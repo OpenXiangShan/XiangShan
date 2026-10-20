@@ -1948,7 +1948,8 @@ struct ConstraintCoverage {
         const RandomConstraints &constraints, bool backpressure,
         const memblock::ResponseLatencyStats &dcache_latency,
         const memblock::ResponseLatencyStats &ptw_latency,
-        const memblock::ResponseLatencyStats &uncache_latency) const
+        const memblock::ResponseLatencyStats &uncache_latency,
+        std::uint64_t canonical_boundary_load_actions = 0) const
     {
         for (std::size_t index = 0; index < operations.size(); ++index) {
             if (!operation_complete(constraints, index)) {
@@ -2012,7 +2013,7 @@ struct ConstraintCoverage {
         const bool dcache_load_enabled =
             constraints.operation_weights[RandomConstraints::scalar_load] != 0;
         if ((!dcache_load_enabled &&
-             (dcache_load_actions != 0 ||
+             (dcache_load_actions != 0 || canonical_boundary_load_actions != 0 ||
               dcache_load_error_manager !=
                   std::array<std::uint64_t, 5>{})) ||
             (dcache_load_enabled &&
@@ -2022,7 +2023,11 @@ struct ConstraintCoverage {
               dcache_load_error_kinds !=
                   std::array<std::uint64_t, 2>{
                       dcache_load_outcomes[1], dcache_load_outcomes[2]} ||
-              dcache_load_actions != operations[RandomConstraints::scalar_load] ||
+              // Early canonical page faults never enter the DCache outcome
+              // space. Their independently counted actions still belong to
+              // the scalar-load operation class and must be conserved.
+              dcache_load_actions + canonical_boundary_load_actions !=
+                  operations[RandomConstraints::scalar_load] ||
               dcache_load_error_manager !=
                   std::array<std::uint64_t, 5>{
                       dcache_load_error_actions,

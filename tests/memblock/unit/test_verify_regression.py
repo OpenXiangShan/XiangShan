@@ -205,11 +205,215 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 48
+        result["constraint_schema"] = 49
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
             verify_regression._check_mixed_coverage(result)
+
+    def test_schema_48_checks_canonical_boundary_accounting(self) -> None:
+        # Unequal counts make direction swaps and incorrect marginals visible.
+        fields: dict[str, object] = {
+            "target_canonical_boundary": 100,
+            "actual_canonical_boundary_cross": ",".join(map(str, range(1, 25))),
+            "actual_canonical_boundary": 300,
+            "actual_canonical_boundary_controls": 936,
+            "actual_canonical_boundary_recoveries": 300,
+            "actual_canonical_boundary_store_checks": 168,
+        }
+        args = (fields, [1, 1], [137, 173], [0, 1, 0], [1, 1])
+        for target in (1, 100, 1000):
+            with self.subTest(target=target):
+                fields["target_canonical_boundary"] = target
+                self.assertEqual(
+                    verify_regression._check_canonical_boundary_coverage_schema48(
+                        *args
+                    ),
+                    (132, 168),
+                )
+        for name in (
+            "actual_canonical_boundary",
+            "actual_canonical_boundary_controls",
+            "actual_canonical_boundary_recoveries",
+            "actual_canonical_boundary_store_checks",
+        ):
+            with self.subTest(counter=name):
+                original = fields[name]
+                fields[name] = int(original) - 1
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError,
+                    "fault/control/recovery accounting",
+                ):
+                    verify_regression._check_canonical_boundary_coverage_schema48(
+                        *args
+                    )
+                fields[name] = original
+        fields["actual_canonical_boundary_cross"] = ",".join(
+            ["0"] + list(map(str, range(2, 25)))
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "does not match enabled classes"
+        ):
+            verify_regression._check_canonical_boundary_coverage_schema48(*args)
+        fields["actual_canonical_boundary_cross"] = ",".join(map(str, range(1, 25)))
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "exceed scalar operation counts"
+        ):
+            verify_regression._check_canonical_boundary_coverage_schema48(
+                fields, [1, 1], [131, 168], [0, 1, 0], [1, 1]
+            )
+
+    def test_schema_48_enforces_disabled_canonical_boundary_classes(self) -> None:
+        fields: dict[str, object] = {
+            "target_canonical_boundary": 100,
+            # Only Sv39 scalar loads; both invalid-first values, all widths.
+            "actual_canonical_boundary_cross": ",".join(
+                (["1"] * 3 + ["0"] * 9) * 2
+            ),
+            "actual_canonical_boundary": 6,
+            "actual_canonical_boundary_controls": 12,
+            "actual_canonical_boundary_recoveries": 6,
+            "actual_canonical_boundary_store_checks": 0,
+        }
+        args = (fields, [1, 0], [7, 0], [0, 1, 0], [1, 0])
+        self.assertEqual(
+            verify_regression._check_canonical_boundary_coverage_schema48(*args),
+            (6, 0),
+        )
+        sv48_stores = {
+            **fields,
+            "actual_canonical_boundary_cross": ",".join(
+                (["0"] * 9 + ["1"] * 3) * 2
+            ),
+            "actual_canonical_boundary_controls": 24,
+            "actual_canonical_boundary_store_checks": 6,
+        }
+        self.assertEqual(
+            verify_regression._check_canonical_boundary_coverage_schema48(
+                sv48_stores, [0, 1], [0, 7], [0, 1, 0], [0, 1]
+            ),
+            (0, 6),
+        )
+        # Disabled observations must fail even when their counters conserve.
+        for index, store_checks, controls in ((6, 0, 12), (3, 1, 14)):
+            with self.subTest(disabled_index=index):
+                cross = [1] * 3 + [0] * 9 + [1] * 3 + [0] * 9
+                cross[index] = 1
+                fields["actual_canonical_boundary_cross"] = ",".join(map(str, cross))
+                fields["actual_canonical_boundary"] = 7
+                fields["actual_canonical_boundary_recoveries"] = 7
+                fields["actual_canonical_boundary_store_checks"] = store_checks
+                fields["actual_canonical_boundary_controls"] = controls + 2
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError,
+                    "does not match enabled classes",
+                ):
+                    verify_regression._check_canonical_boundary_coverage_schema48(
+                        *args
+                    )
+        fields.update({
+            "target_canonical_boundary": 0,
+            "actual_canonical_boundary_cross": ",".join(["0"] * 24),
+            "actual_canonical_boundary": 0,
+            "actual_canonical_boundary_controls": 0,
+            "actual_canonical_boundary_recoveries": 0,
+            "actual_canonical_boundary_store_checks": 0,
+        })
+        self.assertEqual(
+            verify_regression._check_canonical_boundary_coverage_schema48(*args),
+            (0, 0),
+        )
+        for name in (
+            "actual_canonical_boundary",
+            "actual_canonical_boundary_controls",
+            "actual_canonical_boundary_recoveries",
+            "actual_canonical_boundary_store_checks",
+        ):
+            with self.subTest(disabled_counter=name):
+                fields[name] = 1
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError,
+                    "fault/control/recovery accounting",
+                ):
+                    verify_regression._check_canonical_boundary_coverage_schema48(
+                        *args
+                    )
+                fields[name] = 0
+        fields.update({
+            "actual_canonical_boundary_cross": ",".join(["1"] + ["0"] * 23),
+            "actual_canonical_boundary": 1,
+            "actual_canonical_boundary_controls": 2,
+            "actual_canonical_boundary_recoveries": 1,
+        })
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "does not match enabled classes"
+        ):
+            verify_regression._check_canonical_boundary_coverage_schema48(*args)
+
+    def test_schema_48_rejects_invalid_canonical_boundary_fields(self) -> None:
+        fields: dict[str, object] = {
+            "target_canonical_boundary": 0,
+            "actual_canonical_boundary_cross": ",".join(["0"] * 24),
+            "actual_canonical_boundary": 0,
+            "actual_canonical_boundary_controls": 0,
+            "actual_canonical_boundary_recoveries": 0,
+            "actual_canonical_boundary_store_checks": 0,
+        }
+        args = (fields, [1, 1], [1, 1], [0, 1, 0], [1, 1])
+        for invalid in (-1, 1001, True, 1.5, None, "1"):
+            with self.subTest(target=invalid):
+                fields["target_canonical_boundary"] = invalid
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError,
+                    "target_canonical_boundary must be an integer",
+                ):
+                    verify_regression._check_canonical_boundary_coverage_schema48(
+                        *args
+                    )
+        fields["target_canonical_boundary"] = 0
+        for name in (
+            "actual_canonical_boundary",
+            "actual_canonical_boundary_controls",
+            "actual_canonical_boundary_recoveries",
+            "actual_canonical_boundary_store_checks",
+        ):
+            for invalid in (-1, True, 1.5, None, "1"):
+                with self.subTest(counter=name, value=invalid):
+                    fields[name] = invalid
+                    with self.assertRaisesRegex(
+                        verify_regression.VerificationError,
+                        "not a nonnegative integer",
+                    ):
+                        verify_regression._check_canonical_boundary_coverage_schema48(
+                            *args
+                        )
+            fields[name] = 0
+        for value in (
+            ",".join(["0"] * 23),
+            ",".join(["-1"] + ["0"] * 23),
+            ",".join(["0.5"] + ["0"] * 23),
+        ):
+            with self.subTest(cross=value):
+                fields["actual_canonical_boundary_cross"] = value
+                with self.assertRaises(verify_regression.VerificationError):
+                    verify_regression._check_canonical_boundary_coverage_schema48(
+                        *args
+                    )
+        fields["actual_canonical_boundary_cross"] = ",".join(["0"] * 24)
+        fields["target_canonical_boundary"] = 1
+        for operations, translation, modes in (
+            ([0, 0], [0, 1, 0], [1, 1]),
+            ([1, 1], [1, 0, 0], [1, 1]),
+            ([1, 1], [0, 1, 0], [0, 0]),
+        ):
+            with self.subTest(operations=operations, translation=translation, modes=modes):
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError,
+                    "lacks stage-1 scalar traffic",
+                ):
+                    verify_regression._check_canonical_boundary_coverage_schema48(
+                        fields, operations, [1, 1], translation, modes
+                    )
 
     def test_schema_44_checks_vector_fof_accounting(self) -> None:
         fields: dict[str, object] = {

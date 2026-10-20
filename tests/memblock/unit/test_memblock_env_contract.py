@@ -2920,7 +2920,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "probe_max_outstanding=",
             "probe_source_space=",
             "probe_source_lifecycle=",
-            "constraint_schema=47",
+            "constraint_schema=48",
             "RandomVectorShape",
             "choose_vector_shape",
             "actual_vector_cross=",

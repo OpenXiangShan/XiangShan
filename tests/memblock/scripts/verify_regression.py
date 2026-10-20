@@ -811,6 +811,82 @@ def _check_vector_segment_fof_coverage_schema47(
     return presence[1]
 
 
+def _check_canonical_boundary_coverage_schema48(
+    result: dict[str, Any],
+    target_operations: list[int],
+    actual_operations: list[int],
+    target_translation: list[int],
+    target_stage1: list[int],
+) -> tuple[int, int]:
+    """Check canonical range faults, legal alias controls, and recovery."""
+
+    target = result.get("target_canonical_boundary")
+    _require(
+        type(target) is int and 0 <= target <= 1000,
+        "target_canonical_boundary must be an integer in 0..1000",
+    )
+    crosses = _csv_counts(result, "actual_canonical_boundary_cross", 24)
+    counters: dict[str, int] = {}
+    for name in (
+        "actual_canonical_boundary",
+        "actual_canonical_boundary_controls",
+        "actual_canonical_boundary_recoveries",
+        "actual_canonical_boundary_store_checks",
+    ):
+        value = result.get(name)
+        _require(
+            type(value) is int and value >= 0,
+            f"{name} is not a nonnegative integer: {value!r}",
+        )
+        counters[name] = value
+
+    if target != 0:
+        _require(
+            target_translation[1] != 0
+            and any(target_stage1)
+            and any(target_operations[:2]),
+            "enabled canonical boundary lacks stage-1 scalar traffic",
+        )
+
+    directions = [0, 0]
+    for invalid_first in range(2):
+        for mode in range(2):
+            for store in range(2):
+                for width in range(3):
+                    index = ((invalid_first * 2 + mode) * 2 + store) * 3 + width
+                    count = crosses[index]
+                    enabled = (
+                        target != 0
+                        and target_translation[1] != 0
+                        and target_stage1[mode] != 0
+                        and target_operations[store] != 0
+                    )
+                    _require(
+                        (count > 0) == enabled,
+                        "actual_canonical_boundary_cross does not match enabled "
+                        f"classes: invalid_first={invalid_first} mode={mode} "
+                        f"store={store} width={2 << width}",
+                    )
+                    directions[store] += count
+    total = sum(directions)
+    _require(
+        counters["actual_canonical_boundary"] == total
+        and counters["actual_canonical_boundary_recoveries"] == total
+        and counters["actual_canonical_boundary_controls"]
+        == 2 * total + 2 * directions[1]
+        and counters["actual_canonical_boundary_store_checks"] == directions[1],
+        "canonical boundary fault/control/recovery accounting is not conserved",
+    )
+    _require(
+        all(
+            count <= actual_operations[direction]
+            for direction, count in enumerate(directions)
+        ),
+        "canonical boundary faults exceed scalar operation counts",
+    )
+    return directions[0], directions[1]
+
+
 def _check_miss_burst_coverage(
     result: dict[str, Any],
     schema: int,
@@ -979,7 +1055,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -1502,6 +1578,15 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             "actual_ops has an enabled but uncovered class: "
             f"{actual_operations}",
         )
+        canonical_loads = 0
+        if schema >= 48:
+            canonical_loads, _ = _check_canonical_boundary_coverage_schema48(
+                result,
+                target_operations,
+                actual_operations,
+                target_translation,
+                target_stage1,
+            )
         target_hypervisor = _csv_counts(
             result, "target_hypervisor_family", 3
         )
@@ -2235,7 +2320,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 "DCache load aggregate error coverage does not match outcomes",
             )
             _require(
-                clean + errors == actual_operations[0]
+                clean + errors == actual_operations[0] - canonical_loads
                 and sum(actual_dcache_load_error_kind) == errors,
                 "DCache load error coverage is not conserved",
             )

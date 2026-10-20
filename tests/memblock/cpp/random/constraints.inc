@@ -189,6 +189,7 @@ struct RandomConstraints {
     unsigned translation_switches_per_mille = 0;
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
+    unsigned canonical_boundary_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
     // VFOF is a low-rate ordinary vector-load subclass.  The fault-position
     // split is architectural stimulus, not a pipeline/replay expectation.
@@ -293,6 +294,7 @@ struct RandomConstraints {
                 .translation_switches_per_mille = 500,
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
+                .canonical_boundary_per_mille = 100,
                 .vector_corner_per_mille = 1000,
                 .vector_fof_per_mille = 100,
                 .vector_fof_first_fault_per_mille = 500,
@@ -392,6 +394,7 @@ struct RandomConstraints {
                 .translation_switches_per_mille = 1,
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
+                .canonical_boundary_per_mille = 1,
                 .vector_corner_per_mille = 100,
                 .vector_fof_per_mille = 10,
                 .vector_fof_first_fault_per_mille = 100,
@@ -489,6 +492,7 @@ struct RandomConstraints {
                 .translation_switches_per_mille = 750,
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
+                .canonical_boundary_per_mille = 250,
                 .vector_corner_per_mille = 1000,
                 .vector_fof_per_mille = 250,
                 .vector_fof_first_fault_per_mille = 500,
@@ -969,6 +973,8 @@ struct RandomConstraints {
             tlb_flushes_per_mille = parsed;
         } else if (key == "misaligned") {
             misaligned_per_mille = parsed;
+        } else if (key == "canonical-boundary") {
+            canonical_boundary_per_mille = parsed;
         } else if (key == "vector-corner") {
             vector_corner_per_mille = parsed;
         } else if (key == "vector-fof") {
@@ -1305,6 +1311,14 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "nested PTW errors require a nonzero VS-stage mode weight");
         }
+        if (canonical_boundary_per_mille != 0 &&
+            (translation_weights[translation_stage1] == 0 ||
+             (operation_weights[scalar_load] == 0 &&
+              operation_weights[scalar_store] == 0))) {
+            throw std::invalid_argument(
+                "canonical-boundary requires stage-1 translation and "
+                "scalar-load or scalar-store traffic");
+        }
         if (vector_fof_per_mille != 0 &&
             operation_weights[vector_load] == 0) {
             throw std::invalid_argument(
@@ -1590,6 +1604,7 @@ struct RandomConstraints {
             nested_vs_napot_per_mille > 1000 ||
             nested_g_napot_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
+            canonical_boundary_per_mille > 1000 ||
             vector_corner_per_mille > 1000 ||
             vector_fof_per_mille > 1000 ||
             vector_fof_first_fault_per_mille > 1000 ||
@@ -2181,6 +2196,25 @@ struct RandomConstraints {
             operation_weights[mmio] != 0;
     }
 
+    bool canonical_boundary_cross_enabled(unsigned cross) const
+    {
+        const unsigned mode = (cross / 6U) % 2U;
+        const unsigned store = (cross / 3U) % 2U;
+        return canonical_boundary_per_mille != 0 &&
+            translation_weights[translation_stage1] != 0 &&
+            stage1_mode_weights[mode] != 0 &&
+            operation_weights[store ? scalar_store : scalar_load] != 0;
+    }
+
+    unsigned enabled_canonical_boundary_crosses() const
+    {
+        unsigned count = 0;
+        for (unsigned cross = 0; cross < 24; ++cross) {
+            count += canonical_boundary_cross_enabled(cross);
+        }
+        return count;
+    }
+
     unsigned minimum_serial_actions() const
     {
         const auto enabled_vector_shape_classes = [&]() {
@@ -2487,6 +2521,7 @@ struct RandomConstraints {
             }
         }
         return std::max({actions, translation_actions, fence_actions}) +
+            enabled_canonical_boundary_crosses() +
             (stride_stream_per_mille == 0 ? 0U : 8U);
     }
 
@@ -2552,7 +2587,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=47 constraints=" << name
+        stream << "constraint_schema=48 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2667,6 +2702,8 @@ struct RandomConstraints {
                << " target_tlb_flush=" << tlb_flushes_per_mille
                << " target_misaligned=" << misaligned_per_mille
                << " target_vector_corner=" << vector_corner_per_mille
+               << " target_canonical_boundary="
+               << canonical_boundary_per_mille
                << " target_vector_fof=" << vector_fof_per_mille
                << " target_vector_fof_first_fault="
                << vector_fof_first_fault_per_mille

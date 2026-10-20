@@ -456,7 +456,17 @@ stage-1/VS-only/G-stage, Sv39/Sv48, every PTE level, load/store, and the
 lowest/highest PPN bits above the 48-bit physical-address width, for 202
 architectural transactions before nested-GPA checks. Another 56 cross all four
 Sv39/Sv48 VS/G mode pairs, every VS PTE level, load/store, and the lowest PPN
-bit outside the selected 41/50-bit GPA plus PPN[43], bringing the total to 258.
+bit outside the selected 41/50-bit GPA plus PPN[43], bringing that matrix to
+258. A separate canonical-range matrix adds 220 faults spanning both Sv39/Sv48
+boundaries, every 2/4/8-byte crossing distance, scalar loads/stores, and
+strided/indexed-unordered/indexed-ordered vector stores. Its 440 permissive
+alias controls, 440 unchanged-edge readbacks, and 220 same-instance committed
+store/load recovery pairs bring the scenario total to 1,798 transactions.
+Queue retirement/cancellation must be externally observed; no manual
+cancellation closes this matrix. Schema 48 also adds `canonical-boundary` to
+`random-mixed`, closing the 24 enabled scalar mode/direction/boundary/width
+bins before weighted sampling. Vector mixed crossings and G-stage address
+limits remain explicit gaps.
 The shared
 encoding table crosses V/W/R, both ends of reserved bits 60:54, PBMT=3,
 disabled PBMTE, exhausted L0, illegal non-leaf U/A/D/PBMT/N fields, and an

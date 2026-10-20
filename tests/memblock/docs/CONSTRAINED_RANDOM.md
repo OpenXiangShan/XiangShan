@@ -106,6 +106,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `special-concurrent` | Per-mille chance that a legal overlap window also contains an NC or MMIO load |
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
+| `canonical-boundary` | Per-mille share of eligible scalar actions replaced by a Sv39/Sv48 access crossing either canonical boundary; requires scalar load/store and host stage-1 traffic. Zero disables all such actions. Nonzero closes enabled mode x load/store x boundary direction x 2/4/8-byte width bins before weighted sampling; distances, lanes, data, and issue order remain randomized. Presets: SPEC 1, coverage 100, corner 250 |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
 | `vector-fof` | Low-rate per-mille share of ordinary vector-load actions replaced by unit-stride VLEFF. A nonzero value requires vector loads and stage-1 translation; 1000 is rejected because the same profile must retain ordinary vector-shape closure |
 | `vector-fof-first-fault` | Conditional per-mille share of VLEFF actions whose first element faults. The other class places element zero on a mapped page and element one on the next unmapped page |
@@ -464,7 +465,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=47`, the resolved target weights,
+Every terminal line prints `constraint_schema=48`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -758,3 +759,29 @@ same absolute cursor. The pair is an input-legality invariant: changing only
 the flag changes architectural age and may make a younger store legally
 forward to a load. It is therefore checked by UT unit tests but is not inferred
 from DUT internals or used as a replacement for the architectural data oracle.
+
+Schema 48 adds scalar canonical-range faults to the common scheduler. For each
+selected access, independently walked bytes identify the first invalid VA;
+both canonical aliases have permissive 4-KiB mappings, preventing a truncated
+address from accidentally faulting on a missing PTE. Aligned control loads
+prove the mappings before the fault. Each operation has an exact identified
+page-fault completion, exact fault VA, and observed redirect/queue
+conservation. Faulting stores additionally require clean edge readbacks and
+unchanged manager memory. The exception address is sampled only after draining other
+operations because that output has no transaction identity. Legal speculative
+first-page traffic is allowed. These scalar fault actions are excluded from
+ordinary DCache clean/error-refill outcome counters. Every terminal summary
+reports the 24-bin cross, fault total, controls, recovery, and store-check
+counts, and the regression verifier checks their conservation. Vector
+canonical crossings remain directed coverage, and G-stage address-limit
+crossings remain a gap.
+
+The cross order is
+`((invalid_first * 2 + mode) * 2 + store) * 3 + (eew - 1)`, where mode 0/1
+means Sv39/Sv48, store 0/1 means load/store, and EEW 1/2/3 means 2/4/8 bytes.
+`actual_canonical_boundary` equals the sum of its 24 cross bins; recoveries
+must equal that total, controls must equal twice the total plus twice the
+store-fault count, and store checks must equal the store-fault count. At rate
+1000 the generator still closes every ordinary coverage requirement first;
+only then does it replace every eligible scalar action. The nonzero
+canonical closure prefix precedes that probability policy.

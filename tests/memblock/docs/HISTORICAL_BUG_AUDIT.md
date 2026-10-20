@@ -134,10 +134,51 @@ black-box acceptance rule.
 | --- | --- | --- | --- | --- |
 | 2026-10-08 | `c098f996b` | Preserve self-flushing replay information when RAW and RAR redirects share a ROB index | Boundary gap | `memory-violation` and `rar-violation` exercise RAW and RAR separately, but no legal load currently raises both at the same ROB index. The missing acceptance is one selected self-flushing redirect followed by a replay with the final store-to-load value. |
 | 2026-09-24 | `49b6a414f` | Preserve a late vector-load DCache exception in the final vector writeback | **Reproduced** | `dcache-errors` primes one line with scalar denied and last-beat-corrupt responses, then requires vector loads to hit the poisoned line with the corresponding terminal exception. An independent mutation restoring `vecldout.hasException := s3_exception` passes the old cold-miss stimulus but fails the poisoned-line case with `exception=0x0`; clean RTL passes both cases. |
-| 2026-09-15 | `872fa9be3` | Pass vector store access size to the TLB | Boundary gap | Current vector-store translation cases are naturally aligned and remain within one page. No multibyte strided/indexed tail crosses an Sv39/Sv48 or stage-2 limit. |
-| 2026-09-15 | `39ad0d589` | Validate the full access range against pointer masking and canonical limits | Boundary gap | Scalar noncanonical cases cover addresses wholly outside the legal range, but not a legal first byte followed by an invalid multibyte tail; trigger address-masking crosses are also absent. |
+| 2026-09-15 | `872fa9be3` | Pass vector store access size to the TLB | Covered, not mutated | `translation-faults` now crosses both Sv39/Sv48 canonical boundaries with every 2/4/8-byte distance in strided and both indexed store modes (132 faults), proves permissive aliases, checks exact exception/VA, unchanged edge readbacks, and same-instance recovery. Stage-2 limit crossings remain a gap. |
+| 2026-09-15 | `39ad0d589` | Validate the full access range against pointer masking and canonical limits | **Reproduced** | `translation-faults` covers both canonical crossings, every 2/4/8-byte distance, scalar loads/stores and strided/indexed vector stores. An isolated final-byte-check mutation deterministically returns normal scalar data instead of a page fault; clean RTL passes all 1,798 transactions. Schema 48 adds scalar mixed bins. Stage-2 and pointer-masking/trigger combinations remain gaps. |
 | 2026-09-15 | `db2a9c26b` | Avoid vector-state dirtiness for vector-store helper uops | Integration-owned | Rename/commit `mstatus.VS` is not observable at the MemBlock boundary. Memory-effect and writeback checks cannot establish CSR dirtiness. |
 | 2026-09-17 | `f86f50b83` | Initialize SBuffer forward tag state | Four-state gap | The affected X-only state is not observable in the current two-state Verilator configuration; functional first-forward traffic passes. |
+
+## Canonical Access-Range Mutation
+
+On 2026-10-21, an isolated equivalent mutation of `39ad0d589` was detected by
+`translation-faults`. In `TLBNonBlock.sv`, `TLBNonBlock_1.sv`, and
+`TLBNonBlock_2.sv`, the seven generated 64-bit `_lastVa_T_*` definitions were
+changed from `EffectiveVa_i + ((1 << size) - 1)` to `EffectiveVa_i`. This
+preserves first-byte checking while removing the final-byte check. The
+mutated copies were substituted into a separate filelist and exported and
+compiled into a separate Picker directory; the normal RTL, Picker model, and
+ongoing frozen-runtime regression were unchanged.
+
+The same testbench snapshot passes on clean RTL: 220 range faults, 440 alias
+controls, 440 unchanged-edge readbacks, and 220 committed store/load recovery
+pairs, plus the pre-existing 258 transactions. On the mutant, a two-byte
+scalar load at `0x3fffffffff` should fault on `0x4000000000`; instead it
+returns `0x3938`, exception mask zero, and RF write enable one. The ordinary
+load scoreboard rejects that identified completion against the independently
+expected load-page-fault mask `0x2000` and RF write enable zero. Replaying the
+same frozen mutant repeats the mismatch. The exception-address payload is
+irrelevant once the mutant returns no exception and is not used to support
+the finding.
+
+The experiment uses Verilator 5.052 and the existing resolved Picker/xcomm
+builds. Its script, source snapshot/diff, exact before/after expressions,
+commands, dependency resolution, and clean/mutant/replay results are under
+`build/memblock/canonical-mutation/`. Replay the retained artifacts with:
+
+```sh
+LD_LIBRARY_PATH=build/memblock/canonical-mutation/clean/runtime \
+  build/memblock/canonical-mutation/clean/runtime/memblock_sim --test translation-faults
+LD_LIBRARY_PATH=build/memblock/canonical-mutation/fullrange/runtime \
+  build/memblock/canonical-mutation/fullrange/runtime/memblock_sim --test translation-faults
+```
+
+For a fresh experiment, follow the README build workflow, make the generated
+expression substitutions described above in isolated copies, replace only
+those three filelist entries, and export/build that separate model with the
+same current harness. This is historical-mutation sensitivity evidence, not
+a new CPU RTL finding. The separate `872fa9be3` vector-store-size mutation
+has not yet supplied a terminal result and remains **Covered, not mutated**.
 
 ## Audit
 

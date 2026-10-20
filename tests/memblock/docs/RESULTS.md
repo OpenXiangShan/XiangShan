@@ -4146,3 +4146,42 @@ PMP-relation cross with strict lane checks. Artifacts are in
 `build/memblock/continuation-lanes/coverage.json` and
 `build/memblock/canonical-focused/hypervisor-pmp.json`. These results correct a
 UT false positive; they do not constitute a new RTL defect or closure campaign.
+
+## Canonical Access Ranges and Mixed Faults
+
+On 2026-10-21, `translation-faults` was extended from 258 to 1,798 checked
+transactions. Both Sv39/Sv48 canonical boundaries cross every 2/4/8-byte
+width and every crossing distance for scalar load/store and strided,
+indexed-unordered, and indexed-ordered vector stores. The 220 identified
+faults require exact cause/VA and externally observed queue conservation;
+440 permissive-alias controls defeat accidental missing-PTE faults, 440 edge
+readbacks reject forbidden store changes, and 220 real committed store/load
+pairs prove same-instance recovery. No manual queue cancellation is used.
+
+An isolated equivalent `39ad0d589` last-byte-check mutation fails the first
+scalar two-byte range case with an ordinary RF-writing completion instead of
+the expected page fault; deterministic replay repeats the mismatch. The
+clean frozen control passes the complete matrix. Exact expressions, snapshot,
+logs, and reproduction are recorded in `HISTORICAL_BUG_AUDIT.md` and
+`build/memblock/canonical-mutation/`. The vector-store-size mutation is still
+running; its status is not claimed from the scalar result.
+
+Schema 48 adds the same scalar boundary class to `random-mixed`, with presets
+SPEC=1, coverage=100, corner=250 per mille and 24 enabled cross bins. Directed
+vector crossings remain separate; vector mixed crossings, G-stage limits,
+and pointer-masking/trigger interactions remain gaps. Independent review and
+short execution caught and corrected two UT accounting/generation mistakes:
+canonical faults must be separate from DCache outcomes, and rate 1000 must
+wait for complete ordinary coverage before replacing ordinary actions. No
+functional oracle was relaxed.
+
+The frozen schema-48 runtime passes 256-action common-generator seeds 201,
+202, 203, 204, and 205 with the external constraint-coverage verifier. They check
+all 24 canonical bins, strict zero-knob/Bare behavior, Sv39-load-only and
+Sv48-store-only enabled subsets at rate 1000, and the separate hypervisor/PMP
+lane correction. Artifacts retain every override and terminal summary under
+`build/memblock/canonical-focused/`. `check-rtl`, `check-docs`, and all 235
+Python unit tests pass. The focused profiles deliberately disable heterogeneous
+windows and therefore do not satisfy the separate closure-campaign overlap
+acceptance gate. These are capability and sensitivity checks; no new schema-48
+closure campaign has completed.

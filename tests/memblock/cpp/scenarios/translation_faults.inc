@@ -730,8 +730,307 @@ int run_ptw_errors(int argc, char **argv)
     return 0;
 }
 
+struct CanonicalRangeCoverage {
+    unsigned faults = 0;
+    unsigned controls = 0;
+    unsigned readbacks = 0;
+    unsigned recoveries = 0;
+    unsigned scalar_loads = 0;
+    unsigned scalar_stores = 0;
+    unsigned vector_stores = 0;
+};
+
+bool check_canonical_access_ranges(
+    int argc, char **argv, CanonicalRangeCoverage &coverage)
+{
+    // Both canonical sides are mapped.  If an invalid address is truncated
+    // before translation, its alias must succeed rather than accidentally
+    // reproducing the expected fault through a missing PTE.
+    for (const auto mode : {memblock::ReferencePageMode::sv39,
+                            memblock::ReferencePageMode::sv48}) {
+        const unsigned address_bits = mode == memblock::ReferencePageMode::sv48
+            ? 48U : 39U;
+        const std::uint64_t low_limit = std::uint64_t{1} << (address_bits - 1);
+        const std::uint64_t high_base = 0U - low_limit;
+        for (unsigned kind = 0; kind < 5; ++kind) {
+            for (bool invalid_first : {false, true}) {
+                for (unsigned eew = 1; eew <= 3; ++eew) {
+                    const unsigned width = 1U << eew;
+                    for (unsigned distance = 1; distance < width; ++distance) {
+                        memblock::Environment environment(argc, argv);
+                        constexpr std::uint64_t physical = 0xcc000000ULL;
+                        constexpr std::uint64_t root = 0x9e000000ULL;
+                        const std::uint64_t address =
+                            (invalid_first ? high_base : low_limit) - distance;
+                        const std::uint64_t expected_fault = invalid_first
+                            ? address : low_limit;
+                        const auto fail = [&](const char *phase) {
+                            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL"
+                                      << " phase=canonical-range-" << phase
+                                      << " mode=" << address_bits
+                                      << " kind=" << kind << " width=" << width
+                                      << " invalid_first=" << invalid_first
+                                      << " distance=" << distance
+                                      << " address=0x" << std::hex << address
+                                      << " expected_vaddr=0x" << expected_fault
+                                      << " actual_vaddr=0x"
+                                      << environment.exception_vaddr() << std::dec
+                                      << " reason=" << environment.error() << '\n';
+                            return false;
+                        };
+                        environment.memory().fill_incrementing(
+                            physical, 0x2000, 0x39 + kind);
+                        if (!environment.reset() ||
+                            !environment.enable_misaligned_accesses()) {
+                            return fail("reset");
+                        }
+                        for (unsigned side = 0; side < 2; ++side) {
+                            const std::uint64_t va = side == 0
+                                ? low_limit - 0x1000 : high_base;
+                            const std::uint64_t pa = physical + side * 0x1000;
+                            const bool mapped = mode ==
+                                    memblock::ReferencePageMode::sv48
+                                ? environment.map_sv48_4k(va, pa, root)
+                                : environment.map_sv39_4k(va, pa, root);
+                            if (!mapped) {
+                                return fail("map");
+                            }
+                        }
+                        if (!(mode == memblock::ReferencePageMode::sv48
+                                  ? environment.activate_sv48(root, 41)
+                                  : environment.activate_sv39(root, 40))) {
+                            return fail("activate");
+                        }
+                        std::optional<std::uint64_t> first_invalid;
+                        unsigned valid_bytes = 0;
+                        for (unsigned byte = 0; byte < width; ++byte) {
+                            const auto walk = memblock::reference_page_walk(
+                                environment.memory(), root, address + byte, mode);
+                            if (walk.translated) {
+                                ++valid_bytes;
+                            } else if (!first_invalid) {
+                                first_invalid = address + byte;
+                            }
+                        }
+                        if (first_invalid != expected_fault ||
+                            valid_bytes == 0 || valid_bytes == width) {
+                            return fail("reference");
+                        }
+                        // Exact aligned loads at the two edges establish that
+                        // both permissive mappings work before testing faults.
+                        for (unsigned side = 0; side < 2; ++side) {
+                            const memblock::LoadTransaction control{
+                                .address = side == 0
+                                    ? low_limit - width : high_base,
+                                .oracle_address = side == 0
+                                    ? physical + 0x1000 - width
+                                    : physical + 0x1000,
+                                .op = static_cast<memblock::LoadOp>(eew),
+                                .rob = static_cast<std::uint8_t>(side),
+                                .lq = static_cast<std::uint8_t>(side),
+                                .pdest = static_cast<std::uint8_t>(30 + side),
+                                .lane = side,
+                            };
+                            environment.expect_load(control);
+                            if (!environment.set_rob_head(control.rob) ||
+                                !environment.enqueue_load(control) ||
+                                !environment.issue_load(control, 1024) ||
+                                !environment.run_until_complete(16384) ||
+                                !environment.run_until_lq_retired(4096)) {
+                                return fail("control");
+                            }
+                            ++coverage.controls;
+                        }
+                        environment.select_store_exception_address(kind != 0);
+                        if (!environment.set_rob_head(2)) {
+                            return fail("head");
+                        }
+                        bool completed = false;
+                        if (kind == 0) {
+                            const memblock::LoadTransaction fault{
+                                .address = address,
+                                .op = static_cast<memblock::LoadOp>(eew),
+                                .rob = 2,
+                                .lq = 2,
+                                .pdest = 32,
+                                .lane = eew % memblock::kScalarLoadLanes,
+                                .expected_exception_mask =
+                                    memblock::kExceptionLoadPageFault,
+                            };
+                            environment.expect_load(fault);
+                            completed = environment.enqueue_load(fault) &&
+                                environment.issue_load(fault, 1024) &&
+                                environment.run_until_complete(16384) &&
+                                environment.run_until_lq_retired(4096);
+                            ++coverage.scalar_loads;
+                        } else if (kind == 1) {
+                            const memblock::StoreTransaction fault{
+                                .address = address,
+                                .data = 0x13579bdf2468ace0ULL,
+                                .op = static_cast<memblock::StoreOp>(eew),
+                                .rob = 2,
+                                .sq = 0,
+                                .address_lane = eew % memblock::kScalarStoreLanes,
+                                .data_lane = (eew + 1) % memblock::kScalarStoreLanes,
+                                .expected_exception_mask =
+                                    memblock::kExceptionStorePageFault,
+                            };
+                            environment.expect_store(fault);
+                            completed = environment.enqueue_store(fault, 2) &&
+                                environment.issue_store_address(fault, 2048) &&
+                                environment.issue_store_data(fault, 2048) &&
+                                environment.run_until_store_complete_with_replay(
+                                    fault, 16384);
+                            ++coverage.scalar_stores;
+                        } else {
+                            const memblock::VectorMemoryTransaction fault{
+                                .store = true,
+                                .address = address,
+                                .stride = static_cast<std::int64_t>(width),
+                                .addressing = kind == 2
+                                    ? memblock::VectorAddressingMode::strided
+                                    : kind == 3
+                                        ? memblock::VectorAddressingMode::indexed_unordered
+                                        : memblock::VectorAddressingMode::indexed_ordered,
+                                .eew = static_cast<std::uint8_t>(eew),
+                                .vl = 1,
+                                .rob = 2,
+                                .lq = 2,
+                                .sq = 0,
+                                .lane = eew % memblock::kVectorMemoryLanes,
+                                .flow_num = static_cast<std::uint8_t>(16 / width),
+                                .expected_exception_mask =
+                                    memblock::kExceptionStorePageFault,
+                                .expected_writeback_vstart = 0,
+                            };
+                            environment.expect_vector(fault);
+                            completed = environment.enqueue_vector(fault) &&
+                                environment.issue_vector(fault, 2048) &&
+                                environment.run_until_vector_complete_with_replays(
+                                    fault, 16384);
+                            ++coverage.vector_stores;
+                        }
+                        // Legal speculative first-page traffic is allowed.
+                        // The oracle is the identified terminal fault and its
+                        // address, not an assumed absence of cache/PTW activity.
+                        if (!completed || !environment.run_cycles(8) ||
+                            environment.exception_vaddr() != expected_fault ||
+                            environment.exception_is_for_vs_nonleaf_pte()) {
+                            return fail("fault");
+                        }
+                        if (!environment.redirect_after(2, false, true, kind >= 2) ||
+                            !environment.run_cycles(32)) {
+                            return fail("redirect");
+                        }
+                        // Require externally observed retirement/cancellation
+                        // for every flow; model-only teardown is not evidence
+                        // that the faulting instruction released the queue.
+                        if (environment.sq_dequeued() +
+                                environment.sq_canceled() !=
+                                environment.sq_allocated() ||
+                            !environment.run_until_queues_retired(4096)) {
+                            return fail("queue-conservation");
+                        }
+
+                        // Re-read both edge words against the unchanged
+                        // architectural memory. This detects a faulting store
+                        // that has silently modified either permissive alias,
+                        // including data still resident in DCache or SBuffer.
+                        for (unsigned side = 0; side < 2; ++side) {
+                            const auto lq_offset = environment.lq_allocated() -
+                                environment.lq_canceled();
+                            const memblock::LoadTransaction readback{
+                                .address = side == 0
+                                    ? low_limit - 8 : high_base,
+                                .oracle_address = side == 0
+                                    ? physical + 0x1000 - 8
+                                    : physical + 0x1000,
+                                .op = memblock::LoadOp::ld,
+                                .rob = static_cast<std::uint8_t>(3 + side),
+                                .lq = memblock::lq_pointer_value(lq_offset),
+                                .lq_flag = memblock::lq_pointer_flag(lq_offset),
+                                .pdest = static_cast<std::uint8_t>(33 + side),
+                                .lane = (eew + side) % memblock::kScalarLoadLanes,
+                            };
+                            environment.expect_load(readback);
+                            if (!environment.set_rob_head(readback.rob) ||
+                                !environment.enqueue_load(readback) ||
+                                !environment.issue_load(readback, 1024) ||
+                                !environment.run_until_complete(16384) ||
+                                !environment.run_until_lq_retired(4096)) {
+                                return fail("readback");
+                            }
+                            ++coverage.readbacks;
+                        }
+                        {
+                            // A real committed store followed by a load in the
+                            // same DUT instance proves SQ recovery after either
+                            // a scalar fault or a vector fault.
+                            const auto sq_offset = environment.sq_allocated() -
+                                environment.sq_canceled();
+                            const memblock::StoreTransaction survivor{
+                                .address = high_base + 0x100,
+                                .oracle_address = physical + 0x1100,
+                                .data = 0xfedcba9876543210ULL ^ distance,
+                                .op = memblock::StoreOp::sd,
+                                .rob = 5,
+                                .sq = memblock::sq_pointer_value(sq_offset),
+                                .sq_flag = memblock::sq_pointer_flag(sq_offset),
+                                .address_lane = eew % memblock::kScalarStoreLanes,
+                                .data_lane = (eew + 1) % memblock::kScalarStoreLanes,
+                            };
+                            environment.expect_store(survivor);
+                            if (!environment.set_rob_head(survivor.rob) ||
+                                !environment.enqueue_store(
+                                    survivor, memblock::lq_pointer_value(
+                                        environment.lq_allocated() -
+                                        environment.lq_canceled())) ||
+                                !environment.issue_store_data(survivor, 2048) ||
+                                !environment.issue_store_address(survivor, 2048) ||
+                                !environment.run_until_store_complete_with_replay(
+                                    survivor, 16384) ||
+                                !environment.commit_store(survivor, 4096)) {
+                                return fail("survivor-store");
+                            }
+                            const auto lq_offset = environment.lq_allocated() -
+                                environment.lq_canceled();
+                            const memblock::LoadTransaction survivor_load{
+                                .address = survivor.address,
+                                .oracle_address = survivor.oracle_address,
+                                .op = memblock::LoadOp::ld,
+                                .rob = 6,
+                                .lq = memblock::lq_pointer_value(lq_offset),
+                                .lq_flag = memblock::lq_pointer_flag(lq_offset),
+                                .pdest = 35,
+                                .lane = eew % memblock::kScalarLoadLanes,
+                            };
+                            environment.expect_load(survivor_load);
+                            if (!environment.set_rob_head(survivor_load.rob) ||
+                                !environment.enqueue_load(survivor_load) ||
+                                !environment.issue_load(survivor_load, 1024) ||
+                                !environment.run_until_complete(16384) ||
+                                !environment.run_until_queues_retired(4096)) {
+                                return fail("survivor-load");
+                            }
+                            ++coverage.recoveries;
+                        }
+                        ++coverage.faults;
+                    }
+                }
+            }
+        }
+    }
+    return coverage.faults == 220 && coverage.controls == 440 &&
+        coverage.readbacks == 440 && coverage.recoveries == 220;
+}
+
 int run_translation_faults(int argc, char **argv)
 {
+    CanonicalRangeCoverage range_coverage;
+    if (!check_canonical_access_ranges(argc, argv, range_coverage)) {
+        return 1;
+    }
+
     unsigned canonical_boundary_cases = 0;
     unsigned ppn_access_fault_cases = 0;
     unsigned stage1_ppn_access_fault_cases = 0;
@@ -2149,7 +2448,16 @@ int run_translation_faults(int argc, char **argv)
     std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases="
               << canonical_boundary_cases + 4 + ppn_access_fault_cases +
                     vs_gpa_width_cases +
-                    pte_encoding_cases.size() * 4
+                    pte_encoding_cases.size() * 4 + range_coverage.faults +
+                    range_coverage.controls + range_coverage.readbacks +
+                    range_coverage.recoveries * 2
+              << " canonical_range_faults=" << range_coverage.faults
+              << " canonical_range_controls=" << range_coverage.controls
+              << " canonical_range_readbacks=" << range_coverage.readbacks
+              << " canonical_range_recoveries=" << range_coverage.recoveries
+              << " canonical_range_scalar_loads=" << range_coverage.scalar_loads
+              << " canonical_range_scalar_stores=" << range_coverage.scalar_stores
+              << " canonical_range_vector_stores=" << range_coverage.vector_stores
               << " canonical_boundary_cases=" << canonical_boundary_cases
               << " noncanonical_ptw_requests=" << noncanonical_ptw_requests
               << " ppn_access_fault_cases=" << ppn_access_fault_cases
