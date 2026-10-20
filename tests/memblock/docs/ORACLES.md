@@ -413,7 +413,7 @@ after the raw VLS exception redirect. Four real edge controls prove permissive
 aliases and unchanged data, and a committed scalar store/load pair proves
 recovery. Ordinary successful vector shape/policy counters exclude this
 fault subclass. The exact singleton eligibility and remaining multi-element,
-other-shape, vector-load, and G-stage gaps are in `CONSTRAINED_RANDOM.md`.
+other-shape, vector-load, and broader G-stage gaps are in `CONSTRAINED_RANDOM.md`.
 
 
 For G-only upper-limit crossings, `vsatp=Bare` preserves the full GPA for an
@@ -424,4 +424,9 @@ Permissive mappings of the final valid page and GPA zero expose truncation
 rather than an unrelated PTE fault. The directed matrix checks 110 crossings,
 actual edge loads before and after the fault, every observed queue flow, and
 a committed store/load survivor per case. It permits speculative legal-prefix
-traffic and does not claim mixed G-only coverage.
+traffic. Schema 50 applies the same contract in the common mixed scheduler
+with independent scalar/vector G-only counters. G-only actions do not populate
+VS/G-pair or ordinary vector shape counters; ordinary plus canonical plus
+G-only subclasses must conserve operation counts. Explicit context invalidation
+and HFENCE.GVMA bracket the special context; the next ordinary operation must
+reenter its own context.

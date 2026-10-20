@@ -979,14 +979,148 @@ def _check_vector_canonical_boundary_coverage_schema49(
     return total
 
 
+def _check_gstage_boundary_coverage_schema50(
+    result: dict[str, Any],
+    target_operations: list[int],
+    actual_operations: list[int],
+    target_g: list[int],
+) -> tuple[int, int, int]:
+    """Check G-only range faults without ordinary translation/VS gates."""
+
+    target = result.get("target_gstage_boundary")
+    _require(
+        type(target) is int and 0 <= target <= 1000,
+        "target_gstage_boundary must be an integer in 0..1000",
+    )
+    scalar_crosses = _csv_counts(result, "actual_gstage_boundary_cross", 12)
+    directions = [0, 0]
+    for mode in range(2):
+        for store in range(2):
+            for eew in range(1, 4):
+                index = (mode * 2 + store) * 3 + eew - 1
+                count = scalar_crosses[index]
+                enabled = (
+                    target != 0 and target_g[mode] != 0
+                    and target_operations[store] != 0
+                )
+                _require(
+                    (count > 0) == enabled,
+                    "actual_gstage_boundary_cross does not match enabled "
+                    f"classes: mode={mode} store={store} eew={eew}",
+                )
+                directions[store] += count
+
+    dimensions = {
+        dimension: _csv_counts(result, f"target_vector_{dimension}", fields)
+        for dimension, fields in (
+            ("addressing", 4), ("eew", 4), ("sew", 4),
+            ("lmul", 7), ("emul", 7),
+        )
+    }
+    policies: dict[str, int] = {}
+    for policy in ("partial_vl", "nonzero_vstart", "masked"):
+        value = result.get(f"target_vector_{policy}")
+        _require(
+            type(value) is int and 0 <= value <= 1000,
+            f"target_vector_{policy} is not a per-mille integer: {value!r}",
+        )
+        policies[policy] = value
+    vector_eligible = (
+        target != 0 and target_operations[3] != 0
+        and policies["partial_vl"] != 0
+        and policies["nonzero_vstart"] != 1000
+        and policies["masked"] != 1000
+        and dimensions["lmul"][3] != 0
+        and dimensions["emul"][3] != 0
+    )
+    vector_crosses = _csv_counts(
+        result, "actual_vector_gstage_boundary_cross", 18
+    )
+    vector_total = 0
+    flows = 0
+    for mode in range(2):
+        for addressing in range(1, 4):
+            for eew in range(1, 4):
+                index = (mode * 3 + addressing - 1) * 3 + eew - 1
+                count = vector_crosses[index]
+                enabled = (
+                    vector_eligible and target_g[mode] != 0
+                    and dimensions["addressing"][addressing] != 0
+                    and dimensions["eew"][eew] != 0
+                    and dimensions["sew"][eew] != 0
+                )
+                _require(
+                    (count > 0) == enabled,
+                    "actual_vector_gstage_boundary_cross does not match enabled "
+                    f"classes: mode={mode} addressing={addressing} eew={eew}",
+                )
+                vector_total += count
+                flows += count * (16 >> eew)
+    scalar_total = sum(directions)
+    _require(
+        target == 0 or scalar_total + vector_total > 0,
+        "enabled G-stage boundary lacks scalar traffic or an eligible vector "
+        "subclass with a nonzero G-mode weight",
+    )
+    expected = {
+        "actual_gstage_boundary": scalar_total,
+        "actual_gstage_boundary_controls": 4 * scalar_total,
+        "actual_gstage_boundary_recoveries": scalar_total,
+        "actual_gstage_boundary_store_checks": directions[1],
+        "actual_vector_gstage_boundary": vector_total,
+        "actual_vector_gstage_boundary_controls": 4 * vector_total,
+        "actual_vector_gstage_boundary_recoveries": vector_total,
+        "actual_vector_gstage_boundary_store_checks": vector_total,
+        "actual_vector_gstage_boundary_flows": flows,
+    }
+    for name, count in expected.items():
+        value = result.get(name)
+        _require(
+            type(value) is int and value >= 0,
+            f"{name} is not a nonnegative integer: {value!r}",
+        )
+        _require(
+            value == count,
+            "G-stage boundary fault/control/recovery/flow accounting is not "
+            f"conserved: {name}={value}, expected {count}",
+        )
+    _require(
+        all(count <= actual_operations[direction]
+            for direction, count in enumerate(directions))
+        and vector_total <= actual_operations[3],
+        "G-stage boundary faults exceed operation counts",
+    )
+    return directions[0], directions[1], vector_total
+
+
+def _check_scalar_boundary_subclass_accounting(
+    actual_operations: list[int],
+    canonical_faults: tuple[int, int],
+    gstage_faults: tuple[int, int],
+) -> int:
+    """Bound disjoint scalar subclasses and return ordinary load actions."""
+
+    _require(
+        all(canonical + gstage <= actual_operations[direction]
+            for direction, (canonical, gstage) in enumerate(
+                zip(canonical_faults, gstage_faults)
+            )),
+        "scalar canonical/G-stage boundary faults exceed operation counts",
+    )
+    return actual_operations[0] - canonical_faults[0] - gstage_faults[0]
+
+
 def _check_vector_store_subclass_accounting(
     actual_operations: list[int],
     ordinary_directions: list[int],
     canonical_faults: int,
+    gstage_faults: int = 0,
 ) -> None:
     _require(
-        ordinary_directions[1] + canonical_faults == actual_operations[3],
-        "vector-store ordinary/canonical operation accounting is not conserved",
+        ordinary_directions[1] + canonical_faults + gstage_faults
+        == actual_operations[3],
+        "vector-store ordinary/canonical operation accounting is not conserved "
+        "(including G-stage faults)",
     )
 
 
@@ -1158,7 +1292,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -1682,6 +1816,10 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             f"{actual_operations}",
         )
         canonical_loads = 0
+        canonical_stores = 0
+        gstage_loads = 0
+        gstage_stores = 0
+        vector_gstage_faults = 0
         vector_canonical_faults = 0
         if schema >= 49:
             vector_canonical_faults = (
@@ -1691,13 +1829,26 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 )
             )
         if schema >= 48:
-            canonical_loads, _ = _check_canonical_boundary_coverage_schema48(
-                result,
-                target_operations,
-                actual_operations,
-                target_translation,
-                target_stage1,
-                vector_faults=vector_canonical_faults,
+            canonical_loads, canonical_stores = (
+                _check_canonical_boundary_coverage_schema48(
+                    result,
+                    target_operations,
+                    actual_operations,
+                    target_translation,
+                    target_stage1,
+                    vector_faults=vector_canonical_faults,
+                )
+            )
+        ordinary_scalar_loads = actual_operations[0] - canonical_loads
+        if schema >= 50:
+            gstage_loads, gstage_stores, vector_gstage_faults = (
+                _check_gstage_boundary_coverage_schema50(
+                    result, target_operations, actual_operations, target_g,
+                )
+            )
+            ordinary_scalar_loads = _check_scalar_boundary_subclass_accounting(
+                actual_operations, (canonical_loads, canonical_stores),
+                (gstage_loads, gstage_stores),
             )
         target_hypervisor = _csv_counts(
             result, "target_hypervisor_family", 3
@@ -2432,7 +2583,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 "DCache load aggregate error coverage does not match outcomes",
             )
             _require(
-                clean + errors == actual_operations[0] - canonical_loads
+                clean + errors == ordinary_scalar_loads
                 and sum(actual_dcache_load_error_kind) == errors,
                 "DCache load error coverage is not conserved",
             )
@@ -3760,7 +3911,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
 
     if schema >= 49:
         _check_vector_store_subclass_accounting(
-            actual_operations, vector_directions, vector_canonical_faults
+            actual_operations, vector_directions, vector_canonical_faults,
+            vector_gstage_faults,
         )
 
     if schema >= 11:

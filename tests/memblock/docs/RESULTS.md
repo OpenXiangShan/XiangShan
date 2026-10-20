@@ -4299,3 +4299,58 @@ The source diff, build provenance, frozen runtime, and execution log are in
 `build/memblock/gstage-range-runtime/`. This closes directed upper-limit
 coverage only; G-stage mixed traffic, vector loads/unit-stride, and broader
 vector progress/shape crosses remain gaps. No CPU RTL bug is claimed.
+
+
+## G-only Upper Limits in Common Mixed Traffic
+
+Schema 50 adds independent G-only scalar and singleton vector-store upper-limit
+faults to `random-mixed`: 12 scalar and 18 vector bins cover Sv39x4/Sv48x4,
+load/store or strided/indexed address mode, and 2/4/8-byte width. Effective
+bytes are walked independently, terminal VA/GPA/cause/marker are exact, and
+all queue flows are externally conserved. Every fault has four real edge
+controls and a committed store/load survivor. G-only contexts do not count
+as ordinary nested or VS/G-pair coverage. Shared random arbitration keeps
+both canonical and G-only subclasses reachable when both rates are 1000.
+
+The frozen harness passes the scalar-only seed 241 and ten 256-action runs
+(seeds 242–251), each through the full external constraint verifier:
+
+| Case | Scalar bins / faults | Vector bins / faults | Vector flows |
+| --- | ---: | ---: | ---: |
+| All G-only classes | 12 / 85 | 18 / 58 | 274 |
+| Constraint disabled | 0 / 0 | 0 / 0 | 0 |
+| Sv48x4 indexed-ordered 8-byte vector restriction | 6 / 103 | 1 / 46 | 92 |
+| Partial VL disabled | 12 / 93 | 0 / 0 | 0 |
+| Nonzero vstart required | 12 / 94 | 0 / 0 | 0 |
+| Masked operations required | 12 / 96 | 0 / 0 | 0 |
+| Vector-store-only | 0 / 0 | 18 / 146 | 622 |
+| Byte-only vector widths | 12 / 103 | 0 / 0 | 0 |
+| Both boundary rates 1000 | 12 / 29 | 18 / 28 | 124 |
+| Ordinary Bare only, VS-mode weights zero | 12 / 85 | 18 / 58 | 264 |
+
+The both-rate case also records 39 scalar and 47 vector canonical faults,
+exceeding their forced-prefix bins as do both G-only classes. Thus neither
+weighted subclass is starved. The ordinary-Bare case reports zero ordinary
+stage-1/VS/G-pair coverage while executing every G-only bin. The vector-only
+case and external verifier conserve ordinary plus canonical plus G-only
+vector-store actions; scalar DCache outcomes exclude both fault subclasses.
+`check-rtl`, `check-docs`, and 248 Python tests pass. Exact commands, source
+diff/provenance, logs and parsed summaries are in
+`build/memblock/gstage-mixed-focused/`, using the frozen
+`build/memblock/gstage-mixed-runtime/runtime.json`.
+
+These focused runs disable heterogeneous windows and remain capability
+checks. No schema-50 closure campaign has completed. Multi-active-element
+fault progress, vector loads/unit-stride, other vector shapes, nested boundary
+composition, and GPA wrap remain gaps.
+
+The preceding standard integrations pass schema-48 SPEC seed 211 (6,144
+actions, 3,445.610 seconds) and coverage seed 212 (6,144, 1,503.846 seconds),
+and schema-49 coverage seed 232 (6,144, 1,754.938 seconds), each with the full
+mixed verifier. Seed 232 records 36 scalar and 42 vector canonical faults,
+32 Probe sequences (4 isolated / 28 overlap), and 232 concurrent windows.
+Schema-48 corner seed 213 stops at action 5,948 with a hypervisor-PMP-upper-edge
+DCache-request attribution check; it remains a triage candidate, not a CPU bug
+claim or a passing result. Its frozen runtime and complete output remain in
+`build/memblock/canonical-regression/`. Schema-49 SPEC/corner are still running
+at this checkpoint. No six-hour closure claim is made from these integrations.

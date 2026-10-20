@@ -190,6 +190,7 @@ struct RandomConstraints {
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
     unsigned canonical_boundary_per_mille = 0;
+    unsigned gstage_boundary_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
     // VFOF is a low-rate ordinary vector-load subclass.  The fault-position
     // split is architectural stimulus, not a pipeline/replay expectation.
@@ -295,6 +296,7 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
                 .canonical_boundary_per_mille = 100,
+                .gstage_boundary_per_mille = 100,
                 .vector_corner_per_mille = 1000,
                 .vector_fof_per_mille = 100,
                 .vector_fof_first_fault_per_mille = 500,
@@ -395,6 +397,7 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
                 .canonical_boundary_per_mille = 1,
+                .gstage_boundary_per_mille = 1,
                 .vector_corner_per_mille = 100,
                 .vector_fof_per_mille = 10,
                 .vector_fof_first_fault_per_mille = 100,
@@ -493,6 +496,7 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
                 .canonical_boundary_per_mille = 250,
+                .gstage_boundary_per_mille = 250,
                 .vector_corner_per_mille = 1000,
                 .vector_fof_per_mille = 250,
                 .vector_fof_first_fault_per_mille = 500,
@@ -975,6 +979,8 @@ struct RandomConstraints {
             misaligned_per_mille = parsed;
         } else if (key == "canonical-boundary") {
             canonical_boundary_per_mille = parsed;
+        } else if (key == "gstage-boundary") {
+            gstage_boundary_per_mille = parsed;
         } else if (key == "vector-corner") {
             vector_corner_per_mille = parsed;
         } else if (key == "vector-fof") {
@@ -1318,6 +1324,13 @@ struct RandomConstraints {
                 "canonical-boundary requires an eligible stage-1 scalar "
                 "or vector-store subclass");
         }
+        if (gstage_boundary_per_mille != 0 &&
+            enabled_gstage_boundary_crosses() == 0 &&
+            enabled_vector_gstage_boundary_crosses() == 0) {
+            throw std::invalid_argument(
+                "gstage-boundary requires an eligible G-only scalar "
+                "or vector-store subclass");
+        }
         if (vector_fof_per_mille != 0 &&
             operation_weights[vector_load] == 0) {
             throw std::invalid_argument(
@@ -1604,6 +1617,7 @@ struct RandomConstraints {
             nested_g_napot_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
             canonical_boundary_per_mille > 1000 ||
+            gstage_boundary_per_mille > 1000 ||
             vector_corner_per_mille > 1000 ||
             vector_fof_per_mille > 1000 ||
             vector_fof_first_fault_per_mille > 1000 ||
@@ -2268,6 +2282,80 @@ struct RandomConstraints {
         return count;
     }
 
+    bool gstage_boundary_cross_enabled(unsigned cross) const
+    {
+        if (cross >= 12) {
+            return false;
+        }
+        const unsigned mode = cross / 6U;
+        const unsigned store = (cross / 3U) % 2U;
+        return gstage_boundary_per_mille != 0 &&
+            g_mode_weights[mode] != 0 &&
+            operation_weights[store ? scalar_store : scalar_load] != 0;
+    }
+
+    unsigned enabled_gstage_boundary_crosses() const
+    {
+        unsigned count = 0;
+        for (unsigned cross = 0; cross < 12; ++cross) {
+            count += gstage_boundary_cross_enabled(cross);
+        }
+        return count;
+    }
+
+    bool vector_gstage_boundary_cross_enabled(unsigned cross) const
+    {
+        if (cross >= 18) {
+            return false;
+        }
+        const unsigned mode = cross / 9U;
+        const unsigned addressing = (cross / 3U) % 3U + 1U;
+        const unsigned eew = cross % 3U + 1U;
+        // G-only requests use VS=Bare regardless of ordinary translation
+        // regime and VS-mode weights. The singleton shape gates otherwise
+        // match the vector canonical-boundary subclass.
+        return gstage_boundary_per_mille != 0 &&
+            g_mode_weights[mode] != 0 &&
+            operation_weights[vector_store] != 0 &&
+            vector_partial_vl_per_mille != 0 &&
+            vector_nonzero_vstart_per_mille != 1000 &&
+            vector_masked_per_mille != 1000 &&
+            vector_eew_weights[eew] != 0 &&
+            vector_sew_weights[eew] != 0 &&
+            vector_lmul_weights[3] != 0 &&
+            vector_emul_weights[3] != 0 &&
+            vector_addressing_weights[addressing] != 0;
+    }
+
+    unsigned enabled_vector_gstage_boundary_crosses() const
+    {
+        unsigned count = 0;
+        for (unsigned cross = 0; cross < 18; ++cross) {
+            count += vector_gstage_boundary_cross_enabled(cross);
+        }
+        return count;
+    }
+
+    unsigned choose_vector_gstage_boundary_cross(
+        std::uint64_t mode_random, std::uint64_t addressing_random,
+        std::uint64_t eew_random) const
+    {
+        auto eew_weights = vector_eew_weights;
+        eew_weights[0] = 0;
+        for (unsigned eew = 1; eew < eew_weights.size(); ++eew) {
+            if (vector_sew_weights[eew] == 0) {
+                eew_weights[eew] = 0;
+            }
+        }
+        auto addressing_weights = vector_addressing_weights;
+        addressing_weights[0] = 0;
+        const unsigned mode = choose_g_mode(mode_random);
+        const unsigned addressing =
+            choose_weighted(addressing_weights, addressing_random);
+        const unsigned eew = choose_weighted(eew_weights, eew_random);
+        return (mode * 3U + addressing - 1U) * 3U + eew - 1U;
+    }
+
     unsigned minimum_serial_actions() const
     {
         const auto enabled_vector_shape_classes = [&]() {
@@ -2576,6 +2664,8 @@ struct RandomConstraints {
         return std::max({actions, translation_actions, fence_actions}) +
             enabled_canonical_boundary_crosses() +
             enabled_vector_canonical_boundary_crosses() +
+            enabled_gstage_boundary_crosses() +
+            enabled_vector_gstage_boundary_crosses() +
             (stride_stream_per_mille == 0 ? 0U : 8U);
     }
 
@@ -2641,7 +2731,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=49 constraints=" << name
+        stream << "constraint_schema=50 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2758,6 +2848,7 @@ struct RandomConstraints {
                << " target_vector_corner=" << vector_corner_per_mille
                << " target_canonical_boundary="
                << canonical_boundary_per_mille
+               << " target_gstage_boundary=" << gstage_boundary_per_mille
                << " target_vector_fof=" << vector_fof_per_mille
                << " target_vector_fof_first_fault="
                << vector_fof_first_fault_per_mille

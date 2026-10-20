@@ -96,7 +96,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `translation-bare`, `translation-stage1`, `translation-nested` | Relative Bare, host stage-1, and nested VS+G context weights |
 | `stage1-sv39`, `stage1-sv48` | Relative host stage-1 mode weights |
 | `vs-sv39`, `vs-sv48` | Relative VS-stage mode weights in nested contexts |
-| `g-sv39x4`, `g-sv48x4` | Relative G-stage mode weights in nested contexts |
+| `g-sv39x4`, `g-sv48x4` | Relative G-stage mode weights in nested contexts and the independent G-only boundary subclass |
 | `translation-stage1-napot` | Per-mille share of eligible host stage-1 accesses placed in a legal 64-KiB Svnapot region |
 | `translation-vs-napot`, `translation-g-napot` | Independent per-mille Svnapot selection for the VS and final G leaf of eligible nested accesses; their product generates all four leaf topologies |
 | `translation-switch` | Per-mille chance of choosing a new translation context at a drained action/window boundary |
@@ -107,6 +107,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
 | `canonical-boundary` | Per-mille share of eligible scalar or singleton vector-store actions replaced by a Sv39/Sv48 canonical crossing; requires stage-1 traffic and a reachable scalar/vector subclass. Zero disables all such actions. Nonzero closes enabled 24 scalar and 36 vector bins before weighted sampling; vector eligibility intersects addressing, EEW=SEW, LMUL=EMUL=1 and policy gates below. Distances, lanes, data, index offsets, stride signs, and scalar issue order remain randomized. Presets: SPEC 1, coverage 100, corner 250 |
+| `gstage-boundary` | Per-mille share of eligible scalar/singleton vector-store actions replaced by G-only upper-limit crossings. Requires a reachable scalar/vector subclass and G-mode weight; independent of ordinary translation-regime and VS-mode weights. Closes 12 scalar and 18 vector bins before weighted sampling. Presets: SPEC 1, coverage 100, corner 250 |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
 | `vector-fof` | Low-rate per-mille share of ordinary vector-load actions replaced by unit-stride VLEFF. A nonzero value requires vector loads and stage-1 translation; 1000 is rejected because the same profile must retain ordinary vector-shape closure |
 | `vector-fof-first-fault` | Conditional per-mille share of VLEFF actions whose first element faults. The other class places element zero on a mapped page and element one on the next unmapped page |
@@ -465,7 +466,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=49`, the resolved target weights,
+Every terminal line prints `constraint_schema=50`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -773,8 +774,8 @@ first-page traffic is allowed. These scalar fault actions are excluded from
 ordinary DCache clean/error-refill outcome counters. Every terminal summary
 reports the 24-bin cross, fault total, controls, recovery, and store-check
 counts, and the regression verifier checks their conservation. Schema 49
-adds the eligible singleton vector-store subclass below. G-stage address-limit
-crossings remain a gap.
+adds the eligible singleton vector-store subclass below. Schema 50 separately
+composes G-only upper-limit crossings.
 
 The cross order is
 `((invalid_first * 2 + mode) * 2 + store) * 3 + (eew - 1)`, where mode 0/1
@@ -811,7 +812,48 @@ four times that total, recoveries and store checks each equal the total, and
 `actual_vector_canonical_boundary_flows` equals the sum of each bin times
 `16 >> eew`. The external verifier checks enabled and disabled bins and all
 these conservation relations independently, and requires ordinary vector-store
-instructions plus canonical vector faults to equal the vector-store action
-count. Multi-active-element faults,
+instructions plus canonical vector faults (and schema-50 G-only vector
+faults) to equal the vector-store action count. Multi-active-element faults,
 other LMUL/EMUL/SEW shapes, unit-stride and vector-load canonical crossings,
-and G-stage limits remain explicit gaps.
+and broader G-stage access shapes remain explicit gaps.
+
+
+Schema 50 adds the independent `gstage-boundary` subclass, using VS=Bare and
+Sv39x4/Sv48x4 with 41/50-bit zero-extended GPA limits. Its scalar cross order
+is `(mode * 2 + store) * 3 + eew - 1` (12 bins); its vector order is
+`(mode * 3 + addressing - 1) * 3 + eew - 1` (18 bins), with the same mode,
+addressing and EEW conventions as above except mode denotes G-stage. Scalar
+bins require the corresponding operation and G-mode weights. Vector bins
+reuse every schema-49 singleton shape/policy gate, replacing stage-1 mode
+eligibility with G-mode eligibility. Ordinary translation-regime and VS-mode
+weights do not restrict this VS=Bare subclass. A nonzero rate with no reachable
+scalar or vector subclass is rejected.
+
+Every crossing independently walks each effective accessed byte, requires the
+access-specific guest-page fault and exact first-invalid VA/GPA equal to the
+GPA limit, and requires VS-non-leaf-PTE false. Separate G roots map the last
+legal page and GPA zero to distinct backing pages. Two actual loads prove
+these permissive mappings before the fault; two unchanged-edge loads and a
+committed store/load survivor prove side-effect suppression and recovery.
+Legal speculative prefix traffic is allowed. The backend exception redirect
+includes the VLS qualifier for vector faults, and every reserved queue flow
+must retire or cancel on observed IO. G-only activation drains prior work,
+flushes pending fences, invalidates the ordinary context, and issues explicit
+HFENCE.GVMA; the next ordinary action reenters its own context. These actions
+do not populate ordinary VS/G-pair or successful vector shape/policy counters.
+
+`actual_gstage_boundary` equals the sum of its 12 bins, controls equal four
+times the total, recoveries equal the total, and store checks equal scalar
+store faults. The corresponding `actual_vector_gstage_boundary` 18-bin total
+requires four controls, one recovery and one store check per fault; its flows
+sum each bin times `16 >> eew`. C++ closure and the external verifier exclude
+both canonical and G-only scalar faults from the DCache outcome space and
+conserve ordinary plus both fault subclasses against operation counts.
+
+Canonical and G-only boundary prefixes are finite. After all ordinary and
+Probe requirements close, each eligible action independently samples both
+configured rates; if both select the same action, a random equal-choice
+arbitration selects one. Thus both subclasses remain reachable even with both
+rates set to 1000; neither rate promises an exclusive action fraction when
+they share that slot. Multi-active-element faults, vector loads/unit-stride,
+other shape progress, nested boundary composition and GPA wrap remain gaps.

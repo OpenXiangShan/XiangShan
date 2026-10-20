@@ -476,7 +476,13 @@ and indexed vector-store bins, with externally conserved SQ flows, unchanged
 edge readbacks, and a committed survivor store/load pair. Eligibility honors
 all shape weights and the compatible VL/vstart/mask policy endpoints; see
 `CONSTRAINED_RANDOM.md`. Broader vector shapes, multi-element fault progress,
-vector loads, and mixed G-stage address-limit traffic remain explicit gaps.
+vector loads, nested boundary composition, and GPA wrap remain explicit gaps.
+Schema 50 separately adds `gstage-boundary` to the common generator: 12
+scalar and 18 eligible singleton vector-store upper-limit bins use explicit
+G-only contexts and exact VA/GPA, observed-flow and committed-survivor
+checks. G-mode weights select these bins independently of ordinary
+translation-regime and VS-mode weights. If both boundary constraints select
+an action, equal random arbitration preserves each subclass's reachability.
 The shared
 encoding table crosses V/W/R, both ends of reserved bits 60:54, PBMT=3,
 disabled PBMTE, exhausted L0, illegal non-leaf U/A/D/PBMT/N fields, and an

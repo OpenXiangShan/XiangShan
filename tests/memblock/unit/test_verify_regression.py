@@ -205,7 +205,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 50
+        result["constraint_schema"] = 51
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -585,6 +585,261 @@ class VerifyRegressionTest(unittest.TestCase):
                 verify_regression.VerificationError
             ):
                 check(malformed, [1] * 4, [100] * 4, [0, 1, 0], [1, 1])
+
+    @staticmethod
+    def gstage_boundary_fields(
+        scalar_counts: list[int], vector_counts: list[int]
+    ) -> dict[str, object]:
+        scalar_total = sum(scalar_counts)
+        vector_total = sum(vector_counts)
+        return {
+            "target_gstage_boundary": 100,
+            "target_vector_addressing": "0,1,1,1",
+            "target_vector_eew": "0,1,1,1",
+            "target_vector_sew": "0,1,1,1",
+            "target_vector_lmul": "0,0,0,1,0,0,0",
+            "target_vector_emul": "0,0,0,1,0,0,0",
+            "target_vector_partial_vl": 500,
+            "target_vector_nonzero_vstart": 500,
+            "target_vector_masked": 500,
+            "actual_gstage_boundary_cross": ",".join(map(str, scalar_counts)),
+            "actual_gstage_boundary": scalar_total,
+            "actual_gstage_boundary_controls": 4 * scalar_total,
+            "actual_gstage_boundary_recoveries": scalar_total,
+            "actual_gstage_boundary_store_checks": sum(
+                scalar_counts[3:6] + scalar_counts[9:12]
+            ),
+            "actual_vector_gstage_boundary_cross": ",".join(
+                map(str, vector_counts)
+            ),
+            "actual_vector_gstage_boundary": vector_total,
+            "actual_vector_gstage_boundary_controls": 4 * vector_total,
+            "actual_vector_gstage_boundary_recoveries": vector_total,
+            "actual_vector_gstage_boundary_store_checks": vector_total,
+            "actual_vector_gstage_boundary_flows": sum(
+                count * flows
+                for count, flows in zip(vector_counts, [8, 4, 2] * 6)
+            ),
+        }
+
+    def test_schema_50_checks_gstage_fault_control_and_flow_accounting(self) -> None:
+        fields = self.gstage_boundary_fields(
+            list(range(1, 13)), list(range(1, 19))
+        )
+        check = verify_regression._check_gstage_boundary_coverage_schema50
+        args = ([1, 1, 0, 1], [31, 49, 0, 172], [1, 1])
+        self.assertEqual(check(fields, *args), (30, 48, 171))
+        for name in (
+            "actual_gstage_boundary", "actual_gstage_boundary_controls",
+            "actual_gstage_boundary_recoveries",
+            "actual_gstage_boundary_store_checks",
+            "actual_vector_gstage_boundary",
+            "actual_vector_gstage_boundary_controls",
+            "actual_vector_gstage_boundary_recoveries",
+            "actual_vector_gstage_boundary_store_checks",
+            "actual_vector_gstage_boundary_flows",
+        ):
+            with self.subTest(counter=name):
+                malformed = dict(fields)
+                malformed[name] = int(malformed[name]) - 1
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError, "accounting is not conserved"
+                ):
+                    check(malformed, *args)
+                for value in (None, False, -1, "1", 1.5):
+                    malformed[name] = value
+                    with self.assertRaisesRegex(
+                        verify_regression.VerificationError, "nonnegative integer"
+                    ):
+                        check(malformed, *args)
+                del malformed[name]
+                with self.assertRaises(verify_regression.VerificationError):
+                    check(malformed, *args)
+        for actual in ([29, 49, 0, 172], [31, 47, 0, 172], [31, 49, 0, 170]):
+            with self.subTest(actual=actual), self.assertRaisesRegex(
+                verify_regression.VerificationError, "exceed operation counts"
+            ):
+                check(fields, args[0], actual, args[2])
+
+    def test_schema_50_enforces_restricted_gstage_bins(self) -> None:
+        scalar = [0] * 12
+        scalar[9:12] = [2, 3, 5]
+        vector = [0] * 18
+        vector[17] = 7
+        fields = self.gstage_boundary_fields(scalar, vector)
+        fields.update({
+            "target_vector_addressing": "0,0,0,1",
+            "target_vector_eew": "0,0,0,1",
+            "target_vector_sew": "0,0,0,1",
+        })
+        args = ([0, 1, 0, 1], [0, 10, 0, 7], [0, 1])
+        check = verify_regression._check_gstage_boundary_coverage_schema50
+        self.assertEqual(check(fields, *args), (0, 10, 7))
+        for field, counts, indexes in (
+            ("actual_gstage_boundary_cross", scalar, (0, 3, 6, 8, 9, 10, 11)),
+            ("actual_vector_gstage_boundary_cross", vector, (0, 8, 14, 16, 17)),
+        ):
+            for index in indexes:
+                with self.subTest(field=field, index=index):
+                    malformed = dict(fields)
+                    changed = counts[:]
+                    changed[index] = 0 if changed[index] else 1
+                    malformed[field] = ",".join(map(str, changed))
+                    with self.assertRaisesRegex(
+                        verify_regression.VerificationError,
+                        "does not match enabled classes",
+                    ):
+                        check(malformed, *args)
+
+    def test_schema_50_gstage_does_not_require_nested_or_vs_traffic(self) -> None:
+        fields = self.gstage_boundary_fields([1] * 12, [1] * 18)
+        fields.update({
+            "target_translation": "1,0,0",
+            "target_stage1_mode": "0,0", "target_vs_mode": "0,0",
+            "target_g_mode": "1,1",
+        })
+        self.assertEqual(
+            verify_regression._check_gstage_boundary_coverage_schema50(
+                fields, [1, 1, 0, 1], [6, 6, 0, 18], [1, 1]
+            ), (6, 6, 18)
+        )
+        # Load-only faults need neither stores nor an eligible vector shape.
+        fields = self.gstage_boundary_fields([1, 1, 1, 0, 0, 0] * 2, [0] * 18)
+        fields["target_vector_partial_vl"] = 0
+        self.assertEqual(
+            verify_regression._check_gstage_boundary_coverage_schema50(
+                fields, [1, 0, 0, 0], [6, 0, 0, 0], [1, 1]
+            ), (6, 0, 0)
+        )
+
+    def test_schema_50_gstage_vector_policy_endpoints_and_scalar_absence(self) -> None:
+        check = verify_regression._check_gstage_boundary_coverage_schema50
+        for partial in (0, 500, 1000):
+            for vstart in (0, 500, 1000):
+                for masked in (0, 500, 1000):
+                    enabled = partial != 0 and vstart != 1000 and masked != 1000
+                    fields = self.gstage_boundary_fields(
+                        [0] * 12, [int(enabled)] * 18
+                    )
+                    fields.update({
+                        "target_vector_partial_vl": partial,
+                        "target_vector_nonzero_vstart": vstart,
+                        "target_vector_masked": masked,
+                    })
+                    args = ([0, 0, 0, 1], [0, 0, 0, 18], [1, 1])
+                    with self.subTest(partial=partial, vstart=vstart, masked=masked):
+                        if enabled:
+                            self.assertEqual(check(fields, *args), (0, 0, 18))
+                        else:
+                            with self.assertRaisesRegex(
+                                verify_regression.VerificationError,
+                                "lacks scalar traffic or an eligible vector",
+                            ):
+                                check(fields, *args)
+
+    def test_schema_50_gstage_disables_ineligible_vector_shapes(self) -> None:
+        check = verify_regression._check_gstage_boundary_coverage_schema50
+        for override in (
+            {"target_vector_partial_vl": 0},
+            {"target_vector_nonzero_vstart": 1000},
+            {"target_vector_masked": 1000},
+            {"target_vector_lmul": "1,0,0,0,0,0,0"},
+            {"target_vector_emul": "1,0,0,0,0,0,0"},
+            {"target_vector_addressing": "1,0,0,0"},
+            {"target_vector_eew": "1,0,0,0"},
+            {"target_vector_sew": "1,0,0,0"},
+        ):
+            fields = self.gstage_boundary_fields([1] * 12, [0] * 18)
+            fields.update(override)
+            args = ([1, 1, 0, 1], [6, 6, 0, 18], [1, 1])
+            with self.subTest(override=override):
+                self.assertEqual(check(fields, *args), (6, 6, 0))
+                fields["actual_vector_gstage_boundary_cross"] = ",".join(
+                    map(str, [1] + [0] * 17)
+                )
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError,
+                    "does not match enabled classes",
+                ):
+                    check(fields, *args)
+
+    def test_schema_50_gstage_disabled_and_unreachable_targets(self) -> None:
+        check = verify_regression._check_gstage_boundary_coverage_schema50
+        fields = self.gstage_boundary_fields([0] * 12, [0] * 18)
+        fields["target_gstage_boundary"] = 0
+        args = ([1, 1, 0, 1], [0] * 4, [1, 1])
+        self.assertEqual(check(fields, *args), (0, 0, 0))
+        for field, bins in (("actual_gstage_boundary_cross", 12),
+                            ("actual_vector_gstage_boundary_cross", 18)):
+            malformed = dict(fields)
+            malformed[field] = ",".join(["1"] + ["0"] * (bins - 1))
+            with self.subTest(field=field), self.assertRaisesRegex(
+                verify_regression.VerificationError, "does not match enabled classes"
+            ):
+                check(malformed, *args)
+        fields["target_gstage_boundary"] = 100
+        for operations, modes in (([0] * 4, [1, 1]),
+                                  ([0, 0, 1, 0], [1, 1]),
+                                  ([1, 1, 0, 1], [0, 0])):
+            with self.subTest(operations=operations, modes=modes), self.assertRaisesRegex(
+                verify_regression.VerificationError,
+                "lacks scalar traffic or an eligible vector",
+            ):
+                check(fields, operations, [10] * 4, modes)
+        for rate in (1, 1000):
+            fields = self.gstage_boundary_fields([1] * 12, [1] * 18)
+            fields["target_gstage_boundary"] = rate
+            self.assertEqual(check(fields, args[0], [20] * 4, args[2]), (6, 6, 18))
+
+    def test_schema_50_rejects_invalid_or_missing_gstage_fields(self) -> None:
+        check = verify_regression._check_gstage_boundary_coverage_schema50
+        fields = self.gstage_boundary_fields([1] * 12, [1] * 18)
+        args = ([1, 1, 0, 1], [100] * 4, [1, 1])
+        for field in ("target_gstage_boundary", "target_vector_partial_vl",
+                      "target_vector_nonzero_vstart", "target_vector_masked"):
+            for value in (None, False, -1, 1001, "100", 1.5):
+                malformed = dict(fields)
+                malformed[field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(
+                    verify_regression.VerificationError
+                ):
+                    check(malformed, *args)
+        for field, bins in (("actual_gstage_boundary_cross", 12),
+                            ("actual_vector_gstage_boundary_cross", 18)):
+            for value in (None, "1,2", ",".join(["1"] * (bins + 1)),
+                          ",".join(["-1"] + ["1"] * (bins - 1)),
+                          ",".join(["1"] * (bins - 1) + ["oops"])):
+                malformed = dict(fields)
+                malformed[field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(
+                    verify_regression.VerificationError
+                ):
+                    check(malformed, *args)
+        for field in fields:
+            malformed = dict(fields)
+            del malformed[field]
+            with self.subTest(missing=field), self.assertRaises(
+                verify_regression.VerificationError
+            ):
+                check(malformed, *args)
+
+    def test_schema_50_scalar_and_vector_subclasses_are_disjoint(self) -> None:
+        scalar = verify_regression._check_scalar_boundary_subclass_accounting
+        # 7 ordinary DCache loads remain after both fault subclasses are removed.
+        self.assertEqual(scalar([20, 17], (5, 8), (8, 9)), 7)
+        self.assertEqual(scalar([13, 17], (5, 8), (8, 9)), 0)
+        for actions in ([12, 17], [20, 16]):
+            with self.subTest(actions=actions), self.assertRaisesRegex(
+                verify_regression.VerificationError, "exceed operation counts"
+            ):
+                scalar(actions, (5, 8), (8, 9))
+        vector = verify_regression._check_vector_store_subclass_accounting
+        vector([0, 0, 0, 15], [0, 3], 5, 7)
+        for actions in (3, 5, 7, 8, 10, 12, 14, 16):
+            with self.subTest(actions=actions), self.assertRaisesRegex(
+                verify_regression.VerificationError, "operation accounting is not conserved"
+            ):
+                vector([0, 0, 0, actions], [0, 3], 5, 7)
 
     def test_schema_44_checks_vector_fof_accounting(self) -> None:
         fields: dict[str, object] = {

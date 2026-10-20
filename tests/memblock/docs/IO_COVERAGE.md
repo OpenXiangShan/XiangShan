@@ -59,9 +59,9 @@ generated table above is the non-overlapping physical inventory.
 | --- | ---: | --- | --- | --- |
 | Clock and primary reset | 2 | Clock generation, external reset assertion, synchronized release, reset during outstanding manager traffic | Environment reset controller; reset/recovery and quiescence checks | Semantic / directed |
 | LSQ dispatch: `enqLsq_req_0..5`, `enqLsq_needAlloc_*`, `lsqio_scommit`, pending pointers, `flushSb` | 241 | Six dispatch lanes, allocation width, 24 exception classes, FU/op type, `flushPipe`, `uopIdx`, `lastUop`, ROB/LQ/SQ identity, `numLsElem`, commit/pending state | Typed LSQ enqueue/commit drivers and passive six-lane monitor; operation, lane, width, identity, and queue-flow conservation | Semantic / constrained |
-| Scalar load issue: `issueLda_0..2` | 72 | `lb/lh/lw/ld/lbu/lhu/lwu`, three lanes, aligned/misaligned and cross-page VA, both Sv39/Sv48 canonical boundary directions and 2/4/8-byte crossing widths, Bare/Sv39/Sv48 and nested translation, directed 41/50-bit G-only upper-limit crossings, cache/TLB/error outcomes | `issue_load`, load scoreboard, translation/PMP/PMA oracles; direction/lane/operation coverage | Semantic / constrained |
-| Vector memory issue: `issueVldu_0..1` | 75 | EEW/SEW 8/16/32/64, legal LMUL/EMUL, unit/strided/indexed-unordered/indexed-ordered/segment, mask, `vl`, `vstart`, old destination, split/cross-page replay, VFOF and Segment FOF, eligible singleton strided/indexed store crossings at both Sv39/Sv48 canonical boundaries and directed 41/50-bit G-only upper limits | Vector builders, byte-accurate vector scoreboard and RVV reference; legal-shape and uop-flow coverage | Semantic / constrained |
-| Scalar store issue: `issueSta_0..1`, `issueStd_0..1` | 40 | `sb/sh/sw/sd`, both address and data lanes, explicit lane-0 MMIO/CMO/CBO.ZERO/split completions, two issue orders, byte masks, misaligned/replay, Sv39/Sv48 canonical range faults, directed 41/50-bit G-only range faults, forwarding, translation and manager errors | Store address/data drivers, store scoreboard, SQ/readback and forwarding oracles | Semantic / constrained |
+| Scalar load issue: `issueLda_0..2` | 72 | `lb/lh/lw/ld/lbu/lhu/lwu`, three lanes, aligned/misaligned and cross-page VA, both Sv39/Sv48 canonical boundary directions and 2/4/8-byte crossing widths, Bare/Sv39/Sv48 and nested translation, 41/50-bit G-only upper-limit crossings, cache/TLB/error outcomes | `issue_load`, load scoreboard, translation/PMP/PMA oracles; direction/lane/operation coverage | Semantic / constrained |
+| Vector memory issue: `issueVldu_0..1` | 75 | EEW/SEW 8/16/32/64, legal LMUL/EMUL, unit/strided/indexed-unordered/indexed-ordered/segment, mask, `vl`, `vstart`, old destination, split/cross-page replay, VFOF and Segment FOF, eligible singleton strided/indexed store crossings at both Sv39/Sv48 canonical boundaries and 41/50-bit G-only upper limits | Vector builders, byte-accurate vector scoreboard and RVV reference; legal-shape and uop-flow coverage | Semantic / constrained |
+| Scalar store issue: `issueSta_0..1`, `issueStd_0..1` | 40 | `sb/sh/sw/sd`, both address and data lanes, explicit lane-0 MMIO/CMO/CBO.ZERO/split completions, two issue orders, byte masks, misaligned/replay, Sv39/Sv48 canonical range faults, 41/50-bit G-only range faults, forwarding, translation and manager errors | Store address/data drivers, store scoreboard, SQ/readback and forwarding oracles | Semantic / constrained |
 | Translation controls: `sfence`, `tlbCsr_*` | 41 | Bare/Sv39/Sv48, VS/VU/G modes, all four nested `vsatp` x `hgatp` pairs, ASID/VMID/PPN changes, global/selective SFENCE/HFENCE kinds and scopes | `issue_sfence`, translation-context and fence matrices; stale-response suppression and exact PA checks | Semantic / constrained |
 | Redirect and exception controls | 5 | ROB flag/value, redirect level, VLS-exception marker; all load/store/vector/atomic exception causes exercised by focused scenarios | Redirect driver, queue cancellation monitor, exception and writeback oracles | Semantic / constrained |
 | CSR, trigger and backend controls | 63 | CSR-distribution controls, debug/memory/frontend triggers, CPU halted/critical-error/MSI ack, PMP CSRs | Distributed-CSR writers, trigger/PMP contracts and top-control bridge checks | Semantic / directed |
@@ -82,7 +82,7 @@ generated table above is the non-overlapping physical inventory.
 ## Constrained-Random Legal Inputs
 
 The common `random-mixed` generator currently records
-`constraint_schema=49`. Its canonical legal-input dimensions are documented in
+`constraint_schema=50`. Its canonical legal-input dimensions are documented in
 `CONSTRAINED_RANDOM.md` and include:
 
 - scalar loads/stores, vector loads/stores/segments, software prefetch and
@@ -104,7 +104,10 @@ The common `random-mixed` generator currently records
 - eligible singleton vector-store crossings in strided and both indexed modes,
   EEW=SEW 16/32/64, LMUL=EMUL=1, exact terminal fault/VA, all reserved SQ flows
   externally retired/canceled, unchanged edge readbacks, and a committed
-  store/load survivor pair.
+  store/load survivor pair;
+- independent G-only 41/50-bit upper-limit crossings with 12 scalar and 18
+  singleton vector-store bins, exact VA/GPA/marker, four real edge controls,
+  observed queue recovery and committed survivors.
 
 Every enabled constrained class must be observed in each seed and must conserve
 its target/actual coverage counters. Architectural data, exceptions, identity,
@@ -126,7 +129,7 @@ gaps, not silently accepted behavior.
 | Software-visible `satp`/`vsatp`/`hgatp` WARL behavior and hardware A/D updates | TLB CSR/TLB feedback and PTW traffic | MemBlock consumes post-CSR controls; concurrent A/D and invalidation races need full-core or formal context | Medium |
 | Broad cross-cause exception priority and ordered indexed side-effecting accesses | LSQ enqueue/issue, redirect and writeback outputs | Selected page-fault/PBMT/PMP overlaps are covered; the complete priority matrix and ordered MMIO/indexed target semantics are not | Medium |
 | Reset during arbitrary LSQ producer/replay classes | OOO issue/enqueue, redirect and LSQ queues | Three manager-path reset recoveries are covered; additional producer and replay states remain | Medium |
-| Broader vector canonical ranges and stage-2 address limits | Scalar/vector issue and TLB controls | Schema 49 composes eligible singleton strided/indexed store crossings into mixed traffic, alongside scalar crossings. Other vector shapes, multi-active-element fault progress, unit-stride/vector-load crossings remain; 41/50-bit G-only upper-limit crossings are directed only, with mixed integration still missing | Medium |
+| Broader vector canonical ranges and stage-2 address limits | Scalar/vector issue and TLB controls | Schemas 49/50 compose scalar and eligible singleton strided/indexed store crossings at canonical and G-only upper limits into mixed traffic. Other vector shapes, multi-active-element fault progress, unit-stride/vector-load crossings, nested boundary composition and GPA wrap remain | Medium |
 | Split-load timing near RAR capacity | Scalar/vector load issue and load feedback | One directed three-pending-split case exists; the wider delay/occupancy space is not randomized | Medium |
 | Complete wakeup/cancel/memory-violation field attribution | MemBlock-to-OOO feedback outputs | Focused cases cover all exposed violation fields and representative wakeup/cancel classes, but there is no complete count/field relation for every producer, replay and exception cross | Medium |
 | Matching-MSHR L2-hint replay and external-L2 retry policy | L2 hint and L2 DTLB request/response | The MemBlock-side transport and idle/no-MSHR behavior are checked; matching-MSHR policy and downstream retry ownership are outside this boundary | Integration-owned |
