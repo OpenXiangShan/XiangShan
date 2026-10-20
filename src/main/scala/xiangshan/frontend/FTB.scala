@@ -879,7 +879,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   val ftb_write_fallThrough = ftb_write.entry.getFallThrough(write_pc)
   when(write_valid) {
-    assert(write_pc + (FetchWidth * 4).U >= ftb_write_fallThrough, s"FTB write_entry fallThrough address error!")
+    assert(
+      SignExt(write_pc, VAddrBits + 1) + (FetchWidth * 4).U >= ftb_write_fallThrough,
+      s"FTB write_entry fallThrough address error!"
+    )
   }
 
   XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire(0), s0_pc_dup(0), ftbBank.io.req_pc.ready)

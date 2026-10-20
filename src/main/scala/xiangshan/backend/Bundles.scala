@@ -877,7 +877,7 @@ object Bundles {
   }
 
   class ExceptionInfo(implicit p: Parameters) extends XSBundle {
-    val pc = UInt(VAddrData().dataWidth.W)
+    val pc = UInt((VAddrData().dataWidth + 1).W)
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptionVec()

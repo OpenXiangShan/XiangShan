@@ -136,7 +136,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     })
     val fromRob = Input(new Bundle {
       val trap = ValidIO(new Bundle {
-        val pc = UInt(VaddrMaxWidth.W)
+        val pc = UInt((VaddrMaxWidth+1).W)
         val pcGPA = UInt(PAddrBitsMax.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
@@ -983,7 +983,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val vstartChange = vstart.w.wen && (
     vstart.w.wdata === 0.U && vstart.regOut.vstart.asUInt =/= 0.U ||
-    vstart.w.wdata =/= 0.U && vstart.regOut.vstart.asUInt === 0.U
+    vstart.w.wdata =/= 0.U
   )
 
   // flush pipe when write frm and data > 4 or write fcsr and data[7:5] > 4 or write frm/fcsr and frm is reserved

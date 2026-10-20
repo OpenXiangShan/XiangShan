@@ -7,6 +7,7 @@
 [submodule "ready-to-run"]
 	path = ready-to-run
 	url = https://github.com/OpenXiangShan/ready-to-run.git
+	branch = kunminghu-v2
 [submodule "huancun"]
 	path = huancun
 	url = https://github.com/OpenXiangShan/HuanCun.git

@@ -477,8 +477,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   segmentTrigger.io.fromLoadStore.mask                  := 0.U
 
   val triggerAction = segmentTrigger.io.toLoadStore.triggerAction
-  val triggerDebugMode = RegEnable(TriggerAction.isDmode(triggerAction), false.B, state === s_tlb_req)
-  val triggerBreakpoint = RegEnable(TriggerAction.isExp(triggerAction), false.B, state === s_tlb_req)
+  // s_wait_tlb_resp gives the updated latchVaddr a cycle to reach the trigger registers.
+  val triggerDebugMode = RegNext(TriggerAction.isDmode(triggerAction), false.B)
+  val triggerBreakpoint = RegNext(TriggerAction.isExp(triggerAction), false.B)
 
   // tlb resp
   when(io.dtlb.resp.fire && state === s_wait_tlb_resp){

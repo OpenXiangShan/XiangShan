@@ -64,8 +64,8 @@ object FtqPtr {
 }
 
 class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
-  val startAddr     = UInt(VAddrBits.W)
-  val nextLineAddr  = UInt(VAddrBits.W)
+  val startAddr     = UInt((VAddrBits + 1).W)
+  val nextLineAddr  = UInt((VAddrBits + 1).W)
   val isNextMask    = Vec(PredictWidth, Bool())
   val fallThruError = Bool()
   // val carry = Bool()
@@ -90,6 +90,20 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   }
   override def toPrintable: Printable =
     p"startAddr:${Hexadecimal(startAddr)}"
+}
+
+class FtqPcMemEntry(implicit p: Parameters) extends Ftq_RF_Components {
+  // Ftq_RF_Components keeps an extra bit on nextLineAddr for canonical check,
+  // backend pcMem / targetMem does not need that, override here to reduce area
+  override val nextLineAddr = UInt(VAddrBits.W)
+
+  def fromFtqPcBundle(b: Ftq_RF_Components) = {
+    startAddr     := b.startAddr
+    nextLineAddr  := b.nextLineAddr(VAddrBits - 1, 0)
+    isNextMask    := b.isNextMask
+    fallThruError := b.fallThruError
+    this
+  }
 }
 
 class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
@@ -207,7 +221,7 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   // write to backend pc mem
   val pc_mem_wen   = Output(Bool())
   val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
-  val pc_mem_wdata = Output(new Ftq_RF_Components)
+  val pc_mem_wdata = Output(new FtqPcMemEntry)
   // newest target
   val newest_entry_en     = Output(Bool())
   val newest_entry_target = Output(UInt(VAddrBits.W))
@@ -649,8 +663,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
 
   // multi-write
-  val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W))) // could be taken target or fallThrough //TODO: remove this
-  val newest_entry_target          = Reg(UInt(VAddrBits.W))
+  val update_target =
+    Reg(Vec(FtqSize, UInt((VAddrBits + 1).W))) // could be taken target or fallThrough //TODO: remove this
+  val newest_entry_target          = Reg(UInt((VAddrBits + 1).W))
   val newest_entry_target_modified = RegInit(false.B)
   val newest_entry_ptr             = Reg(new FtqPtr)
   val newest_entry_ptr_modified    = RegInit(false.B)
@@ -831,7 +846,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val toIfuPcBundle                  = Wire(new Ftq_RF_Components)
   val entry_is_to_send               = WireInit(entry_fetch_status(ifuPtr.value) === f_to_send)
   val entry_ftq_offset               = WireInit(cfiIndex_vec(ifuPtr.value))
-  val entry_next_addr                = Wire(UInt(VAddrBits.W))
+  val entry_next_addr                = Wire(UInt((VAddrBits + 1).W))
 
   val pc_mem_ifu_ptr_rdata   = VecInit(Seq.fill(copyNum)(RegNext(ftq_pc_mem.io.ifuPtr_rdata)))
   val pc_mem_ifu_plus1_rdata = VecInit(Seq.fill(copyNum)(RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata)))
@@ -1157,13 +1172,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // to backend pc mem / target
   io.toBackend.pc_mem_wen   := RegNext(last_cycle_bpu_in)
   io.toBackend.pc_mem_waddr := RegEnable(last_cycle_bpu_in_idx, last_cycle_bpu_in)
-  io.toBackend.pc_mem_wdata := RegEnable(bpu_in_bypass_buf_for_ifu, last_cycle_bpu_in)
+  io.toBackend.pc_mem_wdata.fromFtqPcBundle(RegEnable(bpu_in_bypass_buf_for_ifu, last_cycle_bpu_in))
 
   // num cycle is fixed
   val newest_entry_en: Bool = RegNext(last_cycle_bpu_in || backendRedirect.valid || ifuRedirectToBpu.valid)
   io.toBackend.newest_entry_en     := RegNext(newest_entry_en)
   io.toBackend.newest_entry_ptr    := RegEnable(newest_entry_ptr, newest_entry_en)
-  io.toBackend.newest_entry_target := RegEnable(newest_entry_target, newest_entry_en)
+  io.toBackend.newest_entry_target := RegEnable(newest_entry_target, newest_entry_en)(VAddrBits - 1, 0)
 
   // *********************************************************************
   // **************************** wb from exu ****************************
@@ -1462,10 +1477,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBpu.update.valid := commit_valid && do_commit
   val update = io.toBpu.update.bits
   update.false_hit   := commit_hit === h_false_hit
-  update.pc          := commit_pc_bundle.startAddr
+  update.pc          := commit_pc_bundle.startAddr(VAddrBits - 1, 0)
   update.meta        := commit_meta
   update.cfi_idx     := commit_cfi
-  update.full_target := commit_target
+  update.full_target := commit_target(VAddrBits - 1, 0)
   update.from_stage  := commit_stage
   update.spec_info   := commit_spec_meta
   XSError(commit_valid && do_commit && debug_cfi, "\ncommit cfi can be non c_commited\n")
@@ -1474,11 +1489,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val update_ftb_entry = update.ftb_entry
 
   val ftbEntryGen = Module(new FTBEntryGen).io
-  ftbEntryGen.start_addr     := commit_pc_bundle.startAddr
+  ftbEntryGen.start_addr     := commit_pc_bundle.startAddr(VAddrBits - 1, 0)
   ftbEntryGen.old_entry      := commit_ftb_entry
   ftbEntryGen.pd             := commit_pd
   ftbEntryGen.cfiIndex       := commit_cfi
-  ftbEntryGen.target         := commit_target
+  ftbEntryGen.target         := commit_target(VAddrBits - 1, 0)
   ftbEntryGen.hit            := commit_real_hit
   ftbEntryGen.mispredict_vec := commit_mispredict
 

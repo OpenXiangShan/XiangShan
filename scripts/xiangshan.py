@@ -28,6 +28,8 @@ import time
 import shlex
 import psutil
 import re
+import pathlib
+from typing import List, Tuple, Set
 
 def find_files_with_suffix(root_dir, suffixes):
     matching_files = []
@@ -90,6 +92,7 @@ class XSArgs(object):
         self.ram_size = args.ram_size
         self.seed = random.randint(0, 9999)
         self.numa = args.numa
+        self.numa_max_retry = args.numa_max_retry
         self.diff = args.diff
         if args.spike and "nemu" in args.diff:
             self.diff = self.diff.replace("nemu-interpreter", "spike")
@@ -215,6 +218,7 @@ class XiangShan(object):
     def __init__(self, args):
         self.args = XSArgs(args)
         self.timeout = args.timeout
+        self.numa_info = None
 
     def show(self):
         self.args.show()
@@ -273,8 +277,9 @@ class XiangShan(object):
         print("workload:", workload)
         numa_args = ""
         if self.args.numa:
-            numa_info = get_free_cores(self.args.threads)
-            numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}"
+            if self.numa_info is None:
+                self.numa_info = get_free_cores(self.args.threads, self.args.numa_max_retry)
+            numa_args = f"numactl -m {self.numa_info[0]} -C {self.numa_info[1]}-{self.numa_info[2]}"
         fork_args = "--enable-fork" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
         chiseldb_args = "--dump-db" if not self.args.disable_db else ""
@@ -634,29 +639,99 @@ class XiangShan(object):
                 return ret
         return 0
 
-def get_free_cores(n):
-    numa_re = re.compile(r'.*numactl +.*-C +([0-9]+)-([0-9]+).*')
-    while True:
-        disable_cores = []
-        for proc in psutil.process_iter():
+def get_free_cores(n: int, max_retry: int = 60) -> Tuple[int, int, int]:
+    '''get contiguous free N cores that numactl can bind to, return (numa_node, start_core, end_core)'''
+    def get_numa_count() -> int:
+        '''get numa node count'''
+        node_dir = pathlib.Path("/sys/devices/system/node/")
+        return len(list(node_dir.glob("node*")))
+
+    def get_cpu_usage() -> List[float]:
+        '''get cpu usage of all cores'''
+        return psutil.cpu_percent(interval=0.5, percpu=True)
+
+    def get_physical_cores() -> Set[int]:
+        '''get all physical cores'''
+        count = psutil.cpu_count(logical=False)
+        if count is None:
+            raise RuntimeError("Failed to get physical core count")
+        return set(range(count))
+
+    def get_usable_cores() -> Set[int]:
+        '''get all cores current process can bind to'''
+        return os.sched_getaffinity(0)
+
+    def get_bound_cores() -> Set[int]:
+        '''get all cores that are already bound by other processes'''
+        valid_list = ["running", "disk-sleep", "waking", "waiting"]
+        cores = set()
+        for proc in psutil.process_iter(["pid", "name", "cpu_affinity", "status"]):
             try:
-                joint = ' '.join(proc.cmdline())
-                numa_match = numa_re.match(joint)
-                if numa_match and 'ssh' not in proc.name():
-                    disable_cores.extend(range(int(numa_match.group(1)), int(numa_match.group(2)) + 1))
+                # our script usually bind <= 16 cores for verilator, only consider these processes, so skip if len > 16
+                if not proc.info["status"] in valid_list or len(proc.info["cpu_affinity"]) > 16:
+                    continue
+                cores |= set(proc.info["cpu_affinity"])
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
-        num_logical_core = psutil.cpu_count(logical=False)
-        core_usage = psutil.cpu_percent(interval=1, percpu=True)
-        num_window = num_logical_core // n
-        for i in range(num_window):
-            if set(disable_cores) & set(range(i * n, i * n + n)):
-                continue
+
+        return cores
+
+    def detect(n: int) -> Tuple[bool, int, int, int]:
+        numa_count = get_numa_count()
+        phy_cores = get_physical_cores() # invariant, get once
+        num_core = len(phy_cores)
+        num_window = num_core // n
+
+        def check(i) -> bool:
+            window = range(i * n, i * n + n)
+            # may change during execution (other processes may taskset this process), get in loop
+            candidates = phy_cores & get_usable_cores()
+            if not set(window).issubset(candidates): # fail-fast
+                return False
+
+            # then get unused cores in phy_cores & usable_cores
+            candidates -= get_bound_cores()
+            if not set(window).issubset(candidates): # fail-fast
+                return False
+
+            core_usage = get_cpu_usage()
             window_usage = core_usage[i * n : i * n + n]
-            if sum(window_usage) < 30 * n and True not in map(lambda x: x > 90, window_usage):
-                return (((i * n) % num_logical_core) // (num_logical_core // 2), i * n, i * n + n - 1)
-        print(f"No free {n} cores found. CPU usage: {core_usage}\n")
-        time.sleep(random.uniform(1, 60))
+
+            return (
+                # average usage of window_cores less than percpu_use_thres
+                sum(window_usage) < 30 * n and
+                # less than 1 core has high usage in window_cores
+                sum(map(lambda x: x > 80, window_usage)) < 1
+            )
+
+        for i in random.sample(range(num_window), num_window):
+            if not check(i):
+                continue
+
+            # sleep random time to avoid contention, then re-check
+            time.sleep(random.uniform(0, 10))
+            if not check(i):
+                continue
+
+            # return (Success?, memory node, start_core, end_core)
+            return (
+                True,
+                (int)(((i * n) % num_core) // (num_core // numa_count)),
+                (int)(i * n),
+                (int)(i * n + n - 1),
+            )
+
+        return (False, 0, 0, 0)
+
+    for _ in range(max_retry):
+        success, node, start_core, end_core = detect(n)
+        if success:
+            print(f"Found free cores: {start_core}-{end_core} on NUMA node {node}")
+            return (node, start_core, end_core)
+        print("No free cores found, retry after 60 seconds...")
+        time.sleep(60)
+
+    raise RuntimeError(f"Failed to find {n} free cores after {max_retry} retries")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Python wrapper for XiangShan')
@@ -696,6 +771,7 @@ if __name__ == "__main__":
     parser.add_argument('--issue', nargs='?', type=str, help='CHI issue')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
+    parser.add_argument('--numa-max-retry', type=int, default=60, help='max retry to find free numa cores')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
@@ -710,7 +786,7 @@ if __name__ == "__main__":
     parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
     parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')
     parser.add_argument('--llvm-profdata', nargs='?', type=str, help='corresponding llvm-profdata command of clang to compile emu, do not set with GCC')
-    parser.add_argument('--rtl-simulator', choices=['verilator', 'gsim'], default='verilator', help='RTL simulator backend')
+    parser.add_argument('--rtl-simulator', '--emulator', dest='rtl_simulator', choices=['verilator', 'gsim'], default='verilator', help='RTL simulator backend')
 
     args = parser.parse_args()
 

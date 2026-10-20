@@ -218,7 +218,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.checkfullva        := s0_use_flow_rs || s0_use_flow_vec
   io.tlb.req.bits.cmd                := Mux(s0_isCbo_noZero, TlbCmd.read, TlbCmd.write)
   io.tlb.req.bits.isPrefetch         := s0_use_flow_prf
-  io.tlb.req.bits.size               := s0_size
+  io.tlb.req.bits.size               := Mux(s0_use_flow_vec, s0_vecstin.alignedType(2,0), s0_size)
   io.tlb.req.bits.kill               := false.B
   io.tlb.req.bits.memidx.is_ld       := false.B
   io.tlb.req.bits.memidx.is_st       := true.B
@@ -346,7 +346,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  storeTrigger.io.fromLoadStore.vaddr                 := s1_in.vaddr
+  storeTrigger.io.fromLoadStore.vaddr                 := Mux(s1_frm_mabuf, s1_out.vaddr, io.tlb.resp.bits.triggerVa)
   storeTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
   storeTrigger.io.fromLoadStore.mask                  := s1_in.mask
   storeTrigger.io.isCbo.get                           := s1_isCbo
@@ -530,17 +530,24 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_misalign_stout.bits.need_rep := RegEnable(s1_tlb_miss, s1_fire)
   io.misalign_stout := s2_misalign_stout
 
-  val s2_misalign_cango = !s2_mis_align || s2_in.isvec && (s2_misalignNeedReplay || s2_exception) || !s2_in.isvec && !s2_misalignNeedReplay && s2_exception
+  val s2_misalign_cango = Mux(
+    s2_in.isvec,
+    !s2_mis_align || s2_misalignNeedReplay || s2_exception,
+    !s2_misalignNeedReplay && (!s2_mis_align || s2_exception)
+  )
 
   // mmio and exception
   io.lsq_replenish := s2_out
   io.lsq_replenish.af := s2_out.af && s2_valid && !s2_kill
-  io.lsq_replenish.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
+  // NC/MMIO cbo.zero: no STA stout and not nc FSM; mark pending for mmioIsCboZero.
+  val s2_uncacheCboZero =
+    LSUOpType.isCboZero(s2_in.uop.fuOpType) && (s2_in.nc || s2_mmio)
+  io.lsq_replenish.mmio := (s2_mmio || s2_isCbo_noZero || s2_uncacheCboZero) && !s2_exception // reuse `mmiostall` logic in sq
 
   // prefetch related
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
-  io.lsq_replenish.updateAddrValid := !s2_mis_align && (!s2_frm_mabuf || s2_out.isFinalSplit) ||
-    !s2_in.isvec && s2_exception && !s2_misalignNeedReplay || s2_in.isvec && s2_exception
+  val s2_updateAddrValid = !s2_mis_align && (!s2_frm_mabuf || s2_out.isFinalSplit) || s2_exception
+  io.lsq_replenish.updateAddrValid := s2_updateAddrValid && (s2_in.isvec || !s2_misalignNeedReplay)
   io.lsq_replenish.isvec := s2_out.isvec || s2_frm_mab_vec
 
   io.lsq_replenish.hasException := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||

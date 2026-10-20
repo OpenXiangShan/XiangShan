@@ -320,13 +320,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val sqReadCnt = WireInit(0.U(log2Ceil(EnsbufferWidth + 1).W))
   val readyReadGoVec = Wire(Vec(EnsbufferWidth, Bool()))
   for (i <- 0 until EnsbufferWidth) {
+    // A split store uses both enqueue ports but retires only the SQ entry selected by sqPtr.
+    val dataBufferReadGo = dataBuffer.io.enq.map(enq =>
+      enq.fire && enq.bits.sqNeedDeq && (enq.bits.sqPtr === rdataPtrExt(i))
+    ).reduce(_ || _)
+    val ncReadGo = allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value)
     if (i == 0) {
-      readyReadGoVec(i) := dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
-        allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value) ||
+      readyReadGoVec(i) := dataBufferReadGo || ncReadGo ||
         io.mmioStout.fire || io.vecmmioStout.fire
     } else {
-      readyReadGoVec(i) := dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
-        allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value) && readyReadGoVec(i - 1)
+      readyReadGoVec(i) := (dataBufferReadGo || ncReadGo) && readyReadGoVec(i - 1)
     }
   }
   sqReadCnt := PopCount(readyReadGoVec)  
@@ -1025,6 +1028,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         when (io.cmoOpResp.bits.denied) {
           uncacheUop.exceptionVec(storeAccessFault) := true.B
         }
+
         when (io.cmoOpResp.bits.corrupt && !io.cmoOpResp.bits.denied) {
           uncacheUop.exceptionVec(hardwareError) := true.B
         }

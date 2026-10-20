@@ -29,8 +29,8 @@ abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
 class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
-  val startAddr:        UInt   = UInt(VAddrBits.W)
-  val nextlineStart:    UInt   = UInt(VAddrBits.W)
+  val startAddr:        UInt   = UInt((VAddrBits + 1).W)
+  val nextlineStart:    UInt   = UInt((VAddrBits + 1).W)
   val ftqIdx:           FtqPtr = new FtqPtr
   val isSoftPrefetch:   Bool   = Bool()
   val backendException: UInt   = UInt(ExceptionType.width.W)
@@ -45,8 +45,8 @@ class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
   }
 
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): IPrefetchReq = {
-    this.startAddr      := req.vaddr
-    this.nextlineStart  := req.vaddr + (1 << blockOffBits).U
+    this.startAddr      := SignExt(req.vaddr, VAddrBits + 1)
+    this.nextlineStart  := SignExt(req.vaddr, VAddrBits + 1) + (1 << blockOffBits).U
     this.ftqIdx         := DontCare
     this.isSoftPrefetch := true.B
     this
@@ -171,13 +171,16 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
   private val itlb_finish = tlb_valid_latch(0) && (!s1_doubleline || tlb_valid_latch(1))
 
   (0 until PortNumber).foreach { i =>
+    val vaddr = Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
     toITLB(i).valid             := s1_need_itlb(i) || (s0_valid && (if (i == 0) true.B else s0_doubleline))
     toITLB(i).bits              := DontCare
     toITLB(i).bits.size         := 3.U
-    toITLB(i).bits.vaddr        := Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
-    toITLB(i).bits.debug.pc     := Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
+    toITLB(i).bits.vaddr        := vaddr
+    toITLB(i).bits.debug.pc     := SignExt(vaddr, XLEN)
     toITLB(i).bits.cmd          := TlbCmd.exec
     toITLB(i).bits.no_translate := false.B
+    toITLB(i).bits.checkfullva  := true.B
+    toITLB(i).bits.fullva       := SignExt(vaddr, XLEN)
   }
   fromITLB.foreach(_.ready := true.B)
   io.itlb.foreach(_.req_kill := false.B)

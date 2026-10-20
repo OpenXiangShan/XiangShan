@@ -33,7 +33,10 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val robFlush = io.robFlush
   val oldestExuRedirect = Wire(chiselTypeOf(io.oldestExuRedirect))
   oldestExuRedirect := io.oldestExuRedirect
-  oldestExuRedirect.bits.fullTarget := Cat(io.oldestExuRedirect.bits.fullTarget.head(XLEN - VAddrBits), io.oldestExuRedirect.bits.cfiUpdate.target)
+  oldestExuRedirect.bits.fullTarget := Cat(
+    io.oldestExuRedirect.bits.fullTarget.head(XLEN - VAddrBits - 1),
+    io.oldestExuRedirect.bits.cfiUpdate.target
+  )
   when(!io.oldestExuRedirectIsCSR){
     oldestExuRedirect.bits.cfiUpdate.backendIAF := io.instrAddrTransType.checkAccessFault(oldestExuRedirect.bits.fullTarget)
     oldestExuRedirect.bits.cfiUpdate.backendIPF := io.instrAddrTransType.checkPageFault(oldestExuRedirect.bits.fullTarget)

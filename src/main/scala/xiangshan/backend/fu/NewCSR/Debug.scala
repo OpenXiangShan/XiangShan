@@ -306,12 +306,19 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Param
   }
 
   def DcacheLineBitsEq(): (Bool, Vec[Bool])= {
+    val cacheLineBase = Cat(vaddr(VAddrBits - 1, DCacheLineOffset), 0.U(DCacheLineOffset.W))
+    val cacheLineLast = Cat(vaddr(VAddrBits - 1, DCacheLineOffset), Fill(DCacheLineOffset, 1.U(1.W)))
     (
     io.isCbo.getOrElse(false.B),
     VecInit(tdataVec.zip(tEnableVec).map{ case(tdata, en) =>
+      val tdata2 = tdata.tdata2(VAddrBits - 1, 0)
+      val cacheLineMatch = MuxLookup(tdata.matchType, false.B)(Seq(
+        TrigMatchEnum.EQ -> (vaddr(VAddrBits - 1, DCacheLineOffset) === tdata2(VAddrBits - 1, DCacheLineOffset)),
+        TrigMatchEnum.GE -> (cacheLineLast >= tdata2),
+        TrigMatchEnum.LT -> (cacheLineBase < tdata2)
+      ))
       !tdata.select && !debugMode && en &&
-        tdata.store && io.isCbo.getOrElse(false.B) &&
-        (vaddr >> DCacheLineOffset) === (tdata.tdata2 >> DCacheLineOffset)
+        tdata.store && io.isCbo.getOrElse(false.B) && cacheLineMatch
     })
     )
   }
