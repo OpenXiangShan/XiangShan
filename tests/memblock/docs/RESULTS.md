@@ -4216,6 +4216,15 @@ suppression cases still pass. The execution is retained in
 stimulus false-negative risk; it is not yet independent RTL-mutation evidence
 for historical `756bbf59`.
 
+The subsequent queue-oracle check removes the legacy model-only cancellation
+fallback for faulting MMIO FP loads. Each denied/corrupt load must drain the
+queue and release exactly one externally dequeued or redirect-canceled LQ
+entry. The rebuilt frozen run passes at cycle 2,116 with all 13 observed
+allocations dequeued, zero observed cancellations, and zero unobserved
+cancellations, while preserving the 24 writebacks and all payload/error bins.
+Its log is `build/memblock/canonical-regression/fp-queue.log` and its frozen
+runtime is `build/memblock/fp-queue-runtime/runtime.json`.
+
 
 ## Singleton Vector Canonical Faults in Common Mixed Traffic
 

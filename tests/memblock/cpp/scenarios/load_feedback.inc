@@ -2720,6 +2720,9 @@ int run_fp_loads(int argc, char **argv)
         }
         const std::uint64_t dcache_before = mmio.tilelink_requests();
         const std::uint64_t uncache_before = mmio.uncache_requests();
+        const std::uint64_t lq_dequeued_before = mmio.lq_dequeued();
+        const std::uint64_t lq_cancels_before =
+            mmio.lq_redirect_canceled_observed();
         if (!mmio.set_rob_head(transaction.rob, transaction.rob_flag) ||
             !mmio.enqueue_load(transaction) ||
             !mmio.issue_load(transaction, 2048) ||
@@ -2750,10 +2753,11 @@ int run_fp_loads(int argc, char **argv)
             !mmio.run_cycles(96)) {
             return false;
         }
-        if (mmio.lq_dequeued() + mmio.lq_canceled() < mmio.lq_allocated()) {
-            return mmio.account_lq_cancellation(1);
-        }
-        return true;
+        // The faulting load must release exactly one LQ entry on observed
+        // queue IO. Model-only cancellation would hide missing DUT recovery.
+        return mmio.run_until_queues_retired(4096) &&
+            mmio.lq_dequeued() - lq_dequeued_before +
+                mmio.lq_redirect_canceled_observed() - lq_cancels_before == 1;
     };
 
     std::uint8_t mmio_next_identity = 0;
@@ -3068,6 +3072,10 @@ int run_fp_loads(int argc, char **argv)
               << " misaligned_cacheable=3 misaligned_nc_faults=1"
               << " mmio_dcache_requests=" << mmio.tilelink_requests()
               << " mmio_uncache_requests=" << mmio.uncache_requests()
+              << " mmio_lq=" << mmio.lq_dequeued() << '+'
+              << mmio.lq_redirect_canceled_observed() << '/'
+              << mmio.lq_enqueued_observed()
+              << " mmio_lq_unobserved_cancels=" << mmio.lq_canceled_unobserved()
               << '\n';
     return 0;
 }
