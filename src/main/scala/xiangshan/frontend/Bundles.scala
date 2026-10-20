@@ -41,6 +41,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.ras.RasSpecReadReq
 import xiangshan.frontend.ibuffer.IBufPtr
+import xiangshan.frontend.ifu.FastFetchBundle
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
@@ -310,6 +311,7 @@ class InstrEndOffset(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
+  // Normal fetch path
   val instrs:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(32.W))
   val valid:          UInt                = UInt(IBufferEnqueueWidth.W)
   val enqEnable:      UInt                = UInt(IBufferEnqueueWidth.W)
@@ -332,6 +334,9 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
+
+  // Fast fetch path, used for the first fetch after a backend redirect.
+  val fastFetch: DecoupledIO[FastFetchBundle] = DecoupledIO(new FastFetchBundle)
 }
 
 class IfuToGpAddrMem(implicit p: Parameters) extends FrontendBundle {
