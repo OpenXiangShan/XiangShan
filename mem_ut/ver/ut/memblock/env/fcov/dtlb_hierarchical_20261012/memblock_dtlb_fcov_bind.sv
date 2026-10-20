@@ -30,6 +30,8 @@
 `ifdef MEMBLOCK_UT_FCOV
 
 // u_dtlb_ld_port0_fcov
+// 观测入口：TLBNonBlock -> u_dtlb_ld_port0_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock memblock_dtlb_core_fcov #(
     .GROUP_ID      (0),
     .PORT_INDEX    (0),
@@ -276,6 +278,8 @@ bind TLBNonBlock memblock_dtlb_core_fcov #(
 );
 
 // u_dtlb_ld_port1_fcov
+// 观测入口：TLBNonBlock -> u_dtlb_ld_port1_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock memblock_dtlb_core_fcov #(
     .GROUP_ID      (0),
     .PORT_INDEX    (1),
@@ -535,6 +539,8 @@ bind TLBNonBlock memblock_dtlb_core_fcov #(
 );
 
 // u_dtlb_ld_port2_fcov
+// 观测入口：TLBNonBlock -> u_dtlb_ld_port2_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock memblock_dtlb_core_fcov #(
     .GROUP_ID      (0),
     .PORT_INDEX    (2),
@@ -794,6 +800,8 @@ bind TLBNonBlock memblock_dtlb_core_fcov #(
 );
 
 // u_dtlb_ld_port3_fcov
+// 观测入口：TLBNonBlock -> u_dtlb_ld_port3_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock memblock_dtlb_core_fcov #(
     .GROUP_ID      (0),
     .PORT_INDEX    (3),
@@ -1053,6 +1061,8 @@ bind TLBNonBlock memblock_dtlb_core_fcov #(
 );
 
 // u_dtlb_st_port0_fcov
+// 观测入口：TLBNonBlock_1 -> u_dtlb_st_port0_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock_1 memblock_dtlb_core_fcov #(
     .GROUP_ID      (1),
     .PORT_INDEX    (0),
@@ -1299,6 +1309,8 @@ bind TLBNonBlock_1 memblock_dtlb_core_fcov #(
 );
 
 // u_dtlb_st_port1_fcov
+// 观测入口：TLBNonBlock_1 -> u_dtlb_st_port1_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock_1 memblock_dtlb_core_fcov #(
     .GROUP_ID      (1),
     .PORT_INDEX    (1),
@@ -1559,6 +1571,8 @@ bind TLBNonBlock_1 memblock_dtlb_core_fcov #(
 );
 
 // u_dtlb_pf_port0_fcov
+// 观测入口：TLBNonBlock_2 -> u_dtlb_pf_port0_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock_2 memblock_dtlb_core_fcov #(
     .GROUP_ID      (2),
     .PORT_INDEX    (0),
@@ -1804,6 +1818,8 @@ bind TLBNonBlock_2 memblock_dtlb_core_fcov #(
 );
 
 // u_dtlb_pf_port1_fcov
+// 观测入口：TLBNonBlock_2 -> u_dtlb_pf_port1_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock_2 memblock_dtlb_core_fcov #(
     .GROUP_ID      (2),
     .PORT_INDEX    (1),
@@ -2063,6 +2079,8 @@ bind TLBNonBlock_2 memblock_dtlb_core_fcov #(
 );
 
 // u_dtlb_ld_control_fcov
+// 观测入口：TLBNonBlock -> u_dtlb_ld_control_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock memblock_dtlb_control_fcov #(
     .GROUP_ID (0)
 ) u_dtlb_ld_control_fcov (
@@ -2122,6 +2140,8 @@ bind TLBNonBlock memblock_dtlb_control_fcov #(
 );
 
 // u_dtlb_ld_storage_fcov
+// 观测入口：TLBFA_1 -> u_dtlb_ld_storage_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBFA_1 memblock_dtlb_storage_fcov #(
     .GROUP_ID (0),
     .PORT_NUM (4)
@@ -2929,6 +2949,8 @@ bind TLBFA_1 memblock_dtlb_storage_fcov #(
 );
 
 // u_dtlb_ld_filter_fcov
+// 观测入口：PTWNewFilter -> u_dtlb_ld_filter_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind PTWNewFilter memblock_dtlb_filter_fcov #(
     .GROUP_ID (0),
     .PORT_NUM (4),
@@ -3070,6 +3092,8 @@ bind PTWNewFilter memblock_dtlb_filter_fcov #(
 );
 
 // u_dtlb_st_control_fcov
+// 观测入口：TLBNonBlock_1 -> u_dtlb_st_control_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock_1 memblock_dtlb_control_fcov #(
     .GROUP_ID (1)
 ) u_dtlb_st_control_fcov (
@@ -3122,6 +3146,8 @@ bind TLBNonBlock_1 memblock_dtlb_control_fcov #(
 );
 
 // u_dtlb_st_storage_fcov
+// 观测入口：TLBFA_2 -> u_dtlb_st_storage_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBFA_2 memblock_dtlb_storage_fcov #(
     .GROUP_ID (1),
     .PORT_NUM (2)
@@ -3898,6 +3924,8 @@ bind TLBFA_2 memblock_dtlb_storage_fcov #(
 );
 
 // u_dtlb_st_filter_fcov
+// 观测入口：PTWNewFilter -> u_dtlb_st_filter_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind PTWNewFilter memblock_dtlb_filter_fcov #(
     .GROUP_ID (1),
     .PORT_NUM (2),
@@ -4008,6 +4036,8 @@ bind PTWNewFilter memblock_dtlb_filter_fcov #(
 );
 
 // u_dtlb_pf_control_fcov
+// 观测入口：TLBNonBlock_2 -> u_dtlb_pf_control_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBNonBlock_2 memblock_dtlb_control_fcov #(
     .GROUP_ID (2)
 ) u_dtlb_pf_control_fcov (
@@ -4060,6 +4090,8 @@ bind TLBNonBlock_2 memblock_dtlb_control_fcov #(
 );
 
 // u_dtlb_pf_storage_fcov
+// 观测入口：TLBFA_3 -> u_dtlb_pf_storage_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind TLBFA_3 memblock_dtlb_storage_fcov #(
     .GROUP_ID (2),
     .PORT_NUM (2)
@@ -4836,6 +4868,8 @@ bind TLBFA_3 memblock_dtlb_storage_fcov #(
 );
 
 // u_dtlb_pf_filter_fcov
+// 观测入口：PTWNewFilter -> u_dtlb_pf_filter_fcov；下方左侧为模型端口，右侧为真实RTL信号。
+// GROUP_ID：0=LD，1=ST，2=PF；PORT_INDEX为组内物理端口。
 bind PTWNewFilter memblock_dtlb_filter_fcov #(
     .GROUP_ID (2),
     .PORT_NUM (2),
@@ -4961,6 +4995,7 @@ bind PTWNewFilter memblock_dtlb_filter_fcov #(
 );
 
 // u_dtlb_integration_fcov
+// 观测入口：MemBlock -> u_dtlb_integration_fcov；下方左侧为模型端口，右侧为真实RTL信号。
 bind MemBlock memblock_dtlb_integration_fcov u_dtlb_integration_fcov (
     .clock              (clock),
     .reset              (reset),
