@@ -84,6 +84,7 @@ trait HasAsyncClockImp { this: BaseXSSocImp =>
   val noc_reset = socParams.EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
   val soc_clock = IO(Input(Clock()))
   val soc_reset = IO(Input(AsyncReset()))
+  val cold_reset = Option.when(socParams.EnableColdReset)(IO(Input(AsyncReset())))
   val clint_clock = IO(Input(Clock()))
   val clint_reset = IO(Input(AsyncReset()))
 
@@ -251,6 +252,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   // core IO connection
   core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
   core_with_l2.module.soc_reset := soc_reset
+  core_with_l2.module.io.cold_reset.foreach(_ := cold_reset.get)
 
   tileio.riscv_halt := core_with_l2.module.io.cpu_halt
   tileio.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error

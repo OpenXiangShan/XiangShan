@@ -106,7 +106,12 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val plic_int_node = IntIdentityNode()
   val nmi_int_node = IntIdentityNode()
   val beu_local_int_source = IntSourceNode(IntSourcePortSimple())
-  val beu_local_int_source_buffer = IntBuffer()
+  val beuLocalIntBuffer = Option.when(EnableColdReset)(LazyModule(new IntBuffer()))
+  val beu_local_int_source_buffer = if (EnableColdReset) {
+    beuLocalIntBuffer.get.node
+  } else {
+    IntBuffer()
+  }
 
   println(s"enableCHI: ${enableCHI}")
   val l2cache = if (enableL2) {
@@ -174,6 +179,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
+      val cold_reset = Option.when(EnableColdReset)(Input(Reset()))
       val beu_errors = Input(chiselTypeOf(beu.module.io.errors))
       val reset_vector = new Bundle {
         val fromTile = Input(UInt(PAddrBits.W))
@@ -249,6 +255,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val dft_reset_out = Option.when(hasMbist)(Output(new DFTResetSignals()))
       // val reset_core = IO(Output(Reset()))
     })
+    io.cold_reset.foreach(beu.module.reset := _)
+    io.cold_reset.foreach(beuLocalIntBuffer.get.module.reset := _)
     io.dft_out.zip(io.dft).foreach({ case(a, b) => a := b })
     io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := b })
 
