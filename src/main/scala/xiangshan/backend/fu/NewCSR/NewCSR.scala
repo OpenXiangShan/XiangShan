@@ -980,6 +980,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   val triggerFrontendChange = Wire(Bool())
+  val triggerBpGateChange = Wire(Bool())
 
   val vstartChange = vstart.w.wen && (
     vstart.w.wdata === 0.U && vstart.regOut.vstart.asUInt =/= 0.U ||
@@ -994,7 +995,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     fcsr.w.wen && (!frmIsReserved && fcsrWdataReserved || frmIsReserved && !fcsrWdataReserved)
 
   val flushPipe = resetSatp ||
-    triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
+    triggerFrontendChange || triggerBpGateChange || floatStatusOnOff || vectorStatusOnOff ||
     vstartChange || frmChange
 
   /**
@@ -1244,6 +1245,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   }}
 
   triggerFrontendChange := debugMod.io.out.triggerFrontendChange
+  // The frontend applies triggerCanRaiseBpExp when instructions are fetched.
+  // Refetch when CSR writes change the MIE/SIE gate of the current mode while fetch triggers are enabled.
+  triggerBpGateChange := debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR && (
+    mstatus.w.wen && mstatus.w.wdataFields.MIE =/= mstatus.regOut.MIE ||
+    mstatus.wAliasSstatus.wen && mstatus.wAliasSstatus.wdataFields.SIE =/= mstatus.regOut.SIE ||
+    vsstatus.w.wen && vsstatus.w.wdataFields.SIE =/= vsstatus.regOut.SIE
+  )
 
   io.status.frontendTrigger := debugMod.io.out.frontendTrigger
   io.status.memTrigger      := debugMod.io.out.memTrigger
