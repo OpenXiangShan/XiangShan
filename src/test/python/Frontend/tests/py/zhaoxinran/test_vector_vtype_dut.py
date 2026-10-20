@@ -21,10 +21,30 @@ def test_vector_vtype_bin_trace(env) -> None:
     assert int(os.getenv("TB_TRACE_TARGET_CURSOR", "0"), 0) == 0
     assert int(os.getenv("TB_TRACE_MAX_CYCLES", "0"), 0) == 0
     trace = GoldenTrace.from_file(os.environ["TB_TRACE_PATH"])
+    assert len(trace.entries) >= 1000
     checker = VTypeChecker.from_golden_trace(trace)
     checker.bind_env(env)
     config_pcs = {pc for pc, result in checker.expected_by_pc.items() if result.kind != "ordinary"}
-    assert len(config_pcs) == 6
+    assert len(config_pcs) == 11
+    illegal_entries = [
+        entry for entry in trace.entries
+        if entry.vtype_after is not None and int(entry.vtype_after) >> 63
+    ]
+    assert len(illegal_entries) == 2
+    recovery = trace.entries[illegal_entries[-1].index + 2]
+    assert recovery.instr == 0x0D0072D7  # vsetvli t0, zero, e32, m1, ta, ma
+    assert recovery.vtype_after == 0xD0
+    restored = VTypeState(False, True, True, 2, 0)
+    assert checker.expected_by_pc[recovery.pc].specvtype.illegal
+    assert checker.expected_by_pc[recovery.pc].vtype == restored
+    vector_entry, ordinary_entry = trace.entries[recovery.index + 1:recovery.index + 3]
+    assert vector_entry.pc == recovery.pc + 4
+    assert (vector_entry.instr & 0xFE00707F) == 0x02000057  # unmasked vadd.vv
+    assert ordinary_entry.pc == recovery.pc + 8
+    assert ordinary_entry.instr == 0x00140413  # addi s0, s0, 1
+    for entry in trace.entries[recovery.index + 1:recovery.index + 3]:
+        assert checker.expected_by_pc[entry.pc].specvtype == restored
+        assert checker.expected_by_pc[entry.pc].vtype == restored
     config_by_cycle: dict[int, set[int]] = {}
     stalled_pcs: set[int] = set()
     stalled_slots: dict[int, tuple[int, ...]] = {}
@@ -97,12 +117,70 @@ def test_vector_vtype_bin_trace(env) -> None:
         f"missing vtype cfVec observations: {sorted(required_pcs - checker.observed_pcs)}"
     )
     assert checker.checked_count >= len(required_pcs)
+    dynamic_checker = env.backend_model.vtype_checker
+    assert dynamic_checker is not None
+    assert {recovery.index, recovery.index + 1, recovery.index + 2} <= dynamic_checker.checked_indices
     assert checker.error_count == 0
     assert any(len(pcs) >= 2 for pcs in config_by_cycle.values()), "no same-cycle vset pair observed"
     assert len([cycle for cycle, pcs in config_by_cycle.items() if pcs]) >= 2
     assert stalled_pcs, "no in-trace cfVec lane observed during backend backpressure"
     assert held_slot_checks > 0, "no cfVec lane held across backpressured cycles"
     assert held_config_checks > 0, "no vset instruction held across backpressured cycles"
+
+
+@pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1" or os.getenv("TB_BIN_TRACE_PIPELINE") != "1",
+    reason="requires the bin-trace DUT pipeline",
+)
+def test_vector_vsetvl_bin_trace(env) -> None:
+    assert int(os.getenv("TB_TRACE_START_INDEX", "0"), 0) == 0
+    assert int(os.getenv("TB_TRACE_TARGET_CURSOR", "0"), 0) == 0
+    assert int(os.getenv("TB_TRACE_MAX_CYCLES", "0"), 0) == 0
+    trace = GoldenTrace.from_file(os.environ["TB_TRACE_PATH"])
+    assert len(trace.entries) >= 1000
+    assert sum(VTypeChecker._vector_config_kind(entry.instr) is not None for entry in trace.entries) == 5
+    vsetvl_entries = [
+        entry for entry in trace.entries
+        if VTypeChecker._vector_config_kind(entry.instr) == "vsetvl"
+    ]
+    assert len(vsetvl_entries) == 1
+    source = vsetvl_entries[0]
+    assert source.vtype_after == 0x49
+    vector_entry = trace.entries[source.index + 1]
+    assert vector_entry.pc == source.pc + 4
+    assert (vector_entry.instr & 0xFE00707F) == 0x02000057  # unmasked vadd.vv
+    observed_redirects: list[tuple[int, int, int, int, int, int, tuple[int, ...]]] = []
+
+    def observe_backend(cycle: int, active_env) -> None:
+        to_ftq = active_env.backend_to_ftq_if
+        to_ibuf = active_env.backend_to_ibuf_if
+        if int(to_ftq.redirect_valid.value):
+            observed_redirects.append((
+                int(cycle),
+                int(to_ftq.redirect_bits_pc.value),
+                int(to_ftq.redirect_bits_target.value),
+                int(to_ftq.redirect_bits_level.value),
+                int(to_ibuf.commit_vtype_valid.value),
+                int(to_ibuf.commit_vtype_has_vsetvl.value),
+                tuple(int(getattr(to_ibuf, f"vsetvl_vtype_{field}").value) for field in (
+                    "illegal", "vma", "vta", "vsew", "vlmul"
+                )),
+            ))
+
+    env.register_cycle_observer(observe_backend)
+    run_bin_trace(env)
+
+    checker = env.backend_model.vtype_checker
+    assert checker is not None
+    assert env._last_run_until_golden_result.completed is True
+    assert {source.index, source.index + 1, source.index + 2} <= checker.checked_indices
+    assert any(
+        pc == source.pc and target == source.pc + 4
+        and level == 0 and commit_valid == 1 and has_vsetvl == 1
+        and fields == (0, 0, 1, 1, 1)
+        for _cycle, pc, target, level, commit_valid, has_vsetvl, fields in observed_redirects
+    ), f"vsetvl commit redirect not observed: {observed_redirects}"
+    assert checker.error_count == 0
 
 
 def _slot_vtype(slot, prefix: str) -> VTypeState:
