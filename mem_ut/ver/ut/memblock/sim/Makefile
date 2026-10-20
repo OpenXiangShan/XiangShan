@@ -7,7 +7,17 @@
 ##=========================================================
 
 #include ../../../../scr/verif/project_cfg.mk
+EFFECTIVE_PLUSARGS = $(strip \
+	$(if $(strip $(plus_file)), \
+		$(shell awk -v plus_arg='$(plus_arg)' 'BEGIN { split(plus_arg, raw, /[ \t]+/); for (i in raw) { if (raw[i] ~ /^\+[A-Za-z0-9_]+=/) { key=raw[i]; sub(/=.*/, "", key); override[key]=1 } } ORS=" " } /^[ \t]*\+[A-Za-z0-9_]+=/ { arg=$$1; key=arg; sub(/=.*/, "", key); if (!(key in override)) print arg }' "$(plus_file)/$(cfg).cfg")) \
+	$(plus_arg))
 include ../cfg/verif/project_cfg.mk
+ifneq ($(strip $(plus_file)),)
+CFG_PLUSARG_FILE := $(plus_file)/$(cfg).cfg
+ifneq ($(shell test -r "$(CFG_PLUSARG_FILE)" && echo yes),yes)
+$(error cfg plusarg file is missing or unreadable: $(CFG_PLUSARG_FILE))
+endif
+endif
 
 USER_CFG_LOCAL ?= ../cfg/user_cfg.local.sv
 USER_CFG_LOCAL_TEMPLATE ?= ../cfg/user_cfg.local.default.sv
@@ -22,7 +32,7 @@ REMOTE_BOOTSTRAP ?= source /usr/share/Modules/init/bash >/dev/null 2>&1 || true;
 REMOTE_WRAPPER := $(CURR_DIR)/remote_eda_make.sh
 REMOTE_SIM_TOOLS ?= vcs
 
-.PHONY: eda_compile eda_batch_run eda_run eda_run_bg eda_status eda_tail eda_kill eda_print_bootstrap ensure_user_cfg_local
+.PHONY: eda_compile eda_batch_run eda_run eda_run_bg eda_status eda_tail eda_kill eda_print_bootstrap eda_print_effective_plusargs ensure_user_cfg_local
 
 compile batch_run rtl: ensure_user_cfg_local
 
@@ -34,6 +44,9 @@ ensure_user_cfg_local:
 
 eda_print_bootstrap:
 	@printf '%s\n' '$(REMOTE_BOOTSTRAP)'
+
+eda_print_effective_plusargs:
+	@for arg in $(EFFECTIVE_PLUSARGS); do printf '%s\n' "$$arg"; done
 
 eda_compile:
 	@mkdir -p $(REMOTE_STATE_DIR)

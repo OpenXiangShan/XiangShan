@@ -65,12 +65,11 @@ CMP_OPTIONS += ${udf}
 CMP_OPTIONS += ${DPILIB}
 VRD_OPTIONS += ${udf}
 ifeq ($(ccov),on)
-CMP_OPTIONS += ${COVER_OPTIONS} ${COVER_TYPE}
+CMP_OPTIONS += ${COVER_OPTIONS} ${COVER_TYPE} ${COVER_DIR}
 endif
 ifeq ($(fcov),on)
 CMP_OPTIONS += ${COVER_DEFINE}
 endif
-CMP_OPTIONS += ${COVER_DIR}
 CMP_OPTIONS += -o ${CMP_OUT_SIMV} ${CMPRTL_LOG}
 #-----------------------------------------#
 #Initreg sim
@@ -114,16 +113,13 @@ SIMV_OPTIONS += +TEST_MODE=${mode}
 SIMV_OPTIONS += ${udr}
 SIMV_OPTIONS += +UVM_TIMEOUT=${timeout_ns}
 SIMV_OPTIONS += +VSEQ_MAIN=${ts}
-ifneq ($(strip $(plus_file)),)
-ifneq ($(wildcard $(plus_file)/$(cfg).cfg),)
-SIMV_OPTIONS += $(shell awk -v plus_arg='$(plus_arg)' 'BEGIN { split(plus_arg, raw, /[ \t]+/); for (i in raw) { if (raw[i] ~ /^\+[A-Za-z0-9_]+=/) { key=raw[i]; sub(/=.*/, "", key); override[key]=1 } } ORS=" " } /^[ \t]*\+[A-Za-z0-9_]+=/ { arg=$$1; key=arg; sub(/=.*/, "", key); if (!(key in override)) print arg }' $(plus_file)/$(cfg).cfg)
-endif
-endif
-SIMV_OPTIONS += ${plus_arg}
+SIMV_OPTIONS += ${EFFECTIVE_PLUSARGS}
 
+ifeq ($(ccov),on)
 SIMV_OPTIONS += ${COVER_OPTIONS}
 SIMV_OPTIONS += ${COVER_DIR}
 SIMV_OPTIONS += ${COV_CM_NAME}
+endif
 SIMV_OPTIONS += +fsdb+gate=off #close
 
 DUMP_WAVE_CFG_FILE = dump_wave_cfg_vcs.tcl
