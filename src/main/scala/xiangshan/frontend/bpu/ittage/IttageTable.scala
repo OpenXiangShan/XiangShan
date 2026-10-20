@@ -68,9 +68,12 @@ class IttageTable(
       val oldTargetOffset: IttageOffset = new IttageOffset
     }
 
-    val req:    DecoupledIO[Req] = Flipped(DecoupledIO(new Req))
-    val resp:   Valid[Resp]      = Output(Valid(new Resp))
-    val update: Update           = Input(new Update)
+    val req:  DecoupledIO[Req] = Flipped(DecoupledIO(new Req))
+    val resp: Valid[Resp]      = Output(Valid(new Resp))
+    // A second logical read port shares the banked single-port SRAM with prediction.
+    val trainReq:  Valid[Req]  = Flipped(Valid(new Req))
+    val trainResp: Valid[Resp] = Output(Valid(new Resp))
+    val update:    Update      = Input(new Update)
 
     val sramResetDone: Bool = Output(Bool())
   }
@@ -117,7 +120,12 @@ class IttageTable(
   // pc is start address of basic block, most 2 branch inst in block
   def getUnhashedIdx(pc: Pc): UInt = (pc >> instOffsetBits).asUInt
 
-  private val s0_valid       = io.req.valid
+  // All tables share the same PC-only bank index.
+  def getBankIndex(pc: Pc): UInt =
+    if (BankIdxWidth == 0) 0.U else getUnhashedIdx(pc)(BankIdxWidth - 1, 0)
+
+  private val powerOnResetState = RegInit(true.B)
+
   private val s0_startPc     = io.req.bits.startPc
   private val s0_unhashedIdx = getUnhashedIdx(io.req.bits.startPc)
   private val (s0_bankIdx, s0_setIdx, s0_tag) =
@@ -127,7 +135,18 @@ class IttageTable(
 
   private val (s1_setIdx, s1_tag) = (RegEnable(s0_setIdx, io.req.fire), RegEnable(s0_tag, io.req.fire))
   private val s1_bankMask         = RegEnable(s0_bankMask, io.req.fire)
-  private val s1_valid            = RegNext(s0_valid)
+  private val s1_valid            = RegNext(io.req.fire, init = false.B)
+
+  // Training reads use the same hash as prediction reads.
+  private val trainUnhashedIdx = getUnhashedIdx(io.trainReq.bits.startPc)
+  private val (trainBankIdx, trainSetIdx, trainTag) =
+    computeTagAndHash(trainUnhashedIdx, io.trainReq.bits.foldedHist)
+  private val trainBankMask = UIntToOH(trainBankIdx, NumBanks)
+  private val trainReqValid = io.trainReq.valid && !powerOnResetState
+
+  private val trainTagReg      = RegEnable(trainTag, trainReqValid)
+  private val trainBankMaskReg = RegEnable(trainBankMask, trainReqValid)
+  private val trainValidReg    = RegNext(trainReqValid, init = false.B)
 
   // Each bank is a single-port SRAM slice; banking lets predict/read and commit/update touch different banks concurrently.
   private val tables = Seq.tabulate(NumBanks) { bankIdx =>
@@ -139,7 +158,7 @@ class IttageTable(
       set = NumSetsPerBank,
       width = foldedWidth,
       shouldReset = true,
-      holdRead = true,
+      holdRead = false, // Prediction s2 and training t1 consume responses without stalling.
       singlePort = true,
       useBitmask = true,
       withClockGate = true,
@@ -153,8 +172,12 @@ class IttageTable(
 
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   tables.zipWithIndex.foreach { case (bank, idx) =>
-    bank.io.r.req.valid       := io.req.fire && s0_bankMask(idx)
-    bank.io.r.req.bits.setIdx := s0_setIdx
+    val predictionRead = io.req.fire && s0_bankMask(idx)
+    val trainRead      = trainReqValid && trainBankMask(idx)
+    // The top-level trainReady prevents prediction/training bank conflicts.
+    assert(!(predictionRead && trainRead), s"read conflict in ittage_table_${tableIdx}_bank_${idx}")
+    bank.io.r.req.valid       := predictionRead || trainRead
+    bank.io.r.req.bits.setIdx := Mux(predictionRead, s0_setIdx, trainSetIdx)
   }
 
   private val tableReadData =
@@ -166,6 +189,16 @@ class IttageTable(
   io.resp.bits.cnt          := tableReadData.confidenceCnt
   io.resp.bits.usefulCnt    := tableReadData.usefulCnt
   io.resp.bits.targetOffset := tableReadData.targetOffset
+
+  private val trainReadData =
+    Mux1H(trainBankMaskReg, tables.map(_.io.r.resp.data.head))
+  private val trainReadHit = trainReadData.valid &&
+    (if (tagLen != 0) trainReadData.tag === trainTagReg else true.B)
+
+  io.trainResp.valid             := trainReadHit && trainValidReg
+  io.trainResp.bits.cnt          := trainReadData.confidenceCnt
+  io.trainResp.bits.usefulCnt    := trainReadData.usefulCnt
+  io.trainResp.bits.targetOffset := trainReadData.targetOffset
 
   // Use fetchpc to compute hash
   private val updateFoldedHist                      = io.update.foldedHist
@@ -183,7 +216,7 @@ class IttageTable(
   private val updateExceptUsefulBitmask = ~updateUsefulBitmask
 
   private val needReset      = RegInit(false.B)
-  private val usefulCanReset = !(io.req.fire || io.update.valid) && needReset
+  private val usefulCanReset = !(io.req.fire || trainReqValid || io.update.valid) && needReset
   // Sweep one set index per cycle; all banks reuse resetSet so the full table resets in NumSetsPerBank cycles.
   private val (resetSet, resetFinish) = Counter(usefulCanReset, NumSetsPerBank)
   when(io.update.resetUsefulCnt) {
@@ -231,7 +264,6 @@ class IttageTable(
   }
 
   // Power-on reset
-  private val powerOnResetState = RegInit(true.B)
   when(tables.map(_.io.r.req.ready).reduce(_ && _)) {
     // When all the SRAM banks first reach ready state, we consider power-on reset is done
     powerOnResetState := false.B
@@ -265,6 +297,7 @@ class IttageTable(
 
   XSPerfAccumulate("ittage_table_updates", io.update.valid)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
+  XSPerfAccumulate("ittage_table_train_read", trainReqValid)
   XSPerfAccumulate("ittage_us_tick_reset", io.update.resetUsefulCnt)
   // read-write conflict: can provide data to sram write port, but sram read port is also requesting
   XSPerfAccumulate(
