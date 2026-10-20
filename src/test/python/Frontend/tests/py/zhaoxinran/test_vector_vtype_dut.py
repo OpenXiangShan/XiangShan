@@ -21,7 +21,7 @@ def test_vector_vtype_bin_trace(env) -> None:
     assert int(os.getenv("TB_TRACE_TARGET_CURSOR", "0"), 0) == 0
     assert int(os.getenv("TB_TRACE_MAX_CYCLES", "0"), 0) == 0
     trace = GoldenTrace.from_file(os.environ["TB_TRACE_PATH"])
-    checker = VTypeChecker(trace.entries)
+    checker = VTypeChecker.from_golden_trace(trace)
     checker.bind_env(env)
     config_pcs = {pc for pc, result in checker.expected_by_pc.items() if result.kind != "ordinary"}
     assert len(config_pcs) == 4
@@ -112,6 +112,23 @@ def _slot_vtype(slot, prefix: str) -> VTypeState:
         vta=bool(getattr(slot, f"{prefix}_vta")),
         vsew=int(getattr(slot, f"{prefix}_vsew")),
         vlmul=int(getattr(slot, f"{prefix}_vlmul")),
+    )
+
+
+def _vtype_gen_state(env, register: str) -> VTypeState:
+    prefix = f"Frontend_top.Frontend.inner_ibuffer.vtypeGen.{register}_"
+
+    def field(name: str) -> int:
+        signal = env.dut.GetInternalSignal(prefix + name)
+        assert signal is not None, f"missing VTypeGen register: {prefix + name}"
+        return int(signal.value)
+
+    return VTypeState(
+        illegal=bool(field("illegal")),
+        vma=bool(field("vma")),
+        vta=bool(field("vta")),
+        vsew=field("vsew"),
+        vlmul=field("vlmul"),
     )
 
 
@@ -214,4 +231,80 @@ def test_vector_vtype_redirect_recovery(env, walk_to_arch: bool, restored: VType
         if seen_target == {target, target + 4}:
             break
     assert seen_target == {target, target + 4}, "redirect target was not delivered"
+    assert not env.get_errors()
+
+
+@pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
+@pytest.mark.parametrize("has_vsetvl", [False, True], ids=("commit_vtype", "vsetvl_priority"))
+def test_vector_vtype_backend_commit(env, has_vsetvl: bool) -> None:
+    base = 0x80000000
+    nop = 0x00000013
+    committed = VTypeState(False, False, True, 1, 1)
+    vsetvl = VTypeState(False, True, False, 3, 2)
+    competing_walk = VTypeState(False, False, False, 0, 0)
+    expected = vsetvl if has_vsetvl else committed
+    LoadProgramSequence(
+        image=ProgramImage(payload=nop.to_bytes(4, "little") * 1024, base_addr=base),
+        step_cycles=0,
+    ).run(env)
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+    env.backend_model.set_can_accept(0)
+
+    for _ in range(1200):
+        env.step(1)
+        frozen = env.monitor.cycle_snapshot.cfvec.slots
+        if any(slot.valid for slot in frozen):
+            break
+    else:
+        raise AssertionError("no cfVec output before backend vtype commit")
+    frozen_pcs = {env.observed_cfvec_pc(slot.slot) for slot in frozen if slot.valid}
+    assert _vtype_gen_state(env, "vtypeSpec") == VTypeState.initial()
+    assert _vtype_gen_state(env, "vtypeArch") == VTypeState.initial()
+
+    to_ibuf = env.backend_to_ibuf_if
+    to_ibuf.resuming_vtype.value = 1
+    to_ibuf.commit_vtype_valid.value = 1
+    for name in ("illegal", "vma", "vta", "vsew", "vlmul"):
+        getattr(to_ibuf, f"commit_vtype_bits_{name}").value = int(getattr(committed, name))
+    if has_vsetvl:
+        to_ibuf.commit_vtype_has_vsetvl.value = 1
+        to_ibuf.walk_vtype_valid.value = 1
+        for name in ("illegal", "vma", "vta", "vsew", "vlmul"):
+            getattr(to_ibuf, f"vsetvl_vtype_{name}").value = int(getattr(vsetvl, name))
+            getattr(to_ibuf, f"walk_vtype_bits_{name}").value = int(getattr(competing_walk, name))
+    env.step(2)
+    assert env.monitor.cycle_snapshot.cfvec.slots == frozen, "commit changed held cfVec output"
+    assert _vtype_gen_state(env, "vtypeArch") == expected
+    assert _vtype_gen_state(env, "vtypeSpec") == (
+        expected if has_vsetvl else VTypeState.initial()
+    )
+
+    to_ibuf.commit_vtype_valid.value = 0
+    to_ibuf.commit_vtype_has_vsetvl.value = 0
+    to_ibuf.walk_vtype_valid.value = 0
+    to_ibuf.walk_to_arch_vtype.value = 1
+    env.step(2)
+    assert _vtype_gen_state(env, "vtypeSpec") == expected
+    to_ibuf.walk_to_arch_vtype.value = 0
+    to_ibuf.resuming_vtype.value = 0
+    env.backend_model.set_can_accept(1)
+
+    seen_new_pcs: set[int] = set()
+    for _ in range(1200):
+        env.step(1)
+        for slot in env.monitor.cycle_snapshot.cfvec.slots:
+            if not slot.valid:
+                continue
+            pc = env.observed_cfvec_pc(slot.slot)
+            if pc <= max(frozen_pcs):
+                continue
+            assert slot.instr == nop
+            assert _slot_vtype(slot, "specvtype") == expected
+            assert _slot_vtype(slot, "vtype") == expected
+            seen_new_pcs.add(pc)
+        if len(seen_new_pcs) >= 2:
+            break
+    assert len(seen_new_pcs) >= 2, "no new cfVec instructions after backend vtype update"
     assert not env.get_errors()
