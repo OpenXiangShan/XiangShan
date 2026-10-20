@@ -95,7 +95,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   ))
 
   // Bypass wire
-  private val bypassEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+  private val normalBypassEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
   // Normal read wire
   private val deqEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
   // Output register
@@ -147,22 +147,24 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
           valid && enqEnable && Seq(VSETIVLI, VSETVL, VSETVLI).map(_ === inst).reduce(_ || _)
       }.reduce(_ || _)
 
-  private val numTryEnq = WireDefault(0.U)
-  private val numEnq    = Mux(io.in.fire, numTryEnq, 0.U)
+  private val normalEnqNum = Mux(io.in.normal.fire, PopCount(io.in.normal.bits.enqEnable), 0.U)
 
   // empty and decode can accept insts
-  private val useBypass = enqPtr === deqPtr && decodeCanAccept && !resumingVType && !enqHasVSet
+  private val normalBypass = enqPtr === deqPtr && decodeCanAccept && !resumingVType && !enqHasVSet
 
   // The number of decode accepted insts.
   // Since decode promises accepting insts in order, use priority encoder to simplify the accumulation.
-  private val numOut = Wire(UInt(DecodeWidth.U.getWidth.W))
-  private val numDeq = numOut
+  private val normalNumOut = Wire(UInt(DecodeWidth.U.getWidth.W))
+  private val normalNumDeq = normalNumOut
 
   // counter current number of valid
   private val numValid = distanceBetween(enqPtr, deqPtr)
   // counter next number of valid
-  private val nextNumValid = numValid + numEnq - numDeq
-  private val numFromFetch = Mux(io.in.valid, PopCount(io.in.bits.enqEnable), 0.U)
+  private val nextNumValid = numValid + normalEnqNum - normalNumDeq
+
+  // TODO: Use ParallelAdder to calculate the sum of Seq(Size.U, -numValid, -numEnq, numDeq)
+  private val nextNumInvalid = Size.U - nextNumValid
+  private val allowEnq       = RegInit(true.B)
 
   // TODO: Use ParallelAdder to calculate the sum of Seq(Size.U, -numValid, -numEnq, numDeq)
   private val nextNumInvalid = Size.U - nextNumValid
@@ -199,31 +201,34 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val enqExceptionIndex = PriorityEncoder(io.in.bits.exceptionMask)
 
   private val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid
-  private val numBypass              = Wire(UInt(DecodeWidth.U.getWidth.W))
+  private val normalNumBypass        = Wire(UInt(DecodeWidth.U.getWidth.W))
   // when using bypass, bypassed entries do not enqueue
   // Timing optimization: only count enqEnable up to MaxBypassNum.
   // - Higher-index enqEnable bits arrive later (longer datapath).
   // - Reducing PopCount width improves timing
-  private val maybeBypassNum = Mux(io.in.valid, PopCount(io.in.bits.enqEnable.take(MaxBypassNum)), 0.U)
-  when(useBypass) {
-    when(maybeBypassNum >= DecodeWidth.U) {
-      numBypass := DecodeWidth.U
+  private val normalMaybeBypassNum = Mux(io.in.valid, PopCount(io.in.bits.enqEnable.take(MaxBypassNum)), 0.U)
+  when(normalBypass) {
+    when(normalMaybeBypassNum >= DecodeWidth.U) {
+      normalNumBypass := DecodeWidth.U
     }.otherwise {
-      numBypass := maybeBypassNum
+      normalNumBypass := normalMaybeBypassNum
     }
   }.otherwise {
-    numBypass := 0.U
+    normalNumBypass := 0.U
   }
-  numTryEnq := numFromFetch
 
   when(resumingVType) {
-    numOut := 0.U
+    normalNumOut := 0.U
   }.elsewhen(decodeCanAccept) {
-    numOut := Mux(useBypass, numBypass, Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid))
+    normalNumOut := Mux(normalBypass, normalNumBypass, Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid))
   }.elsewhen(outputEntriesIsNotFull) {
-    numOut := Mux(numValid >= DecodeWidth.U - outputEntriesValidNum, DecodeWidth.U - outputEntriesValidNum, numValid)
+    normalNumOut := Mux(
+      numValid >= DecodeWidth.U - outputEntriesValidNum,
+      DecodeWidth.U - outputEntriesValidNum,
+      numValid
+    )
   }.otherwise {
-    numOut := 0.U
+    normalNumOut := 0.U
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -243,18 +248,18 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // sliding window [idx, idx + NumWriteBank - 1]. This avoids computing
   // enqOffset with a prefix PopCount on the bypass path.
   private val bypassExceptionMask = Wire(Vec(DecodeWidth, Bool()))
-  bypassEntries.zipWithIndex.foreach { case (entry, idx) =>
+  normalBypassEntries.zipWithIndex.foreach { case (entry, idx) =>
     val bankOffset = enqPtrDup(2).value(log2Ceil(NumWriteBank) - 1, 0)
     val bankOH     = UIntToOH(bankOffset, NumWriteBank)
 
     val selectedValid = Mux1H(
       bankOH,
       VecInit.tabulate(NumWriteBank)(i =>
-        io.in.bits.valid(i + idx) && io.in.bits.enqEnable(i + idx)
+        io.in.normal.bits.valid(i + idx) && io.in.normal.bits.enqEnable(i + idx)
       )
     )
 
-    entry.valid := selectedValid && io.in.fire && !io.flush
+    entry.valid := selectedValid && io.in.normal.fire && !io.flush
     entry.bits := Mux1H(
       bankOH,
       VecInit.tabulate(NumWriteBank)(i =>
@@ -264,7 +269,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     bypassExceptionMask(idx) := Mux1H(
       bankOH,
       VecInit.tabulate(NumWriteBank)(i =>
-        io.in.bits.exceptionMask(i + idx) && io.in.bits.valid(i + idx) && io.in.bits.enqEnable(i + idx)
+        io.in.normal.bits.exceptionMask(i + idx) && io.in.normal.bits.valid(i + idx) &&
+         io.in.normal.bits.enqEnable(i + idx)
       )
     )
   }
@@ -295,7 +301,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
         outFromDeq.valid := Mux(
           i.U < outputEntriesValidNum,
           outReg.valid,
-          (i.U - outputEntriesValidNum) < numDeq
+          (i.U - outputEntriesValidNum) < normalNumDeq
         )
         outFromDeq.bits := Mux(
           i.U < outputEntriesValidNum,
@@ -316,9 +322,12 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   }
 
   // Final outputEntriesNext: bypass overrides the deq-based output
+  // ----- 需要进行一下改造，放入fast Fetch 逻辑
   (outputEntriesNext lazyZip outputEntriesFromDeqNext lazyZip bypassEntries).zipWithIndex.foreach {
     case ((outNext, outFromDeq, bypass), i) =>
-      when(decodeCanAccept && !resumingVType && useBypass && io.in.valid) {
+      when(decodeCanAccept && !resumingVType && fastFetch) {
+
+      }.elsewhen(decodeCanAccept && !resumingVType && useBypass && io.in.valid) {
         outNext.valid := bypass.valid
         outNext.bits := Mux(
           bypassExceptionMask(i),
@@ -346,7 +355,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       vtypeGen.in.insts(i).valid := outputEntriesFromDeqNext(i).valid
     }.elsewhen(outputEntriesIsNotFull) {
       // Only lanes carrying a genuinely new deq entry (within numDeq) are fed to VTypeGen.
-      vtypeGen.in.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, (i.U - outputEntriesValidNum) < numDeq)
+      vtypeGen.in.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, (i.U - outputEntriesValidNum) < normalNumDeq)
     }.otherwise {
       vtypeGen.in.insts(i).valid := false.B
     }
@@ -407,6 +416,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // low-bit bank cycle is preserved across wrap-around.
   private val baseAlignedPtr = Wire(new IBufPtr)
   private val alignedMask    = (~(NumWriteBank - 1).U(log2Ceil(Size).W)).asUInt
+  private val numTryEnq = Mux(fastFetch, fastFetchNum, normalEnqNum)
   baseAlignedPtr       := (enqPtrDup(1) + numTryEnq)
   baseAlignedPtr.value := (enqPtrDup(1) + numTryEnq).value & alignedMask
   when(io.in.fire && !io.flush) {
@@ -423,9 +433,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   when(resumingVType) {
     outputEntriesValidNumNext := outputEntriesValidNum
   }.elsewhen(decodeCanAccept) {
-    outputEntriesValidNumNext := Mux(useBypass, numBypass, numDeq)
+    outputEntriesValidNumNext := Mux(useBypass, numBypass, normalNumDeq)
   }.elsewhen(outputEntriesIsNotFull) {
-    outputEntriesValidNumNext := outputEntriesValidNum + numDeq
+    outputEntriesValidNumNext := outputEntriesValidNum + normalNumDeq
   }.otherwise {
     outputEntriesValidNumNext := outputEntriesValidNum
   }
@@ -438,7 +448,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   for (i <- 0 until DecodeWidth) {
     // Genuine dequeue validity: only the numDeq lanes actually consumed this cycle are valid.
     // Under bypass no real data is read from ibuf, so the deq read window is invalid.
-    deqEntries(i).valid := (i.U < numDeq) && !useBypass
+    deqEntries(i).valid := (i.U < normalDeqNum) && !useBypass && !fastFetch
     deqEntries(i).bits  := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1)
   }
   // Pointer maintenance
@@ -452,7 +462,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       idx.asUInt - deqBankPtr.value,
       ((idx + NumReadBank).asUInt - deqBankPtr.value)(DecodeWidth.U.getWidth - 1, 0)
     )(DecodeWidth.U.getWidth - 1, 0)
-    val bankAdvance = numOut > validIdx
+    val bankAdvance = numDeq > validIdx
     ptrNext := Mux(bankAdvance, ptr + 1.U, ptr)
   }
 
@@ -461,7 +471,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   // Register the first encountered exceptions into the IBuffer.
-  private val receiveExceptionFire = io.in.fire && !io.flush && !firstException.valid
+  private val receiveExceptionFire = io.in.normal.fire && !io.flush && !firstException.valid
   private val nextFirstHasException =
     currentException.exceptionType.hasException &&
       (io.in.bits.exceptionMask & io.in.bits.enqEnable).orR &&
@@ -481,7 +491,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     deqPtrVec(i) === firstExceptionIdx && firstException.valid
   ))
 
-  private val deqHasExceptionOH = UIntToMask(numDeq, DecodeWidth) & deqExceptionMatchOH.asUInt
+  private val deqHasExceptionOH = UIntToMask(normalNumDeq, DecodeWidth) & deqExceptionMatchOH.asUInt
   deqHasException    := deqHasExceptionOH.orR
   deqExceptionOffset := OHToUInt(deqHasExceptionOH)
 
@@ -621,3 +631,4 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   )
   generatePerfEvent()
 }
+
