@@ -4196,3 +4196,22 @@ Python unit tests pass. The focused profiles deliberately disable heterogeneous
 windows and therefore do not satisfy the separate closure-campaign overlap
 acceptance gate. These are capability and sensitivity checks; no new schema-48
 closure campaign has completed.
+
+
+## Discriminating MMIO FP Payloads
+
+The historical audit found that the previous sole PBMT-IO FLH payload,
+`0x908f`, could not distinguish correct NaN boxing from integer sign extension.
+`fp-loads` now uses five halfword payloads (`0000`, `3c00`, `7bff`, `8000`,
+`ffff`) and five word payloads (`00000000`, `3f800000`, `7f7fffff`, `80000000`,
+`ffffffff`). Each width has three sign-bit-clear cases that reject integer
+sign extension and two sign-bit-set controls. The oracle and exact destination
+checks are unchanged; no RTL change is involved.
+
+The rebuilt frozen harness passes 24 total writebacks, 13 PBMT-IO requests,
+zero MMIO DCache requests, five successful FLH and five successful FLW cases,
+and sign bins 3/2 for each width. FLD and the denied/corrupt and earlier fault
+suppression cases still pass. The execution is retained in
+`build/memblock/canonical-regression/schema49-fp-loads.log`. This closes a
+stimulus false-negative risk; it is not yet independent RTL-mutation evidence
+for historical `756bbf59`.

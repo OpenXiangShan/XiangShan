@@ -1891,7 +1891,13 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             REPO_ROOT / "src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala"
         ).read_text()
         for contract in (
-            "mmio_fp=5 mmio_flh=1 mmio_flw=2 mmio_fld=2",
+            '" mmio_fp="',
+            '" mmio_flh_success="',
+            '" mmio_flh_sign0="',
+            '" mmio_flh_sign1="',
+            '" mmio_flw_success="',
+            '" mmio_flw_sign0="',
+            '" mmio_flw_sign1="',
             '" mmio_faults="',
             '" page_faults=1"',
             '" pmp_faults=1 permission_faults=1 guest_faults=1"',

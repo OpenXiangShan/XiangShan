@@ -2657,6 +2657,26 @@ int run_fp_loads(int argc, char **argv)
     constexpr std::uint64_t mmio_physical = 0x9003a000ULL;
     constexpr std::uint64_t mmio_root = 0x97010000ULL;
     mmio.memory().fill_incrementing(mmio_physical, 64, 0x8d);
+    // Both sign bins matter: integer sign extension accidentally matches NaN
+    // boxing when the narrow payload's sign bit is set.
+    constexpr std::array<std::uint16_t, 5> mmio_flh_payloads{{
+        0x0000, 0x3c00, 0x7bff, 0x8000, 0xffff,
+    }};
+    constexpr std::array<std::uint32_t, 5> mmio_flw_payloads{{
+        0x00000000, 0x3f800000, 0x7f7fffff, 0x80000000, 0xffffffff,
+    }};
+    constexpr std::uint64_t mmio_flh_offset = 0x100;
+    constexpr std::uint64_t mmio_flw_offset = 0x200;
+    for (std::size_t index = 0; index < mmio_flh_payloads.size(); ++index) {
+        mmio.memory().write_u64(
+            mmio_physical + mmio_flh_offset + index * 8,
+            mmio_flh_payloads[index]);
+    }
+    for (std::size_t index = 0; index < mmio_flw_payloads.size(); ++index) {
+        mmio.memory().write_u64(
+            mmio_physical + mmio_flw_offset + index * 8,
+            mmio_flw_payloads[index]);
+    }
     mmio.configure_backpressure(0x243f6a8885a308d3ULL, true);
     if (!mmio.reset() ||
         !mmio.map_sv39_4k(
@@ -2670,6 +2690,10 @@ int run_fp_loads(int argc, char **argv)
     }
 
     unsigned mmio_faults = 0;
+    unsigned mmio_flh_success = 0;
+    unsigned mmio_flw_success = 0;
+    std::array<unsigned, 2> mmio_flh_sign_bins{};
+    std::array<unsigned, 2> mmio_flw_sign_bins{};
     auto run_mmio_fp = [&](std::uint8_t rob, std::uint8_t lq,
                            memblock::LoadOp op, std::uint64_t offset,
                            std::uint32_t exception, bool denied, bool corrupt) {
@@ -2707,7 +2731,17 @@ int run_fp_loads(int argc, char **argv)
             return false;
         }
         if (exception == 0) {
-            return mmio.run_until_lq_retired(2048);
+            if (!mmio.run_until_lq_retired(2048)) {
+                return false;
+            }
+            if (op == memblock::LoadOp::lh) {
+                ++mmio_flh_success;
+                ++mmio_flh_sign_bins[(expected >> 15) & 1];
+            } else if (op == memblock::LoadOp::lw) {
+                ++mmio_flw_success;
+                ++mmio_flw_sign_bins[(expected >> 31) & 1];
+            }
+            return true;
         }
         ++mmio_faults;
         if (!mmio.run_cycles(8) ||
@@ -2722,14 +2756,36 @@ int run_fp_loads(int argc, char **argv)
         return true;
     };
 
-    if (!run_mmio_fp(0, 0, memblock::LoadOp::lh, 2, 0, false, false) ||
-        !run_mmio_fp(1, 1, memblock::LoadOp::lw, 4, 0, false, false) ||
-        !run_mmio_fp(2, 2, memblock::LoadOp::ld, 16, 0, false, false) ||
+    std::uint8_t mmio_next_identity = 0;
+    bool mmio_payloads_ok = true;
+    for (std::size_t index = 0;
+         mmio_payloads_ok && index < mmio_flh_payloads.size(); ++index) {
+        const std::uint8_t identity = mmio_next_identity++;
+        mmio_payloads_ok = run_mmio_fp(
+            identity, identity, memblock::LoadOp::lh,
+            mmio_flh_offset + index * 8, 0, false, false);
+    }
+    for (std::size_t index = 0;
+         mmio_payloads_ok && index < mmio_flw_payloads.size(); ++index) {
+        const std::uint8_t identity = mmio_next_identity++;
+        mmio_payloads_ok = run_mmio_fp(
+            identity, identity, memblock::LoadOp::lw,
+            mmio_flw_offset + index * 8, 0, false, false);
+    }
+    const std::uint8_t mmio_fld_identity = mmio_next_identity++;
+    const std::uint8_t mmio_denied_identity = mmio_next_identity++;
+    const std::uint8_t mmio_corrupt_identity = mmio_next_identity++;
+    if (!mmio_payloads_ok ||
         !run_mmio_fp(
-            3, 3, memblock::LoadOp::lw, 28,
+            mmio_fld_identity, mmio_fld_identity,
+            memblock::LoadOp::ld, 16, 0, false, false) ||
+        !run_mmio_fp(
+            mmio_denied_identity, mmio_denied_identity,
+            memblock::LoadOp::lw, 28,
             memblock::kExceptionLoadAccessFault, true, false) ||
         !run_mmio_fp(
-            4, 4, memblock::LoadOp::ld, 40,
+            mmio_corrupt_identity, mmio_corrupt_identity,
+            memblock::LoadOp::ld, 40,
             memblock::kExceptionHardwareError, false, true)) {
         std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << mmio.cycle()
                   << " phase=mmio-completion reason=" << mmio.error()
@@ -2996,7 +3052,16 @@ int run_fp_loads(int argc, char **argv)
                      permission_fault.writebacks() + guest_fault.writebacks() +
                      split.writebacks() + nc_misaligned.writebacks()
               << " fp_destinations=" << transactions.size()
-              << " mmio_fp=5 mmio_flh=1 mmio_flw=2 mmio_fld=2"
+              << " mmio_fp=" << unsigned{mmio_next_identity}
+              << " mmio_flh=" << mmio_flh_success
+              << " mmio_flw=" << mmio_flw_success + 1
+              << " mmio_fld=2"
+              << " mmio_flh_success=" << mmio_flh_success
+              << " mmio_flh_sign0=" << mmio_flh_sign_bins[0]
+              << " mmio_flh_sign1=" << mmio_flh_sign_bins[1]
+              << " mmio_flw_success=" << mmio_flw_success
+              << " mmio_flw_sign0=" << mmio_flw_sign_bins[0]
+              << " mmio_flw_sign1=" << mmio_flw_sign_bins[1]
               << " mmio_faults=" << mmio_faults
               << " page_faults=1"
               << " pmp_faults=1 permission_faults=1 guest_faults=1"
