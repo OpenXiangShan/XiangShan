@@ -165,7 +165,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val refill_info = Flipped(ValidIO(new MissQueueRefillInfo))
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
-    val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
     // hardware prefetch
     val prefetch_req = Flipped(Decoupled(new L1PrefetchReq()))
     // pass to Prefetch Monitor for statistic
