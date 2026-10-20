@@ -16,6 +16,10 @@ constexpr unsigned kSqEnqueueHeadroom = 4;
 constexpr unsigned kEnqueueSettleCycles = 16;
 constexpr unsigned kRobEntries = 160;
 constexpr unsigned kDcacheMissEntries = 16;
+constexpr unsigned kDcacheReleaseEntries = 18;
+// DCacheWrapper: IdRange(0, miss + release + one CMO entry + one).
+constexpr unsigned kDcacheSourceCount =
+    kDcacheMissEntries + kDcacheReleaseEntries + 2;
 constexpr unsigned kDcacheProbeEntries = 8;
 constexpr unsigned kDcacheProbeSourceBits = 6;
 constexpr unsigned kDcacheProbeSourceCount = 1U << kDcacheProbeSourceBits;

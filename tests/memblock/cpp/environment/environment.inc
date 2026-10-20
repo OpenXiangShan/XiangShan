@@ -958,6 +958,15 @@ public:
     {
         return memory_agent_.last_request_address();
     }
+    const std::array<std::uint64_t, 7> &dcache_request_classes() const
+    {
+        return memory_agent_.request_classes();
+    }
+    std::string dcache_request_summary_since(
+        std::uint64_t first_request, unsigned maximum_records = 8) const
+    {
+        return memory_agent_.request_summary_since(first_request, maximum_records);
+    }
     std::uint64_t dcache_requests_covering_since(
         std::uint64_t address, std::uint64_t first_request) const
     {

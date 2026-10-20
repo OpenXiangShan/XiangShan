@@ -7036,6 +7036,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         *dcache_load_error_denied
                         ? memblock::kExceptionLoadAccessFault
                         : memblock::kExceptionHardwareError;
+                    const std::string error_operation_phase = phase;
                     const std::uint64_t requests_before_error =
                         environment.tilelink_requests();
                     const std::uint64_t refills_before =
@@ -7113,7 +7114,18 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                << ":last_keyword="
                                << environment.dcache_last_error_response_keyword()
                                << ":expected_keyword="
-                               << ((transaction.address & 32U) != 0);
+                               << ((transaction.address & 32U) != 0)
+                               << ":operation_phase={" << error_operation_phase
+                               << "}:rob=" << unsigned(transaction.rob) << ':'
+                               << transaction.rob_flag
+                               << ":lq=" << unsigned(transaction.lq) << ':'
+                               << transaction.lq_flag
+                               << ":op=0x" << std::hex
+                               << static_cast<unsigned>(transaction.op)
+                               << std::dec << ":accepted_a={"
+                               << environment.dcache_request_summary_since(
+                                      requests_before_error)
+                               << '}';
                         phase = detail.str();
                         return false;
                     }
@@ -9712,6 +9724,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         environment.tilelink_requests();
                     const std::uint64_t uncache_before =
                         environment.uncache_requests();
+                    const std::string operation_phase = phase;
                     bool completed_store = false;
                     if (physical_pmp_denied) {
                         const std::uint64_t lq_dequeued_before =
@@ -9781,14 +9794,30 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                          environment.tilelink_requests() != dcache_before)) {
                         std::ostringstream detail;
                         detail << phase << ":hypervisor-store-manager"
+                               << ":operation_phase={" << operation_phase << '}'
+                               << ":family=" << *hypervisor_family
+                               << ":op=0x" << std::hex
+                               << static_cast<unsigned>(transaction.op)
+                               << ":address=0x" << transaction.address
+                               << ":pa=0x" << reference.physical_address
+                               << std::dec
+                               << ":rob=" << unsigned(transaction.rob) << ':'
+                               << transaction.rob_flag
+                               << ":sq=" << unsigned(transaction.sq) << ':'
+                               << transaction.sq_flag
                                << ":pbmt=" << hypervisor_pbmt_pair
+                               << ":pmp_relation=" << hypervisor_pmp_relation
                                << ":dcache=" << dcache_before << '/'
                                << environment.tilelink_requests()
                                << ":last_dcache=0x" << std::hex
                                << environment.dcache_last_request_address()
                                << std::dec
                                << ":uncache=" << uncache_before << '/'
-                               << environment.uncache_requests();
+                               << environment.uncache_requests()
+                               << ":accepted_a={"
+                               << environment.dcache_request_summary_since(
+                                      dcache_before)
+                               << '}';
                         phase = detail.str();
                         return false;
                     }
@@ -9920,6 +9949,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         environment.uncache_requests();
                     const auto feedback_before =
                         environment.scalar_load_feedback_stats();
+                    const std::string operation_phase = phase;
                     bool completed_load = false;
                     if (physical_pmp_denied || physical_pma_execute_denied) {
                         const std::uint64_t lq_dequeued_before =
@@ -9987,6 +10017,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         !suppressed_dcache_valid) {
                         std::ostringstream detail;
                         detail << phase << ":hypervisor-load-manager"
+                               << ":operation_phase={" << operation_phase << '}'
+                               << ":family=" << *hypervisor_family
+                               << ":op=0x" << std::hex
+                               << static_cast<unsigned>(transaction.op)
+                               << ":address=0x" << transaction.address
+                               << ":pa=0x" << reference.physical_address
+                               << std::dec
+                               << ":rob=" << unsigned(transaction.rob) << ':'
+                               << transaction.rob_flag
+                               << ":lq=" << unsigned(transaction.lq) << ':'
+                               << transaction.lq_flag
                                << ":pbmt=" << hypervisor_pbmt_pair
                                << ":pmp_relation="
                                << hypervisor_pmp_relation
@@ -9996,7 +10037,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                << environment.dcache_last_request_address()
                                << std::dec
                                << ":uncache=" << uncache_before << '/'
-                               << environment.uncache_requests();
+                               << environment.uncache_requests()
+                               << ":accepted_a={"
+                               << environment.dcache_request_summary_since(
+                                      dcache_before)
+                               << '}';
                         phase = detail.str();
                         return false;
                     }

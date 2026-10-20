@@ -4357,8 +4357,13 @@ mixed verifier. Seed 232 records 36 scalar and 42 vector canonical faults,
 Schema-48 corner seed 213 stops at action 5,948 with a hypervisor-PMP-upper-edge
 DCache-request attribution check; it remains a triage candidate, not a CPU bug
 claim or a passing result. Its frozen runtime and complete output remain in
-`build/memblock/canonical-regression/`. Schema-49 SPEC/corner are still running
-at this checkpoint. No six-hour closure claim is made from these integrations.
+`build/memblock/canonical-regression/`. Schema-49 SPEC seed 231 also passes
+6,144 actions in 3,762.715 seconds; the independent full verifier accepts both
+231 and 232, including all 36 vector-canonical bins, observed queue cancellation
+and grant/ack conservation. Seed 231 records 36 vector canonical faults and
+168 associated flows. Corner seed 233 also passes 6,144 actions in 4,135.308 seconds with the full
+independent verifier: 44 vector canonical faults, all 36 bins, and 208 flows.
+The three schema-49 profiles total 9,652.961 simulator seconds (2.681 hours). No six-hour closure claim is made from these integrations.
 
 
 Corner 213 is being replayed with the unchanged schema-48 frozen binary in
@@ -4375,3 +4380,47 @@ that licenses filtering the extra request.
 The extra address equals a prior stride-stream address, but that coincidence
 alone does not establish request provenance. Neither replay has finished at
 this checkpoint, and the oracle has not been relaxed.
+
+
+## Accepted DCache A Contracts and Bounded Failure Diagnostics
+
+The accepted-A monitor now checks legal Acquire opcode/grow/size/source,
+line alignment, byte mask, corrupt, request-source and defined raw-vaddr
+alias/page-offset relationships. CMO unspecified fields remain exempt;
+Generic Get compatibility uses the negotiated 0–35 source range and carries
+no producer-coverage claim. Both prefetch-synthesized VA and demand-merged
+prefetch ancestry remain legal. No manager guard is weakened or filtered.
+Hypervisor load/store and scalar DCache-load-error manager failures retain
+the original operation identity across recovery and include bounded accepted-A
+records. This improves protocol checking and triage; it does not establish
+causality from request-source alone.
+
+The production pure checker passes five unit groups with UBSan and strict
+compiler warnings, including single-field mutations, legal non-PA virtual
+aliases, synthetic prefetch metadata, both hint/keyword values, all legal
+grows, 96 varied CMO unspecified-field controls and Generic Get source/mask
+boundaries. The full 253-test Python suite, `check-rtl` (including `check-docs`),
+and independent source/contract review pass.
+
+A fresh frozen runtime in `build/memblock/dcache-a-observer-runtime/` passes
+seven actual-DUT checks: `single-load` (including two merged loads and one
+refill), `hardware-prefetch`, `dcache-coherence`, `atomic-contracts`,
+`cmo-contracts`, `hypervisor-contracts`, and the 256-action G-only mixed
+all-bin seed 242. The latter again records 85 scalar faults, 58 vector faults
+and 274 vector flows and passes the full independent constraint checker.
+Commands, patch provenance, logs and summaries are retained in
+`build/memblock/dcache-a-observer-checks/`. These are capability checks, not
+closure acceptance. Existing frozen campaigns and schema-48 corner replays
+are preserved; no new CPU RTL bug is confirmed by this change.
+
+
+Schema-50 coverage seed 262 also passes 6,144 actions in 1,804.100 seconds
+with full independent verification. It reaches all 12 scalar G-only boundary
+bins (21 faults, 84 controls, 21 recoveries, 11 store checks) and all 18 vector
+G-only bins (20 faults, 80 controls, 20 recoveries/store checks, 90 flows).
+The same run closes all 24 scalar and 36 vector canonical bins. Observed LQ
+accounting is 82,705 dequeues plus 28 cancellations for 82,733 enqueues;
+SQ is 38,792, with no unobserved cancellation. Its 82,867 GrantAcks equal
+82,866 refills plus one AcquirePerm. Artifacts and the independent verifier
+result are in `build/memblock/gstage-mixed-regression/`; SPEC261 and corner263
+remain running at this checkpoint.

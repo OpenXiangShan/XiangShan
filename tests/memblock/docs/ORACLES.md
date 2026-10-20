@@ -281,6 +281,34 @@ physical address of the failing page-table access; it is not adjusted by a
 vector element offset. This rule is architectural and is deliberately tested
 with randomized vector width, mask, and offset.
 
+### DCache A request legality and diagnostic identity
+
+The passive accepted-A monitor checks every AcquireBlock/AcquirePerm against
+its defined external contract: 64-byte size/alignment, source 0–15, legal
+grow, full 32-byte beat mask, no corrupt bit, and load/store/atomic/prefetch
+request-source encodings. The raw user-vaddr is VA[49:6]: alias must equal
+its bits [7:6], and its bits [5:0] must equal PA[11:6]. Virtual alias is not
+compared with PA[13:12]. Both needHint and keyword values remain legal.
+Prefetch may supply only synthesized alias and page-offset bits; request-source
+6 can retain prefetch ancestry after demand merging and does not prove that a
+request is independent of the operation under test.
+
+CMO checks only defined opcode/source 17/64-byte size/alignment/corrupt
+fields; param, mask, user, echo and data remain unspecified. Generic Get
+compatibility checks param zero, size/alignment, byte mask, corrupt and the
+negotiated source range 0–35, independently of the narrower Acquire range.
+There is no current Get producer coverage claim. A.data is never treated as
+store data. The pure production checker is exercised by legal controls and
+single-field mutations under UBSan without a DUT.
+
+Accepted records retain cycle/index and sideband fields. Hypervisor load/store
+and scalar DCache-load-error manager failures include at most eight records by
+default (absolute cap 32), plus the operation
+identity captured before recovery. These diagnostics preserve existing total
+request guards: neither an address coincidence nor request-source ancestry
+permits dropping unexpected traffic. Transaction causality still requires
+independent input lineage and external effects.
+
 ### Forwarding and commit
 
 Forwarding is modeled as a byte overlay ordered by the legal age relation. It

@@ -356,27 +356,34 @@ public:
         a_fire_ = a_valid && a_ready;
         if (a_fire_) {
             captured_a_ = ARequest{
-                static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_a_bits_opcode.U()),
-                static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_a_bits_param.U()),
-                static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_a_bits_size.U()),
-                static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_a_bits_source.U()),
-                dut.auto_inner_dcache_client_out_a_bits_address.U(),
-                dut.auto_inner_dcache_client_out_a_bits_echo_isKeyword.B(),
+                .opcode = static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_a_bits_opcode.U()),
+                .param = static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_a_bits_param.U()),
+                .size = static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_a_bits_size.U()),
+                .source = static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_a_bits_source.U()),
+                .address = dut.auto_inner_dcache_client_out_a_bits_address.U(),
+                .keyword = dut.auto_inner_dcache_client_out_a_bits_echo_isKeyword.B(),
+                .request_source = static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_a_bits_user_reqSource.U()),
+                .virtual_address =
+                    dut.auto_inner_dcache_client_out_a_bits_user_vaddr.U(),
+                .alias = static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_a_bits_user_alias.U()),
+                .need_hint = dut.auto_inner_dcache_client_out_a_bits_user_needHint.B(),
+                .mask = static_cast<std::uint32_t>(
+                    dut.auto_inner_dcache_client_out_a_bits_mask.U()),
+                .corrupt = dut.auto_inner_dcache_client_out_a_bits_corrupt.B(),
+                .cycle = dut.xclock.clk,
+                .index = request_count_,
             };
-            const bool cmo_opcode = captured_a_->opcode >= 12 &&
-                captured_a_->opcode <= 14;
-            if (captured_a_->opcode != 4 && captured_a_->opcode != 6 &&
-                captured_a_->opcode != 7 && !cmo_opcode) {
-                error_ = "unsupported DCache TileLink A opcode";
-            }
-            if (captured_a_->size > 6) {
-                error_ = "oversized DCache TileLink A request";
-            }
-            if (cmo_opcode &&
-                (captured_a_->size != 6 ||
-                 captured_a_->source != kDcacheCmoSource ||
-                 (captured_a_->address & (kLineBytes - 1)) != 0)) {
-                error_ = "malformed DCache CMO request identity";
+            if (const char *error = dcache_a_protocol_error(
+                    *captured_a_, kDcacheMissEntries, kDcacheCmoSource,
+                    kDcacheSourceCount)) {
+                error_ = std::string("DCache TileLink A contract: ") + error +
+                    ':' + request_record_summary(*captured_a_);
             }
         }
         const bool b_valid = dut.auto_inner_dcache_client_out_b_valid.B();
@@ -562,6 +569,7 @@ public:
             }
             last_request_address_ = captured_a_->address;
             request_history_.push_back(*captured_a_);
+            ++request_classes_[request_class(*captured_a_)];
             respond(*captured_a_);
             ++request_count_;
         }
@@ -603,6 +611,27 @@ public:
     const std::string &error() const { return error_; }
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t last_request_address() const { return last_request_address_; }
+    const std::array<std::uint64_t, 7> &request_classes() const
+    {
+        return request_classes_;
+    }
+    std::string request_summary_since(
+        std::uint64_t first_request, unsigned maximum_records = 8) const
+    {
+        const std::size_t start = static_cast<std::size_t>(
+            std::min<std::uint64_t>(first_request, request_history_.size()));
+        const std::size_t count = request_history_.size() - start;
+        const std::size_t shown = std::min<std::size_t>(
+            count, std::min(maximum_records, 32U));
+        std::ostringstream stream;
+        stream << "count=" << count << ":records=[";
+        for (std::size_t offset = 0; offset < shown; ++offset) {
+            stream << (offset == 0 ? "" : ";")
+                   << request_record_summary(request_history_[start + offset]);
+        }
+        stream << "]:omitted=" << count - shown;
+        return stream.str();
+    }
     std::uint64_t request_covering_count_since(
         std::uint64_t address, std::uint64_t first_request) const
     {
@@ -870,14 +899,48 @@ private:
     static constexpr std::size_t kBeatBytes = 32;
     static constexpr std::size_t kLineBytes = 64;
 
-    struct ARequest {
-        std::uint8_t opcode;
-        std::uint8_t param;
-        std::uint8_t size;
-        std::uint8_t source;
-        std::uint64_t address;
-        bool keyword;
-    };
+    using ARequest = DcacheARequest;
+
+    static unsigned request_class(const ARequest &request)
+    {
+        // CMO/Get user fields are unspecified. Classify by opcode first;
+        // Acquire reqSource describes ancestry, not transaction identity.
+        if (request.opcode >= 12 && request.opcode <= 14) {
+            return 4;
+        }
+        if (request.opcode == 4) {
+            return 5;
+        }
+        if (request.opcode == 6 || request.opcode == 7) {
+            switch (request.request_source) {
+            case 2: return 0;
+            case 3: return 1;
+            case 4: return 2;
+            case 6: return 3;
+            default: break;
+            }
+        }
+        return 6;
+    }
+
+    static std::string request_record_summary(const ARequest &request)
+    {
+        std::ostringstream stream;
+        stream << "index=" << request.index << ":cycle=" << request.cycle
+               << ":opcode=" << unsigned(request.opcode)
+               << ":param=" << unsigned(request.param)
+               << ":size=" << unsigned(request.size)
+               << ":source=" << unsigned(request.source)
+               << ":address=0x" << std::hex << request.address
+               << ":user_vaddr=0x" << request.virtual_address
+               << ":mask=0x" << request.mask << std::dec
+               << ":reqSource=" << unsigned(request.request_source)
+               << ":alias=" << unsigned(request.alias)
+               << ":needHint=" << request.need_hint
+               << ":keyword=" << request.keyword
+               << ":corrupt=" << request.corrupt;
+        return stream.str();
+    }
 
     struct DBeat {
         std::uint8_t opcode;
@@ -1375,6 +1438,7 @@ private:
     std::optional<CRequest> captured_c_;
     std::optional<CRequest> stalled_c_request_;
     std::vector<ARequest> request_history_;
+    std::array<std::uint64_t, 7> request_classes_{};
     std::vector<ReleaseRecord> release_observation_;
     bool observe_releases_ = false;
     std::optional<ReleaseDataState> release_data_;

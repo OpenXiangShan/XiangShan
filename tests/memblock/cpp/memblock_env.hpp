@@ -22,6 +22,7 @@
 namespace memblock {
 
 #include "environment/model.inc"
+#include "environment/dcache_a_contract.inc"
 #include "environment/dcache_agent.inc"
 #include "environment/ptw_agent.inc"
 #include "environment/uncache_agent.inc"
