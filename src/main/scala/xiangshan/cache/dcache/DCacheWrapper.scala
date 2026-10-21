@@ -391,6 +391,12 @@ trait HasDCacheParameters
     ins.zip(sel).foreach { case (in, s) => in.ready := out.ready && s }
   }
 
+  def rrArb[T <: Data](out: DecoupledIO[T], ins: Seq[DecoupledIO[T]]): Unit = {
+    val arb = Module(new RRArbiter(chiselTypeOf(out.bits), ins.size, initLastGrant = true))
+    arb.io.in.zip(ins).foreach { case (in, source) => in <> source }
+    out <> arb.io.out
+  }
+
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
   require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
@@ -1561,7 +1567,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   for (ch <- 0 until nCCHIChannels) {
     io.cchi(ch).upREQ <> missQueue.io.txreq(ch)
-    lowestArb(io.cchi(ch).upRSP, Seq(missQueue.io.txrsp(ch), wb.io.txrsp(ch)))
+    rrArb(io.cchi(ch).upRSP, Seq(missQueue.io.txrsp(ch), wb.io.txrsp(ch)))
     io.cchi(ch).upEVT <> wb.io.txevt(ch)
     io.cchi(ch).upDAT <> wb.io.txdat(ch)
     missQueue.io.rxdat(ch) <> io.cchi(ch).dnDAT
