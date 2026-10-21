@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -118,6 +120,42 @@ class RunRegressionTest(unittest.TestCase):
 
     def test_default_worker_count_uses_measured_host_scaling(self) -> None:
         self.assertEqual(run_regression.DEFAULT_JOBS, 8)
+
+    def test_parallel_workers_reject_a_shared_mem_direct_trace(self) -> None:
+        environment = {"MEMBLOCK_MEM_DIRECT_TRACE_FILE": "shared-trace.log"}
+        with self.assertRaisesRegex(
+            run_regression.RegressionError, "unsafe with --jobs > 1"
+        ):
+            run_regression.validate_worker_environment(2, environment)
+        run_regression.validate_worker_environment(1, environment)
+        run_regression.validate_worker_environment(2, {})
+
+    def test_main_rejects_parallel_trace_before_creating_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "results.json"
+            stderr = io.StringIO()
+            argv = [
+                "run_regression.py",
+                "--binary",
+                "/bin/true",
+                "--output",
+                str(output),
+                "--jobs",
+                "2",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.dict(
+                    os.environ,
+                    {"MEMBLOCK_MEM_DIRECT_TRACE_FILE": "shared-trace.log"},
+                    clear=False,
+                ),
+                contextlib.redirect_stderr(stderr),
+            ):
+                returncode = run_regression.main()
+            self.assertEqual(returncode, 2)
+            self.assertIn("unsafe with --jobs > 1", stderr.getvalue())
+            self.assertFalse(output.exists())
 
     def test_constraint_interface_is_forwarded_only_to_random_mixed(self) -> None:
         with mock.patch.object(

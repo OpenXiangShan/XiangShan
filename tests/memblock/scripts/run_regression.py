@@ -85,6 +85,17 @@ def completed_transaction_count(scenario: str, requested: int) -> int:
     return requested if cap is None else min(requested, cap)
 
 
+def validate_worker_environment(
+    jobs: int, environment: dict[str, str] | None = None
+) -> None:
+    trace_file = (environment or {}).get("MEMBLOCK_MEM_DIRECT_TRACE_FILE")
+    if jobs > 1 and trace_file:
+        raise RegressionError(
+            "a shared MEMBLOCK_MEM_DIRECT_TRACE_FILE is unsafe with --jobs > 1; "
+            "use --jobs 1 for debug tracing"
+        )
+
+
 def parse_summary(
     output: str,
     *,
@@ -402,6 +413,11 @@ def main() -> int:
         help="continue submitting seeds after a failure for bug hunting",
     )
     args = parser.parse_args()
+    try:
+        validate_worker_environment(args.jobs, os.environ)
+    except RegressionError as error:
+        print(f"run_regression.py: error: {error}", file=sys.stderr)
+        return 2
     run_id = uuid.uuid4().hex
     invoked_at = dt.datetime.now(dt.timezone.utc)
     try:

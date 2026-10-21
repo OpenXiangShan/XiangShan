@@ -11,6 +11,8 @@ PREPARED_DIR := $(REPO_ROOT)/build/memblock
 PREPARED_FILELIST := $(PREPARED_DIR)/rtl.f
 PREPARED_METADATA := $(PREPARED_DIR)/rtl.json
 REGRESSION_OUTPUT ?= $(PREPARED_DIR)/regression.json
+HUNT_RESULT ?= $(PREPARED_DIR)/boundary-hunt.json
+BOUNDARY_HUNT_RESULT ?= $(PREPARED_DIR)/random-boundary-hunt.json
 EXTENDED_RESULT ?= $(PREPARED_DIR)/extended-mixed-frozen-6h-8192.json
 FINAL_RESULT ?= $(PREPARED_DIR)/final-frozen-8h-16384.json
 LONG_RESULT ?= $(PREPARED_DIR)/final-frozen-12h-32768.json
@@ -364,13 +366,13 @@ random-boundary-hunt: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test random-boundary-hunt --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),512)
 
 hunt-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(PREPARED_DIR)/boundary-hunt.json --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),16384) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --scenarios random-mixed --hunt-boundaries --continue-on-failure --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(HUNT_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),16384) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --scenarios random-mixed --hunt-boundaries --continue-on-failure --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
 random-boundary-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(PREPARED_DIR)/random-boundary-hunt.json --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --scenarios random-boundary-hunt --hunt-boundaries --continue-on-failure
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(BOUNDARY_HUNT_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --scenarios random-boundary-hunt --hunt-boundaries --continue-on-failure
 
 verify-boundary-hunt:
-	$(PYTHON) scripts/verify_boundary_hunt.py --input $(PREPARED_DIR)/random-boundary-hunt.json --min-seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --expect repaired-all-pass
+	$(PYTHON) scripts/verify_boundary_hunt.py --input $(BOUNDARY_HUNT_RESULT) --min-seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --expect repaired-all-pass
 
 scalar-guest-fault: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test scalar-guest-fault

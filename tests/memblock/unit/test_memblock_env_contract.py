@@ -3569,6 +3569,24 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn(
             "--mixed-transactions $(or $(STRESS_TRANSACTIONS),16384)", stress_rule
         )
+        self.assertIn(
+            "HUNT_RESULT ?= $(PREPARED_DIR)/boundary-hunt.json", makefile
+        )
+        self.assertIn(
+            "BOUNDARY_HUNT_RESULT ?= $(PREPARED_DIR)/random-boundary-hunt.json",
+            makefile,
+        )
+        hunt_rule = makefile[
+            makefile.index("hunt-regression:"):
+            makefile.index("random-boundary-regression:")
+        ]
+        boundary_rule = makefile[
+            makefile.index("random-boundary-regression:"):
+            makefile.index("scalar-guest-fault:")
+        ]
+        self.assertIn("--output $(HUNT_RESULT)", hunt_rule)
+        self.assertIn("--output $(BOUNDARY_HUNT_RESULT)", boundary_rule)
+        self.assertIn("--input $(BOUNDARY_HUNT_RESULT)", boundary_rule)
         self.assertNotIn("--rtl-metadata $(FROZEN_RTL_METADATA)", makefile)
         self.assertNotIn("$${SEED:-1}", makefile)
         self.assertNotIn("$${TRANSACTIONS:-", makefile)
