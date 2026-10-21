@@ -3,9 +3,43 @@ from pathlib import Path
 import pytest
 
 from tools.write_frontend_build_manifest import (
+    _git,
+    _worktree_head,
     _is_dut_input_path,
     _resolve_design_baseline_sha,
 )
+
+
+def test_linked_worktree_provenance_uses_its_own_head_and_index(tmp_path):
+    import subprocess
+
+    main = tmp_path / "main"
+    linked = tmp_path / "linked"
+    main.mkdir()
+
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(main), *args], text=True).strip()
+
+    git("init", "-q")
+    git("config", "user.name", "provenance-test")
+    git("config", "user.email", "test@example.invalid")
+    src = main / "Makefile"
+    src.write_text("old\n")
+    git("add", "Makefile")
+    git("commit", "-qm", "old")
+    old = git("rev-parse", "HEAD")
+    src.write_text("new\n")
+    git("commit", "-qam", "new")
+    new = git("rev-parse", "HEAD")
+    git("worktree", "add", "--detach", str(linked), old)
+    src.write_text("user dirty\n")
+    assert _worktree_head(linked) == old
+    assert _git(linked, "status", "--porcelain") == ""
+    assert _git(linked, "rev-parse", "HEAD") == old
+    assert _git(main, "rev-parse", "HEAD") == new
+    (linked / "Makefile").write_text("linked dirty\n")
+    assert "Makefile" in _git(linked, "status", "--porcelain")
+    assert src.read_text() == "user dirty\n"
 
 
 @pytest.mark.parametrize(

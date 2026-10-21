@@ -63,10 +63,12 @@ def _git_invocation(repo_root: Path) -> tuple[list[str], dict[str, str] | None]:
     context = _worktree_git_context(repo_root)
     if context is None:
         return ["git"], None
-    common_dir, index_file, _ = context
+    _, index_file, admin_dir = context
     env = os.environ.copy()
     env["GIT_INDEX_FILE"] = str(index_file)
-    return ["git", "--git-dir", str(common_dir), "--work-tree", str(repo_root)], env
+    # The common directory has the main worktree's HEAD. Combining it with
+    # a linked index reports that index as staged against the wrong commit.
+    return ["git", "--git-dir", str(admin_dir), "--work-tree", str(repo_root)], env
 
 
 def _worktree_head(repo_root: Path) -> str:
