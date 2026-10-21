@@ -226,12 +226,13 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   // Meta stores enough state for provider-only training. Re-read SRAM when an alternate
   // table entry is needed, or when the prediction was wrong and allocation state is needed.
   private val t0_needRead = t0_branches.zipWithIndex.map { case (branch, i) =>
-    val mbtbHit      = t0_mbtbHitMask(i)
     val isCond       = t0_condMask(i)
+    val mbtbHit      = t0_mbtbHitMask(i)
     val useProvider  = t0_meta(i).useProvider
     val hasAlt       = t0_meta(i).hasAlt
+    val useAlt       = !useProvider && hasAlt
     val mispredicted = branch.bits.mispredict
-    mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt))
+    isCond && (mispredicted || mbtbHit && useAlt)
   }.reduce(_ || _)
   private val t0_useMeta = !t0_needRead
 
@@ -393,10 +394,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       altTableOH := getLongestHistTableOH(hitTableMaskNoProvider).asUInt
       alt        := Mux1H(altTableOH, allTableTagMatchResults)
 
-      altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, t2_baseCtr(i).isPositive)
+      altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, mbtbHit && t2_baseCtr(i).isPositive)
     }
 
-    val altConf       = Mux(t2_useMeta, meta.altConf, Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate))
+    val altConf = Mux(t2_useMeta, meta.altConf, Mux(hasAlt, !alt.takenCtr.isWeak, mbtbHit && t2_baseCtr(i).isSaturate))
     val useAltOnNaIdx = Cat(OHToUInt(providerTableOH), altConf)
     val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
     useProvider := Mux(t2_useMeta, meta.useProvider, hasProvider && !(useAltOnNa && provider.takenCtr.isWeak))
@@ -430,7 +431,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val decUseAltOnNa   = trainUseAltOnNa && providerPred === actualTaken
 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
-    trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
+    trainInfo.valid := isCond
 
     trainInfo.hasProvider            := hasProvider
     trainInfo.useProvider            := useProvider
