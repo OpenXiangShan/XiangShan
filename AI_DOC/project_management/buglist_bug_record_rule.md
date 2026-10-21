@@ -20,9 +20,11 @@ review 门禁。
 满足以下条件时，才建立或更新 buglist 记录：
 
 1. 缺陷来自仿真测试过程，而不是仅凭静态猜测。
-2. 已经过多轮 review，能够判断责任边界属于 RTL、RM 或测试框架之一；若仍无法判断，先放入
-   `AI_DOC/analysis`，不得提前登记为确认缺陷。
-3. 已保留可复现所需的 testcase、配置/临时 plusarg、日志和波形信息。
+2. 已保留可复现所需的 testcase、配置/临时 plusarg、日志和波形信息。
+3. 登记前已经完成责任分类 review，能够判断责任边界属于 RTL、RM 或测试框架之一。RM/测试框架
+   至少完成一轮独立责任分类 review；RTL 确认缺陷至少完成两轮独立 review。
+4. 若责任类别仍无法判断、波形无法复现或证据不足，先放入 `AI_DOC/analysis`，状态记为
+   `PAUSED_ANALYSIS`，不得提前登记为确认缺陷。
 
 版本路由按以下顺序确定：
 
@@ -202,38 +204,69 @@ review 日期、review 结论和 review 文档/issue 绝对路径；若 review �
 
 本节只适用于 RM 或测试框架问题，不适用于 RTL。RTL 仍须经过独立 review 确认后记录，禁止自动修改。
 
+在实际批量回归已经触发本规则的缺陷闭环时，本节关于 RM、测试框架和 RTL 的分类授权优先于
+`AI_DOC/project_management/code_modification_authorization_rule.md`。该优先级只覆盖当前批量回归、
+已确认责任类别和对应缺陷，不构成跨类别或跨任务授权。未进入本规则闭环的单次仿真、静态分析和
+普通开发任务，仍以通用代码修改授权规则为主。
+
 #### RM 问题的默认授权
 
-未明确指定责任类别，或明确要求按本规则处理 RM compare 错误时，RM 问题默认获得 coding 授权，但必须按以下顺序执行：
+仿真失败不能在责任类别未确认时自动获得 RM coding 授权。责任分类 review 已确认属于 RM 后，按以下
+顺序执行：
 
-1. 固定首个错误，完成 bug 记录和最优、最小修复方案。
-2. 至少完成一轮独立 review，确认方案不改变 DUT 激励、不掩盖 RTL 缺陷，并且事件顺序、异常优先级和资源生命周期正确。
-3. review 无问题后，自动获得 RM coding 授权，允许修改 RM、PMA/PMP 模型、scoreboard 及其辅助代码。
-4. 使用原始 testcase、cfg、seed 和请求数专项复测；专项复测通过后恢复批量回归。
+1. 固定首个错误，保留 testcase、cfg、seed、请求数、临时 plusarg、日志和波形证据。
+2. 完成独立责任分类 review，确认问题属于 RM 而不是 RTL 或测试框架。
+3. 扫描当前周文件，登记或更新正式 Buglist，并给出最优、最小修复方案。
+4. 至少完成一轮独立方案 review，确认方案不改变 DUT 激励、不掩盖 RTL 缺陷，并且事件顺序、
+   异常优先级和资源生命周期正确。
+5. 方案 review 无问题后，自动获得当前批量回归内的 RM coding 授权，允许修改 RM、PMA/PMP 模型、
+   scoreboard 及其辅助代码。
+6. 修改后完成必要的代码 review，并使用原始 testcase、cfg、seed、请求数和临时 plusarg 专项复测。
+7. 专项复测通过后更新 Buglist 状态，再恢复批量回归。
 
 RM 自动授权只覆盖 RM/验证模型代码，不包括 RTL、Scala/Chisel、DUT 接口和 RTL 生成输入。
 
 #### 测试框架问题的默认授权
 
-测试框架问题默认不自动获得 coding 授权。完成问题记录、最优修复方案和 review 后，仍需用户明确授予测试框架 coding 权限，才可修改 monitor、driver、adapter、sequence、handler、状态表或 batch 收尾逻辑。
+测试框架问题默认不自动获得 coding 授权。责任分类 review 确认属于测试框架后，先登记或更新 Buglist，
+给出最优修复方案并完成方案 review；之后仍需用户明确授予测试框架 coding 权限，才可修改 monitor、
+driver、adapter、sequence、handler、状态表或 batch 收尾逻辑。
 
-如果当前提示词明确指定“测试框架授权 coding”或语义等价授权，则在完成记录和至少一轮独立 review 后自动开始 coding。修改后必须使用原始 seed 专项复测，专项测试通过后才可继续批量回归。方案不得改变 DUT 激励、伪造 RTL 事件或吞掉真实 RTL 错误。
+如果当前提示词明确指定“测试框架授权 coding”或语义等价授权，则在完成责任分类、正式记录和至少
+一轮独立方案 review 后自动开始 coding。修改后必须使用原始 testcase、cfg、seed、请求数和临时
+plusarg 专项复测，专项测试通过后才可继续批量回归。方案不得改变 DUT 激励、伪造 RTL 事件或吞掉
+真实 RTL 错误。
 
 #### 已授权批量回归中的自动迭代
 
 本轮一旦获得 RM 或测试框架 coding 授权，该授权在同一批量回归任务中持续有效。后续随机 seed 再次出现同责任类别问题时，可自动执行：
 
 ```text
-停止回归 -> 保留首错 seed/日志/波形/config -> 更新同周 buglist
--> 给出最小方案并完成 review -> 修改对应 RM/测试框架代码
--> 原始 seed 专项复测 -> 通过后恢复批量回归
+停止回归 -> 保留首错 seed/日志/波形/config -> 责任分类 review
+-> 更新同周 buglist -> 给出最小方案并完成方案 review
+-> 按授权修改对应 RM/测试框架代码 -> 完成代码 review
+-> 原始 seed 专项复测 -> 更新 buglist -> 通过后恢复批量回归
 ```
 
 授权范围不能跨类别：RM 授权不能修改测试框架，测试框架授权不能修改 RM；两类问题必须分别记录、review 和验证。
 
 #### 回归终止条件
 
-批量回归只能在所有计划的随机请求/seed 完成，或至少两轮独立 review 确认发现 RTL bug 时结束。若 RTL review 认定不是 RTL，而是 RM/测试框架问题，必须返回上述记录、方案、coding、专项复测和批量回归闭环。
+批量回归状态统一使用：
+
+| 状态 | 含义 |
+|---|---|
+| `COMPLETE` | 整个回归任务计划数量均已完成，最终结果全部通过。 |
+| `PAUSED_AUTH` | 已确认问题和方案，但等待对应类别 coding 授权。 |
+| `PAUSED_INFRA` | 远端连接、license、磁盘、编译环境或远端进程状态无法确认。 |
+| `PAUSED_ANALYSIS` | 波形未复现、证据不足或责任类别尚未确认。 |
+| `PAUSED_BY_USER` | 用户明确要求暂停，并保留恢复条件。 |
+| `STOPPED_RTL_CONFIRMED` | 至少两轮独立 review 确认 RTL 缺陷并按规则停止后续回归。 |
+| `STOPPED_BY_USER` | 用户明确要求终止回归任务。 |
+
+只有 `COMPLETE` 表示回归成功完成。所有 `PAUSED_*` 状态必须保留结果目录、待执行 seed、恢复参数和
+暂停原因，不得报告为完成。若 RTL review 认定不是 RTL，而是 RM/测试框架问题，必须返回上述责任
+分类、正式记录、方案 review、coding、专项复测和批量回归闭环。
 
 RM 与测试框架若在同一仿真中同时出现，分别建立章节并各自填写主类别；只有根因确实相同且经过 review
 确认时，才允许在一个章节中以“关联类别”说明，不能因为同一时间报错就合并。

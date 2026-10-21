@@ -25,6 +25,14 @@ cd mem_ut/ver/ut/memblock/sim
 
 - [mem_ut远端编译仿真方案与流程.md](AI_DOC/mem_ut远端编译仿真方案与流程.md)
 
+当前 `mem_ut` 远端并发仿真脚本使用说明为：
+
+- [mem_ut_parallel_eda_regression_usage_rule.md](AI_DOC/project_management/mem_ut_parallel_eda_regression_usage_rule.md)
+
+当前 `mem_ut` 并发回归仿真执行规则为：
+
+- [mem_ut_parallel_regression_execution_rule.md](AI_DOC/project_management/mem_ut_parallel_regression_execution_rule.md)
+
 当前 `memblock` RTL 生成规则文档为：
 
 - [memblock_rtl生成规则.md](AI_DOC/memblock_rtl生成规则.md)
@@ -172,6 +180,16 @@ testcase preset 的 Makefile `cfg=` 入口、编译期宏参数或 connect-time 
 网页文档、分析文档或项目管理规则时，必须先阅读
 `AI_DOC/project_management/ai_doc_file_management_rule.md`。
 
+后续使用、修改或 review `mem_ut/ver/ut/memblock/sim/run_eda_regression.sh`，包括远端编译一次、
+多 seed 并发仿真、runtime plusargs、UVM 错误联停、结果文件判读或脚本参数调整时，必须先阅读
+`AI_DOC/project_management/mem_ut_parallel_eda_regression_usage_rule.md`。
+
+后续启动或恢复多 seed 并发回归、监控回归结果、根据失败 seed 收集波形、调用 subagent 分析根因、
+登记 Buglist、修复缺陷、执行原 seed 专项复测或恢复被联停任务时，必须先阅读
+`AI_DOC/project_management/mem_ut_parallel_regression_execution_rule.md` 和
+`AI_DOC/project_management/mem_ut_parallel_eda_regression_usage_rule.md`。提示词未指定 testcase 时，
+按执行规则使用 `basicTest`；回归默认开启 monitor 和 record。
+
 只有用户提示词明确要求结合 Scala/Chisel 源码分析、解释、追踪或比较 RTL 模块、信号、
 pipeline、状态机、队列、exception、redirect、replay、flush、writeback 或 V2/V3 RTL 行为时，
 才必须先阅读 `AI_DOC/project_management/rtl_knowledge_base_management_rule.md`，并使用
@@ -191,6 +209,8 @@ plan、项目管理文档、日志或仿真结果时，默认不触发 RTL 知�
 `AI_DOC/project_management/code_modification_authorization_rule.md`。只有用户在当前任务中明确要求
 “开始代码修改/开始 coding/可以修改代码”，或明确要求按指定 plan 执行代码修改时，才允许进行代码写操作；
 分析、草案、方案、文档、review、解释、检查和无歧义 coding 授权之外的“继续”默认只读，不得自行推断进入 coding。
+唯一例外是实际批量回归已触发 Buglist 缺陷闭环，此时责任分类后的 RM、测试框架和 RTL coding 授权
+以 `AI_DOC/project_management/buglist_bug_record_rule.md` 为主，且只覆盖当前回归、已确认类别和对应缺陷。
 
 后续新增、修改或 review `mem_ut` 测试框架运行期逻辑、测试用例构建逻辑、
 sequence 主循环、monitor service loop、handler、adapter、scheduler 或公共状态维护逻辑时，
@@ -235,10 +255,11 @@ Flow 首章必须前置解释流程图、功能描述和文字伪代码中的专
 `AI_DOC/project_management/buglist_bug_record_rule.md`。记录前先按类别、版本和 ISO 周扫描已有周文件；
 V2 默认写入 `buglist/rtl/v2` 或 `buglist/rm/v2`，V3 写入对应 `v3` 目录；同周同类只允许一个文件，
 重复现象必须更新原章节。RTL 章节的“RTL 修复方法”必须先给出源码修改具体逻辑，再给出自然语言修改说明；
-RM/测试框架章节必须单独标注责任子类型，且方案至少经过一轮 review。未指定责任类别时，RM 问题在
-review 无问题后默认获得 coding 授权并专项复测；测试框架问题仍需明确测试框架 coding 授权，除非当前
-提示词已明确授予该权限。已授权的 RM/测试框架问题可在同一批量回归中自动迭代修复，直到批量完成或
-两轮独立 review 确认 RTL bug。
+正式登记前必须先完成责任分类 review；责任不明、波形未复现或证据不足时先写入 `AI_DOC/analysis`。
+RM/测试框架章节必须单独标注责任子类型，且正式记录后的修复方案至少经过一轮独立 review。实际批量
+回归进入 Buglist 闭环后，确认的 RM 问题在方案 review 无问题后自动获得当前回归内的 RM coding 授权；
+测试框架问题仍需明确测试框架 coding 授权；RTL 问题不得自动修改。已授权问题可按执行规则完成原 seed
+专项复测和剩余回归恢复，最终状态必须使用 `COMPLETE`、`PAUSED_*` 或 `STOPPED_*` 分类。
 
 ## 版本 Profile 路由规则
 
