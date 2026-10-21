@@ -57,6 +57,7 @@ SCENARIOS = (
     "vector-split-load",
     "vector-fof",
     "vector-segment",
+    "vector-segment-canonical",
     "vector-segment-fof",
     "vector-issue-order",
     "vector-store-forwarding",

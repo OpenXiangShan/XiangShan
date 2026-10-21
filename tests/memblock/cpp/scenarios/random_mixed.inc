@@ -1038,6 +1038,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             return true;
         };
 
+        if (constraints.vector_segment_high_va_per_mille != 0) {
+            // A distinct canonical alias retains every XLEN address bit while
+            // using the same independent physical memory image as ordinary
+            // segment traffic. Do not map a truncated noncanonical address.
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                const std::uint64_t high_base = 0U -
+                    (std::uint64_t{1} << (mode == 0 ? 38U : 47U));
+                for (std::uint64_t page = cache0_base + 0xf000;
+                     page <= cache0_base + 0x92000; page += 0x1000) {
+                    if (!map_stage_page(
+                            mode, random_stage1_roots[mode], high_base + page,
+                            page, false, false, true)) {
+                        return false;
+                    }
+                }
+            }
+        }
         // Include a page of padding for negative vector strides and a page
         // beyond the nominal cold set for indexed/split vector accesses.
         for (std::uint64_t page = cache0_base + 0xf000;
@@ -3499,16 +3516,24 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 (constraint_coverage.vector_segment_nfs[
                      shape.nf_index] == 0));
         };
-        auto choose_vector_segment_shape = [&]()
+        auto choose_vector_segment_shape = [&](bool require_misaligned = false)
             -> const RandomVectorSegmentShape & {
+            const auto eligible = [&](const RandomVectorSegmentShape &shape) {
+                return !require_misaligned ||
+                    (shape.addressing >= 2 ? shape.vsew : shape.eew) != 0;
+            };
             unsigned maximum_deficit = 0;
             for (const auto &shape : vector_segment_shapes) {
+                if (!eligible(shape)) {
+                    continue;
+                }
                 maximum_deficit = std::max(
                     maximum_deficit, vector_segment_shape_deficit(shape));
             }
             long double total_weight = 0;
             for (const auto &shape : vector_segment_shapes) {
-                if (vector_segment_shape_deficit(shape) == maximum_deficit) {
+                if (eligible(shape) &&
+                    vector_segment_shape_deficit(shape) == maximum_deficit) {
                     total_weight += shape.weight;
                 }
             }
@@ -3517,7 +3542,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             long double selection = unit * total_weight;
             const RandomVectorSegmentShape *fallback = nullptr;
             for (const auto &shape : vector_segment_shapes) {
-                if (vector_segment_shape_deficit(shape) != maximum_deficit) {
+                if (!eligible(shape) ||
+                    vector_segment_shape_deficit(shape) != maximum_deficit) {
                     continue;
                 }
                 fallback = &shape;
@@ -5745,7 +5771,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 vector_segment_store =
                     !vector_segment_fof_cross_missing && vector_segment_store;
             }
-            const bool vector_segment_fof =
+            bool vector_segment_fof =
                 kind == RandomConstraints::vector_segment &&
                 !vector_segment_store &&
                 (vector_segment_fof_cross_missing || choose_binary_class(
@@ -5770,6 +5796,63 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         constraints.choose_stage1_mode(random());
                     vector_segment_fof_shape =
                         &choose_vector_segment_fof_shape();
+                }
+            }
+            std::optional<unsigned> vector_segment_high_va_cross;
+            if (kind == RandomConstraints::vector_segment &&
+                constraints.vector_segment_high_va_per_mille != 0) {
+                const unsigned first = random() % 8U;
+                for (unsigned offset = 0; offset < 8; ++offset) {
+                    const unsigned cross = (first + offset) % 8U;
+                    if (constraints.vector_segment_high_va_cross_enabled(cross) &&
+                        constraint_coverage.vector_segment_high_va_crosses[cross] == 0) {
+                        vector_segment_high_va_cross = cross;
+                        break;
+                    }
+                }
+                if (!vector_segment_high_va_cross && !vector_segment_fof &&
+                    !ordinary_constraint_coverage_closed) {
+                    ordinary_constraint_coverage_closed = constraint_coverage.complete(
+                        constraints, options.backpressure,
+                        environment.dcache_response_latency_stats(),
+                        environment.ptw_response_latency_stats(),
+                        environment.uncache_response_latency_stats(),
+                        canonical_boundary_loads(), gstage_boundary_loads());
+                }
+                if (!vector_segment_high_va_cross && !vector_segment_fof &&
+                    ordinary_constraint_coverage_closed &&
+                    random() % 1000 < constraints.vector_segment_high_va_per_mille) {
+                    std::array<std::uint64_t, 8> weights{};
+                    std::uint64_t total = 0;
+                    for (unsigned cross = 0; cross < 8; ++cross) {
+                        if (!constraints.vector_segment_high_va_cross_enabled(cross)) {
+                            continue;
+                        }
+                        const unsigned mode = cross / 4U;
+                        const bool store = (cross / 2U) % 2U != 0;
+                        const bool misaligned = cross % 2U != 0;
+                        weights[cross] = std::uint64_t{
+                            constraints.stage1_mode_weights[mode]} *
+                            (store ? constraints.vector_segment_stores_per_mille
+                                   : 1000U - constraints.vector_segment_stores_per_mille) *
+                            (misaligned ? constraints.misaligned_per_mille
+                                        : 1000U - constraints.misaligned_per_mille);
+                        total += weights[cross];
+                    }
+                    if (total != 0) {
+                        std::uint64_t selection = random() % total;
+                        for (unsigned cross = 0; cross < 8; ++cross) {
+                            if (selection < weights[cross]) {
+                                vector_segment_high_va_cross = cross;
+                                break;
+                            }
+                            selection -= weights[cross];
+                        }
+                    }
+                }
+                if (vector_segment_high_va_cross) {
+                    vector_segment_store = (*vector_segment_high_va_cross / 2U) % 2U != 0;
+                    vector_segment_fof = false;
                 }
             }
             bool vector_fof_cross_missing = false;
@@ -6439,6 +6522,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 translation = TranslationContext{};
                 translation.regime = RandomConstraints::translation_stage1;
                 translation.stage1_mode = vector_fof_stage1_mode;
+            } else if (vector_segment_high_va_cross) {
+                translation = TranslationContext{};
+                translation.regime = RandomConstraints::translation_stage1;
+                translation.stage1_mode = *vector_segment_high_va_cross / 4U;
             } else if (kind == RandomConstraints::vector_segment &&
                        vector_segment_fof) {
                 translation = TranslationContext{};
@@ -6680,7 +6767,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             // in every translated context. Keep this stress action out of
             // the separately located NAPOT pools so its failure mode remains
             // bank/replay behavior rather than an accidental page fault.
-            if (bank_conflict_action || vector_fof || vector_segment_fof) {
+            if (bank_conflict_action || vector_fof || vector_segment_fof ||
+                vector_segment_high_va_cross) {
                 leaf = TranslationLeafTopology{};
             }
             if (kind != RandomConstraints::ptw_error) {
@@ -8983,7 +9071,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     !environment.run_until_queues_retired(8192)) {
                     return false;
                 }
-                const auto &shape = choose_vector_segment_shape();
+                const bool high_va_misaligned = vector_segment_high_va_cross &&
+                    *vector_segment_high_va_cross % 2U != 0;
+                const auto &shape = choose_vector_segment_shape(high_va_misaligned);
                 const auto addressing =
                     static_cast<memblock::VectorAddressingMode>(
                         shape.addressing);
@@ -9014,20 +9104,39 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             (1U + random() % 4U));
                     stride = (random() & 1U) == 0 ? magnitude : -magnitude;
                 }
-                std::uint64_t address = action_cacheable_address(data_bytes);
+                std::uint64_t address = action_cacheable_address(
+                    data_bytes, vector_segment_high_va_cross
+                        ? std::optional<bool>{high_va_misaligned} : std::nullopt);
                 if (stride < 0) {
                     address += static_cast<std::uint64_t>(-stride) *
                         (vlmax - 1U);
+                }
+                const std::uint64_t physical_address = address;
+                if (vector_segment_high_va_cross) {
+                    const std::uint64_t high_base = 0U - (std::uint64_t{1} <<
+                        (translation.stage1_mode == 0 ? 38U : 47U));
+                    address += high_base;
+                    std::ostringstream detail;
+                    detail << phase << ":segment-high-va:cross="
+                           << *vector_segment_high_va_cross << ":va=0x" << std::hex
+                           << address << ":pa=0x" << physical_address << std::dec;
+                    phase = detail.str();
                 }
                 const std::uint64_t rob = rob_offset++;
                 const std::uint8_t vl = static_cast<std::uint8_t>(
                     vector_corner ? 1U + random() % vlmax : vlmax);
                 const bool vm = !vector_corner || (random() & 1U) != 0;
-                const std::uint16_t mask_bits =
-                    static_cast<std::uint16_t>(random());
+                std::uint16_t mask_bits = static_cast<std::uint16_t>(random());
                 const std::uint8_t vstart = vector_corner
-                    ? static_cast<std::uint8_t>(random() % (vl + 1U))
+                    ? static_cast<std::uint8_t>(random() %
+                        (vector_segment_high_va_cross
+                            ? (vm ? vl : std::min<unsigned>(vl, 16U)) : vl + 1U))
                     : 0;
+                if (vector_segment_high_va_cross && !vm) {
+                    // A high-VA bin requires actual translated memory work;
+                    // zero-active-element instructions cannot satisfy it.
+                    mask_bits |= static_cast<std::uint16_t>(1U << vstart);
+                }
                 const std::uint8_t first_pdest = static_cast<std::uint8_t>(
                     1 + random() % (256 - uop_count));
                 const std::uint8_t vlmul = static_cast<std::uint8_t>(
@@ -9052,6 +9161,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         }
                     }
                 }
+                const auto segment_loads_before = environment.vector_load_writebacks();
+                const auto segment_stores_before = environment.vector_store_writebacks();
                 std::vector<memblock::VectorMemoryTransaction> uops;
                 uops.reserve(uop_count);
                 for (unsigned uop = 0; uop < uop_count; ++uop) {
@@ -9082,6 +9193,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         .vec_wen = !vector_segment_store && uop < data_uops,
                     });
                     auto &segment_uop = uops.back();
+                    if (vector_segment_high_va_cross) {
+                        segment_uop.oracle_address = physical_address;
+                    }
                     segment_uop.oracle_index_group = indexed
                         ? std::optional{index_group} : std::nullopt;
                     segment_uop.vm = vm;
@@ -9103,6 +9217,32 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             index_group.begin() + source_offset,
                             index_group_bytes, segment_uop.index.begin());
                     }
+                    if (vector_segment_high_va_cross && uop < data_uops) {
+                        auto virtual_uop = segment_uop;
+                        virtual_uop.oracle_address.reset();
+                        const auto active = memblock::active_vector_elements(segment_uop);
+                        for (unsigned element = 0; element < 16U / data_bytes; ++element) {
+                            if (((active >> element) & 1U) == 0) {
+                                continue;
+                            }
+                            const auto virtual_element =
+                                memblock::vector_element_address(virtual_uop, element);
+                            const auto physical_element =
+                                memblock::vector_element_address(segment_uop, element);
+                            for (unsigned byte = 0; byte < data_bytes; ++byte) {
+                                const auto walk = memblock::reference_page_walk(
+                                    environment.memory(),
+                                    random_stage1_roots[translation.stage1_mode],
+                                    virtual_element + byte,
+                                    page_mode(translation.stage1_mode));
+                                if (!walk.translated || walk.physical_address !=
+                                    physical_element + byte) {
+                                    phase += ":segment-high-va-reference";
+                                    return false;
+                                }
+                            }
+                        }
+                    }
                     if (!vector_segment_store && uop >= data_uops) {
                         environment.expect_vector_data(
                             segment_uop, segment_uop.data);
@@ -9117,6 +9257,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         constrained_completion_timeout)) {
                     return false;
                 }
+                if (vector_segment_high_va_cross &&
+                    (environment.vector_load_writebacks() - segment_loads_before !=
+                         (vector_segment_store ? 0U : uop_count) ||
+                     environment.vector_store_writebacks() - segment_stores_before !=
+                         (vector_segment_store ? uop_count : 0U))) {
+                    phase += ":segment-high-va-completions";
+                    return false;
+                }
                 for (unsigned uop = 0; uop < data_uops; ++uop) {
                     coverage.sample(uops[uop]);
                 }
@@ -9129,6 +9277,50 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     for (unsigned uop = 0; uop < data_uops; ++uop) {
                         environment.record_committed_vector_store(uops[uop]);
                     }
+                }
+                if (vector_segment_high_va_cross) {
+                    std::uint64_t active_elements = 0;
+                    for (unsigned uop = 0; uop < data_uops; ++uop) {
+                        const auto &completed = uops[uop];
+                        auto virtual_uop = completed;
+                        virtual_uop.oracle_address.reset();
+                        const auto active = memblock::active_vector_elements(completed);
+                        for (unsigned element = 0; element < 16U / data_bytes; ++element) {
+                            if (((active >> element) & 1U) == 0) {
+                                continue;
+                            }
+                            ++active_elements;
+                            if (vector_segment_store) {
+                                auto readback = make_load(
+                                    memblock::vector_element_address(virtual_uop, element),
+                                    static_cast<memblock::LoadOp>(data_eew == 3U
+                                        ? 3U : data_eew + 4U),
+                                    random() % memblock::kScalarLoadLanes);
+                                readback.oracle_address =
+                                    memblock::vector_element_address(completed, element);
+                                if (!environment.set_rob_head(
+                                        readback.rob, readback.rob_flag) ||
+                                    !issue_load(readback, std::nullopt, false)) {
+                                    phase += ":segment-high-va-store-readback";
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                    if (active_elements == 0 ||
+                        !environment.run_until_queues_retired(
+                            constrained_completion_timeout)) {
+                        phase += ":segment-high-va-retire";
+                        return false;
+                    }
+                    ++constraint_coverage.vector_segment_high_va_crosses[
+                        *vector_segment_high_va_cross];
+                    constraint_coverage.vector_segment_high_va_data_uops += data_uops;
+                    constraint_coverage.vector_segment_high_va_elements += active_elements;
+                    // The high-VA alias is a separately declared 4-KiB
+                    // mapping. It cannot satisfy or contradict a profile's
+                    // ordinary NAPOT-only topology requirement.
+                    leaf_addressed = constraints.stage1_napot_per_mille != 1000;
                 }
                 ++actions;
                 ++constraint_coverage.vector_segment_directions[

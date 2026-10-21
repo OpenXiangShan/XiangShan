@@ -411,6 +411,198 @@ int run_vector_fault_only_first(int argc, char **argv)
     return 0;
 }
 
+struct SegmentCanonicalMetrics {
+    unsigned cases = 0;
+    std::uint64_t cycles = 0;
+    std::uint64_t dcache_requests = 0;
+};
+
+int run_vector_segment_canonical(
+    int argc, char **argv, SegmentCanonicalMetrics *metrics = nullptr)
+{
+    // A segment split must retain the full canonical VA when it translates
+    // either aligned beat again. Low-half and aligned controls distinguish
+    // that contract from generic segment/mapping failures.
+    unsigned canonical_segment_cases = 0;
+    std::uint64_t canonical_segment_cycles = 0;
+    std::uint64_t canonical_segment_dcache_requests = 0;
+    for (unsigned mode_index = 0; mode_index < 2; ++mode_index) {
+        memblock::Environment canonical_environment(argc, argv);
+        const auto page_mode = mode_index == 0
+            ? memblock::ReferencePageMode::sv39
+            : memblock::ReferencePageMode::sv48;
+        constexpr std::uint64_t root = 0x97d00000ULL;
+        const std::array<std::uint64_t, 2> virtual_bases{{
+            0x40000000ULL,
+            mode_index == 0 ? 0xffffffc040000000ULL
+                            : 0xffff800040000000ULL,
+        }};
+        const std::uint64_t physical_base =
+            memblock::kDefaultMemoryBase + 0x900000 + mode_index * 0x10000;
+        canonical_environment.configure_backpressure(
+            0x13198a2e03707344ULL ^ mode_index, true);
+        const auto fail = [&](const char *phase, std::uint64_t address) {
+            std::cerr << (metrics ? "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle="
+                                  : "MEMBLOCK_VECTOR_SEGMENT_CANONICAL_FAIL cycle=")
+                      << canonical_environment.cycle()
+                      << " phase=canonical-segment-" << phase
+                      << " mode=" << (mode_index == 0 ? 39 : 48)
+                      << " address=0x" << std::hex << address << std::dec
+                      << " reason=" << canonical_environment.error() << '\n';
+            return 1;
+        };
+        if (!canonical_environment.reset() ||
+            !canonical_environment.enable_misaligned_accesses() ||
+            !canonical_environment.set_pointer_masking(
+                memblock::PointerMaskingConfig{})) {
+            return fail("reset", 0);
+        }
+        for (unsigned side = 0; side < virtual_bases.size(); ++side) {
+            const std::uint64_t physical = physical_base + side * 0x4000;
+            canonical_environment.memory().fill_incrementing(
+                physical, 0x2000,
+                static_cast<std::uint8_t>(0x35 + mode_index * 23 + side * 61));
+            for (unsigned page = 0; page < 2; ++page) {
+                const std::uint64_t address = virtual_bases[side] + page * 0x1000;
+                const std::uint64_t target = physical + page * 0x1000;
+                if (!(mode_index == 0
+                          ? canonical_environment.map_sv39_4k(address, target, root)
+                          : canonical_environment.map_sv48_4k(address, target, root))) {
+                    return fail("mapping", address);
+                }
+            }
+        }
+        if (!(mode_index == 0 ? canonical_environment.activate_sv39(root, 47)
+                              : canonical_environment.activate_sv48(root, 47))) {
+            return fail("activation", 0);
+        }
+        std::uint8_t next_rob = 0;
+        for (unsigned side = 0; side < virtual_bases.size(); ++side) {
+            // Aligned, cross-16-byte, and cross-page elements; all bytes remain
+            // legal in the same canonical half and both pages are mapped.
+            for (const unsigned offset : {0x180U, 0x18fU, 0xff9U}) {
+                const std::uint64_t address = virtual_bases[side] + offset;
+                const std::uint64_t physical = physical_base + side * 0x4000 + offset;
+                for (unsigned byte = 0; byte < 16; ++byte) {
+                    const auto walk = memblock::reference_page_walk_permissions(
+                        canonical_environment.memory(), root, address + byte,
+                        page_mode);
+                    if (!walk.walk.translated || !walk.leaf_permissions ||
+                        walk.walk.physical_address != physical + byte ||
+                        !memblock::reference_memory_access_permitted(
+                            memblock::ReferenceMemoryAccess::load,
+                            *walk.leaf_permissions,
+                            memblock::ReferencePrivilegeMode::supervisor,
+                            false, false) ||
+                        !memblock::reference_memory_access_permitted(
+                            memblock::ReferenceMemoryAccess::store,
+                            *walk.leaf_permissions,
+                            memblock::ReferencePrivilegeMode::supervisor,
+                            false, false)) {
+                        return fail("reference", address + byte);
+                    }
+                }
+                const auto run_instruction = [&](bool store) {
+                    if (std::getenv("MEMBLOCK_SEGMENT_CANONICAL_TRACE")) {
+                        std::cerr << "SEGMENT_CANONICAL cycle="
+                                  << canonical_environment.cycle()
+                                  << " mode=" << (mode_index == 0 ? 39 : 48)
+                                  << " store=" << store << " address=0x"
+                                  << std::hex << address << std::dec << '\n';
+                    }
+                    std::array<memblock::VectorMemoryTransaction, 2> uops{};
+                    const auto rob = next_rob++;
+                    for (unsigned field = 0; field < uops.size(); ++field) {
+                        auto &uop = uops[field];
+                        uop = memblock::VectorMemoryTransaction{
+                            .store = store,
+                            .segment = true,
+                            .address = address,
+                            .eew = 3,
+                            .vl = 1,
+                            .rob = rob,
+                            .pdest = static_cast<std::uint8_t>(160 + field),
+                            .lane = 0,
+                            .flow_num = 2,
+                            .expected_trigger = memblock::kVectorWritebackTriggerNone,
+                            .vuop_idx = static_cast<std::uint8_t>(field),
+                            .last_uop = field + 1 == uops.size(),
+                            .nf = 1,
+                        };
+                        uop.oracle_address = physical;
+                        uop.vsew = 3;
+                        uop.vl = 1;
+                        for (unsigned byte = 0; byte < uop.data.size(); ++byte) {
+                            uop.data[byte] = static_cast<unsigned char>(
+                                0x41 + mode_index * 17 + side * 33 +
+                                canonical_segment_cases * 7 + field * 19 + byte * 5);
+                        }
+                        if (store) {
+                            canonical_environment.expect_vector(uop);
+                        } else {
+                            auto expected = uop.data;
+                            for (unsigned byte = 0; byte < 8; ++byte) {
+                                expected[byte] = canonical_environment.memory().read_byte(
+                                    physical + field * 8 + byte);
+                            }
+                            canonical_environment.expect_vector_data(uop, expected);
+                        }
+                        if (!canonical_environment.issue_vector(uop, 1024)) {
+                            return false;
+                        }
+                    }
+                    if (!canonical_environment.run_until_vector_complete(32768) ||
+                        canonical_environment.lq_allocated() != 0 ||
+                        canonical_environment.sq_allocated() != 0) {
+                        return false;
+                    }
+                    if (store) {
+                        for (const auto &uop : uops) {
+                            canonical_environment.record_committed_vector_store(uop);
+                        }
+                        if (!canonical_environment.pulse_sbuffer_flush() ||
+                            !canonical_environment.run_until_sbuffer_empty(32768)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+                if (!run_instruction(false)) {
+                    return fail("load", address);
+                }
+                if (!run_instruction(true)) {
+                    return fail("store", address);
+                }
+                if (!run_instruction(false)) {
+                    return fail("readback", address);
+                }
+                ++canonical_segment_cases;
+            }
+        }
+        if (canonical_environment.vector_load_writebacks() != 24 ||
+            canonical_environment.vector_store_writebacks() != 12 ||
+            canonical_environment.vector_fof_fix_writebacks() != 0) {
+            return fail("conservation", 0);
+        }
+        canonical_segment_cycles += canonical_environment.cycle();
+        canonical_segment_dcache_requests += canonical_environment.tilelink_requests();
+    }
+
+    if (metrics) {
+        *metrics = {canonical_segment_cases, canonical_segment_cycles,
+                    canonical_segment_dcache_requests};
+    }
+    if (!metrics) {
+        std::cout << "MEMBLOCK_VECTOR_SEGMENT_CANONICAL_PASS"
+                  << " cases=" << canonical_segment_cases
+                  << " cycle=" << canonical_segment_cycles
+                  << " tilelink_requests=" << canonical_segment_dcache_requests
+                  << " vector_load_writebacks=48 vector_store_writebacks=24"
+                  << " segment_lsq_allocations=0\n";
+    }
+    return 0;
+}
+
 int run_vector_segment(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -539,6 +731,14 @@ int run_vector_segment(int argc, char **argv)
             return 1;
         }
     }
+
+    SegmentCanonicalMetrics canonical_metrics;
+    if (run_vector_segment_canonical(argc, argv, &canonical_metrics) != 0) {
+        return 1;
+    }
+    const unsigned canonical_segment_cases = canonical_metrics.cases;
+    const auto canonical_segment_cycles = canonical_metrics.cycles;
+    const auto canonical_segment_dcache_requests = canonical_metrics.dcache_requests;
 
     const std::array<memblock::VectorAddressingMode, 3> addressing_modes{{
         memblock::VectorAddressingMode::strided,
@@ -1217,11 +1417,11 @@ int run_vector_segment(int argc, char **argv)
 
     const std::uint64_t aggregate_cycles =
         environment.cycle() + addressing_cycles + segment_lmul_matrix.cycle() +
-        indexed_segment_matrix.cycle();
+        indexed_segment_matrix.cycle() + canonical_segment_cycles;
     const std::uint64_t aggregate_dcache_requests =
         environment.tilelink_requests() + addressing_dcache_requests +
         segment_lmul_matrix.tilelink_requests() +
-        indexed_segment_matrix.tilelink_requests();
+        indexed_segment_matrix.tilelink_requests() + canonical_segment_dcache_requests;
 
     std::cout << "MEMBLOCK_VECTOR_SEGMENT_PASS"
               << " cycle=" << aggregate_cycles
@@ -1252,6 +1452,9 @@ int run_vector_segment(int argc, char **argv)
               << " indexed_lmul_store_index_only="
                     << indexed_segment_store_index_only_uops
               << " indexed_lmul_rob_wraps=" << indexed_segment_rob_wraps
+              << " canonical_segment_cases=" << canonical_segment_cases
+              << " canonical_segment_load_writebacks=48"
+              << " canonical_segment_store_writebacks=24"
               << " segment_lsq_allocations=0"
               << " readback_lq_allocated=" << environment.lq_allocated()
               << " readback_lq_dequeued=" << environment.lq_dequeued()

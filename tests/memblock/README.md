@@ -380,6 +380,7 @@ make vector-load PICKER="$PICKER" JOBS=8
 make vector-split-load PICKER="$PICKER" JOBS=8
 make vector-fof PICKER="$PICKER" JOBS=8
 make vector-segment PICKER="$PICKER" JOBS=8
+make vector-segment-canonical PICKER="$PICKER" JOBS=8
 make vector-segment-fof PICKER="$PICKER" JOBS=8
 make vector-addressing PICKER="$PICKER" JOBS=8
 make vector-store-forwarding PICKER="$PICKER" JOBS=8
@@ -1779,3 +1780,23 @@ Do not use `XData::CSelf()` to read signal values. It returns the address of the
 See `docs/VERIFICATION_PLAN.md` for the test matrix and `docs/RESULTS.md` for
 recorded campaigns. `docs/HISTORICAL_BUG_AUDIT.md` gives the status and evidence
 level for every 2026 commit touching `src/main/scala/xiangshan/mem`.
+
+
+Schema 51 adds `vector-segment-high-va` to ordinary mixed segment traffic:
+legal Sv39/Sv48 high-half canonical aliases, both directions and alignment
+classes, with ordinary randomized addressing and decoder-legal shapes. The
+reference model walks every active byte against the declared physical image;
+load completion data and exact uop counts are checked, and stores require
+actual DUT readback after SBuffer drain. A bounded missing-bin prefix precedes
+ordinary constraint closure and subsequent weighted selection. The separate
+4-KiB aliases do not count against NAPOT-only ordinary topology requirements.
+See `docs/CONSTRAINED_RANDOM.md` for endpoint constraints and accounting.
+
+`vector-segment-canonical` is the short deterministic subset shared with
+`vector-segment`: Sv39/Sv48, low/high canonical halves, and aligned,
+cross-16-byte and cross-page accesses. Each of the 12 cases checks a load,
+store and segment-load readback, totaling 48 load and 24 store uop completions.
+It detects the historical full-VA capture regression independently of the
+mixed generator. Mutation commands and evidence are described in
+`docs/HISTORICAL_BUG_AUDIT.md`; these finite capability tests do not establish
+closure-scale random acceptance.

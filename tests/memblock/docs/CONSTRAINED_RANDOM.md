@@ -119,6 +119,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `vector-eew8` .. `vector-eew64`, `vector-sew8` .. `vector-sew64` | Relative ordinary vector index/memory EEW and data SEW weights |
 | `vector-lmul-mf8` .. `vector-lmul-m8`, `vector-emul-mf8` .. `vector-emul-m8` | Relative ordinary vector LMUL and derived EMUL weights. Only legal `EMUL = EEW - SEW + LMUL` shapes are generated |
 | `vector-segment-store` | Per-mille store share within the vector-segment class |
+| `vector-segment-high-va` | Per-mille share of ordinary non-FOF segment actions using a legal high-half canonical alias under Sv39/Sv48. Requires stage-1 traffic and a compatible shape/direction/alignment. Zero disables the subclass; nonzero closes enabled mode x load/store x aligned/misaligned bins, then enables weighted selection after ordinary constraint coverage closes. SPEC 1, coverage 100, corner 250 |
 | `vector-segment-unit-stride`, `vector-segment-strided`, `vector-segment-indexed-unordered`, `vector-segment-indexed-ordered` | Relative segment addressing-mode weights |
 | `vector-segment-eew8` .. `vector-segment-eew64`, `vector-segment-sew8` .. `vector-segment-sew64` | Relative segment index/memory EEW and data SEW weights |
 | `vector-segment-lmul-mf8` .. `vector-segment-lmul-m8`, `vector-segment-emul-mf8` .. `vector-segment-emul-m8` | Relative fractional/integer LMUL and derived EMUL weights. A shape is enabled only when `EMUL = EEW - SEW + LMUL` and both selected weights are nonzero |
@@ -466,7 +467,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=50`, the resolved target weights,
+Every terminal line prints `constraint_schema=51`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -857,3 +858,33 @@ arbitration selects one. Thus both subclasses remain reachable even with both
 rates set to 1000; neither rate promises an exclusive action fraction when
 they share that slot. Multi-active-element faults, vector loads/unit-stride,
 other shape progress, nested boundary composition and GPA wrap remain gaps.
+
+
+Schema 51 adds ordinary high-half canonical segment addresses to `random-mixed`.
+The eight `actual_vector_segment_high_va_cross` bins are ordered as
+`(stage1_mode * 2 + store) * 2 + misaligned`. A bin requires enabled stage-1
+mode and segment operation weights, a legal shape, its load/store direction,
+and its alignment endpoint. Non-FOF loads require `vector-segment-fof != 1000`;
+misaligned bins require data EEW above eight bits (indexed data uses SEW).
+A nonzero target with no reachable class is rejected. A finite missing-bin prefix
+contains at most eight high-VA instructions. Further weighted replacements wait
+until ordinary constraint coverage closes, so even target 1000 preserves
+ordinary shape, translation-regime and leaf-topology reachability. High-VA
+aliases use their own 4-KiB mappings; with NAPOT-only ordinary traffic, these
+actions are excluded from ordinary leaf-topology accounting.
+Ordinary shape, direction
+and FOF accounting retains its meaning: these are successful ordinary segment
+instructions, not a new operation or a fault subclass.
+
+Each selected instruction uses its randomized ordinary physical address through
+a full-XLEN high-half alias. All active effective VA bytes are independently
+walked against the declared physical addresses before issue. Shape, field
+count, stride/index values, data, partial VL, vstart and mask stay randomized;
+at least one segment element must be active to count a high-VA bin. Exact
+vector completion identity/data and observed load/store completion counts are
+checked. High-VA stores are followed by actual DUT loads of every active field
+element. The total equals the sum of all bins; the reported data-uop and active
+field-element counts are bounded by the decoder shape limits and cannot be
+satisfied by zero-active-element instructions. High-half nested translation,
+FOF, noncanonical segment faults, and broader partial-fault progress remain
+explicit gaps for this subclass.

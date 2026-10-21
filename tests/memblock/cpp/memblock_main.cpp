@@ -258,6 +258,9 @@ int main(int argc, char **argv)
         if (options.test == "vector-fof") {
             return run_vector_fault_only_first(argc, argv);
         }
+        if (options.test == "vector-segment-canonical") {
+            return run_vector_segment_canonical(argc, argv);
+        }
         if (options.test == "vector-segment") {
             return run_vector_segment(argc, argv);
         }

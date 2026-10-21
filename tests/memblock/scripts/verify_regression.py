@@ -1284,6 +1284,127 @@ def _check_miss_burst_coverage(
         )
 
 
+def _check_vector_segment_high_va_coverage_schema51(
+    result: dict[str, Any],
+    target_operations: list[int],
+    target_translation: list[int],
+    target_stage1: list[int],
+    segment_directions: list[int],
+) -> None:
+    """Check successful canonical high VAs using legal segment shape inputs."""
+
+    rates: dict[str, int] = {}
+    for name in (
+        "vector_segment_high_va", "vector_segment_store",
+        "vector_segment_fof", "misaligned",
+    ):
+        value = result.get(f"target_{name}")
+        _require(
+            type(value) is int and 0 <= value <= 1000,
+            f"target_{name} must be an integer in 0..1000",
+        )
+        rates[name] = value
+    dimensions = {
+        dimension: _csv_counts(result, f"target_vector_segment_{dimension}", fields)
+        for dimension, fields in (
+            ("addressing", 4), ("eew", 4), ("sew", 4),
+            ("lmul", 7), ("emul", 7), ("nf", 7),
+        )
+    }
+    reachable = [False, False]
+    for addressing in range(4):
+        for eew in range(4):
+            for sew in range(4):
+                if not (dimensions["addressing"][addressing]
+                        and dimensions["eew"][eew]
+                        and dimensions["sew"][sew]):
+                    continue
+                for lmul in range(-3, 4):
+                    emul = eew - sew + lmul
+                    if (lmul < sew - 3 or emul < -3 or emul > 3
+                            or not dimensions["lmul"][lmul + 3]
+                            or not dimensions["emul"][emul + 3]):
+                        continue
+                    group_uops = 1 << max(lmul if addressing >= 2 else emul, 0)
+                    for nf in range(7):
+                        if (dimensions["nf"][nf]
+                                and group_uops * (nf + 2) <= 8):
+                            reachable[0] = True
+                            if (sew if addressing >= 2 else eew) > 0:
+                                reachable[1] = True
+
+    crosses = _csv_counts(result, "actual_vector_segment_high_va_cross", 8)
+    counts: dict[str, int] = {}
+    for suffix in ("", "_data_uops", "_elements"):
+        name = f"actual_vector_segment_high_va{suffix}"
+        value = result.get(name)
+        _require(
+            type(value) is int and value >= 0,
+            f"{name} is not a nonnegative integer: {value!r}",
+        )
+        counts[suffix] = value
+    any_enabled = False
+    for mode in range(2):
+        for store in range(2):
+            direction_enabled = (
+                rates["vector_segment_store"] != 0 if store
+                else rates["vector_segment_store"] != 1000
+                and rates["vector_segment_fof"] != 1000
+            )
+            for misaligned in range(2):
+                enabled = (
+                    rates["vector_segment_high_va"] != 0
+                    and target_operations[4] != 0
+                    and target_translation[1] != 0
+                    and target_stage1[mode] != 0
+                    and direction_enabled
+                    and (rates["misaligned"] != 0 if misaligned
+                         else rates["misaligned"] != 1000)
+                    and reachable[misaligned]
+                )
+                any_enabled |= enabled
+                cross = (mode * 2 + store) * 2 + misaligned
+                _require(
+                    (crosses[cross] > 0) == enabled,
+                    "actual_vector_segment_high_va_cross does not match "
+                    f"enabled classes: mode={mode} store={store} "
+                    f"misaligned={misaligned}",
+                )
+    _require(
+        rates["vector_segment_high_va"] == 0 or any_enabled,
+        "target_vector_segment_high_va has no eligible ordinary stage-1 "
+        "segment shape, direction, and alignment",
+    )
+    total = sum(crosses)
+    _require(
+        counts[""] == total,
+        "vector segment high-VA operation accounting is not conserved",
+    )
+    for store in range(2):
+        direction_total = sum(
+            crosses[(mode * 2 + store) * 2 + misaligned]
+            for mode in range(2) for misaligned in range(2)
+        )
+        _require(
+            direction_total <= segment_directions[store],
+            "vector segment high-VA direction accounting exceeds ordinary "
+            f"segment traffic: store={store}",
+        )
+    actual_stage1 = _csv_counts(result, "actual_stage1_mode", 2)
+    for mode in range(2):
+        _require(
+            sum(crosses[mode * 4:(mode + 1) * 4]) <= actual_stage1[mode],
+            "vector segment high-VA mode accounting exceeds stage-1 "
+            f"traffic: mode={mode}",
+        )
+    _require(
+        (counts["_data_uops"] == 0 and counts["_elements"] == 0) if total == 0
+        else 2 * total <= counts["_data_uops"] <= 8 * total
+        and 2 * total <= counts["_elements"] <= 128 * total,
+        "vector segment high-VA data-uop/element accounting is not conserved",
+    )
+
+
 def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
@@ -1292,7 +1413,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -3801,6 +3922,12 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     "vector segment operation/subclass coverage is not "
                     f"conserved for {dimension}",
                 )
+
+    if schema >= 51:
+        _check_vector_segment_high_va_coverage_schema51(
+            result, target_operations, target_translation, target_stage1,
+            actual_segment_direction,
+        )
 
     if schema >= 10:
         vector_dimensions = (

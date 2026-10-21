@@ -368,6 +368,10 @@ struct ConstraintCoverage {
         vector_segment_fof_crosses{};
     std::uint64_t vector_segment_fof_data_uops = 0;
     std::uint64_t vector_segment_fof_fix_vl = 0;
+    // [Sv39/Sv48][load/store][aligned/misaligned] successful high VAs.
+    std::array<std::uint64_t, 8> vector_segment_high_va_crosses{};
+    std::uint64_t vector_segment_high_va_data_uops = 0;
+    std::uint64_t vector_segment_high_va_elements = 0;
     std::array<std::uint64_t, 2> nc_directions{};
     std::array<std::uint64_t, 2> mmio_directions{};
     std::array<std::uint64_t, 2> uncache_errors{};
@@ -1040,7 +1044,11 @@ struct ConstraintCoverage {
                     vector_segment_fof_crosses ==
                         decltype(vector_segment_fof_crosses){} &&
                     vector_segment_fof_data_uops == 0 &&
-                    vector_segment_fof_fix_vl == 0;
+                    vector_segment_fof_fix_vl == 0 &&
+                    vector_segment_high_va_crosses ==
+                        decltype(vector_segment_high_va_crosses){} &&
+                    vector_segment_high_va_data_uops == 0 &&
+                    vector_segment_high_va_elements == 0;
             }
             return true;
         }
@@ -1885,6 +1893,35 @@ struct ConstraintCoverage {
                                  vector_segment_fof_data_uops ==
                                      expected_data_uops &&
                                  vector_segment_fof_fix_vl == fof_actions);
+            std::uint64_t high_va_total = 0;
+            std::array<std::uint64_t, 2> high_va_directions{};
+            std::array<std::uint64_t, 2> high_va_modes{};
+            bool high_va_complete = true;
+            for (unsigned cross = 0;
+                 cross < vector_segment_high_va_crosses.size(); ++cross) {
+                const auto count = vector_segment_high_va_crosses[cross];
+                high_va_complete &= (count != 0) ==
+                    constraints.vector_segment_high_va_cross_enabled(cross);
+                high_va_total += count;
+                high_va_directions[(cross / 2U) % 2U] += count;
+                high_va_modes[cross / 4U] += count;
+            }
+            for (unsigned index = 0; index < 2; ++index) {
+                high_va_complete &= high_va_directions[index] <=
+                    vector_segment_directions[index];
+                high_va_complete &= high_va_modes[index] <= stage1_modes[index];
+            }
+            high_va_complete &= high_va_total == 0
+                ? vector_segment_high_va_data_uops == 0 &&
+                      vector_segment_high_va_elements == 0
+                : vector_segment_high_va_data_uops / 2 >= high_va_total &&
+                      vector_segment_high_va_data_uops / 8 +
+                              (vector_segment_high_va_data_uops % 8 != 0) <=
+                          high_va_total &&
+                      vector_segment_high_va_elements / 2 >= high_va_total &&
+                      vector_segment_high_va_elements / 128 +
+                              (vector_segment_high_va_elements % 128 != 0) <=
+                          high_va_total;
             return operations[operation] != 0 &&
                 direction_complete(
                     constraints.vector_segment_stores_per_mille,
@@ -1929,7 +1966,7 @@ struct ConstraintCoverage {
                 std::accumulate(
                     vector_segment_nfs.begin(), vector_segment_nfs.end(),
                     std::uint64_t{0}) == ordinary_actions &&
-                fof_complete;
+                fof_complete && high_va_complete;
         }
         if (operation == RandomConstraints::noncacheable) {
             return uncache_operation_complete(
@@ -2892,6 +2929,16 @@ public:
                << vector_segment_fof_data_uops
                << " actual_vector_segment_fof_fix_vl="
                << vector_segment_fof_fix_vl
+               << " actual_vector_segment_high_va_cross=";
+        append_counts(stream, vector_segment_high_va_crosses);
+        stream << " actual_vector_segment_high_va="
+               << std::accumulate(
+                      vector_segment_high_va_crosses.begin(),
+                      vector_segment_high_va_crosses.end(), std::uint64_t{0})
+               << " actual_vector_segment_high_va_data_uops="
+               << vector_segment_high_va_data_uops
+               << " actual_vector_segment_high_va_elements="
+               << vector_segment_high_va_elements
                << " actual_nc_direction=" << nc_directions[0] << ','
                << nc_directions[1]
                << " actual_mmio_direction=" << mmio_directions[0] << ','

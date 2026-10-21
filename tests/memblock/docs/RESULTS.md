@@ -4377,9 +4377,17 @@ it carries the truncated VA slice and has defined alias/line relationships;
 for L1 prefetch it is only an index fragment, and CMO user fields are
 undefined. These fields are therefore diagnostic provenance, not an oracle
 that licenses filtering the extra request.
-The extra address equals a prior stride-stream address, but that coincidence
-alone does not establish request provenance. Neither replay has finished at
-this checkpoint, and the oracle has not been relaxed.
+The unchanged replay completes in 4,043.315 seconds with byte-identical
+simulator output, reproducing action 5,948 / cycle 7,831,226. The passive
+diagnostic also reproduces the same failure boundary in 3,917.170 seconds and
+records an accepted STORE-class request (`reqSource=3`) to `0x80256680` at
+cycle 7,830,888. That address equals an ordinary stride-pool line. This
+excludes the earlier simple prefetch-source explanation but does not identify
+which committed store caused the request. SQ retirement does not prove that
+SBuffer is empty, and the current hypervisor context transition waits for SQ
+retirement without a separate SBuffer-drain guarantee. Delayed committed
+store traffic remains a harness-attribution hypothesis. The total-A guard
+has not been relaxed or filtered, and no CPU bug is established.
 
 
 ## Accepted DCache A Contracts and Bounded Failure Diagnostics
@@ -4422,5 +4430,74 @@ The same run closes all 24 scalar and 36 vector canonical bins. Observed LQ
 accounting is 82,705 dequeues plus 28 cancellations for 82,733 enqueues;
 SQ is 38,792, with no unobserved cancellation. Its 82,867 GrantAcks equal
 82,866 refills plus one AcquirePerm. Artifacts and the independent verifier
-result are in `build/memblock/gstage-mixed-regression/`; SPEC261 and corner263
-remain running at this checkpoint.
+result are in `build/memblock/gstage-mixed-regression/`. SPEC261 and
+corner263 also pass 6,144 actions in 3,564.621 and 3,969.636 seconds,
+respectively. Independent verification accepts all three original artifacts,
+commands and target fields, including all scalar/vector canonical and G-only
+bins, observed LSQ enqueue/cancel accounting and DCache GrantAck conservation.
+The three profiles total 18,432 actions, 18,847,565 cycles and 9,338.358
+simulator seconds (2.594 hours); they do not establish six-hour closure or
+later schema-51 coverage.
+
+
+## High-Half Canonical Segment Verification
+
+Schema 51 adds ordinary successful high-half canonical segment load/store
+traffic to the mixed scheduler. All eight enabled Sv39/Sv48 x direction x
+alignment bins have independent active-byte VA-to-PA walks, exact vector uop
+completion checks and actual DUT store readbacks. The bounded prefix and
+post-ordinary-closure weighted selection preserve ordinary shapes, translation
+regimes and leaf topologies at target 1000. Separately mapped high-VA 4-KiB
+aliases do not count against NAPOT-only ordinary topology. C++ and Python
+checks enforce per-direction and per-mode subset conservation as well as
+operation, data-uop and active-element bounds. Independent-context review
+found and resolved an endpoint starvation issue and a nested-helper terminal
+summary issue before the final validation.
+
+The 267-test unit suite passes, including production C++ constraint/coverage
+checks under UBSan, 3,136 singleton decoder-shape combinations, malformed and
+overclaimed Python summaries, endpoints and disabled classes. `check-rtl`,
+`check-docs` and diff whitespace checks pass. A fresh frozen runtime in
+`build/memblock/segment-high-va-verified-runtime/` passes the short shared
+`vector-segment-canonical` matrix: 12 cases, 1,985 cycles, 24 DCache requests,
+48 load and 24 store completions, zero segment LSQ allocations, and exactly
+one matching terminal summary. Low/high aliases map to distinct physical data.
+The full `vector-segment` scenario also passes in 380.498 seconds: 907,360
+aggregate cycles, 1,352 existing shape configurations, the 12 shared canonical
+cases, and exactly one matching terminal summary. The earlier development
+attempt's actual 300-second subprocess timeout remains recorded as incomplete;
+this final run completes within its declared 900-second budget.
+
+Six final 256-action mixed capability runs also pass with full independent
+`_check_constraint_coverage` validation: all ordinary shapes (seed 281),
+misaligned load-only (282), store-only (283), high-VA disabled (284),
+NAPOT-only ordinary topology (285), and Bare/stage-1/nested regimes (286).
+They record respectively 155, 153, 155, 0, 154 and 149 high-VA instructions.
+Commands, source snapshots, output and independent verification are in
+`build/memblock/segment-high-va-development/verified/`. The initial artifact
+controller used a positional argument with a keyword-only parser; the retained
+successful simulator output was independently reparsed with the correct API
+and unchanged targets, without rerunning or accepting the controller's error
+as a DUT failure. These focused configurations disable concurrency and do not
+satisfy the broader mixed-closure gate. Earlier development configurations
+and runtimes remain separately preserved.
+
+An isolated historical full-VA-capture mutation of `39824ca68394` fails the
+same directed and mixed stimulus twice each with byte-identical output;
+identical prepared CPP sources pass on clean RTL. The directed mutant returns
+unexpected load-page-fault mask `0x2000` at cycle 754 for legal Sv39 VA
+`0xffffffc04000018f`. The mixed mutant fails seed 282 at action 99, cycle 3677,
+for VA `0xffffffc080210186` / PA `0x80210186`. Model, matching wrappers,
+source comparison, commands, logs and sensitivity verification are under
+`build/memblock/segment-va-mutation/`. This reproduces a historical bug class;
+no new CPU RTL bug or notification follows from this experiment.
+
+
+At the user's request to stop after this round and its commit, no next campaign
+was launched. The separate schema-48 store-lineage replay was stopped with
+SIGTERM after final capability checks, preserving its partial 2.6-MB log and
+source/runtime provenance in
+`build/memblock/schema48-store-lineage-diagnostic/`. Its last logged cycle is
+2,492,972; `run-result.json` explicitly records `user-stop` and `incomplete`.
+It has no terminal simulator result and supplies no new CPU attribution.
+The completed earlier exact and passive replays remain preserved separately.

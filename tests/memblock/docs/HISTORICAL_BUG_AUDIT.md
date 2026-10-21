@@ -299,3 +299,47 @@ as a deterministic RTL candidate rather than weakened to match the design.
 conditional GPA patch generated in an independent worktree makes the exact
 reproducer pass without weakening the oracle; it is validation evidence, not
 a modification to the baseline CPU tree.
+
+
+## Segment Full-VA Capture Mutation
+
+The 2025-08-18 fix `39824ca68394b819515643924a93003a084e2aaa`
+(`#4954`, an ancestor of `origin/kunminghu-v2`) widens `latchVaddr` and
+`latchVaddrDup` to XLEN and captures the complete segment VA. It completes the
+earlier `71802692d97cd368f6a3c18255d49a12058bb06d` adjustment. Low-half-only
+segment addresses did not distinguish losing the upper VA bits when a
+misaligned beat requests translation again.
+
+An isolated equivalent mutation changes only the two generated capture
+assignments in `VSegmentUnit.sv` to `{14'b0, _vaddr_T[49:0]}`. The 2,007
+actual RTL input files are copied into a private snapshot; the prepared base
+metadata is preserved unchanged even though its historical count says 2,006.
+The isolated model, matching generated wrapper, CPP snapshot, mutation patch,
+build commands and runtime linkage are retained under
+`build/memblock/segment-va-mutation/`. The normal model and generated RTL are
+unchanged. This is a full-VA-loss equivalent mutation, not a wholesale revert
+of all later segment RTL changes.
+
+With identical prepared CPP sources, clean `vector-segment-canonical` passes
+all 12 cases. The mutant passes the low-half and aligned high-half controls,
+then reports unexpected load-page-fault mask `0x2000` at cycle 754 for Sv39 VA
+`0xffffffc04000018f`, where the independent mapping requires success. Two
+mutant runs have byte-identical simulator output. Reproduce with:
+
+```sh
+LD_LIBRARY_PATH=build/memblock/segment-va-mutation/runtime \
+  build/memblock/segment-va-mutation/runtime/memblock_sim \
+  --test vector-segment-canonical
+```
+
+The same focused `random-mixed` seed 282 passes 256 actions on clean RTL and
+fails the mutant twice with byte-identical output at action 99, cycle 3677:
+VA `0xffffffc080210186` is independently mapped to PA `0x80210186`, but its
+ordinary segment load returns `0x2000` instead of zero exception. The exact
+constraint command is retained in `load-split-mutant-1.json` and
+`segment-high-va-development/refined/load-split.json`. This establishes mixed
+stimulus and external scoreboard sensitivity to the historical bug class;
+it is not a new CPU bug or a claim that the unmodified broad default
+profiles have already completed schema-51 closure stress. High-half nested
+translation, segment noncanonical faults, FOF composition and partial-fault
+progress remain gaps.

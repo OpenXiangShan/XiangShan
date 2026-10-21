@@ -213,6 +213,7 @@ struct RandomConstraints {
     std::array<unsigned, 7> vector_segment_emul_weights{};
     std::array<unsigned, 7> vector_segment_nf_weights{};
     unsigned vector_segment_stores_per_mille = 0;
+    unsigned vector_segment_high_va_per_mille = 0;
     // Segment FOF is a low-rate unit-stride subclass of segment loads. Fault
     // position and every decoder-legal EEW/SEW/LMUL/EMUL/NF shape remain
     // independently selectable.
@@ -317,6 +318,7 @@ struct RandomConstraints {
                 .vector_segment_emul_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_nf_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_stores_per_mille = 500,
+                .vector_segment_high_va_per_mille = 100,
                 .vector_segment_fof_per_mille = 100,
                 .vector_segment_fof_first_fault_per_mille = 500,
                 .probes_per_mille = 20,
@@ -418,6 +420,7 @@ struct RandomConstraints {
                 .vector_segment_emul_weights = {1, 1, 2, 16, 8, 2, 1},
                 .vector_segment_nf_weights = {32, 16, 8, 4, 2, 1, 1},
                 .vector_segment_stores_per_mille = 300,
+                .vector_segment_high_va_per_mille = 1,
                 .vector_segment_fof_per_mille = 10,
                 .vector_segment_fof_first_fault_per_mille = 100,
                 .probes_per_mille = 1,
@@ -517,6 +520,7 @@ struct RandomConstraints {
                 .vector_segment_emul_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_nf_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_stores_per_mille = 500,
+                .vector_segment_high_va_per_mille = 250,
                 .vector_segment_fof_per_mille = 250,
                 .vector_segment_fof_first_fault_per_mille = 500,
                 .probes_per_mille = 100,
@@ -999,6 +1003,8 @@ struct RandomConstraints {
             vector_nonzero_vstart_per_mille = parsed;
         } else if (key == "vector-segment-store") {
             vector_segment_stores_per_mille = parsed;
+        } else if (key == "vector-segment-high-va") {
+            vector_segment_high_va_per_mille = parsed;
         } else if (key == "vector-segment-fof") {
             vector_segment_fof_per_mille = parsed;
         } else if (key == "vector-segment-fof-first-fault") {
@@ -1331,6 +1337,12 @@ struct RandomConstraints {
                 "gstage-boundary requires an eligible G-only scalar "
                 "or vector-store subclass");
         }
+        if (vector_segment_high_va_per_mille != 0 &&
+            enabled_vector_segment_high_va_crosses() == 0) {
+            throw std::invalid_argument(
+                "vector-segment-high-va requires an eligible ordinary "
+                "stage-1 segment shape, direction, and alignment");
+        }
         if (vector_fof_per_mille != 0 &&
             operation_weights[vector_load] == 0) {
             throw std::invalid_argument(
@@ -1621,6 +1633,7 @@ struct RandomConstraints {
             vector_corner_per_mille > 1000 ||
             vector_fof_per_mille > 1000 ||
             vector_fof_first_fault_per_mille > 1000 ||
+            vector_segment_high_va_per_mille > 1000 ||
             vector_segment_fof_per_mille > 1000 ||
             vector_segment_fof_first_fault_per_mille > 1000 ||
             probes_per_mille > 1000 ||
@@ -2135,6 +2148,74 @@ struct RandomConstraints {
                     }
                 }
             }
+        }
+        return count;
+    }
+
+    bool vector_segment_high_va_shape_reachable(bool misaligned) const
+    {
+        for (unsigned addressing = 0; addressing < 4; ++addressing) {
+            if (vector_segment_addressing_weights[addressing] == 0) {
+                continue;
+            }
+            const bool indexed = addressing >= 2;
+            for (unsigned eew = 0; eew < 4; ++eew) {
+                for (unsigned sew = 0; sew < 4; ++sew) {
+                    if (vector_segment_eew_weights[eew] == 0 ||
+                        vector_segment_sew_weights[sew] == 0 ||
+                        (misaligned && (indexed ? sew : eew) == 0)) {
+                        continue;
+                    }
+                    for (int lmul = -3; lmul <= 3; ++lmul) {
+                        const int emul = static_cast<int>(eew) -
+                            static_cast<int>(sew) + lmul;
+                        if (lmul < static_cast<int>(sew) - 3 ||
+                            emul < -3 || emul > 3 ||
+                            vector_segment_lmul_weights[lmul + 3] == 0 ||
+                            vector_segment_emul_weights[emul + 3] == 0) {
+                            continue;
+                        }
+                        const unsigned group_uops = 1U <<
+                            static_cast<unsigned>(std::max(
+                                indexed ? lmul : emul, 0));
+                        for (unsigned nf = 0; nf < 7; ++nf) {
+                            if (vector_segment_nf_weights[nf] != 0 &&
+                                group_uops * (nf + 2U) <= 8U) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    bool vector_segment_high_va_cross_enabled(unsigned cross) const
+    {
+        if (cross >= 8) {
+            return false;
+        }
+        const unsigned mode = cross / 4U;
+        const bool store = (cross / 2U) % 2U != 0;
+        const bool misaligned = cross % 2U != 0;
+        return vector_segment_high_va_per_mille != 0 &&
+            operation_weights[vector_segment] != 0 &&
+            translation_weights[translation_stage1] != 0 &&
+            stage1_mode_weights[mode] != 0 &&
+            (store ? vector_segment_stores_per_mille != 0
+                   : vector_segment_stores_per_mille != 1000 &&
+                         vector_segment_fof_per_mille != 1000) &&
+            (misaligned ? misaligned_per_mille != 0
+                        : misaligned_per_mille != 1000) &&
+            vector_segment_high_va_shape_reachable(misaligned);
+    }
+
+    unsigned enabled_vector_segment_high_va_crosses() const
+    {
+        unsigned count = 0;
+        for (unsigned cross = 0; cross < 8; ++cross) {
+            count += vector_segment_high_va_cross_enabled(cross);
         }
         return count;
     }
@@ -2666,6 +2747,7 @@ struct RandomConstraints {
             enabled_vector_canonical_boundary_crosses() +
             enabled_gstage_boundary_crosses() +
             enabled_vector_gstage_boundary_crosses() +
+            enabled_vector_segment_high_va_crosses() +
             (stride_stream_per_mille == 0 ? 0U : 8U);
     }
 
@@ -2731,7 +2813,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=50 constraints=" << name
+        stream << "constraint_schema=51 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2871,6 +2953,8 @@ struct RandomConstraints {
         stream
                << " target_vector_segment_store="
                << vector_segment_stores_per_mille
+               << " target_vector_segment_high_va="
+               << vector_segment_high_va_per_mille
                << " target_vector_segment_fof="
                << vector_segment_fof_per_mille
                << " target_vector_segment_fof_first_fault="

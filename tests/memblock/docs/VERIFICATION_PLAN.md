@@ -652,3 +652,14 @@ summaries, and per-seed submit/complete offsets spanning the requested duration.
    state.
 5. If historical sensitivity matters, regenerate a separate revert RTL tree
    and require clean pass plus mutant fail under identical test sources.
+
+
+Schema 51 adds executable ordinary high-half canonical segment success traffic:
+Sv39/Sv48 x load/store x aligned/misaligned, with all enabled legal addressing,
+EEW/SEW/LMUL/EMUL/NF shapes eligible. Full-XLEN VA is independently walked by
+active byte, vector completion identity/data and uop conservation are checked,
+and stores require DUT readback. `vector-segment-canonical` runs a shared
+12-case subset of `vector-segment`, which crosses
+low/high canonical halves with aligned, cross-16-byte and cross-page accesses.
+Nested high-half segment composition, segment noncanonical faults and arbitrary
+partial-fault progress remain gaps.
