@@ -53,7 +53,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val usefulResetInFlight = RegInit(false.B)
 
   // use the alternate prediction when counter is positive
-  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.WeakPositive))
+  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.WeakNegative))
 
   /* *** reset *** */
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
@@ -226,12 +226,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   // Meta stores enough state for provider-only training. Re-read SRAM when an alternate
   // table entry is needed, or when the prediction was wrong and allocation state is needed.
   private val t0_needRead = t0_branches.zipWithIndex.map { case (branch, i) =>
-    val mbtbHit      = t0_mbtbHitMask(i)
-    val isCond       = t0_condMask(i)
-    val useProvider  = t0_meta(i).useProvider
-    val hasAlt       = t0_meta(i).hasAlt
-    val mispredicted = branch.bits.mispredict
-    mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt))
+    val mbtbHit         = t0_mbtbHitMask(i)
+    val isCond          = t0_condMask(i)
+    val hasProvider     = t0_meta(i).hasProvider
+    val providerIsWeak  = t0_meta(i).providerTakenCtr.isWeak
+    val providerIsWrong = t0_meta(i).providerTakenCtr.isPositive =/= branch.bits.taken
+    val hasAlt          = t0_meta(i).hasAlt
+    val needUpdateAlt   = hasProvider && providerIsWeak && providerIsWrong && hasAlt
+    val mispredicted    = branch.bits.mispredict
+    mbtbHit && isCond && (mispredicted || needUpdateAlt)
   }.reduce(_ || _)
   private val t0_useMeta = !t0_needRead
 
@@ -378,7 +381,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       provider.takenCtr     := meta.providerTakenCtr
       provider.usefulCtr    := meta.providerUsefulCtr
 
-      hasAlt     := false.B
+      hasAlt     := meta.hasAlt
       altTableOH := 0.U
       alt        := 0.U.asTypeOf(new TrainTagMatchResult)
 
@@ -421,7 +424,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val needUpdateProviderCtr    = !provider.takenCtr.shouldHold(actualTaken) && hasProvider
     val needUpdateProviderUseful = !provider.usefulCtr.isSaturatePositive && incProviderUsefulCtr && hasProvider
 
-    val needUpdateAltCtr = !alt.takenCtr.shouldHold(actualTaken) && useAlt
+    val needUpdateAltCtr = hasProvider && provider.takenCtr.isWeak && providerPred =/= actualTaken &&
+      hasAlt && !alt.takenCtr.shouldHold(actualTaken)
 
     // Train the selector only when it can change the prediction.
     // When the weak provider and alternate/base disagree, exactly one of them is correct.
