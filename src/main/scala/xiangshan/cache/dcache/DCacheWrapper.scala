@@ -979,6 +979,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   require(pseudoErrorMaskBits >= tagBits, "pseudo-error masks must cover tagBits")
   require(pseudoErrorMaskBits >= DCacheSRAMRowBits, "pseudo-error masks must cover data-bank row width")
+  io.cchi.zipWithIndex.foreach { case (port, ch) =>
+    require(port.dnDAT.bits.Data.getWidth == l1BusDataWidth, s"DCache CCHI channel $ch: DnDAT Data width must match l1BusDataWidth ($l1BusDataWidth)")
+    require(port.upDAT.bits.Data.getWidth == l1BusDataWidth, s"DCache CCHI channel $ch: UpDAT Data width must match l1BusDataWidth ($l1BusDataWidth)")
+    val txnIdWidth = port.upREQ.bits.TxnID.getWidth
+    require(BigInt(nEntries) <= (BigInt(1) << txnIdWidth), s"DCache CCHI channel $ch: $txnIdWidth-bit TxnID must cover $nEntries MSHR/CMO/WBQ slots")
+  }
 
   println("DCache:")
   println("  DCacheSets: " + DCacheSets)
@@ -1083,6 +1089,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   if (cacheCtrlParamsOpt.nonEmpty) {
     val ctrlUnit = outer.cacheCtrlOpt.get.module
+    ctrlUnit.io_pseudoError.foreach(_.ready := false.B)
 
     if (EnableTagEcc) {
       ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io_pseudoError(0))
@@ -1543,8 +1550,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.forward_stData := io.lsu.forward_mshrStData
 
   // Compact CHI: per-channel MQ / WBQ / Probe
-  val wbTxnIdBase = releaseIdBase.U(8.W)
-  val wbTxnIdEnd = (releaseIdBase + cfg.nReleaseEntries).U(8.W)
+  val wbTxnIdBase = releaseIdBase.U
+  val wbTxnIdEnd = (releaseIdBase + cfg.nReleaseEntries).U
 
   val rxsnpArb = Module(new RRArbiter(new FlitSNP, nCCHIChannels, initLastGrant = true))
   for (ch <- 0 until nCCHIChannels) {
@@ -1571,6 +1578,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       CCHIOpcode.CompDBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid))
     val rxrspToMq = rxrspIsCompCMO || rxrspIsMqComp
     val rxrspToWb = rxrspIsWbqComp || rxrspIsWbqDbid
+    assert(!rxrsp.valid || rxrspToMq || rxrspToWb, "DnRSP must route to MQ or WBQ")
     assert(!(rxrspIsCompCMO && rxrspTxnId =/= cmoTxnId.U), "CompCMO TxnID must match CMO slot")
     assert(!(rxrspIsWbq && rxrspTxnId >= wbTxnIdEnd), "WBQ TxnID must be within range")
 
