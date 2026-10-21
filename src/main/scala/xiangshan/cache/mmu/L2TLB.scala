@@ -456,7 +456,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   XSPerfAccumulate("ptw_queued_while_idle", ptwQueueReady && missQueue.io.out.valid && !missQueue.io.out.bits.isLLptw)
   XSPerfAccumulate("ptw_parallel_overlap", primaryBusy && parallelBusy)
   XSPerfAccumulate("ptw_parallel_demand_blocked", cache.io.resp.valid && !cache.io.resp.bits.hit && normalLevel1 && !mainPtwReady)
-  XSPerfAccumulate("ptw_parallel_nonleaf", parallelPtw.io.llptw.fire)
+  XSPerfAccumulate("ptw_parallel_recheck", parallelPtw.io.llptw.fire)
+  // A pending MQ request may hit PTC on recheck, so this interval also includes
+  // idle time if the queue drains before the next primary walker admission.
+  val primaryResponsePending = ptw.io.resp.fire && missQueue.io.out.valid && !missQueue.io.out.bits.isLLptw
+  val primaryTurnaround = BoolStopWatch(primaryResponsePending, ptw.io.req.fire || flush)
+  XSPerfAccumulate("ptw_pending_turnaround_start", primaryResponsePending && !flush)
+  XSPerfAccumulate("ptw_pending_turnaround_done", primaryTurnaround && ptw.io.req.fire && !flush)
+  XSPerfAccumulate("ptw_pending_turnaround_cycle", primaryTurnaround && !flush)
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
 
   if (HasMptCheck) {

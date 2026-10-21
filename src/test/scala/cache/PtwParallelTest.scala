@@ -47,6 +47,7 @@ class PtwParallelHarness(implicit p: Parameters) extends LazyModule {
         val id = UInt(bus.d.bits.source.getWidth.W)
       }))
       val flush = Input(Bool())
+      val bitmapEnable = Input(Bool())
       val rootPpn = Input(UInt(44.W))
       val asid = Input(UInt(16.W))
       val satpChanged = Input(Bool())
@@ -54,6 +55,8 @@ class PtwParallelHarness(implicit p: Parameters) extends LazyModule {
     })
     walker.module.io.hartId := 0.U
     walker.module.io.csr.tlb := 0.U.asTypeOf(walker.module.io.csr.tlb)
+    walker.module.io.csr.tlb.mbmc.BME := io.bitmapEnable.asUInt
+    walker.module.io.csr.tlb.mbmc.BMA := (BigInt("90000000", 16) >> 6).U
     walker.module.io.csr.tlb.satp.mode := 8.U
     walker.module.io.csr.tlb.satp.asid := io.asid
     walker.module.io.csr.tlb.satp.ppn := io.rootPpn
@@ -123,6 +126,7 @@ object PtwParallelTest extends App with ChiselSim {
     dut.io.memResponse.bits.data.poke(0.U)
     dut.io.memResponse.bits.id.poke(0.U)
     dut.io.flush.poke(false.B)
+    dut.io.bitmapEnable.poke(false.B)
     dut.io.rootPpn.poke("h80000".U)
     dut.io.asid.poke(1.U)
     dut.io.satpChanged.poke(false.B)
@@ -265,6 +269,36 @@ object PtwParallelTest extends App with ChiselSim {
     reply(nextGet(), pte(0x140000)); expect(0x4e000, 0x140000, 1)
     tick(20)
     assert(gets.isEmpty && responses.isEmpty)
+    // A legal CSR mode transition can occur while old memory IDs remain in flight.
+    send(0x4f000); val bitmapOldA = nextGet()
+    send(0x50000); val bitmapOldB = nextGet()
+    assert(bitmapOldA.id != bitmapOldB.id)
+    dut.io.bitmapEnable.poke(true.B); tick(8)
+    reply(bitmapOldB, pte(0x160000)); tick(12)
+    assert(!responses.exists(_.vpn == 0x50000), "unchecked mapping returned after Bitmap enable")
+    reply(bitmapOldA, pte(0x180000))
+    def bitmapWalksDone: Boolean = responses.exists(_.vpn == 0x4f000) && responses.exists(_.vpn == 0x50000)
+    val bitmapAddresses = ArrayBuffer.empty[BigInt]
+    var bitmapRemaining = 400
+    while (!bitmapWalksDone && bitmapRemaining > 0) {
+      if (gets.nonEmpty) {
+        val bitmapGet = gets.remove(0)
+        assert(bitmapGet.id > 7 && bitmapGet.id < bitmapOldB.id, bitmapGet.toString)
+        reply(bitmapGet, 0)
+        bitmapAddresses += bitmapGet.address
+      } else tick()
+      bitmapRemaining -= 1
+    }
+    assert(bitmapWalksDone, s"Bitmap retry did not complete: $gets $responses")
+    assert(bitmapAddresses.size == 2 && bitmapAddresses.toSet ==
+      Set(BigInt("90030000", 16), BigInt("9002c000", 16)),
+      s"expected both mappings to be checked: $bitmapAddresses")
+    // Existing Bitmap output conversion splits mappings into 4 KiB entries.
+    expect(0x4f000, 0x180000, 0)
+    expect(0x50000, 0x160000, 0)
+    tick(20)
+    assert(gets.isEmpty && responses.isEmpty)
+    println("BITMAP_TRANSITION_CHECK_PASS: primary and replayed secondary mappings checked")
     println("PTW_PARALLEL_PASS: overlap, reordering, same-page queue, backpressure, nonleaf/4KiB, PF, PMP/AF, SFENCE/SATP late returns")
   }
 }

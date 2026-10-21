@@ -269,13 +269,18 @@ class PTW(parallel: Boolean = false)(implicit p: Parameters) extends XSModule wi
 
   val normal_resp = mem_addr_update && !need_last_s2xlate && (guestFault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate || (if (HasMptCheck) (mpt_af) else false.B))
   val stageHit_resp = hptw_resp_stage2
-  io.resp.valid := !idle && Mux(stage1Hit, stageHit_resp, normal_resp)
+  // Bitmap may be enabled after this lane accepted a normal walk. Recheck
+  // its completed result through PTC so the primary walker performs the check.
+  val replayBitmap = if (parallel && HasBitmapCheck) bitmap_enable else false.B
+  val responseValid = !idle && Mux(stage1Hit, stageHit_resp, normal_resp)
+  io.resp.valid := responseValid && !replayBitmap
   io.resp.bits.source := source
   io.resp.bits.resp := Mux(stage1Hit || (l3Hit || l2Hit) && guestFault && !pte_valid, stage1, ptw_resp)
   io.resp.bits.h_resp := Mux(gvpn_gpf, fake_h_resp, hptw_resp)
   io.resp.bits.s2xlate := req_s2xlate
 
-  io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFaultMpt && !guestFault
+  io.llptw.valid := (s_llptw_req === false.B && to_find_pte && !accessFaultMpt && !guestFault) ||
+    (responseValid && replayBitmap)
   io.llptw.bits.req_info.source := source
   io.llptw.bits.req_info.vpn := vpn
   io.llptw.bits.req_info.s2xlate := req_s2xlate
@@ -556,7 +561,7 @@ class PTW(parallel: Boolean = false)(implicit p: Parameters) extends XSModule wi
     pte_valid := true.B
     update_full_gvpn_mem_resp := true.B
     if (HasBitmapCheck) {
-      when (bitmap_enable) {
+      when (bitmap_enable && !parallel.B) {
         whether_need_bitmap_check := true.B
       } .otherwise {
         s_llptw_req := false.B
