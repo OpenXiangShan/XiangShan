@@ -2,14 +2,8 @@
 
 ## Status
 
-**Confirmed RTL bug, fixed in the current worktree.** This finding is separate
-from the historical commit audit because the `LoadUnit.scala` fix is currently
-an uncommitted source delta. The complete pre-fix generated RTL was recorded as
-`0b6c6aa34dc8aa148d0f6da91091df58e6622415136e60baf985d7560824e7e3`; the
-isolated regenerated NC-fix RTL was
-`c97a89cd517e32cca52fc8f2dde38c539e9628209f69377c420d8fbcfb978084`.
-After the later atomic exceptional-writeback fix, the current complete RTL is
-`670cf5d399c55e40c9d51c70183315b4cdd730e73843543aec5789414558b846`.
+**Confirmed RTL bug, fixed by commit `f8bb99518`.** This branch-local fix is
+separate from the commits in the initial `origin/kunminghu-v2` history audit.
 
 ## Reproducer
 
@@ -42,12 +36,9 @@ The isolated NC-fixed RTL produced:
 
 ```text
 MEMBLOCK_UNCACHE_ERRORS_PASS cycle=388 denied=1 corrupt=1 uncache_requests=2
-rtl_sha256=c97a89cd517e32cca52fc8f2dde38c539e9628209f69377c420d8fbcfb978084
 ```
 
-The same reproducer on the current complete RTL (which also includes the
-atomic exceptional-writeback fix) produces the identical pass contract with
-`rtl_sha256=670cf5d399c55e40c9d51c70183315b4cdd730e73843543aec5789414558b846`.
+The repaired RTL produces the same externally observable pass contract.
 
 ## Architectural Contract
 
@@ -63,6 +54,12 @@ For a legal Uncache load response:
 The independent C++ oracle checks all of these observable properties. It does
 not accept a matching data value when the D-channel error flags or writeback
 exception are wrong.
+
+## CPU Impact
+
+A denied Uncache load can appear successful, and independently corrupted data
+can be consumed without `hardwareError`. Both outcomes turn a defined memory
+failure into architecturally wrong load data or execution instead of a trap.
 
 ## Root Cause
 
@@ -95,8 +92,8 @@ architecturally incorrect successful load result rather than an exception.
 
 ## Fix
 
-The current [LoadUnit.scala](../../src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala)
-change has two parts:
+The [LoadUnit.scala](../../../src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala)
+fix has two parts:
 
 1. `fromMmioSource` and `fromNcSource` explicitly preserve the source
    `exceptionVec` members for address-misaligned, access-fault, page-fault,
@@ -124,13 +121,13 @@ The separate `mmio-contracts` scenario passes one normal, one denied, and one
 corrupt PBMT=IO load. It observes zero DCache requests, three Uncache requests,
 and exact `isMMIO=1/isNCIO=0` plus exception metadata at scalar writeback.
 
-The current regenerated RTL also passes:
+The repaired RTL also passes:
 
 - all deterministic translation, cache, queue, atomic, exception, and
   misalignment scenarios;
-- the complete port/SVA checks and 98 Python unit tests;
-- current 32,768-action and 65,536-action stress/mixed direct runs on the same
-  complete RTL hash, with queue-conservation and backpressure gates passing.
+- the complete port/SVA checks and applicable UT unit tests;
+- 32,768-action and 65,536-action stress/mixed direct runs, with
+  queue-conservation and backpressure gates passing.
 
 ## Scope and Remaining Boundary
 

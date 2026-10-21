@@ -1,12 +1,9 @@
-# CPU BUG: PTW D-Channel Error Is Ignored
+# CPU Bug: PTW D-Channel Error Is Ignored
 
 ## Status
 
-Confirmed and repaired locally on 2026-09-07. The failing generated
-`DefaultConfig` MemBlock RTL had complete RTL SHA-256
-`e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`;
-the repaired RTL has complete SHA-256
-`97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`.
+Confirmed RTL bug, fixed by commit `39a7b9629`. The focused contract remains
+executable as `make -C tests/memblock ptw-errors`.
 
 ## Trigger
 
@@ -64,7 +61,7 @@ Consequently no existing access-fault path can distinguish bad PTE data.
 - The problem applies to host and nested walks and to load/store instruction
   classes; it is not limited to the scalar Sv39 reproducer.
 
-## Repair Requirements
+## Fix
 
 The D-channel error must be accumulated across every beat of the PTW block
 read, forwarded with the completed response to PTW/LLPTW/HPTW/Bitmap, and
@@ -92,4 +89,4 @@ entry; every recovery returned exact data through one DCache request. No
 faulting architectural access issued a DCache or Uncache request. The existing
 translation matrix, 118-case translation-fault suite, 58-case permission suite,
 36-case PBMT suite, Bare degenerations, and ten superpage cases also passed on
-the same RTL hash.
+the same repaired model.

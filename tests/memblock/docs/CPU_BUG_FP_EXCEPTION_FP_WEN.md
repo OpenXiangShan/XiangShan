@@ -1,5 +1,10 @@
 # CPU Bug: Exceptional FP Load Must Not Enable `fpWen`
 
+## Status
+
+Confirmed RTL bug, fixed by commit `7045fa175`. The focused contract remains
+executable as `make -C tests/memblock fp-loads`.
+
 ## Summary
 
 `LoadUnit` suppressed `rfWen` on an exceptional scalar load writeback but
@@ -21,9 +26,7 @@ has TileLink `denied` asserted:
 make -C tests/memblock fp-loads
 ```
 
-The unmodified RTL, with complete RTL SHA-256
-`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`,
-produced:
+The unmodified RTL produced:
 
 ```text
 MEMBLOCK_FP_LOADS_FAIL cycle=217 phase=mmio-completion
@@ -82,9 +85,7 @@ and late exception sources. Every exceptional operation must retain its exact
 exception and metadata while deasserting both `rfWen` and `fpWen`; early faults
 must issue no data-manager request, and every MMIO operation must bypass DCache.
 
-After full DefaultConfig re-elaboration, the repaired complete RTL SHA-256 is
-`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
-The focused regression passes as:
+The focused regression passes on the repaired RTL as:
 
 ```text
 MEMBLOCK_FP_LOADS_PASS cycle=1753 writebacks=16 fp_destinations=3
@@ -92,5 +93,4 @@ mmio_fp=5 mmio_flh=1 mmio_flw=2 mmio_fld=2 mmio_faults=2 page_faults=1
 pmp_faults=1 permission_faults=1 guest_faults=1
 misaligned_cacheable=3 misaligned_nc_faults=1
 mmio_dcache_requests=0 mmio_uncache_requests=5
-rtl_sha256=4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4
 ```

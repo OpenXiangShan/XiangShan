@@ -1,5 +1,10 @@
 # CPU Bug: Atomic Exception Writeback Must Not Enable `rfWen`
 
+## Status
+
+Confirmed RTL bug, fixed by commit `e1424686a`. The focused contract remains
+executable as `make -C tests/memblock atomic-contracts`.
+
 ## Summary
 
 `AtomicsUnit` propagated the input atomic uop's `rfWen` unchanged when the
@@ -35,18 +40,14 @@ The output now drives `rfWen := uop.rfWen && !exceptionVec.asUInt.orR`.
 `atomic-contracts` requires both misaligned D/W cases to produce the expected
 exception, suppress integer writeback, and emit no DCache transaction.
 
-On the current complete RTL, the contract passes as:
+The repaired RTL passes the contract with:
 
 ```text
 MEMBLOCK_ATOMIC_CONTRACTS_PASS cycle=1216 amo_d_variants=9 amo_w_variants=9
 amocas_variants=4 lr_sc=1 misaligned_d_offsets=7 misaligned_w_offsets=3
 misaligned=10 final=0xfeedfacecafebeef
 tilelink_requests=1
-rtl_sha256=670cf5d399c55e40c9d51c70183315b4cdd730e73843543aec5789414558b846
 ```
-
-The current UT executable for this result has SHA-256
-`2eac0cce350f1a60aea68cda47baca18be6ce73d2d50912d1837a812128a2821`.
 
 ## Scope
 

@@ -1,18 +1,20 @@
 # CPU Bug: Vector Split Guest-Page-Fault GPA
 
+## Status
+
+Confirmed RTL bug, fixed by commit `f5b553973`. The focused contract remains
+executable as `make -C tests/memblock vector-guest-fault-split`.
+
 ## Reproducer
 
-The historical clean RTL (complete SHA-256
-`39709aa5225aa56ce6764569bbcbd20089ff25ff89eafaf0d3e7b9e3632ea815`) produced
-the failure below. The repaired RTL uses complete SHA-256
-`0b6c6aa34dc8aa148d0f6da91091df58e6622415136e60baf985d7560824e7e3` and must
-pass the same command:
+The pre-fix RTL produced the failure below. Run the same contract on fixed RTL
+with:
 
 ```sh
-make vector-guest-fault-split
+make -C tests/memblock vector-guest-fault-split
 ```
 
-The deterministic result is:
+The deterministic pre-fix result is:
 
 ```text
 MEMBLOCK_VECTOR_GUEST_FAULT_FAIL cycle=152 phase=exception-metadata
@@ -40,9 +42,17 @@ The G-stage maps the VS root page but intentionally does not map this next-level
 VS page-table page. The architectural result must therefore identify the PTE
 guest physical address, not a data-element address.
 
+## CPU Impact
+
+The stale `+8` reaches the externally visible guest-fault GPA together with the
+VS-non-leaf marker. Guest fault handling can therefore receive a false physical
+address for the page-table walk, even though the vector address and fault class
+are correct.
+
 ## Root-Cause Localization
 
-`src/main/scala/xiangshan/mem/vector/VMergeBuffer.scala` computes:
+Before the fix, `src/main/scala/xiangshan/mem/vector/VMergeBuffer.scala`
+computed:
 
 ```scala
 val firstUnmask = genVFirstUnmask(selPort(0).mask).asUInt
@@ -69,15 +79,13 @@ val gpaddr = Mux(
 )
 ```
 
-## Independent Patch Validation
+## Fix and Validation
 
-The narrow candidate above was applied in
-`/tmp/xiangshan-memblock-mutation-fbb1e3` after restoring the independently
-reverted `fbb1e349` fix. Scala was elaborated again and the complete Picker
-model was rebuilt. The resulting complete RTL SHA-256 is
-`f0ac62b8ccc840a6a691af6acce42ebcf146df7314e98d08460ab6235576946d`.
+The narrow fix above landed as commit `f5b553973`. Pre-landing validation used
+an isolated worktree with the independently reverted `fbb1e349` fix; that work
+did not modify the canonical CPU tree.
 
-The repaired model produces:
+At landing time, the repaired model produced:
 
 ```text
 MEMBLOCK_VECTOR_GUEST_FAULT_PASS cycle=152 writebacks=1 vector_replays=0
@@ -96,5 +104,6 @@ scenarios passed 40/40 invocations and 17,344 completed transactions. A
 separate duration-mode artifact passed the independent streaming verifier with
 21 round-robin invocations and 1,184 completed transactions.
 
-This validates the candidate against the current block-level suite. The patch
-remains isolated and is not applied to the baseline CPU source tree.
+This validated the fix against the block-level suite at landing time. The
+source contains the conditional GPA expression and the focused reproducer
+remains available for regression.

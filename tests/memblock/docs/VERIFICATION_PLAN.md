@@ -10,11 +10,11 @@ a historical mutation, but they are not substitutes for an architectural
 oracle.
 
 The current generated RTL under test is validated from its complete ordered
-file list and external interface manifest. Historical clean-baseline and
-mutant hashes in old reports are provenance only, not current build gates. A
-failure is reported as an RTL candidate only after a
-deterministic replay excludes driver, manager, reference-model, and scoreboard
-errors.
+file list and external interface manifest. Historical clean-baseline and mutant
+revisions, including hashes in old reports, are provenance only. Source, binary,
+and RTL hashes are not acceptance gates. A failure is reported as an RTL
+candidate only after a deterministic replay excludes driver, manager,
+reference-model, and scoreboard errors.
 
 ## Translation Specification Scope
 
@@ -62,38 +62,24 @@ CSR or full-core integration test.
 
 ## Stable Oracles
 
-| Contract | Independent oracle | DUT obligation | Status |
-| --- | --- | --- | --- |
-| Scalar load | Byte-addressed sparse memory plus ISA width/sign extension | Exactly one completion with the expected ROB/destination, data, and exception bits | Implemented for modeled scalar loads |
-| Floating load | Byte-addressed sparse memory plus FLH/FLW NaN-boxing and FLD bit preservation; translation, PMP, PBMT, and manager-error causes remain independent inputs | Exact FP destination/data on success with no integer-RF enable; exact memory exception and neither RF enable on fault; early faults issue no DCache/Uncache data request | Implemented for aligned and cacheable split FLH/FLW/FLD, PBMT=IO normal/error responses, sign-bit-clear/set FLH/FLW payload bases that distinguish NaN boxing from integer sign extension, and page/PMP/permission/guest-page/PBMT-misalignment faults in `fp-loads` |
-| Scalar store | ISA store width/mask applied to an architectural reference separate from bus backing memory | Address/data writebacks compare exception/ROB/flush/debug metadata and independently declared issue/completion lanes; committed bytes are recovered by an independent load. PBMT=IO stores must use Uncache, avoid DCache, complete the response/writeback sequence, and retire the SQ entry | Implemented for modeled scalar stores and scalar PBMT=IO contract |
-| Vector load | Independent unit/strided/indexed address decoder, `vl`/`vstart`/mask rules, old destination, and legal `vma/vta` agnostic values | Exact active data, active-element mask, and destination chunk `vdIdxInField` for EEW 8/16/32/64; inactive data is constrained by RVV policy | Implemented for modeled 128-bit operations |
-| Vector store | The same independent address/mask decoder applied to source bytes | Eventual completion/commit, exact vector readback of every active byte, RF write-enable/flush metadata, and optional trigger/debug metadata | Implemented for modeled 128-bit stores |
-| Address translation | Mode-parameterized software walk for Bare/Sv39/Sv48 and Sv39x4/Sv48x4; independent canonicality, PTE validity, PPN physical/GPA-width overflow, leaf level, alignment, Svnapot VPN-low-bit substitution, permission, PBMT/N/reserved, and A/D checks | Accesses reach the independently calculated PA; invalid walks report the access-specific page/access/guest-page fault without a data-manager request | Partial: generic walker, Bare degenerations, all four 4-KiB nested paths, superpage leaves, all 16 subpages of legal 64-KiB Svnapot leaves in Sv39/Sv48 stage-1 and Sv39x4/Sv48x4 G-only modes plus all four nested mode pairs crossed with VS-only/G-only/both-stage NAPOT, each with load/store/readback, and schema-12-and-later random traffic over distinct stage-1 and four nested leaf-topology regions are implemented. Sv39/Sv48 high-half canonical and both noncanonical sign-extension directions, physical PPN bits 48/55 at every ordinary stage-1/VS-only/G-stage PTE level, every-level VS-generated 41/50-bit GPA overflow across all four nested pairs, permission cases, the complete valid two-stage PBMT matrix, and 52 invalid/reserved/PBMT/NAPOT encodings are implemented for both scalar loads and stores. Schema 19 adds independently located root/intermediate/leaf PTW manager faults and clean retries across every supported stage/mode pair; remaining permission/fault crosses remain |
-| Nested translation | Independent VS-stage walk followed by independent G-stage walk for all four `vsatp` x `hgatp` mode pairs, including implicit page-table accesses, VS-generated GPA width, and VS-over-G PBMT priority | Exact host PA or stage-specific fault; no stage may be skipped or silently treated as Bare; final PMA/NC/IO class follows architectural composition | Partial: all four 4-KiB pairs, VS/G/Bare degenerations, every-level 41/50-bit VS-generated GPA overflow across all four non-Bare pairs and load/store, all 36 valid PBMT combinations, VS/G context switches, host/nested `V` transitions, same-ID root reuse with targeted fences, global/selective stale-response races, co-issued distinct-page walks, and redirected root/ASID/VMID/MODE/`V` changes with a delayed walk are covered. The common random tail weights and gates every mode pair, all enabled VS/G NAPOT topologies, cold/reuse observations, and manager errors at implicit-G, VS-PTE, and final-G nested sites |
-| Data-side PMP/PMA | Hand-calculated TOR/NAPOT regions and architectural first-match, permission, lock, current/effective privilege, platform-grain rules, and fixed SoC PMA entries | Exact allow/fault result and constrained manager behavior on denial; ordinary load/store/AMO denials emit no DCache/Uncache request. A split hypervisor load may expose at most the independently allowed prefix line before its terminal physical-PMP fault; no Uncache or architectural effect is allowed | Partial: `pmp-contracts` covers TOR/NAPOT edges, R/W/AMO denial, overlap priority, M-mode bypass, lock, and 4-KiB-grain WARL behavior. `hypervisor-contracts` crosses M-mode HLV/HLVX/HSV with SPVP=U/S and R/X/RW/RX plus locked R/RWX PMP regions, then maps all three families to a fixed `c=0` PMA device window. Schema 26 closes seven 4-KiB NAPOT edge relations across every family x SPVP pair; other sizes, TOR/lock/permission/overlap-by-edge, and broader PMA crosses remain |
-| L2-to-L1 DTLB boundary | Drive all retained `io_l2_tlb_req_req_*` controls with the legal read command, including ordinary/prefetch, kill, and `no_translate`; sample the separately registered PMP output at its specified later cycle | Exact miss/hit valid; on non-fault hits, exact PA, PBMT, fault, PMP-deny, and PMA-MMIO fields; on fault hits, exact PF/GPF/AF with address/protection payload treated as invalid. A cold miss starts a shared PTW refill, and the same-VA retry must hit without an additional external PTW TileLink A request | Implemented at the MemBlock boundary: `l2-tlb-contracts` covers ordinary/prefetch miss, cacheable/PBMT-NC/PBMT-IO refill hits, stage-1 PF, nested GPF, PTW AF, kill/no-response, pruned-zero-address `no_translate`, PMP allow, locked 4-KiB PMP deny, and MMIO classification. External-L2 retry policy remains integration-owned |
-| IFU-to-Mem PTW bridge | Typed `PtwReq` driver over `io_fetch_to_mem_itlb_*` with an independent page-table image | Exact Sv39/Sv48 and nested sector response metadata; request acceptance and response payload stability under backpressure | Implemented: `ifetch-ptw-bridge` covers valid Sv39/Sv48, all four Sv39/Sv48 x Sv39x4/Sv48x4 4-KiB pairs, Sv39/Sv48 VS-only and G-only degenerations, PBMT=NC/IO leaves, invalid L0 leaves, and all eight sector indices in one Sv39 leaf-PTE block. The sector matrix interleaves three PPN-high groups and checks exact `valididx`, one-hot `pteidx`, every selected `ppn_low`, reconstructed PPN, three cold PTW reads, and zero subsequent reads. Stage-1 and G-stage `G` bits are covered at leaf/non-leaf levels; stage-1 `G=0` may not be promoted, while legal conservative demotion of `G=1` is counted. G-stage `G` may be exposed as raw internal metadata but cannot affect translation, permission, or fault results. Every nested pair is crossed with VS-leaf, final-G-leaf, and implicit VS-page-table G-stage faults. A delayed IFU walk overlaps a cold scalar DTLB walk, and two same-VPN IFU requests coalesce into one three-request Sv39 walk with two exact responses. Delayed stage-1 and nested walks are invalidated by root/mode/ASID/VMID changes plus global and selective `SFENCE.VMA`, `HFENCE.VVMA`, and `HFENCE.GVMA`; each requires stale-response suppression and the exact replacement mapping. The active-stage ASID/VMID, permission, PPN, index, PBMT, fault level, fault bits, both leaf PTE addresses, and cross-source PTW outstanding depth are checked |
-| L2 hint propagation | Valid/invalid `io_l2_hint`, all `sourceId` values, and `isKeyword` polarity at an idle/no-matching-MSHR boundary | Hint is registered and distributed without producing a ghost writeback, queue corruption, or protocol error; matching-MSHR replay semantics are integration-tested with L2 | Implemented for both keyword polarities and all 16 source IDs with an idle no-MSHR safety oracle in `l2-tlb-contracts`; matching-MSHR replay remains an L2 integration scenario |
-| Frontend bridge | Independent request/response sequences for ICache, ICache-control, and instruction-Uncache, including the fields synthesized or narrowed by their diplomacy edges | Every accepted A request emerges once and in order with exact opcode/size/source/address/mask/data/user fields; every accepted D beat returns once with exact observable fields; a source is not reused before its response completes; payload remains stable under request and response stalls | Implemented in `frontend-bridge`: all 88 top-level frontend TileLink fields are explicitly driven or checked, the three paths run concurrently, source credits are enforced and observed, ICache uses two response beats, and the ICache-control path exercises Get/PutFull/PutPartial, sizes 1-8 bytes, all 32 sources, masks, and D-channel backpressure |
-| Guest-fault metadata | Reference VS/G-stage walk from PTE addresses, including explicit data faults and implicit VS-page-table faults | Exact fault VA, faulting PTE GPA, shifted `htval`-class value where observable, and VS-non-leaf-PTE marker | Partial: current VA/GPA/marker cases are covered; broader fault classes are planned |
-| Misalignment | Byte concatenation/splitting across 16-byte, line, and page boundaries | Exact value/bytes when enabled; specified address-misaligned exception when disallowed by memory type/control | Partial: common scalar/vector splits are covered; `scalar-misaligned` also holds three split loads at the LQ head, completes 60 younger loads to pressure RAR, and drains the splits in ROB order with exact data and no spurious violation |
-| Exception side effects | RISC-V cause rules plus independent circular ROB/uop-age ordering, deliberately opposed to LQ/SQ allocation order | Exact exception bit; exceptional scalar load has no integer/FP RF write; software prefetch never raises a load exception or writes an RF; the exported exception VA belongs to the oldest coexisting fault | Partial: `exception-contracts` checks simultaneous scalar faults across ROB wrap with reversed LQ/SQ order, switches the retained load/store source for both scalar and vector load faults, makes an older `vuopIdx=0` vector fault replace a younger `vuopIdx=1` fault at the same ROB, chooses between co-issued page and PBMT-NC-misaligned faults by age, and replaces retained scalar/vector faults in both source directions. `vector-fof` and `trigger-contracts` drive authentic load/store VLS exception redirects and require the next ROB-qualified same-direction exception to publish its own exact VA; the address payload has no valid/identity, so it is not sampled in the interval after redirect. The broader cause/source matrix remains |
-| Redirect | ROB age and redirect level supplied by a legal backend transaction | Redirected younger work has no terminal writeback; surviving work completes with the same data | Partial: basic redirect is covered; each known redirect samples the retained top-level LQ/SQ cancellation counts once after their two-cycle queue-output latency and the directed scalar case requires exactly one LQ cancellation. Broader producer-class arbitration remains |
-| Cache coherence boundary | TileLink opcode/source/size/mask/data reference agent with separate bus and architectural memories | Accepted-A opcode/size/source/grow/alignment/mask/corrupt and defined Acquire user alias/page-offset legality, stable producer payload while stalled, complete refill, sink-exact GrantAck, clean/dirty ProbeAck(Data), ReleaseAck, byte-exact dirty data, atomic/CMO update, and denied/corrupt D-channel handling | Partial: `dcache-coherence` checks clean ProbeAck, requested clean ProbeAckData, mandatory dirty ProbeAckData, invalidation/refill, and E-channel GrantAck with forced backpressure. It also accepts two distinct Probe sources while an unrelated cold miss is outstanding and address-matches both responses. C-channel source is client-owned and is not required to echo the manager's B source. `cmo-contracts` adds custom CLEAN/FLUSH/INVAL A requests, all operation x clean/dirty toB/toN reports before delayed CBOAck, retained/refilled line state, a younger cold MSHR canceled by CMO `flushPipe`, and six denied/corrupt cases. Schema-15 `random-mixed` adds weighted translated CMO operations, clean/dirty state, randomized CBOAck delay, optional younger delayed-MSHR cancellation, and opcode-qualified CBOAck errors crossed with every operation. Schema 33 covers the standard configuration's complete eight-entry ProbeQueue: a delayed cold miss remains unwritten while zero through seven clean auxiliary Probes and the dirty primary Probe are queued on distinct active B sources, C stays unready until all selected B requests are accepted, all address-identified responses complete, and measured accepted-but-unanswered depth equals one through eight. All 32 depth x toB/toN x requested/mandatory-data bins close; toB retention gets a checked toN cleanup. Schema 34 derives the complete six-bit B-source namespace from the generated port, rejects active-ID reuse, and exactly checks unique accepted IDs, completed-ID reuse, and every 63-to-0 wrap. Schema 36 closes 48 CLEAN/FLUSH/INVAL x clean/dirty x one-through-eight-depth bins while CBOAck is pending. Schema 37 closes 54 AMO/LRSC/AMOCAS x W/D x zero-through-eight-depth bins: depth zero retains ordinary atomic traffic, while nonzero depth uses a held cold refill with exact auxiliary-response and atomic-result attribution. DCache denied/corrupt scalar errors, cached poisoned-line vector late errors, and all 22 refill-capable W/D LR/AMO/AMOCAS error paths are executable. Malformed responses and replacement cross-operation Probe bursts remain planned |
-| PTW/uncache boundary | TileLink and uncache ready-valid agents with deterministic memory | Stable request/response while stalled, legal source/opcode/size/address/mask, ordered NC/MMIO store data, exact beat/lane load response, denied/corrupt error propagation, and SQ retirement | Partial: legal backpressure and response identity are executable. `ptw-errors` crosses denied/corrupt with Sv39/Sv48 stage-1, isolated Sv39x4/Sv48x4, fully nested, bitmap, load/store, and root/intermediate/leaf walks; corrupt is split across first/last beats, denied obeys the fixed-field/data-corrupt TileLink rules, and every fault is followed by a stage-appropriate fence plus a checked clean retry. Schema 19 composes that address-qualified oracle with common random traffic at five host/G/nested sites, and conserves duplicate requests plus every response beat. Scalar Uncache width/lane and denied/corrupt propagation are executable in `uncache-widths`/`uncache-errors`; PBMT=IO direct MMIO load/store bypass, metadata/error path, SQ retirement, and an ordered side-effecting device log are executable in `mmio-contracts`. Malformed/duplicate/early/late response injection remains planned |
-| Trigger and DynInst sidebands | Independent CSR trigger update plus explicit LSQ enqueue exception/trigger/flush and scalar issue RVC/FTQ/store-set/load-wait fields | Exact action/cause/`vstart` policy, target-manager suppression with legal-prefix accounting, store-image preservation, exception-vector mapping, and no dropped issue sideband | Partial: `trigger-contracts` covers all four memory-trigger slots, EQ/GE/LT hit/miss boundaries, both legal actions, enable/load/store/select/breakpoint/debug-state gates, a two-entry chain hit/miss pair, aligned/misaligned scalar stores, and eight vector load/store cases spanning unit/strided/indexed-unordered/indexed-ordered addressing, EEW 8/16/32/64, and two-field segment traffic. Scalar issue RVC/FTQ/store-set/load-wait paths and generated enqueue exception-vector mapping are also executable; the top-level issueLda boundary does not expose that vector. Broad randomized trigger/sideband crosses remain |
-| Progress | Manager fairness: every observed request is eventually made ready and answered | Every non-canceled modeled operation terminates before the generous scenario deadline | Partial: LSQ enqueue transactions, dequeues, and redirect cancellation counts are independently observed. Exceptional and reset teardown that has no redirect remains explicitly classified as unobserved |
-| Resource conservation | Accepted LSQ allocation, architectural commit, and redirect events | Allocated entries equal dequeued plus explicitly canceled entries at scenario end | Partial: all six LSQ dispatch lanes are passively sampled with independent LQ/SQ flow accounting and checked against DUT dequeue outputs. Each redirect samples the retained `lqCancelCnt/sqCancelCnt` values once; Schema 2 requires mixed-test cancellation conservation and zero unobserved cancellation |
+The correctness contracts, independent calculations, temporal and protocol rules,
+oracle gaps, anti-oracles, implementation limitations, and failure classification
+are defined only in [`ORACLES.md`](ORACLES.md#stable-oracles). This plan does not
+restate or reinterpret them.
 
-The page-table builder, scalar formatter, vector element-address calculator,
-mask merge, store-forward overlay, and sparse memory are C++ reference code;
-they do not sample internal RTL decisions. Cache hit/miss classification is
-derived from external TileLink traffic and PTW refill counts. A warm access
-requiring no new PTW request is useful coverage, but translation correctness is
-still decided by the returned data or exact exception, not by the hit itself.
+The `Stimulus Matrix` owns required stimulus and acceptance flow. The `Complete
+Verification-Point Inventory` owns implementation status and gap traceability.
+Oracle selection must always come from `ORACLES.md`, not from this plan.
+
+A row marked `implemented` requires an observed result; `partial` and `planned`
+retain an explicit limitation and cannot be promoted by a green run alone.
 
 ## Stimulus Matrix
+
+This matrix owns the required stimulus and externally observable acceptance flow
+for each operational area. It does not define an alternate oracle; calculations
+remain in `ORACLES.md`. The inventory below owns implementation status and gap
+traceability for the same verification points.
 
 | Area | Required stimulus | Acceptance checks |
 | --- | --- | --- |
@@ -342,6 +328,7 @@ cacheable tests pass.
 | Vector indexed unordered | Repeated indices, aliasing, non-monotonic indices, all EEWs, masked elements | Implemented for modeled operations: all 78 legal ELEN=64 EEW/SEW/LMUL/EMUL configurations execute exact load/store/readback with reverse uop issue, including index-register reuse when LMUL exceeds EMUL and 28 `EMUL>LMUL` shared-Vd configurations. Schema-11 `random-mixed` generates complete unique-offset index groups, randomly reverses uop issue, and conserves 1..8-uop shapes. Directed cases retain repeated-load aliases, cache-line/Bare-page crossings, and mask/`vstart` filtering |
 | Vector indexed ordered | Strict element order, repeated/aliasing indices, split beats/pages | Partial only at the system-side ordering boundary: all 78 legal ELEN=64 EEW/SEW/LMUL/EMUL configurations execute exact in-order load/store/readback, including index-register reuse and 28 `EMUL>LMUL` shared-Vd configurations. Schema-11 `random-mixed` adds weighted complete shapes under ordinary mixed traffic. Directed cases retain repeated/non-monotonic indices and split boundaries. Architecturally observable ordering against a side-effecting translated target remains |
 | Vector segmented/whole-register | NF/segment count, multi-uop streams, load/store direction, EEW, mask/`vstart`, fault-only-first, and partial completion | Partial: `vector-segment` checks lane-0 takeover, interleaved load/store data, multi-uop identity, the driver-side no-`enqLsq` input contract, and all addressing modes. Every addressing mode exhausts 338 legal NF 2..8 x EEW/SEW/LMUL/EMUL configurations per mode with exact load/store/readback; strided cases cover positive/negative strides, while indexed cases cover the complete index group and 252 index-only uops required by 32 `EMUL>LMUL*NF` configurations across both modes. `vector-fof` and `vector-segment-fof` cover first/later faults, including exact first-fault VA in an isolated exception epoch; schema 44 brings ordinary VFOF into `random-mixed` and closes first/later fault x Sv39/Sv48 x EEW with identified exception writeback and exact fix-VL conservation. Schema 47 extends common unit-stride segment FOF across all 338 decoder-legal EEW/SEW/LMUL/derived-EMUL/NF shapes and closes all 1,352 first/later fault x Sv39/Sv48 x shape bins with independent mapped-prefix data, identified exception/suppression, final-VL, fix-VL, identity, and terminal-writeback accounting. The decoder has no indexed or strided Segment FOF encoding. Field-level exception choice and faulting/remainder destination elements remain unspecified where required by the vector specification. `trigger-contracts` covers field-1 indexed and strided-store breakpoints; `vector-addressing` exhausts all ordinary addressing matrices plus all 16 whole-register NF/EEW combinations. Schema-9-and-later `random-mixed` exposes addressing, EEW, SEW, LMUL, EMUL, NF, and direction weights through one interface and independently gates every enabled class. Full-core `waitForward`/`blockBackward` serialization makes an active segment plus redirect unreachable, so that combination is an upstream assumption rather than a MemBlock stimulus. Overlapping indexed stores and ordered access to a side-effecting translated target remain |
+| Vector segment high-half canonical | Full-XLEN high-half Sv39/Sv48 ordinary segment load/store aliases, aligned, cross-16-byte and cross-page accesses, all enabled addressing modes and legal EEW/SEW/LMUL/EMUL/NF shapes | Partial; `vector-segment-canonical` covers the 12-case shared subset, and schema 51 adds eight stage-1 mode x direction x alignment bins in `random-mixed` with an independent per-byte walk, exact completion/data/uop conservation, and store readback. Nested high-half composition, segment noncanonical faults, and arbitrary partial-fault progress remain |
 | Vector data patterns | all zero/one, ramps, alternating bits, random bytes, same-byte aliases, old-destination merge | Implemented/partial by operation class |
 | Software prefetch | `prefetch.i/r/w`, mapped/unmapped, cacheable/NC/IO, all lanes, signed `src + imm`, duplicate and outstanding requests | Partial: `ifetch-prefetch` checks every class/lane, all signed-12-bit boundary classes through 0/1/2047/-1/-2048, a same-cycle `i/r/w` batch, unmapped cold data-hint drop without PTW/data traffic, warmed Sv39 cacheable data-prefetch hits, individual `r/w` DCache requests, and the intentional PBMT policy: resident-TLB NC `r/w` issue DCache hints without Uncache while IO `r/w` reach neither manager; broader duplicate/same-line contention remains |
 | Atomics | LR/SC, AMOADD/XOR/AND/OR/SWAP/MIN/MAX and signed/unsigned variants, AMOCAS, reservation loss, alignment | Partial; all exposed W/D-width AMO variants, AMOCAS.W/D compare success/failure, LR/SC success/failure, all 24 W/D opcodes crossed with every illegal byte offset (120 cases), and a fixed-device-PMA `AMOADD.D` denial execute in `atomic-contracts`. The alignment matrix checks LR load-misaligned versus all other store-misaligned exception classes, suppressed RF write, zero new DCache traffic, and ROB pointer wrap; the PMA fault suppresses RF write and all manager/memory side effects. `atomic-dchannel-errors` crosses denied/corrupt with all 22 refill-capable W/D LR/AMO/AMOCAS operations, checks initial exception/RF contracts, later poisoned-line load hits, SC.W/D hits on denied/corrupt metadata, exact request counts, and clean AMO recovery. Schema-18 `random-mixed` adds common `atomic-error`/`atomic-error-denied` controls and requires all 18 enabled family x width x clean/corrupt/denied outcomes, exact exception and manager accounting, unchanged backing memory at response time, and a deterministic private poisoned-line image for later ReleaseData. Schema 37 adds all 54 successful family x width x zero-through-eight-depth bins. Depth zero keeps the ordinary path; nonzero depth checks exact old-value/result and one cold target request, forbids early writeback while D is held, and validates address-matched no-data Probe completions after D release. The SC checks do not claim internal reservation observability. SC cannot have a cold-miss D response because MainPipe returns failure before issuing TileLink traffic when the line or usable reservation is absent. Cross-hart reservation interference and replacement/concurrent ordering remain |
@@ -409,32 +396,26 @@ cacheable tests pass.
 
 ## Constrained-Random Distribution
 
-The intended closure design is a legal-value generator followed by weighted
-constraints, not a fixed list of replay cases. `random-stress` now derives
-independent traffic, shape, payload, and scheduling streams from the scenario
-seed with SplitMix64; the derivation is deterministic and part of replay
-provenance. The per-seed gate still combines generator-side feature bins with
-observed writeback/manager progress, so it is not a substitute for a future
-independent starvation monitor or general simulator cross-coverage database.
+`random-mixed` is the canonical legal-value generator and weight layer; its
+traffic, shape, payload, and scheduling streams are deterministically derived
+from the scenario seed with SplitMix64 for replay. Per-seed gates combine
+generator-side feature bins with observed writeback and manager progress. There
+is still no independent starvation monitor or general simulator cross-coverage
+database, so these counters are evidence of stimulus intent, not proof that every
+required cross occurred.
 
-The planned generator must include both common traffic and rare boundary bins,
-with a starvation monitor that fails a seed if a required bin is never
-observed. Planned cross coverage includes:
+Required cross coverage remains operation class x issue lane x alignment; vector
+EEW x address mode x mask/vstart/vl; cache residency x translation state x
+memory type; producer overlap x issue order x backpressure; fault cause x
+privilege/translation stage x queue age; store width x overlap x forwarding
+direction; and redirect point x outstanding type x pointer-wrap state. The
+executable fields, presets, counters, and replay contract are defined only in
+[`CONSTRAINED_RANDOM.md`](CONSTRAINED_RANDOM.md).
 
-- operation class x issue lane x alignment class;
-- vector EEW x address mode x mask/vstart/vl class;
-- cache residency x translation state x memory type;
-- producer overlap x issue order x backpressure class;
-- fault cause x privilege/translation stage x queue age;
-- store width x byte overlap x forwarding direction;
-- redirect point x outstanding request type x pointer-wrap state.
+Profiles may reweight rare bins but must not change legal-value constraints or the
+oracle. A generated value that the reference model cannot explain is a generator
+failure, not an RTL failure.
 
-Weights may be changed to accelerate rare bins, but the oracle and legal-value
-constraints must remain unchanged. A generated value that cannot be explained
-by the reference model is a generator failure, not an RTL failure. Until the
-planned independent monitors exist, current coverage fields are evidence of
-stimulus intent and observed writebacks where available, not proof of all
-listed crosses.
 
 ## Coverage Closure and Exit Criteria
 
@@ -457,60 +438,52 @@ provenance, and no unclassified failure. Planned rows remain visible in the
 artifact and in reports until their independent model and observation path are
 implemented.
 
-## Top-Level IO Coverage
+## Top-Level IO and Interface Assumptions
 
-The authoritative interface-to-driver mapping, exact port counts, legal-value
-dimensions, implementation status, and remaining coverage gaps are maintained
-in [`IO_COVERAGE.md`](IO_COVERAGE.md). The generated inventory currently covers
-1,335 ports: 749 inputs and 586 outputs. `make check-docs` verifies that the
-inventory and `constraint_schema` match the checked RTL manifest and C++
-constraint implementation.
+[`IO_COVERAGE.md`](IO_COVERAGE.md) is the sole authority for interface-to-driver
+mapping, legal-value dimensions, implementation status, and interface gaps.
+[`PORTS.md`](PORTS.md) is the generated summary and
+`config/expected_ports.json` is the exact flattened inventory. `make check-docs`
+checks inventory and constraint-schema consistency; this plan does not duplicate
+port counts or per-family driver details.
 
-No port is promoted to semantic coverage because it appears in `pin-space`.
-The behavior inventory below defines the legal stimulus and oracle classes;
-`IO_COVERAGE.md` maps those classes to physical interface groups and states
-whether the implementation is complete, partial, integration-owned, or only
-structurally exercised.
+The environment makes only these behavioral assumptions:
 
-## Interface Assumptions
+- Issue inputs use legal operation encodings and consistent LSQ/ROB pointers;
+  typed drivers hold `valid` and payload stable until acceptance.
+- Backend allocation, commit, redirect, and age information follow their legal
+  order; the scoreboard removes only architecturally younger work.
+- Reference page tables, sparse memory, permissions, masks, and instruction
+  fields are testbench-owned. Manager responses correspond to captured requests
+  and obey their modeled opcode, source, size, address, mask, and beat rules.
+- DCache, PTW, and Uncache traffic is coherent and finite-delay; only modeled
+  requests receive responses, and denied data implies corrupt where the protocol
+  requires it.
+- Generated SVA checks DUT producer stability. Every backpressure-enabled mixed
+  seed requires nonzero DCache/PTW/Uncache request-stall and response-delay
+  observations, so a manager cannot remain accidentally always-ready.
 
-| Interface family | Environment assumption | Enforced rule |
-| --- | --- | --- |
-| Issue | Legal operation encoding and LSQ/ROB pointer; payload held until `ready` | Typed drivers retain `valid` and payload through acceptance |
-| LSQ dispatch/commit | Allocations and commits are in legal backend order | Drivers allocate the correct scalar/vector count and never commit unallocated work |
-| Redirect | ROB pointer/flag and level describe a legal backend redirect | The scoreboard removes only architecturally younger work |
-| DCache manager | Coherent 64-byte lines on a 256-bit bus; finite randomized delay | Agent drives and observes A/B/C/D/E traffic, distinguishes Get/AcquireBlock/AcquirePerm/CLEAN/FLUSH/INVAL, checks ProbeAck(Data), Release/ReleaseData, GrantAck, and CBOAck, and applies A/C/D/E timing pressure. Random CMO varies operation, line state, overlap, locality, translation, latency, and Ack errors. Schema 33 Probe traffic queues one through eight distinct active B sources while an unrelated refill is delayed, holds C until every selected B request is accepted, and requires matching accepted-outstanding depth. The capacity is tracked as `queue.dcache_probe_entries=8` and checked against the XiangShan DCache parameters. Schema 34 also tracks `tilelink.dcache_probe_source_bits=6`, forbids active-source reuse, and validates the exact accepted unique/reuse/wrap lifecycle. Schemas 17/18 add address-qualified load and atomic errors. Schema 28 adds phase-local compact C observation and address-qualified response holding; schema 38 exercises that hold queue with as many as eight complete D transactions, retains in-progress multibeat ReleaseData in the idle contract, and checks its ceiling against `queue.dcache_miss_entries=16` from the standard configuration. Schema 29 adds a target-line release-ready window that bypasses unrelated C traffic, forces 16 valid stall cycles on one selected target transaction, and compares opcode, param, size, source, address, user metadata, echo, corrupt, and data throughout the stall. Schema 36 crosses every CMO operation and clean/dirty target state with one through eight accepted Probe sources while CBOAck is pending. Schema 37 crosses every successful atomic family/width with zero through eight auxiliary Probes, holding the target D response before writeback and applying C backpressure only after D is released so legal B backpressure is respected. Denied data responses also assert corrupt, while data-less Grant and CBOAck errors follow their operation-specific contracts. Concurrent multiple-CMO/source, replacement composition with Probe/CMO/atomic traffic, and malformed response modes remain planned |
-| PTW manager | PTE memory and response source/size match the programmed roots | Reference page tables and PTW agent share sparse memory. `denied` is fixed over a multibeat response and implies `corrupt` on data; independent `corrupt` can select all, first, or last data beats. Stage-appropriate fencing is required before a clean retry of a cached access-fault result. Schema 19 makes target address, five walk sites, direction, level, mode pair, and legal error beat independently constrainable, with exact manager accounting. Malformed response validation remains planned |
-| Uncache manager | Only modeled Get/Put requests receive AccessAck/Data | Ordered byte-level update plus an optional side-effecting device window are modeled. Denied data responses imply corrupt, a denied Put cannot update either backing-memory class, and corrupt on data-less `AccessAck` is rejected. Scalar size/address/mask/lane, response identity, legal denied/corrupt exception checks, PBMT=IO store request/retirement, read-clear behavior, error-response side-effect suppression, exact partial-write logging, same-class queued MMIO, and mixed load/store MMIO serialization are executable (`uncache-widths`, `uncache-errors`, `mmio-contracts`); CBO.ZERO is covered through the cacheable SBuffer path (`cbo-zero-contracts`), while malformed/duplicate/early/late responses remain planned |
+These are driver guarantees, not assumptions about an internal FSM. The
+StoreQueue TLB-miss property remains targeted historical mutation evidence and
+is secondary to architectural store/readback and progress checks.
 
-These are simulation driver guarantees, not assumptions about an internal FSM.
-Generated SVA checks ready-valid payload stability on DUT-produced channels.
-Every backpressure-enabled mixed seed records six observed manager effects:
-DCache request stall and response delay, PTW request stall and response delay,
-and uncache request stall and response delay. The verifier requires all six to
-be nonzero, so a manager cannot be accidentally left at always-ready while the
-campaign is reported as backpressure-tested.
-The StoreQueue TLB-miss property is retained as targeted historical mutation
-evidence; it is secondary to architectural store/readback and progress checks.
+With primary reset asserted, `pin-space` drives every other input bit through zero,
+all ones, and 254 deterministic mixed patterns, then checks readback and output
+sampling. This proves manifest completeness and wrapper connectivity only. It does
+not promote protocol-invalid combinations or any pin to semantic coverage; only
+typed drivers and independently checked observations can do that.
 
-## Complete Pin Audit
-
-The exact flattened inventory is `config/expected_ports.json`; its generated
-summary is `PORTS.md`, and the semantic mapping is `IO_COVERAGE.md`. With
-primary reset asserted, `pin-space` drives every other input bit to both values
-and applies 254 additional deterministic per-pin mixed patterns. It reads back
-every driven input and samples every output into a digest. Normal reset and
-clock operation cover the excluded clock/reset inputs.
-
-This proves manifest completeness, wrapper connectivity, and broad raw value
-space. It does not claim semantic coverage for protocol-invalid combinations.
-Semantic coverage comes only from the legal typed agents and oracles above.
 
 ## Known Boundary Gaps
 
 The current harness does not yet own a complete legal producer, independent
 reference model, or externally observable contract for the following. These
 are planned work items, not silently accepted coverage:
+
+The required independent calculation and observation contract for each gap is
+defined in [`ORACLES.md#planned-oracles-for-current-boundary-gaps`](ORACLES.md#planned-oracles-for-current-boundary-gaps).
+This section owns the plan status, closure conditions, and cross-document
+traceability.
 
 - cross-hart LR/SC reservation interference and atomic ordering with concurrent
   traffic (all operation encodings, the complete opcode-by-illegal-offset
@@ -588,6 +561,71 @@ These gaps are reported per historical commit in
 them. The historical `vector-guest-fault-split` mismatch is now fixed and is
 included in the repaired sentinel and boundary-hunt gates.
 
+## Independent Review and No-Progress Audits
+
+### Independent review gate
+
+A material change to an oracle decision rule, behavioral monitor, acceptance
+criterion, constrained-random distribution, coverage claim, or verification-plan
+contract requires a non-author, fresh-context review before the next
+closure-scale regression. Mechanical prose-only edits do not require a separate
+review unless they change one of those contracts.
+
+The reviewer starts from the actual diff and normative source sections, not the
+author's summary, and does not receive the author's proposed root cause or
+conclusion as a fixed decision. The review is read-only by default. Use one
+reviewer; add a second only when oracle correctness and stimulus/coverage validity
+are independent risks. If no independent context is available, record the work as
+`self-reviewed` and do not claim independence.
+
+The review packet must contain a stable `review_id` and trigger; base and reviewed
+revision or exact dirty-file snapshot; author/reviewer identities and context
+independence; affected contract and source-of-truth sections; intended behavior,
+fixed decisions, and non-goals; changed files and coverage claim; commands, result
+paths, replay evidence, and known gaps; and a bounded output request and stop
+conditions.
+
+The reviewer checks whether any IO group, legal transaction field, or interaction
+is unstimulated or incorrectly constrained; whether plan/`IO_COVERAGE.md` claims
+exceed implementation; whether an oracle depends on DUT timing, internal state, a
+historical value, or the implementation under test; whether profiles reach the
+claimed bins; whether realistic and corner/error traffic are both represented;
+whether representative historical mutations remain detectable; and whether the
+proposed regression adds useful state-space exploration rather than only runtime.
+
+Return severity-ordered findings with `file:line` or artifact evidence and a
+verdict of `pass`, `pass-with-gaps`, `fail`, or `blocked`. The primary agent must
+disposition every finding as accepted, rejected with rationale, or deferred with
+a tracked gap. Any change to reviewed decision logic requires review of the
+changed portion. Record the `review_id`, reviewed revision, scope, reviewer
+independence, findings, review finding dispositions, verdict, commands, and
+verification artifacts in `RESULTS.md`.
+
+### No-progress gate
+
+At each campaign checkpoint, record measurable progress. Valid progress is a newly
+exercised semantic bin with a real oracle, a stimulus dimension that reaches its
+intended distribution, a detectable historical mutation, a root-caused failure, a
+removed false positive/negative, or a material reproducibility or isolation
+improvement. Runtime, transaction count, and passing-seed count alone are not
+progress.
+
+If approximately 24 elapsed hours pass without recorded progress for the same
+revision and constraint profile, stop submitting new campaign work. Preserve the
+existing artifacts and finish an in-flight seed only when its evidence is needed;
+do not extend a campaign merely because it is already running.
+
+Before restarting closure-scale work, perform one bounded read-only historical
+review of three to five representative fixes or one coherent bug theme from
+`origin/kunminghu-v2`, using the status vocabulary in
+[`HISTORICAL_BUG_AUDIT.md`](HISTORICAL_BUG_AUDIT.md#scope-and-evidence-rules).
+Return a bounded set of candidate reproducers or constraint/coverage updates with
+evidence paths and explicit non-applicable boundary reasons; do not return an
+unrestricted history dump. The primary agent dispositions the proposal, then uses
+a separately scoped implementation or verification task. Run `check-rtl`, focused
+capabilities, and a short regression that reaches the new semantic points before
+launching another long campaign.
+
 ## Regression Acceptance
 
 Before a duration run:
@@ -602,8 +640,7 @@ Before a duration run:
    request/response/source-credit stalls, and at least 39 field checks per
    transaction.
 4. The executable, Verilated model, xspcomm, resolved system libraries, and RTL
-   metadata are frozen and their resolved paths are checked. Source and binary
-   hashes are intentionally not acceptance inputs.
+   metadata are frozen and their resolved paths and runtime layout are checked.
 
 The time-based breadth campaign runs at least 28,800 monotonic seconds (eight
 hours) with eight workers and the `random-mixed --constraints spec` scenario.
@@ -635,12 +672,12 @@ the exact VS-non-leaf GPA and first-active-element VA against the software
 oracle. On the historical clean RTL it must produce at least one mismatch;
 after the fix it must produce an all-pass campaign with the same oracle.
 
-An independent streaming verifier checks the result artifact, duration,
-scenario set, transaction counts, per-seed coverage, aggregate counts,
-continuous seeds, eight-worker configuration, and frozen-runtime layout. It
-does not use source, binary, or RTL hashes as acceptance gates. It also requires schema-2 completion state,
-a unique run id, finite timing values, strict scenario/seed/count terminal
-summaries, and per-seed submit/complete offsets spanning the requested duration.
+An independent streaming verifier checks the result artifact, duration, scenario
+set, transaction counts, per-seed coverage, aggregate counts, continuous seeds,
+eight-worker configuration, and frozen-runtime layout. It also requires schema-2
+completion state, a unique run id, finite timing values, strict
+scenario/seed/count terminal summaries, and per-seed submit/complete offsets
+spanning the requested duration.
 
 ## Failure Triage
 
@@ -652,14 +689,3 @@ summaries, and per-seed submit/complete offsets spanning the requested duration.
    state.
 5. If historical sensitivity matters, regenerate a separate revert RTL tree
    and require clean pass plus mutant fail under identical test sources.
-
-
-Schema 51 adds executable ordinary high-half canonical segment success traffic:
-Sv39/Sv48 x load/store x aligned/misaligned, with all enabled legal addressing,
-EEW/SEW/LMUL/EMUL/NF shapes eligible. Full-XLEN VA is independently walked by
-active byte, vector completion identity/data and uop conservation are checked,
-and stores require DUT readback. `vector-segment-canonical` runs a shared
-12-case subset of `vector-segment`, which crosses
-low/high canonical halves with aligned, cross-16-byte and cross-page accesses.
-Nested high-half segment composition, segment noncanonical faults and arbitrary
-partial-fault progress remain gaps.
