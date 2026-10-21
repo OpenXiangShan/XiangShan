@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from env.core.frontend_env import FrontendEnv
@@ -20,6 +22,63 @@ from env.support import PmpPmaConfig
 
 def _env() -> FrontendEnv:
     return FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+
+
+@pytest.mark.parametrize("pbmte", [0, 1])
+def test_per_page_pbmt_drives_page_table_and_permission_outcomes(pbmte) -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="mixed-page-pbmt",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        page_count=3,
+        payload=b"\x13\x00\x00\x00" * 3072,
+        s1_page_pbmt=(0, 1, 2),
+        ptw_machine_pbmte=pbmte,
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    assert [env.page_table.pte_map[(scenario.va >> 12) + i].pbmt for i in range(3)] == [0, 1, 2]
+    assert [item["stage1_pbmt"] for item in state.expected_page_outcomes] == [0, 1, 2]
+    assert [item["expected_path"] for item in state.expected_page_outcomes] == (
+        ["cacheable", "uncache", "uncache"] if pbmte else ["cacheable", "fault", "fault"]
+    )
+    for index in range(3):
+        response = env.page_table.build_ptw_resp((scenario.va >> 12) + index)
+        assert response["s1_pf"] == int(not pbmte and index > 0)
+
+    # The opt-in page attributes must not leak into a later uniform scenario.
+    uniform = replace(scenario, scenario_id="uniform-page-pbmt", s1_page_pbmt=(), s1_pte=TranslationPte(pbmt=0))
+    uniform_state = TranslationScenarioBuilder(env).build(uniform)
+    assert [item["stage1_pbmt"] for item in uniform_state.expected_page_outcomes] == [0, 0, 0]
+    assert [env.page_table.pte_map[(scenario.va >> 12) + i].pbmt for i in range(3)] == [0, 0, 0]
+
+
+@pytest.mark.parametrize("overrides, message", [
+    ({"s1_page_pbmt": (0, 1)}, "exactly one PBMT"),
+    ({"s1_page_pbmt": (0, 1, 3)}, "values must be"),
+    ({"s1_page_pbmt": (0, True, 2)}, "values must be"),
+    ({"mode": "bare", "pa": 0x8020_0000}, "requires non-bare"),
+    ({"s2xlate": 2}, "requires non-bare"),
+    ({"s1_pte": TranslationPte(level=1)}, "requires non-bare"),
+])
+def test_invalid_per_page_pbmt_is_rejected_before_page_table_changes(overrides, message) -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="invalid-page-pbmt",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        page_count=3,
+        payload=b"\x13\x00\x00\x00",
+        s1_page_pbmt=(0, 1, 2),
+    )
+    before = dict(env.page_table.pte_map)
+
+    with pytest.raises(ValueError, match=message):
+        TranslationScenarioBuilder(env).build(replace(scenario, **overrides))
+
+    assert env.page_table.pte_map == before
 
 
 def _ptw_request(vpn: int, *, s2xlate: int = 0, get_gpa: int = 0) -> PTWRequestSnapshot:

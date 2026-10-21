@@ -150,6 +150,8 @@ class TranslationScenario:
     permission_probes: Tuple[TranslationPermissionProbe, ...] = ()
     expected_path: Literal["cacheable", "uncache", "fault"] = "cacheable"
     expected_result: Literal["hit", "miss_refill", "page_fault", "access_fault", "guest_fault", "normal"] = "normal"
+    # Appended to preserve existing positional callers. Empty means uniform.
+    s1_page_pbmt: Tuple[int, ...] = ()
 
     def program_image(self) -> ProgramImage:
         return ProgramImage(payload=bytes(self.payload), base_addr=int(self.pa))
@@ -516,6 +518,13 @@ class TranslationScenarioBuilder:
             _S2XLATE_ALL_STAGE,
         }:
             raise ValueError(f"unsupported s2xlate value: {scenario.s2xlate}")
+        if scenario.s1_page_pbmt:
+            if len(scenario.s1_page_pbmt) != int(scenario.page_count):
+                raise ValueError("s1_page_pbmt must declare exactly one PBMT per page")
+            if stage1_mode == "bare" or s2xlate == _S2XLATE_ONLY_STAGE2 or int(scenario.s1_pte.level) != 0:
+                raise ValueError("s1_page_pbmt requires non-bare level-0 stage-1 translation")
+            if any(type(pbmt) is not int or pbmt not in {0, 1, 2} for pbmt in scenario.s1_page_pbmt):
+                raise ValueError("s1_page_pbmt values must be PBMT.PMA, NC, or IO")
         if int(scenario.ptw_response_latency) < 0:
             raise ValueError("PTW response latency must be non-negative")
         if scenario.ptw_response_latency_max is not None and int(scenario.ptw_response_latency_max) < int(scenario.ptw_response_latency):
@@ -642,10 +651,17 @@ class TranslationScenarioBuilder:
         for page in range(int(scenario.page_count)):
             if ((int(scenario.va) >> 12) + page) in skipped:
                 continue
+            page_pbmt = (
+                int(scenario.s1_page_pbmt[page])
+                if scenario.s1_page_pbmt
+                else int(pte_kwargs["pbmt"])
+            )
+            page_kwargs = dict(pte_kwargs)
+            page_kwargs["pbmt"] = page_pbmt
             env.page_table.map_page(
                 (int(scenario.va) >> 12) + page,
                 (int(target) >> 12) + page,
-                **pte_kwargs,
+                **page_kwargs,
             )
 
     @staticmethod
