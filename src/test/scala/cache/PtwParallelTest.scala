@@ -47,13 +47,17 @@ class PtwParallelHarness(implicit p: Parameters) extends LazyModule {
         val id = UInt(bus.d.bits.source.getWidth.W)
       }))
       val flush = Input(Bool())
+      val rootPpn = Input(UInt(44.W))
+      val asid = Input(UInt(16.W))
+      val satpChanged = Input(Bool())
       val csrWrite = Flipped(new DistributedCSRIO)
     })
     walker.module.io.hartId := 0.U
     walker.module.io.csr.tlb := 0.U.asTypeOf(walker.module.io.csr.tlb)
     walker.module.io.csr.tlb.satp.mode := 8.U
-    walker.module.io.csr.tlb.satp.asid := 1.U
-    walker.module.io.csr.tlb.satp.ppn := "h80000".U
+    walker.module.io.csr.tlb.satp.asid := io.asid
+    walker.module.io.csr.tlb.satp.ppn := io.rootPpn
+    walker.module.io.csr.tlb.satp.changed := io.satpChanged
     walker.module.io.csr.distribute_csr <> io.csrWrite
     walker.module.io.sfence := 0.U.asTypeOf(walker.module.io.sfence)
     walker.module.io.sfence.valid := io.flush
@@ -119,6 +123,9 @@ object PtwParallelTest extends App with ChiselSim {
     dut.io.memResponse.bits.data.poke(0.U)
     dut.io.memResponse.bits.id.poke(0.U)
     dut.io.flush.poke(false.B)
+    dut.io.rootPpn.poke("h80000".U)
+    dut.io.asid.poke(1.U)
+    dut.io.satpChanged.poke(false.B)
     dut.io.csrWrite.w.valid.poke(false.B)
     dut.io.csrWrite.w.bits.addr.poke(0.U)
     dut.io.csrWrite.w.bits.data.poke(0.U)
@@ -237,6 +244,27 @@ object PtwParallelTest extends App with ChiselSim {
     reply(nextGet(), pte(0x100000)); expect(0x49000, 0x100000, 1)
     tick(20)
     assert(gets.isEmpty && responses.isEmpty)
-    println("PTW_PARALLEL_PASS: overlap, reordering, same-page queue, backpressure, nonleaf/4KiB, PF, PMP/AF, SFENCE late returns")
+
+    // Switch to a fresh ASID: SATP writes alone need not invalidate PTC entries.
+    // Both in-flight lanes must flush independently of SFENCE and drop late PTEs.
+    send(0x4c000); val oldRootA = nextGet()
+    send(0x4d000); val oldRootB = nextGet()
+    assert(oldRootA.id != oldRootB.id)
+    dut.io.rootPpn.poke("h80002".U)
+    dut.io.asid.poke(2.U)
+    dut.io.satpChanged.poke(true.B); tick()
+    dut.io.satpChanged.poke(false.B); tick(8)
+    responses.clear()
+    send(0x4e000); tick(12)
+    assert(gets.isEmpty, "memory ID reused before the pre-SATP return")
+    reply(oldRootB, pte(0xf0000)); reply(oldRootA, pte(0xf0000)); tick(8)
+    assert(responses.isEmpty, s"stale response after SATP change: $responses")
+    val changedRoot = nextGet()
+    assert(changedRoot.address == BigInt("80002000", 16), changedRoot.toString)
+    reply(changedRoot, pte(0x80003, 1))
+    reply(nextGet(), pte(0x140000)); expect(0x4e000, 0x140000, 1)
+    tick(20)
+    assert(gets.isEmpty && responses.isEmpty)
+    println("PTW_PARALLEL_PASS: overlap, reordering, same-page queue, backpressure, nonleaf/4KiB, PF, PMP/AF, SFENCE/SATP late returns")
   }
 }
