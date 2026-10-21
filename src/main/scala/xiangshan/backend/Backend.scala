@@ -623,8 +623,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.intIssue.flatten.map(deq =>
     deq.fire && deq.bits.robIdx === ctrlBlock.io.robio.robDeqPtr
   ).reduce(_ || _)
-  ctrlBlock.io.robio.topdownIQInfoVec.foreach(x => x := 0.U.asTypeOf(x))
-  // (_ := intRegion.io.topdownIQInfoVec.get ++ fpRegion.io.topdownIQInfoVec.get)
+  ctrlBlock.io.robio.topdownIQInfoVec.foreach { iqInfo =>
+    val source = intRegion.io.topdownIQInfoVec.get ++ fpRegion.out.topdownIQInfoVec.get
+    require(iqInfo.size == source.size, s"ROB TopDown IQ entries: ${iqInfo.size}, Int + FP entries: ${source.size}")
+    iqInfo := source
+  }
 
   // mem io
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq

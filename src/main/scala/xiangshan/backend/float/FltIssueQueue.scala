@@ -8,7 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.{PerfCCT, SelectOne, XSPerfAccumulate}
 import utils.NamedUInt
 import xiangshan._
-import xiangshan.backend.Bundles.{DispatchOutUop, IssueQueueInDebug, RegionInUop, UopIdx}
+import xiangshan.backend.Bundles.{DispatchOutUop, IQCancelSource, IssueQueueInDebug, RegionInUop, TopdownIQInfo, UopIdx}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
@@ -21,7 +21,8 @@ import xiangshan.backend.float.FltIssueQueue._
 import xiangshan.backend.vector.IssueParam
 import xiangshan.backend.vector.ExuParam
 import xiangshan.backend.vector.VecRegionModule
-import xiangshan.backend.vector.VecIssueQueue.{Entry, Enq, Deq, Status, SrcStatus, BypassDelay, RespBundle, WakeUpBundle}
+import xiangshan.backend.vector.VecIssueQueue
+import xiangshan.backend.vector.VecIssueQueue.{Enq, Deq, Status, SrcStatus, BypassDelay, RespBundle, WakeUpBundle}
 import xiangshan.mem.SqPtr
 import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 
@@ -213,14 +214,27 @@ class FltIssueQueue(
   private val fastEntryCancel = Wire(Vec(param.numFastEntry, Bool()))
   private val entryCancel: Seq[Bool] = enqEntryCancel ++ fastEntryCancel
   private val fltExuWBPort = param.backendParams.getFltRegionParam.issueParams.map(_.fpWbPortIds.head)
-  private val entriesKeepNext = enqEntriesKeepNext ++ fastEntriesKeepNext
+  private val entryCancelSourceNext = Option.when(backendParams.debugEn)(Wire(Vec(param.numEntry, IQCancelSource())))
   for (((cancel, entry, srcCancel), entryIdx) <- entryCancel.lazyZip(entries).lazyZip(entrySrcCancel).zipWithIndex) {
-    cancel := Mux1H(Seq(
-      in.resps.is0(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U),
-      in.resps.is1(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 1.U),
-      in.resps.ex0(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 2.U),
-      in.resps.ex1(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 3.U),
-      )) || entryFmaM4Cancel(entryIdx) || entryLoadM4NoM2Cancel(entryIdx) || entryLoadM4Cancel(entryIdx)
+    val status = entry.bits.status
+    val deqPortIdx = status.deqPortIdx
+    val issueFail = Seq(in.resps.is0(deqPortIdx), in.resps.is1(deqPortIdx),
+      in.resps.ex0(deqPortIdx), in.resps.ex1(deqPortIdx)).zipWithIndex.map { case (resp, timer) =>
+      status.issued && status.issuedTimer === timer.U && resp.fail
+    }
+    cancel := issueFail.reduce(_ || _) || entryFmaM4Cancel(entryIdx) ||
+      entryLoadM4NoM2Cancel(entryIdx) || entryLoadM4Cancel(entryIdx)
+    entry.bits.debugLastIssueCancelSource.foreach { _ =>
+      val pipeCancelSource = Mux1H(issueFail.zip(Seq(in.resps.is0(deqPortIdx), in.resps.is1(deqPortIdx),
+        in.resps.ex0(deqPortIdx), in.resps.ex1(deqPortIdx))).map { case (fail, resp) =>
+        fail -> resp.debugCancelSource.get
+      })
+      val loadCancel = entryLoadM4NoM2Cancel(entryIdx) || entryLoadM4Cancel(entryIdx)
+      val cancelSource = Mux(loadCancel, IQCancelSource.ld,
+        Mux(issueFail.reduce(_ || _), pipeCancelSource, IQCancelSource.og0))
+      entryCancelSourceNext.get(entryIdx) :=
+        Mux(entry.valid && status.issued && cancel, cancelSource, entry.bits.debugLastIssueCancelSource.get)
+    }
     srcCancel.zipWithIndex.map { case (srccancel, srcidx) =>
       val issuedSrcCancel =
         in.resps.is0(entry.bits.status.deqPortIdx).srcCancel(srcidx) && entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U ||
@@ -281,6 +295,7 @@ class FltIssueQueue(
     enq.valid := inEnq.valid
     enq.bits.payload.fromEnq(inEnqBits)
     enq.bits.status.fromEnq(inEnqBits)
+    enq.bits.debugLastIssueCancelSource.foreach(_ := IQCancelSource.none)
   }
 
   // NewAgeDetector can be used here, because the 2nd port has uop only if the 1st port has uop.
@@ -367,6 +382,7 @@ class FltIssueQueue(
   for (((etyKeepNext: ValidIO[Entry], ety: ValidIO[Entry]), enqIdx) <- (enqEntriesKeepNext lazyZip enqEntries).zipWithIndex) {
     // Connect all bundles by default
     etyKeepNext := ety
+    etyKeepNext.bits.debugLastIssueCancelSource.foreach(_ := entryCancelSourceNext.get(enqIdx))
     // Invalid the entry if it is issued successfully or is flushed
     etyKeepNext.valid := ety.valid && !enqEntrySuccess(enqIdx) && !enqEntryFlush(enqIdx) && !fastEntryEmptySel(enqIdx).valid
     // Change the connection of status
@@ -418,6 +434,7 @@ class FltIssueQueue(
   for (((etyKeepNext: ValidIO[Entry], ety: ValidIO[Entry]), fastIdx) <- (fastEntriesKeepNext lazyZip fastEntries).zipWithIndex) {
     // Connect all bundles by default
     etyKeepNext := ety
+    etyKeepNext.bits.debugLastIssueCancelSource.foreach(_ := entryCancelSourceNext.get(enqEntries.size + fastIdx))
     // Invalid the entry if it is issued successfully
     etyKeepNext.valid := ety.valid && !fastEntrySuccess(fastIdx) && !fastEntryFlush(fastIdx)
     // Change the connection of status
@@ -535,6 +552,17 @@ class FltIssueQueue(
   out.canAccept := PopCount(fastEntries.map(!_.valid)) >= 2.U
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
+  out.debugEnqHasIssued.foreach(_ := enqEntries.map(e => e.valid && e.bits.status.issued).reduce(_ && _))
+  out.topdownIQInfoVec.foreach { infoVec =>
+    infoVec.zip(entries).foreach { case (info, entry) =>
+      info.valid := entry.valid
+      info.bits.robIdx := entry.bits.status.robIdx
+      info.bits.fuType := entry.bits.status.fuType
+      info.bits.srcReady := entry.bits.status.srcReady
+      info.bits.issued := entry.bits.status.issued
+      info.bits.cancelSource := entry.bits.debugLastIssueCancelSource.get
+    }
+  }
 
   private def handleSrcWakeUp(
     isKeep: Boolean,
@@ -745,6 +773,10 @@ object FltIssueQueue {
   val IntCrossRegionVecCycle = 1
   val FpCrossRegionVecCycle = 1
 
+  class Entry(implicit p: Parameters, param: IssueParam) extends VecIssueQueue.Entry {
+    val debugLastIssueCancelSource = Option.when(param.backendParams.debugEn)(IQCancelSource())
+  }
+
   class WbFuBusyTableReadBundle(implicit p: Parameters, param: IssueParam) extends XSBundle {
     private val intWbPortIds = param.intWbPortIds
     private val fpWbPortIds = param.fpWbPortIds
@@ -810,6 +842,8 @@ object FltIssueQueue {
     val canAccept: Bool = Bool()
 
     val validNum: UInt = UInt(log2Ceil(param.numEntry + 1).W)
+    val debugEnqHasIssued = Option.when(backendParams.debugEn)(Bool())
+    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Vec(param.numEntry, ValidIO(new TopdownIQInfo())))
   }
 
   def connectWbFuBusyTableIn(
@@ -879,6 +913,7 @@ object FltIssueQueue {
     val fail = Bool()
     val success = Bool()
     val srcCancel = Vec(param.numRegSrc, Bool())
+    val debugCancelSource = Option.when(backendParams.debugEn)(IQCancelSource())
   }
 
   class InResp(implicit p: Parameters, param: IssueParam) extends XSBundle {

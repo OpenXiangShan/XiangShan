@@ -531,24 +531,20 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   private val deqValidCount = PopCount(io.out.map(_.valid))
   private val deqWasteCount = DecodeWidth.U - deqValidCount
-  private val matchBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
-    topdownStages.last.reasons.reverse
+  private val matchBubble = Mux(
+    topdownStages.last.reasons.asUInt.orR,
+    (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdownStages.last.reasons.reverse),
+    Mux(
+      deqWasteCount === DecodeWidth.U,
+      TopDownCounters.FrontendOtherCoreStall.id.U,
+      TopDownCounters.FetchFragBubble.id.U
+    )
   )
 
   io.stallReason.reason.foreach(_ := 0.U)
   for (i <- 0 until DecodeWidth) {
     when(i.U < deqWasteCount) {
       io.stallReason.reason(DecodeWidth - i - 1) := matchBubble
-    }
-  }
-
-  when(!(deqWasteCount === DecodeWidth.U || topdownStages.last.reasons.asUInt.orR)) {
-    // should set reason for FetchFragmentationStall
-    // topdownStage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
-    for (i <- 0 until DecodeWidth) {
-      when(i.U < deqWasteCount) {
-        io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
-      }
     }
   }
 

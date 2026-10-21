@@ -2185,7 +2185,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         robEntries(i).topdownCancelTimeVec.foreach(_.zipWithIndex.foreach{ case (cancelTime, index) =>
           val cancelMatch = topdownCancelSrcUpdate === index.asUInt
           cancelTime := Mux(hasWriteBack, 0.U,
-            Mux(topdownCanceled && cancelMatch, robEntries(i).topdownCancelTimeVec.get(index) + robEntries(i).topdownLastIssueTime.get,
+            Mux(topdownCanceled && cancelMatch, robEntries(i).topdownCancelTimeVec.get(index) + robEntries(i).topdownLastIssueTime.get + 1.U,
               robEntries(i).topdownCancelTimeVec.get(index) +& (cancelMatch & topdownCancelTimeUpdate)))
         })
       }
@@ -2228,7 +2228,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val cancelTimeVec = deqEntry.topdownCancelTimeVec.get
       val cancelTimeFixVec = deqEntry.topdownCancelTimeFixVec.get
       val fixedCancelTimeVec = cancelTimeVec.zip(cancelTimeFixVec).map{ case (time, fix) =>
-        Mux(time < fix, 0.U, time - fix)
+        Mux(time < fix, 0.U, Mux((time === fix) && time.orR, 1.U, time - fix))
       }
       val maxCancelTime = fixedCancelTimeVec.reduce{ (a,b) => Mux(a > b, a, b)}
       val maxCancelTimeVec = VecInit(fixedCancelTimeVec.map(_ === maxCancelTime)).asUInt
