@@ -269,16 +269,22 @@ class MainBtbAlignBank(
   private val t1_vbtbPredHit      = t1_vbtbMeta.hit(t1_mispredictInfo.bits)
   private val t1_vbtbTrainInPlace = t1_vbtbHit && t1_vbtbPredHit
 
-  // Write entry only when there's a mispredict, and if:
-  private val t1_entryNeedWrite = t1_needWrite && !t1_vbtbTrainInPlace && t1_mispredictInfo.valid && (
-    // 1. not hit, always write a new entry, use mbtb replacer's victim way.
-    !t1_hit ||
-      // 2. hit, do write only if:
-      //   a. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table).
-      t1_mispredictInfo.bits.attribute.needIttage ||
-      //   b. attribute changed, probably indicating a software self-modification.
-      t1_mispredictInfo.bits.attribute =/= Mux1H(t1_hitMask, t1_meta.map(_.attribute))
-  )
+  // A not-taken conditional resolve carries the sequential next PC, not the
+  // branch target. Train its counters without rewriting the entry payload.
+  // Keep non-conditional updates enabled so IFU can invalidate false BTB hits
+  // with attribute=None and taken=false.
+  private val t1_canWriteEntry = !t1_mispredictInfo.bits.attribute.isConditional || t1_mispredictInfo.bits.taken
+
+  private val t1_entryNeedWrite = t1_needWrite && !t1_vbtbTrainInPlace &&
+    t1_mispredictInfo.valid && t1_canWriteEntry && (
+      // 1. not hit, always write a new entry, use mbtb replacer's victim way.
+      !t1_hit ||
+        // 2. hit, do write only if:
+        //   a. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table).
+        t1_mispredictInfo.bits.attribute.needIttage ||
+        //   b. attribute changed, probably indicating a software self-modification.
+        t1_mispredictInfo.bits.attribute =/= Mux1H(t1_hitMask, t1_meta.map(_.attribute))
+    )
   // Use hit wayMask if hit, else use replacer's victim way
   private val t1_entryWayMask = Mux(t1_hit, t1_hitMask, t1_victimMask)
 
@@ -301,10 +307,11 @@ class MainBtbAlignBank(
   }
 
   // Repair the VBTB payload only when the branch is being trained in place.
-  private val t1_vbtbEntryNeedUpdate = t1_needWrite && t1_vbtbTrainInPlace && t1_mispredictInfo.valid && (
-    t1_mispredictInfo.bits.attribute.needIttage ||
-      !(t1_mispredictInfo.bits.attribute === Mux1H(t1_vbtbHitMask, vbtbEntries.map(_.entry.attribute)))
-  )
+  private val t1_vbtbEntryNeedUpdate = t1_needWrite && t1_vbtbTrainInPlace &&
+    t1_mispredictInfo.valid && t1_canWriteEntry && (
+      t1_mispredictInfo.bits.attribute.needIttage ||
+        !(t1_mispredictInfo.bits.attribute === Mux1H(t1_vbtbHitMask, vbtbEntries.map(_.entry.attribute)))
+    )
 
   /* *** update counter *** */
   private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
