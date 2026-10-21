@@ -38,7 +38,7 @@ trait HasIBufferParameters extends HasFrontendParameters {
   def ReadBankSize:  Int = Size / NumReadBank
   def WriteBankSize: Int = Size / NumWriteBank
 
-  def MaxBypassNum: Int = DecodeWidth + NumWriteBank
+  def MaxNormalBypassNum: Int = DecodeWidth + NumWriteBank
 
   // IBufferEnqueueWidth inherited from HasFrontendParameters
   def EnqueueWidth: Int = IBufferEnqueueWidth

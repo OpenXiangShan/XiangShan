@@ -197,39 +197,61 @@ class InstrCompactBundle(width: Int)(implicit p: Parameters) extends IfuBundle {
 }
 
 class FastFetchInfo(implicit p: Parameters) extends IfuBundle {
-  val instrCount: UInt = UInt(log2Ceil(FastFetchWidth + 1).W)
-  val realInstrValid: UInt = UInt(FastFetchWidth.W)
-  val rawInstrValid: Vec[Bool] = Vec(FastFetchWidth, Bool())
-  val rawIsRvc:      Vec[Bool] = Vec(FastFetchWidth, Bool())
-  val rawIsRvI:      Vec[Bool] = Vec(FastFetchWidth, Bool())
-  val rawIsPredTaken: Vec[Bool] = Vec(FastFetchWidth, Bool())
-  val rawInst:       Vec[UInt] = Vec(FastFetchWidth, UInt(32.W))
-  val rawPc:         Vec[GuardedPc] = Vec(FastFetchWidth, new GuardedPc)
-  val rawFoldedPC:   Vec[UInt] = Vec(FastFetchWidth, UInt(MemPredPCWidth.W))
-  val validMaskOH:   Vec[UInt] = Vec(FastFetchWidth, UInt(FastFetchWidth.W))
-  val endMaskOH:     Vec[UInt] = Vec(FastFetchWidth, UInt(FastFetchWidth.W))
-  val rawIsLastInFtqEntry: Vec[Bool] = Vec(FastFetchWidth, Bool())
-  val ftqPtr: FtqPtr = new FtqPtr
+  val instrCount:          UInt           = UInt(log2Ceil(FastFetchWidth + 1).W)
+  val realInstrValid:      UInt           = UInt(FastFetchWidth.W)
+  val rawInstrValid:       Vec[Bool]      = Vec(FastFetchWidth, Bool())
+  val rawIsRvc:            Vec[Bool]      = Vec(FastFetchWidth, Bool())
+  val rawIsRvI:            Vec[Bool]      = Vec(FastFetchWidth, Bool())
+  val rawIsPredTaken:      Vec[Bool]      = Vec(FastFetchWidth, Bool())
+  val rawInst:             Vec[UInt]      = Vec(FastFetchWidth, UInt(32.W))
+  val rawPc:               Vec[GuardedPc] = Vec(FastFetchWidth, new GuardedPc)
+  val rawFoldedPC:         Vec[UInt]      = Vec(FastFetchWidth, UInt(MemPredPCWidth.W))
+  val validMaskOH:         Vec[UInt]      = Vec(FastFetchWidth, UInt(FastFetchWidth.W))
+  val endMaskOH:           Vec[UInt]      = Vec(FastFetchWidth, UInt(FastFetchWidth.W))
+  val rawIsLastInFtqEntry: Vec[Bool]      = Vec(FastFetchWidth, Bool())
+  val ftqPtr:              FtqPtr         = new FtqPtr
 }
 
 class FastFetchEntry(implicit p: Parameters) extends IfuBundle {
-  val valid:              Bool          = Bool()
-  val inst:               UInt          = UInt(32.W)
-  val pc:                 Pc            = Pc()
-  val foldpc:             UInt          = UInt(MemPredPCWidth.W)
-  val isRvc:              Bool          = Bool()
-  val predTaken:          Bool          = Bool()
-  val ftqPtr:             FtqPtr        = new FtqPtr
-  val exceptionType:      ExceptionType = new ExceptionType
-  val exceptionCrossPage: Bool          = Bool()
-  val isBackendException: Bool          = Bool()
-  val hasSatpFlush:       Bool          = Bool()
-  val triggered:          UInt          = TriggerAction()
-  val isLastInFtqEntry:   Bool          = Bool()
-  val instrEndOffset:     UInt          = UInt(FetchBlockInstOffsetWidth.W)
-  val debug_seqNum:       InstSeqNum    = InstSeqNum()
+  val valid:            Bool          = Bool()
+  val inst:             UInt          = UInt(32.W)
+  val pc:               Pc            = Pc()
+  val foldpc:           UInt          = UInt(MemPredPCWidth.W)
+  val isRvc:            Bool          = Bool()
+  val predTaken:        Bool          = Bool()
+  val ftqPtr:           FtqPtr        = new FtqPtr
+  val exceptionType:    ExceptionType = new ExceptionType
+  val triggered:        UInt          = TriggerAction()
+  val isLastInFtqEntry: Bool          = Bool()
+  val instrEndOffset:   UInt          = UInt(FetchBlockInstOffsetWidth.W)
+  val debug_seqNum:     InstSeqNum    = InstSeqNum()
 }
 
 class FastFetchBundle(implicit p: Parameters) extends IfuBundle {
   val entries: Vec[FastFetchEntry] = Vec(FastFetchWidth, new FastFetchEntry)
+}
+
+class NormalFetchBundle(implicit p: Parameters) extends IfuBundle {
+  val instrs:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(32.W))
+  val valid:          UInt                = UInt(IBufferEnqueueWidth.W)
+  val enqEnable:      UInt                = UInt(IBufferEnqueueWidth.W)
+  val isRvc:          Vec[Bool]           = Vec(IBufferEnqueueWidth, Bool())
+  val foldpc:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(MemPredPCWidth.W))
+  val instrEndOffset: Vec[InstrEndOffset] = Vec(IBufferEnqueueWidth, new InstrEndOffset)
+
+  val exceptionType:      ExceptionType = new ExceptionType
+  val isBackendException: Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
+  val exceptionCrossPage: Bool          = Bool()
+  val exceptionMask:      UInt          = UInt(IBufferEnqueueWidth.W)
+
+  val triggered:        Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
+  val isLastInFtqEntry: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
+
+  val pc:             Vec[Pc]               = Vec(IBufferEnqueueWidth, Pc())
+  val prevIBufEnqPtr: IBufPtr               = new IBufPtr
+  val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
+  val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
+  val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
+  val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 }
