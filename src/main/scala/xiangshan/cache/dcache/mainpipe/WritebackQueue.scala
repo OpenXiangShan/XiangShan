@@ -380,8 +380,9 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
   }
 
   if (nCCHIChannels >= 2) {
+    val rxrspMatched = (0 until nCCHIChannels).map(ch => rxrspMatches.map(_(ch)).reduce(_ || _))
     XSPerfAccumulate("dual_channel_release", io.txevt(0).valid && io.txevt(1).valid)
-    XSPerfAccumulate("dual_channel_releaseAck", io.rxrsp(0).valid && io.rxrsp(1).valid)
+    XSPerfAccumulate("dual_channel_releaseAck", rxrspMatched(0) && rxrspMatched(1))
   }
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))

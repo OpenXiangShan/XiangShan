@@ -364,7 +364,7 @@ class CMOUnit(implicit p: Parameters) extends DCacheModule {
     cchiDcacheSrcId(io.channel_sel)
   )
 
-  io.rxrsp.ready := state === s_wresp
+  io.rxrsp.ready := true.B
   io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
 
   io.resp_to_lsq.valid := state === s_lsq_resp
@@ -1654,7 +1654,7 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
     io.rxrsp(ch).bits.TxnID === cmoTxnId.U
   }
   for (ch <- 0 until nCCHIChannels) {
-    io.rxrsp(ch).ready := Mux(rxrspIsCompCMO(ch), cmo_unit.io.rxrsp.ready, true.B)
+    io.rxrsp(ch).ready := true.B
   }
 
   val nMaxPrefetchEntry = Constantin.createRecord(s"nMaxPrefetchEntry${p(XSCoreParamsKey).HartId}", initValue = cfg.nMissEntries - 2)
@@ -1687,7 +1687,8 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
           e.io.rxdat <> io.rxdat(ch)
         }
         when (io.rxrsp(ch).valid && io.rxrsp(ch).bits.TxnID === i.U) {
-          e.io.rxrsp <> io.rxrsp(ch)
+          e.io.rxrsp.valid := io.rxrsp(ch).valid
+          e.io.rxrsp.bits := io.rxrsp(ch).bits
         }
       }
 
@@ -1743,7 +1744,8 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
   cmo_unit.io.rxrsp.bits := DontCare
   for (ch <- 0 until nCCHIChannels) {
     when (rxrspIsCompCMO(ch)) {
-      cmo_unit.io.rxrsp <> io.rxrsp(ch)
+      cmo_unit.io.rxrsp.valid := io.rxrsp(ch).valid
+      cmo_unit.io.rxrsp.bits := io.rxrsp(ch).bits
     }
   }
   io.wfi.wfiSafe := (Seq(cmo_unit.io.wfi.wfiSafe) ++ entries.map(_.io.wfi.wfiSafe)).reduce(_&&_)

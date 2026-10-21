@@ -1366,9 +1366,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   for (ch <- 0 until nCCHIChannels) {
-    val compDataWakeup = io.cchi(ch).dnDAT.valid &&
-      CCHIOpcode.CompData.is(io.cchi(ch).dnDAT.bits.Opcode, io.cchi(ch).dnDAT.valid) &&
-      io.cchi(ch).dnDAT.bits.TxnID < cfg.nMissEntries.U
+    val compDataWakeup = io.cchi(ch).dnDAT.valid
     loadWakeups(ch).valid := compDataWakeup
     loadWakeups(ch).bits.mshrId := io.cchi(ch).dnDAT.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
   }
@@ -1573,27 +1571,24 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     missQueue.io.rxdat(ch) <> io.cchi(ch).dnDAT
 
     val rxrsp = io.cchi(ch).dnRSP
+    // These signals are only for assertion
     val rxrspTxnId = rxrsp.bits.TxnID
     val rxrspIsCompCMO = rxrsp.valid && CCHIOpcode.CompCMO.is(rxrsp.bits.Opcode, rxrsp.valid)
-    val rxrspIsMqComp = rxrsp.valid && rxrspTxnId < cfg.nMissEntries.U &&
-      CCHIOpcode.Comp.is(rxrsp.bits.Opcode, rxrsp.valid)
+    val rxrspIsMqComp = rxrsp.valid && rxrspTxnId < cfg.nMissEntries.U && CCHIOpcode.Comp.is(rxrsp.bits.Opcode, rxrsp.valid)
     val rxrspIsWbq = rxrsp.valid && rxrspTxnId >= wbTxnIdBase
     val rxrspIsWbqComp = rxrspIsWbq && CCHIOpcode.Comp.is(rxrsp.bits.Opcode, rxrsp.valid)
-    val rxrspIsWbqDbid = rxrspIsWbq && (
-      CCHIOpcode.DBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid) ||
-      CCHIOpcode.CompDBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid))
+    val rxrspIsWbqDbid = rxrspIsWbq && (CCHIOpcode.DBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid) || CCHIOpcode.CompDBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid))
     val rxrspToMq = rxrspIsCompCMO || rxrspIsMqComp
     val rxrspToWb = rxrspIsWbqComp || rxrspIsWbqDbid
     assert(!rxrsp.valid || rxrspToMq || rxrspToWb, "DnRSP must route to MQ or WBQ")
     assert(!(rxrspIsCompCMO && rxrspTxnId =/= cmoTxnId.U), "CompCMO TxnID must match CMO slot")
     assert(!(rxrspIsWbq && rxrspTxnId >= wbTxnIdEnd), "WBQ TxnID must be within range")
 
-    missQueue.io.rxrsp(ch).valid := rxrsp.valid && rxrspToMq
+    missQueue.io.rxrsp(ch).valid := rxrsp.valid
     missQueue.io.rxrsp(ch).bits := rxrsp.bits
-    wb.io.rxrsp(ch).valid := rxrsp.valid && rxrspToWb
+    wb.io.rxrsp(ch).valid := rxrsp.valid
     wb.io.rxrsp(ch).bits := rxrsp.bits
-    rxrsp.ready := Mux(rxrspToMq, missQueue.io.rxrsp(ch).ready,
-      Mux(rxrspToWb, wb.io.rxrsp(ch).ready, true.B))
+    rxrsp.ready := true.B
   }
 
   val snp = rxsnpArb.io.out.bits
