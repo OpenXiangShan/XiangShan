@@ -1736,30 +1736,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.mshrFull := missQueue.io.full
   io.l1Miss := missQueue.io.l1Miss
 
-  // performance counter
-  // val ld_access = Wire(Vec(LoadPipelineWidth, missQueue.io.debug_early_replace.last.cloneType))
-  // val st_access = Wire(ld_access.last.cloneType)
-  // ld_access.zip(ldu).foreach {
-  //   case (a, u) =>
-  //     a.valid := RegNext(u.io.lsu.req.fire) && !u.io.lsu.s1_kill
-  //     a.bits.idx := RegEnable(get_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)
-  //     a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
-  // }
-  // st_access.valid := RegNext(mainPipe.io.store_req.fire)
-  // st_access.bits.idx := RegEnable(get_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)
-  // st_access.bits.tag := RegEnable(get_tag(mainPipe.io.store_req.bits.addr), mainPipe.io.store_req.fire)
-  // val access_info = ld_access.toSeq ++ Seq(st_access)
-  // val early_replace = RegNext(missQueue.io.debug_early_replace) // TODO: clock gate
-  // val access_early_replace = access_info.map {
-  //   case acc =>
-  //     Cat(early_replace.map {
-  //       case r =>
-  //         acc.valid && r.valid &&
-  //           acc.bits.tag === r.bits.tag &&
-  //           acc.bits.idx === r.bits.idx
-  //     })
-  // }
-  // XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
   // ========== Multi-channel hint/grant perf counters ==========
   for (ch <- 0 until nCCHIChannels) {
     val chSuffix = s"_$ch"
