@@ -101,7 +101,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   })
 }
 
-class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
+class PTW(parallel: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PTWIO)
   val sfence = io.sfence
   val mem = io.mem
@@ -317,7 +317,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
   mem.req.valid := s_mem_req === false.B && !mem.mask && !accessFaultMpt && s_pmp_check
   mem.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
-  mem.req.bits.id := FsmReqID.U(bMemID.W)
+  mem.req.bits.id := (if (parallel) ParallelFsmReqID else FsmReqID).U(bMemID.W)
   mem.req.bits.hptw_bypassed := false.B
 
   io.refill.req_info.s2xlate := req_s2xlate
