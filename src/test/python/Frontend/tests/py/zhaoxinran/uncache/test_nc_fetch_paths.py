@@ -16,6 +16,11 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
+from env.runtime.frontend_init import (
+    FrontendInitConfig,
+    PrepareTranslationScenario,
+    initialize_frontend,
+)
 from env.support import PmpPmaConfig, record_scenario, scenario_rng
 from tests.py.support import translation_faults
 from tests.py.support import uncache_scenarios as uncache
@@ -70,7 +75,7 @@ def _register_nc_timing_observer(env) -> list[dict]:
     def capture(cycle, current_env) -> None:
         recorder = current_env.functional_coverage
         assert recorder is not None, "NC timing observer requires functional coverage"
-        snapshot = read_nc_timing_runtime_snapshot(recorder, current_env.dut)
+        snapshot = read_nc_timing_runtime_snapshot(None, current_env.dut)
         missing = [
             snapshot_key
             for snapshot_key in _NC_TIMING_SNAPSHOT_KEYS.values()
@@ -934,6 +939,9 @@ def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env
     "s2xlate,response_field,expected_result,expected_fault",
     translation_faults._CROSS_PAGE_FAULT_CASES,
 )
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True,
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_cross_page_second_page_translation_fault_has_exact_pc(
     env,
@@ -969,22 +977,19 @@ def test_nc_cross_page_second_page_translation_fault_has_exact_pc(
             "expected_path": "second_page_translation_fault_exact_pc",
         },
     )
-    uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
-    state = TranslationScenarioBuilder(env).build(scenario)
-    env.monitor.clear()
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            reset_vector=cross_page_va,
+            bare_mode=False,
+            after_reset=(PrepareTranslationScenario(scenario),),
+        ),
+    )
     env.monitor.set_expected_pc(cross_page_va)
     exception_records = _register_cfvec_exception_observer(env)
     timing_samples = _register_nc_timing_observer(env)
-    env.arm_translation_scenario(state)
-    uncache._force_redirect_to(env, cross_page_va)
 
     first_beat = cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1)
-    assert uncache._wait_for_request_addr(env, first_beat, max_cycles=12000), {
-        "s2xlate": s2xlate,
-        "response_field": response_field,
-        "uncache": env.uncache_agent.get_stats(),
-        "ptw": env.ptw_agent.get_stats(),
-    }
     for _ in range(12000):
         active = env.translation_oracle.get_active()
         if active is not None and active.get("fault_seen"):

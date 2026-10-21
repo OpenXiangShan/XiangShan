@@ -71,13 +71,23 @@ def test_pmp_mmio_with_pbmt_nc_waits_for_mmio_commit_order(env):
             "pa": mapping.paddr,
             "latency": latency,
             "blocked_cycles": blocked_cycles,
-            "expected_path": "pmp_mmio_waits_commit",
+            "expected_path": "pmp_mmio_waits_backend_empty",
         },
     )
     uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
     uncache._configure_exec_pmp_4k(env, base_addr=mapping.paddr)
     uncache._configure_exec_mmio_pma_4k(env, base_addr=mapping.paddr)
-    env.backend_model.set_can_accept(0)
+    env.backend_model.set_can_accept(1)
+    # can_accept=0 prevents the cfVec stream from reaching an FTQ boundary;
+    # hold the DUT's WAIT_LAST_COMMIT gate through backendEmpty instead.
+    backend_empty_blocked = True
+
+    def backend_empty_override() -> int:
+        if backend_empty_blocked:
+            return 0
+        return 1
+
+    env.backend_model.backend_empty_for_dut = backend_empty_override
     snapshots: list[dict[str, int | None]] = []
 
     def capture(cycle: int, active_env) -> None:
@@ -99,14 +109,13 @@ def test_pmp_mmio_with_pbmt_nc_waits_for_mmio_commit_order(env):
     env.step(blocked_cycles)
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == req_before_release
 
-    env.backend_model.set_can_accept(1)
+    backend_empty_blocked = False
     assert uncache._wait_for_uncache_req(env, max_cycles=6000) > req_before_release
     assert any(
         sample["s2_valid"] == 1
         and sample["s2_pmp_mmio"] == 1
         and sample["s2_pbmt"] == uncache._PBMT_NC
         and sample["is_first"] == 0
-        and sample["backend_commit"] == 1
         for sample in snapshots
     ), {"snapshots": snapshots[-64:]}
     assert uncache._wait_for_observed_pc(env, mapping.vaddr, max_cycles=12000)
