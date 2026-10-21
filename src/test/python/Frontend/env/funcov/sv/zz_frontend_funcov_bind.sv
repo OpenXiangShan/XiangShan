@@ -134,10 +134,13 @@ module frontend_funcov_hub (
   input logic             ifed_icache_d_valid,
   input logic             ifed_icache_d_denied,
   input logic             ifed_icache_d_corrupt,
-  input logic             ifed_icache_cross64_first_denied,
-  input logic             ifed_icache_cross64_first_corrupt,
-  input logic             ifed_icache_cross64_second_denied,
-  input logic             ifed_icache_cross64_second_corrupt,
+  input logic             ifed_icache_s0_fire,
+  input logic             ifed_icache_s1_valid,
+  input logic             ifed_icache_cross_line,
+  input logic             ifed_icache_first_refill,
+  input logic             ifed_icache_second_refill,
+  input logic             ifed_icache_refill_denied,
+  input logic             ifed_icache_refill_corrupt,
   input logic             ifed_icache_cross64_rvi,
   input logic             ifed_icache_ifu_req_valid,
   input logic [49:0]      ifed_icache_ifu_start_vaddr,
@@ -413,6 +416,30 @@ module frontend_funcov_hub (
     .from_ftq_start_pc_addr(cfvec_from_ftq_start_pc_addr)
   );
 
+  logic [1:0] ifed_icache_first_error;
+  logic [1:0] ifed_icache_second_error;
+  wire [1:0] ifed_icache_refill_error =
+    ifed_icache_refill_denied ? 2'b01 :
+    ifed_icache_refill_corrupt ? 2'b10 : 2'b00;
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      ifed_icache_first_error <= 2'b00;
+      ifed_icache_second_error <= 2'b00;
+    end else begin
+      if (ifed_icache_first_refill) begin
+        if (ifed_icache_first_error == 2'b00)
+          ifed_icache_first_error <= ifed_icache_refill_error;
+      end else if (ifed_icache_s0_fire)
+        ifed_icache_first_error <= 2'b00;
+      if (ifed_icache_second_refill) begin
+        if (ifed_icache_second_error == 2'b00)
+          ifed_icache_second_error <= ifed_icache_refill_error;
+      end else if (ifed_icache_s0_fire)
+        ifed_icache_second_error <= 2'b00;
+    end
+  end
+
   frontend_ifu_exception_delivery_funcov u_ifed (
     .clock(clock),
     .reset(reset),
@@ -438,10 +465,14 @@ module frontend_funcov_hub (
     .icache_d_valid(ifed_icache_d_valid),
     .icache_d_denied(ifed_icache_d_denied),
     .icache_d_corrupt(ifed_icache_d_corrupt),
-    .icache_cross64_first_denied(ifed_icache_cross64_first_denied),
-    .icache_cross64_first_corrupt(ifed_icache_cross64_first_corrupt),
-    .icache_cross64_second_denied(ifed_icache_cross64_second_denied),
-    .icache_cross64_second_corrupt(ifed_icache_cross64_second_corrupt),
+    .icache_cross64_first_denied(ifed_icache_s1_valid && ifed_icache_cross_line &&
+      ifed_icache_first_error == 2'b01),
+    .icache_cross64_first_corrupt(ifed_icache_s1_valid && ifed_icache_cross_line &&
+      ifed_icache_first_error == 2'b10),
+    .icache_cross64_second_denied(ifed_icache_s1_valid && ifed_icache_cross_line &&
+      ifed_icache_second_error == 2'b01),
+    .icache_cross64_second_corrupt(ifed_icache_s1_valid && ifed_icache_cross_line &&
+      ifed_icache_second_error == 2'b10),
     .icache_cross64_rvi(ifed_icache_cross64_rvi),
     .icache_ifu_req_valid(ifed_icache_ifu_req_valid),
     .icache_ifu_start_vaddr(ifed_icache_ifu_start_vaddr),
@@ -895,18 +926,13 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
   .ifed_icache_d_valid(auto_inner_icache_client_out_d_valid),
   .ifed_icache_d_denied(auto_inner_icache_client_out_d_bits_denied),
   .ifed_icache_d_corrupt(auto_inner_icache_client_out_d_bits_corrupt),
-  .ifed_icache_cross64_first_denied(inner_icache.mainPipe.s1_valid &&
-                                    inner_icache.mainPipe.accessTrace_crossLine &&
-                                    inner_icache.mainPipe.s1_tlDenied_r),
-  .ifed_icache_cross64_first_corrupt(inner_icache.mainPipe.s1_valid &&
-                                     inner_icache.mainPipe.accessTrace_crossLine &&
-                                     inner_icache.mainPipe.s1_tlCorrupt_r),
-  .ifed_icache_cross64_second_denied(inner_icache.mainPipe.s1_valid &&
-                                     inner_icache.mainPipe.accessTrace_crossLine &&
-                                     inner_icache.mainPipe.s1_tlDenied_r_1),
-  .ifed_icache_cross64_second_corrupt(inner_icache.mainPipe.s1_valid &&
-                                      inner_icache.mainPipe.accessTrace_crossLine &&
-                                      inner_icache.mainPipe.s1_tlCorrupt_r_1),
+  .ifed_icache_s0_fire(inner_icache.mainPipe.s0_fire),
+  .ifed_icache_s1_valid(inner_icache.mainPipe.s1_valid),
+  .ifed_icache_cross_line(inner_icache.mainPipe.accessTrace_crossLine),
+  .ifed_icache_first_refill(inner_icache.mainPipe.s1_mshrValid_0_0),
+  .ifed_icache_second_refill(inner_icache.mainPipe.s1_mshrValid_0_1),
+  .ifed_icache_refill_denied(inner_icache.mainPipe.io_missResp_bits_denied),
+  .ifed_icache_refill_corrupt(inner_icache.mainPipe.io_missResp_bits_corrupt),
   .ifed_icache_cross64_rvi(
     !inner_icache.mainPipe.io_toIfu_req_bits_maybeRvcMap[5'd15]),
   .ifed_icache_ifu_req_valid(inner_icache.mainPipe.io_toIfu_req_valid),

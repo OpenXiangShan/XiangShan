@@ -213,7 +213,7 @@ _MAINPIPE_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_1_ftqIdx_value"
     ),
     "s1_exception": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.s1_exception_value"
+        "Frontend_top.Frontend.inner_icache.mainPipe.s1_exception_0_value"
     ),
     "s1_mmio": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_isMmio"),
     "backend_redirect": _aliases(
@@ -227,7 +227,7 @@ _MAINPIPE_SIGNALS = {
         "TOP.Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
     ),
     "to_ifu_exception": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.s1_exceptionOut_value"
+        "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_bits_info_0_icacheMeta_exception_value"
     ),
 }
 
