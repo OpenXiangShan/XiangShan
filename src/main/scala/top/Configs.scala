@@ -52,6 +52,8 @@ import xscache.coupledL2._
 import xscache.coupledL2.prefetch._
 import xscache.common.DirtyField
 
+case object EnableIommuKey extends Field[Boolean](false)
+
 object LLCType extends Enumeration {
   val OpenLLC, ZhuJiang = Value
 }
@@ -584,6 +586,12 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
+)
+
+class NoRobCompressionConfig(n: Int = 1) extends Config(
+  new DefaultConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(_.copy(EnableRobCompression = false))
+  })
 )
 
 class CVMConfig(n: Int = 1) extends Config(

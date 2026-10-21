@@ -126,7 +126,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val Sv48x4Enable = csr.hgatp.mode === 9.U
 
   val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (
-    if (EnbaleTlbDebug) (Sv39Enable || Sv48Enable)
+    if (EnableTlbDebug) (Sv39Enable || Sv48Enable)
     else (Sv39Enable || Sv48Enable) && (mode(i) < ModeM))
   )
   val s2xlateEnable = (0 until Width).map(i =>
@@ -160,7 +160,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     resp(i).bits.fullva := RegEnable(EffectiveVa(i), req(i).valid)
   }
   val prevmEnable = (0 until Width).map(i => !(virt_in || req_in(i).bits.hyperinst) && (
-    if (EnbaleTlbDebug) (Sv39Enable || Sv48Enable)
+    if (EnableTlbDebug) (Sv39Enable || Sv48Enable)
     else (Sv39Enable || Sv48Enable) && (premode(i) < ModeM))
   )
   val pres2xlateEnable = (0 until Width).map(i =>

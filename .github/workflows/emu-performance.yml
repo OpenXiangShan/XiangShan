@@ -88,6 +88,7 @@ jobs:
         id: select
         run: |
           SELECTED=$(python3 ${GITHUB_WORKSPACE}/.github/workflows/ckpt_select.py \
+            --seed ${{ github.run_number }} \
             --profile "${PROFILE_PATH}" \
             --eta-threshold "${ETA_THRESHOLD}" \
             --weighted ":${CKPT_JSON}" \

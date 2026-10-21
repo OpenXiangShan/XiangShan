@@ -150,6 +150,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
+    val specialMode = Output(Bool())
 
     val diffStore = OptionWrapper(debugEn, Flipped(new DiffStoreIO))
   })
@@ -275,7 +276,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   val pendingstate = RegInit(s_idle)
   val selectLq = (loadQueue.io.uncache.req.valid && !storeQueue.io.toUncacheBuffer.req.valid) || (
     loadQueue.io.uncache.req.valid && storeQueue.io.toUncacheBuffer.req.valid &&
-    loadQueue.io.uncache.req.bits.robIdx < storeQueue.io.toUncacheBuffer.req.bits.robIdx
+    loadQueue.io.uncache.req.bits.robIdx.isBeforeSlot(storeQueue.io.toUncacheBuffer.req.bits.robIdx)
   )
 
   switch(pendingstate){
@@ -330,6 +331,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   loadQueue.io.debugTopDown <> io.debugTopDown
   loadQueue.io.replayAllocate <> io.replayAllocate
+  io.specialMode := loadQueue.io.specialMode
 
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.toUncacheBuffer.resp.valid))
   assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.toUncacheBuffer.idResp.valid))

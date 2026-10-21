@@ -76,10 +76,16 @@ else
 GOALS = $(MAKECMDGOALS)
 endif
 
+IOMMU_ENABLED := $(WITH_IOMMU)
+
 # GSIM reads CHIRRTL directly, so Verilog is not needed for these goals.
 # An explicit CHISEL_TARGET on the command line still takes precedence.
 ifneq ($(filter sim-chirrtl gsim,$(GOALS)),)
 CHISEL_TARGET ?= chirrtl
+ifeq ($(WITH_IOMMU),1)
+$(info WITH_IOMMU=1 is ignored for GSIM/CHIRRTL)
+endif
+IOMMU_ENABLED := 0
 endif
 CHISEL_TARGET ?= systemverilog
 
@@ -194,6 +200,16 @@ ifndef DRAMSIM3_HOME
 $(error DRAMSIM3_HOME is not set)
 endif
 override SIM_ARGS += --with-dramsim3
+endif
+
+# OpenIOMMU is enabled only for the configuration that provides the BOSC
+# lightweight integration. GSIM forces the effective option off above.
+ifeq ($(IOMMU_ENABLED),1)
+ifeq ($(CONFIG),DefaultConfig)
+override SIM_ARGS += --with-iommu
+else
+$(error WITH_IOMMU=1 requires CONFIG=DefaultConfig)
+endif
 endif
 
 # SimAXIMem size in GB (for sim-verilog only)
