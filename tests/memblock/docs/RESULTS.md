@@ -33,9 +33,13 @@ Evidence snapshot: 2026-10-21.
 - xcomm: `3e4bccb73f08310c08382d3987ba2d98b83df4d6` (v0.2.0).
 - Bootstrap provenance: `build/memblock/tools/picker.json`.
 - General frozen runtime manifest: `build/memblock/runtime/runtime.json`.
-- Latest schema-51 focused runtime:
+- Latest schema-52 focused runtime:
+  `build/memblock/schema52-runtime-v3/runtime.json`.
+- Retained schema-51 focused runtime:
   `build/memblock/segment-high-va-verified-runtime/runtime.json`.
-- Latest schema-51 evidence provenance:
+- Latest schema-52 focused provenance:
+  `build/memblock/schema52-focused-v3/provenance.json`.
+- Retained schema-51 evidence provenance:
   `build/memblock/segment-high-va-development/verified/provenance.json`.
 
 The frozen runtime manifests record artifact paths, sizes, and resolved external
@@ -43,7 +47,7 @@ libraries. Those values are reproducibility data, not hidden acceptance hashes.
 
 ## Current Capability and Closure Status
 
-The current generator schema is 51. `random-mixed` remains the canonical mixed
+The current generator schema is 52. `random-mixed` remains the canonical mixed
 workload; the schemas below add independent semantic classes and conservation
 checks. Schema 48-50 have three recorded 6,144-action profile runs per schema,
 but each passing set totals less than three simulator hours. They are capability
@@ -51,10 +55,11 @@ evidence, not closure evidence.
 
 | Schema | Implemented capability | Passing evidence | Remaining status |
 | --- | --- | --- | --- |
-| 48 | Scalar canonical access-range faults in common mixed traffic, with 24 bins and separate fault/DCache accounting. | Focused seeds 201-205 pass all bins; SPEC seed 211 and coverage seed 212 pass 6,144 actions. Evidence: `build/memblock/canonical-focused/`, `build/memblock/canonical-regression/`. | Corner seed 213 stops at action 5,948 on DCache-request attribution. Exact replay and passive diagnostics reproduce the boundary. It remains a triage candidate, not a CPU bug. Evidence: `build/memblock/schema48-corner-triage/`, `build/memblock/schema48-corner-diagnostic/`. |
+| 48 | Scalar canonical access-range faults in common mixed traffic, with 24 bins and separate fault/DCache accounting. | Focused seeds 201-205 pass all bins; SPEC seed 211 and coverage seed 212 pass 6,144 actions. Evidence: `build/memblock/canonical-focused/`, `build/memblock/canonical-regression/`. | Corner seed 213 originally stopped at action 5,948 because a global accepted-A window attributed an unrelated CPU-store request to a denied hypervisor load. Fresh review classified it as a harness attribution defect, and the causal demand-A guard now lets schema-52 `corner` seed 213/6144 pass at cycle 8,083,144. Old evidence: `build/memblock/schema48-corner-triage/`, `build/memblock/schema48-corner-diagnostic/`; fixed replay: `build/memblock/schema52-corner-replay/`. |
 | 49 | Singleton vector-store canonical faults in mixed traffic, with 36 bins, exact fault VA, queue conservation, edge controls, and recovery. | Focused seeds 221-228 pass; standard SPEC/coverage/corner seeds 231-233 pass 6,144 actions each. The profiles total 9,652.961 simulator seconds (2.681 hours). Evidence: `build/memblock/canonical-vector-focused/`, `build/memblock/canonical-vector-regression/`. | Multi-active-element progress and vector loads remain gaps. No closure claim. |
 | 50 | G-only scalar and singleton vector-store upper-limit faults, with 12 scalar and 18 vector bins, exact VA/GPA/cause/marker, controls, and recovery. | Focused seeds 241-251 pass; standard SPEC/coverage/corner seeds 261-263 pass 18,432 total actions. The profiles total 9,338.358 simulator seconds (2.594 hours). Evidence: `build/memblock/gstage-range-runtime/`, `build/memblock/gstage-mixed-focused/`, `build/memblock/gstage-mixed-regression/`. | Nested boundary composition and GPA wrap remain gaps. No closure claim. |
-| 51 | Successful high-half canonical segment load/store traffic, with Sv39/Sv48 x direction x alignment bins and independent full-width VA walks. | `vector-segment-canonical` passes all 12 shared cases; full `vector-segment` passes in 380.498 seconds; focused mixed seeds 281-286 pass. Evidence: `build/memblock/segment-high-va-verified-runtime/`, `build/memblock/segment-high-va-development/verified/`. | No standard 6,144-action profile matrix or closure campaign has completed under schema 51. Nested high-half composition, segment noncanonical faults, arbitrary partial-fault progress, and broader vector progress/shape crosses remain gaps. |
+| 51 | Successful high-half canonical segment load/store traffic, with Sv39/Sv48 x direction x alignment bins and independent full-width VA walks. | `vector-segment-canonical` passes all 12 shared cases; full `vector-segment` passes in 380.498 seconds; focused mixed seeds 281-286 pass. Standard coverage seed 291, SPEC seed 292, and corner seed 293 each pass 6,144 actions with all eight bins populated; total 8,503.323 simulator seconds (2.362 hours). Evidence: `build/memblock/segment-high-va-verified-runtime/`, `build/memblock/segment-high-va-development/verified/`, `build/memblock/segment-high-va-regression/`. | The three-profile capability matrix is complete but remains below the closure duration and seed count. Nested high-half composition, segment noncanonical faults, arbitrary partial-fault progress, and broader vector progress/shape crosses remain gaps. |
+| 52 | Schema-51 high-half segment coverage plus all four nested VS/G pairs crossed with load/store and aligned/misaligned bins, using per-byte independent two-stage walks. | `vector-segment-canonical` passes 12/12. Focused mixed seed 286 passes all 24 bins with 150 segment actions, 300 data uops, and 356 active elements. Coverage seed 301 now passes 6,144 actions in 1,481.949 seconds with all 24 bins; its direct replay and controller terminal line are byte-identical. Evidence: `build/memblock/schema52-runtime-v3/`, `build/memblock/schema52-focused-v3/`, `build/memblock/schema52-regression-v3/`. | SPEC seed 302 and corner seed 303 were explicitly stopped at about 40 minutes on user request; neither is claimed as a pass. The prior v1 runtime SPEC/corner runs passed, but coverage exposed the release-window oracle defect fixed here. High-half FOF, segment noncanonical faults, arbitrary partial-fault progress, and broader vector progress/shape crosses remain gaps. |
 
 Supporting oracle and diagnostic improvements retained in this evidence set:
 
@@ -67,8 +72,13 @@ Supporting oracle and diagnostic improvements retained in this evidence set:
   `build/memblock/agent-workflow-review-20261021-01/unit.log`.
 - `check-rtl` and `check-docs` pass in
   `build/memblock/agent-workflow-review-20261021-01/check-rtl.log`.
+- The schema-52 pre-decision runtime passed all 89 benchmark leaves
+  (`build/memblock/schema52-runtime/benchmark.json`, 1,934.016 seconds). After
+  the release-window decision fix, the affected 16,384-action `random-mixed`
+  leaf passes under the current runtime in 1,701.059 seconds
+  (`build/memblock/schema52-runtime-v3/benchmark-random-mixed.json`).
 
-No schema-51 closure campaign has completed. In particular, the current records
+No schema-52 closure campaign has completed. In particular, the current records
 do not establish the eight-hour/128-seed breadth campaign or the 8,000,000-action
 endurance campaign required by `Regression Acceptance`.
 
@@ -107,7 +117,7 @@ path or an explicit missing-artifact status.
 | `39ad0d589`, full access-range check | The final byte of an access crossing canonical or pointer-masking limits must be checked. | Reproduced: mutant returns scalar data instead of a page fault on the first two-byte boundary case. | `build/memblock/canonical-mutation/fullrange/`. |
 | `872fa9be3`, vector-store TLB access size | A crossing vector store must use the correct access size and produce the identified terminal fault. | Reproduced: mutant remains pending after replay instead of producing the expected vector writeback. | `build/memblock/canonical-mutation/vector_store_size/`. |
 | `756bbf59`, MMIO half-precision FP boxing | A successful MMIO FLH must NaN-box, not integer-sign-extend, the halfword payload. | Reproduced: mutant returns `0x0` instead of `0xffffffffffff0000` at cycle 128 for payload `0x0000`. | `build/memblock/fp-boxing-mutation/`. |
-| `39824ca68394`, full segment VA capture | Misaligned high-half segment traffic must retain the complete VA when translation is re-requested. | Reproduced: directed mutant faults legal Sv39 high-half VA at cycle 754; mixed seed 282 fails deterministically at action 99. | `build/memblock/segment-va-mutation/`. |
+| `39824ca68394`, full segment VA capture | Misaligned high-half segment traffic must retain the complete VA when translation is re-requested. | Reproduced: directed mutant faults legal Sv39 high-half VA at cycle 754; schema-51 mixed seed 282 fails at action 99; schema-52 focused seed 286 fails at action 104, nested `vs=1,g=0` cross 17, cycle 4741 while the clean runtime passes. | `build/memblock/segment-va-mutation/`, `build/memblock/schema52-segment-va-mutation/`. |
 | `9ee7b335`, misaligned vector-store progress | Misaligned vector stores must complete, dequeue, and read back exactly. | Not reproduced: the available legal sequence passes on the mutant. | Negative evidence is summarized in [HISTORICAL_BUG_AUDIT.md](HISTORICAL_BUG_AUDIT.md); artifact not retained. |
 | `fbb1e349`, cross-page vector-store progress | A translated cross-page vector store must complete, dequeue, and read back exactly. | Not reproduced: expanded legal progress sequence passes on the rebuilt mutant. | Negative evidence is summarized in [HISTORICAL_BUG_AUDIT.md](HISTORICAL_BUG_AUDIT.md); artifact not retained. |
 
@@ -160,6 +170,58 @@ git -C XiangShan diff --check
 
 No RTL bug candidate was produced by this workflow review, so no CPU bug
 document or DingTalk notification was created.
+
+### Schema 52 Nested High-Half And Demand Attribution
+
+- Review ID: `schema52-nested-high-va-20261021`.
+- Reviewed state: the schema-52 24-bin high-half segment generator,
+  coverage/verifier accounting, independent stage-1/two-stage walks, and the
+  causal DCache suppression check used by denied hypervisor loads.
+- Independence: primary author plus a fresh-context, non-author reviewer with
+  the normative contracts and actual diff, but no author conclusions.
+- Initial verdict: `fail`; final focused re-review verdict: `pass`.
+
+| ID | Review finding | Stable evidence | Review finding disposition |
+| --- | --- | --- | --- |
+| S1 | Demand attribution counted any history record with `user.reqSource=2`, although that field is unspecified for CMO/Get traffic. | `environment/dcache_a_contract.inc`, `environment/dcache_agent.inc`, `unit/test_dcache_a_contract.py`. | Accepted and fixed: a shared predicate requires Acquire/AcquirePerm opcode 6/7 plus demand source 2; CMO/Get, stores, and prefetch are excluded. |
+| S2 | README and the reporter table still described schema 51 and eight high-VA bins. | `README.md`, `docs/CONSTRAINED_RANDOM.md`. | Accepted and fixed: current schema is 52 and the reporter contract names all 24 stage-1/nested bins. |
+| S3 | The suppression test exercised only precomputed counts, not request classification. | `unit/test_dcache_a_contract.py`. | Accepted and fixed: synthetic demand, store, prefetch, Get, and CMO requests now test the shared predicate directly. |
+
+Residual risk at review time: no three-profile schema-52 matrix or closure
+campaign had completed, and the 24 bins constrain mode/direction/alignment but
+do not guarantee a cross-page placement for every seed.
+
+Verification for the reviewed change: `make -C tests/memblock unit` passed 273
+tests in `build/memblock/schema52-runtime-v3/unit.log`; `check-rtl` passed in
+`build/memblock/schema52-runtime-v3/check-rtl.log`; the schema-52 runtime passed
+`vector-segment-canonical` and focused mixed seed 286 in
+`build/memblock/schema52-focused-v3/`. The same focused input deterministically
+fails on the retained full-segment-VA mutant at nested `vs=1,g=0` cross 17
+(exit 123), recorded in `build/memblock/schema52-segment-va-mutation/`.
+
+### DCache Release-Window Quiescence
+
+- Review ID: `dcache-release-quiescence-20261021`.
+- Trigger: schema-52 coverage seed 301 reached all 24 high-VA bins, then stopped
+  at action 5,067 on `selected=0:stalled=0:cycles=0:stable=1`. The original
+  `run_until_dcache_idle` did not drain a pre-window C transaction, so the
+  readiness window could attribute prior manager activity to its own target.
+  Exact replay after quiescence also showed that a disabled endpoint can legally
+  observe an incidental one-cycle stability check without a forced stall.
+- Independence: primary author plus a fresh-context non-author reviewer.
+- Initial verdict: `fail`; final focused re-review verdict: `pass`.
+
+| ID | Review finding | Stable evidence | Review finding disposition |
+| --- | --- | --- | --- |
+| Q1 | Probe-driven C backpressure was absent from the quiescence predicate. | `environment/dcache_agent.inc` C ready generation and release-idle state. | Accepted and fixed: an active probe hold prevents idle accumulation. |
+| Q2 | Checking sampled monitor state once could return before an active ready C was observed. | `environment/environment.inc` `run_until_dcache_release_idle`. | Accepted and fixed: every tick samples C valid and requires two consecutive complete quiet samples with no stalled C, release data, readiness window, or probe hold. |
+| Q3 | The disabled endpoint incorrectly required zero payload-stability checks rather than zero forced stall coverage. | `environment/dcache_a_contract.inc` release-backpressure predicate, `scenarios/random_mixed.inc`, `unit/test_dcache_a_contract.py`. | Accepted and fixed: disabled endpoints require zero stalled releases/cycles but allow incidental stability; enabled endpoints retain the exact one-release/16-cycle/16-stability contract. Manager accounting records forced cycles only. |
+
+The exact schema-52 coverage seed 301 replay now passes all 6,144 actions on
+`schema52-runtime-v3` at cycle 3,453,254. The direct terminal and independent
+coverage verifier pass in
+`build/memblock/schema52-regression-v3/coverage-replay{,-verified}.log`; the
+forced backpressure manager tuple is `781,781,12496,12496,1566`.
 
 ### Documentation Cleanup
 

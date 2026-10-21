@@ -5,7 +5,7 @@
 `random-mixed` is the canonical workload generator. A verification direction is a constraint set,
 not another scenario implementation. The same scheduler, drivers, scoreboards, architectural
 reference memory, translation machinery, and completion checks are used for realistic traffic,
-balanced coverage, and corner-heavy traffic. The current executable contract is `constraint_schema=51`.
+balanced coverage, and corner-heavy traffic. The current executable contract is `constraint_schema=52`.
 
 The complete top-level interface mapping and interface gaps are in
 `IO_COVERAGE.md`; `VERIFICATION_PLAN.md` owns the cross-domain verification
@@ -282,7 +282,7 @@ directly into transaction probabilities or expected DUT results.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=51`, resolved targets, and actual
+Every terminal line prints `constraint_schema=52`, resolved targets, and actual
 counts for operations, atomic/Probe/hypervisor/CMO/DCache state, ordinary and
 segment vector shapes, FOF, NC/MMIO, translation and leaf topology, fences,
 cache events, all load wakeup/cancel lanes, prefetch diagnostics, and manager
@@ -449,21 +449,30 @@ independently; a collision resolves by random equal choice, so both remain reach
 counters, or ordinary leaf-topology accounting. Scalar ordinary plus canonical/G-only scalar faults
 conserve against scalar operation counts and are excluded from DCache outcomes.
 
-Segment high-VA coverage has eight bins `(stage1_mode * 2 + store) * 2 + misaligned`. A bin
-requires nonzero `vector-segment-high-va`, segment operation, stage-1 traffic, the corresponding
-mode, a reachable shape/direction/alignment, and enabled segment-store/load weights. Non-FOF loads
-require `vector-segment-fof != 1000`; misaligned bins require data EEW above eight bits, using SEW
-for indexed addressing. A finite missing-bin prefix contains at most eight instructions, and weighted replacement
-starts only after ordinary coverage closes, preserving ordinary shape/regime/leaf reachability even at target 1000.
-Each action uses the randomized ordinary physical address through a full-XLEN high-half alias and its own 4-KiB
-mappings; all active effective VA bytes are independently walked to the declared physical bytes. Shape, NF, stride/index values, data, partial
-VL, vstart, and mask remain randomized, and at least one field element is active. Exact vector
-completion identity/data and observed completion counts are checked; stores are followed by actual
-DUT loads of every active field element. The operation count equals the bin total, direction/mode
-totals cannot exceed ordinary segment/stage-1 traffic, data uops are 2..8 times actions, and active
-elements are 2..128 times actions. These are successful ordinary segment instructions, not a new
-operation or fault subclass; with NAPOT-only ordinary traffic they are excluded from ordinary
-leaf-topology accounting while shape, direction, and FOF accounting retain their meaning.
+Segment high-VA coverage has 24 bins. Eight stage-1 bins use
+`(stage1_mode * 2 + store) * 2 + misaligned`; sixteen nested bins use all
+four VS/G pairs with the same `(store, misaligned)` dimensions, indexed from
+eight. A bin requires nonzero `vector-segment-high-va`, segment operation, the
+selected stage-1 or nested translation traffic, a reachable
+shape/direction/alignment, and enabled segment-store/load weights. Non-FOF
+loads require `vector-segment-fof != 1000`; misaligned bins require data EEW
+above eight bits, using SEW for indexed addressing. A finite missing-bin prefix
+contains at most 24 instructions, and weighted replacement starts only after
+ordinary coverage closes, preserving ordinary shape/regime/leaf reachability
+even at target 1000. Each action uses the randomized ordinary physical address
+through a full-XLEN high-half alias and its own 4-KiB mappings; all active
+effective VA bytes are independently walked through the selected stage-1 or
+two-stage page table to the declared physical bytes. Shape, NF, stride/index
+values, data, partial VL, vstart, and mask remain randomized, and at least one
+field element is active. Exact vector completion identity/data and observed
+completion counts are checked; stores are followed by actual DUT loads of every
+active field element. The operation count equals the bin total;
+direction/stage-1/nested-pair accounting cannot exceed matching ordinary
+translation traffic; data uops are 2..8 times actions and active elements are
+2..128 times actions. These are successful ordinary segment instructions, not
+a new operation or fault subclass; with NAPOT-only ordinary traffic they are
+excluded from ordinary leaf-topology accounting while shape, direction, and
+FOF accounting retain their meaning.
 
 ### Reporter Identifiers
 
@@ -499,7 +508,7 @@ checks them from the terminal summary:
 | `actual_vector_canonical_boundary_flows` | Queue-flow count weighted by `16 >> eew` |
 | `actual_gstage_boundary` | G-only scalar upper-limit 12-bin total |
 | `actual_vector_gstage_boundary` | G-only singleton vector upper-limit 18-bin total |
-| `actual_vector_segment_high_va_cross` | Eight stage-1 mode x direction x alignment high-half segment bins |
+| `actual_vector_segment_high_va_cross` | Twenty-four high-half segment bins: eight stage-1 mode x direction x alignment bins followed by all four nested VS/G pairs x direction x alignment |
 
 ### Legal Driver and Replay Contracts
 
@@ -535,8 +544,8 @@ characterization/configuration gaps.
 
 Boundary gaps include multi-active-element faults, vector-load and unit-stride
 canonical crossings, additional LMUL/EMUL/SEW shapes, nested boundary
-composition, GPA wrap, high-half nested/FOF segment traffic, noncanonical
-segment faults, and broader partial-fault progress. Hypervisor gaps include
+composition, GPA wrap, high-half FOF segment traffic, noncanonical segment
+faults, and broader partial-fault progress. Hypervisor gaps include
 non-PMA PBMT with misalignment and additional fixed-PMA/PMP sizes, TOR, lock,
 permission, and overlap-by-edge crosses. Do not infer these gaps from aggregate
 event counts; when a reachable known class cannot be reached, stop extending

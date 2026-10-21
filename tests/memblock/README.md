@@ -26,7 +26,7 @@ The current harness covers the main MemBlock verification domains:
 - focused scenarios plus the canonical `random-mixed` constrained-random
   generator.
 
-The current random schema is 51. Its executable fields, presets, replay rules,
+The current random schema is 52. Its executable fields, presets, replay rules,
 and accounting contracts are in
 [CONSTRAINED_RANDOM.md](docs/CONSTRAINED_RANDOM.md). The schema number itself is
 not a correctness claim.

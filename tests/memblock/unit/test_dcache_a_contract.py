@@ -22,6 +22,9 @@ namespace memblock {
 }
 using memblock::DcacheARequest;
 using memblock::dcache_a_protocol_error;
+using memblock::dcache_is_cpu_demand_acquire;
+using memblock::dcache_release_backpressure_observation_valid;
+using memblock::dcache_suppressed_demand_error;
 
 static unsigned checks = 0;
 static void check(const DcacheARequest &request, const char *expected = nullptr) {
@@ -185,6 +188,87 @@ static void invalid_op_and_size() {
         }
     }
 }
+static void suppressed_demand_attribution() {
+    auto check_suppression = [](
+        bool must_suppress, bool prefix_allowed, std::uint64_t demand,
+        std::uint64_t target, const char *expected) {
+        const char *actual = dcache_suppressed_demand_error(
+            must_suppress, prefix_allowed, demand, target);
+        ++checks;
+        if ((actual == nullptr) != (expected == nullptr) ||
+            (actual != nullptr && std::strcmp(actual, expected) != 0)) {
+            std::cerr << "suppression check " << checks << ": expected "
+                      << (expected ? expected : "valid") << ", got "
+                      << (actual ? actual : "valid") << '\n';
+            std::exit(1);
+        }
+    };
+    const char *const rejected =
+        "suppressed DCache operation issued a disallowed CPU demand request";
+    check_suppression(false, false, 1, 0, nullptr);
+    check_suppression(true, false, 0, 0, nullptr);
+    // Unrelated store/prefetch traffic is absent from these demand-only counts.
+    check_suppression(true, false, 1, 1, rejected);
+    check_suppression(true, false, 1, 0, rejected);
+    check_suppression(true, true, 0, 0, nullptr);
+    check_suppression(true, true, 1, 1, nullptr);
+    check_suppression(true, true, 1, 0, rejected);
+    check_suppression(true, true, 2, 2, rejected);
+}
+static void demand_request_classification() {
+    auto check_demand = [](const DcacheARequest &request, bool expected) {
+        ++checks;
+        const bool actual = dcache_is_cpu_demand_acquire(request);
+        if (actual != expected) {
+            std::cerr << "demand classification " << checks << ": expected "
+                      << expected << ", got " << actual << '\n';
+            std::exit(1);
+        }
+    };
+    auto request = acquire();
+    check_demand(request, true);
+    request.opcode = 7;
+    check_demand(request, true);
+    request = acquire();
+    request.request_source = 3;  // CPUStoreData
+    check_demand(request, false);
+    request.request_source = 6;  // L1DataPrefetch
+    check_demand(request, false);
+    // user.reqSource is unspecified for Get and CMO traffic. A coincidental
+    // value of two must not make either opcode look like a demand Acquire.
+    request.opcode = 4;
+    request.request_source = 2;
+    check_demand(request, false);
+    request.opcode = 12;
+    request.request_source = 2;
+    check_demand(request, false);
+}
+static void release_backpressure_observations() {
+    auto check_observation = [](
+        bool selected, std::uint64_t stalled, std::uint64_t cycles,
+        std::uint64_t stability, unsigned forced, bool expected) {
+        ++checks;
+        const bool actual = dcache_release_backpressure_observation_valid(
+            selected, stalled, cycles, stability, forced);
+        if (actual != expected) {
+            std::cerr << "release observation " << checks << ": expected "
+                      << expected << ", got " << actual << '\n';
+            std::exit(1);
+        }
+    };
+    // A disabled endpoint may still observe legal incidental manager
+    // backpressure, but no forced stalled-release or stall-cycle coverage.
+    check_observation(false, 0, 0, 0, 16, true);
+    check_observation(false, 0, 0, 1, 16, true);
+    check_observation(false, 1, 0, 1, 16, false);
+    check_observation(false, 0, 1, 1, 16, false);
+    // An enabled endpoint must observe all 16 forced cycles and one stalled
+    // target release; incidental additional stability is not silently allowed.
+    check_observation(true, 1, 16, 16, 16, true);
+    check_observation(true, 0, 16, 16, 16, false);
+    check_observation(true, 1, 15, 15, 16, false);
+    check_observation(true, 1, 16, 17, 16, false);
+}
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     const std::string name = argv[1];
@@ -193,6 +277,10 @@ int main(int argc, char **argv) {
     else if (name == "cmo") cmo_records();
     else if (name == "get") get_records();
     else if (name == "invalid") invalid_op_and_size();
+    else if (name == "suppression") suppressed_demand_attribution();
+    else if (name == "demand-classification") demand_request_classification();
+    else if (name == "release-backpressure")
+        release_backpressure_observations();
     else return 2;
     std::cout << name << " checks=" << checks << '\n';
 }
@@ -237,6 +325,15 @@ class DcacheAContractTest(unittest.TestCase):
 
     def test_invalid_opcodes_and_oversizes_are_safe(self) -> None:
         self.check_case("invalid")
+
+    def test_suppressed_demand_attribution_is_transaction_causal(self) -> None:
+        self.check_case("suppression")
+
+    def test_demand_classification_excludes_unspecified_user_fields(self) -> None:
+        self.check_case("demand-classification")
+
+    def test_release_backpressure_endpoints_separate_forced_coverage(self) -> None:
+        self.check_case("release-backpressure")
 
 
 if __name__ == "__main__":

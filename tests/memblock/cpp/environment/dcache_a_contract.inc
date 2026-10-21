@@ -93,3 +93,35 @@ inline const char *dcache_a_protocol_error(
     }
     return nullptr;
 }
+
+inline bool dcache_is_cpu_demand_acquire(const DcacheARequest &request)
+{
+    return (request.opcode == 6 || request.opcode == 7) &&
+        request.request_source == 2;
+}
+
+inline const char *dcache_suppressed_demand_error(
+    bool must_suppress, bool pmp_prefix_allowed,
+    std::uint64_t demand_requests, std::uint64_t demand_target_requests)
+{
+    if (!must_suppress || demand_requests == 0) {
+        return nullptr;
+    }
+    if (pmp_prefix_allowed && demand_requests == 1 &&
+        demand_target_requests == 1) {
+        return nullptr;
+    }
+    return "suppressed DCache operation issued a disallowed CPU demand request";
+}
+
+inline bool dcache_release_backpressure_observation_valid(
+    bool selected, std::uint64_t stalled_releases,
+    std::uint64_t stall_cycles, std::uint64_t stability_checks,
+    unsigned forced_stall_cycles)
+{
+    const std::uint64_t expected_stalled = selected ? 1U : 0U;
+    const std::uint64_t expected_cycles = selected ? forced_stall_cycles : 0U;
+    return stalled_releases == expected_stalled &&
+        stall_cycles == expected_cycles &&
+        (!selected || stability_checks == expected_cycles);
+}

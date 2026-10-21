@@ -355,6 +355,6 @@ constraint command is retained in `load-split-mutant-1.json` and
 `segment-high-va-development/refined/load-split.json`. This establishes mixed
 stimulus and external scoreboard sensitivity to the historical bug class;
 it is not a new CPU bug or a claim that the unmodified broad default
-profiles have already completed schema-51 closure stress. High-half nested
-translation, segment noncanonical faults, FOF composition and partial-fault
-progress remain gaps.
+profiles have already completed schema-51 closure stress. Schema 52 composes
+all four high-half nested VS/G pairs into common traffic; segment noncanonical
+faults, high-half FOF composition and partial-fault progress remain gaps.

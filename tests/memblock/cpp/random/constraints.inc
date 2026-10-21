@@ -2191,18 +2191,44 @@ struct RandomConstraints {
         return false;
     }
 
+    static constexpr unsigned vector_segment_high_va_cross_count = 24;
+
+    static constexpr bool vector_segment_high_va_cross_is_nested(
+        unsigned cross)
+    {
+        return cross >= 8 && cross < vector_segment_high_va_cross_count;
+    }
+
+    static constexpr unsigned vector_segment_high_va_nested_pair(
+        unsigned cross)
+    {
+        return (cross - 8U) / 4U;
+    }
+
     bool vector_segment_high_va_cross_enabled(unsigned cross) const
     {
-        if (cross >= 8) {
+        if (cross >= vector_segment_high_va_cross_count) {
             return false;
         }
-        const unsigned mode = cross / 4U;
-        const bool store = (cross / 2U) % 2U != 0;
+        const bool nested = vector_segment_high_va_cross_is_nested(cross);
+        const unsigned cross_class = nested ? cross - 8U : cross;
+        const bool store = (cross_class / 2U) % 2U != 0;
         const bool misaligned = cross % 2U != 0;
+        bool translation_reachable = false;
+        if (nested) {
+            const unsigned pair = vector_segment_high_va_nested_pair(cross);
+            translation_reachable =
+                translation_weights[translation_nested] != 0 &&
+                vs_mode_weights[pair / 2U] != 0 &&
+                g_mode_weights[pair % 2U] != 0;
+        } else {
+            translation_reachable =
+                translation_weights[translation_stage1] != 0 &&
+                stage1_mode_weights[cross / 4U] != 0;
+        }
         return vector_segment_high_va_per_mille != 0 &&
             operation_weights[vector_segment] != 0 &&
-            translation_weights[translation_stage1] != 0 &&
-            stage1_mode_weights[mode] != 0 &&
+            translation_reachable &&
             (store ? vector_segment_stores_per_mille != 0
                    : vector_segment_stores_per_mille != 1000 &&
                          vector_segment_fof_per_mille != 1000) &&
@@ -2214,7 +2240,8 @@ struct RandomConstraints {
     unsigned enabled_vector_segment_high_va_crosses() const
     {
         unsigned count = 0;
-        for (unsigned cross = 0; cross < 8; ++cross) {
+        for (unsigned cross = 0;
+             cross < vector_segment_high_va_cross_count; ++cross) {
             count += vector_segment_high_va_cross_enabled(cross);
         }
         return count;
@@ -2813,7 +2840,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=51 constraints=" << name
+        stream << "constraint_schema=52 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];

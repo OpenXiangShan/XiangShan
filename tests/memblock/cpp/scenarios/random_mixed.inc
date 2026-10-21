@@ -1049,6 +1049,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                      page <= cache0_base + 0x92000; page += 0x1000) {
                     if (!map_stage_page(
                             mode, random_stage1_roots[mode], high_base + page,
+                            page, false, false, true) ||
+                        !map_stage_page(
+                            mode, random_vs_roots[mode], high_base + page,
                             page, false, false, true)) {
                         return false;
                     }
@@ -5801,9 +5804,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             std::optional<unsigned> vector_segment_high_va_cross;
             if (kind == RandomConstraints::vector_segment &&
                 constraints.vector_segment_high_va_per_mille != 0) {
-                const unsigned first = random() % 8U;
-                for (unsigned offset = 0; offset < 8; ++offset) {
-                    const unsigned cross = (first + offset) % 8U;
+                constexpr unsigned high_va_cross_count =
+                    RandomConstraints::vector_segment_high_va_cross_count;
+                const unsigned first = random() % high_va_cross_count;
+                for (unsigned offset = 0; offset < high_va_cross_count;
+                     ++offset) {
+                    const unsigned cross =
+                        (first + offset) % high_va_cross_count;
                     if (constraints.vector_segment_high_va_cross_enabled(cross) &&
                         constraint_coverage.vector_segment_high_va_crosses[cross] == 0) {
                         vector_segment_high_va_cross = cross;
@@ -5822,17 +5829,36 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 if (!vector_segment_high_va_cross && !vector_segment_fof &&
                     ordinary_constraint_coverage_closed &&
                     random() % 1000 < constraints.vector_segment_high_va_per_mille) {
-                    std::array<std::uint64_t, 8> weights{};
+                    std::array<std::uint64_t, high_va_cross_count> weights{};
                     std::uint64_t total = 0;
-                    for (unsigned cross = 0; cross < 8; ++cross) {
+                    for (unsigned cross = 0; cross < high_va_cross_count;
+                         ++cross) {
                         if (!constraints.vector_segment_high_va_cross_enabled(cross)) {
                             continue;
                         }
-                        const unsigned mode = cross / 4U;
-                        const bool store = (cross / 2U) % 2U != 0;
+                        const bool nested = RandomConstraints::
+                            vector_segment_high_va_cross_is_nested(cross);
+                        const unsigned cross_class = nested ? cross - 8U : cross;
+                        const bool store = (cross_class / 2U) % 2U != 0;
                         const bool misaligned = cross % 2U != 0;
-                        weights[cross] = std::uint64_t{
-                            constraints.stage1_mode_weights[mode]} *
+                        std::uint64_t translation_weight = 0;
+                        if (nested) {
+                            const unsigned pair = RandomConstraints::
+                                vector_segment_high_va_nested_pair(cross);
+                            translation_weight =
+                                std::uint64_t{
+                                    constraints.translation_weights[
+                                        RandomConstraints::translation_nested]} *
+                                constraints.vs_mode_weights[pair / 2U] *
+                                constraints.g_mode_weights[pair % 2U];
+                        } else {
+                            translation_weight =
+                                std::uint64_t{
+                                    constraints.translation_weights[
+                                        RandomConstraints::translation_stage1]} *
+                                constraints.stage1_mode_weights[cross / 4U];
+                        }
+                        weights[cross] = translation_weight *
                             (store ? constraints.vector_segment_stores_per_mille
                                    : 1000U - constraints.vector_segment_stores_per_mille) *
                             (misaligned ? constraints.misaligned_per_mille
@@ -5841,7 +5867,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     if (total != 0) {
                         std::uint64_t selection = random() % total;
-                        for (unsigned cross = 0; cross < 8; ++cross) {
+                        for (unsigned cross = 0; cross < high_va_cross_count;
+                             ++cross) {
                             if (selection < weights[cross]) {
                                 vector_segment_high_va_cross = cross;
                                 break;
@@ -5851,7 +5878,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                 }
                 if (vector_segment_high_va_cross) {
-                    vector_segment_store = (*vector_segment_high_va_cross / 2U) % 2U != 0;
+                    const unsigned cross_class = RandomConstraints::
+                            vector_segment_high_va_cross_is_nested(
+                                *vector_segment_high_va_cross)
+                        ? *vector_segment_high_va_cross - 8U
+                        : *vector_segment_high_va_cross;
+                    vector_segment_store = (cross_class / 2U) % 2U != 0;
                     vector_segment_fof = false;
                 }
             }
@@ -6524,8 +6556,19 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 translation.stage1_mode = vector_fof_stage1_mode;
             } else if (vector_segment_high_va_cross) {
                 translation = TranslationContext{};
-                translation.regime = RandomConstraints::translation_stage1;
-                translation.stage1_mode = *vector_segment_high_va_cross / 4U;
+                if (RandomConstraints::vector_segment_high_va_cross_is_nested(
+                        *vector_segment_high_va_cross)) {
+                    const unsigned pair =
+                        RandomConstraints::vector_segment_high_va_nested_pair(
+                            *vector_segment_high_va_cross);
+                    translation.regime = RandomConstraints::translation_nested;
+                    translation.vs_mode = pair / 2U;
+                    translation.g_mode = pair % 2U;
+                } else {
+                    translation.regime = RandomConstraints::translation_stage1;
+                    translation.stage1_mode =
+                        *vector_segment_high_va_cross / 4U;
+                }
             } else if (kind == RandomConstraints::vector_segment &&
                        vector_segment_fof) {
                 translation = TranslationContext{};
@@ -7387,6 +7430,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     !environment.run_until_queues_retired(8192) ||
                     !environment.run_until_sbuffer_empty(
                         constrained_completion_timeout) ||
+                    !environment.run_until_dcache_release_idle(
+                        constrained_completion_timeout) ||
                     !environment.run_until_dcache_idle(
                         constrained_completion_timeout)) {
                     return false;
@@ -7569,15 +7614,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     if (!environment.end_dcache_release_ready_window()) {
                         return false;
                     }
-                    const std::uint64_t expected_stalled =
-                        set_pressure_release_backpressure ? 1U : 0U;
-                    const std::uint64_t expected_cycles =
-                        set_pressure_release_backpressure
-                        ? forced_release_stall_cycles
-                        : 0U;
-                    if (stalled_releases != expected_stalled ||
-                        stall_cycles != expected_cycles ||
-                        stability_checks != expected_cycles) {
+                    const bool backpressure_observation_valid =
+                        memblock::dcache_release_backpressure_observation_valid(
+                            set_pressure_release_backpressure,
+                            stalled_releases, stall_cycles, stability_checks,
+                            forced_release_stall_cycles);
+                    if (!backpressure_observation_valid) {
                         std::ostringstream detail;
                         detail << "random-set-pressure-release-backpressure"
                                << ":selected="
@@ -7592,7 +7634,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         set_pressure_release_backpressure ? 1U : 0U,
                         stalled_releases,
                         stall_cycles,
-                        stability_checks,
+                        set_pressure_release_backpressure
+                            ? forced_release_stall_cycles : 0U,
                         1,
                     }};
                     return true;
@@ -9113,13 +9156,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
                 const std::uint64_t physical_address = address;
                 if (vector_segment_high_va_cross) {
+                    const unsigned virtual_mode =
+                        translation.regime == RandomConstraints::translation_nested
+                        ? translation.vs_mode : translation.stage1_mode;
                     const std::uint64_t high_base = 0U - (std::uint64_t{1} <<
-                        (translation.stage1_mode == 0 ? 38U : 47U));
+                        (virtual_mode == 0 ? 38U : 47U));
                     address += high_base;
                     std::ostringstream detail;
                     detail << phase << ":segment-high-va:cross="
-                           << *vector_segment_high_va_cross << ":va=0x" << std::hex
-                           << address << ":pa=0x" << physical_address << std::dec;
+                           << *vector_segment_high_va_cross
+                           << ":regime="
+                           << (translation.regime ==
+                                       RandomConstraints::translation_nested
+                                   ? "nested" : "stage1")
+                           << ":vs=" << translation.vs_mode
+                           << ":g=" << translation.g_mode
+                           << ":va=0x" << std::hex << address
+                           << ":pa=0x" << physical_address << std::dec;
                     phase = detail.str();
                 }
                 const std::uint64_t rob = rob_offset++;
@@ -9230,11 +9283,24 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             const auto physical_element =
                                 memblock::vector_element_address(segment_uop, element);
                             for (unsigned byte = 0; byte < data_bytes; ++byte) {
-                                const auto walk = memblock::reference_page_walk(
-                                    environment.memory(),
-                                    random_stage1_roots[translation.stage1_mode],
-                                    virtual_element + byte,
-                                    page_mode(translation.stage1_mode));
+                                const auto walk =
+                                    translation.regime ==
+                                            RandomConstraints::translation_nested
+                                    ? memblock::reference_two_stage_walk(
+                                          environment.memory(),
+                                          random_vs_roots[translation.vs_mode],
+                                          random_g_roots[translation.g_mode],
+                                          virtual_element + byte,
+                                          page_mode(translation.vs_mode),
+                                          page_mode(translation.g_mode))
+                                    : memblock::reference_two_stage_walk(
+                                          environment.memory(),
+                                          random_stage1_roots[
+                                              translation.stage1_mode],
+                                          random_g_roots[0],
+                                          virtual_element + byte,
+                                          page_mode(translation.stage1_mode),
+                                          memblock::ReferencePageMode::bare);
                                 if (!walk.translated || walk.physical_address !=
                                     physical_element + byte) {
                                     phase += ":segment-high-va-reference";
@@ -9320,7 +9386,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     // The high-VA alias is a separately declared 4-KiB
                     // mapping. It cannot satisfy or contradict a profile's
                     // ordinary NAPOT-only topology requirement.
-                    leaf_addressed = constraints.stage1_napot_per_mille != 1000;
+                    leaf_addressed =
+                        translation.regime ==
+                                RandomConstraints::translation_nested
+                        ? constraints.nested_vs_napot_per_mille != 1000 &&
+                              constraints.nested_g_napot_per_mille != 1000
+                        : constraints.stage1_napot_per_mille != 1000;
                 }
                 ++actions;
                 ++constraint_coverage.vector_segment_directions[
@@ -10185,28 +10256,33 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         (!physical_pma_execute_denied && !physical_pmp_denied &&
                              (final_nc || final_io)
                              ? 1U : 0U);
-                    const std::uint64_t dcache_after =
-                        environment.tilelink_requests();
-                    const std::uint64_t dcache_delta =
-                        dcache_after - dcache_before;
-                    const bool pmp_prefix_request_valid =
+                    const std::uint64_t target_line =
+                        reference.physical_address & ~std::uint64_t{63};
+                    // Other operations may still be retiring through the
+                    // manager after architectural completion.  Attribute only
+                    // demand-load requests, and require any permitted PMP
+                    // prefix request to cover this load's translated line.
+                    // Unrelated store/prefetch traffic is not part of this
+                    // operation's no-side-effect contract.
+                    const std::uint64_t demand_requests =
+                        environment.dcache_requests_from_source_since(
+                            2, dcache_before);
+                    const std::uint64_t demand_target_requests =
+                        environment.dcache_requests_from_source_covering_since(
+                            2, target_line, dcache_before);
+                    const bool pmp_prefix_request_allowed =
                         physical_pmp_denied &&
                         hypervisor_pmp_relation == RandomConstraints::
-                            hypervisor_pmp_cross_upper &&
-                        dcache_delta <= 1 &&
-                        (dcache_delta == 0 ||
-                         environment.dcache_last_request_address() ==
-                             (reference.physical_address &
-                              ~std::uint64_t{63}));
-                    const bool suppressed_dcache_valid =
-                        !(physical_pma_execute_denied || physical_pmp_denied ||
-                          final_nc || final_io) ||
-                        (physical_pmp_denied
-                             ? pmp_prefix_request_valid || dcache_delta == 0
-                             : dcache_delta == 0);
+                            hypervisor_pmp_cross_upper;
+                    const char *suppression_error =
+                        memblock::dcache_suppressed_demand_error(
+                            physical_pma_execute_denied || physical_pmp_denied ||
+                                final_nc || final_io,
+                            pmp_prefix_request_allowed, demand_requests,
+                            demand_target_requests);
                     if (!completed_load ||
                         environment.uncache_requests() != expected_uncache ||
-                        !suppressed_dcache_valid) {
+                        suppression_error != nullptr) {
                         std::ostringstream detail;
                         detail << phase << ":hypervisor-load-manager"
                                << ":operation_phase={" << operation_phase << '}'
@@ -10225,6 +10301,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                << hypervisor_pmp_relation
                                << ":dcache=" << dcache_before << '/'
                                << environment.tilelink_requests()
+                               << ":demand=" << demand_requests
+                               << ":target_demand=" << demand_target_requests
+                               << ":target_line=0x" << std::hex << target_line
+                               << std::dec
+                               << ":suppression="
+                               << (suppression_error == nullptr
+                                       ? "valid" : suppression_error)
                                << ":last_dcache=0x" << std::hex
                                << environment.dcache_last_request_address()
                                << std::dec

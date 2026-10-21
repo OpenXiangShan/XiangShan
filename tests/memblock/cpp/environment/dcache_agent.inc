@@ -32,6 +32,8 @@ public:
         release_ready_window_stall_remaining_ = 0;
         release_ready_window_stall_cycles_ = 0;
         release_ready_window_completed_releases_ = 0;
+        release_channel_idle_cycles_ = 0;
+        c_valid_sampled_ = false;
         force_a_stall_ = enabled;
         force_e_stall_ = enabled;
     }
@@ -270,6 +272,8 @@ public:
         release_ready_window_stall_remaining_ = 0;
         release_ready_window_stall_cycles_ = 0;
         release_ready_window_completed_releases_ = 0;
+        release_channel_idle_cycles_ = 0;
+        c_valid_sampled_ = false;
         hold_c_until_probe_requests_.reset();
         pending_response_error_.reset();
         force_a_stall_ = random_backpressure_;
@@ -394,6 +398,7 @@ public:
         b_fire_ = b_valid && b_ready;
         const bool c_valid = dut.auto_inner_dcache_client_out_c_valid.B();
         const bool c_ready = dut.auto_inner_dcache_client_out_c_ready.B();
+        c_valid_sampled_ = c_valid;
         std::optional<CRequest> current_c;
         if (c_valid) {
             current_c = CRequest{
@@ -587,6 +592,13 @@ public:
             expected_grant_acks_.erase(expected);
             ++grant_ack_count_;
         }
+        const bool probe_hold = hold_c_until_probe_requests_ &&
+            probe_request_count_ < *hold_c_until_probe_requests_;
+        const bool release_idle_sample = !c_valid_sampled_ &&
+            !stalled_c_request_ && !release_data_ &&
+            !release_ready_window_active_ && !probe_hold;
+        release_channel_idle_cycles_ = release_idle_sample
+            ? release_channel_idle_cycles_ + 1U : 0U;
         a_fire_ = false;
         b_fire_ = false;
         c_fire_ = false;
@@ -642,6 +654,37 @@ public:
             const std::uint64_t bytes = std::uint64_t{1} << request.size;
             const std::uint64_t base = request.address & ~(bytes - 1);
             count += address >= base && address - base < bytes;
+        }
+        return count;
+    }
+    std::uint64_t request_source_count_since(
+        std::uint8_t request_source, std::uint64_t first_request) const
+    {
+        std::uint64_t count = 0;
+        for (std::size_t index = static_cast<std::size_t>(first_request);
+             index < request_history_.size(); ++index) {
+            const ARequest &request = request_history_[index];
+            count += request_source == 2
+                ? dcache_is_cpu_demand_acquire(request)
+                : request.request_source == request_source;
+        }
+        return count;
+    }
+    std::uint64_t request_source_covering_count_since(
+        std::uint8_t request_source, std::uint64_t address,
+        std::uint64_t first_request) const
+    {
+        std::uint64_t count = 0;
+        for (std::size_t index = static_cast<std::size_t>(first_request);
+             index < request_history_.size(); ++index) {
+            const ARequest &request = request_history_[index];
+            const std::uint64_t bytes = std::uint64_t{1} << request.size;
+            const std::uint64_t base = request.address & ~(bytes - 1U);
+            const bool source_matches = request_source == 2
+                ? dcache_is_cpu_demand_acquire(request)
+                : request.request_source == request_source;
+            count += source_matches &&
+                address >= base && address - base < bytes;
         }
         return count;
     }
@@ -847,6 +890,14 @@ public:
     bool grant_acks_idle() const
     {
         return expected_grant_acks_.empty();
+    }
+    bool release_channel_idle() const
+    {
+        const bool probe_hold = hold_c_until_probe_requests_ &&
+            probe_request_count_ < *hold_c_until_probe_requests_;
+        return release_channel_idle_cycles_ >= 2 &&
+            !stalled_c_request_ && !release_data_ &&
+            !release_ready_window_active_ && !probe_hold;
     }
     bool responses_idle() const
     {
@@ -1517,6 +1568,8 @@ private:
     unsigned release_ready_window_stall_remaining_ = 0;
     std::uint64_t release_ready_window_stall_cycles_ = 0;
     std::uint64_t release_ready_window_completed_releases_ = 0;
+    unsigned release_channel_idle_cycles_ = 0;
+    bool c_valid_sampled_ = false;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     std::string error_;

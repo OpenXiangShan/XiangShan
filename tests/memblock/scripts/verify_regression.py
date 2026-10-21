@@ -1284,12 +1284,15 @@ def _check_miss_burst_coverage(
         )
 
 
-def _check_vector_segment_high_va_coverage_schema51(
+def _check_vector_segment_high_va_coverage(
     result: dict[str, Any],
     target_operations: list[int],
     target_translation: list[int],
     target_stage1: list[int],
+    target_vs: list[int],
+    target_g: list[int],
     segment_directions: list[int],
+    schema: int,
 ) -> None:
     """Check successful canonical high VAs using legal segment shape inputs."""
 
@@ -1333,7 +1336,10 @@ def _check_vector_segment_high_va_coverage_schema51(
                             if (sew if addressing >= 2 else eew) > 0:
                                 reachable[1] = True
 
-    crosses = _csv_counts(result, "actual_vector_segment_high_va_cross", 8)
+    cross_count = 24 if schema >= 52 else 8
+    crosses = _csv_counts(
+        result, "actual_vector_segment_high_va_cross", cross_count
+    )
     counts: dict[str, int] = {}
     for suffix in ("", "_data_uops", "_elements"):
         name = f"actual_vector_segment_high_va{suffix}"
@@ -1370,9 +1376,38 @@ def _check_vector_segment_high_va_coverage_schema51(
                     f"enabled classes: mode={mode} store={store} "
                     f"misaligned={misaligned}",
                 )
+    if schema >= 52:
+        for pair in range(4):
+            vs_mode, g_mode = divmod(pair, 2)
+            for store in range(2):
+                direction_enabled = (
+                    rates["vector_segment_store"] != 0 if store
+                    else rates["vector_segment_store"] != 1000
+                    and rates["vector_segment_fof"] != 1000
+                )
+                for misaligned in range(2):
+                    enabled = (
+                        rates["vector_segment_high_va"] != 0
+                        and target_operations[4] != 0
+                        and target_translation[2] != 0
+                        and target_vs[vs_mode] != 0
+                        and target_g[g_mode] != 0
+                        and direction_enabled
+                        and (rates["misaligned"] != 0 if misaligned
+                             else rates["misaligned"] != 1000)
+                        and reachable[misaligned]
+                    )
+                    any_enabled |= enabled
+                    cross = 8 + (pair * 2 + store) * 2 + misaligned
+                    _require(
+                        (crosses[cross] > 0) == enabled,
+                        "actual_vector_segment_high_va_cross does not match "
+                        f"enabled nested classes: vs={vs_mode} g={g_mode} "
+                        f"store={store} misaligned={misaligned}",
+                    )
     _require(
         rates["vector_segment_high_va"] == 0 or any_enabled,
-        "target_vector_segment_high_va has no eligible ordinary stage-1 "
+        "target_vector_segment_high_va has no eligible ordinary stage-1/nested "
         "segment shape, direction, and alignment",
     )
     total = sum(crosses)
@@ -1382,8 +1417,9 @@ def _check_vector_segment_high_va_coverage_schema51(
     )
     for store in range(2):
         direction_total = sum(
-            crosses[(mode * 2 + store) * 2 + misaligned]
-            for mode in range(2) for misaligned in range(2)
+            crosses[path * 4 + store * 2 + misaligned]
+            for path in range(cross_count // 4)
+            for misaligned in range(2)
         )
         _require(
             direction_total <= segment_directions[store],
@@ -1397,6 +1433,15 @@ def _check_vector_segment_high_va_coverage_schema51(
             "vector segment high-VA mode accounting exceeds stage-1 "
             f"traffic: mode={mode}",
         )
+    if schema >= 52:
+        actual_nested_pairs = _csv_counts(result, "actual_nested_pairs", 4)
+        for pair in range(4):
+            _require(
+                sum(crosses[8 + pair * 4:8 + (pair + 1) * 4])
+                <= actual_nested_pairs[pair],
+                "vector segment high-VA mode accounting exceeds nested "
+                f"traffic: vs={pair // 2} g={pair % 2}",
+            )
     _require(
         (counts["_data_uops"] == 0 and counts["_elements"] == 0) if total == 0
         else 2 * total <= counts["_data_uops"] <= 8 * total
@@ -1413,7 +1458,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -3924,9 +3969,9 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 )
 
     if schema >= 51:
-        _check_vector_segment_high_va_coverage_schema51(
+        _check_vector_segment_high_va_coverage(
             result, target_operations, target_translation, target_stage1,
-            actual_segment_direction,
+            target_vs, target_g, actual_segment_direction, schema,
         )
 
     if schema >= 10:

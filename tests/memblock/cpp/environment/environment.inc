@@ -973,6 +973,19 @@ public:
         return memory_agent_.request_covering_count_since(
             address, first_request);
     }
+    std::uint64_t dcache_requests_from_source_since(
+        std::uint8_t request_source, std::uint64_t first_request) const
+    {
+        return memory_agent_.request_source_count_since(
+            request_source, first_request);
+    }
+    std::uint64_t dcache_requests_from_source_covering_since(
+        std::uint8_t request_source, std::uint64_t address,
+        std::uint64_t first_request) const
+    {
+        return memory_agent_.request_source_covering_count_since(
+            request_source, address, first_request);
+    }
     void begin_dcache_release_observation()
     {
         memory_agent_.begin_release_observation();
@@ -1137,6 +1150,10 @@ public:
     bool dcache_responses_idle() const
     {
         return memory_agent_.responses_idle();
+    }
+    bool dcache_release_channel_idle() const
+    {
+        return memory_agent_.release_channel_idle();
     }
     std::uint64_t ptw_requests() const { return ptw_agent_.request_count(); }
     std::uint64_t ptw_error_response_requests() const
@@ -4875,6 +4892,23 @@ public:
         if (!memory_agent_.responses_idle() ||
             !memory_agent_.grant_acks_idle()) {
             error_ = "timed out draining DCache responses and GrantAcks";
+            return false;
+        }
+        return check_components();
+    }
+
+    bool run_until_dcache_release_idle(unsigned timeout = 4096)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout && !memory_agent_.release_channel_idle();
+             ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (!memory_agent_.release_channel_idle()) {
+            error_ = "timed out draining the DCache release channel";
             return false;
         }
         return check_components();

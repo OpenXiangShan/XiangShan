@@ -465,10 +465,12 @@ reenter its own context.
 
 For ordinary high-half segment actions, canonical VA is a complete XLEN input.
 The testbench maps a permissive legal high-half alias to the declared physical
-image, walks every active byte independently, and checks exact zero-exception
-vector completion/data. Aliases never license truncating VA before canonical
-checking or retranslating a split beat. The observed completion count must equal
-the instruction's complete data/index uop count; each active store field element
-is read back through the DUT after the store buffer drains. A zero-active-element
-instruction cannot close this address class. Segment execution remains serialized
-according to the existing backend contract and does not allocate LSQ entries.
+image and independently walks every active byte through either the stage-1
+walker or the full VS/G two-stage walker selected by the coverage bin. It then
+checks exact zero-exception vector completion/data. Aliases never license
+truncating VA before canonical checking or retranslating a split beat. The
+observed completion count must equal the instruction's complete data/index uop
+count; each active store field element is read back through the DUT after the
+store buffer drains. A zero-active-element instruction cannot close this address
+class. Segment execution remains serialized according to the existing backend
+contract and does not allocate LSQ entries.

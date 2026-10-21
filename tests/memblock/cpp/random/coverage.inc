@@ -368,8 +368,10 @@ struct ConstraintCoverage {
         vector_segment_fof_crosses{};
     std::uint64_t vector_segment_fof_data_uops = 0;
     std::uint64_t vector_segment_fof_fix_vl = 0;
-    // [Sv39/Sv48][load/store][aligned/misaligned] successful high VAs.
-    std::array<std::uint64_t, 8> vector_segment_high_va_crosses{};
+    // The first eight bins are [Sv39/Sv48][load/store][aligned/misaligned]
+    // stage-1 paths. The remaining bins cross all four VS/G pairs with the
+    // same direction and alignment dimensions.
+    std::array<std::uint64_t, 24> vector_segment_high_va_crosses{};
     std::uint64_t vector_segment_high_va_data_uops = 0;
     std::uint64_t vector_segment_high_va_elements = 0;
     std::array<std::uint64_t, 2> nc_directions{};
@@ -1896,6 +1898,7 @@ struct ConstraintCoverage {
             std::uint64_t high_va_total = 0;
             std::array<std::uint64_t, 2> high_va_directions{};
             std::array<std::uint64_t, 2> high_va_modes{};
+            std::array<std::uint64_t, 4> high_va_nested_crosses{};
             bool high_va_complete = true;
             for (unsigned cross = 0;
                  cross < vector_segment_high_va_crosses.size(); ++cross) {
@@ -1903,13 +1906,24 @@ struct ConstraintCoverage {
                 high_va_complete &= (count != 0) ==
                     constraints.vector_segment_high_va_cross_enabled(cross);
                 high_va_total += count;
-                high_va_directions[(cross / 2U) % 2U] += count;
-                high_va_modes[cross / 4U] += count;
+                const bool nested = RandomConstraints::
+                    vector_segment_high_va_cross_is_nested(cross);
+                const unsigned cross_class = nested ? cross - 8U : cross;
+                high_va_directions[(cross_class / 2U) % 2U] += count;
+                if (nested) {
+                    high_va_nested_crosses[(cross - 8U) / 4U] += count;
+                } else {
+                    high_va_modes[cross / 4U] += count;
+                }
             }
             for (unsigned index = 0; index < 2; ++index) {
                 high_va_complete &= high_va_directions[index] <=
                     vector_segment_directions[index];
                 high_va_complete &= high_va_modes[index] <= stage1_modes[index];
+            }
+            for (unsigned pair = 0; pair < high_va_nested_crosses.size(); ++pair) {
+                high_va_complete &= high_va_nested_crosses[pair] <=
+                    nested_mode_pairs[pair];
             }
             high_va_complete &= high_va_total == 0
                 ? vector_segment_high_va_data_uops == 0 &&
