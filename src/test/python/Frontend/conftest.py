@@ -92,6 +92,9 @@ def pytest_sessionfinish(session, exitstatus):
             merge_native_toffee_reports(worker_reports, toffee_session_report_path())
         else:
             write_toffee_session_report(session)
+    status_file = os.getenv("TB_PYTEST_EXIT_STATUS_FILE", "").strip()
+    if status_file:
+        Path(status_file).write_text(f"{int(exitstatus)}\n", encoding="utf-8")
     finish_vcs_batch_dut()
 
 
