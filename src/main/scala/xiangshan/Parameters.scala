@@ -84,7 +84,7 @@ case class XSCoreParameters
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
   MaxUopSize: Int = 8,
-  EnableRobCompression: Boolean = true,
+  EnableRobCompression: Boolean = false,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
   // TODO: New frontend parameters system below. Replace the old parameters above during development.
@@ -112,7 +112,7 @@ case class XSCoreParameters
   StoreQueueSnapshotInterval: Int = 1, // must a power of 2
   SQUnalignQueueSize: Int = 2,
   VlsQueueSize: Int = 8,
-  RobSize: Int = 144,
+  RobSize: Int = 352,
   RabSize: Int = 352,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
