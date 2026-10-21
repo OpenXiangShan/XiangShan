@@ -1006,7 +1006,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     )
     ptwl0replace.access(l0RefillIdx, l0VictimWay)
     l0v := l0v | l0RfvOH
-    l0g := l0g & ~l0RfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR && refill.req_info_dup(0).s2xlate =/= onlyStage2, l0RfvOH, 0.U)
+    l0g := l0g & ~l0RfvOH | Mux(Cat(memPtes.map(pte => pte.perm.g && pte.perm.v)).andR &&
+      refill.req_info_dup(0).s2xlate =/= onlyStage2, l0RfvOH, 0.U)
     l0h(l0RefillIdx)(l0VictimWay) := refill_h(0)
     if (HasBitmapCheck) {updateL0BitmapReg(l0BitmapReg, Tran2D(~l0RfvOH))}
     l0asids(l0RefillIdx)(l0VictimWay) := XORFold(l0Wasid, l2tlbParams.hashAsidWidth)
@@ -1044,7 +1045,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     )
     spreplace.access(spRefillIdx)
     spv := spv | spRfOH
-    spg := spg & ~spRfOH | Mux(memPte(0).perm.g && refill.req_info_dup(0).s2xlate =/= onlyStage2, spRfOH, 0.U)
+    spg := spg & ~spRfOH | Mux(memPte(0).perm.g && memPte(0).perm.v &&
+      refill.req_info_dup(0).s2xlate =/= onlyStage2, spRfOH, 0.U)
     sph(spRefillIdx) := refill_h(0)
 
     for (i <- 0 until l2tlbParams.spSize) {

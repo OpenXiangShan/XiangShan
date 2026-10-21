@@ -111,6 +111,21 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     this
   }
 
+  def apply(pte: PteBundle, pf: Bool, af: Bool, entryValid: Bool) = {
+    this.pf := pf
+    this.af := af
+    this.v := entryValid
+    this.d := pte.perm.d
+    this.a := pte.perm.a
+    this.g := pte.perm.g
+    this.u := pte.perm.u
+    this.x := pte.perm.x
+    this.w := pte.perm.w
+    this.r := pte.perm.r
+
+    this
+  }
+
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
   }
@@ -144,6 +159,21 @@ class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
 
     this
   }
+  def apply(pte: PteBundle, pf: Bool, af: Bool, entryValid: Bool) = {
+    this.pf := pf
+    this.af := af
+    this.v := entryValid
+    this.d := pte.perm.d
+    this.a := pte.perm.a
+    this.g := pte.perm.g
+    this.u := pte.perm.u
+    this.x := pte.perm.x
+    this.w := pte.perm.w
+    this.r := pte.perm.r
+
+    this
+  }
+
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
   }
@@ -866,7 +896,8 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     val pm = Wire(new PtePermBundle)
     pm.d := perm.d
     pm.a := perm.a
-    pm.g := perm.g
+    // V = 0 makes G a don't-care; it does not create a global mapping.
+    pm.g := perm.g && perm.v
     pm.u := perm.u
     pm.x := perm.x
     pm.w := perm.w
@@ -987,7 +1018,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false,
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     pbmt := pte.asTypeOf(new PteBundle().cloneType).pbmt
     ppn := pte.asTypeOf(new PteBundle().cloneType).getPPN()
-    perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
+    perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).getPerm())
     when (s2xlate === onlyStage2) {
       // g bit in G-stage PTEs should be ignored by hardware
       perm.map(_.g := false.B)
@@ -1089,7 +1120,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
       ps.ppns(i) := pte.getPPN()
       ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
       ps.onlypf(i) := pte.onlyPf(levelUInt, s2xlate, pbmte)
-      ps.perms.map(_(i) := pte.perm)
+      ps.perms.map(_(i) := pte.getPerm())
       when (s2xlate === onlyStage2) {
         // g bit in G-stage PTEs should be ignored by hardware
         ps.perms.map(_(i).g := false.B)

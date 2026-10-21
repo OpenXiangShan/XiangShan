@@ -129,8 +129,6 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     (PrivExceptionCause.cboZ,       !HasCMO.B || in.fromCSR.illegalInst.cboZ,      in.fromCSR.virtualInst.cboZ),
     (PrivExceptionCause.cboCF,      !HasCMO.B || in.fromCSR.illegalInst.cboCF,     in.fromCSR.virtualInst.cboCF),
     (PrivExceptionCause.cboI,       !HasCMO.B || in.fromCSR.illegalInst.cboI,      in.fromCSR.virtualInst.cboI),
-    (PrivExceptionCause.aes64ks1i,  true.B,                                        false.B),
-    (PrivExceptionCause.amocasQ,    true.B,                                        false.B),
   )
 
   val privExceptionII = Mux1H(privExceptionSources.map {
@@ -141,6 +139,9 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     case (cause, _, virtual) => (privCause === cause) -> virtual
   })
 
+  val isAes64ks1i = instFields.FUNCT7 === "b0011000".U && instFields.OPCODE === "b0010011".U && instFields.FUNCT3 === "b001".U && instFields.RS2(4) === "b1".U
+  val reserveExceptionII = isAes64ks1i && instFields.RS2(3, 0) > 10.U
+
   for (i <- 0 until maxSimpleSplitUopNum) {
     val frmExceptionII = out.uop(i).bits.frmRen && (out.uop(i).bits.frmIll || (out.uop(i).bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
 
@@ -149,8 +150,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
     out.uop(i).bits.opcode := opcodes(i) | cboOpcode
-    out.uop(i).bits.lsrc1 := instFields.RS1
-    out.uop(i).bits.lsrc2 := instFields.RS2
+    out.uop(i).bits.lsrc1 := Mux(isMop, 0.U, instFields.RS1)
+    out.uop(i).bits.lsrc2 := Mux(isMop, 0.U, instFields.RS2)
     out.uop(i).bits.lsrc3 := instFields.FS3
     out.uop(i).bits.frmRen := frmRen
     out.uop(i).bits.fflagsWen := fflagsWen
@@ -168,7 +169,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.isJ := isJs(i)
     out.uop(i).bits.isJr := isJrs(i)
     out.uop(i).bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U
-    out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII
+    out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII || reserveExceptionII
     out.uop(i).bits.exceptionVI := privExceptionVI
   }
   out.uopNumOH := numUopOH

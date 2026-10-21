@@ -37,7 +37,7 @@ class FMulFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltFixLatFunc(cf
   // fma results to falu
   val outToFaluFromFmul = out.FmulToFadd.get
   //dirty code fuOpType, in valid next cycle outToFaluFromFmul valid
-  outToFaluFromFmul.valid := RegNext(in.ex.head.valid && FMacOpcode.isOP3(ex0ctrl.opcode))
+  outToFaluFromFmul.valid := in.ex(1).valid && FMacOpcode.isOP3(in.ex(1).bits.ctrl.opcode)
   outToFaluFromFmul.bits.FMULToFALUCtrl := fmul.io.outToFADD.FMULToFADDCtrl
   outToFaluFromFmul.bits.fpAAppend := fmul.io.outToFADD.fpAAppend
   outToFaluFromFmul.bits.fpA := fmul.io.outToFADD.fpA

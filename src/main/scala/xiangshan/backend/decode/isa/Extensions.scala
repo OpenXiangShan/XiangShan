@@ -71,6 +71,8 @@ object Extensions {
 
   case object Zcmop extends UnprivExt(Seq(ZCMOPType))
 
+  case object Zimop extends UnprivExt(Seq(ZIMOPType), tableZimop)
+
   case object Zfa extends UnprivExt
 
   case object Zfh extends UnprivExt(Seq(ZFHType, ZFH64Type), tableZfh)
@@ -164,7 +166,7 @@ object Extensions {
     XSTrap,
     Zicbo,
     Zicond,
-    Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
+    Zifencei, Zimop, Zknd, Zkne, Zknh, Zksed, Zksh,
     // Zcb, Zcmop,
     ZfaF, ZfaD, ZfaZfh, Zfh, Zfhmin, ZfhminD,
   ) ++ Option.when(p(XSCoreParamsKey).HasMptCheck && !p(XSCoreParamsKey).HasBitmapCheck)(Smmtt).toSeq

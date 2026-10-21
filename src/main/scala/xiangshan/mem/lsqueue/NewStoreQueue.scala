@@ -506,6 +506,9 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       // Two-step selection to handle circular queue segments
       val s1CanForwardLow = s1AgeMaskLow & s1OverlapMask & s1VaddrMatchVec
       val s1CanForwardHigh = s1AgeMaskHigh & s1OverlapMask & s1VaddrMatchVec
+      val s1VaddrForward = s1CanForwardLow | s1CanForwardHigh
+      val s1OverlapCandidateVec = (s1AgeMaskLow | s1AgeMaskHigh) &
+        s1OverlapMask & addrValidVec.asUInt
 
       // find youngest entry, which is one-hot
       // Find youngest store (highest index = most recent)
@@ -554,7 +557,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2SelectCtrlEntry   = RegEnable(s1SelectCtrlEntry, s1Valid)
       val s2DataInValid       = RegEnable(s1DataInvalid, s1Valid)
       val s2StrictMdpWait     = RegEnable(s1StrictMdpWait, s1Valid)
-      val s2CanForward       = RegEnable((s1AgeMaskLow | s1AgeMaskHigh) & s1OverlapMask & addrValidVec.asUInt, s1Valid)
+      val s2VaddrForward     = RegEnable(s1VaddrForward, s1Valid)
+      val s2OverlapCandidateVec = RegEnable(s1OverlapCandidateVec, s1Valid)
       val s2SelectOH         = RegEnable(s1SelectOH, s1Valid)
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CalculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
@@ -600,7 +604,9 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       //                                  Load needs this byte (0x77)
 
       val s2ByteSelectOffset    = s2LoadStart - s2SelectDataEntry.byteStart
-      // !Paddrmatch
+      // Physical CAM result. It is intentionally computed for every queue
+      // entry here; s2OverlapCandidateVec below restricts the comparison to
+      // older, valid, overlapping stores from the original query.
       val s2PaddrMatchVec       = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
         val storeIsCbo          = ctrlEntry.isCbo
         val same16BMatch        = dataEntry.paddr(PAddrBits - 1, VWordOffset) === s2LoadPaddr
@@ -609,16 +615,14 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
           s2LoadPaddr(s2LoadPaddr.getWidth - 1, DCacheLineOffset - VWordOffset)
 
         same16BMatch || next16BMatch || (storeIsCbo && sameLineMatch)
-      }).asUInt
+      }).asUInt & s2OverlapCandidateVec
 
       val s2CboForwardFail      = s2SelectCtrlEntry.isCbo && !isCboZero(s2SelectDataEntry.cboType)
 
-      // two situation need to trigger paddr not match :
-      // [1]. vaddr match, but paddr not match.
-      // [2]. vaddr not match, but paddr match.
-      val s2PaddrNoMatch       = Mux(s2ForwardValid,
-        !(s2PaddrMatchVec & s2CanForward & s2SelectOH).orR, // if forward valid, select entry's paddr must match
-        (s2PaddrMatchVec & s2CanForward).orR) // if forward invalid, must no paddr match
+      // A virtual/physical CAM disagreement must cause replay.
+      // Compare the masks only over the same older-store domain;
+      // including younger or invalid queue entries would turn unrelated physical hits into replays.
+      val s2PaddrNoMatch       = (s2PaddrMatchVec ^ s2VaddrForward).orR
 
       val s2SelectData         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
@@ -687,7 +691,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         dontTouch(s2OutData)
         dontTouch(s2SafeForward)
         dontTouch(s2PaddrMatchVec)
-        dontTouch(s2CanForward)
+        dontTouch(s2VaddrForward)
+        dontTouch(s2OverlapCandidateVec)
         dontTouch(s1HasAddrInvalidVec)
         dontTouch(s2MdpHitOutOfRange)
       }
