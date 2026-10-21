@@ -25,6 +25,9 @@ Defaults:
   TB_RESET_VECTOR 0x80000000
 
 Environment:
+  TB_ASM_BIN_PATH
+               Optional binary output path; defaults to
+               tests/asm_cases/generated/<case>.bin under Frontend.
   NEMU_EXEC or TB_NEMU_EXEC
                NEMU executable path. If unset, this script tries
                ready-to-run/riscv64-nemu-interpreter.
@@ -63,7 +66,7 @@ fi
 
 CASE_NAME="$(basename "${ASM_PATH}")"
 CASE_STEM="${CASE_NAME%.*}"
-BIN_PATH="${FRONTEND_DIR}/tests/asm_cases/generated/${CASE_STEM}.bin"
+BIN_PATH="${TB_ASM_BIN_PATH:-${FRONTEND_DIR}/tests/asm_cases/generated/${CASE_STEM}.bin}"
 
 LINK_ADDR="${LINK_ADDR:-0x80000000}"
 NEMU_MEM_BASE="${NEMU_MEM_BASE:-0x80000000}"
