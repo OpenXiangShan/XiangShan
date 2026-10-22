@@ -163,13 +163,20 @@ endif
 RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 override DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 
-# co-simulation with DRAMsim3
+# memory backends
+MEMORY_BACKEND_COUNT := $(words $(filter 1,$(WITH_DRAMSIM3) $(WITH_BAIYANG)))
+ifneq ($(filter-out 0 1,$(MEMORY_BACKEND_COUNT)),)
+$(error WITH_DRAMSIM3 and WITH_BAIYANG are mutually exclusive)
+endif
+
 ifeq ($(WITH_DRAMSIM3),1)
 ifndef DRAMSIM3_HOME
 $(error DRAMSIM3_HOME is not set)
 endif
 override SIM_ARGS += --with-dramsim3
 endif
+
+include scripts/Makefile.baiyang.mk
 
 # SimAXIMem size in GB (for sim-verilog only)
 ifneq ($(SIM_MEM_SIZE),)
@@ -348,11 +355,14 @@ reformat:
 	mill xiangshan.reformat
 
 # verilator simulation
-emu-mk: sim-verilog
-	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
+emu-mk: sim-verilog $(BAIYANG_EMU_DEPS)
+	$(MAKE) -C ./difftest emu-mk SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)" $(BAIYANG_DIFTEST_ARGS)
 
 emu: $(call docker-deps,emu-mk)
-	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) $(BAIYANG_DIFTEST_ARGS)
+
+emu-run: emu
+	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) $(BAIYANG_DIFTEST_ARGS)
 
 gsim: sim-verilog
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
@@ -385,4 +395,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog gsim emu clean help init init-force bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog gsim emu emu-run clean help init init-force baiyang-init baiyang-verilog bump bsp $(REF_SO)
