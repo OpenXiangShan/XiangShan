@@ -263,7 +263,9 @@ class MainBtbAlignBank(
   private val t1_vbtbHit = t1_vbtbHitMask.orR
 
   // Write entry only when there's a mispredict, and if:
-  private val t1_entryNeedWrite = t1_needWrite && !t1_vbtbHit && t1_mispredictInfo.valid && (
+  // A VBTB hit can be hidden behind its single earlier prediction. Let a
+  // mispredicted branch missing from Main BTB be promoted through normal allocation.
+  private val t1_entryNeedWrite = t1_needWrite && t1_mispredictInfo.valid && (
     // 1. not hit, always write a new entry, use mbtb replacer's victim way.
     !t1_hit ||
       // 2. hit, do write only if:
