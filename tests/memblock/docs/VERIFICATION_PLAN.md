@@ -486,6 +486,30 @@ not promote protocol-invalid combinations or any pin to semantic coverage; only
 typed drivers and independently checked observations can do that.
 
 
+## Toffee Verification Layer
+
+The Toffee-based Python layer is the target control and composition architecture:
+tests submit semantic transactions to protocol agents, adapters alone own Picker
+pin names and clock initialization, and pure models/scoreboards retain the
+existing external oracles. Its component boundaries and lifecycle are owned by
+[`TOFFEE_ARCHITECTURE.md`](TOFFEE_ARCHITECTURE.md).
+
+[`suite_manifest.json`](../toffee/suite_manifest.json) assigns every C++ leaf
+scenario to exactly one Toffee target suite. The manifest currently reports
+`smoke` and `l2-flush-contracts` as natively migrated; every other leaf remains
+explicitly planned. A planned assignment is not migration evidence and receives
+no coverage credit from the existence of the Python framework.
+
+Until a suite is marked migrated, the corresponding C++ leaf remains required
+by `Regression Acceptance`. A suite becomes migrated only when it has a native
+Toffee test, preserves the same external contract and replay inputs, produces
+an independently monitored observation with cycle or protocol transaction
+identity, and passes the applicable functional/line coverage and independent
+review gates. The migration manifest
+checker must pass in `toffee-unit`; `--strict-complete` is reserved for the point
+at which Toffee replaces the C++ control path.
+
+
 ## Known Boundary Gaps
 
 The current harness does not yet own a complete legal producer, independent

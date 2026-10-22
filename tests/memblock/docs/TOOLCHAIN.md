@@ -7,13 +7,14 @@ either Picker or xcomm changes.
 
 | Tool | Locked revision | Role in this UT |
 | --- | --- | --- |
-| [Picker](https://github.com/XS-MLVP/picker) | `v2.1.0`, `7499f797` | Exports the RTL as a compiled C++ DUT and mem-direct model |
+| [Picker](https://github.com/XS-MLVP/picker) | `v2.1.0`, `7499f797` | Exports the RTL as compiled C++ and Python DUT models |
 | [xcomm](https://github.com/XS-MLVP/xcomm) | `v1.0.0`, `a5f5dae` | Supplies `XData`, `XClock`, native signal access, triggers, and coverage runtime |
-| [Toffee](https://github.com/XS-MLVP/toffee) | `master`, `f57dd6ff` | Optional Python environment layer; not imported by the current C++ harness |
+| [Toffee](https://github.com/XS-MLVP/toffee) | `master`, `f57dd6ff` | Python verification orchestration for the migrated Python test layer |
+| [toffee-test](https://github.com/XS-MLVP/toffee-test) | `master`, `abec0edd` | Pytest fixtures, DUT lifecycle, waveforms, coverage, and reports |
 
 The Toffee lock is a pinned master snapshot 15 commits after the last PyPI
-release, `v0.3.1`. It is recorded for compatibility and optional Python work,
-but `bootstrap-picker` does not install it.
+release, `v0.3.1`. The Python framework environment is built by
+`bootstrap-toffee`, not by `bootstrap-picker`.
 
 ## UT-Relevant Features
 
@@ -24,9 +25,9 @@ but `bootstrap-picker` does not install it.
 - `mem_direct` provides generated read access without enabling VPI. The current
   harness uses it only for diagnostics; architectural PASS/FAIL remains based on
   top-level observations.
-- A Python export can share the same prepared RTL file list if a Toffee-based
-  environment is added later. It should not replace the independent C++
-  reference models and scoreboards.
+- The C++ and Python exports share the same prepared RTL file list but use
+  separate output and runtime directories. The Toffee path does not replace
+  the independent C++ regression while migration is in progress.
 
 **xcomm**
 
@@ -51,11 +52,10 @@ but `bootstrap-picker` does not install it.
 - `CovGroup` supports function/bin coverage, while the `toffee-test` pytest
   plugin manages DUT resources, fixtures, reports, and waveforms.
 
-The pinned optional Python layer can be installed separately when needed:
+The pinned Python layer is installed by the isolated bootstrap target:
 
 ```sh
-python3 -m pip install \
-  "pytoffee @ git+https://github.com/XS-MLVP/toffee.git@f57dd6ffc295b9b8bad3e3b3ce040b8a849f5c91"
+make -C tests/memblock bootstrap-toffee JOBS=8
 ```
 
 ## Updating
@@ -69,6 +69,7 @@ make -C tests/memblock bootstrap-picker JOBS=8 \
   PICKER_REF=<tag-or-commit> XCOMM_REF=<tag-or-commit>
 ```
 
-The actual revisions and executable path are recorded in
-`build/memblock/tools/picker.json`. Run at least `unit`, `prepare-rtl`,
-`check-rtl`, and `smoke` after changing the lock.
+The canonical revisions are recorded in `build/memblock/tools/picker.json`; the
+Toffee environment is recorded in `build/memblock/toffee/environment.json`. Run
+at least `unit`, `toffee-unit`, `prepare-rtl`, `check-rtl`, `smoke`, and
+`toffee-smoke` after changing the lock.

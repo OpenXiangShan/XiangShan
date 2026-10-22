@@ -100,10 +100,17 @@ Supporting oracle and diagnostic improvements retained in this evidence set:
 - The accepted-A DCache monitor checks opcode, grow, size, source, alignment,
   mask, corrupt, and defined user-address relationships without filtering legal
   prefetch or demand-merged traffic.
-- The latest complete Python unit evidence is 286 tests. The Picker 2.1.0 /
-  xcomm 1.0.0 migration also rebuilt the full model and passed `check-rtl` and
-  `smoke` (`cycle=38`, 748 driven inputs, 20 checked outputs); the final harness
-  requires `libxspcomm.so.3`.
+- The latest complete Python unit evidence is 292 tests. The Picker 2.1.0 /
+  xcomm 1.0.0 migration also rebuilt the full C++ model and passed `check-rtl`
+  and `smoke` (`cycle=38`, 748 driven inputs, 20 checked outputs); the final
+  harness requires `libxspcomm.so.3`.
+- The initial Toffee architecture passes 10 pin-free framework/model tests, one
+  adapter-boundary test, and two generated-DUT tests. `toffee_smoke` reaches the
+  canonical `cycle=38` with 24 idle cycles over the 20 quiescent outputs.
+  `l2-flush-contracts` covers all four enable/done combinations with 4 enable
+  and 5 done transitions in the canonical eight-pattern loop, plus separate
+  deassert cycles and pre-edge/post-edge timing checks. The migration manifest
+  accounts for all 90 C++ leaves and currently marks 2 as migrated.
 - The reviewed Debug guard runtime passes all 90 registered leaves, including
   SPEC seed 1/16,384 (`build/memblock/debug-guard-expansion/inventory90.json`).
   This inventory predates schema 53 and does not replace its runtime checks.
@@ -162,6 +169,38 @@ controls remain required and must not be replaced by the failing split-vector
 case as the expected value.
 
 ## Independent Review Records
+
+### Toffee Framework
+
+- Review ID: `toffee-framework-20261022-01`.
+- Trigger: material replacement of the verification control architecture,
+  adapter boundary, timing oracle, runtime publication, and migration accounting.
+- Reviewed state: worktree based on `e076c2c4cd1d040c3c5c9c3cf6234b9483eb62e4`.
+- Independence: fresh-context non-author reviews; later passes reviewed the
+  concrete fixes rather than the author's proposed root causes.
+- Verdict: `pass-with-known-migration-gap` for the framework/runtime slice.
+- Residual gap: native Toffee coverage remains `2/90`; the other 88 C++ leaves
+  stay canonical and are explicitly `planned`. This is not migration closure.
+
+| ID | Review finding | Stable evidence | Disposition |
+| --- | --- | --- | --- |
+| T1 | Driver, monitor, and sequencer responsibilities were collapsed. | `agent/control.py`, `monitor/control.py`, `sequence/control.py`, `test_uvm_sequence.py` | Fixed with separate concrete UVM roles and cycle-token sequencing. |
+| T2 | Runtime tests could silently import worktree source. | `toffee/pyproject.toml`, runtime-only pytest commands | Fixed by removing pytest source-path injection and embedding `memblock_toffee` in the runtime. |
+| T3 | Frozen runtime omitted the port manifest. | `freeze_toffee_runtime.py`, `runtime/config/expected_ports.json` | Fixed; runtime smoke/control pass without source-tree manifest overrides. |
+| T4 | Runtime integrity could fail open or omit sidecars. | `runtime.py`, `environment.json`, `rtl.json`, `toolchain.lock.json` | Fixed with fail-closed discovery and 62 hashed artifacts. |
+| T5 | Migration accounting was directory/marker based. | `suite_manifest.json`, `check_suite_manifest.py` | Fixed with concrete node-bound Toffee tests and status consistency checks. |
+| T6 | L2 retained metrics mixed canonical-loop and deassert transitions. | `model/control.py`, control output | Fixed with canonical-loop counters (`4` enable, `5` done). |
+| T7 | Runtime/package names and caches leaked outside ownership boundaries. | adapter loader, `.gitignore` | Fixed; generated package/class selection is adapter-only and generated caches are ignored. |
+
+Final verification for this slice: 11 Toffee unit/adapter tests, generated-DUT
+smoke (`cycle=38`, 20 checked idle outputs), control (`cycle=24`, four
+combinations, `4/5` canonical-loop transitions), two-worker HTML/JUnit
+regression, 292 C++ unit tests, `check-rtl`, and canonical `smoke`. Runtime
+metadata is `build/memblock/toffee/runtime/runtime.json`; retained report output
+was produced under `TOFFEE_RESULT_ROOT=/tmp/kmhv2-toffee-repo-regression-final3`.
+
+No CPU RTL bug was claimed, so no CPU bug document or DingTalk notification was
+created.
 
 ### Agent Workflow
 

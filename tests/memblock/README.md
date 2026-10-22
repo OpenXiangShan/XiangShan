@@ -26,7 +26,7 @@ The current harness covers the main MemBlock verification domains:
 - focused scenarios plus the canonical `random-mixed` constrained-random
   generator.
 
-The current random schema is 52. Its executable fields, presets, replay rules,
+The current random schema is 53. Its executable fields, presets, replay rules,
 and accounting contracts are in
 [CONSTRAINED_RANDOM.md](docs/CONSTRAINED_RANDOM.md). The schema number itself is
 not a correctness claim.
@@ -55,6 +55,20 @@ make -C tests/memblock smoke JOBS=8
 The first `smoke` invocation exports Picker, verilates the model, and compiles
 the simulator. Later targets normally reuse that binary and rebuild only the
 C++ harness when its sources change.
+
+The Toffee verification path is built separately:
+
+```sh
+make -C tests/memblock bootstrap-toffee JOBS=8
+make -C tests/memblock toffee-unit
+make -C tests/memblock toffee-model JOBS=8
+make -C tests/memblock toffee-smoke
+```
+
+It uses a Python Picker export and an isolated virtual environment below
+`build/memblock/toffee`. See
+[TOFFEE_ARCHITECTURE.md](docs/TOFFEE_ARCHITECTURE.md) for the component
+boundaries and migration status.
 
 The default `PICKER` is
 `build/memblock/tools/picker/build/bin/picker`. To use an existing Picker
@@ -174,6 +188,7 @@ dependency that can start a rebuild.
 | `build/memblock/rtl.f` and `rtl.json` | `make prepare-rtl` | Exclusive with builds and final checks. Treat both files as one generated unit. |
 | `config/expected_ports.json`, `docs/PORTS.md`, `sv/memblock_protocol_sva.sv`, and `cpp/generated_port_defaults.hpp` | `make ports` | Exclusive write with explicit review. Do not regenerate to hide an interface mismatch. |
 | `build/memblock/tools/` and `build/memblock/picker/` | `bootstrap-picker`, export, model, and harness targets | One build owner. The Picker lock covers selected public targets, not every preparation or result path. |
+| `build/memblock/toffee/` | `bootstrap-toffee`, `toffee-model`, and `toffee-runtime` | Disjoint from the canonical C++ export, but still one owner for its environment, Python Picker model, and immutable runtime. |
 | `build/memblock/runtime/` | `freeze-runtime` | Replace only when no campaign uses that runtime. Active jobs may read a frozen runtime concurrently. |
 | Regression and benchmark JSON/Markdown | Controllers and verifiers | Use a unique output path. Do not share default result files across concurrent controllers. |
 | `MEMBLOCK_MEM_DIRECT_TRACE_FILE` | Simulator diagnostics | Use one filename per process. `run_regression.py` rejects `--jobs > 1` when this variable is set. |
@@ -198,6 +213,7 @@ REGRESSION_OUTPUT  STRESS_RESULT  EXTENDED_RESULT  FINAL_RESULT
 LONG_RESULT        ENDURANCE_RESULT
 BENCHMARK_RESULT   BENCHMARK_MARKDOWN  SPEC_COUNTER_JSON
 HUNT_RESULT        BOUNDARY_HUNT_RESULT
+TOFFEE_RESULT_ROOT
 ```
 
 Budget host resources explicitly. `REGRESSION_JOBS=8` means one controller may
@@ -472,6 +488,7 @@ Do not use `XData::CSelf()` to read signal values. It returns the address of the
 | [RESULTS.md](docs/RESULTS.md) | Compact evidence index; use Git history for removed campaign detail |
 | [PORTS.md](docs/PORTS.md) | Generated per-pin summary |
 | [TOOLCHAIN.md](docs/TOOLCHAIN.md) | Locked verification tools and UT-relevant features |
+| [TOFFEE_ARCHITECTURE.md](docs/TOFFEE_ARCHITECTURE.md) | Toffee component boundaries, lifecycle, and migration status |
 
 Keep `IO_COVERAGE.md`, `VERIFICATION_PLAN.md`, and `CONSTRAINED_RANDOM.md`
 consistent with the implementation. After an interface or schema change, run:

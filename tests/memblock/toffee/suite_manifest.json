@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "suites": [
+    {
+      "name": "smoke",
+      "status": "implemented",
+      "marker": "toffee_smoke",
+      "tests": "tests/smoke",
+      "exact": ["smoke"],
+      "migrated_nodes": [
+        {
+          "scenario": "smoke",
+          "test": "tests/smoke/test_reset.py::test_reset_and_clock_drive"
+        }
+      ],
+      "prefixes": []
+    },
+    {
+      "name": "control",
+      "status": "partial",
+      "marker": "toffee_control",
+      "tests": "tests/control",
+      "exact": [
+        "l2-flush-contracts",
+        "top-control-contracts",
+        "trace-bridge-contracts",
+        "dft-bridge-contracts",
+        "pin-space",
+        "frontend-bridge",
+        "frontend-reset-recovery",
+        "wfi-safety"
+      ],
+      "migrated_nodes": [
+        {
+          "scenario": "l2-flush-contracts",
+          "test": "tests/control/test_l2_flush.py::test_l2_flush_pass_through"
+        }
+      ],
+      "prefixes": []
+    },
+    {
+      "name": "reset",
+      "status": "planned",
+      "marker": "toffee_regression",
+      "tests": null,
+      "exact": [
+        "reset-recovery",
+        "reset-partial-load",
+        "reset-tree-contracts"
+      ],
+      "migrated_nodes": [],
+      "prefixes": []
+    },
+    {
+      "name": "random",
+      "status": "planned",
+      "marker": "toffee_regression",
+      "tests": null,
+      "exact": [],
+      "migrated_nodes": [],
+      "prefixes": ["random-"]
+    },
+    {
+      "name": "vector",
+      "status": "planned",
+      "marker": "toffee_regression",
+      "tests": null,
+      "exact": [
+        "scalar-misaligned",
+        "misaligned-stores"
+      ],
+      "migrated_nodes": [],
+      "prefixes": ["vector-"]
+    },
+    {
+      "name": "translation",
+      "status": "planned",
+      "marker": "toffee_regression",
+      "tests": null,
+      "exact": [
+        "pmp-contracts",
+        "hypervisor-contracts",
+        "pointer-masking-contracts",
+        "mbmc-contracts",
+        "l2-tlb-contracts",
+        "ifetch-ptw-bridge",
+        "two-stage-translation",
+        "ptw-errors",
+        "scalar-guest-fault"
+      ],
+      "migrated_nodes": [],
+      "prefixes": ["translation-"]
+    },
+    {
+      "name": "issue",
+      "status": "planned",
+      "marker": "toffee_regression",
+      "tests": null,
+      "exact": [
+        "single-load",
+        "load-feedback",
+        "topdown-contracts",
+        "memory-violation",
+        "rar-violation",
+        "ifetch-prefetch",
+        "hardware-prefetch",
+        "fp-loads",
+        "trigger-contracts",
+        "metadata-contracts",
+        "exception-contracts",
+        "redirect",
+        "queue-pressure",
+        "iq-slow-feedback",
+        "store-forwarding",
+        "store-rdata-order",
+        "store-tlb-miss-preserve"
+      ],
+      "migrated_nodes": [],
+      "prefixes": []
+    },
+    {
+      "name": "cache",
+      "status": "planned",
+      "marker": "toffee_regression",
+      "tests": null,
+      "exact": [
+        "dcache-errors",
+        "dcache-coherence",
+        "dcache-release",
+        "atomic-contracts",
+        "atomic-dchannel-errors",
+        "uncache-errors",
+        "uncache-widths",
+        "uncache-outstanding",
+        "sbuffer-flush",
+        "sbuffer-timeout",
+        "mmio-contracts",
+        "cbo-zero-contracts",
+        "cmo-contracts"
+      ],
+      "migrated_nodes": [],
+      "prefixes": []
+    }
+  ]
+}

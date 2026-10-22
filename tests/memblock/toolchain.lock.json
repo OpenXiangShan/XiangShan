@@ -15,5 +15,10 @@
     "ref": "master",
     "commit": "f57dd6ffc295b9b8bad3e3b3ce040b8a849f5c91",
     "optional": true
+  },
+  "toffee_test": {
+    "repository": "https://github.com/XS-MLVP/toffee-test.git",
+    "ref": "master",
+    "commit": "abec0edd93cba9f3d91ab1ef7e2fc30bf807eb00"
   }
 }
