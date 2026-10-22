@@ -5,7 +5,7 @@
 | 状态 | 已完成 coding、implementation review、远端验证并已归档 |
 | 方案类型 | V2 RM/checker plan |
 | 工作分支 | `mem_ut_uvm_v2` |
-| 关联提交 | `7632adee72`（`mem_ut: restore RM TLB completion invariant`） |
+| 关联提交 | `7632adee72`（核心实现）+ `6599301026`（跨页非冻结测试补充） |
 | 目标问题 | 采用非冻结查询方案，收窄当前 RM 对“L2TLB request 已 fire、response 尚未完成”的等待逻辑，恢复 commit 边界的强检查语义；已完成 UID record 仍可作为完成事实使用 |
 | 计划目录 | `AI_DOC/plan/rm_plan/undo/` |
 | coding 门禁 | 本文只提供 plan；只有用户明确授权 coding 后才能修改源码或测试 |
