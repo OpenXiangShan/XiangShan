@@ -126,9 +126,9 @@ Debug 入口的目标状态与 RNMI 相同，但保存位置不同：
 ```text
 1. 保存进入 Debug 前的 archELP 到 dcsr.PELP
 2. 清除实时 archELP
-3. Debug handler 从 ELP=0 开始执行
-4. DRET 读取 dcsr.PELP
-5. 根据返回目标模式 LPE 计算恢复值
+3. Debug 期间禁止指令更新 ELP，LPAD 按 no-op 执行
+4. 正常 DRET 使用旧 dcsr.PELP 和返回目标 LPE 计算恢复值
+5. DRET 事件清除 dcsr.PELP，返回事务保留已计算的恢复值
 6. 返回目标重新接受 LPAD 检查
 ```
 
@@ -138,7 +138,7 @@ Debug 入口的目标状态与 RNMI 相同，但保存位置不同：
 restoredELP = dcsr.PELP && LPE(返回目标模式)
 ```
 
-Debug 入口可能由外部 Debug interrupt、触发器、单步或 EBREAK 产生；它不一定是 ROB 的架构异常。因此 Debug 入口不能只依赖 `rob.io.exception.valid` 来清除 ELP。
+当前实现中，外部 Debug interrupt、触发器、单步和 EBREAK 的普通入口都依赖 ROB trap。critical-error 的 Debug 入口另有不依赖该 trap 的路径；CSR 回传的入口脉冲补充这类入口的状态清零。
 
 ### 当前 RTL 已完成的 Debug 部分
 
@@ -218,7 +218,13 @@ when (io.trap || io.entryClear) {
 
 保存值仍来自入口前架构 ELP，不能取清零后的值。Debug 入口与 ROB trap 同周期时，清零条件合并为一个优先分支。
 
-另外，当前 `DretEvent` 的 `dcsr` 更新字段主要包括 `V` 和 `PRV`，没有明显的 `PELP` 清零赋值。需要结合 Zicfilp 规范确认 DRET 是否要求消费并清除 PELP；即使允许保留，也应补一条明确注释和回归，避免下一次 Debug 入口或重复 DRET 使用旧值。
+### Debug 期间持续禁止跟踪，正常 DRET 消费 PELP
+
+Debug Spec 1.0 §4.1 第 13 条要求 Debug 期间 ELP 保持 NO_LP_EXPECTED，指令不更新它，LPAD 按 no-op 执行。当前 NewCSR 输出 `enableZicfilp = modeLPE && !debugMode`，通过原有 CSR-to-Decode 通路控制推测和提交侧状态；LPE CSR 配置位保持原值。
+
+Debug Spec 1.0 §4.8 第 3 条单独规定 Debug Resume 的 ELP 恢复及 PELP 清零。当前 `DretEvent` 将 `PELP` 加入 DCSR 事件更新集合并写 0；NewCSR 的 `DataHoldBypass` 保留从旧 PELP 算出的 `retELP`，输出反压时也不会因保存字段清零而丢失结果。DRET 的恢复仍使用返回目标模式的原始 LPE，不使用 Debug 中为 0 的内部有效使能。
+
+critical-error 导致 DRET 立即重入 Debug 时的 PELP 保存/恢复仲裁仍待处理；这次没有修改该路径，不能将普通 DRET 的修复视为这一重入问题也已解决。
 
 ## 4. RNMI/Debug 的完整状态表
 
@@ -227,10 +233,10 @@ when (io.trap || io.entryClear) {
 | 入口前 | 读取架构 ELP | 已由 ROB/ArchZicfilp 提供 | 读取架构 ELP | 已由 TrapEntryDEvent 读取 |
 | 入口保存 | 写 `MNPELP` | 已接通 | 写 `DCSR.PELP` | 已接通 |
 | handler 开始 | 实时 ELP 清 0 | ROB trap 或 `zicfilpEntryClear` | 实时 ELP 清 0 | `zicfilpEntryClear` 已接通 |
-| handler 执行 | 不继承原 LPAD 期待 | 已有入口清零链 | 不继承原 LPAD 期待 | 已有入口清零链 |
+| handler 执行 | 不继承原 LPAD 期待 | 已有入口清零链 | Debug 期间禁止 ELP 更新/检查 | 内部有效使能受 debugMode 屏蔽 |
 | 返回值 | `MNPELP && targetLPE` | 已接通 | `DCSR.PELP && targetLPE` | 已接通 |
 | 返回 redirect | 恢复 Spec ELP | 已接通 | 恢复 Spec ELP | 已接通 |
-| 保存字段清理 | MNRET 清 `MNPELP` | 已有 | DRET 是否清 `PELP` | 需要确认 |
+| 保存字段清理 | MNRET 清 `MNPELP` | 已有 | 正常 DRET 消费 `PELP` | 已清零，返回事务保留旧值计算结果 |
 | 异常报告 | cause/tval 正确 | MNCAUSE 的内部 17 需验证 | Debug CAUSE 使用 Debug cause | 不使用软件异常号 |
 
 ## 5. 建议的最小验证矩阵
@@ -251,5 +257,8 @@ when (io.trap || io.entryClear) {
 4. DRET 返回到 LPE=0：恢复 ELP=0。
 5. 触发器、单步、EBREAK 分别进入 Debug：都应保存同一个入口前的架构 ELP，并清除实时 ELP。
 6. Debug 入口与 ROB trap 同周期：保存值必须是入口前架构 ELP，不能取清零后的值。
+7. Debug 内执行受保护 JALR 后接 LPAD：ELP 不重新置 1，LPAD 不生成检查标志。
+8. 普通 DRET 输出受到反压：DCSR.PELP 已清零，但待接收事务的 retELP 保持正确。
+9. critical-error 使 DRET 立即重入：已知的 PELP 保存仲裁问题单独保留，尚未修复。
 
 当前代码已经具备 RNMI/Debug 的 CSR 字段、入口清零和 xRET 恢复骨架；RNMI 的最终异常号转换以及入口/返回时序仍需要上述回归确认。

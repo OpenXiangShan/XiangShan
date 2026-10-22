@@ -407,7 +407,7 @@ restoredELP = 对应保存字段 && 返回目标特权级的 LPE
 
 它使用目标特权级和目标虚拟化状态选择 LPE，而不是使用 handler 当前模式的 LPE。CSR wrapper 仅对没有 illegal/virtual-instruction 异常的 xRET 设置 `ZicfilpXRetValid`；恢复值随 redirect 同时送往推测态和架构态。
 
-MRET/SRET/MNRET 事件会清除其对应保存字段。此 PDF 对 Debug 返回的描述是恢复 `dcsr.pelp`，未要求与 MRET/SRET 相同的清零动作；不能仅凭 DRET 没有清 `PELP` 就认定违规。
+MRET/SRET/MNRET 事件会清除其对应保存字段。DRET 的清零依据来自独立的 Debug Spec 1.0 §4.8：正常 Resume 恢复 ELP 后将 dcsr.pelp 清为 NO_LP_EXPECTED。当前 DretEvent 已加入 PELP 清零，NewCSR 为返回事务保留从旧值算出的恢复结果。Debug 期间另以 `modeLPE && !debugMode` 禁止 ELP 更新及 LPAD 检查，不清除 LPE CSR 配置位。critical-error 导致 DRET 立即重入的 PELP 仲裁仍未修复。
 
 ## 8. 启用控制与异常语义
 

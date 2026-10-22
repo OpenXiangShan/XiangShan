@@ -1669,12 +1669,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   // LPAD 阅读：运行时使能信号的来源。按当前特权级选择对应 CSR 的 LPE，送往 Decode/提交侧。
   // 这是 1 位模式选择逻辑；HasZicfilp=false 时整个可选接口不生成。
   io.toDecode.enableZicfilp.foreach { enable =>
-    enable := MuxCase(false.B, Seq(
+    val modeLPE = MuxCase(false.B, Seq(
       isModeM  -> mseccfg.regOut.MLPE.asBool,
       isModeHS -> menvcfg.regOut.LPE.asBool,
       isModeVS -> henvcfg.regOut.LPE.asBool,
       (isModeHU || isModeVU) -> senvcfg.regOut.LPE.asBool,
     ))
+    // Debug 期间 ELP 保持 NO_LP_EXPECTED，LPAD 按 no-op 执行；不改写任何 LPE CSR。
+    // 这是 Decode/提交侧的有效使能。DRET 的 targetLPE 仍读取返回目标的原始 LPE 配置。
+    enable := modeLPE && !debugMode
   }
 
   io.toDecode.illegalInst.mfence.foreach(_ := !isModeM)
