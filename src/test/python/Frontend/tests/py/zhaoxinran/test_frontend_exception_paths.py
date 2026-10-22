@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
+
 from env.support import record_scenario, scenario_rng
 from tests.py.jiabowen import test_icache_mainpipe_miss_response as icache
+from tests.py.support.translation_faults import _read_exception_bit
 
 
 _CROSS64_PC = 0x8007_003E
@@ -18,11 +21,6 @@ _TRIGGER_PC = 0x8009_0000
 _TRIGGER_DEBUG_MODE = 1
 _INSTRUCTION_ACCESS_FAULT_BIT = 1
 _HARDWARE_ERROR_BIT = 19
-
-
-def _read_exception_bit(signal) -> int:
-    value = getattr(signal, "value", None)
-    return 0 if value is None else int(value)
 
 
 def _require_dut_signal(env, name: str):
@@ -232,6 +230,7 @@ def test_cacheable_cross64_refill_fault_delivery(
 
 
 @pytest.mark.skipif(not icache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.parametrize("frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True)
 def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
     scenario_key = "zhaoxinran/exception/illegal-rvc-then-clean"
     base_seed, seed, rng = scenario_rng(scenario_key)
@@ -257,7 +256,7 @@ def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
         seed=seed,
     )
     cfvec_cycles = _capture_backend_cfvec_cycles(env)
-    env.initialize(reset_vector=_ILLEGAL_RVC_BASE, bare_mode=True, reset_cycles=20)
+    initialize_frontend(env, FrontendInitConfig(reset_vector=_ILLEGAL_RVC_BASE, bare_mode=True, reset_cycles=20))
     env.monitor.clear()
     env.monitor.set_expected_pc(_ILLEGAL_RVC_BASE)
 

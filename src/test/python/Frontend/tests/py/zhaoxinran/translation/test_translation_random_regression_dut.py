@@ -6,6 +6,7 @@ from dataclasses import asdict
 
 import pytest
 
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.sequences import (
     TranslationPmpPmaEntry,
     TranslationScenario,
@@ -18,6 +19,11 @@ from env.support import PmpPmaConfig, record_scenario
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+
+
+pytestmark = pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 
 
 def _read_int(name: str, default: str) -> int:
@@ -149,7 +155,14 @@ def test_translation_constrained_random_stream_dut(env) -> None:
         }
         translation_enabled = str(scenario.mode).lower() != "bare" or int(scenario.s2xlate) != 0
         env.translation_oracle.disarm()
-        env.initialize(reset_vector=scenario.va, bare_mode=not translation_enabled)
+        initialize_frontend(
+            env,
+            FrontendInitConfig(
+                reset_vector=scenario.va,
+                bare_mode=not translation_enabled,
+                reset_cycles=20,
+            ),
+        )
         prepared: dict[str, object] = {}
 
         def arm_before_reset_release() -> None:

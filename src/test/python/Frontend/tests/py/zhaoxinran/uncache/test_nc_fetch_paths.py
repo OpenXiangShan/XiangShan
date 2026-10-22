@@ -23,17 +23,17 @@ from env.runtime.frontend_init import (
 )
 from env.support import PmpPmaConfig, record_scenario, scenario_rng
 from tests.py.support import translation_faults
+from tests.py.support.dut_support import (
+    _wait_for_req_count,
+    _wait_for_req_delta,
+    _wait_for_resp_delta,
+)
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 _CFVEC_EXCEPTION_BITS = (1, 2, 12, 19, 20)
-
-
-def _read_exception_bit(signal) -> int:
-    value = getattr(signal, "value", None)
-    return 0 if value is None else int(value)
 
 
 _NC_TIMING_SNAPSHOT_KEYS = {
@@ -71,10 +71,10 @@ _NC_TIMING_DIRECT_SIGNALS = {
 
 def _register_nc_timing_observer(env) -> list[dict]:
     samples: list[dict] = []
+    nc_active = False
 
     def capture(cycle, current_env) -> None:
-        recorder = current_env.functional_coverage
-        assert recorder is not None, "NC timing observer requires functional coverage"
+        nonlocal nc_active
         snapshot = read_nc_timing_runtime_snapshot(None, current_env.dut)
         missing = [
             snapshot_key
@@ -82,8 +82,6 @@ def _register_nc_timing_observer(env) -> list[dict]:
             if snapshot[snapshot_key] is None
         ]
         assert not missing, {"missing_runtime_semantics": missing}
-        state = getattr(recorder, "_ifu_mmio_nc_owner_state", None)
-        assert isinstance(state, dict) and "nc_active" in state
         sample = {
             name: int(snapshot[snapshot_key])
             for name, snapshot_key in _NC_TIMING_SNAPSHOT_KEYS.items()
@@ -95,7 +93,7 @@ def _register_nc_timing_observer(env) -> list[dict]:
             }
         )
         sample["nc_pending"] = int(
-            derive_nc_pending(snapshot, nc_active=bool(state["nc_active"]))
+            derive_nc_pending(snapshot, nc_active=bool(nc_active))
         )
         sample["cycle"] = int(cycle)
         sample["uncache_req_valid"] = uncache._require_first_dut_signal(
@@ -106,6 +104,21 @@ def _register_nc_timing_observer(env) -> list[dict]:
             current_env.backend_to_ftq_if.redirect_valid.value
         )
         samples.append(sample)
+        nc_candidate = (
+            snapshot["s2_valid"] == 1
+            and snapshot["s2_req_uncache"] == 1
+            and snapshot["s2_pmp_mmio"] == 0
+            and snapshot["s2_pbmt"] == uncache._PBMT_NC
+        )
+        req_fire = (
+            snapshot.get("req_valid") == 1 and snapshot.get("req_ready") == 1
+        )
+        if snapshot["ifu_flush"] == 1 or snapshot["backend_redirect"] == 1:
+            nc_active = False
+        elif nc_candidate and snapshot.get("s2_use_uncache") == 1 and req_fire:
+            nc_active = True
+        elif snapshot["resp_valid"] == 1:
+            nc_active = False
 
     env.register_pre_drive_cycle_observer(capture)
     return samples
@@ -189,7 +202,7 @@ def _register_cfvec_exception_observer(env) -> list[dict]:
             bits = tuple(
                 bit
                 for bit in _CFVEC_EXCEPTION_BITS
-                if _read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) != 0
+                if translation_faults._read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) != 0
             )
             if bits:
                 records.append(
@@ -414,7 +427,7 @@ def test_nc_tl_a_backpressure_holds_payload_until_fire(env):
     env.uncache_agent.set_a_ready(0)
     uncache._force_redirect_to(env, mapping.vaddr)
 
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert uncache._wait_for_uncache_a_valid_addr(
         env, mapping.paddr, max_cycles=6000
     ), {
@@ -435,8 +448,8 @@ def test_nc_tl_a_backpressure_holds_payload_until_fire(env):
     assert int(env.uncache_if.a_bits_address.value) == stalled_addr
 
     env.uncache_agent.set_a_ready(None)
-    assert uncache._wait_for_uncache_req(env, max_cycles=6000) > req_before
-    assert uncache._wait_for_uncache_resp(env, max_cycles=6000) > 0
+    assert _wait_for_req_delta(env, env.uncache_agent, max_cycles=6000) > req_before
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=6000) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) > req_before
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert not env.memory.is_mmio(mapping.paddr)
@@ -485,12 +498,12 @@ def test_nc_d_response_fault_reports_exception(env, fault, expected_exception_bi
     exception_records = _register_cfvec_exception_observer(env)
     uncache._force_redirect_to(env, mapping.vaddr)
 
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert uncache._wait_for_request_addr(env, mapping.paddr, max_cycles=6000), {
         "mapping": mapping,
         "uncache": env.uncache_agent.get_stats(),
     }
-    assert uncache._wait_for_uncache_resp(env, max_cycles=6000) > 0
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=6000) > 0
     assert uncache._wait_for_monitor_exception(env, max_cycles=6000)
 
     stats = env.uncache_agent.get_stats()
@@ -557,7 +570,7 @@ def test_nc_8b_tail_delivery_uses_correct_second_beat_policy(env, tmp_path, is_r
 
     first_beat = mapping.paddr + 0x8
     second_beat = mapping.paddr + 0x10
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert uncache._wait_for_request_addr(env, first_beat, max_cycles=6000), {
         "mapping": mapping,
         "uncache": env.uncache_agent.get_stats(),
@@ -633,7 +646,7 @@ def test_nc_cfi_instruction_is_delivered_with_control_flow_type(env, tmp_path, i
     uncache._configure_exec_attrs_for_mapping(env, mapping)
     uncache._force_redirect_to(env, mapping.vaddr)
 
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert uncache._wait_for_request_addr(env, mapping.paddr, max_cycles=6000), {
         "mapping": mapping,
         "uncache": env.uncache_agent.get_stats(),
@@ -697,8 +710,8 @@ def test_nc_mixed_beat_types_preserve_delivery_order_and_pc_progress(env, tmp_pa
         mapping.vaddr + 0x06: True,
         mapping.vaddr + 0x08: False,
     }
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
-    assert uncache._wait_for_uncache_req_count(env, 1, max_cycles=12000), {
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_req_count(env, env.uncache_agent, 1, max_cycles=12000), {
         "mapping": mapping,
         "uncache": env.uncache_agent.get_stats(),
     }
@@ -793,7 +806,7 @@ def test_nc_page_tail_delivery_uses_correct_next_page_policy(env, tmp_path, is_r
     timing_samples = _register_nc_timing_observer(env)
     uncache._force_redirect_to(env, tail_vaddr)
 
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert uncache._wait_for_request_addr(env, first_beat, max_cycles=6000), {
         "mapping": mapping,
         "uncache": env.uncache_agent.get_stats(),
@@ -819,7 +832,7 @@ def test_nc_page_tail_delivery_uses_correct_next_page_policy(env, tmp_path, is_r
     assert bool(observed.is_rvc) is bool(is_rvc)
     if is_rvc:
         assert next_page not in stats_at_delivery.get("request_addrs", [])
-        assert uncache._wait_for_icache_req(env, max_cycles=6000) > 0
+        assert _wait_for_req_delta(env, env.icache_agent, max_cycles=6000) > 0
         assert uncache._wait_for_observed_pc(
             env, mapping.vaddr + uncache._SV39_PAGE_SIZE, max_cycles=12000
         ), {
@@ -911,12 +924,12 @@ def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env
     exception_records = _register_cfvec_exception_observer(env)
     uncache._force_redirect_to(env, tail_vaddr)
 
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert uncache._wait_for_request_addr(env, first_beat, max_cycles=6000), {
         "mapping": mapping,
         "uncache": env.uncache_agent.get_stats(),
     }
-    assert uncache._wait_for_uncache_resp(env, max_cycles=6000) > 0
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=6000) > 0
     assert uncache._wait_for_monitor_exception(env, max_cycles=6000)
 
     stats = env.uncache_agent.get_stats()
@@ -1302,7 +1315,7 @@ def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
     uncache._configure_exec_attrs_for_mapping(env, mapping)
     uncache._force_redirect_to(env, mapping.vaddr)
 
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert uncache._wait_for_request_addr(env, mapping.paddr, max_cycles=6000), {
         "mapping": mapping,
         "uncache": env.uncache_agent.get_stats(),
@@ -1326,7 +1339,7 @@ def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
     assert int(env.backend_model.commit_count) == commits_before_fall
 
     env.backend_model.set_can_accept(1)
-    assert uncache._wait_for_uncache_resp(env, max_cycles=6000) > 0
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=6000) > 0
     assert uncache._wait_for_observed_pc(env, mapping.vaddr, max_cycles=12000), {
         "mapping": mapping,
         "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
@@ -1390,7 +1403,7 @@ def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
         delay_cycles=redirect_delay,
     )
 
-    assert uncache._wait_for_uncache_resp(env, max_cycles=6000) > 0
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=6000) > 0
     # Both agents drive after the ready-cycle rising-edge callback. Step() is
     # measured in half-cycles, so advance through the next rising edge where
     # the DUT consumes the response and redirect together.
@@ -1435,7 +1448,7 @@ def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
         "redirect_delay": redirect_delay,
         "timing_window": timing_window,
     }
-    assert uncache._wait_for_icache_req(env, max_cycles=6000) > 0
+    assert _wait_for_req_delta(env, env.icache_agent, max_cycles=6000) > 0
     assert any(
         sample["backend_redirect"] == 1 and sample["ifu_flush"] == 1
         for sample in timing_samples

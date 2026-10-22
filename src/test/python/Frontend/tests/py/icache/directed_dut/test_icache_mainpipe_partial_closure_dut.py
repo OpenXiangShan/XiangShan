@@ -38,9 +38,6 @@ from tests.py.icache.directed_dut.programs import (
     CACHEABLE_BASE as _BASE,
 )
 
-from dataclasses import (
-    replace,
-)
 from env.sequences import (
     TranslationPmpPmaEntry,
     TranslationScenario,
@@ -50,9 +47,17 @@ from env.sequences import (
 )
 from env.support import (
     PmpPmaConfig,
-    record_scenario,
-    scenario_rng,
 )
+from tests.py.support.dut_support import (
+    _assert_observed_instrs,
+    _first_observed_index,
+    _wait_for_observed_pc,
+    _wait_for_observed_pc_sequence,
+    _wait_for_request_addr,
+    _wait_for_req_count,
+    _wait_for_resp_count,
+)
+from tests.py.support.translation_scenarios import _randomize_translation_timing
 from tests.py.support.uncache_scenarios import (
     _ADDI_X0_X0_0,
     _CNOP,
@@ -66,10 +71,6 @@ from tests.py.support.uncache_scenarios import (
     _force_redirect_to,
     _prepare_sv39_dual_nc_cacheable_stream,
     _pulse_sfence,
-    _wait_for_observed_pc,
-    _wait_for_observed_pc_sequence,
-    _wait_for_request_addr,
-    _wait_for_resp_count,
 )
 
 
@@ -103,66 +104,6 @@ def _wait_hit(env, group: str, bin_name: str, *, max_cycles: int = 6000) -> None
 
 
 # Protection flows used only by this test module.
-
-
-def _randomize_translation_timing(
-    env, scenario: TranslationScenario, *, latency_min: int = 1, latency_max: int = 8
-) -> TranslationScenario:
-    scenario_key = f"zhaoxinran/uncache/translation/{scenario.scenario_id}"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(int(latency_min), int(latency_max))
-    randomized = replace(scenario, ptw_response_latency=latency, ptw_response_seed=seed)
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "scenario_id": scenario.scenario_id,
-            "va": scenario.va,
-            "pa": scenario.pa,
-            "page_count": scenario.page_count,
-            "latency": latency,
-            "expected_path": scenario.expected_path,
-            "expected_result": scenario.expected_result,
-        },
-    )
-    return randomized
-
-
-def _wait_for_icache_req_count(env, count: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(env.icache_agent.get_stats().get("req_count", 0)) >= int(count):
-            return True
-        env.step(1)
-    return int(env.icache_agent.get_stats().get("req_count", 0)) >= int(count)
-
-
-def _first_observed_index(env, pc: int) -> int:
-    for idx, obs in enumerate(env.monitor.observations):
-        if int(obs.pc) == int(pc):
-            return int(idx)
-    return -1
-
-
-def _assert_observed_instrs(env, expected_block: list[tuple[int, int, bool]]) -> None:
-    observed_by_pc = {
-        int(obs.pc): obs
-        for obs in env.monitor.observations
-        if any((int(obs.pc) == int(pc) for pc, _, _ in expected_block))
-    }
-    for pc, instr, is_rvc in expected_block:
-        obs = observed_by_pc[int(pc)]
-        assert int(obs.instr) == int(instr), {
-            "pc": hex(int(pc)),
-            "expected_instr": hex(int(instr)),
-            "observed_instr": hex(int(obs.instr)),
-        }
-        assert bool(obs.is_rvc) == bool(is_rvc), {
-            "pc": hex(int(pc)),
-            "expected_is_rvc": bool(is_rvc),
-            "observed_is_rvc": bool(obs.is_rvc),
-        }
 
 
 def run_cross_page_pma_path(env):
@@ -241,7 +182,7 @@ def run_cross_page_pma_path(env):
         phase="translation_activate",
     )
     _force_redirect_to(env, cross_page_va)
-    assert _wait_for_request_addr(env, next_page_pa, max_cycles=12000), {
+    assert _wait_for_request_addr(env, env.uncache_agent, next_page_pa, max_cycles=12000), {
         "ptw": env.ptw_agent.get_stats(),
         "icache": env.icache_agent.get_stats(),
         "uncache": env.uncache_agent.get_stats(),
@@ -438,18 +379,21 @@ def run_cacheable_pending_redirect_to_pbmt_nc(
     )
     _configure_exec_attrs_16k(env, base_addr=2147483648)
     _force_redirect_to(env, _NORMAL_ALT_BASE)
-    assert _wait_for_icache_req_count(
-        env, 2, max_cycles=12000
+    assert _wait_for_req_count(
+        env, env.icache_agent, 2, max_cycles=12000
     ), env.icache_agent.get_stats()
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
     _pulse_sfence(env, addr=_NORMAL_ALT_BASE, rs1=1, rs2=0)
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
     _force_redirect_to(env, _NORMAL_BASE)
     assert _wait_for_request_addr(
-        env, _NORMAL_PHYS_BASE, max_cycles=6000
+        env, env.uncache_agent, _NORMAL_PHYS_BASE, max_cycles=6000
     ), env.uncache_agent.get_stats()
     assert _wait_for_resp_count(
-        env, _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES, max_cycles=12000
+        env,
+        env.uncache_agent,
+        _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES,
+        max_cycles=12000,
     ), {
         "uncache": env.uncache_agent.get_stats(),
         "icache": env.icache_agent.get_stats(),

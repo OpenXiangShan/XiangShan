@@ -174,6 +174,21 @@ def _read_optional(recorder, *names: str) -> int | None:
     return None if value is None else int(value)
 
 
+def _read_direct(env, *names: str) -> int | None:
+    for name in names:
+        try:
+            signal = getattr(env.dut, str(name), None)
+            if signal is None:
+                getter = getattr(env.dut, "GetInternalSignal", None)
+                signal = getter(str(name)) if callable(getter) else None
+            value = None if signal is None else getattr(signal, "value", None)
+            if value is not None:
+                return int(value)
+        except Exception:
+            continue
+    return None
+
+
 def _s2_has_predicted_taken_at(recorder, target_pc: int) -> bool:
     for slot in range(_OBSERVABLE_S2_SLOTS):
         prefix = f"{_IFU_PREFIX}s2_alignedInstrVec_{slot}_"
@@ -415,13 +430,32 @@ def _run_until_bin(
     debug_pc: int | None = None,
 ) -> None:
     recorder = env.functional_coverage
-    assert recorder is not None
     debug_events: list[dict] = []
     for _ in range(int(max_cycles)):
         env.step(1)
-        if recorder.key_hit(group, name):
+        if recorder is not None and recorder.key_hit(group, name):
             return
-        if debug_pc is None:
+        if recorder is None and group == "ifu_predchecker_v3_fault":
+            redirect_valid = _read_direct(
+                env,
+                "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_valid",
+                "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_valid",
+            )
+            invalid_taken = _read_direct(
+                env,
+                "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
+                "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
+            )
+            not_cfi_taken = _read_direct(
+                env,
+                "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_notCfiTaken",
+                "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_bits_notCfiTaken",
+            )
+            if name == "invalid_taken" and redirect_valid == 1 and invalid_taken == 1:
+                return
+            if name == "not_cfi_taken" and redirect_valid == 1 and not_cfi_taken == 1:
+                return
+        if debug_pc is None or recorder is None:
             continue
         s1 = {
             "cycle": int(env.current_cycle),

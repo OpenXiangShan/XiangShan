@@ -5,6 +5,7 @@ import os
 import pytest
 
 from env.support import record_scenario, require_sig, scenario_rng
+from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -91,8 +92,8 @@ def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
     snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     start_req_count = int(env.uncache_agent.get_stats().get("req_count", 0))
     for _ in range(256):
         if any(
@@ -126,7 +127,7 @@ def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == start_req_count
 
     env.backend_model.set_can_accept(1)
-    assert uncache._wait_for_uncache_req(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
     assert not env.monitor.get_errors()
 
 
@@ -151,8 +152,8 @@ def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_e
     snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     start_req_count = int(env.uncache_agent.get_stats().get("req_count", 0))
     for _ in range(256):
         if any(
@@ -198,8 +199,8 @@ def test_mmio_empty_release_enters_send_req_before_tl_a(env):
     snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     for _ in range(512):
         if (
             snapshots
@@ -228,8 +229,8 @@ def test_mmio_empty_release_enters_send_req_before_tl_a(env):
         and sample["tl_a_valid"] == 0
         for sample in snapshots
     ), {"snapshots": snapshots[-64:]}
-    assert uncache._wait_for_uncache_req(env)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     assert not env.monitor.get_errors()
 
 
@@ -253,8 +254,8 @@ def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
     snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     for _ in range(512):
         if snapshots and snapshots[-1]["cfvec_valid"] == 1:
             break
@@ -311,7 +312,7 @@ def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
     snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
     for _ in range(512):
         if (
             snapshots
@@ -346,7 +347,7 @@ def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
     ), {"snapshots": snapshots[-64:]}
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == held_req_count
     env.backend_model.set_can_accept(1)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     assert not env.monitor.get_errors()
 
 
@@ -397,6 +398,6 @@ def test_mmio_send_req_ibuffer_stall_suppresses_tl_a(env):
     ), {"snapshots": snapshots[-64:]}
     env.backend_model.set_can_accept(1)
     assert uncache._wait_for_request_addr(env, mapping.paddr, max_cycles=6000)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     assert uncache._wait_for_observed_pc(env, expected[0][0], max_cycles=12000)
     assert not env.monitor.get_errors()

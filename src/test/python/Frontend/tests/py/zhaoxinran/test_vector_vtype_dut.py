@@ -9,7 +9,13 @@ from env.core.transactions import ProgramImage
 from env.model.golden_trace import GoldenTrace
 from env.model.vtype import VTypeState
 from env.sequences import LoadProgramSequence
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from tests.py.zhaoxinran.test_bin_trace_dut import test_bin_trace as run_bin_trace
+
+
+pytestmark = pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 
 
 @pytest.mark.skipif(
@@ -234,7 +240,7 @@ def test_vector_vtype_redirect_recovery(env, walk_to_arch: bool, restored: VType
         ),
         step_cycles=0,
     ).run(env)
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(env, FrontendInitConfig(reset_vector=base, bare_mode=True, reset_cycles=20))
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
 
@@ -325,7 +331,7 @@ def test_vector_vtype_backend_commit(env, has_vsetvl: bool) -> None:
         image=ProgramImage(payload=nop.to_bytes(4, "little") * 1024, base_addr=base),
         step_cycles=0,
     ).run(env)
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(env, FrontendInitConfig(reset_vector=base, bare_mode=True, reset_cycles=20))
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     env.backend_model.set_can_accept(0)

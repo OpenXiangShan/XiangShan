@@ -243,9 +243,11 @@ def _drive_bpu_s3_until_s1_hit(env, bin_name: str, *, max_cycles: int) -> None:
 
     try:
         while elapsed < int(max_cycles):
-            if env.functional_coverage.key_hit("icache_mainpipe_s1_flush", bin_name):
+            if (
+                env.functional_coverage is not None
+                and env.functional_coverage.key_hit("icache_mainpipe_s1_flush", bin_name)
+            ):
                 return
-
             sample = _snapshot(env)
             if int(sample["s1_valid"]) == 1:
                 s1_windows += 1
@@ -257,8 +259,15 @@ def _drive_bpu_s3_until_s1_hit(env, bin_name: str, *, max_cycles: int) -> None:
                         if int(sample["bpu_valid"]) == 1:
                             bpu_samples.append(sample)
                             bpu_samples[:] = bpu_samples[-16:]
-                        if env.functional_coverage.key_hit(
+                        if env.functional_coverage is not None and env.functional_coverage.key_hit(
                             "icache_mainpipe_s1_flush", bin_name
+                        ):
+                            return
+                        if env.functional_coverage is None and (
+                            int(sample["s1_valid"]) == 1
+                            and int(sample["s1_flush"]) == 0
+                            and int(sample["bpu_valid"]) == 1
+                            and _bpu_is_after_s1(sample)
                         ):
                             return
                         env.step(1)
@@ -270,8 +279,21 @@ def _drive_bpu_s3_until_s1_hit(env, bin_name: str, *, max_cycles: int) -> None:
     finally:
         _restore_predictors(env)
 
-    assert env.functional_coverage.key_hit("icache_mainpipe_s1_flush", bin_name), {
-        "reason": "BPU s3 flush did not align with requested MainPipe s1 flush bin",
+    if env.functional_coverage is not None:
+        assert env.functional_coverage.key_hit("icache_mainpipe_s1_flush", bin_name), {
+            "reason": "BPU s3 flush did not align with requested MainPipe s1 flush bin",
+            "bin": bin_name,
+            "max_cycles": int(max_cycles),
+            "s1_windows": int(s1_windows),
+            "last_bpu_samples": bpu_samples,
+            "last": _snapshot(env),
+            "icache": env.icache_agent.get_stats(),
+            "backend": env.backend_model.get_stats(),
+            "monitor_errors": env.monitor.get_errors(),
+        }
+        return
+    raise AssertionError({
+        "reason": "BPU s3 flush did not align with requested MainPipe s1 flush observation",
         "bin": bin_name,
         "max_cycles": int(max_cycles),
         "s1_windows": int(s1_windows),
@@ -280,7 +302,7 @@ def _drive_bpu_s3_until_s1_hit(env, bin_name: str, *, max_cycles: int) -> None:
         "icache": env.icache_agent.get_stats(),
         "backend": env.backend_model.get_stats(),
         "monitor_errors": env.monitor.get_errors(),
-    }
+    })
 
 
 def _train_live_cfi_for_s3_override(env, *, max_cycles: int) -> dict:

@@ -4,6 +4,7 @@ import logging
 
 import pytest
 
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.api import (
     api_Frontend_load_golden_trace,
     api_Frontend_load_program_file,
@@ -54,6 +55,7 @@ def _trace_target_cursor() -> int:
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.skipif(not _RUN_PIPELINE_TEST, reason="pipeline-only test")
+@pytest.mark.parametrize("frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True)
 def test_bin_trace(env):
     bin_path = Path(_require_env("TB_BIN_PATH"))
     trace_path = Path(_require_env("TB_TRACE_PATH"))
@@ -65,7 +67,9 @@ def test_bin_trace(env):
     assert bin_path.is_file(), f"bin file not found: {bin_path}"
     assert trace_path.is_file(), f"trace file not found: {trace_path}"
 
-    env.initialize(reset_vector=reset_vector, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env, FrontendInitConfig(reset_vector=reset_vector, bare_mode=True, reset_cycles=20)
+    )
     bin_size = api_Frontend_load_program_file(env, str(bin_path), base_addr, max_cycles=0)
     trace_entries = api_Frontend_load_golden_trace(env, str(trace_path), max_cycles=0, start_index=trace_start_index)
     run_ok = api_Frontend_run_until_golden_complete(env, max_cycles=_trace_cycle_limit())

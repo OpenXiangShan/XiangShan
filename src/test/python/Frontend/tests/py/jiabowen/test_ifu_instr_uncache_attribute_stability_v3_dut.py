@@ -5,6 +5,7 @@ import os
 import pytest
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner
+from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 
 
@@ -31,7 +32,7 @@ def test_pbmt_nc_tl_a_backpressure_holds_user_attributes(env) -> None:
     env.uncache_agent.set_a_ready(0)
     uncache._force_redirect_to(env, mapping.vaddr)
 
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert uncache._wait_for_uncache_a_valid_addr(
         env, mapping.paddr, max_cycles=6000
     ), {
@@ -50,8 +51,8 @@ def test_pbmt_nc_tl_a_backpressure_holds_user_attributes(env) -> None:
 def test_pma_mmio_tl_a_backpressure_holds_user_attributes(env) -> None:
     uncache._prepare_mmio_cnop_stream(env)
     uncache._initialize_mmio_fetch(env)
-    assert uncache._wait_for_uncache_req(env) > 0
-    assert uncache._wait_for_uncache_resp(env) > 0
+    assert _wait_for_req_delta(env, env.uncache_agent) > 0
+    assert _wait_for_resp_delta(env, env.uncache_agent) > 0
     env.uncache_agent.set_a_ready(0)
     for _ in range(256):
         if int(env.uncache_if.a_valid.value) == 1:

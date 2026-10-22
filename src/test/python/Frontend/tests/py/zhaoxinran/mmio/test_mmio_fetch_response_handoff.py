@@ -7,6 +7,8 @@ import pytest
 from env.core.transactions import ProgramImage
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.sequences import LoadProgramSequence
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
+from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 from tests.py.zhaoxinran.uncache import test_nc_fetch_paths as nc_paths
 from env.support import PmpPmaConfig, record_scenario, scenario_rng
@@ -47,8 +49,8 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     snapshots = _register_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     for _ in range(64):
         if any(
             sample["resp_valid"] == 1
@@ -96,7 +98,7 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
     snapshots = _register_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
     assert env.uncache_agent.pending
     # Queue the redirect while InstrUncache is waiting for D, before D becomes
     # visible.  The backend drives a queued redirect on the next edge; waiting
@@ -152,6 +154,7 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.parametrize("frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True)
 def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(env):
     """An older JAL redirect cancels a younger MMIO request before TL-A."""
     source_page = uncache._NORMAL_BASE
@@ -193,7 +196,7 @@ def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(
     env.memory.mmio_ranges.append((mmio_page, mmio_page + uncache._SV39_PAGE_SIZE))
     env.icache_agent.configure(hit_latency=8, miss_latency=8, miss_rate=0.0, seed=17)
     env.uncache_agent.configure(latency=24, mmio_latency=24)
-    env.initialize(reset_vector=cacheable_start, bare_mode=True, reset_cycles=20)
+    initialize_frontend(env, FrontendInitConfig(reset_vector=cacheable_start, bare_mode=True, reset_cycles=20))
     env.write_pmp_entry(
         0,
         PmpPmaConfig(match="napot", read=True, write=True, execute=True),

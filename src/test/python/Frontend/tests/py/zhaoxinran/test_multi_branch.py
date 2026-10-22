@@ -60,10 +60,6 @@ def _bne(rs1: int, rs2: int, offset: int) -> int:
     )
 
 
-def _make_program(size: int = 128) -> list:
-    return [NOP] * size
-
-
 def _instructions_to_bytes(instructions: Iterable[int]) -> bytes:
     buf = bytearray()
     for instr in instructions:
@@ -89,7 +85,7 @@ def test_jal_forward_jump_observes_target_pc(env):
     scenario_key = "zhaoxinran/multi-branch/jal-forward-target"
     base_seed, seed, rng = scenario_rng(scenario_key)
     target_index = rng.randint(2, 16)
-    prog = _make_program(64)
+    prog = [NOP] * 64
     prog[0] = _jal(0, target_index * 4)
     payload = _instructions_to_bytes(prog)
     record_scenario(
@@ -122,7 +118,7 @@ def test_jal_resolve_drains_pending_queue(env):
     base_seed, seed, rng = scenario_rng(scenario_key)
     min_delay, max_delay = _rand_resolve_delays(rng, env)
 
-    prog = _make_program(64)
+    prog = [NOP] * 64
     prog[8] = _jal(0, 8)
     payload = _instructions_to_bytes(prog)
     record_scenario(

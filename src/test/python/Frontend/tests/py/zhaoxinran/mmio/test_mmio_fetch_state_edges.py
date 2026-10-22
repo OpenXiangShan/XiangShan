@@ -6,6 +6,7 @@ import pytest
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.support import record_scenario, scenario_rng
+from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -60,7 +61,7 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
 
     env.uncache_agent.set_a_ready(None)
     assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE, max_cycles=8000)
-    assert uncache._wait_for_uncache_resp(env, max_cycles=8000)
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=8000)
 
     fire_cycle = min(
         sample["cycle"]
@@ -112,6 +113,6 @@ def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
         and sample["tl_a_ready"] == 1
         for sample in snapshots
     ), {"snapshots": snapshots[-32:]}
-    assert uncache._wait_for_uncache_resp(env, max_cycles=8000)
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=8000)
     assert uncache._wait_for_observed_pc(env, uncache._MMIO_BASE, max_cycles=8000)
     assert not env.monitor.get_errors()

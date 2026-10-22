@@ -15,6 +15,7 @@ import pytest
 
 from env.core.transactions import BackendRedirectClass, RedirectTxn, ProgramImage
 from env.sequences import InjectRedirectSequence, LoadProgramSequence
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.support import record_scenario, scenario_rng
 from tests.py.jiabowen import test_ifu_predchecker_v3_dut as predchecker
 from tests.py.icache.directed_dut import test_icache_lowrisk_gap_closure_dut as lowrisk
@@ -117,7 +118,7 @@ def _load_boundary_stream(env, *, is_rvc: bool, ftq_offset: int) -> None:
         image=ProgramImage(payload=payload, base_addr=_BASE),
         step_cycles=0,
     ).run(env)
-    env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
+    initialize_frontend(env, FrontendInitConfig(reset_vector=_BASE, bare_mode=True, reset_cycles=20))
     env.monitor.clear()
     env.monitor.set_expected_pc(_BASE)
 
@@ -374,6 +375,7 @@ def _run_late_uncache_response_after_redirect(
         pytest.param("igpf", 20, {"backend_igpf": 1}, id="igpf"),
     ],
 )
+@pytest.mark.parametrize("frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True)
 def test_rfr_s01_fault_redirect_recovery_three_fetches(
     env, fault_kind: str, fault_bit: int, redirect_faults: dict[str, int]
 ) -> None:
@@ -433,6 +435,7 @@ def test_rfr_s02_memory_violation_redirect_cancels_mmio(env) -> None:
         pytest.param(True, 31, 1, id="flush-itself-rvc-tail"),
     ),
 )
+@pytest.mark.parametrize("frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True)
 def test_rfr_s03_source_bound_ahead_match_and_boundaries(
     env, is_rvc: bool, ftq_offset: int, level: int
 ) -> None:

@@ -495,6 +495,7 @@ def read_nc_timing_runtime_snapshot(recorder, dut) -> dict[str, Optional[int]]:
             pmp_mmio_stem="s2_icacheMeta_0_pmpMmio",
             pbmt_stem="s2_icacheMeta_0_itlbPbmt",
         ),
+        "s2_use_uncache": _read_ifu(recorder, dut, "s2_useUncacheFetch"),
         "s2_pmp_mmio": s2_pmp_mmio,
         "s2_pbmt": s2_pbmt,
         "uncache_busy": _read_ifu(recorder, dut, "uncacheBusy"),
@@ -529,6 +530,8 @@ def read_nc_timing_runtime_snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "tl_a_valid": _read(
             recorder, dut, "auto_inner_instrUncache_client_out_a_valid"
         ),
+        "req_valid": _read_uncache(recorder, dut, "io_req_valid"),
+        "req_ready": _read_uncache(recorder, dut, "io_req_ready"),
     }
 
 

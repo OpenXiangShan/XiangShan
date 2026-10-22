@@ -5,6 +5,7 @@ import os
 import pytest
 
 from env.support import record_scenario, require_sig, scenario_rng
+from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -106,7 +107,7 @@ def test_mmio_flush_cancels_unaccepted_8b_resend(env):
 
     assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE, max_cycles=8000)
     env.uncache_agent.set_a_ready(0)
-    assert uncache._wait_for_uncache_resp(env, max_cycles=8000)
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=8000)
 
     _redirect_before_unaccepted_request(
         env,
@@ -155,7 +156,7 @@ def test_mmio_flush_cancels_unaccepted_page_half_recheck(env):
     next_page = uncache._MMIO_BASE + uncache._SV39_PAGE_SIZE
     assert uncache._wait_for_request_addr(env, first_beat, max_cycles=8000)
     env.uncache_agent.set_a_ready(0)
-    assert uncache._wait_for_uncache_resp(env, max_cycles=8000)
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=8000)
 
     _redirect_before_unaccepted_request(env, pending_addr=next_page, target_pc=target_pc)
     assert not any(

@@ -499,9 +499,13 @@ _BPU_TRAINING_SIGNALS = {
 }
 
 
-def _read_bpu_training_signal(recorder, key: str) -> int:
+def _read_bpu_training_signal(env, key: str) -> int:
     names = _BPU_TRAINING_SIGNALS[key]
-    value = recorder._read_first_dut_signal(recorder.env.dut, names)
+    recorder = getattr(env, "functional_coverage", None)
+    if recorder is not None:
+        value = recorder._read_first_dut_signal(env.dut, names)
+    else:
+        value = _read_generic_dut_signal(env, names)
     assert value is not None, {
         "reason": "required directed-flow observation is unavailable",
         "label": str(key),
@@ -516,26 +520,27 @@ class WarmBpuTraining:
 
     def run(self, env) -> dict:
         recorder = getattr(env, "functional_coverage", None)
-        assert (
-            recorder is not None
-        ), "directed flow tests require the canonical funcov recorder"
-        assert getattr(recorder, "env", None) is env
         max_cycles = self.max_cycles
         if max_cycles is None:
             max_cycles = cycle_limit("TB_TWO_FETCH_TRAIN_MAX_CYCLES", 4000)
         for _ in range(max(0, int(max_cycles))):
             env.step(1)
             dual_request_fire = (
-                _read_bpu_training_signal(recorder, "ftq_valid") == 1
-                and _read_bpu_training_signal(recorder, "ftq_ready") == 1
-                and _read_bpu_training_signal(recorder, "ftq_req1_valid") == 1
+                _read_bpu_training_signal(env, "ftq_valid") == 1
+                and _read_bpu_training_signal(env, "ftq_ready") == 1
+                and _read_bpu_training_signal(env, "ftq_req1_valid") == 1
             )
             if (
                 int(env.backend_model.get_stats().get("commit_count", 0)) >= 1
                 and int(env.icache_agent.get_stats().get("req_count", 0)) >= 4
-                and recorder.key_hit("ifu_cfi_decode_type", "jal")
-                and recorder.key_hit("two_fetch_ftq_eligibility", "eligible_dual")
-                and recorder.key_hit("two_fetch_delivery", "dual_fire")
+                and (
+                    recorder is None
+                    or (
+                        recorder.key_hit("ifu_cfi_decode_type", "jal")
+                        and recorder.key_hit("two_fetch_ftq_eligibility", "eligible_dual")
+                        and recorder.key_hit("two_fetch_delivery", "dual_fire")
+                    )
+                )
                 and dual_request_fire
             ):
                 return {

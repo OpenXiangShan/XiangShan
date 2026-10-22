@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 
 from env.core.transactions import RedirectTxn
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.sequences import (
     InjectRedirectSequence,
     TranslationPmpPmaEntry,
@@ -14,6 +15,7 @@ from env.sequences import (
     TranslationScenarioBuilder,
 )
 from env.support import PmpPmaConfig, record_scenario, scenario_rng
+from tests.py.support.dut_support import wait_until as _wait_until
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -118,15 +120,6 @@ def _scenario(
     )
 
 
-def _wait_until(env, predicate, *, description: str, max_cycles: int = 2000) -> None:
-    for _ in range(max_cycles):
-        if predicate():
-            return
-        env.step(1)
-    if not predicate():
-        raise AssertionError(f"timed out waiting for {description}")
-
-
 def _translation_complete(env) -> bool:
     active = env.translation_oracle.get_active()
     if active is None:
@@ -215,7 +208,14 @@ def _sfence_stage_scenario(scenario_id: str, *, s2xlate: int) -> TranslationScen
 
 
 def _run_to_refill(env, scenario: TranslationScenario):
-    env.initialize(reset_vector=scenario.va, bare_mode=str(scenario.mode).lower() == "bare" and not scenario.s2xlate)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            reset_vector=scenario.va,
+            bare_mode=str(scenario.mode).lower() == "bare" and not scenario.s2xlate,
+            reset_cycles=20,
+        ),
+    )
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
@@ -234,7 +234,9 @@ def _run_sfence_retranslation(
 ) -> dict:
     """Invalidate a live refill before its source FTQ entry is committed."""
 
-    env.initialize(reset_vector=scenario.va, bare_mode=False)
+    initialize_frontend(
+        env, FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20)
+    )
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
@@ -291,7 +293,9 @@ def test_satp_asid_switch_restarts_translation_from_live_cfvec(env) -> None:
     # Build the target oracle state before reset.  The old context is built after
     # reset so its PMP/PMA writes remain live when the DUT starts fetching.
     new_state = builder.build(new)
-    env.initialize(reset_vector=_OLD_VA, bare_mode=False)
+    initialize_frontend(
+        env, FrontendInitConfig(reset_vector=_OLD_VA, bare_mode=False, reset_cycles=20)
+    )
     old_state = builder.build(old)
     for page in range(new.page_count):
         env.page_table.map_page(
@@ -373,7 +377,9 @@ def test_tlb_csr_change_retranslates_same_vpn_with_new_pte_signature(env) -> Non
     # Build the target oracle before the live source context; building a
     # scenario drives CSR inputs and therefore consumes DUT cycles.
     new_state = builder.build(new)
-    env.initialize(reset_vector=_OLD_VA, bare_mode=False)
+    initialize_frontend(
+        env, FrontendInitConfig(reset_vector=_OLD_VA, bare_mode=False, reset_cycles=20)
+    )
     old_state = builder.build(old)
     env.monitor.clear()
     env.monitor.set_expected_pc(_OLD_VA)
@@ -443,7 +449,9 @@ def test_satp_switch_records_late_old_epoch_ptw_response(env) -> None:
     builder = TranslationScenarioBuilder(env)
 
     new_state = builder.build(new)
-    env.initialize(reset_vector=_OLD_VA, bare_mode=False)
+    initialize_frontend(
+        env, FrontendInitConfig(reset_vector=_OLD_VA, bare_mode=False, reset_cycles=20)
+    )
     old_state = builder.build(old)
     for page in range(new.page_count):
         env.page_table.map_page(
@@ -504,7 +512,9 @@ def test_satp_switch_records_late_old_epoch_ptw_response(env) -> None:
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_all_stage_context_change_after_refill(env, scenario_id, context_update, changed_name) -> None:
     scenario = _randomize_context_timing(env, _all_stage_scenario(scenario_id))
-    env.initialize(reset_vector=scenario.va, bare_mode=False)
+    initialize_frontend(
+        env, FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20)
+    )
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
@@ -611,7 +621,9 @@ def test_unmatched_sfence_during_ptw_wait_preserves_translation(env) -> None:
         _sfence_stage_scenario("translation-unmatched-sfence-ptw-wait", s2xlate=0),
         ptw_response_latency=32,
     ), latency_min=24, latency_max=48)
-    env.initialize(reset_vector=scenario.va, bare_mode=False)
+    initialize_frontend(
+        env, FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20)
+    )
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)

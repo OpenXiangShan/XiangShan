@@ -25,6 +25,14 @@ from env.sequences import (
 )
 from env.core.transactions import BackendRedirectClass, CommitTarget, ProgramImage, RedirectTxn
 from env.support import PmpPmaConfig, record_scenario, require_sig, scenario_rng
+from tests.py.support.dut_support import (
+    _assert_observed_instrs,
+    _first_observed_index,
+    _wait_for_resp_delta,
+    _wait_for_req_delta,
+    _wait_for_req_count,
+)
+from tests.py.support.translation_scenarios import _randomize_translation_timing
 from tests.py.support.uncache_scenarios import (
     _ADDI_X0_X0_0,
     _CNOP,
@@ -63,24 +71,19 @@ from tests.py.support.uncache_scenarios import (
     _prepare_cross_page_rvc_stream,
     _prepare_cross_page_rvi_stream,
     _prepare_mmio_cnop_stream,
+    _prepare_normal_and_mmio_cnop_stream,
     _prepare_sv39_dual_nc_cacheable_stream,
     _prepare_sv39_mapped_pbmt_nc_cfi_stream,
     _pulse_sfence,
     _register_prev_half_rvi_observer,
     _remap_sv39_page_pbmt,
     _require_first_dut_signal,
-    _wait_for_icache_req,
     _wait_for_monitor_exception,
     _wait_for_observed_pc,
     _wait_for_observed_pc_sequence,
-    _wait_for_ptw_resp,
     _wait_for_request_addr,
     _wait_for_resp_count,
     _wait_for_uncache_a_valid_addr,
-    _wait_for_uncache_req,
-    _wait_for_uncache_req_count,
-    _wait_for_uncache_req_delta,
-    _wait_for_uncache_resp,
 )
 
 
@@ -88,39 +91,6 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _INSTR_UNCACHE_INVALID = 0
 _INSTR_UNCACHE_REFILL_REQ = 1
 _INSTR_UNCACHE_SEND_RESP = 3
-
-
-def _randomize_translation_timing(
-    env,
-    scenario: TranslationScenario,
-    *,
-    latency_min: int = 1,
-    latency_max: int = 8,
-) -> TranslationScenario:
-    scenario_key = f"zhaoxinran/uncache/translation/{scenario.scenario_id}"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(int(latency_min), int(latency_max))
-    randomized = replace(
-        scenario,
-        ptw_response_latency=latency,
-        ptw_response_seed=seed,
-    )
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "scenario_id": scenario.scenario_id,
-            "va": scenario.va,
-            "pa": scenario.pa,
-            "page_count": scenario.page_count,
-            "latency": latency,
-            "expected_path": scenario.expected_path,
-            "expected_result": scenario.expected_result,
-        },
-    )
-    return randomized
 
 
 def _configure_random_path_latencies(
@@ -165,56 +135,6 @@ def _prepare_non_crossing_rvi_offsets(env) -> tuple[int, int, int]:
         image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0
     ).run(env)
     return tuple(_MMIO_BASE + offset for offset in offsets)
-
-
-def _prepare_normal_and_mmio_cnop_stream(env, *, instr_count: int = 256) -> None:
-    payload = int(_CNOP).to_bytes(2, "little") * int(instr_count)
-    env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
-    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=_NORMAL_BASE), step_cycles=0).run(env)
-    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=_MMIO_BASE), step_cycles=0).run(env)
-
-
-def _prepare_sv39_mapped_cnop_stream(env, *, vaddr: int, paddr: int, pbmt: int, instr_count: int = 256) -> None:
-    payload = int(_CNOP).to_bytes(2, "little") * int(instr_count)
-    env.page_table.clear()
-    env.page_table.map_page(vaddr >> 12, paddr >> 12, v=1, r=1, x=1, pbmt=int(pbmt))
-    env.ptw_agent.configure(mode="sv39", response_source="model", compare_drive_source="model")
-    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=int(paddr)), step_cycles=0).run(env)
-
-
-def _wait_for_icache_req_count(env, count: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(env.icache_agent.get_stats().get("req_count", 0)) >= int(count):
-            return True
-        env.step(1)
-    return int(env.icache_agent.get_stats().get("req_count", 0)) >= int(count)
-
-
-def _first_observed_index(env, pc: int) -> int:
-    for idx, obs in enumerate(env.monitor.observations):
-        if int(obs.pc) == int(pc):
-            return int(idx)
-    return -1
-
-
-def _assert_observed_instrs(env, expected_block: list[tuple[int, int, bool]]) -> None:
-    observed_by_pc = {
-        int(obs.pc): obs
-        for obs in env.monitor.observations
-        if any(int(obs.pc) == int(pc) for pc, _, _ in expected_block)
-    }
-    for pc, instr, is_rvc in expected_block:
-        obs = observed_by_pc[int(pc)]
-        assert int(obs.instr) == int(instr), {
-            "pc": hex(int(pc)),
-            "expected_instr": hex(int(instr)),
-            "observed_instr": hex(int(obs.instr)),
-        }
-        assert bool(obs.is_rvc) == bool(is_rvc), {
-            "pc": hex(int(pc)),
-            "expected_is_rvc": bool(is_rvc),
-            "observed_is_rvc": bool(obs.is_rvc),
-        }
 
 
 def _collect_cfvec_cycles(env, *, max_cycles: int) -> list[dict]:
@@ -391,8 +311,8 @@ def test_uncache_a_ready_backpressure_holds_request(env):
     _prepare_mmio_cnop_stream(env)
     _initialize_mmio_fetch(env)
 
-    first_req = _wait_for_uncache_req(env)
-    first_resp = _wait_for_uncache_resp(env)
+    first_req = _wait_for_req_delta(env, env.uncache_agent)
+    first_resp = _wait_for_resp_delta(env, env.uncache_agent)
     assert first_req > 0
     assert first_resp > 0
 
@@ -413,8 +333,8 @@ def test_uncache_a_ready_backpressure_holds_request(env):
     assert int(env.uncache_if.a_bits_address.value) == stalled_addr
 
     env.uncache_agent.set_a_ready(None)
-    req_after = _wait_for_uncache_req(env)
-    assert _wait_for_uncache_req_delta(env, 1)
+    req_after = _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_req_delta(env, env.uncache_agent)
 
     assert req_after > req_before
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before + 2
@@ -468,8 +388,8 @@ def test_uncache_response_fault_reports_dut_exception(
     env.uncache_agent.inject_next_response_fault(**fault_kwargs)
     _initialize_mmio_fetch(env)
 
-    req_count = _wait_for_uncache_req(env)
-    resp_count = _wait_for_uncache_resp(env)
+    req_count = _wait_for_req_delta(env, env.uncache_agent)
+    resp_count = _wait_for_resp_delta(env, env.uncache_agent)
     stats = env.uncache_agent.get_stats()
 
     assert req_count > 0
@@ -508,8 +428,8 @@ def test_uncache_wfi_blocks_new_acquire_and_refill_not_safe(env):
     req_during_wfi = int(env.uncache_agent.get_stats().get("req_count", 0))
 
     env.backend_model.set_wfi_req(0)
-    req_after = _wait_for_uncache_req(env)
-    assert _wait_for_uncache_req_delta(env, 1)
+    req_after = _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_req_delta(env, env.uncache_agent)
     env.backend_model.set_wfi_req(1)
     saw_not_safe = False
     for _ in range(64):
@@ -548,8 +468,8 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
     _prepare_mmio_cnop_stream(env)
     _initialize_mmio_fetch(env)
 
-    assert _wait_for_uncache_req(env) > 0
-    assert _wait_for_uncache_resp(env) > 0
+    assert _wait_for_req_delta(env, env.uncache_agent) > 0
+    assert _wait_for_resp_delta(env, env.uncache_agent) > 0
 
     env.uncache_agent.set_a_ready(0)
     for _ in range(256):
@@ -573,8 +493,8 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
 
     env.backend_model.set_wfi_req(0)
     env.uncache_agent.set_a_ready(None)
-    req_after = _wait_for_uncache_req(env)
-    assert _wait_for_uncache_req_delta(env, 1)
+    req_after = _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_req_delta(env, env.uncache_agent)
 
     assert req_after > req_before
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before + 2
@@ -603,13 +523,13 @@ def test_uncache_pending_response_flushed_by_redirect(env):
     _prepare_mmio_cnop_stream(env)
     _initialize_mmio_fetch(env)
 
-    assert _wait_for_uncache_req(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
     _assert_ifu_uncache_state(env, _IFU_UNCACHE_WAIT_RESP)
     _assert_instr_uncache_entry_state_in(env, {_INSTR_UNCACHE_REFILL_REQ, _INSTR_UNCACHE_REFILL_RESP})
     req_before_redirect = int(env.uncache_agent.get_stats().get("req_count", 0))
     _force_redirect_to(env, target_pc)
     assert _wait_for_observed_pc(env, target_pc)
-    assert _wait_for_uncache_resp(env, max_cycles=4000)
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=4000)
 
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before_redirect
@@ -648,7 +568,7 @@ def test_uncache_flushed_fault_response_does_not_report_exception(env, fault_kwa
     env.uncache_agent.inject_response_fault_at(_MMIO_BASE, **fault_kwargs)
     _initialize_mmio_fetch(env)
 
-    assert _wait_for_uncache_req(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
     _assert_ifu_uncache_state(env, _IFU_UNCACHE_WAIT_RESP)
     _assert_instr_uncache_entry_state_in(env, {_INSTR_UNCACHE_REFILL_REQ, _INSTR_UNCACHE_REFILL_RESP})
     assert env.uncache_agent.pending
@@ -657,7 +577,7 @@ def test_uncache_flushed_fault_response_does_not_report_exception(env, fault_kwa
         env.step(1)
     _force_redirect_to(env, target_pc)
     assert _wait_for_observed_pc(env, target_pc)
-    assert _wait_for_uncache_resp(env, max_cycles=4000)
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=4000)
     env.step(32)
     stats = env.uncache_agent.get_stats()
 
@@ -692,7 +612,7 @@ def test_uncache_consecutive_redirects_drop_older_pending_fetch(env):
     _prepare_mmio_cnop_stream(env)
     _initialize_mmio_fetch(env)
 
-    assert _wait_for_uncache_req(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
     _force_redirect_to(env, first_target)
     env.step(redirect_gap)
     _force_redirect_to(env, second_target)
@@ -735,7 +655,7 @@ def test_uncache_redirect_to_mmio_while_icache_response_pending(env):
     _prepare_normal_and_mmio_cnop_stream(env)
     _initialize_mmio_fetch(env, reset_vector=_NORMAL_BASE)
 
-    assert _wait_for_icache_req(env)
+    assert _wait_for_req_delta(env, env.icache_agent)
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
 
     _force_redirect_to(env, _MMIO_BASE)
@@ -784,7 +704,7 @@ def test_uncache_mmio_and_icache_pending_redirects_do_not_pollute_new_path(env):
 
     assert _wait_for_request_addr(env, _MMIO_BASE)
     _force_redirect_to(env, _NORMAL_BASE)
-    assert _wait_for_icache_req(env, max_cycles=5000)
+    assert _wait_for_req_delta(env, env.icache_agent, max_cycles=5000)
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
 
     _force_redirect_to(env, target_pc)
@@ -825,7 +745,7 @@ def _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
     env.uncache_agent.set_a_ready(0)
     _force_redirect_to(env, mapping.vaddr)
 
-    assert _wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert _wait_for_uncache_a_valid_addr(env, mapping.paddr, max_cycles=6000), {
         "ptw": env.ptw_agent.get_stats(),
         "icache": env.icache_agent.get_stats(),
@@ -895,7 +815,7 @@ def test_uncache_pbmt_io_waits_commit_on_cacheable_pma(env):
     env.backend_model.set_can_accept(0)
     _force_redirect_to(env, mapping.vaddr)
 
-    assert _wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert _wait_for_uncache_a_valid_addr(env, mapping.paddr, max_cycles=6000), {
         "ptw": env.ptw_agent.get_stats(),
         "uncache": env.uncache_agent.get_stats(),
@@ -946,7 +866,7 @@ def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_la
     _configure_exec_cacheable_pma_4k(env, base_addr=mapping.paddr)
     _force_redirect_to(env, mapping.vaddr)
 
-    assert _wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
     assert _wait_for_resp_count(env, 1, max_cycles=6000), env.uncache_agent.get_stats()
     target_req_count = _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES
@@ -1052,7 +972,7 @@ def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
     _configure_exec_mmio_pma_4k(env, base_addr=mapping.paddr)
     _force_redirect_to(env, mapping.vaddr)
 
-    assert _wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
     ptw_resp = env.ptw_agent.get_last_drive_expectation()
     assert ptw_resp is not None
     assert int(ptw_resp["resp"].get("s1_entry_pbmt", 0)) == _PBMT_NC, ptw_resp
@@ -1068,7 +988,7 @@ def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
     assert req_without_commit == req_before_commit
 
     env.backend_model.set_can_accept(1)
-    req_after_commit = _wait_for_uncache_req(env, max_cycles=6000)
+    req_after_commit = _wait_for_req_delta(env, env.uncache_agent, max_cycles=6000)
 
     assert req_after_commit > req_without_commit, {
         "uncache": env.uncache_agent.get_stats(),
@@ -1117,7 +1037,7 @@ def test_uncache_pbmt_nc_real_bin_uses_generated_sv39_vaddr_mapping(env, tmp_pat
     _configure_exec_attrs_for_mapping(env, mapping)
     _force_redirect_to(env, mapping.vaddr)
 
-    assert _wait_for_ptw_resp(env, max_cycles=6000), {"mapping": mapping, "ptw": env.ptw_agent.get_stats()}
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), {"mapping": mapping, "ptw": env.ptw_agent.get_stats()}
     assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), {
         "mapping": mapping,
         "uncache": env.uncache_agent.get_stats(),
@@ -1170,7 +1090,7 @@ def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_reque
     _force_redirect_to(env, _NORMAL_BASE)
 
     assert _wait_for_request_addr(env, _NORMAL_PHYS_BASE, max_cycles=6000), env.uncache_agent.get_stats()
-    assert _wait_for_uncache_req_count(env, _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES, max_cycles=12000), (
+    assert _wait_for_req_count(env, env.uncache_agent, _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES, max_cycles=12000), (
         env.uncache_agent.get_stats()
     )
     assert int(env.uncache_agent.get_stats().get("pending", 0)) > 0
@@ -1181,7 +1101,7 @@ def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_reque
     assert int(env.uncache_agent.get_stats().get("pending", 0)) > 0
     _force_redirect_to(env, _NORMAL_BASE)
     env.backend_model.set_can_accept(1)
-    assert _wait_for_icache_req_count(env, 2, max_cycles=12000), env.icache_agent.get_stats()
+    assert _wait_for_req_count(env, env.icache_agent, 2, max_cycles=12000), env.icache_agent.get_stats()
     assert _wait_for_observed_pc_sequence(env, nc_pcs[:8], max_cycles=12000), {
         "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-32:]],
         "icache": env.icache_agent.get_stats(),
@@ -1262,7 +1182,7 @@ def _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(
     _configure_exec_attrs_16k(env, base_addr=0x80000000)
     _force_redirect_to(env, _NORMAL_ALT_BASE)
 
-    assert _wait_for_icache_req_count(env, 2, max_cycles=12000), env.icache_agent.get_stats()
+    assert _wait_for_req_count(env, env.icache_agent, 2, max_cycles=12000), env.icache_agent.get_stats()
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
     _pulse_sfence(env, addr=_NORMAL_ALT_BASE, rs1=1, rs2=0)
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
@@ -1342,7 +1262,7 @@ def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str
     _force_redirect_to(env, mapping.vaddr)
 
     if old_attr == "cacheable":
-        assert _wait_for_icache_req(env, max_cycles=6000) > 0
+        assert _wait_for_req_delta(env, env.icache_agent, max_cycles=6000) > 0
     else:
         assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
     assert _wait_for_observed_pc(env, mapping.vaddr, max_cycles=12000)
@@ -1359,7 +1279,7 @@ def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str
     _pulse_sfence(env, addr=mapping.vaddr, rs1=0, rs2=1)
 
     if new_attr == "cacheable":
-        assert _wait_for_icache_req(env, max_cycles=12000) > 0
+        assert _wait_for_req_delta(env, env.icache_agent, max_cycles=12000) > 0
     else:
         assert _wait_for_request_addr(env, mapping.paddr, max_cycles=12000), env.uncache_agent.get_stats()
     for _ in range(12000):
@@ -1427,7 +1347,7 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
     _configure_translation_attribute(env, attr=old_attr, paddr=old_mapping.paddr)
 
     if old_attr == "cacheable":
-        assert _wait_for_icache_req(env, max_cycles=6000) > 0
+        assert _wait_for_req_delta(env, env.icache_agent, max_cycles=6000) > 0
     else:
         assert _wait_for_request_addr(env, old_mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
     assert _wait_for_observed_pc(env, old_mapping.vaddr, max_cycles=12000)
@@ -1440,7 +1360,7 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
     )
 
     if new_attr == "cacheable":
-        assert _wait_for_icache_req(env, max_cycles=12000) > 0
+        assert _wait_for_req_delta(env, env.icache_agent, max_cycles=12000) > 0
     else:
         assert _wait_for_request_addr(env, target_mapping.paddr, max_cycles=12000), env.uncache_agent.get_stats()
     assert _wait_for_observed_pc(env, target_mapping.vaddr, max_cycles=12000)
@@ -2289,7 +2209,7 @@ def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
     _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
 
     assert _wait_for_request_addr(env, _MMIO_BASE)
-    assert _wait_for_uncache_resp(env)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     assert _wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
 
@@ -2384,7 +2304,7 @@ def test_uncache_resend_first_beat_combined_fault_suppresses_resend(env):
     _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
 
     assert _wait_for_request_addr(env, _MMIO_BASE)
-    assert _wait_for_uncache_resp(env)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     assert _wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
 
@@ -2703,7 +2623,7 @@ def test_uncache_page_tail_fault_does_not_create_half_state(env, denied):
     _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
 
     assert _wait_for_request_addr(env, first_beat, max_cycles=5000)
-    assert _wait_for_uncache_resp(env, max_cycles=5000)
+    assert _wait_for_resp_delta(env, env.uncache_agent, max_cycles=5000)
     assert _wait_for_monitor_exception(env, max_cycles=5000)
     env.step(32)
     stats = env.uncache_agent.get_stats()
@@ -2909,13 +2829,13 @@ def test_uncache_mmio_commit_order_waits_last_commit(env):
     env.backend_model.set_can_accept(0)
     _initialize_mmio_fetch(env)
 
-    assert _wait_for_uncache_req(env)
-    assert _wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     req_before_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
     env.step(blocked_cycles)
     req_without_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
     env.backend_model.set_can_accept(1)
-    req_after_commit = _wait_for_uncache_req(env)
+    req_after_commit = _wait_for_req_delta(env, env.uncache_agent)
 
     assert req_without_commit == req_before_commit
     assert req_after_commit > req_without_commit
@@ -2945,8 +2865,8 @@ def test_uncache_wfi_during_mmio_commit_gate_blocks_next_request(env):
     )
     _initialize_mmio_fetch(env)
 
-    assert _wait_for_uncache_req(env)
-    assert _wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     env.backend_model.set_can_accept(0)
     env.backend_model.set_wfi_req(1)
     req_before = int(env.uncache_agent.get_stats().get("req_count", 0))
@@ -2957,7 +2877,7 @@ def test_uncache_wfi_during_mmio_commit_gate_blocks_next_request(env):
     env.step(post_wfi_cycles)
     req_still_commit_gated = int(env.uncache_agent.get_stats().get("req_count", 0))
     env.backend_model.set_can_accept(1)
-    req_after_commit = _wait_for_uncache_req(env)
+    req_after_commit = _wait_for_req_delta(env, env.uncache_agent)
 
     assert req_during_gate_and_wfi == req_before
     assert req_still_commit_gated == req_before

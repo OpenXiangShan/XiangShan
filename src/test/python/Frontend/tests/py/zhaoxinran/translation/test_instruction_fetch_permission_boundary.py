@@ -6,6 +6,7 @@ import os
 import pytest
 
 from env.core.transactions import BackendRedirectClass, RedirectTxn
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.sequences import (
     InjectRedirectSequence,
     TranslationPmpPmaEntry,
@@ -16,10 +17,19 @@ from env.sequences import (
     TranslationScenarioPhase,
     TranslationScenarioSequence,
 )
-from env.support import PmpPmaConfig, fold_pc, record_scenario, scenario_rng
+from env.support import PmpPmaConfig, fold_pc
+from tests.py.support.dut_support import wait_until as _wait_until
+from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+
+
+pytestmark = pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
+
+
 _VA = 0x8020_0F00
 _PA = 0x8040_0F00
 _SINGLE_PAGE_VA = 0x8020_0800
@@ -28,38 +38,6 @@ _PAGE_SIZE = 0x1000
 _PAYLOAD = b"\x13\x00\x00\x00" * 64
 _CROSS_PAGE_PAYLOAD = b"\x13\x00\x00\x00" * 512
 _OBSERVED_EXCEPTION_BITS = (1, 2, 12, 19, 20)
-
-
-def _randomize_permission_timing(
-    env,
-    scenario: TranslationScenario,
-    expected_fault: str | None,
-) -> TranslationScenario:
-    scenario_key = f"zhaoxinran/translation/permission/{scenario.scenario_id}"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(1, 8)
-    randomized = replace(
-        scenario,
-        ptw_response_latency=latency,
-        ptw_response_seed=seed,
-    )
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "scenario_id": scenario.scenario_id,
-            "va": scenario.va,
-            "pa": scenario.pa,
-            "page_count": scenario.page_count,
-            "latency": latency,
-            "priv_imode": scenario.priv_imode,
-            "expected_path": scenario.expected_path,
-            "expected_fault": expected_fault,
-        },
-    )
-    return randomized
 
 
 def _entry(
@@ -101,15 +79,6 @@ def _scenario(
         expected_path="fault" if expected_fault is not None else "cacheable",
         expected_result="access_fault" if expected_fault is not None else "normal",
     )
-
-
-def _wait_until(env, predicate, *, description: str, max_cycles: int = 2000) -> None:
-    for _ in range(max_cycles):
-        if predicate():
-            return
-        env.step(1)
-    if not predicate():
-        raise AssertionError(f"timed out waiting for {description}")
 
 
 def _assert_exact_oracle_fault(env, *, pc: int, expected_fault: str) -> None:
@@ -554,7 +523,17 @@ def test_instruction_fetch_permission_boundary(
     scenario: TranslationScenario,
     expected_fault: str,
 ) -> None:
-    scenario = _randomize_permission_timing(env, scenario, expected_fault)
+    scenario = _randomize_ptw_response_timing(
+        env,
+        scenario,
+        scenario_key=f"zhaoxinran/translation/permission/{scenario.scenario_id}",
+        parameters={
+            "page_count": scenario.page_count,
+            "priv_imode": scenario.priv_imode,
+            "expected_path": scenario.expected_path,
+            "expected_fault": expected_fault,
+        },
+    )
     sequence = TranslationScenarioSequence(
         actions=(TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),)
     )
@@ -677,7 +656,9 @@ def _run_backend_fault_redirect_recovery(
     builder = TranslationScenarioBuilder(env)
     records = _capture_backend_fault_recovery(env)
 
-    env.initialize(reset_vector=fault_pc, bare_mode=False)
+    initialize_frontend(
+        env, FrontendInitConfig(reset_vector=fault_pc, bare_mode=False, reset_cycles=20)
+    )
 
     def arm_fault_before_reset_release() -> None:
         fault_state = builder.build(fault)
@@ -830,7 +811,17 @@ def test_pmp_lock_mode(env, scenario: TranslationScenario) -> None:
     expected_fault = (
         "instruction_access_fault" if scenario.expected_path == "fault" else None
     )
-    scenario = _randomize_permission_timing(env, scenario, expected_fault)
+    scenario = _randomize_ptw_response_timing(
+        env,
+        scenario,
+        scenario_key=f"zhaoxinran/translation/permission/{scenario.scenario_id}",
+        parameters={
+            "page_count": scenario.page_count,
+            "priv_imode": scenario.priv_imode,
+            "expected_path": scenario.expected_path,
+            "expected_fault": expected_fault,
+        },
+    )
     sequence = TranslationScenarioSequence(actions=(TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),))
     sequence.initialize_first_phase(env)
     phases = [record for record in sequence.run(env) if record["kind"] == "phase"]

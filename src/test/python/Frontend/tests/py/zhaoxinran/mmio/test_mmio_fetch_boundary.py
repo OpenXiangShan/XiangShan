@@ -8,18 +8,15 @@ from env.core.transactions import BackendRedirectClass, ProgramImage
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.sequences import LoadProgramSequence
 from env.support import record_scenario, scenario_rng
+from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
+from tests.py.support.translation_faults import _read_exception_bit
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 _INSTRUCTION_ACCESS_FAULT_BIT = 1
 _HARDWARE_ERROR_BIT = 19
-
-
-def _read_exception_bit(signal) -> int:
-    value = getattr(signal, "value", None)
-    return 0 if value is None else int(value)
 
 
 def _capture_cfvec_exceptions(env) -> list[dict]:
@@ -290,7 +287,7 @@ def test_mmio_cross_8b_first_beat_fault_reports_without_resend(env, fault: dict[
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     assert uncache._wait_for_request_addr(env, first_beat)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     assert uncache._wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
     assert int(stats.get("corrupt_resp_count", 0)) == 1
@@ -402,8 +399,8 @@ def test_mmio_single_beat_d_response_fault_is_reported(env, fault: dict[str, int
     )
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     assert uncache._wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
     assert int(stats.get("corrupt_resp_count", 0)) == 1
@@ -543,7 +540,7 @@ def test_mmio_tl_a_backpressure_holds_request_until_accepted(env):
 
     env.uncache_agent.set_a_ready(None)
     assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     assert uncache._wait_for_observed_pc(env, uncache._MMIO_BASE, max_cycles=8000)
     assert not env.monitor.get_errors()
 
@@ -657,8 +654,8 @@ def _run_mmio_redirect_cancels_wait_last_commit_before_request(
     env.register_cycle_observer(capture)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_req_delta(env, env.uncache_agent)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     for _ in range(8000):
         if snapshots and snapshots[-1]["uncache_state"] == uncache._IFU_UNCACHE_WAIT_LAST_COMMIT:
             break
@@ -817,7 +814,7 @@ def test_mmio_page_tail_first_beat_fault_preserves_resend_contract(
     uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_PAGE_PC)
 
     assert uncache._wait_for_request_addr(env, first_beat, max_cycles=8000)
-    assert uncache._wait_for_uncache_resp(env)
+    assert _wait_for_resp_delta(env, env.uncache_agent)
     stats = env.uncache_agent.get_stats()
     assert int(stats.get("corrupt_resp_count", 0)) == int(fault.get("corrupt", 0))
     assert int(stats.get("denied_resp_count", 0)) == int(fault.get("denied", 0))

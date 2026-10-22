@@ -17,6 +17,7 @@ from env.sequences import (
 )
 from env.support import PmpPmaConfig, fold_pc, record_scenario, scenario_rng
 from tests.py.support import translation_faults
+from tests.py.support.dut_support import _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -362,7 +363,7 @@ def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
         and int(record["folded_pc"]) == fold_pc(cross_page_va)
         for record in env.translation_oracle.get_stats()["records"]
     )
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000) >= 2
+    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000) >= 2
     assert env.assert_translation_scenario()["error_count"] == 0
     assert not env.monitor.get_errors()
 

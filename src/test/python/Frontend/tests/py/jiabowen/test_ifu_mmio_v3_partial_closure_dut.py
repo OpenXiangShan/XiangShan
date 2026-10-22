@@ -17,6 +17,11 @@ from env.support import PmpPmaConfig
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.funcov.py.ifu.mmio_v3_funcov import MMIO_V3_CHECKED_EVENT_TYPE
 from env.support.pc_utils import fold_pc
+from tests.py.support.dut_support import (
+    _wait_for_req_count,
+    _wait_for_req_delta,
+    _wait_for_resp_delta,
+)
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -101,8 +106,8 @@ def test_mmio_tl_a_stall_holds_request_context(env):
     uncache._prepare_mmio_cnop_stream(env)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env) > 0
-    assert uncache._wait_for_uncache_resp(env) > 0
+    assert _wait_for_req_delta(env, env.uncache_agent) > 0
+    assert _wait_for_resp_delta(env, env.uncache_agent) > 0
 
     env.uncache_agent.set_a_ready(0)
     for _ in range(256):
@@ -122,7 +127,8 @@ def test_mmio_tl_a_stall_holds_request_context(env):
     assert env.functional_coverage.key_hit("ifu_mmio_tl_a_stall", "stable_until_accept")
 
     env.uncache_agent.set_a_ready(None)
-    assert uncache._wait_for_uncache_req_delta(env, 1)
+    target_req_count = int(env.uncache_agent.get_stats().get("req_count", 0)) + 1
+    assert _wait_for_req_count(env, env.uncache_agent, target_req_count)
     assert not env.monitor.get_errors()
 
 
@@ -397,8 +403,8 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     uncache._initialize_mmio_fetch(env)
 
     recorder = env.functional_coverage
-    assert uncache._wait_for_uncache_req(env) > 0
-    assert uncache._wait_for_uncache_resp(env) > 0
+    assert _wait_for_req_delta(env, env.uncache_agent) > 0
+    assert _wait_for_resp_delta(env, env.uncache_agent) > 0
     for _ in range(32):
         env.step(1)
         if recorder.key_hit("ifu_mmio_backpressure", "reserved_slot_fire"):
@@ -1150,7 +1156,7 @@ def test_mmio_backend_redirect_wins_response_writeback(env):
     env.uncache_agent.configure(latency=2, mmio_latency=32)
     uncache._initialize_mmio_fetch(env)
 
-    assert uncache._wait_for_uncache_req(env) > 0
+    assert _wait_for_req_delta(env, env.uncache_agent) > 0
     assert env.uncache_agent.pending
     ready_cycle = int(env.uncache_agent.pending[0].ready_cycle)
     trace = []

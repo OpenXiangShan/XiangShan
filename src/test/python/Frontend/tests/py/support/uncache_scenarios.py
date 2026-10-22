@@ -9,6 +9,13 @@ from typing import Sequence
 from env.sequences import LoadProgramSequence
 from env.core.transactions import ProgramImage
 from env.support import PmpPmaConfig
+from tests.py.support.dut_support import (
+    _wait_for_monitor_exception as _wait_for_monitor_exception_common,
+    _wait_for_observed_pc as _wait_for_observed_pc_common,
+    _wait_for_observed_pc_sequence as _wait_for_observed_pc_sequence_common,
+    _wait_for_request_addr as _wait_for_request_addr_common,
+    _wait_for_resp_count as _wait_for_resp_count_common,
+)
 
 _MMIO_BASE = 0x10001000
 
@@ -72,6 +79,12 @@ class Sv39Mapping:
 def _prepare_mmio_cnop_stream(env, *, instr_count: int = 256) -> None:
     payload = int(_CNOP).to_bytes(2, "little") * int(instr_count)
     env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
+    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=_MMIO_BASE), step_cycles=0).run(env)
+
+def _prepare_normal_and_mmio_cnop_stream(env, *, instr_count: int = 256) -> None:
+    payload = int(_CNOP).to_bytes(2, "little") * int(instr_count)
+    env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
+    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=_NORMAL_BASE), step_cycles=0).run(env)
     LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=_MMIO_BASE), step_cycles=0).run(env)
 
 def _prepare_cross_beat_rvi_stream(env) -> None:
@@ -345,95 +358,24 @@ def _initialize_mmio_fetch(env, *, reset_vector: int = _MMIO_BASE) -> None:
     env.monitor.clear()
     env.monitor.set_expected_pc(int(reset_vector))
 
-def _wait_for_uncache_req(env, *, max_cycles: int = 2000) -> int:
-    start = int(env.uncache_agent.get_stats().get("req_count", 0))
-    for _ in range(int(max_cycles)):
-        env.step(1)
-        now = int(env.uncache_agent.get_stats().get("req_count", 0))
-        if now > start:
-            return now
-    return int(env.uncache_agent.get_stats().get("req_count", 0))
-
-def _wait_for_uncache_resp(env, *, max_cycles: int = 2000) -> int:
-    start = int(env.uncache_agent.get_stats().get("resp_count", 0))
-    for _ in range(int(max_cycles)):
-        env.step(1)
-        now = int(env.uncache_agent.get_stats().get("resp_count", 0))
-        if now > start:
-            return now
-    return int(env.uncache_agent.get_stats().get("resp_count", 0))
-
-def _wait_for_icache_req(env, *, max_cycles: int = 2000) -> int:
-    start = int(env.icache_agent.get_stats().get("req_count", 0))
-    for _ in range(int(max_cycles)):
-        env.step(1)
-        now = int(env.icache_agent.get_stats().get("req_count", 0))
-        if now > start:
-            return now
-    return int(env.icache_agent.get_stats().get("req_count", 0))
-
-def _wait_for_uncache_req_count(env, count: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(env.uncache_agent.get_stats().get("req_count", 0)) >= int(count):
-            return True
-        env.step(1)
-    return int(env.uncache_agent.get_stats().get("req_count", 0)) >= int(count)
-
-def _wait_for_uncache_req_delta(env, delta: int, *, max_cycles: int = 2000) -> bool:
-    start = int(env.uncache_agent.get_stats().get("req_count", 0))
-    target = start + int(delta)
-    for _ in range(int(max_cycles)):
-        if int(env.uncache_agent.get_stats().get("req_count", 0)) >= target:
-            return True
-        env.step(1)
-    return int(env.uncache_agent.get_stats().get("req_count", 0)) >= target
-
-def _wait_for_ptw_resp(env, *, max_cycles: int = 2000) -> int:
-    start = int(env.ptw_agent.get_stats().get("resp_count", 0))
-    for _ in range(int(max_cycles)):
-        env.step(1)
-        now = int(env.ptw_agent.get_stats().get("resp_count", 0))
-        if now > start:
-            return now
-    return int(env.ptw_agent.get_stats().get("resp_count", 0))
-
 def _wait_for_request_addr(env, addr: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(addr) in env.uncache_agent.get_stats().get("request_addrs", []):
-            return True
-        env.step(1)
-    return int(addr) in env.uncache_agent.get_stats().get("request_addrs", [])
+    return _wait_for_request_addr_common(
+        env, env.uncache_agent, addr, max_cycles=max_cycles
+    )
 
 def _wait_for_resp_count(env, count: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(env.uncache_agent.get_stats().get("resp_count", 0)) >= int(count):
-            return True
-        env.step(1)
-    return int(env.uncache_agent.get_stats().get("resp_count", 0)) >= int(count)
+    return _wait_for_resp_count_common(
+        env, env.uncache_agent, count, max_cycles=max_cycles
+    )
 
 def _wait_for_monitor_exception(env, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if int(env.monitor.exception_mark_count) > 0:
-            return True
-        env.step(1)
-    return int(env.monitor.exception_mark_count) > 0
+    return _wait_for_monitor_exception_common(env, max_cycles=max_cycles)
 
 def _wait_for_observed_pc(env, pc: int, *, max_cycles: int = 2000) -> bool:
-    for _ in range(int(max_cycles)):
-        if any(int(obs.pc) == int(pc) for obs in env.monitor.observations):
-            return True
-        env.step(1)
-    return any(int(obs.pc) == int(pc) for obs in env.monitor.observations)
+    return _wait_for_observed_pc_common(env, pc, max_cycles=max_cycles)
 
 def _wait_for_observed_pc_sequence(env, pcs: list[int], *, max_cycles: int = 2000) -> bool:
-    expected = {int(pc) for pc in pcs}
-    for _ in range(int(max_cycles)):
-        seen = {int(obs.pc) for obs in env.monitor.observations if int(obs.pc) in expected}
-        if expected.issubset(seen):
-            return True
-        env.step(1)
-    seen = {int(obs.pc) for obs in env.monitor.observations if int(obs.pc) in expected}
-    return expected.issubset(seen)
+    return _wait_for_observed_pc_sequence_common(env, pcs, max_cycles=max_cycles)
 
 def _try_read_dut_signal(env, name: str) -> int | None:
     try:
