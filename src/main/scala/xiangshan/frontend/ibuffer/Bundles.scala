@@ -31,6 +31,8 @@ import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.ifu.FastFetchBundle
+import xiangshan.frontend.ifu.NormalFetchBundle
 
 // FIXME: these ptrs have ambiguous names
 // FIXME: if these ptrs are never used outside ibuffer, we can move them to class IBuffer as private inner classes
@@ -61,16 +63,16 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
   def fromNormalFetch(fetch: NormalFetchBundle, i: Int): IBufEntry = {
-    inst             := fetch.bits.instrs(i)
-    pc               := fetch.bits.pc(i)
-    foldpc           := fetch.bits.foldpc(i)
-    isRvc            := fetch.bits.isRvc(i)
-    predTaken        := fetch.bits.instrEndOffset(i).predTaken
-    ftqPtr           := fetch.bits.ftqPtr(i)
-    instrEndOffset   := fetch.bits.instrEndOffset(i).offset
-    triggered        := fetch.bits.triggered(i)
-    isLastInFtqEntry := fetch.bits.isLastInFtqEntry(i)
-    debug_seqNum     := fetch.bits.debug_seqNum(i)
+    inst             := fetch.instrs(i)
+    pc               := fetch.pc(i)
+    foldpc           := fetch.foldpc(i)
+    isRvc            := fetch.isRvc(i)
+    predTaken        := fetch.instrEndOffset(i).predTaken
+    ftqPtr           := fetch.ftqPtr(i)
+    instrEndOffset   := fetch.instrEndOffset(i).offset
+    triggered        := fetch.triggered(i)
+    isLastInFtqEntry := fetch.isLastInFtqEntry(i)
+    debug_seqNum     := fetch.debug_seqNum(i)
     this
   }
 
@@ -105,10 +107,10 @@ class IBufExceptionEntry(implicit p: Parameters) extends IBufferBundle {
   val hasSatpFlush:       Bool          = Bool()
 
   def fromNormalFetch(fetch: NormalFetchBundle): IBufExceptionEntry = {
-    exceptionType      := fetch.bits.exceptionType
-    exceptionCrossPage := fetch.bits.exceptionCrossPage
-    isBackendException := fetch.bits.isBackendException
-    hasSatpFlush       := fetch.bits.hasSatpFlush
+    exceptionType      := fetch.exceptionType
+    exceptionCrossPage := fetch.exceptionCrossPage
+    isBackendException := fetch.isBackendException
+    hasSatpFlush       := fetch.hasSatpFlush
     this
   }
 }
@@ -167,20 +169,20 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   }
 
   def fromFastFetch(fetch: FastFetchBundle, i: Int): IBufOutEntry = {
-    inst               := fetch.bits.entries(i).inst
-    pc                 := fetch.bits.entries(i).pc
-    foldpc             := fetch.bits.entries(i).foldpc
-    isRvc              := fetch.bits.entries(i).isRvc
-    predTaken          := fetch.bits.entries(i).predTaken
-    ftqPtr             := fetch.bits.entries(i).ftqPtr
-    exceptionType      := fetch.bits.entries(i).exceptionType
+    inst               := fetch.entries(i).inst
+    pc                 := fetch.entries(i).pc
+    foldpc             := fetch.entries(i).foldpc
+    isRvc              := fetch.entries(i).isRvc
+    predTaken          := fetch.entries(i).predTaken
+    ftqPtr             := fetch.entries(i).ftqPtr
+    exceptionType      := fetch.entries(i).exceptionType
     exceptionCrossPage := false.B
     isBackendException := false.B
     hasSatpFlush       := false.B
-    triggered          := fetch.bits.entries(i).triggered
-    isLastInFtqEntry   := fetch.bits.entries(i).isLastInFtqEntry
-    instrEndOffset     := fetch.bits.entries(i).instrEndOffset
-    debug_seqNum       := fetch.bits.entries(i).debug_seqNum
+    triggered          := fetch.entries(i).triggered
+    isLastInFtqEntry   := fetch.entries(i).isLastInFtqEntry
+    instrEndOffset     := fetch.entries(i).instrEndOffset
+    debug_seqNum       := fetch.entries(i).debug_seqNum
     vtype              := DontCare
     specvtype          := DontCare
     this
