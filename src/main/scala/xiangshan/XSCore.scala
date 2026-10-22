@@ -101,7 +101,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val traceCoreInterface = new TraceCoreInterface
     val l2PfCtrl = Output(new PrefetchCtrlFromCore)
     val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
-    val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
+    val perfEvents = Input(Vec(numL2PerfEvents, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))

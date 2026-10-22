@@ -247,7 +247,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = Vec(numMemChannelsFromDcache, ValidIO(new L2ToL1Hint()))
       val l2_fdbk_pf_ctrl = Output(new L2ToL1PfCtrl)
-      val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
+      val perfEvents = Output(Vec(numL2PerfEvents, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
       val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
@@ -350,6 +350,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_tlb_req.req.bits.isPrefetch := l2.io.l2_tlb_req.req.bits.isPrefetch
       io.l2_tlb_req.req.bits.no_translate := l2.io.l2_tlb_req.req.bits.no_translate
       io.l2_tlb_req.req_kill := l2.io.l2_tlb_req.req_kill
+      require(l2.io_perf.length == numL2PerfEvents,
+        s"L2 exports ${l2.io_perf.length} events, expected $numL2PerfEvents including noEvent")
       io.perfEvents := l2.io_perf
 
       val allPerfEvents = l2.getPerfEvents

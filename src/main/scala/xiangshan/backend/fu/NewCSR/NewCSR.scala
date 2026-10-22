@@ -1375,10 +1375,8 @@ class NewCSR(implicit val p: Parameters) extends Module
    */
   val csrevents = mhpmevents.slice(24, 29).map(_.rdata)
 
-  val hcEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
-  for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
-    hcEvents(i) := io.perf.perfEventsHc(i)
-  }
+  val hcEvents = io.perf.perfEventsHc
+  require(hcEvents.length == numL2PerfEvents, "CSR must receive the complete L2 event pool, including noEvent")
 
   val hpmHc = HPerfMonitor(csrevents, hcEvents)
   val allPerfEvents = io.perf.perfEventsFrontend ++
