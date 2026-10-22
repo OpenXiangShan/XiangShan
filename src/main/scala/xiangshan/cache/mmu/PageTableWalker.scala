@@ -654,6 +654,31 @@ class PTW(parallel: Boolean = false)(implicit p: Parameters) extends XSModule wi
   }
 
 
+  if (parallel && HasMptCheck) {
+    // MODE may change without SDID/flush. Stop new reads, drain any old read,
+    // and let the primary lane perform MPT checks after a PTC recheck.
+    val replayMpt = RegInit(false.B)
+    val recheck = !idle && (mptEn || replayMpt)
+    when (!idle && mptEn) { replayMpt := true.B }
+    when (io.req.fire || io.llptw.fire || flush) { replayMpt := false.B }
+    io.mptCheck.get.req.valid := false.B
+    when (recheck) {
+      io.resp.valid := false.B
+      mem.req.valid := false.B
+      io.llptw.valid := w_mem_resp
+      s_pmp_check := true.B
+      s_mem_req := true.B
+      s_mpt_check := false.B
+      when (io.llptw.fire) {
+        idle := true.B
+        s_llptw_req := true.B
+        mem_addr_update := false.B
+        need_last_s2xlate := false.B
+      }
+    }
+  }
+
+
   when (flush) {
     idle := true.B
     s_pmp_check := true.B
