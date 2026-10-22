@@ -31,8 +31,11 @@ Evidence snapshot: 2026-10-22.
   changes below.
 - Kunminghu-v2 source baseline: `fe2288cb09361b65afa26be3f403520c4b496dbf`,
   merged into the UT branch as `4bd72b3a0`.
-- Picker: `add7b522fd58ac82599f22b9fa280003728f41ea` (v2.0.1).
-- xcomm: `3e4bccb73f08310c08382d3987ba2d98b83df4d6` (v0.2.0).
+- Picker: `7499f797b56be57cf950cd40f3d14e9eba133449` (v2.1.0).
+- xcomm: `a5f5dae14f3cdc8f7b35dab7b5dc8c21576b4dbd` (v1.0.0,
+  native ABI 3).
+- Toolchain lock: `tests/memblock/toolchain.lock.json`; the optional Toffee
+  snapshot is not imported by the C++ harness.
 - Bootstrap provenance: `build/memblock/tools/picker.json`.
 - General frozen runtime manifest: `build/memblock/runtime/runtime.json`.
 - Latest H fault oracle runtime:
@@ -97,9 +100,10 @@ Supporting oracle and diagnostic improvements retained in this evidence set:
 - The accepted-A DCache monitor checks opcode, grow, size, source, alignment,
   mask, corrupt, and defined user-address relationships without filtering legal
   prefetch or demand-merged traffic.
-- The latest complete Python unit evidence is 283 tests; `check-rtl` and
-  `check-docs` also pass in
-  `build/memblock/dirty-ownership-prototype/integrated-checks-v2.log`.
+- The latest complete Python unit evidence is 286 tests. The Picker 2.1.0 /
+  xcomm 1.0.0 migration also rebuilt the full model and passed `check-rtl` and
+  `smoke` (`cycle=38`, 748 driven inputs, 20 checked outputs); the final harness
+  requires `libxspcomm.so.3`.
 - The reviewed Debug guard runtime passes all 90 registered leaves, including
   SPEC seed 1/16,384 (`build/memblock/debug-guard-expansion/inventory90.json`).
   This inventory predates schema 53 and does not replace its runtime checks.

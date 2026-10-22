@@ -30,6 +30,8 @@ SPEC_COUNTER_JSON ?= $(PREPARED_DIR)/spec-counters.json
 JOBS ?= 8
 PICKER_ROOT := $(PREPARED_DIR)/tools/picker
 PICKER ?= $(PICKER_ROOT)/build/bin/picker
+PICKER_REF ?=
+XCOMM_REF ?=
 PICKER_METADATA := $(PREPARED_DIR)/tools/picker.json
 PICKER_OUTPUT := $(PREPARED_DIR)/picker
 PICKER_BUILD_LOCK := $(PREPARED_DIR)/.picker-build.lock
@@ -85,7 +87,7 @@ check-rtl: check-ports check-docs
 	$(PYTHON) scripts/prepare_rtl.py check --source $(SOURCE_FILELIST) --bind $(SVA) --config $(CONFIG) --output $(PREPARED_FILELIST) --metadata $(PREPARED_METADATA)
 
 bootstrap-picker:
-	$(PYTHON) scripts/bootstrap_picker.py --root $(PICKER_ROOT) --metadata $(PICKER_METADATA) --jobs $(JOBS)
+	$(PYTHON) scripts/bootstrap_picker.py --root $(PICKER_ROOT) --metadata $(PICKER_METADATA) --jobs $(JOBS) $(if $(PICKER_REF),--picker-ref '$(PICKER_REF)') $(if $(XCOMM_REF),--xcomm-ref '$(XCOMM_REF)')
 
 ifeq ($(MEMBLOCK_PICKER_BUILD_LOCK_HELD),1)
 
@@ -93,7 +95,7 @@ ifeq ($(MEMBLOCK_PICKER_BUILD_LOCK_HELD),1)
 
 export-picker _export-picker: $(PICKER_EXPORT_STAMP)
 
-$(PICKER_EXPORT_STAMP): $(PREPARED_FILELIST) $(PREPARED_METADATA) $(PORT_JSON) $(SVA) scripts/prepare_picker_export.py
+$(PICKER_EXPORT_STAMP): $(PREPARED_FILELIST) $(PREPARED_METADATA) $(PORT_JSON) $(SVA) $(PICKER_METADATA) scripts/prepare_picker_export.py
 	@test -x $(PICKER) || { echo "Picker is missing: $(PICKER); run make bootstrap-picker or set PICKER" >&2; exit 1; }
 	@test "$(abspath $(PICKER_OUTPUT))" = "$(PREPARED_DIR)/picker"
 	rm -rf -- $(PICKER_OUTPUT)

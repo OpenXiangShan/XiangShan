@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "picker": {
+    "repository": "https://github.com/XS-MLVP/picker.git",
+    "ref": "refs/tags/v2.1.0",
+    "commit": "7499f797b56be57cf950cd40f3d14e9eba133449"
+  },
+  "xcomm": {
+    "repository": "https://github.com/XS-MLVP/xcomm.git",
+    "ref": "refs/tags/v1.0.0",
+    "commit": "a5f5dae14f3cdc8f7b35dab7b5dc8c21576b4dbd"
+  },
+  "toffee": {
+    "repository": "https://github.com/XS-MLVP/toffee.git",
+    "ref": "master",
+    "commit": "f57dd6ffc295b9b8bad3e3b3ce040b8a849f5c91",
+    "optional": true
+  }
+}

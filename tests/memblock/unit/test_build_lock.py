@@ -50,6 +50,12 @@ class BuildLockTest(unittest.TestCase):
             "export-picker _export-picker: $(PICKER_EXPORT_STAMP)", makefile
         )
         self.assertIn(
+            "$(PICKER_EXPORT_STAMP): $(PREPARED_FILELIST) $(PREPARED_METADATA) "
+            "$(PORT_JSON) $(SVA) $(PICKER_METADATA) "
+            "scripts/prepare_picker_export.py",
+            makefile,
+        )
+        self.assertIn(
             "picker-model _picker-model: $(PICKER_MODEL_STAMP)", makefile
         )
         self.assertIn(
