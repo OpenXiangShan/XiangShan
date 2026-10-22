@@ -158,7 +158,7 @@ class IttageTable(
       set = NumSetsPerBank,
       width = foldedWidth,
       shouldReset = true,
-      holdRead = true,
+      holdRead = false, // Prediction s2 and training t1 consume responses without stalling.
       singlePort = true,
       useBitmask = true,
       withClockGate = true,
