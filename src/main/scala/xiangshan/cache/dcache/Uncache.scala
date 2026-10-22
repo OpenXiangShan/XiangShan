@@ -277,6 +277,8 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   val q0_entry = Wire(new UncacheEntry)
   val q0_canSentIdx = Wire(UInt(INDEX_WIDTH.W))
   val q0_canSent = Wire(Bool())
+  val q0_addrLocked = RegInit(false.B)
+  val q0_lockedIdx = Reg(UInt(INDEX_WIDTH.W))
 
   def sizeMap[T <: Data](f: Int => T) = VecInit((0 until UncacheBufferSize).map(f))
   def sizeForeach[T <: Data](f: Int => Unit) = (0 until UncacheBufferSize).map(f)
@@ -310,7 +312,7 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   }
 
   def canMergeSecondary(eid: UInt): Bool = {
-    // old entry is not inflight and senting
+    // The selected entry cannot change while its address request is pending.
     states(eid).canMerge() && !(q0_canSent && q0_canSentIdx === eid)
   }
 
@@ -407,8 +409,8 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
 
   val q0_canSentVec = sizeMap(i => states(i).can2Bus())
   val q0_res = PriorityEncoderWithFlag(q0_canSentVec)
-  q0_canSentIdx := q0_res._1
-  q0_canSent := q0_res._2 && (io.enableOutstanding || uState === s_idle)
+  q0_canSentIdx := Mux(q0_addrLocked, q0_lockedIdx, q0_res._1)
+  q0_canSent := q0_addrLocked || (q0_res._2 && (io.enableOutstanding || uState === s_idle))
   q0_entry := entries(q0_canSentIdx)
 
   val size = PopCount(q0_entry.mask)
@@ -421,7 +423,8 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   assert(!(q0_canSent && !legal))
 
   val q0_isStore = q0_entry.cmd === MemoryOpConstants.M_XWR
-  val q0_issue = q0_canSent && !io.wfi.wfiReq
+  // Once presented, an AXI address request must survive backpressure and WFI.
+  val q0_issue = q0_addrLocked || (q0_canSent && !io.wfi.wfiReq)
 
   io.axi.ar.valid := q0_issue && !q0_isStore
   io.axi.ar.bits := 0.U.asTypeOf(io.axi.ar.bits)
@@ -429,7 +432,8 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
     fillAxiAddr(io.axi.ar.bits, q0_canSentIdx, q0_entry.addr, lgSize, q0_entry.memBackTypeMM, q0_entry.nc)
   }
 
-  io.axi.aw.valid := q0_issue && q0_isStore && axiWIdQ.io.enq.ready
+  // A locked AW reserved queue capacity when first presented; no other AW can issue.
+  io.axi.aw.valid := q0_issue && q0_isStore && (q0_addrLocked || axiWIdQ.io.enq.ready)
   io.axi.aw.bits := 0.U.asTypeOf(io.axi.aw.bits)
   when(io.axi.aw.valid) {
     fillAxiAddr(io.axi.aw.bits, q0_canSentIdx, q0_entry.addr, lgSize, q0_entry.memBackTypeMM, q0_entry.nc)
@@ -437,7 +441,12 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   axiWIdQ.io.enq.valid := io.axi.aw.fire
   axiWIdQ.io.enq.bits := q0_canSentIdx
 
+  when(io.axi.ar.valid && !io.axi.ar.ready || io.axi.aw.valid && !io.axi.aw.ready) {
+    q0_addrLocked := true.B
+    q0_lockedIdx := q0_canSentIdx
+  }
   when(io.axi.ar.fire || io.axi.aw.fire) {
+    q0_addrLocked := false.B
     states(q0_canSentIdx).setInflight(true.B)
     noPending(q0_canSentIdx) := false.B
     (0 until UncacheBufferSize).map(j =>
@@ -498,7 +507,7 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
     entries(io.axi.r.bits.id).addr >> blockOffBits << blockOffBits
   )
 
-  io.wfi.wfiSafe := GatedValidRegNext(noPending.asUInt.andR && io.wfi.wfiReq)
+  io.wfi.wfiSafe := GatedValidRegNext(noPending.asUInt.andR && !q0_addrLocked && io.wfi.wfiReq)
   /******************************************************************
    * Return to LSQ
    ******************************************************************/
