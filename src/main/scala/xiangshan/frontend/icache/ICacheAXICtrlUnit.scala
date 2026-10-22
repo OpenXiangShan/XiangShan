@@ -21,6 +21,7 @@ import chisel3.util._
 import freechips.rocketchip.amba.axi4.AXI4RegisterNode
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
+import freechips.rocketchip.diplomacy.ResourceBinding
 import freechips.rocketchip.diplomacy.SimpleDevice
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.regmapper.RegFieldDesc
@@ -42,6 +43,12 @@ class ICacheAXICtrlUnit(implicit p: Parameters) extends LazyModule
     beatBytes = BeatBytes,
     concurrency = 1
   )
+
+  // AXI4RegisterNode does not bind device address resources automatically.
+  ResourceBinding {
+    val slave = node.edges.in.head.slave.slaves.head
+    device.reg.foreach(_.bind(slave.toResource))
+  }
 
   class ICacheAXICtrlUnitImp(wrapper: LazyModule) extends LazyModuleImp(wrapper)
       with HasICacheCtrlUnitParameters

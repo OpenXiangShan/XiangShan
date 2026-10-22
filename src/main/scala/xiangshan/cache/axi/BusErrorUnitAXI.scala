@@ -39,6 +39,12 @@ class BusErrorUnitAXI[T <: BusErrors](t: => T, params: BusErrorUnitParams)(impli
     beatBytes = XLEN / 8
   )
 
+  // AXI4RegisterNode does not bind device address resources automatically.
+  ResourceBinding {
+    val slave = node.edges.in.head.slave.slaves.head
+    device.reg.foreach(_.bind(slave.toResource))
+  }
+
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {

@@ -39,6 +39,12 @@ class DCacheAXICtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) exten
     concurrency = 1,
   )
 
+  // AXI4RegisterNode does not bind device address resources automatically.
+  ResourceBinding {
+    val slave = node.edges.in.head.slave.slaves.head
+    device.reg.foreach(_.bind(slave.toResource))
+  }
+
   lazy val module = new DCacheAXICtrlUnitImp
 
   class DCacheAXICtrlUnitImp extends LazyModuleImp(this) {
