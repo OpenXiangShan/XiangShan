@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from memblock_toffee.agent import ControlDriverAgent
-from memblock_toffee.datadef import FlushCommand
+from memblock_toffee.datadef import FlushCommand, flush_cycle_transaction_id
 from memblock_toffee.model import L2FlushModel
 from memblock_toffee.monitor import L2FlushMonitor
 from memblock_toffee.scoreboard import L2FlushScoreboard
@@ -43,11 +43,14 @@ class L2FlushSequencer(Sequencer[FlushCommand]):
     async def execute(self, sequence: Sequence[FlushCommand]) -> None:
         await super().run(sequence)
         for command in await self.drain():
-            token = self.tracker.next_token()
-            self.scoreboard.expect(
-                self.model.accept(command, transaction_id=token.transaction_id)
-            )
-            await self.driver.prepare_l2_flush(command)
-            before = self.monitor.before(token)
-            await self.driver.advance_cycle(token)
-            self.scoreboard.observe(self.monitor.after(token, before))
+            async with self.tracker.reservation() as token:
+                self.scoreboard.expect(
+                    self.model.expect(
+                        command,
+                        transaction_id=flush_cycle_transaction_id(token.index),
+                    )
+                )
+                await self.driver.prepare_l2_flush(command)
+                before = self.monitor.before(token)
+                await self.driver.advance_cycle()
+                self.scoreboard.observe(self.monitor.after(token, before))

@@ -9,7 +9,7 @@ def test_model_and_scoreboard_are_pin_independent() -> None:
     model = L2FlushModel()
     scoreboard = L2FlushScoreboard()
     command = FlushCommand("txn-0", enable=True, done=False)
-    expected = model.accept(command)
+    expected = model.expect(command)
     scoreboard.expect(expected)
     scoreboard.observe(FlushObservation("txn-0", True, False, True, False, 9))
     scoreboard.finish()
@@ -22,7 +22,7 @@ def test_model_and_scoreboard_are_pin_independent() -> None:
 def test_scoreboard_rejects_duplicate_observation() -> None:
     scoreboard = L2FlushScoreboard()
     command = FlushCommand("txn-0", enable=False, done=True)
-    expected = L2FlushModel().accept(command)
+    expected = L2FlushModel().expect(command)
     scoreboard.expect(expected)
     scoreboard.observe(FlushObservation("txn-0", False, False, False, True, 1))
     scoreboard.observe(FlushObservation("txn-0", False, False, False, True, 2))
@@ -34,7 +34,7 @@ def test_scoreboard_rejects_combinational_done_instead_of_one_cycle_delay() -> N
     model = L2FlushModel()
     scoreboard = L2FlushScoreboard()
     command = FlushCommand("txn-0", enable=False, done=True)
-    scoreboard.expect(model.accept(command))
+    scoreboard.expect(model.expect(command))
     scoreboard.observe(
         FlushObservation(
             transaction_id="txn-0",

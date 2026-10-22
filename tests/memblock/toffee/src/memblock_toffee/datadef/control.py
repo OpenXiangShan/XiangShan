@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from memblock_toffee.timing import CycleToken
 
 
+def flush_cycle_transaction_id(cycle: int) -> str:
+    return f"flush-cycle-{cycle}"
+
+
 @dataclass(frozen=True, slots=True)
 class FlushCommand:
     transaction_id: str

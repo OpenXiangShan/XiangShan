@@ -49,6 +49,8 @@ TOFFEE_TOOLS := $(TOFFEE_ROOT)/tools/picker
 TOFFEE_PICKER := $(TOFFEE_TOOLS)/build/bin/picker
 TOFFEE_ENV := $(TOFFEE_ROOT)/env
 TOFFEE_BOOTSTRAP_STAMP := $(TOFFEE_ENV)/.bootstrap.stamp
+TOFFEE_PYTHON_STAMP := $(TOFFEE_ENV)/.python.stamp
+TOFFEE_PYTHON_METADATA := $(TOFFEE_ROOT)/python-environment.json
 TOFFEE_PYTHON := $(TOFFEE_ENV)/bin/python
 TOFFEE_SWIG_BIN := $(TOFFEE_ROOT)/tools/swig-root/usr/bin
 TOFFEE_METADATA := $(TOFFEE_ROOT)/environment.json
@@ -63,14 +65,20 @@ TOFFEE_RUNTIME_DIR := $(TOFFEE_ROOT)/runtime
 TOFFEE_RUNTIME_PACKAGE_ROOT := $(TOFFEE_RUNTIME_DIR)/picker
 TOFFEE_RUNTIME_SOURCE_ROOT := $(TOFFEE_RUNTIME_DIR)/python
 TOFFEE_RUNTIME_METADATA := $(TOFFEE_RUNTIME_DIR)/runtime.json
-TOFFEE_RESULT_ROOT ?= $(TOFFEE_ROOT)/results
+TOFFEE_RUN_ID ?= local-$(shell date -u +%Y%m%dT%H%M%S%NZ)
+TOFFEE_ARTIFACT_ROOT ?= $(TOFFEE_ROOT)/results
+TOFFEE_RESULT_ROOT ?= $(TOFFEE_ARTIFACT_ROOT)/$(TOFFEE_RUN_ID)
+TOFFEE_PROFILE ?= coverage
+TOFFEE_SEED ?= 1
+TOFFEE_MAX_CYCLES ?= 100000
 TOFFEE_JOBS ?= 1
 TOFFEE_WAVE_ARGS = $(if $(filter 1,$(TOFFEE_ENABLE_WAVE)),-w MemBlock.fst)
 TOFFEE_COVERAGE_ARGS = $(if $(filter 1,$(TOFFEE_ENABLE_COVERAGE)),-c)
 TOFFEE_XDIST_ARGS = $(if $(filter-out 1,$(TOFFEE_JOBS)),-n $(TOFFEE_JOBS))
-TOFFEE_PYTEST_ENV = env PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 MEMBLOCK_TOFFEE_RUNTIME_METADATA=$(TOFFEE_RUNTIME_METADATA) MEMBLOCK_TOFFEE_PORT_MANIFEST=$(TOFFEE_RUNTIME_DIR)/config/expected_ports.json
-TOFFEE_UNIT_PYTEST = $(TOFFEE_PYTEST_ENV) MEMBLOCK_TOFFEE_PYTHON_PATH=$(TOFFEE_OUTPUT) PYTHONPATH=$(CURDIR)/$(TOFFEE_PROJECT)/src:$(TOFFEE_OUTPUT) $(TOFFEE_PYTHON) -m pytest -q --strict-markers --basetemp=$(TOFFEE_RESULT_ROOT)/tmp -o cache_dir=$(TOFFEE_RESULT_ROOT)/pytest-cache
-TOFFEE_RUNTIME_PYTEST = $(TOFFEE_PYTEST_ENV) MEMBLOCK_TOFFEE_PYTHON_PATH=$(TOFFEE_RUNTIME_PACKAGE_ROOT) PYTHONPATH=$(TOFFEE_RUNTIME_SOURCE_ROOT):$(TOFFEE_RUNTIME_PACKAGE_ROOT) $(TOFFEE_PYTHON) -m pytest -q --strict-markers --basetemp=$(TOFFEE_RESULT_ROOT)/tmp -o cache_dir=$(TOFFEE_RESULT_ROOT)/pytest-cache
+TOFFEE_PYTEST_ENV = env PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 MEMBLOCK_TOFFEE_PROFILE=$(TOFFEE_PROFILE) MEMBLOCK_TOFFEE_SEED=$(TOFFEE_SEED) MEMBLOCK_TOFFEE_MAX_CYCLES=$(TOFFEE_MAX_CYCLES) MEMBLOCK_TOFFEE_RUN_ID=$(TOFFEE_RUN_ID) MEMBLOCK_TOFFEE_ARTIFACT_DIR=$(TOFFEE_ARTIFACT_ROOT)
+TOFFEE_PYTEST_CONTROL = $(TOFFEE_PYTHON) -m pytest -q --strict-markers --basetemp=$(TOFFEE_RESULT_ROOT)/tmp -o cache_dir=$(TOFFEE_RESULT_ROOT)/pytest-cache
+TOFFEE_FRAMEWORK_PYTEST = $(TOFFEE_PYTEST_ENV) MEMBLOCK_TOFFEE_PORT_MANIFEST=$(PORT_JSON) PYTHONPATH=$(CURDIR)/$(TOFFEE_PROJECT)/src $(TOFFEE_PYTEST_CONTROL)
+TOFFEE_RUNTIME_PYTEST = $(TOFFEE_PYTEST_ENV) MEMBLOCK_TOFFEE_RUNTIME_METADATA=$(TOFFEE_RUNTIME_METADATA) MEMBLOCK_TOFFEE_PORT_MANIFEST=$(TOFFEE_RUNTIME_DIR)/config/expected_ports.json MEMBLOCK_TOFFEE_PYTHON_PATH=$(TOFFEE_RUNTIME_PACKAGE_ROOT) PYTHONPATH=$(TOFFEE_RUNTIME_SOURCE_ROOT):$(TOFFEE_RUNTIME_PACKAGE_ROOT) $(TOFFEE_PYTEST_CONTROL)
 RUNTIME_DIR := $(PREPARED_DIR)/runtime
 RUNTIME_METADATA := $(RUNTIME_DIR)/runtime.json
 FROZEN_RTL_METADATA := $(RUNTIME_DIR)/rtl.json
@@ -83,7 +91,7 @@ CPP_SUPPORT := $(CPP_SCENARIOS) $(CPP_ENV_PARTS) $(CPP_RANDOM_PARTS)
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker bootstrap-toffee toffee-model toffee-runtime toffee-unit toffee-smoke toffee-control toffee-regression export-picker picker-model picker-harness freeze-runtime smoke l2-flush-contracts top-control-contracts trace-bridge-contracts dft-bridge-contracts pin-space frontend-bridge frontend-reset-recovery single-load load-feedback topdown-contracts memory-violation rar-violation ifetch-prefetch hardware-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths uncache-outstanding sbuffer-flush sbuffer-timeout mmio-contracts cbo-zero-contracts cmo-contracts wfi-safety reset-recovery reset-partial-load reset-tree-contracts scalar-misaligned misaligned-stores exception-contracts pmp-contracts hypervisor-contracts pointer-masking-contracts mbmc-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-all translation-context translation-bare ptw-errors translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-fof vector-segment vector-addressing vector-issue-order vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve iq-slow-feedback dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
+.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker bootstrap-toffee toffee-python toffee-model toffee-runtime toffee-unit toffee-smoke toffee-control toffee-regression toffee-ci export-picker picker-model picker-harness freeze-runtime smoke l2-flush-contracts top-control-contracts trace-bridge-contracts dft-bridge-contracts pin-space frontend-bridge frontend-reset-recovery single-load load-feedback topdown-contracts memory-violation rar-violation ifetch-prefetch hardware-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths uncache-outstanding sbuffer-flush sbuffer-timeout mmio-contracts cbo-zero-contracts cmo-contracts wfi-safety reset-recovery reset-partial-load reset-tree-contracts scalar-misaligned misaligned-stores exception-contracts pmp-contracts hypervisor-contracts pointer-masking-contracts mbmc-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-all translation-context translation-bare ptw-errors translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-fof vector-segment vector-addressing vector-issue-order vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve iq-slow-feedback dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
 .PHONY: vector-segment-fof vector-segment-canonical
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS)
@@ -119,37 +127,49 @@ bootstrap-picker:
 bootstrap-toffee:
 	+$(PICKER_LOCKED_MAKE) _bootstrap-toffee
 
+toffee-python:
+	+$(PICKER_LOCKED_MAKE) _toffee-python
+
 toffee-model:
 	+$(PICKER_LOCKED_MAKE) _toffee-model
 
 toffee-runtime:
 	+$(PICKER_LOCKED_MAKE) _toffee-runtime
 
-toffee-unit: bootstrap-toffee
+toffee-unit: toffee-python
 	@mkdir -p $(TOFFEE_RESULT_ROOT)
 	$(PYTHON) $(TOFFEE_PROJECT)/scripts/check_suite_manifest.py
-	$(TOFFEE_UNIT_PYTEST) $(TOFFEE_PROJECT)/tests/unit $(TOFFEE_PROJECT)/tests/adapters
+	$(TOFFEE_FRAMEWORK_PYTEST) --junitxml=$(TOFFEE_RESULT_ROOT)/junit-framework.xml $(TOFFEE_PROJECT)/tests/unit $(TOFFEE_PROJECT)/tests/adapters
 
 toffee-smoke: toffee-runtime
 	@mkdir -p $(TOFFEE_RESULT_ROOT)
-	$(TOFFEE_RUNTIME_PYTEST) -m toffee_smoke $(TOFFEE_PROJECT)/tests/smoke
+	$(TOFFEE_RUNTIME_PYTEST) -m toffee_smoke --junitxml=$(TOFFEE_RESULT_ROOT)/junit-smoke.xml $(TOFFEE_PROJECT)/tests/smoke
 
 toffee-control: toffee-runtime
 	@mkdir -p $(TOFFEE_RESULT_ROOT)
-	$(TOFFEE_RUNTIME_PYTEST) -m toffee_control $(TOFFEE_PROJECT)/tests/control
+	$(TOFFEE_RUNTIME_PYTEST) -m toffee_control --junitxml=$(TOFFEE_RESULT_ROOT)/junit-control.xml $(TOFFEE_PROJECT)/tests/control
 
 toffee-regression: toffee-runtime
 	@mkdir -p $(TOFFEE_RESULT_ROOT)
 	$(TOFFEE_RUNTIME_PYTEST) $(TOFFEE_XDIST_ARGS) -m 'toffee_smoke or toffee_control or toffee_regression' --junitxml=$(TOFFEE_RESULT_ROOT)/junit.xml --toffee-report --report-dir $(TOFFEE_RESULT_ROOT)/report --report-name index.html $(TOFFEE_PROJECT)/tests
 
+toffee-ci:
+	+$(MAKE) --no-print-directory toffee-unit
+	+$(MAKE) --no-print-directory toffee-regression
+
 ifeq ($(MEMBLOCK_PICKER_BUILD_LOCK_HELD),1)
 
-.PHONY: _export-picker _picker-model _picker-harness _freeze-runtime _bootstrap-toffee _toffee-model _toffee-runtime
+.PHONY: _export-picker _picker-model _picker-harness _freeze-runtime _bootstrap-toffee _toffee-python _toffee-model _toffee-runtime
+
+_toffee-python: $(TOFFEE_PYTHON_STAMP)
+
+$(TOFFEE_PYTHON_STAMP): toolchain.lock.json scripts/bootstrap_toffee.py $(TOFFEE_PROJECT)/pyproject.toml
+	$(PYTHON) scripts/bootstrap_toffee.py --python-only --environment $(TOFFEE_ENV) --metadata $(TOFFEE_PYTHON_METADATA) --stamp $(TOFFEE_PYTHON_STAMP) --project $(TOFFEE_PROJECT) --lock toolchain.lock.json
 
 _bootstrap-toffee: $(TOFFEE_BOOTSTRAP_STAMP)
 
-$(TOFFEE_BOOTSTRAP_STAMP): toolchain.lock.json scripts/bootstrap_toffee.py $(TOFFEE_PROJECT)/pyproject.toml
-	$(PYTHON) scripts/bootstrap_toffee.py --root $(TOFFEE_ROOT) --picker-root $(TOFFEE_TOOLS) --environment $(TOFFEE_ENV) --metadata $(TOFFEE_METADATA) --stamp $(TOFFEE_BOOTSTRAP_STAMP) --project $(TOFFEE_PROJECT) --jobs $(JOBS)
+$(TOFFEE_BOOTSTRAP_STAMP): $(TOFFEE_PYTHON_STAMP) toolchain.lock.json scripts/bootstrap_toffee.py $(TOFFEE_PROJECT)/pyproject.toml
+	$(PYTHON) scripts/bootstrap_toffee.py --root $(TOFFEE_ROOT) --picker-root $(TOFFEE_TOOLS) --environment $(TOFFEE_ENV) --metadata $(TOFFEE_METADATA) --stamp $(TOFFEE_BOOTSTRAP_STAMP) --project $(TOFFEE_PROJECT) --lock toolchain.lock.json --jobs $(JOBS)
 
 $(TOFFEE_DUT_STAMP): $(PREPARED_FILELIST) $(PREPARED_METADATA) $(PORT_JSON) $(SVA) $(TOFFEE_METADATA) | $(TOFFEE_BOOTSTRAP_STAMP)
 	@test -x $(TOFFEE_PICKER) || { echo "Toffee Picker is missing; run make bootstrap-toffee" >&2; exit 1; }

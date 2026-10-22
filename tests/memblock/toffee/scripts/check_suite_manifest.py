@@ -74,7 +74,7 @@ def check_test_node(test_spec: str, marker: str) -> None:
     if function is None:
         raise ManifestError(f"migrated test function is missing: {test_spec}")
     decorators = [ast.unparse(decorator) for decorator in function.decorator_list]
-    if "toffee_test.testcase" not in decorators:
+    if not {"toffee_test.testcase", "memblock_toffee.testcase"} & set(decorators):
         raise ManifestError(f"migrated test is not a Toffee testcase: {test_spec}")
     if not any(marker in decorator for decorator in decorators):
         raise ManifestError(f"migrated test has no {marker} marker: {test_spec}")

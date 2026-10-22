@@ -1,13 +1,13 @@
+import memblock_toffee
 import pytest
-import toffee_test
 
 from memblock_toffee.sequence import L2FlushSequence
 
 
 @pytest.mark.toffee_control
-@toffee_test.testcase
+@memblock_toffee.testcase
 async def test_l2_flush_pass_through(memblock_env):
-    await memblock_env.control_driver.reset()
+    await memblock_env.reset()
     sequence = L2FlushSequence(
         patterns=(
             (False, False),
@@ -22,35 +22,25 @@ async def test_l2_flush_pass_through(memblock_env):
             (False, False),
         )
     )
-    await memblock_env.control_sequencer.execute(sequence)
-    memblock_env.control_scoreboard.finish()
-    assert memblock_env.control_model.enable_transitions >= 4
-    assert memblock_env.control_model.done_transitions >= 4
-    assert memblock_env.control_model.loop_enable_transitions >= 4
-    assert memblock_env.control_model.loop_done_transitions >= 4
-    assert memblock_env.control_model.cross_bitmap == 0xF
-    memblock_env.control_coverage.mark_function(
+    result = await memblock_env.run(sequence)
+    assert result.enable_transitions >= 4
+    assert result.done_transitions >= 4
+    assert result.loop_enable_transitions >= 4
+    assert result.loop_done_transitions >= 4
+    assert result.cross_bitmap == 0xF
+    memblock_env.mark_coverage(
+        test_l2_flush_pass_through,
         "l2_flush_enable",
-        test_l2_flush_pass_through,
-    )
-    memblock_env.control_coverage.mark_function(
         "l2_flush_done",
-        test_l2_flush_pass_through,
-    )
-    memblock_env.control_coverage.mark_function(
         "outer_l2_flush_enable",
-        test_l2_flush_pass_through,
-    )
-    memblock_env.control_coverage.mark_function(
         "backend_l2_flush_done",
-        test_l2_flush_pass_through,
     )
     print(
         "TOFFEE_L2_FLUSH_PASS "
-        f"cycle={memblock_env.cycle_tracker.cycle} "
+        f"cycle={result.cycle} "
         "combinations=4 "
         "loop_enable_transitions="
-        f"{memblock_env.control_model.loop_enable_transitions} "
+        f"{result.loop_enable_transitions} "
         "loop_done_transitions="
-        f"{memblock_env.control_model.loop_done_transitions}"
+        f"{result.loop_done_transitions}"
     )

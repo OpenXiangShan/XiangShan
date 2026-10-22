@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from memblock_toffee.datadef import FlushCommand, FlushExpectation
+from memblock_toffee.uvm import ReferenceModel
 
 
-class L2FlushModel:
+class L2FlushModel(ReferenceModel[FlushCommand, FlushExpectation]):
     """Pin-free model of the top-level L2 flush pass-through contract."""
 
     def __init__(self) -> None:
@@ -17,7 +18,7 @@ class L2FlushModel:
         self._commands_seen = 0
         self._cross_bitmap = 0
 
-    def accept(
+    def expect(
         self,
         command: FlushCommand,
         transaction_id: str | None = None,

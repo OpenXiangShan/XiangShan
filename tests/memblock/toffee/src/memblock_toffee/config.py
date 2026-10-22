@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
@@ -7,6 +8,7 @@ from typing import Any, TypeVar
 
 T = TypeVar("T")
 _MISSING = object()
+_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class ConfigDB:
@@ -56,4 +58,24 @@ class VerificationConfig:
             raise ValueError("max_cycles must be positive")
         if not self.run_id:
             raise ValueError("run_id must not be empty")
+        if not _RUN_ID.fullmatch(self.run_id):
+            raise ValueError(
+                "run_id must contain only letters, digits, '.', '_' or '-'"
+            )
         object.__setattr__(self, "artifact_dir", Path(self.artifact_dir))
+
+    @property
+    def run_dir(self) -> Path:
+        """Run-scoped output directory, never shared across invocations."""
+
+        return self.artifact_dir / self.run_id
+
+    def document(self) -> dict[str, str | int]:
+        return {
+            "module": self.module,
+            "profile": self.profile,
+            "seed": self.seed,
+            "run_id": self.run_id,
+            "max_cycles": self.max_cycles,
+            "artifact_dir": str(self.artifact_dir),
+        }

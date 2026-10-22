@@ -16,8 +16,9 @@ projects rather than treating Toffee as a replacement for `XData`:
   in a software-facing model that owns pipeline timing while pytest cases call
   operations such as read, update, or send.
 - [toffee-test](https://github.com/XS-MLVP/toffee-test) owns DUT construction,
-  clock startup, waveform/coverage filenames, and report cleanup. A test must not
-  construct or close the DUT independently.
+  finalization, waveform/coverage filenames, and report cleanup. This framework
+  leases the clock inside the Env; a test must not construct or close the DUT
+  independently.
 - The XS-MLVP [XReactor guides](https://github.com/XS-MLVP/xreactor/tree/main/docs/guides)
   provide a stricter reference for lifecycle ownership, independent reference
   models, transaction scoreboards, bounded completion, and per-run artifacts.
@@ -28,13 +29,15 @@ projects rather than treating Toffee as a replacement for `XData`:
 ```text
 pytest / toffee-test fixture
             |
+ VerificationRegistry ----> protocol components / coverage providers
+            |
        MemBlockEnv
        /    |     \
-  Agent   Model  Scoreboard
+  Sequencer Model  Scoreboard
     |
- Bundle (logical protocol fields)
+ Agent + Bundle (logical protocol fields)
     |
- Picker adapter (generated package, clock, pin map)
+ Picker adapter (generated package, clock lease, pin map)
     |
  Picker Python DUT
 ```
@@ -48,6 +51,8 @@ Dependencies point downward only:
 | Agent | One logical Bundle and timing | Reference values or scoreboard internals |
 | Model | Specification state and transactions | DUT, pins, clocks, Agents |
 | Scoreboard | Immutable expected/observed transactions | DUT, clocks, generated names |
+| Config/RNG | Run identity, budget, named deterministic streams | DUT internals |
+| Registry | Component and coverage factories | Protocol behavior |
 | Adapter/fixture | Generated DUT, pin map, clock ownership | Test intent or expected behavior |
 
 The adapter is the only hardware-specific code. It initializes Picker's clock,
@@ -61,27 +66,34 @@ the UVM library:
 
 | UVM concept | This framework | Toffee |
 | --- | --- | --- |
-| Test | pytest test selected by marker/tag | `toffee-test` testcase |
+| Test | pytest test selected by marker/tag | managed wrapper around Toffee `main_coro` |
 | Sequence | `Sequence` containing transaction intent | async `Agent` calls |
-| Sequencer | `Sequencer` coordinating driver, monitor, model, and scoreboard | asyncio |
+| Sequencer | Request handles, outstanding completion, overlap/cancellation | asyncio |
 | Driver | Protocol-specific `@driver_method` | `Agent` |
 | Monitor | Passive pre-edge/post-edge sampling after the driver phase | none |
 | Reference model | Pure Python state machine | none |
 | Scoreboard | Independent identity-based comparison | pytest assertions/reports |
-| Env | Composition root | `Env` |
-| Config DB | Typed dotted-path configuration | none |
+| Env | Stable facade over registered protocol components | `Env` |
+| Config DB | Typed dotted-path configuration and named RNG streams | none |
 | Phases | fixture setup, test body, bounded finish, teardown | pytest + Toffee lifecycle |
 
 Toffee is used for orchestration, not as the correctness oracle. Internal
 `mem_direct` signals remain diagnostic-only.
+
+Migrated tests use `@memblock_toffee.testcase`. It adds the pytest async marker,
+initializes Toffee's clock-loop state, and directly awaits the test body. It does
+not call `main_coro` or either upstream wrapper path that globally cancels all
+tasks. The Env closes component resources and its clock lease before pytest
+tears down the event loop.
 
 ## Lifecycle
 
 1. The fixture asks `toffee_request` to create the raw Picker DUT.
 2. The adapter calls `InitClock`, applies logical pin aliases, and initializes
    all inputs from the checked port manifest.
-3. The fixture builds Bundles, Agents, the pure model, and scoreboards.
-4. Exactly one Toffee clock loop is started.
+3. `VerificationRegistry` builds protocol components, which own their Bundles,
+   Agents, pure models, and scoreboards; coverage providers are built separately.
+4. `ClockLease` starts and records exactly one Toffee clock task for this Env.
 5. Reset and all active stimulus use `await bundle.step()`. Tests never call
    `DUT.Step()` directly.
 6. The sequencer assigns cycle identity before driving, asks the driver to
@@ -90,8 +102,54 @@ Toffee is used for orchestration, not as the correctness oracle. Internal
 7. The frozen runtime contains both the generated DUT package and a snapshot of
    `memblock_toffee`. Its files are read-only, and recorded sizes and hashes are
    validated once before importing the generated module.
-8. The fixture stops the clock task, then `toffee-test` calls `Finish()` and
-   writes coverage/waveform/report artifacts.
+8. The fixture closes registered components and cancels only its leased clock
+   task, then `toffee-test` calls `Finish()` and writes coverage/waveform/report
+   artifacts.
+
+## Extension Contract
+
+Tests use the stable facade:
+
+```python
+await env.reset()
+result = await env.run(sequence)
+await env.tick(cycles, require_idle=True)
+env.mark_coverage(test_function, "coverage_point")
+```
+
+`MemBlockEnv` defaults to the `control` component, but every operation accepts a
+component name. A new LSU, DCache, translation, or memory-side slice registers a
+component factory instead of editing the environment composition:
+
+```python
+registry.add_component("dcache", DcacheComponent)
+registry.add_coverage("dcache", dcache_coverage)
+env = MemBlockEnv(
+    adapter,
+    config=config,
+    rng=rng,
+    registry=registry,
+    default_component="dcache",
+)
+```
+
+A component exposes its Toffee `Agent` instances as `agents`, implements
+`reset`, `execute`, `tick`, and `finish`, and may implement asynchronous
+`close`. Agents are mounted on the Env so Toffee's existing UVM-style agent
+names and driver paths continue to work. Coverage providers return one group or
+an iterable of groups.
+
+Components expose owned `Sequencer` instances as `sequencers`. Env finish and
+teardown reject queued or outstanding requests unless they were completed or
+explicitly canceled. Cycle users acquire `CycleTracker.reservation()` around a
+driver phase, so concurrent protocol components receive unique, serialized
+cycle identities.
+
+`VerificationConfig` supplies seed, profile, run identity, artifact root, and a
+hard cycle budget. `RandomStreams.stream(name)` derives independent stable
+streams from that seed; no component should use unseeded module-global RNG.
+`CycleTracker` raises `CycleBudgetExceeded` before work can pass the configured
+budget.
 
 ## Source Layout
 
@@ -107,18 +165,25 @@ tests/memblock/toffee/
     scoreboard/     identity-based checking
     sequence/       reusable scenario intent
     env/            composition root
+    channels.py     request/response manager contracts
+    transactions.py transaction identity, completion, cancellation
+    registry.py     component and coverage extension hooks
+    randomness.py   named deterministic random streams
+    timing.py       cycle identity and budget enforcement
+    runtime.py      frozen-runtime identity validation
+    testcase.py     managed Toffee main-loop testcase wrapper
     fixtures.py     DUT/clock ownership
   tests/
-    unit/           framework and model tests without RTL
+    unit/           framework and model tests without Picker or RTL
     adapters/       generated-pin boundary tests only
     smoke/          reset and clock bring-up
     control/        migrated top-level control contracts
 ```
 
 New subsystems follow the same boundary: add a Bundle, Agent, model or
-scoreboard, fixture/environment wiring, and a focused pytest module. Do not add
-new hardware fields to tests or reuse the legacy C++ `Environment` as a Python
-API.
+scoreboard, component registration, coverage provider, and a focused pytest
+module. Do not add new hardware fields to tests or reuse the legacy C++
+`Environment` as a Python API.
 
 ## Migration Status
 
@@ -160,16 +225,32 @@ because a Toffee test exists.
 
 ```sh
 make -C tests/memblock bootstrap-toffee JOBS=8
+make -C tests/memblock toffee-python
 make -C tests/memblock toffee-unit
 make -C tests/memblock toffee-model JOBS=8
 make -C tests/memblock toffee-runtime
 make -C tests/memblock toffee-smoke
 make -C tests/memblock toffee-control
 make -C tests/memblock toffee-regression
+make -C tests/memblock toffee-ci TOFFEE_JOBS=2
 ```
 
 Generated Toffee artifacts stay below `build/memblock/toffee`; they do not
-replace the canonical C++ export or runtime.
+replace the canonical C++ export or runtime. `toffee-unit` only builds the
+locked Python environment. `toffee-runtime` embeds the generated package,
+`memblock_toffee` source snapshot, manifest, RTL/toolchain metadata, source-tree
+identity, and artifact identity. Runtime paths are relative and validated after
+relocation. The package file set must exactly match declared artifacts and
+generated Python caches are excluded. Replacing an existing runtime requires
+atomic directory exchange; when the filesystem cannot provide it, publication
+fails closed without moving the old runtime.
+
+Each invocation writes below
+`build/memblock/toffee/results/$TOFFEE_RUN_ID/`, including `run.json`, JUnit,
+report output, and isolated pytest temporaries. Configure a run with
+`TOFFEE_PROFILE`, `TOFFEE_SEED`, and `TOFFEE_MAX_CYCLES`, or the corresponding
+`--memblock-*` pytest options. `toffee-ci` is a convenience aggregate and is not
+part of `check-rtl` or the canonical C++ acceptance gate.
 
 Waveform and line-coverage compilation are disabled by default because they
 make the large MemBlock translation units unsuitable for routine development.

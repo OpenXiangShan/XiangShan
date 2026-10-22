@@ -14,7 +14,9 @@ either Picker or xcomm changes.
 
 The Toffee lock is a pinned master snapshot 15 commits after the last PyPI
 release, `v0.3.1`. The Python framework environment is built by
-`bootstrap-toffee`, not by `bootstrap-picker`.
+`bootstrap-toffee`, not by `bootstrap-picker`. Its install step is also
+available independently as `toffee-python`, so framework tests do not require a
+native Picker build.
 
 ## UT-Relevant Features
 
@@ -58,6 +60,14 @@ The pinned Python layer is installed by the isolated bootstrap target:
 make -C tests/memblock bootstrap-toffee JOBS=8
 ```
 
+For framework-only work, create the same locked Python environment without
+building Picker:
+
+```sh
+make -C tests/memblock toffee-python
+make -C tests/memblock toffee-unit
+```
+
 ## Updating
 
 Update `toolchain.lock.json` only after rebuilding and qualifying the generated
@@ -70,6 +80,8 @@ make -C tests/memblock bootstrap-picker JOBS=8 \
 ```
 
 The canonical revisions are recorded in `build/memblock/tools/picker.json`; the
-Toffee environment is recorded in `build/memblock/toffee/environment.json`. Run
-at least `unit`, `toffee-unit`, `prepare-rtl`, `check-rtl`, `smoke`, and
-`toffee-smoke` after changing the lock.
+full Toffee environment is recorded in
+`build/memblock/toffee/environment.json`, and the lightweight Python install in
+`build/memblock/toffee/python-environment.json`. Run at least `unit`,
+`toffee-unit`, `prepare-rtl`, `check-rtl`, `smoke`, and `toffee-smoke` after
+changing the lock.

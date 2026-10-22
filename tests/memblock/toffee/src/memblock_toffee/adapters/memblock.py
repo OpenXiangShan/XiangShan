@@ -99,6 +99,14 @@ def load_dut_class(package_root: Path) -> type[Any]:
         sys.path.insert(0, root_text)
     importlib.invalidate_caches()
     module = importlib.import_module(package_name)
+    module_file = Path(getattr(module, "__file__", "")).resolve()
+    try:
+        module_file.relative_to((package_root / package_name).resolve())
+    except ValueError as error:
+        raise RuntimeError(
+            "generated Picker module was imported outside the selected runtime: "
+            f"{module_file}"
+        ) from error
     try:
         return getattr(module, class_name)
     except AttributeError as error:
@@ -111,29 +119,47 @@ class MemBlockDutAdapter(PickerDutAdapter):
     """The only MemBlock component allowed to know generated signal names."""
 
     def __init__(self, raw: Any, manifest_path: Path | None = None) -> None:
-        self.ports = load_port_manifest(manifest_path)
+        self._ports = load_port_manifest(manifest_path)
+        missing = sorted(set(LOGICAL_PINS.values()) - set(self._ports))
+        if missing:
+            raise ValueError(
+                "logical pin map references unknown ports: " + ", ".join(missing)
+            )
         super().__init__(raw, LOGICAL_PINS, clock_pin="clock")
         self._initialize_inputs()
 
     def _initialize_inputs(self) -> None:
-        for port in self.ports.values():
+        for port in self._ports.values():
             if port.direction != "input" or port.protocol == "clock":
                 continue
             value = 1 if port.input_policy == "one" else 0
-            wrapper = ToffeePin(self.raw_signal(port.name), self.event)
+            wrapper = ToffeePin(self._raw_signal(port.name), self.event)
             wrapper.SetWriteMode(wrapper.xdata.Imme)
             wrapper.value = value
 
     def drive(self, logical_name: str, value: int) -> None:
-        if logical_name not in LOGICAL_PINS:
-            raise KeyError(f"no write adapter for logical pin {logical_name!r}")
+        port = self._port_for(logical_name)
+        if port.direction != "input" or port.protocol == "clock":
+            raise ValueError(f"logical pin {logical_name!r} is not drivable")
+        if not 0 <= value < (1 << port.width):
+            raise ValueError(
+                f"value {value} does not fit logical pin {logical_name!r}"
+            )
         getattr(self, logical_name).value = value
 
     def sample(self, logical_name: str) -> int:
-        if logical_name not in LOGICAL_PINS:
-            raise KeyError(f"no read adapter for logical pin {logical_name!r}")
+        port = self._port_for(logical_name)
+        if port.direction != "output":
+            raise ValueError(f"logical pin {logical_name!r} is not observable")
         return int(getattr(self, logical_name).value)
+
+    def _port_for(self, logical_name: str) -> PortSpec:
+        try:
+            generated_name = LOGICAL_PINS[logical_name]
+        except KeyError as error:
+            raise KeyError(f"no adapter for logical pin {logical_name!r}") from error
+        return self._ports[generated_name]
 
     @property
     def port_count(self) -> int:
-        return len(self.ports)
+        return len(self._ports)

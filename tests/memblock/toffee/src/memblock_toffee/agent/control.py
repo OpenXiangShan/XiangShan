@@ -6,7 +6,7 @@ from toffee import Agent, driver_method
 
 from memblock_toffee.bundle import ControlBundle
 from memblock_toffee.datadef import FlushCommand
-from memblock_toffee.timing import CycleToken, CycleTracker
+from memblock_toffee.timing import CycleTracker
 from memblock_toffee.uvm import Driver
 
 
@@ -34,14 +34,12 @@ class ControlDriverAgent(Agent, Driver[FlushCommand, None]):
             raise ValueError("reset cycles must be positive")
         self.bundle.reset.value = 1
         for _ in range(cycles):
-            token = self.tracker.next_token()
-            await self.bundle.step()
-            self.tracker.commit(token)
+            async with self.tracker.reservation():
+                await self.bundle.step()
         self.bundle.reset.value = 0
         for _ in range(16):
-            token = self.tracker.next_token()
-            await self.bundle.step()
-            self.tracker.commit(token)
+            async with self.tracker.reservation():
+                await self.bundle.step()
             if not self.bundle.backend_reset.value:
                 return
         raise AssertionError("internal reset did not deassert within 16 cycles")
@@ -53,6 +51,5 @@ class ControlDriverAgent(Agent, Driver[FlushCommand, None]):
         self.timing.refresh_comb()
 
     @driver_method()
-    async def advance_cycle(self, token: CycleToken) -> None:
+    async def advance_cycle(self) -> None:
         await self.bundle.step()
-        self.tracker.commit(token)

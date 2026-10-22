@@ -13,6 +13,10 @@ Local framework tests:
 make -C tests/memblock toffee-unit
 ```
 
+This target installs only the locked Python/Toffee environment; it does not
+require a Picker export or generated DUT. Generated-DUT tests consume the
+immutable runtime below `build/memblock/toffee/runtime`.
+
 Generated-DUT smoke test:
 
 ```sh

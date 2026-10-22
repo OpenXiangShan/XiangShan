@@ -63,57 +63,70 @@ def create_environment(environment_dir: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--picker-root", type=Path, required=True)
+    parser.add_argument("--root", type=Path)
+    parser.add_argument("--picker-root", type=Path)
     parser.add_argument("--environment", type=Path, required=True)
     parser.add_argument("--metadata", type=Path, required=True)
     parser.add_argument("--stamp", type=Path, required=True)
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--lock", type=Path, default=None)
     parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument(
+        "--python-only",
+        action="store_true",
+        help="Install the locked Python environment without building Picker.",
+    )
     args = parser.parse_args()
 
     try:
         if args.jobs < 1:
             raise BootstrapError("--jobs must be positive")
+        if not args.python_only and (args.root is None or args.picker_root is None):
+            raise BootstrapError("--root and --picker-root are required for Picker builds")
         tools = load_toolchain(args.lock) if args.lock else load_toolchain()
-        picker_spec = tools["picker"]
-        xcomm_spec = tools["xcomm"]
         toffee_spec = tools["toffee"]
         toffee_test_spec = tools["toffee_test"]
-
-        picker_root = args.picker_root.resolve()
-        picker_commit = ensure_checkout(
-            picker_root,
-            "Toffee Picker",
-            str(picker_spec["repository"]),
-            str(picker_spec["ref"]),
-            str(picker_spec["commit"]),
-        )
-        build_environment = os.environ.copy()
-        build_environment["BUILD_XSPCOMM_SWIG"] = "python"
-        swig = local_swig(picker_root.parent, build_environment)
-        run(["make", "init"], cwd=picker_root, env=build_environment)
-        xcomm = picker_root / "dependence/xcomm"
-        xcomm_commit = checkout_revision(
-            xcomm,
-            "Toffee xcomm",
-            str(xcomm_spec["ref"]),
-            str(xcomm_spec["commit"]),
-        )
-        revisions = (picker_commit, xcomm_commit)
-        if previous_revisions(args.metadata) != revisions:
-            shutil.rmtree(picker_root / "build", ignore_errors=True)
-        run(
-            [
-                "make",
-                "build",
-                f"NPROC={args.jobs}",
-                f"ARGS=-DSWIG_EXECUTABLE={swig}",
-            ],
-            cwd=picker_root,
-            env=build_environment,
-        )
+        picker_commit = ""
+        xcomm_commit = ""
+        swig = ""
+        picker_root: Path | None = None
+        if not args.python_only:
+            assert args.root is not None
+            assert args.picker_root is not None
+            picker_spec = tools["picker"]
+            xcomm_spec = tools["xcomm"]
+            picker_root = args.picker_root.resolve()
+            picker_commit = ensure_checkout(
+                picker_root,
+                "Toffee Picker",
+                str(picker_spec["repository"]),
+                str(picker_spec["ref"]),
+                str(picker_spec["commit"]),
+            )
+            build_environment = os.environ.copy()
+            build_environment["BUILD_XSPCOMM_SWIG"] = "python"
+            swig = local_swig(picker_root.parent, build_environment)
+            run(["make", "init"], cwd=picker_root, env=build_environment)
+            xcomm = picker_root / "dependence/xcomm"
+            xcomm_commit = checkout_revision(
+                xcomm,
+                "Toffee xcomm",
+                str(xcomm_spec["ref"]),
+                str(xcomm_spec["commit"]),
+            )
+            revisions = (picker_commit, xcomm_commit)
+            if previous_revisions(args.metadata) != revisions:
+                shutil.rmtree(picker_root / "build", ignore_errors=True)
+            run(
+                [
+                    "make",
+                    "build",
+                    f"NPROC={args.jobs}",
+                    f"ARGS=-DSWIG_EXECUTABLE={swig}",
+                ],
+                cwd=picker_root,
+                env=build_environment,
+            )
 
         env_dir = args.environment.resolve()
         python = create_environment(env_dir)
@@ -145,8 +158,8 @@ def main() -> int:
 
         metadata = {
             "schema_version": 1,
-            "profile": "toffee",
-            "picker": str(picker_root / "build/bin/picker"),
+            "profile": "toffee-python" if args.python_only else "toffee",
+            "picker": str(picker_root / "build/bin/picker") if picker_root else "",
             "picker_commit": picker_commit,
             "xcomm_commit": xcomm_commit,
             "toffee_commit": str(toffee_spec["commit"]),

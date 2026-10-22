@@ -202,6 +202,41 @@ was produced under `TOFFEE_RESULT_ROOT=/tmp/kmhv2-toffee-repo-regression-final3`
 No CPU RTL bug was claimed, so no CPU bug document or DingTalk notification was
 created.
 
+### Toffee Framework Hardening
+
+- Review ID: `toffee-framework-20261023-02`.
+- Trigger: material changes to transaction completion, cycle ownership,
+  testcase/task lifecycle, environment composition, runtime identity, and
+  replacement publication.
+- Reviewed state: `HEAD=2c9f753c6` plus the staged Toffee framework diff
+  (`sha256=22669c4084570032178bcae2f04b55d6a348d01bcb4d285b29855091d6fd185a`).
+- Independence: a fresh-context reviewer examined the stabilized snapshot; a
+  focused re-review checked every accepted fix and returned `pass` with no open
+  finding.
+- Initial verdict: `fail`; final verdict: `pass`, with native Toffee migration
+  still explicitly limited to `2/90` scenarios.
+
+| ID | Review finding | Stable evidence | Disposition |
+| --- | --- | --- | --- |
+| T8 | Issued requests could remain outstanding without failing teardown. | `uvm.py`, `env/memblock.py`, sequencer/environment unit tests | Fixed; queue and outstanding handles are audited at component finish and Env teardown. |
+| T9 | Concurrent drivers could reserve the same cycle token. | `timing.py`, `agent/control.py`, `sequence/control.py` | Fixed with serialized async cycle reservations and unique-token tests. |
+| T10 | Upstream testcase and `main_coro` paths globally canceled component tasks before fixture teardown. | `testcase.py`, `toffee_runtime.py`, managed-testcase tests | Fixed; the managed testcase initializes Toffee loop state and directly awaits intent while Env owns task cleanup. |
+| T11 | Runtime validation accepted undeclared generated-package files. | `runtime.py`, runtime unit tests | Fixed; the actual package file set must equal declared artifacts. |
+| T12 | Default run IDs collided at one-second resolution. | `Makefile` | Fixed with nanosecond run IDs; explicit IDs remain supported. |
+| T13 | Runtime replacement had a crash-visible old-to-new gap. | `freeze_toffee_runtime.py`, freeze/runtime tests | Fixed; replacement requires atomic directory exchange and fails closed without moving the old runtime. |
+| T14 | Generated `pyc` files made runtime identity timestamp-dependent. | `freeze_toffee_runtime.py`, frozen manifest | Fixed; Python caches are excluded and the current runtime has no `pyc` artifact. |
+| T15 | The documented registry extension omitted default-component selection. | `TOFFEE_ARCHITECTURE.md`, Env constructor | Fixed; the example selects `dcache`, and invalid defaults fail at construction. |
+
+Final verification: `toffee-ci` passed 40 framework/adapter tests and a two-worker
+smoke/control regression (`2 passed`, HTML and JUnit generated); repository
+`unit` passed 295 tests; `check-rtl` and canonical C++ `smoke` passed. The final
+runtime metadata hash is
+`bd1edd0920fdc08a8271493d071b9411b4a991b27e9576d5925b0521a8af202d`,
+with schema 2, 66 artifacts, runtime identity `6d526acb...`, and source identity
+`cd3b90cd...`. Retained run output is under
+`build/memblock/toffee/results/final-toffee-ci-20261023/`. No CPU RTL bug or
+coverage-completion claim follows from framework work.
+
 ### Agent Workflow
 
 Review ID `agent-workflow-20261021-01` covers the material workflow, review-gate,

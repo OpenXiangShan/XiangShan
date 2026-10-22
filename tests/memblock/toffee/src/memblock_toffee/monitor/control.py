@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from memblock_toffee.bundle import ControlBundle
-from memblock_toffee.datadef import FlushObservation, FlushPreSample
+from memblock_toffee.datadef import (
+    FlushObservation,
+    FlushPreSample,
+    flush_cycle_transaction_id,
+)
 from memblock_toffee.timing import CycleToken
 from memblock_toffee.uvm import Monitor
 
@@ -27,7 +31,7 @@ class L2FlushMonitor(Monitor[FlushObservation]):
     ) -> FlushObservation:
         self.observations += 1
         return FlushObservation(
-            transaction_id=token.transaction_id,
+            transaction_id=flush_cycle_transaction_id(token.index),
             pre_outer_enable=before.outer_enable,
             pre_backend_done=before.backend_done,
             post_outer_enable=bool(self.bundle.outer_l2_flush_enable.value),

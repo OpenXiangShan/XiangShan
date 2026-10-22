@@ -33,9 +33,8 @@ class PickerDutAdapter:
         clock_pin: str,
     ) -> None:
         raw.InitClock(clock_pin)
-        self._raw = raw
+        self.__raw = raw
         self.event = raw.event
-        self.pin_map = dict(pin_map)
         for logical_name, generated_name in pin_map.items():
             try:
                 signal = raw[generated_name]
@@ -46,7 +45,7 @@ class PickerDutAdapter:
             setattr(self, logical_name, ToffeePin(signal, self.event))
 
     def Step(self, cycles: int = 1) -> Any:
-        return self._raw.Step(cycles)
+        return self.__raw.Step(cycles)
 
     def StepRis(
         self,
@@ -54,7 +53,7 @@ class PickerDutAdapter:
         args: tuple[Any, ...] = (),
         kwargs: dict[str, Any] | None = None,
     ) -> Any:
-        return self._raw.StepRis(callback, args, kwargs or {})
+        return self.__raw.StepRis(callback, args, kwargs or {})
 
     def StepFal(
         self,
@@ -62,13 +61,13 @@ class PickerDutAdapter:
         args: tuple[Any, ...] = (),
         kwargs: dict[str, Any] | None = None,
     ) -> Any:
-        return self._raw.StepFal(callback, args, kwargs or {})
+        return self.__raw.StepFal(callback, args, kwargs or {})
 
     def Finish(self) -> Any:
-        return self._raw.Finish()
+        return self.__raw.Finish()
 
     def refresh_comb(self) -> Any:
-        return self._raw.RefreshComb()
+        return self.__raw.RefreshComb()
 
-    def raw_signal(self, generated_name: str) -> Any:
-        return self._raw[generated_name]
+    def _raw_signal(self, generated_name: str) -> Any:
+        return self.__raw[generated_name]

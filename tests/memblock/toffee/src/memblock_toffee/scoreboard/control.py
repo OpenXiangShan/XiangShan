@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from memblock_toffee.datadef import FlushExpectation, FlushObservation
-from memblock_toffee.errors import FailureContext, IssueCollector
+from memblock_toffee.errors import FailureContext
+from memblock_toffee.transactions import OutstandingTable, TransactionKey
 from memblock_toffee.uvm import Scoreboard
 
 
@@ -9,41 +10,25 @@ class L2FlushScoreboard(Scoreboard[FlushExpectation, FlushObservation]):
     """Match flush observations by transaction identity, not arrival order."""
 
     def __init__(self) -> None:
-        self._expected: dict[str, FlushExpectation] = {}
-        self._observed: set[str] = set()
-        self.issues = IssueCollector()
+        self._table = OutstandingTable[
+            TransactionKey,
+            FlushExpectation,
+            FlushObservation | None,
+        ]("l2_flush_scoreboard")
+        self.issues = self._table.issues
 
     def expect(self, expected: FlushExpectation) -> None:
-        if expected.transaction_id in self._expected:
-            raise ValueError(f"duplicate expectation for {expected.transaction_id}")
-        self._expected[expected.transaction_id] = expected
+        self._table.expect(
+            TransactionKey("l2_flush", expected.transaction_id),
+            expected,
+        )
 
     def observe(self, actual: FlushObservation) -> None:
         transaction_id = actual.transaction_id
-        if transaction_id in self._observed:
-            self.issues.add(
-                FailureContext(
-                    component="l2_flush_scoreboard",
-                    phase="observe",
-                    cycle=actual.cycle,
-                    transaction_id=transaction_id,
-                ),
-                "duplicate observation",
-            )
+        key = TransactionKey("l2_flush", transaction_id)
+        if not self._table.observe(key, actual, actual.cycle):
             return
-        self._observed.add(transaction_id)
-        expected = self._expected.get(transaction_id)
-        if expected is None:
-            self.issues.add(
-                FailureContext(
-                    component="l2_flush_scoreboard",
-                    phase="observe",
-                    cycle=actual.cycle,
-                    transaction_id=transaction_id,
-                ),
-                "unexpected observation",
-            )
-            return
+        expected = self._table.expected(key)
         if actual.pre_outer_enable != expected.pre_outer_enable:
             self.issues.add(
                 FailureContext(
@@ -90,14 +75,4 @@ class L2FlushScoreboard(Scoreboard[FlushExpectation, FlushObservation]):
             )
 
     def finish(self) -> None:
-        missing = sorted(set(self._expected) - self._observed)
-        for transaction_id in missing:
-            self.issues.add(
-                FailureContext(
-                    component="l2_flush_scoreboard",
-                    phase="finish",
-                    transaction_id=transaction_id,
-                ),
-                "missing observation",
-            )
-        self.issues.raise_if_any()
+        self._table.finish()

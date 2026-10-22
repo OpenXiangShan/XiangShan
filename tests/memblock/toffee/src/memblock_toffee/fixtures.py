@@ -8,10 +8,10 @@ from typing import Any
 import toffee_test
 
 from memblock_toffee.adapters import MemBlockDutAdapter, load_dut_class
-from memblock_toffee.coverage import control_coverage
+from memblock_toffee.config import VerificationConfig
 from memblock_toffee.env import MemBlockEnv
+from memblock_toffee.randomness import RandomStreams
 from memblock_toffee.runtime import validate_runtime
-from memblock_toffee.toffee_runtime import start_toffee_clock, stop_toffee_clock
 
 
 def _load_dut_class() -> type[Any]:
@@ -22,19 +22,22 @@ def _load_dut_class() -> type[Any]:
 
 @toffee_test.fixture
 async def memblock_env(
+    verification_config: VerificationConfig,
+    random_streams: RandomStreams,
     toffee_request: toffee_test.ToffeeRequest,
 ) -> AsyncIterator[MemBlockEnv]:
     dut_class = _load_dut_class()
     raw_dut = toffee_request.create_dut(dut_class)
     adapter = MemBlockDutAdapter(raw_dut)
-    env = MemBlockEnv(adapter)
-    clock_started = False
+    env = MemBlockEnv(
+        adapter,
+        config=verification_config,
+        rng=random_streams,
+    )
     try:
-        start_toffee_clock(adapter)
-        clock_started = True
-        env.control_coverage = control_coverage(env)
-        toffee_request.add_cov_groups(env.control_coverage)
+        await env.start()
+        for group in env.coverage_groups:
+            toffee_request.add_cov_groups(group)
         yield env
     finally:
-        if clock_started:
-            await stop_toffee_clock()
+        await env.close()
