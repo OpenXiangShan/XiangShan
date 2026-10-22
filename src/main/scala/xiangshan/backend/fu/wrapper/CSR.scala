@@ -391,6 +391,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrOut.tlb := tlb
 
   csrOut.debugMode := csrMod.io.status.debugMode
+  csrOut.zicfilpEntryClear.foreach { sink =>
+    sink := csrMod.io.status.zicfilpEntryClear.get
+  }
 
   csrOut.traceCSR := csrMod.io.status.traceCSR
 

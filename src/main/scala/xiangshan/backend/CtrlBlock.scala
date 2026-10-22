@@ -466,6 +466,7 @@ class CtrlBlockImp(
     }
     arch.io.enable := io.fromCSR.toDecode.enableZicfilp.get
     arch.io.trap := rob.io.exception.valid
+    arch.io.entryClear := io.fromCSR.zicfilpEntryClear.get
     arch.io.xret.valid := s1_s3_redirect.valid && s1_s3_redirect.bits.ZicfilpXRetValid.get
     arch.io.xret.bits := s1_s3_redirect.bits.ZicfilpRetELP.get
     io.toCSR.ZicfilpELP.get := arch.io.archELP
@@ -990,6 +991,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val toDecode = Input(new CSRToDecode)
     val traceCSR = Input(new TraceCSR)
     val instrAddrTransType = Input(new AddrTransType)
+    // NewCSR entry pulse for Debug/RNMI/MN ELP clearing.
+    val zicfilpEntryClear = OptionWrapper(HasZicfilp, Input(Bool()))
   }
   val toIssueBlock = new Bundle {
     val flush = ValidIO(new Redirect)
