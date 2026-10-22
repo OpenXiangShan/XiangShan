@@ -11,6 +11,8 @@ class ArchZicfilpIO(implicit p: Parameters) extends XSBundle {
   val commitLPAD = Input(Vec(CommitWidth, Bool()))
   val enable = Input(Bool())
   val trap = Input(Bool())
+  // Entry from NewCSR for Debug/RNMI paths that do not rely solely on ROB exception.valid.
+  val entryClear = Input(Bool())
   val xret = Flipped(ValidIO(Bool()))
   val archELP = Output(Bool())
 }
@@ -25,7 +27,9 @@ class ArchZicfilp(implicit p: Parameters) extends XSModule {
       Mux(io.enable && valid && jalr, true.B, Mux(io.enable && valid && lpad, false.B, elp))
   }
 
-  when(io.trap) {
+  // Normal ROB traps and CSR-originated entry pulses both start the handler with ELP=0.
+  // The pre-entry value is saved separately in the corresponding CSR field.
+  when(io.trap || io.entryClear) {
     archELP := false.B
   }.elsewhen(io.xret.valid) {
     archELP := io.xret.bits
