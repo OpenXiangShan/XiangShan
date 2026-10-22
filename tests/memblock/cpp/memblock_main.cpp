@@ -243,6 +243,9 @@ int main(int argc, char **argv)
         if (options.test == "wfi-safety") {
             return run_wfi_safety(argc, argv);
         }
+        if (options.test == "reset-partial-load") {
+            return run_reset_partial_load(argc, argv);
+        }
         if (options.test == "reset-recovery") {
             return run_reset_recovery(argc, argv);
         }

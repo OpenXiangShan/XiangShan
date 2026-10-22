@@ -43,6 +43,68 @@ static void require(bool condition, const std::string &reason)
     }
 }
 
+static void check_scalar_reset_cancellation()
+{
+    const memblock::LoadTransaction old{
+        .address = 0x80001018, .op = memblock::LoadOp::ld,
+        .rob = 7, .pdest = 31, .lane = 0,
+    };
+    auto next = old;
+    next.rob_flag = true;
+    next.address += 0x1000;
+    next.pdest = 32;
+    memblock::generated::ScalarLoadWriteback wb{};
+    wb.valid = true;
+    wb.rob_value = old.rob;
+    wb.pdest = old.pdest;
+    wb.rf_wen = true;
+    wb.trigger = old.expected_trigger;
+    wb.data = 0x123456789abcdef0ULL;
+
+    memblock::LoadScoreboard canceled;
+    canceled.expect(old, wb.data);
+    canceled.expect(next, wb.data);
+    require(canceled.cancel_for_reset(old), "pending reset cancellation rejected");
+    require(!canceled.pending(old) && canceled.pending(next),
+            "reset cancellation removed unrelated wrapped identity");
+    require(canceled.observed() == 0 && canceled.reset_canceled() == 1,
+            "cancellation counted as a completion");
+    canceled.observe(0, wb);
+    require(!canceled.ok() && canceled.error().find("unexpected load writeback") !=
+                std::string::npos, "stale canceled writeback was accepted");
+
+    memblock::LoadScoreboard early;
+    early.expect(old, wb.data);
+    early.observe(0, wb);
+    require(early.ok() && !early.pending(old) && early.observed() == 1,
+            "legal early completion rejected");
+    require(!early.cancel_for_reset(old) && early.reset_canceled() == 0,
+            "completed identity was canceled a second time");
+
+    for (unsigned mismatch = 0; mismatch < 4; ++mismatch) {
+        memblock::LoadScoreboard wrong;
+        wrong.expect(old, wb.data);
+        auto requested = old;
+        if (mismatch == 0) requested.rob_flag = !requested.rob_flag;
+        if (mismatch == 1) ++requested.pdest;
+        if (mismatch == 2) ++requested.address;
+        if (mismatch == 3) requested.op = memblock::LoadOp::lw;
+        require(!wrong.cancel_for_reset(requested) && wrong.pending(old) &&
+                wrong.reset_canceled() == 0, "mismatched reset identity accepted");
+    }
+    memblock::LoadScoreboard invalid;
+    invalid.expect(old, wb.data);
+    wb.data ^= 1;
+    invalid.observe(0, wb);
+    require(!invalid.ok() && !invalid.cancel_for_reset(old) && invalid.pending(old),
+            "reset cancellation hid an earlier data mismatch");
+    memblock::LoadScoreboard prefetch;
+    const memblock::PrefetchTransaction hint{.address = old.address, .rob = old.rob};
+    prefetch.expect_prefetch(hint);
+    require(!prefetch.cancel_for_reset(old) && prefetch.pending_prefetch() == 1,
+            "scalar reset cancellation removed a prefetch");
+}
+
 static void check_index(
     const memblock::VectorMemoryTransaction &transaction, unsigned index,
     bool significant = true)
@@ -76,6 +138,10 @@ int main(int argc, char **argv)
     try {
         require(argc == 2, "one case name required");
         const std::string name = argv[1];
+        if (name == "scalar-reset") {
+            check_scalar_reset_cancellation();
+            return 0;
+        }
         memblock::VectorMemoryTransaction transaction;
         if (name == "ordinary") {
             check_index(transaction, 0);

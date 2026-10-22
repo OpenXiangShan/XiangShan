@@ -264,6 +264,30 @@ struct ConstraintCoverage {
     // Backpressured actions/stalled target releases/target C stall cycles/
     // stable-payload checks/completed ready windows.
     std::array<std::uint64_t, 5> set_pressure_backpressure_manager{};
+    // Dirty-overlap attempts/qualified/accepted/rejected/cleaned/
+    // acquisition-reason/error-reason/Release-reason/in-flight. Reasons overlap.
+    std::array<std::uint64_t, 9> set_pressure_ownership{};
+    // Rejected attempts/stores/baseline/overflow/held loads/target A/held A/
+    // store WB/SQ/load WB/LQ/target C/target ReleaseData/global ReleaseData/
+    // verified global ReleaseData/expected target ReleaseData/preserved stores/all A.
+    std::array<std::uint64_t, 18> set_pressure_rejected_manager{};
+    std::array<std::uint64_t, 2> set_pressure_rejected_issue_orders{};
+
+    static bool rejected_pressure_accounting_valid(
+        const std::array<std::uint64_t, 18> &m,
+        const std::array<std::uint64_t, 2> &orders)
+    {
+        return m[1] == m[2] + m[3] && m[2] == m[4] * 8U &&
+            m[4] >= m[0] && m[4] <= m[0] * 8U &&
+            m[3] >= m[4] && m[3] <= m[4] * 2U &&
+            m[5] >= m[1] && m[6] == m[4] && m[7] == m[1] && m[8] == m[1] &&
+            m[9] == m[4] && m[10] == m[4] && m[11] >= m[12] &&
+            m[13] >= m[12] && m[14] == m[13] && m[12] >= m[15] &&
+            m[15] <= m[1] && m[16] == m[15] && m[17] >= m[5] + m[6] &&
+            orders[0] + orders[1] == m[1] &&
+            (m[0] != 0 || (m == std::array<std::uint64_t, 18>{} &&
+                          orders == std::array<std::uint64_t, 2>{}));
+    }
     // [depth2..depth17][same-cycle scalar issue width1..3]
     // [scalar-only/scalar+vector-load][Bare/stage-1/nested].
     std::array<
@@ -2113,6 +2137,7 @@ struct ConstraintCoverage {
         std::uint64_t set_pressure_overlap_actions = 0;
         std::uint64_t set_pressure_overlap_windows = 0;
         std::uint64_t set_pressure_clean_overlap_windows = 0;
+        std::uint64_t set_pressure_dirty_overlap_actions = 0;
         std::uint64_t set_pressure_overlap_min_releases = 0;
         std::uint64_t set_pressure_backpressure_actions = 0;
         for (unsigned state = 0;
@@ -2158,6 +2183,8 @@ struct ConstraintCoverage {
                                         if (state == 0) {
                                             set_pressure_clean_overlap_windows +=
                                                 count * windows;
+                                        } else {
+                                            set_pressure_dirty_overlap_actions += count;
                                         }
                                         set_pressure_overlap_min_releases +=
                                             count * windows * (depth + 1U);
@@ -2241,6 +2268,16 @@ struct ConstraintCoverage {
             set_pressure_backpressure_manager[3] !=
                 set_pressure_backpressure_actions * 16U ||
             set_pressure_backpressure_manager[4] != set_pressure_actions) {
+            return false;
+        }
+        const auto &q = set_pressure_ownership;
+        if (q[0] != q[2] + q[3] || q[1] != q[2] ||
+            q[2] != set_pressure_dirty_overlap_actions || q[3] != q[4] ||
+            q[5] > q[3] || q[6] > q[3] || q[7] > q[3] ||
+            q[5] + q[6] + q[7] < q[3] || q[8] != 0 ||
+            q[0] > q[2] * 4U || set_pressure_rejected_manager[0] != q[4] ||
+            !rejected_pressure_accounting_valid(
+                set_pressure_rejected_manager, set_pressure_rejected_issue_orders)) {
             return false;
         }
         const std::uint64_t miss_burst_actions =
@@ -2747,6 +2784,17 @@ public:
             stream << (index == 0 ? "" : ",")
                    << set_pressure_backpressure_manager[index];
         }
+        stream << " actual_set_pressure_ownership=";
+        for (unsigned i = 0; i < set_pressure_ownership.size(); ++i) {
+            stream << (i == 0 ? "" : ",") << set_pressure_ownership[i];
+        }
+        stream << " actual_set_pressure_rejected_manager=";
+        for (unsigned i = 0; i < set_pressure_rejected_manager.size(); ++i) {
+            stream << (i == 0 ? "" : ",") << set_pressure_rejected_manager[i];
+        }
+        stream << " actual_set_pressure_rejected_issue_order="
+               << set_pressure_rejected_issue_orders[0] << ','
+               << set_pressure_rejected_issue_orders[1];
         stream << " actual_miss_burst_depth=";
         for (unsigned depth = 0; depth < miss_burst_depths.size(); ++depth) {
             stream << (depth == 0 ? "" : ",") << miss_burst_depths[depth];

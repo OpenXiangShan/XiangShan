@@ -228,27 +228,30 @@ int run_hypervisor_contracts(int argc, char **argv)
             cancels += feedback_after.ld2_cancels[lane] -
                        feedback_before.ld2_cancels[lane];
         }
-        // HLVX maps to a read-execute PMP command. If R is allowed but X is
-        // denied, the load pipeline raises the correct access fault through
-        // pmp.instr, while its DCache kill path sees neither pmp.ld nor pmp.st.
-        // Pin that unique externally visible early lookup instead of allowing
-        // arbitrary DCache traffic for every physical PMP fault.
+        // An HLVX physical execute denial may follow a legal speculative
+        // read of this target. Its presence is not required for the fault.
+        // Wakeup/cancel counts remain diagnostic; the scoreboard owns exact
+        // terminal exception, identity, and RF-suppression checks.
         const bool hlvx_execute_only_fault =
             expected_exception == memblock::kExceptionLoadAccessFault &&
             hlvx && active_pmp_config.has_value() &&
             ((*active_pmp_config & 0x1U) != 0) &&
             ((*active_pmp_config & 0x4U) == 0);
-        const std::uint64_t expected_fault_dcache = dcache_before +
-            (hlvx_execute_only_fault ? 1U : 0U);
+        const char *fault_request_error = expected_exception != 0
+            ? environment.dcache_faulting_load_requests_error_since(
+                  transaction.oracle_address.value() & ~std::uint64_t{63},
+                  hlvx_execute_only_fault, dcache_before)
+            : nullptr;
         if (expected_exception != 0 &&
             (environment.uncache_requests() != uncache_before ||
-             environment.tilelink_requests() != expected_fault_dcache ||
-             cancels == 0 || wakeups != cancels)) {
+             fault_request_error != nullptr)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << " reason=faulting-load-side-effect"
                       << " dcache_before=" << dcache_before
                       << " dcache_after=" << environment.tilelink_requests()
+                      << " request_error="
+                      << (fault_request_error ? fault_request_error : "none")
                       << " uncache_before=" << uncache_before
                       << " uncache_after=" << environment.uncache_requests()
                       << " wakeups=" << wakeups

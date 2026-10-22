@@ -23,6 +23,8 @@ strict:
   architectural/protocol behavior, but no independent revert was built.
 - **Covered, mutation did not fail**: a revert was built and the most relevant
   current test still passed. This is not sensitivity evidence.
+- **Stimulus gap**: the boundary models the required producer and observation,
+  but no current test demonstrates the discriminating combination or overlap.
 - **Boundary gap**: the required legal producer, consumer, or architectural
   observation is not modeled at the current MemBlock boundary.
 - **Non-functional/outside MemBlock UT**: performance attribution, X-only,
@@ -45,7 +47,7 @@ For each selected fix, record:
 - the legal producer and stimulus dimensions needed at the MemBlock boundary;
 - the independent oracle and observable completion/protocol effect;
 - whether the current UT is `Reproduced`, `Covered, not mutated`,
-  `Covered, mutation did not fail`, `Boundary gap`, or
+  `Covered, mutation did not fail`, `Stimulus gap`, `Boundary gap`, or
   `Non-functional/outside MemBlock UT`;
 - the exact test, mutation, or evidence path, plus the missing coverage point
   when sensitivity is absent.
@@ -270,14 +272,14 @@ to the historical mux revert; it is not a newly discovered CPU RTL bug.
 | 2026-06-20 | `9045e063` | Store exception priority by ROB/uop, not SQ index | Covered, not mutated | `exception-contracts` issues two simultaneous PBMT-NC misaligned stores whose SQ and wrapped ROB orders disagree, then requires the exported VA of the oldest ROB. An independent revert RTL has not been built. |
 | 2026-06-20 | `7ce99d4a` | VSplit threshold must not use LSQ pointer | Covered, not mutated | Split vector traffic plus LQ/SQ and ROB wrap/pressure are checked, but the exact threshold mutation was not built. |
 | 2026-06-20 | `e42d4b51` | Cross-page SMB matching uses SQ `rdataPtr` | Covered, not mutated | Translated cross-page vector store requires exact completion, SQ drain, and readback. |
-| 2026-06-20 | `9f988c01` | Non-debug mode cannot access debug memory | Covered, not mutated | `mmio-contracts` requires an access fault and zero manager requests for a non-Debug-Mode load at `0x38020010`, then enters Debug Mode and checks successful Uncache load/store; the full scenario passes. An independent guard revert, non-debug store denial, Debug Mode exit, and region-edge combinations remain untested. |
-| 2026-06-17 | `22cc0b6b` | HLVX final PA execute permission | Covered, not mutated | `hypervisor-contracts` includes HLVX PMP execute denial, the SPVP permission matrix, and fixed-PMA execute denial with exact access-fault checking; the 82-case run passes. One legal early cache request may occur before permission denial, so its absence is not the oracle. An independent execute-permission revert remains unbuilt. |
+| 2026-06-20 | `9f988c01` | Non-debug mode cannot access debug memory | Reproduced | `mmio-contracts` checks 24 LD/SD x initial-nondebug/Debug-Mode/exit x aligned-edge cases at `0x3801fff8`, `0x38020000`, `0x38020ff8`, and `0x38021000`. Protected accesses fault outside Debug Mode with zero manager requests; allowed operations require exact Uncache traffic, and all twelve store cases use DUT readback. Faulted stores finish with exactly one observed dequeue/cancellation and are explicitly redirected. An isolated equivalent range-guard revert passes on clean RTL and fails twice identically at the existing interior denied-LD case (cycle 8408, missing expected fault completion and bounded timeout; no accepted forbidden manager request). `build/memblock/debug-guard-expansion/sensitivity-verification.json` records matched binaries and commands. The full scenario mutant stops before the added matrix. A separately selected fixture then checks all eight protected first/last-doubleword x LD/SD x initial-nondebug/real-exit bins: each passes twice on clean RTL and fails twice with identical same-case output on the same mutant. Fixture and functional oracles, exact shared binary/arguments, model selection, and limits were independently reviewed (`build/memblock/debug-guard-bin-sensitivity/{summary.json,review.json}`). The selected fixture resets before entry and does not claim original-stream equivalence. Failures are missing expected writeback timeouts, not proof of accepted forbidden traffic. Misaligned crossings, fetch, and restrictive-PMP override remain gaps. |
+| 2026-06-17 | `22cc0b6b` | HLVX final PA execute permission | Covered, not mutated | `hypervisor-contracts` includes HLVX PMP execute denial, the SPVP permission matrix, and fixed-PMA execute denial with exact access-fault checking; the 82-case run passes. Legal speculative target-line reads may occur before permission denial; neither their presence nor cardinality is an oracle. An independent execute-permission revert remains unbuilt. |
 | 2026-06-09 | `be3e3761` | VSegment load S1 data-read kill | Boundary gap | Segment takeover and DCache bank-read observation are absent. |
 | 2026-06-04 | `d1cb3398` | Misaligned vector store split logic | Covered, not mutated | `misaligned-stores`, `vector-addressing`, and mandatory mixed replay/readback. |
 | 2026-06-01 | `b28e7b40` | Killed loads must not read DCache bank | Non-functional/outside MemBlock UT | Architectural cancellation is checked; internal bank-read power behavior is not externally observable. |
 | 2026-05-26 | `6af73d2b` | Disallow speculation for split misaligned loads | Covered, not mutated | Scalar misaligned cache-line/page splits plus redirect recovery and exact data checks. |
 | 2026-05-26 | `5d886c6f` | Ordered-index vector load split order | Covered, not mutated | `vector-addressing` checks indexed-ordered data against independently decoded indices. |
-| 2026-05-26 | `3f00c595` | HLV/HLVX arbitration priority | Boundary gap | Hypervisor load instruction producer is absent. |
+| 2026-05-26 | `3f00c595` | HLV/HLVX arbitration metadata | Stimulus gap | HLV/HLVX producers and scalar/vector coissue exist, but no current test demonstrates scalar H metadata remaining valid on the same LoadUnit lane while vector split flows are selected. Separate H and vector tests do not cover this cross. The independent discriminator is ordinary vector host mapping/data versus distinct guest alias mapping/data or HLVX execute permissions; legal arbitration ordering must remain unconstrained. Audit: `build/memblock/hypervisor-bounded-audit/input.json`. |
 | 2026-05-20 | `d38fc34d` | Misaligned loads filling LQ RAR can deadlock | Boundary gap | Needs multiple simultaneous split misaligned loads under RAR pressure, not sequential completion. |
 | 2026-05-20 | `2751f4ec` | Misalign VSplit ROB-age comparison | Boundary gap | Needs concurrent wrapped ROB ages in the split buffer. |
 | 2026-05-19 | `f2bbca15` | Avoid X in LoadQueueRAR | Non-functional/outside MemBlock UT | The two-state Verilator model cannot prove four-state X behavior. |

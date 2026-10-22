@@ -237,8 +237,17 @@ Representative target groups are:
 | Scalar/vector memory | `single-load`, `vector-load`, `vector-addressing`, `vector-fof`, `vector-segment`, `store-forwarding` |
 | Cache, coherence, errors | `dcache-errors`, `dcache-coherence`, `atomic-contracts`, `uncache-errors`, `cmo-contracts`, `mmio-contracts` |
 | Translation and protection | `translation-matrix`, `translation-fence-all`, `translation-permissions`, `translation-pbmt`, `pmp-contracts`, `hypervisor-contracts` |
-| Frontend, control, reset | `ifetch-prefetch`, `ifetch-ptw-bridge`, `trace-bridge-contracts`, `dft-bridge-contracts`, `reset-recovery`, `reset-tree-contracts` |
+| Frontend, control, reset | `ifetch-prefetch`, `ifetch-ptw-bridge`, `trace-bridge-contracts`, `dft-bridge-contracts`, `reset-recovery`, `reset-partial-load`, `reset-tree-contracts` |
 | Queue and pressure | `queue-pressure`, `redirect`, `store-rdata-order`, `sbuffer-timeout` |
+
+`reset-recovery` includes outstanding DCache/PTW/Uncache cancellation and six
+LR/AMOADD/AMOCAS x W/D cold-refill reset cases plus four partial LR refill cases
+that permit legal early completion. `reset-partial-load` adds twelve partial scalar
+LD cases: singleton and same-line opposite-half pairs, each crossing all three
+primary issue lanes and both target halves in a separate process to bound
+dynamic-loader TLS usage per leaf. They check exact post-reset
+results, readback, and stale completion. Its reset domain includes manager links;
+it does not claim dirty-cache persistence or reservation-reset coverage.
 
 The executable scenario inventory is `SCENARIOS` in
 `scripts/benchmark_tests.py`; the Makefile is the source for target names and
@@ -406,6 +415,14 @@ LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
   --test random-mixed --seed 17 --transactions 16384
 ```
+
+For mixed-run diagnostics, set `MEMBLOCK_MIXED_PROGRESS_ACTIONS=64` on the
+simulator or regression controller. It flushes action/cycle/last-phase checkpoints
+to stderr at action boundaries; zero or an unset variable disables it. It changes
+no random stream, DUT cycle, oracle, coverage gate, or acceptance requirement.
+The controller retains the output tail for a failed/timed-out seed. A live
+checkpoint proves progress only when actions or cycles advance; a final checkpoint
+alone does not prove completion or a design deadlock.
 
 Before calling a failure an RTL bug, replay it deterministically, minimize it
 without weakening the oracle, and exclude driver, manager, reference-model,

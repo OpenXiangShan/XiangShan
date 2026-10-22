@@ -62,6 +62,9 @@ class VectorScoreboardTest(unittest.TestCase):
     def test_unit_and_strided_destination_index(self) -> None:
         self.check_case("ordinary")
 
+    def test_scalar_reset_cancellation_preserves_exact_identity_and_errors(self) -> None:
+        self.check_case("scalar-reset")
+
     def test_indexed_split_and_fractional_destination_index(self) -> None:
         self.check_case("indexed")
 

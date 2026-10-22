@@ -52,6 +52,7 @@ SCENARIOS = (
     "cmo-contracts",
     "wfi-safety",
     "reset-recovery",
+    "reset-partial-load",
     "reset-tree-contracts",
     "vector-load",
     "vector-split-load",

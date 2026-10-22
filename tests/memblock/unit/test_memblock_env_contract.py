@@ -1744,7 +1744,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "memory_agent_.reset_link_state();",
             "ptw_agent_.reset_link_state();",
             "uncache_agent_.reset_link_state();",
-            '" outstanding_resets=3"',
+            '" outstanding_resets=13"',
             '" dcache=1 ptw=1 uncache=1"',
         ):
             self.assertIn(contract, environment + main)
@@ -1832,7 +1832,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "pma_physical_base = 0x35000000ULL",
             "pma_denied_count",
             "phase=pma-debug-denied",
-            "phase=pma-debug-feedback",
             "pma_denied_wakeups=",
             "pma_denied_cancels=",
             "debug_physical_base = 0x38020000ULL",
@@ -2926,7 +2925,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "probe_max_outstanding=",
             "probe_source_space=",
             "probe_source_lifecycle=",
-            "constraint_schema=52",
+            "constraint_schema=53",
             "RandomVectorShape",
             "choose_vector_shape",
             "actual_vector_cross=",

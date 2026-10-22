@@ -4,6 +4,13 @@
 int run_random_mixed(int argc, char **argv, const Options &options)
 {
     const RandomConstraints constraints = resolve_random_constraints(options);
+    // Optional diagnostics only: never consume random numbers or advance the
+    // DUT here. Flushed checkpoints survive a controller timeout and expose
+    // whether the replay is still advancing actions and simulation cycles.
+    const char *const progress_text =
+        std::getenv("MEMBLOCK_MIXED_PROGRESS_ACTIONS");
+    const std::uint64_t progress_interval = progress_text
+        ? parse_u64(progress_text, "MEMBLOCK_MIXED_PROGRESS_ACTIONS") : 0;
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
     constexpr unsigned minimum_actions = 6144;
@@ -147,6 +154,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     };
     std::string phase = "reset";
     unsigned actions = 0;
+    std::uint64_t next_progress_action = 0;
+    const auto report_progress = [&](bool force = false) {
+        if (progress_interval == 0 ||
+            (!force && actions < next_progress_action)) {
+            return;
+        }
+        std::cerr << "MEMBLOCK_RANDOM_MIXED_PROGRESS seed=" << options.seed
+                  << " actions=" << actions << " cycle=" << environment.cycle()
+                  << " phase=" << phase << std::endl;
+        next_progress_action = progress_interval >
+                std::numeric_limits<std::uint64_t>::max() - actions
+            ? std::numeric_limits<std::uint64_t>::max()
+            : actions + progress_interval;
+    };
+    report_progress();
     std::uint64_t rob_offset = 0;
     std::uint64_t lq_offset = 0;
     std::uint64_t sq_offset = 0;
@@ -2801,6 +2823,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
           // completion drain, so cache, TLB, forwarding, and queue timing can
           // interact in one simulation.
           while (actions + 7 <= concurrent_action_limit) {
+            report_progress();
             std::optional<unsigned> special_kind;
             if (actions + 8 <= concurrent_action_limit &&
                 constraints.special_concurrent_per_mille != 0 &&
@@ -5317,6 +5340,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
 
         bool ordinary_constraint_coverage_closed = false;
         while (actions < target_before_redirect) {
+            report_progress();
             const bool closing_stride_stream =
                 constraints.stride_stream_per_mille != 0 &&
                 stride_stream_loads < stride_training_loads;
@@ -7436,18 +7460,47 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         constrained_completion_timeout)) {
                     return false;
                 }
+                // The L1 stride prefetcher is traffic-trained and may issue a
+                // background A request into a target set while the held
+                // responses are being armed. That eviction is legal but it is
+                // not part of the pressure-owned stimulus, so quiesce the
+                // prefetcher for the whole action and restore it afterwards.
+                const bool restore_stride_prefetch =
+                    constraints.stride_stream_per_mille != 0;
+                if (restore_stride_prefetch &&
+                    !environment.configure_stride_prefetch(false)) {
+                    return false;
+                }
+                if (restore_stride_prefetch &&
+                    (!environment.run_cycles(8) ||
+                     !environment.run_until_dcache_idle(
+                         constrained_completion_timeout))) {
+                    return false;
+                }
 
-                constexpr unsigned dcache_sets = 128;
-                constexpr unsigned dcache_ways = 8;
+                // Retry only construction; keep the selected profile tuple fixed.
+                // Fresh address/identity sequences and actual traffic never rewind.
+                constexpr unsigned ownership_attempt_limit = 4;
+                bool pressure_action_accepted = false;
+                for (unsigned ownership_attempt = 0;
+                     ownership_attempt < ownership_attempt_limit &&
+                         !pressure_action_accepted;
+                     ++ownership_attempt) {
+                // The generated 256-set, four-way DCache maps this 8-KiB
+                // stride to two sets. A window has eight total ways across
+                // that pair; the low seven index bits identify disjoint pairs.
+                // These windows do not claim single-set associativity coverage.
+                constexpr unsigned pressure_index_count = 128;
+                constexpr unsigned pressure_capacity_lines = 8;
                 constexpr unsigned line_bytes = 64;
-                constexpr unsigned sets_per_quartile = dcache_sets / 4;
-                constexpr std::uint64_t same_set_stride =
-                    dcache_sets * line_bytes;
+                constexpr unsigned indices_per_quartile = pressure_index_count / 4;
+                constexpr std::uint64_t pressure_stride =
+                    pressure_index_count * line_bytes;
                 constexpr std::uint64_t group_stride = 0x20000;
                 constexpr std::uint64_t groups =
                     set_pressure_span / group_stride;
                 constexpr std::uint64_t sequences_per_quartile =
-                    groups * sets_per_quartile;
+                    groups * indices_per_quartile;
                 struct SetPressureWindow {
                     std::uint64_t sequence;
                     std::uint64_t first_line;
@@ -7478,18 +7531,18 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         const std::uint64_t sequence =
                             set_pressure_sequences.at(quartile)++;
                         const std::uint64_t group =
-                            sequence / sets_per_quartile;
+                            sequence / indices_per_quartile;
                         const unsigned set_index =
-                            quartile * sets_per_quartile +
+                            quartile * indices_per_quartile +
                             static_cast<unsigned>(
-                                sequence % sets_per_quartile);
+                                sequence % indices_per_quartile);
                         const std::uint64_t first_line =
                             set_pressure_base + group * group_stride +
                             set_index * line_bytes;
                         bool fresh = true;
                         for (unsigned index = 0; index < depth; ++index) {
                             const std::uint64_t line =
-                                first_line + index * same_set_stride;
+                                first_line + index * pressure_stride;
                             if (environment.dcache_requests_covering_since(
                                     line, 0) != 0) {
                                 fresh = false;
@@ -7518,7 +7571,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 for (const auto &window : pressure_windows) {
                     for (unsigned index = 0; index < depth; ++index) {
                         target_lines.push_back(
-                            window.first_line + index * same_set_stride);
+                            window.first_line + index * pressure_stride);
                     }
                 }
                 const unsigned width_bytes = 1U << set_pressure_width;
@@ -7548,7 +7601,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     std::uint64_t count = 0;
                     for (unsigned index = 0; index < depth; ++index) {
                         const std::uint64_t line =
-                            window.first_line + index * same_set_stride;
+                            window.first_line + index * pressure_stride;
                         count += data_only
                             ? environment
                                   .observed_dcache_release_data_covering(line)
@@ -7658,10 +7711,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             window.set_index * line_bytes;
                         std::optional<std::uint64_t> fresh_overlap_line;
                         std::optional<unsigned> fresh_overlap_set;
-                        for (unsigned delta = 1; delta < dcache_sets &&
+                        for (unsigned delta = 1; delta < pressure_index_count &&
                              !fresh_overlap_line; ++delta) {
                             const unsigned candidate_set =
-                                (window.set_index + delta) % dcache_sets;
+                                (window.set_index + delta) % pressure_index_count;
                             const bool aliases_target = std::any_of(
                                 pressure_windows.begin(), pressure_windows.end(),
                                 [&](const SetPressureWindow &target) {
@@ -7675,7 +7728,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             }
                             for (unsigned tag = depth; tag < 16U; ++tag) {
                                 const std::uint64_t candidate = group_base +
-                                    tag * same_set_stride +
+                                    tag * pressure_stride +
                                     candidate_set * line_bytes;
                                 if (environment.dcache_requests_covering_since(
                                         candidate, 0) == 0 &&
@@ -7753,7 +7806,29 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     if (!set_pressure_refill_overlap) {
                         return true;
                     }
-                    const std::uint64_t required = depth - dcache_ways;
+                    const std::uint64_t required = depth - pressure_capacity_lines;
+                    const auto overlap_failure = [&](const char *why) {
+                        std::ostringstream detail;
+                        detail << phase << ":reason=" << why
+                               << ":cycle=" << environment.cycle()
+                               << ":depth=" << depth
+                               << ":windows=" << window_count
+                               << ":required=" << required
+                               << ":data_only=" << data_only
+                               << ":backpressure=" << set_pressure_release_backpressure
+                               << ":held_count=" << environment.dcache_held_response_count();
+                        for (unsigned w = 0; w < window_count; ++w) {
+                            detail << ":w" << w << "=" << pressure_windows[w].set_index
+                                   << ",0x" << std::hex << pressure_windows[w].first_line
+                                   << std::dec << "," << before[w] << ","
+                                   << window_target_releases(pressure_windows[w], data_only)
+                                   << ",0x" << std::hex << overlap_lines[w]
+                                   << std::dec << "," << environment.dcache_response_held_at(overlap_lines[w])
+                                   << "," << environment.scalar_load_pending(overlap_loads[w]);
+                        }
+                        phase = detail.str();
+                        return false;
+                    };
                     const auto all_windows_released = [&]() {
                         for (unsigned window = 0; window < window_count;
                              ++window) {
@@ -7771,7 +7846,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                          ++cycle) {
                         for (const auto &load : overlap_loads) {
                             if (!environment.scalar_load_pending(load)) {
-                                return false;
+                                return overlap_failure("overlap-load-not-pending");
                             }
                         }
                         if (!environment.run_cycles(1)) {
@@ -7782,7 +7857,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     if (!all_windows_released() ||
                         environment.dcache_held_response_count() !=
                             window_count) {
-                        return false;
+                        return overlap_failure("release-minimum-or-held-count");
                     }
                     for (unsigned window = 0; window < window_count; ++window) {
                         releases_while_overlap_pending +=
@@ -7793,7 +7868,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                 overlap_lines[window]) ||
                             !environment.scalar_load_pending(
                                 overlap_loads[window])) {
-                            return false;
+                            return overlap_failure("overlap-address-or-identity");
                         }
                     }
                     if (data_only &&
@@ -7851,7 +7926,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                          ++index) {
                         const std::uint64_t line = target_lines[index];
                         const unsigned target_set = static_cast<unsigned>(
-                            (line / line_bytes) % dcache_sets);
+                            (line / line_bytes) % pressure_index_count);
                         environment.memory().fill_incrementing(
                             line, line_bytes,
                             static_cast<std::uint8_t>(
@@ -7863,7 +7938,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     std::vector<std::uint64_t>
                         target_releases_before_overlap;
                     target_releases_before_overlap.reserve(window_count);
-                    const auto issue_pressure_load = [&](unsigned index) {
+                    const auto issue_pressure_load = [&](unsigned index,
+                                                         bool defer_issue = false) {
                         const std::uint64_t line = target_lines[index];
                         auto load = make_load(
                             line + offset,
@@ -7875,7 +7951,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         if (set_pressure_refill_overlap) {
                             environment.expect_load(load);
                             issued = environment.enqueue_load(load) &&
-                                environment.issue_load(load, 4096);
+                                (defer_issue || environment.issue_load(load, 4096));
                         } else {
                             issued = issue_load(load, std::nullopt, false);
                         }
@@ -7883,28 +7959,42 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             phase = "random-set-pressure-clean-fill";
                             return false;
                         }
-                        coverage.sample(load);
+                        if (!defer_issue) {
+                            coverage.sample(load);
+                        }
                         pressure_loads.push_back(load);
                         return true;
                     };
+                    // Allocate an older prefix without sending target cache
+                    // traffic. It can retire ahead of the held younger loads.
+                    // At eight windows: 32 prefix + 8 held flows initially;
+                    // after prefix dequeue: 8 * (10 - 4 + 1) = 56 flows.
+                    constexpr unsigned older_targets_per_window = 4;
+                    static_assert(
+                        RandomConstraints::set_pressure_window_class_count *
+                            (older_targets_per_window + 1U) <=
+                        memblock::kVirtualLoadQueueEntries -
+                            memblock::kLqEnqueueHeadroom);
+                    static_assert(
+                        RandomConstraints::set_pressure_window_class_count *
+                            (10U - older_targets_per_window + 1U) <=
+                        memblock::kVirtualLoadQueueEntries -
+                            memblock::kLqEnqueueHeadroom);
                     if (set_pressure_refill_overlap) {
-                        phase = "random-set-pressure-clean-baseline-fill";
+                        phase = "random-set-pressure-clean-prefix-enqueue";
                         for (unsigned window = 0; window < window_count;
                              ++window) {
-                            for (unsigned tag = 0; tag < dcache_ways; ++tag) {
+                            for (unsigned tag = 0;
+                                 tag < older_targets_per_window; ++tag) {
                                 if (!issue_pressure_load(
-                                        window * depth + tag)) {
+                                        window * depth + tag, true)) {
                                     return false;
                                 }
                             }
                         }
-                        phase =
-                            "random-set-pressure-clean-baseline-fill-complete";
-                        if (!environment.run_until_all_complete(
-                                set_pressure_completion_timeout) ||
-                            !environment.run_until_queues_retired(8192) ||
-                            !environment.run_until_dcache_idle(
-                                set_pressure_completion_timeout)) {
+                        if (!environment.set_rob_head(
+                                pressure_loads.front().rob,
+                                pressure_loads.front().rob_flag)) {
                             return false;
                         }
                     }
@@ -7914,7 +8004,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     if (set_pressure_refill_overlap) {
                         phase = "random-set-pressure-clean-refill-overlap";
-                        if (!start_refill_overlap(true)) {
+                        if (!start_refill_overlap(false)) {
                             return false;
                         }
                     }
@@ -7923,10 +8013,42 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         return false;
                     }
                     if (set_pressure_refill_overlap) {
+                        phase = "random-set-pressure-clean-prefix-issue";
+                        const unsigned prefix_count =
+                            static_cast<unsigned>(pressure_loads.size());
+                        for (const auto &load : pressure_loads) {
+                            if (!environment.issue_load(load, 4096)) {
+                                return false;
+                            }
+                            coverage.sample(load);
+                        }
+                        phase = "random-set-pressure-clean-prefix-retire";
+                        if (!environment.run_until_load_writebacks(
+                                writebacks_before_pressure + prefix_count,
+                                set_pressure_completion_timeout)) {
+                            return false;
+                        }
+                        for (unsigned cycle = 0;
+                             cycle < set_pressure_completion_timeout &&
+                                 environment.lq_dequeued() <
+                                     lq_before_pressure + prefix_count;
+                             ++cycle) {
+                            if (!environment.run_cycles(1)) {
+                                return false;
+                            }
+                        }
+                        if (environment.lq_dequeued() !=
+                                lq_before_pressure + prefix_count ||
+                            !environment.set_rob_head(
+                                overlap_loads.front().rob,
+                                overlap_loads.front().rob_flag)) {
+                            return false;
+                        }
+                        phase = "random-set-pressure-clean-tail-issue";
                         for (unsigned window = 0; window < window_count;
                              ++window) {
-                            for (unsigned tag = dcache_ways; tag < depth;
-                                 ++tag) {
+                            for (unsigned tag = older_targets_per_window;
+                                 tag < depth; ++tag) {
                                 if (!issue_pressure_load(
                                         window * depth + tag)) {
                                     return false;
@@ -8026,7 +8148,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     for (const auto &window : pressure_windows) {
                         if (window_target_releases(window, false) <
-                            depth - dcache_ways) {
+                            depth - pressure_capacity_lines) {
                             phase =
                                 "random-set-pressure-clean-window-release";
                             return false;
@@ -8050,7 +8172,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         environment.lq_dequeued() - lq_before_pressure,
                     }};
                     const std::uint64_t minimum_target_releases =
-                        window_count * (depth - dcache_ways);
+                        window_count * (depth - pressure_capacity_lines);
                     const std::uint64_t overlap_load_count =
                         set_pressure_refill_overlap ? window_count : 0U;
                     if (manager_delta[2] != target_lines.size() ||
@@ -8092,6 +8214,18 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 } else {
                   const std::uint64_t requests_before_pressure =
                       environment.tilelink_requests();
+                  const bool qualify_ownership = set_pressure_refill_overlap;
+                  if (qualify_ownership) {
+                    ++constraint_coverage.set_pressure_ownership[0]; // attempts
+                    ++constraint_coverage.set_pressure_ownership[8]; // in flight
+                  }
+                  const std::array<std::uint64_t, 3> ownership_errors_before{{
+                      environment.dcache_error_response_requests(),
+                      environment.dcache_denied_d_beats(),
+                      environment.dcache_corrupt_d_beats(),
+                  }};
+                  const std::uint64_t all_requests_before_pressure =
+                      environment.tilelink_requests();
                   const std::uint64_t expected_releases_before =
                       environment.tilelink_expected_release_data_verified();
                   const std::uint64_t releases_before_pressure =
@@ -8104,16 +8238,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                       environment.sq_dequeued();
                   std::vector<std::uint64_t> store_lines;
                   store_lines.reserve(target_lines.size());
-                  for (unsigned index = 0; index < dcache_ways; ++index) {
+                  for (unsigned index = 0; index < pressure_capacity_lines; ++index) {
                     for (const auto &window : pressure_windows) {
                       store_lines.push_back(
-                          window.first_line + index * same_set_stride);
+                          window.first_line + index * pressure_stride);
                     }
                   }
-                  for (unsigned index = dcache_ways; index < depth; ++index) {
+                  for (unsigned index = pressure_capacity_lines; index < depth; ++index) {
                     for (const auto &window : pressure_windows) {
                       store_lines.push_back(
-                          window.first_line + index * same_set_stride);
+                          window.first_line + index * pressure_stride);
                     }
                   }
                   std::vector<memblock::StoreTransaction> pressure_stores;
@@ -8125,7 +8259,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                        ++index) {
                     const std::uint64_t line = store_lines[index];
                     const unsigned target_set = static_cast<unsigned>(
-                        (line / line_bytes) % dcache_sets);
+                        (line / line_bytes) % pressure_index_count);
                     environment.memory().fill_incrementing(
                         line, line_bytes,
                         static_cast<std::uint8_t>(0x31U + target_set +
@@ -8155,18 +8289,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     ++issue_orders[data_first ? 1U : 0U];
                   }
                   const auto issue_store_range = [&](std::size_t first,
-                                                     std::size_t last) {
+                                                     std::size_t last,
+                                                     bool already_enqueued = false) {
                     for (std::size_t index = first; index < last; ++index) {
                       const auto &store = pressure_stores[index];
                       const bool data_first =
                           pressure_store_data_first[index];
-                      environment.expect_store(store);
+                      if (!already_enqueued) {
+                        environment.expect_store(store);
+                      }
                       const bool issued =
                           (index != 0 ||
                            environment.set_rob_head(
                                store.rob, store.rob_flag)) &&
-                          environment.enqueue_store(
-                              store, memblock::lq_pointer_value(lq_offset)) &&
+                          (already_enqueued || environment.enqueue_store(
+                              store, memblock::lq_pointer_value(lq_offset))) &&
                           (data_first
                                ? environment.issue_store_data(store, 4096) &&
                                      environment
@@ -8186,7 +8323,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     return true;
                   };
                   const std::size_t baseline_stores =
-                      window_count * dcache_ways;
+                      window_count * pressure_capacity_lines;
                   // Commit each four-way half before the next one so an
                   // eight-window action stays below the SQ dispatch watermark.
                   const std::size_t baseline_batch_stores = window_count * 4U;
@@ -8213,6 +8350,32 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                       return false;
                     }
                   }
+                  if (qualify_ownership) {
+                    phase = "random-set-pressure-dirty-baseline-response-drain";
+                    if (!environment.run_until_dcache_idle(
+                            set_pressure_completion_timeout)) {
+                      return false;
+                    }
+                  }
+                  // Overflow stores are older than the overlap loads.
+                  // Dispatch all of their SQ allocations first; defer address
+                  // and data issue until every younger D response is held.
+                  if (set_pressure_refill_overlap) {
+                    phase = "random-set-pressure-dirty-overflow-enqueue";
+                    static_assert(
+                        RandomConstraints::set_pressure_window_class_count *
+                            (10U - 8U) <=
+                        memblock::kStoreQueueEntries - memblock::kSqEnqueueHeadroom);
+                    for (std::size_t index = baseline_stores;
+                         index < pressure_stores.size(); ++index) {
+                      environment.expect_store(pressure_stores[index]);
+                      if (!environment.enqueue_store(
+                              pressure_stores[index],
+                              memblock::lq_pointer_value(lq_offset))) {
+                        return false;
+                      }
+                    }
+                  }
                   std::vector<std::uint64_t>
                       target_releases_before_overlap;
                   target_releases_before_overlap.reserve(window_count);
@@ -8224,13 +8387,145 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   if (!start_refill_overlap(false)) {
                     return false;
                   }
+                  if (qualify_ownership) {
+                    // No DUT tick between this external proof and arming C
+                    // backpressure. Responsibility may reside in a writeback
+                    // queue; array residency is neither observed nor required.
+                    std::uint64_t bad_acquisitions = 0;
+                    for (std::size_t index = 0; index < baseline_stores; ++index) {
+                      const auto line = pressure_stores[index].address &
+                          ~std::uint64_t{63};
+                      bad_acquisitions +=
+                          environment.dcache_requests_covering_since(
+                              line, requests_before_pressure) != 1 ||
+                          environment.dcache_store_ntot_line_count_since(
+                              line, requests_before_pressure) != 1;
+                    }
+                    const bool errors_changed = ownership_errors_before !=
+                        std::array<std::uint64_t, 3>{{
+                            environment.dcache_error_response_requests(),
+                            environment.dcache_denied_d_beats(),
+                            environment.dcache_corrupt_d_beats(),
+                        }};
+                    const auto early_releases = target_releases(false);
+                    const bool ownership_qualified = bad_acquisitions == 0 &&
+                        !errors_changed && early_releases == 0;
+                    if (!ownership_qualified) {
+                      ++constraint_coverage.set_pressure_ownership[3];
+                      constraint_coverage.set_pressure_ownership[5] +=
+                          bad_acquisitions != 0;
+                      constraint_coverage.set_pressure_ownership[6] += errors_changed;
+                      constraint_coverage.set_pressure_ownership[7] += early_releases != 0;
+                      std::cerr << "MEMBLOCK_DIRTY_OWNERSHIP_REJECT"
+                                << " seed=" << options.seed << " action=" << actions
+                                << " attempt=" << ownership_attempt + 1U
+                                << " cycle=" << environment.cycle()
+                                << " bad_acquisitions=" << bad_acquisitions
+                                << " errors_changed=" << errors_changed
+                                << " early_releases=" << early_releases << '\n';
+                      // Keep every byte, identity and protocol oracle. Only the
+                      // unqualified overlap/stall minima are inapplicable.
+                      phase = "random-set-pressure-dirty-rejected-release-held";
+                      for (const auto line : overlap_lines) {
+                        if (!environment.release_held_dcache_response_at(line)) {
+                          return false;
+                        }
+                      }
+                      phase = "random-set-pressure-dirty-rejected-overflow";
+                      if (!issue_store_range(
+                              baseline_stores, pressure_stores.size(), true) ||
+                          !environment.run_until_store_complete(
+                              set_pressure_completion_timeout)) {
+                        return false;
+                      }
+                      for (std::size_t index = baseline_stores;
+                           index < pressure_stores.size(); ++index) {
+                        if (!environment.commit_store(pressure_stores[index], 8192)) {
+                          return false;
+                        }
+                      }
+                      phase = "random-set-pressure-dirty-rejected-drain";
+                      if (!environment.set_rob_head(
+                              overlap_loads.front().rob, overlap_loads.front().rob_flag) ||
+                          !environment.run_until_all_complete(set_pressure_completion_timeout) ||
+                          !environment.run_until_queues_retired(8192) ||
+                          !environment.run_until_sbuffer_empty(set_pressure_completion_timeout) ||
+                          !environment.run_until_dcache_idle(set_pressure_completion_timeout) ||
+                          !environment.run_until_dcache_release_idle(set_pressure_completion_timeout) ||
+                          !environment.run_until_dcache_idle(set_pressure_completion_timeout)) {
+                        return false;
+                      }
+                      std::uint64_t target_requests = 0;
+                      std::uint64_t held_requests = 0;
+                      std::uint64_t preserved_stores = 0;
+                      constexpr std::array<memblock::LoadOp, 4> read_ops{{
+                          memblock::LoadOp::lbu, memblock::LoadOp::lhu,
+                          memblock::LoadOp::lwu, memblock::LoadOp::ld,
+                      }};
+                      const auto value_mask = width_bytes == 8 ? ~std::uint64_t{0}
+                          : (std::uint64_t{1} << (width_bytes * 8U)) - 1U;
+                      for (const auto &store : pressure_stores) {
+                        const auto line_requests = environment.dcache_requests_covering_since(
+                            store.address & ~std::uint64_t{63}, requests_before_pressure);
+                        // Even unqualified cold-store construction must fetch
+                        // each target. Extra legal acquisitions cannot hide a
+                        // missing target's request through aggregate accounting.
+                        if (line_requests == 0) {
+                          phase = "random-set-pressure-dirty-rejected-missing-target-request";
+                          return false;
+                        }
+                        target_requests += line_requests;
+                        preserved_stores += environment.bus_expected_load(
+                            store.address, read_ops[set_pressure_width]) ==
+                            (store.data & value_mask);
+                      }
+                      for (const auto line : overlap_lines) {
+                        held_requests += environment.dcache_requests_covering_since(
+                            line, overlap_requests_before);
+                      }
+                      const std::array<std::uint64_t, 18> rejected_delta{{
+                          1, pressure_stores.size(), baseline_stores,
+                          pressure_stores.size() - baseline_stores, window_count,
+                          target_requests, held_requests,
+                          environment.store_writebacks() - writebacks_before_pressure,
+                          environment.sq_dequeued() - sq_before_pressure,
+                          environment.writebacks() - overlap_writebacks_before,
+                          environment.lq_dequeued() - overlap_lq_before,
+                          target_releases(false), target_releases(true),
+                          environment.tilelink_release_data() - releases_before_pressure,
+                          environment.tilelink_release_data_verified() - verified_before_pressure,
+                          environment.tilelink_expected_release_data_verified() - expected_releases_before,
+                          preserved_stores,
+                          environment.tilelink_requests() - all_requests_before_pressure,
+                      }};
+                      if (!ConstraintCoverage::rejected_pressure_accounting_valid(
+                              rejected_delta, issue_orders)) {
+                        phase = "random-set-pressure-dirty-rejected-accounting";
+                        return false;
+                      }
+                      for (unsigned i = 0; i < rejected_delta.size(); ++i) {
+                        constraint_coverage.set_pressure_rejected_manager[i] += rejected_delta[i];
+                      }
+                      for (unsigned i = 0; i < issue_orders.size(); ++i) {
+                        constraint_coverage.set_pressure_rejected_issue_orders[i] += issue_orders[i];
+                      }
+                      ++constraint_coverage.set_pressure_ownership[4]; // cleaned
+                      --constraint_coverage.set_pressure_ownership[8];
+                      coverage.cacheable += pressure_stores.size();
+                      environment.end_dcache_release_observation();
+                      environment.clear_release_line_expectations();
+                      continue;
+                    }
+                    ++constraint_coverage.set_pressure_ownership[1]; // qualified
+                  }
                   phase = "random-set-pressure-dirty-release-backpressure";
                   if (!begin_release_backpressure(true)) {
                     return false;
                   }
                   phase = "random-set-pressure-dirty-overflow-issue";
                   if (!issue_store_range(
-                          baseline_stores, pressure_stores.size()) ||
+                          baseline_stores, pressure_stores.size(),
+                          set_pressure_refill_overlap) ||
                       !environment.run_until_store_complete(
                           constrained_completion_timeout)) {
                     return false;
@@ -8261,7 +8556,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                           set_pressure_completion_timeout) ||
                       !environment.run_until_expected_release_data_count(
                           expected_releases_before +
-                              window_count * (depth - dcache_ways),
+                              window_count * (depth - pressure_capacity_lines),
                           set_pressure_completion_timeout) ||
                       !environment.run_until_dcache_idle(
                           set_pressure_completion_timeout)) {
@@ -8303,7 +8598,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   }
                   for (const auto &window : pressure_windows) {
                     if (window_target_releases(window, true) <
-                        depth - dcache_ways) {
+                        depth - pressure_capacity_lines) {
                       phase = "random-set-pressure-dirty-window-release";
                       return false;
                     }
@@ -8326,7 +8621,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   const auto overlap_delta = overlap_manager_delta();
                   if (manager_delta[2] != target_lines.size() ||
                       manager_delta[3] <
-                          window_count * (depth - dcache_ways) ||
+                          window_count * (depth - pressure_capacity_lines) ||
                       manager_delta[4] < manager_delta[3] ||
                       manager_delta[5] != manager_delta[4] ||
                       manager_delta[6] != target_lines.size() ||
@@ -8358,9 +8653,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                       translation.regime, set_pressure_set, issue_orders,
                       manager_delta, {}, overlap_delta,
                       backpressure_manager_delta);
+                  if (qualify_ownership) {
+                    ++constraint_coverage.set_pressure_ownership[2]; // accepted
+                    --constraint_coverage.set_pressure_ownership[8];
+                  }
                   ordinary_leaf_addressed = true;
                   ++actions;
                   coverage.cacheable += target_lines.size();
+                }
+                if (restore_stride_prefetch &&
+                    !environment.configure_stride_prefetch(true)) {
+                  return false;
+                }
+                pressure_action_accepted = true;
+                }
+                if (!pressure_action_accepted) {
+                  phase = "stimulus_construction_exhausted:dirty-ownership:attempts=4";
+                  return false;
                 }
             } else if (kind == RandomConstraints::miss_burst) {
                 phase = "random-miss-burst";
@@ -10210,8 +10519,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         environment.tilelink_requests();
                     const std::uint64_t uncache_before =
                         environment.uncache_requests();
-                    const auto feedback_before =
-                        environment.scalar_load_feedback_stats();
                     const std::string operation_phase = phase;
                     bool completed_load = false;
                     if (physical_pmp_denied || physical_pma_execute_denied) {
@@ -10320,39 +10627,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         phase = detail.str();
                         return false;
                     }
-                    if (physical_pma_execute_denied || physical_pmp_denied) {
-                        const auto feedback_after =
-                            environment.scalar_load_feedback_stats();
-                        std::uint64_t wakeups = 0;
-                        std::uint64_t cancels = 0;
-                        bool all_wakeups_canceled = true;
-                        for (unsigned lane = 0;
-                             lane < memblock::kScalarLoadLanes; ++lane) {
-                            const std::uint64_t lane_wakeups =
-                                feedback_after.wakeups[lane] -
-                                feedback_before.wakeups[lane];
-                            const std::uint64_t lane_cancels =
-                                feedback_after.ld2_cancels[lane] -
-                                feedback_before.ld2_cancels[lane];
-                            wakeups += lane_wakeups;
-                            cancels += lane_cancels;
-                            all_wakeups_canceled &= lane_wakeups == 0 ||
-                                (lane_cancels != 0 &&
-                                 feedback_after.last_cancel_cycle[lane] >=
-                                     feedback_after.last_wakeup[lane].cycle);
-                        }
-                        if (cancels == 0 || !all_wakeups_canceled) {
-                            std::ostringstream detail;
-                            detail << phase
-                                   << ":hypervisor-fault-wakeup"
-                                   << ":pmp_relation="
-                                   << hypervisor_pmp_relation
-                                   << ":wakeups=" << wakeups
-                                   << ":cancels=" << cancels;
-                            phase = detail.str();
-                            return false;
-                        }
-                    }
+                    // Early wakeup/cancel pulse counts are diagnostic. Exact
+                    // fault completion, RF suppression, manager restrictions,
+                    // and identity-specific queue recovery above decide PASS.
                 }
                 if (!activate_translation_context(translation)) {
                     return false;
@@ -11050,6 +11327,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         return true;
     }();
 
+    report_progress(true);
     if (!completed) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=" << actions

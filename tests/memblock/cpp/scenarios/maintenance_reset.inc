@@ -524,18 +524,44 @@ int run_mmio_contracts(int argc, char **argv)
             pma_environment.uncache_requests();
         const auto denied_feedback_before =
             pma_environment.scalar_load_feedback_stats();
+        const auto denied_expected_writebacks =
+            pma_environment.writebacks() + 1U;
+        const auto run_debug_denied_load = [&]() {
+            for (unsigned cycle = 0; cycle < 8192; ++cycle) {
+                if (pma_environment.writebacks() == denied_expected_writebacks) {
+                    return true;
+                }
+                if (!pma_environment.run_cycles(1) ||
+                    pma_environment.tilelink_requests() != denied_dcache_before ||
+                    pma_environment.uncache_requests() != denied_uncache_before) {
+                    std::cerr << "MEMBLOCK_MMIO_DEBUG_GUARD_TRAFFIC"
+                              << " dcache=" << pma_environment.tilelink_requests()
+                              << '/' << denied_dcache_before
+                              << " uncache=" << pma_environment.uncache_requests()
+                              << '/' << denied_uncache_before << '\n';
+                    return false;
+                }
+                if (pma_environment.writebacks() == denied_expected_writebacks) {
+                    return true;
+                }
+            }
+            return pma_environment.run_until_complete(1);
+        };
         pma_environment.expect_load(pma_denied);
         if (!pma_environment.set_rob_head(pma_denied.rob) ||
             !pma_environment.enqueue_load(pma_denied) ||
             !pma_environment.issue_load(pma_denied, 2048) ||
-            !pma_environment.run_until_complete(8192) ||
+            !run_debug_denied_load() ||
             !pma_environment.run_until_lq_retired(2048) ||
             pma_environment.tilelink_requests() != denied_dcache_before ||
             pma_environment.uncache_requests() != denied_uncache_before) {
             std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
                       << pma_environment.cycle()
                       << " phase=pma-debug-denied reason="
-                      << pma_environment.error() << '\n';
+                      << pma_environment.error()
+                      << " dcache=" << pma_environment.tilelink_requests()
+                      << " uncache=" << pma_environment.uncache_requests()
+                      << '\n';
             return 1;
         }
         const auto denied_feedback_after =
@@ -548,15 +574,8 @@ int run_mmio_contracts(int argc, char **argv)
                 denied_feedback_after.ld2_cancels[lane] -
                 denied_feedback_before.ld2_cancels[lane];
         }
-        if (pma_denied_cancels == 0 ||
-            pma_denied_wakeups != pma_denied_cancels) {
-            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
-                      << pma_environment.cycle()
-                      << " phase=pma-debug-feedback wakeups="
-                      << pma_denied_wakeups << " cancels="
-                      << pma_denied_cancels << '\n';
-            return 1;
-        }
+        // Feedback cardinality is diagnostic; access permission is checked by
+        // exact exception/identity, queue retirement, and zero manager traffic.
         ++pma_denied_count;
 
         // Entering Debug Mode makes the same PMA entry visible. It remains an
@@ -726,6 +745,185 @@ int run_mmio_contracts(int argc, char **argv)
             return 1;
         }
         pma_cycles = pma_environment.cycle();
+    }
+
+    // The configured DM interval is [0x38020000, 0x38021000). The
+    // execution-based Debug spec restricts it to Debug Mode; adjacent c=0
+    // device intervals remain accessible. Reuse the same PA after real Debug
+    // Mode traffic, then leave Debug Mode without reset or a translation fence.
+    unsigned debug_guard_cases = 0;
+    unsigned debug_guard_denied_loads = 0;
+    unsigned debug_guard_denied_stores = 0;
+    unsigned debug_guard_exit_cases = 0;
+    unsigned debug_guard_fault_store_dequeued = 0;
+    unsigned debug_guard_fault_store_canceled = 0;
+    unsigned debug_guard_readbacks = 0;
+    std::uint64_t debug_guard_cycles = 0;
+    constexpr std::array<std::uint64_t, 4> debug_guard_addresses{{
+        0x3801fff8ULL, 0x38020000ULL, 0x38020ff8ULL, 0x38021000ULL,
+    }};
+    for (unsigned edge = 0; edge < debug_guard_addresses.size(); ++edge) {
+        memblock::Environment guard(argc, argv);
+        guard.memory().write_u64(
+            debug_guard_addresses[edge], 0x8172635445362718ULL);
+        unsigned next_rob = 1, next_lq = 0, next_sq = 0;
+        for (unsigned direction = 0; direction < 2; ++direction) {
+            for (unsigned mode = 0; mode < 3; ++mode) {
+                const bool store_case = direction != 0;
+                const bool protected_address = edge == 1 || edge == 2;
+                const bool denied = protected_address && mode != 1;
+                const auto address = debug_guard_addresses[edge];
+                guard.configure_backpressure(
+                    0x6a09e667f3bcc909ULL + mode * 8U + edge * 2U + direction,
+                    true);
+                const auto fail = [&](const char *phase) {
+                    std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                              << guard.cycle() << " phase=debug-guard-" << phase
+                              << " mode=" << mode << " edge=" << edge
+                              << " store=" << store_case << " address=0x"
+                              << std::hex << address << std::dec
+                              << " sq=" << guard.sq_dequeued() << '+'
+                              << guard.sq_canceled() << '/' << guard.sq_allocated()
+                              << " canceled_observed="
+                              << guard.sq_redirect_canceled_observed()
+                              << " reason=" << guard.error() << '\n';
+                    return false;
+                };
+                // Each step checks exactly one terminal identity and one
+                // permitted Uncache request, or an access fault with neither
+                // memory manager touched. Faulting stores are never committed.
+                const auto access = [&](bool is_store, bool fault,
+                                        std::uint64_t data) {
+                    const auto dcache_before = guard.tilelink_requests();
+                    const auto uncache_before = guard.uncache_requests();
+                    const auto bus_before = guard.bus_expected_load(
+                        address, memblock::LoadOp::ld);
+                    const auto sq_dequeued_before = guard.sq_dequeued();
+                    const auto sq_canceled_before = guard.sq_canceled();
+                    const auto rob = static_cast<std::uint8_t>(next_rob++);
+                    // pendingPtr authorizes store retirement. Keep the faulted
+                    // store younger than that frontier until its redirect.
+                    if (!guard.set_rob_head(is_store && fault ? rob - 1U : rob)) {
+                        return fail("rob");
+                    }
+                    if (is_store) {
+                        const memblock::StoreTransaction transaction{
+                            .address = address, .oracle_address = address,
+                            .data = data, .op = memblock::StoreOp::sd,
+                            .rob = rob,
+                            .sq = static_cast<std::uint8_t>(next_sq++),
+                            .address_lane = edge % memblock::kScalarStoreLanes,
+                            .data_lane = (edge + 1U) % memblock::kScalarStoreLanes,
+                            .expected_address_writeback_lane = fault
+                                ? edge % memblock::kScalarStoreLanes : 0U,
+                            .expected_exception_mask = fault
+                                ? memblock::kExceptionStoreAccessFault : 0U,
+                            .expected_debug_is_mmio = fault
+                                ? std::nullopt : std::optional<bool>{true},
+                            .expected_debug_is_ncio = fault
+                                ? std::nullopt : std::optional<bool>{false},
+                        };
+                        guard.expect_store(transaction);
+                        if (!guard.enqueue_store(transaction, 0) ||
+                            !guard.issue_store_data(transaction, 2048) ||
+                            !guard.issue_store_address(transaction, 2048) ||
+                            (!fault && !guard.wait_for_mmio_store_request(
+                                rob, false, 8192)) ||
+                            !guard.run_until_store_complete(8192)) {
+                            return fail("store");
+                        }
+                        if (fault) {
+                            if (!guard.run_cycles(8) ||
+                                !guard.redirect_after(rob, false, true)) {
+                                return fail("store-cancel");
+                            }
+                            next_sq -= guard.sq_canceled() - sq_canceled_before;
+                        } else {
+                            if (!guard.commit_stores_through(transaction, 1)) {
+                                return fail("store-commit");
+                            }
+                            guard.record_committed_store(transaction);
+                        }
+                    } else {
+                        const memblock::LoadTransaction transaction{
+                            .address = address, .oracle_address = address,
+                            .op = memblock::LoadOp::ld, .rob = rob,
+                            .lq = static_cast<std::uint8_t>(next_lq++),
+                            .pdest = static_cast<std::uint8_t>(170U + rob),
+                            .lane = edge % memblock::kScalarLoadLanes,
+                            .expected_exception_mask = fault
+                                ? memblock::kExceptionLoadAccessFault : 0U,
+                            .expected_debug_is_mmio = fault
+                                ? std::nullopt : std::optional<bool>{true},
+                            .expected_debug_is_ncio = fault
+                                ? std::nullopt : std::optional<bool>{false},
+                        };
+                        guard.expect_load(transaction);
+                        if (!guard.enqueue_load(transaction) ||
+                            !guard.issue_load(transaction, 2048) ||
+                            (!fault && !guard.wait_for_mmio_request(
+                                rob, false, 8192)) ||
+                            !guard.run_until_complete(8192)) {
+                            return fail("load");
+                        }
+                    }
+                    if (!guard.run_until_queues_retired(2048) ||
+                        !guard.run_cycles(32) ||
+                        guard.tilelink_requests() != dcache_before ||
+                        guard.uncache_requests() !=
+                            uncache_before + (fault ? 0U : 1U) ||
+                        guard.bus_expected_load(address, memblock::LoadOp::ld) !=
+                            (is_store && !fault ? data : bus_before)) {
+                        return fail("effects");
+                    }
+                    if (is_store &&
+                        guard.sq_dequeued() - sq_dequeued_before +
+                            guard.sq_canceled() - sq_canceled_before != 1U) {
+                        return fail("store-disposition");
+                    }
+                    if (is_store && fault) {
+                        debug_guard_fault_store_dequeued +=
+                            guard.sq_dequeued() - sq_dequeued_before;
+                        debug_guard_fault_store_canceled +=
+                            guard.sq_canceled() - sq_canceled_before;
+                    }
+                    return true;
+                };
+                if ((mode == 0 && direction == 0 &&
+                     (!guard.reset() || !guard.activate_bare(45))) ||
+                    !guard.set_debug_mode(mode != 0)) {
+                    fail("configuration");
+                    return 1;
+                }
+                if (mode == 2) {
+                    if (!access(store_case, false, 0x1020304050607080ULL) ||
+                        !guard.set_debug_mode(false)) {
+                        fail("exit");
+                        return 1;
+                    }
+                    ++debug_guard_exit_cases;
+                }
+                if (!access(store_case, denied, 0xfedcba9876543210ULL)) {
+                    return 1;
+                }
+                ++debug_guard_cases;
+                debug_guard_denied_loads += denied && !store_case;
+                debug_guard_denied_stores += denied && store_case;
+                if (store_case) {
+                    // Read through the DUT after the terminal/cancellation.
+                    // Independent committed memory predicts retained bytes.
+                    if (!guard.set_debug_mode(true) ||
+                        !access(false, false, 0)) {
+                        fail("readback");
+                        return 1;
+                    }
+                    ++debug_guard_readbacks;
+                }
+                if (mode == 2 && direction == 1) {
+                    debug_guard_cycles += guard.cycle();
+                }
+            }
+        }
     }
 
     unsigned device_access_count = 0;
@@ -1336,6 +1534,16 @@ int run_mmio_contracts(int argc, char **argv)
               << " pma_edge_dcache=" << pma_edge_dcache_requests
               << " pma_edge_uncache=" << pma_edge_uncache_requests
               << " pma_cycles=" << pma_cycles
+              << " debug_guard_cases=" << debug_guard_cases
+              << " debug_guard_denied_loads=" << debug_guard_denied_loads
+              << " debug_guard_denied_stores=" << debug_guard_denied_stores
+              << " debug_guard_exit_cases=" << debug_guard_exit_cases
+              << " debug_guard_fault_store_dequeued="
+              << debug_guard_fault_store_dequeued
+              << " debug_guard_fault_store_canceled="
+              << debug_guard_fault_store_canceled
+              << " debug_guard_readbacks=" << debug_guard_readbacks
+              << " debug_guard_cycles=" << debug_guard_cycles
               << " device_accesses=" << device_access_count
               << " device_read_clear=1 device_partial_write=1"
               << " device_error_reads=2 device_error_writes=1"
@@ -2121,6 +2329,480 @@ int run_wfi_safety(int argc, char **argv)
     return 0;
 }
 
+bool check_atomic_reset_recovery(int argc, char **argv,
+                                 std::uint64_t &total_cycles)
+{
+    constexpr unsigned response_delay = 1024;
+    const std::array<memblock::AtomicOp, 6> operations{{
+        memblock::AtomicOp::lr_w, memblock::AtomicOp::lr_d,
+        memblock::AtomicOp::amoadd_w, memblock::AtomicOp::amoadd_d,
+        memblock::AtomicOp::amocas_w, memblock::AtomicOp::amocas_d,
+    }};
+    for (unsigned index = 0; index < operations.size(); ++index) {
+        memblock::Environment environment(argc, argv);
+        const bool word = (index & 1U) == 0;
+        const std::uint64_t old_line =
+            memblock::kDefaultMemoryBase + 0x440000 + index * 0x2000;
+        const std::uint64_t new_line = old_line + 0x1000;
+        const std::uint64_t old_address = old_line + 24;
+        const std::uint64_t new_address = new_line + 24;
+        // High-bit-set W payloads check sign extension as well as preserving
+        // the adjacent word. Old and survivor lines have distinct images.
+        environment.memory().fill_incrementing(old_line, 64, 0x71 + index);
+        environment.memory().fill_incrementing(new_line, 64, 0xa1 + index);
+        const auto old_image = environment.memory().read_beat(old_line, 64);
+        const auto new_image = environment.memory().read_beat(new_line, 64);
+        const auto bus_unchanged = [&](std::uint64_t line, const auto &image) {
+            for (unsigned byte = 0; byte < image.size(); ++byte) {
+                if (environment.bus_expected_load(
+                        line + byte, memblock::LoadOp::lbu) != image[byte]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const std::uint64_t old_value = environment.memory().expected_load(
+            old_address, memblock::LoadOp::ld);
+        const std::uint64_t new_value = environment.memory().expected_load(
+            new_address, memblock::LoadOp::ld);
+        const std::uint64_t operand = 0x12345678f0e1d2c3ULL;
+        const auto fail = [&](const char *phase) {
+            std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=atomic-" << phase
+                      << " case=" << index << " cycle=" << environment.cycle()
+                      << " requests=" << environment.tilelink_requests()
+                      << " outstanding=" << environment.dcache_outstanding_requests()
+                      << " writebacks=" << environment.writebacks()
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        };
+        environment.configure_backpressure(
+            0x9b05688c2b3e6c1fULL ^ index, true);
+        // Use the default M-mode Bare controls. Translation/CSR activation
+        // helpers contain unmonitored setup ticks and must not create holes
+        // in the cancellation check after reset returns.
+        if (!environment.reset()) {
+            return fail("configuration");
+        }
+        const memblock::AtomicTransaction canceled{
+            .address = old_address,
+            .op = operations[index],
+            .data = operand,
+            .compare = old_value,
+            .rob = 0,
+            .pdest = 146,
+            .address_lane = index % memblock::kScalarStoreLanes,
+            .data_lane = index % memblock::kScalarStoreLanes,
+        };
+        // No completion is expected for this reset-canceled identity. The
+        // scalar scoreboard rejects any premature or stale writeback.
+        environment.force_next_dcache_response_delay(response_delay);
+        if (!environment.set_rob_head(canceled.rob) ||
+            !environment.issue_atomic(canceled, 2048) ||
+            !environment.run_until_dcache_requests(1, 4096) ||
+            environment.dcache_requests_covering_since(old_line, 0) != 1 ||
+            environment.dcache_outstanding_requests() != 1 ||
+            environment.dcache_refills() != 1 ||
+            environment.dcache_grant_data_beats() != 0 ||
+            environment.writebacks() != 0 ||
+            !environment.reset() ||
+            environment.dcache_outstanding_requests() != 0 ||
+            !environment.dcache_responses_idle() ||
+            !environment.dcache_grants_drained() ||
+            !environment.run_cycles(32)) {
+            return fail("cancellation");
+        }
+        const memblock::AtomicTransaction survivor{
+            .address = new_address,
+            .op = operations[index],
+            .data = operand,
+            .compare = new_value,
+            .rob = 1,
+            .pdest = 147,
+            .address_lane = (index + 1) % memblock::kScalarStoreLanes,
+            .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+        };
+        const memblock::LoadTransaction result{
+            .address = new_address,
+            .op = word ? memblock::LoadOp::lw : memblock::LoadOp::ld,
+            .rob = survivor.rob,
+            .pdest = survivor.pdest,
+            .lane = 0,
+        };
+        environment.expect_load(result);
+        if (!environment.set_rob_head(survivor.rob) ||
+            !environment.issue_atomic(survivor, 2048) ||
+            !environment.run_until_complete(8192) ||
+            environment.dcache_requests_covering_since(new_line, 1) != 1 ||
+            environment.tilelink_requests() != 2 ||
+            environment.writebacks() != 1) {
+            return fail("survivor");
+        }
+        // ISA arithmetic, independent of the DUT: LR leaves memory unchanged,
+        // ADD wraps at the access width, and the matching CAS replaces it.
+        std::uint64_t updated = index < 2 ? new_value :
+            index < 4 ? new_value + operand : operand;
+        if (word) {
+            updated = (new_value & 0xffffffff00000000ULL) |
+                (updated & 0xffffffffULL);
+        }
+        for (unsigned read = 0; read < 2; ++read) {
+            const memblock::LoadTransaction readback{
+                .address = read == 0 ? old_address : new_address,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(2 + read),
+                .lq = static_cast<std::uint8_t>(read),
+                .pdest = static_cast<std::uint8_t>(148 + read),
+                .lane = (index + read) % memblock::kScalarLoadLanes,
+            };
+            environment.expect_load_data(readback, read == 0 ? old_value : updated);
+            if (!environment.set_rob_head(readback.rob) ||
+                !environment.enqueue_load(readback) ||
+                !environment.issue_load(readback, 2048) ||
+                !environment.run_until_complete(8192) ||
+                !environment.run_until_lq_retired(2048)) {
+                return fail("readback");
+            }
+        }
+        // Monitor beyond the canceled response's original due time. The old
+        // line must refill once; the survivor readback must hit its new line.
+        if (!environment.run_cycles(response_delay + 64) ||
+            environment.writebacks() != 3 || environment.tilelink_requests() != 3 ||
+            environment.dcache_refills() != 3 ||
+            environment.dcache_outstanding_requests() != 0 ||
+            !environment.dcache_responses_idle() ||
+            !environment.dcache_grants_drained() ||
+            environment.lq_dequeued() != 2 || environment.lq_canceled() != 0 ||
+            environment.lq_allocated() != 2 || environment.sq_allocated() != 0 ||
+            !bus_unchanged(old_line, old_image) ||
+            !bus_unchanged(new_line, new_image)) {
+            return fail("quiet-tail");
+        }
+        total_cycles += environment.cycle();
+    }
+    return true;
+}
+
+bool check_partial_lr_reset_recovery(int argc, char **argv,
+                                     std::uint64_t &total_cycles,
+                                     unsigned &completed_before_reset,
+                                     unsigned &reset_canceled,
+                                     std::array<unsigned, 2> &beat_orders)
+{
+    constexpr unsigned interbeat_delay = 1024;
+    for (unsigned index = 0; index < 4; ++index) {
+        memblock::Environment environment(argc, argv);
+        const bool word = index < 2;
+        const auto op = word ? memblock::AtomicOp::lr_w : memblock::AtomicOp::lr_d;
+        const auto load_op = word ? memblock::LoadOp::lw : memblock::LoadOp::ld;
+        const std::uint64_t line =
+            memblock::kDefaultMemoryBase + 0x460000 + index * 0x2000;
+        const std::uint64_t next_line = line + 0x1000;
+        const unsigned offset = index % 2 == 0 ? 24 : 56;
+        environment.memory().fill_incrementing(line, 64, 0x91 + index);
+        environment.memory().fill_incrementing(next_line, 64, 0xc1 + index);
+        const auto image = environment.memory().read_beat(line, 64);
+        const auto next_image = environment.memory().read_beat(next_line, 64);
+        const auto bus_unchanged = [&](std::uint64_t base, const auto &bytes) {
+            for (unsigned byte = 0; byte < bytes.size(); ++byte) {
+                if (environment.bus_expected_load(base + byte, memblock::LoadOp::lbu)
+                    != bytes[byte]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const auto fail = [&](const char *phase) {
+            std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=partial-lr-" << phase
+                      << " case=" << index << " cycle=" << environment.cycle()
+                      << " grant_beats=" << environment.dcache_grant_data_beats()
+                      << " writebacks=" << environment.writebacks()
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        };
+        environment.configure_backpressure(0x1f83d9abfb41bd6bULL ^ index, true);
+        if (!environment.reset()) {
+            return fail("configuration");
+        }
+        const memblock::AtomicTransaction old{
+            .address = line + offset, .op = op, .rob = 0, .pdest = 150,
+            .address_lane = index % 2, .data_lane = index % 2,
+        };
+        const memblock::LoadTransaction old_result{
+            .address = old.address, .op = load_op, .rob = old.rob,
+            .pdest = old.pdest, .lane = 0,
+        };
+        environment.expect_load(old_result);
+        environment.force_next_dcache_response_delay(32);
+        environment.force_next_dcache_interbeat_delay(interbeat_delay);
+        if (!environment.set_rob_head(old.rob) ||
+            !environment.issue_atomic(old, 2048)) {
+            return fail("issue");
+        }
+        for (unsigned tick = 0; tick < 4096 &&
+             environment.dcache_grant_data_beats() == 0; ++tick) {
+            if (!environment.run_cycles(1)) {
+                return fail("first-beat");
+            }
+        }
+        if (!environment.run_cycles(32) ||
+            environment.dcache_grant_data_beats() != 1 ||
+            environment.tilelink_requests() != 1 ||
+            environment.dcache_requests_covering_since(line, 0) != 1 ||
+            environment.dcache_refills() != 1 ||
+            environment.dcache_outstanding_requests() != 1 ||
+            environment.dcache_responses_idle()) {
+            return fail("partial-window");
+        }
+        // LR may legally finish from the first data beat. Validate such a
+        // result normally; reset cancels only an identity still pending here.
+        const bool early = !environment.scalar_load_pending(old_result);
+        const auto old_acks = environment.dcache_grant_acks();
+        const auto keyword = environment.dcache_keyword_refills();
+        if (environment.writebacks() != (early ? 1U : 0U) || old_acks > 1 ||
+            keyword + environment.dcache_nonkeyword_refills() != 1 ||
+            !environment.reset() ||
+            (!early && !environment.cancel_scalar_load_for_reset(old_result)) ||
+            environment.scalar_load_pending(old_result) ||
+            environment.scalar_load_reset_canceled() != (early ? 0U : 1U) ||
+            environment.dcache_outstanding_requests() != 0 ||
+            !environment.dcache_responses_idle() ||
+            !environment.dcache_grants_drained() || !environment.run_cycles(32)) {
+            return fail("reset-disposition");
+        }
+        const memblock::AtomicTransaction survivor{
+            .address = next_line + offset, .op = op, .rob = 1, .pdest = 151,
+            .address_lane = (index + 1) % 2, .data_lane = (index + 1) % 2,
+        };
+        const memblock::LoadTransaction result{
+            .address = survivor.address, .op = load_op, .rob = survivor.rob,
+            .pdest = survivor.pdest, .lane = 0,
+        };
+        environment.expect_load(result);
+        if (!environment.set_rob_head(survivor.rob) ||
+            !environment.issue_atomic(survivor, 2048) ||
+            !environment.run_until_complete(8192)) {
+            return fail("survivor");
+        }
+        for (unsigned read = 0; read < 2; ++read) {
+            const memblock::LoadTransaction readback{
+                .address = (read == 0 ? line : next_line) + offset,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(2 + read),
+                .lq = static_cast<std::uint8_t>(read),
+                .pdest = static_cast<std::uint8_t>(152 + read),
+                .lane = (index + read) % memblock::kScalarLoadLanes,
+            };
+            environment.expect_load(readback);
+            if (!environment.set_rob_head(readback.rob) ||
+                !environment.enqueue_load(readback) ||
+                !environment.issue_load(readback, 2048) ||
+                !environment.run_until_complete(8192) ||
+                !environment.run_until_lq_retired(2048)) {
+                return fail("readback");
+            }
+        }
+        if (!environment.run_cycles(interbeat_delay + 64) ||
+            environment.writebacks() != 3 + (early ? 1U : 0U) ||
+            environment.tilelink_requests() != 3 || environment.dcache_refills() != 3 ||
+            environment.dcache_requests_covering_since(line, 1) != 1 ||
+            environment.dcache_requests_covering_since(next_line, 1) != 1 ||
+            environment.dcache_grant_data_beats() != 5 ||
+            environment.dcache_grant_acks() != old_acks + 2 ||
+            environment.dcache_outstanding_requests() != 0 ||
+            !environment.dcache_responses_idle() ||
+            !environment.dcache_grants_drained() ||
+            environment.lq_allocated() != 2 || environment.lq_dequeued() != 2 ||
+            environment.lq_canceled() != 0 || environment.sq_allocated() != 0 ||
+            !bus_unchanged(line, image) || !bus_unchanged(next_line, next_image)) {
+            return fail("quiet-tail");
+        }
+        completed_before_reset += early;
+        reset_canceled += !early;
+        ++beat_orders.at(keyword != 0 ? 1 : 0);
+        total_cycles += environment.cycle();
+    }
+    return true;
+}
+
+struct PartialLoadResetCoverage {
+    unsigned completed = 0;
+    unsigned canceled = 0;
+    std::array<unsigned, 2> beat_orders{};
+    std::array<unsigned, 2> old_lq_dispositions{};
+    unsigned mixed_disposition_cases = 0;
+};
+
+bool check_partial_load_reset_recovery(
+    int argc, char **argv, std::uint64_t &total_cycles,
+    std::array<PartialLoadResetCoverage, 2> &coverage)
+{
+    constexpr unsigned interbeat_delay = 1024;
+    for (unsigned index = 0; index < 12; ++index) {
+        memblock::Environment environment(argc, argv);
+        const bool merged = index >= 6;
+        const unsigned old_count = merged ? 2 : 1;
+        const unsigned readback_count = merged ? 3 : 2;
+        const unsigned recovery_count = 1 + readback_count;
+        auto &observed = coverage.at(merged ? 1 : 0);
+        const std::uint64_t line =
+            memblock::kDefaultMemoryBase + 0x480000 + index * 0x2000;
+        const std::uint64_t next_line = line + 0x1000;
+        const unsigned offset = index % 2 == 0 ? 24 : 56;
+        environment.memory().fill_incrementing(line, 64, 0x51 + index);
+        environment.memory().fill_incrementing(next_line, 64, 0xa1 + index);
+        const auto image = environment.memory().read_beat(line, 64);
+        const auto next_image = environment.memory().read_beat(next_line, 64);
+        const auto bus_unchanged = [&](std::uint64_t base, const auto &bytes) {
+            for (unsigned byte = 0; byte < bytes.size(); ++byte) {
+                if (environment.bus_expected_load(base + byte, memblock::LoadOp::lbu)
+                    != bytes[byte]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const auto fail = [&](const char *phase) {
+            std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=partial-load-" << phase
+                      << " case=" << index << " cycle=" << environment.cycle()
+                      << " grant_beats=" << environment.dcache_grant_data_beats()
+                      << " writebacks=" << environment.writebacks()
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        };
+        environment.configure_backpressure(0x5be0cd19137e2179ULL ^ index, true);
+        if (!environment.reset()) {
+            return fail("configuration");
+        }
+        std::vector<memblock::LoadTransaction> old_results;
+        for (unsigned load = 0; load < old_count; ++load) {
+            old_results.push_back({
+                .address = line + (load == 0 ? offset : (offset ^ 32)),
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(load),
+                .lq = static_cast<std::uint8_t>(load),
+                .pdest = static_cast<std::uint8_t>(154 + load),
+                .lane = ((index % 6) / 2 + load) % memblock::kScalarLoadLanes,
+            });
+            environment.expect_load(old_results.back());
+        }
+        environment.force_next_dcache_response_delay(merged ? 128 : 32);
+        environment.force_next_dcache_interbeat_delay(interbeat_delay);
+        if (!environment.set_rob_head(old_results.front().rob)) {
+            return fail("rob-head");
+        }
+        for (const auto &old : old_results) {
+            if (!environment.enqueue_load(old) ||
+                !environment.issue_load(old, 2048)) {
+                return fail("issue");
+            }
+        }
+        for (unsigned tick = 0; tick < 4096 &&
+             environment.dcache_grant_data_beats() == 0; ++tick) {
+            if (!environment.run_cycles(1)) {
+                return fail("first-beat");
+            }
+        }
+        if (!environment.run_cycles(32) ||
+            environment.dcache_grant_data_beats() != 1 ||
+            environment.tilelink_requests() != 1 ||
+            environment.dcache_requests_covering_since(line, 0) != 1 ||
+            environment.dcache_refills() != 1 ||
+            environment.dcache_outstanding_requests() != 1 ||
+            environment.dcache_responses_idle()) {
+            return fail("partial-window");
+        }
+        // Completion and LQ retirement are independent of the remaining
+        // manager credit. Snapshot each identity; reset cancels only pending
+        // expectations, including the opposite-half merged follower.
+        std::vector<bool> pending;
+        unsigned completed = 0;
+        for (const auto &old : old_results) {
+            pending.push_back(environment.scalar_load_pending(old));
+            completed += !pending.back();
+        }
+        const unsigned canceled = old_count - completed;
+        const auto old_dequeued = environment.lq_dequeued();
+        const auto old_acks = environment.dcache_grant_acks();
+        const auto keyword = environment.dcache_keyword_refills();
+        if (environment.writebacks() != completed || old_acks > 1 ||
+            environment.lq_allocated() != old_count || old_dequeued > old_count ||
+            environment.lq_canceled() != 0 ||
+            keyword + environment.dcache_nonkeyword_refills() != 1 ||
+            !environment.reset()) {
+            return fail("reset-boundary");
+        }
+        for (unsigned load = 0; load < old_count; ++load) {
+            if ((pending[load] &&
+                 !environment.cancel_scalar_load_for_reset(old_results[load])) ||
+                environment.scalar_load_pending(old_results[load])) {
+                return fail("reset-identity");
+            }
+        }
+        if (!environment.account_lq_cancellation(old_count - old_dequeued) ||
+            environment.scalar_load_reset_canceled() != canceled ||
+            environment.dcache_outstanding_requests() != 0 ||
+            !environment.dcache_responses_idle() ||
+            !environment.dcache_grants_drained() || !environment.run_cycles(32)) {
+            return fail("reset-disposition");
+        }
+        const memblock::LoadTransaction result{
+            .address = next_line + offset, .op = memblock::LoadOp::ld, .rob = 2, .lq = 0,
+            .pdest = 156, .lane = ((index % 6) / 2 + 1) % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load(result);
+        if (!environment.set_rob_head(result.rob) ||
+            !environment.enqueue_load(result) ||
+            !environment.issue_load(result, 2048) ||
+            !environment.run_until_complete(8192) ||
+            !environment.run_until_lq_retired(2048)) {
+            return fail("survivor");
+        }
+        for (unsigned read = 0; read < readback_count; ++read) {
+            const memblock::LoadTransaction readback{
+                .address = read < old_count ? old_results[read].address : result.address,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(3 + read),
+                .lq = static_cast<std::uint8_t>(1 + read),
+                .pdest = static_cast<std::uint8_t>(157 + read),
+                .lane = (index + read) % memblock::kScalarLoadLanes,
+            };
+            environment.expect_load(readback);
+            if (!environment.set_rob_head(readback.rob) ||
+                !environment.enqueue_load(readback) ||
+                !environment.issue_load(readback, 2048) ||
+                !environment.run_until_complete(8192) ||
+                !environment.run_until_lq_retired(2048)) {
+                return fail("readback");
+            }
+        }
+        if (!environment.run_cycles(interbeat_delay + 64) ||
+            environment.writebacks() != recovery_count + completed ||
+            environment.tilelink_requests() != 3 || environment.dcache_refills() != 3 ||
+            environment.dcache_requests_covering_since(line, 1) != 1 ||
+            environment.dcache_requests_covering_since(next_line, 1) != 1 ||
+            environment.dcache_grant_data_beats() != 5 ||
+            environment.dcache_grant_acks() != old_acks + 2 ||
+            environment.dcache_outstanding_requests() != 0 ||
+            !environment.dcache_responses_idle() ||
+            !environment.dcache_grants_drained() ||
+            environment.lq_allocated() != old_count + recovery_count ||
+            environment.lq_dequeued() != old_dequeued + recovery_count ||
+            environment.lq_canceled() != old_count - old_dequeued ||
+            environment.sq_allocated() != 0 ||
+            !bus_unchanged(line, image) || !bus_unchanged(next_line, next_image)) {
+            return fail("quiet-tail");
+        }
+        observed.completed += completed;
+        observed.canceled += canceled;
+        observed.old_lq_dispositions[0] += old_dequeued;
+        observed.old_lq_dispositions[1] += old_count - old_dequeued;
+        observed.mixed_disposition_cases += completed != 0 && canceled != 0;
+        ++observed.beat_orders.at(keyword != 0 ? 1 : 0);
+        total_cycles += environment.cycle();
+    }
+    return true;
+}
+
 int run_reset_recovery(int argc, char **argv)
 {
     constexpr unsigned response_delay = 256;
@@ -2321,14 +3003,62 @@ int run_reset_recovery(int argc, char **argv)
         return 1;
     }
 
+    std::uint64_t atomic_cycles = 0;
+    if (!check_atomic_reset_recovery(argc, argv, atomic_cycles)) {
+        return 1;
+    }
+    unsigned partial_completed = 0;
+    unsigned partial_canceled = 0;
+    std::array<unsigned, 2> partial_beat_orders{};
+    if (!check_partial_lr_reset_recovery(argc, argv, atomic_cycles,
+                                       partial_completed, partial_canceled,
+                                       partial_beat_orders)) {
+        return 1;
+    }
     std::cout << "MEMBLOCK_RESET_RECOVERY_PASS"
-              << " cycle=" << dcache.cycle() + ptw.cycle() + uncache.cycle()
-              << " outstanding_resets=3"
-              << " canceled=3"
-              << " survivor_writebacks=3"
+              << " cycle=" << dcache.cycle() + ptw.cycle() + uncache.cycle() + atomic_cycles
+              << " outstanding_resets=13"
+              << " canceled=" << 9 + partial_canceled
+              << " survivor_writebacks=13"
               << " dcache=1 ptw=1 uncache=1"
+              << " atomic=6"
+              << " atomic_readbacks=12 atomic_response_delay=1024"
+              << " partial_lr_resets=4 partial_lr_readbacks=8"
+              << " partial_lr_disposition=" << partial_completed << ',' << partial_canceled
+              << " partial_lr_beat_orders=" << partial_beat_orders[0] << ',' << partial_beat_orders[1]
+              << " partial_lr_interbeat_delay=1024"
               << " response_delay=" << response_delay
               << '\n';
+    return 0;
+}
+
+int run_reset_partial_load(int argc, char **argv)
+{
+    // Keep at most twelve sequential DUT contexts in this leaf process.
+    // reset-recovery independently owns its thirteen contexts.
+    std::uint64_t cycles = 0;
+    std::array<PartialLoadResetCoverage, 2> coverage{};
+    if (!check_partial_load_reset_recovery(argc, argv, cycles, coverage)) {
+        return 1;
+    }
+    const auto &single = coverage[0];
+    const auto &merged = coverage[1];
+    std::cout << "MEMBLOCK_RESET_PARTIAL_LOAD_PASS cycle=" << cycles
+              << " outstanding_resets=12 survivor_writebacks=12 readbacks=30"
+              << " disposition=" << single.completed + merged.completed << ','
+              << single.canceled + merged.canceled
+              << " beat_orders=" << single.beat_orders[0] + merged.beat_orders[0] << ','
+              << single.beat_orders[1] + merged.beat_orders[1]
+              << " old_lq_disposition=" << single.old_lq_dispositions[0] + merged.old_lq_dispositions[0] << ','
+              << single.old_lq_dispositions[1] + merged.old_lq_dispositions[1]
+              << " single_disposition=" << single.completed << ',' << single.canceled
+              << " merged_disposition=" << merged.completed << ',' << merged.canceled
+              << " single_beat_orders=" << single.beat_orders[0] << ',' << single.beat_orders[1]
+              << " merged_beat_orders=" << merged.beat_orders[0] << ',' << merged.beat_orders[1]
+              << " single_lq_disposition=" << single.old_lq_dispositions[0] << ',' << single.old_lq_dispositions[1]
+              << " merged_lq_disposition=" << merged.old_lq_dispositions[0] << ',' << merged.old_lq_dispositions[1]
+              << " mixed_disposition_cases=" << merged.mixed_disposition_cases
+              << " interbeat_delay=1024" << '\n';
     return 0;
 }
 

@@ -150,6 +150,25 @@ public:
                    rob_identity(transaction.rob, transaction.rob_flag)) !=
             expected_.end();
     }
+    bool cancel_for_reset(const LoadTransaction &transaction)
+    {
+        if (!error_.empty()) {
+            return false;
+        }
+        const auto it = expected_.find(
+            rob_identity(transaction.rob, transaction.rob_flag));
+        if (it == expected_.end() || it->second.prefetch ||
+            it->second.pdest != transaction.pdest ||
+            it->second.address != transaction.address ||
+            it->second.op != static_cast<std::uint16_t>(transaction.op)) {
+            error_ = "reset cancellation does not match a pending scalar load";
+            return false;
+        }
+        expected_.erase(it);
+        ++reset_canceled_;
+        return true;
+    }
+    std::uint64_t reset_canceled() const { return reset_canceled_; }
     std::size_t pending() const { return expected_.size(); }
     std::size_t pending_prefetch() const { return pending_prefetch_; }
     std::size_t pending_load() const { return expected_.size() - pending_prefetch_; }
@@ -250,6 +269,7 @@ private:
 
     std::unordered_map<RobIdentity, Expected, RobIdentityHash> expected_;
     std::uint64_t observed_ = 0;
+    std::uint64_t reset_canceled_ = 0;
     std::uint64_t prefetch_observed_ = 0;
     std::size_t pending_prefetch_ = 0;
     std::string error_;

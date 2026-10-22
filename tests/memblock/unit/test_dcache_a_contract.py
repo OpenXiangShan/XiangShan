@@ -16,12 +16,15 @@ DRIVER = r'''
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <unordered_map>
 namespace memblock {
 #include "environment/dcache_a_contract.inc"
 }
 using memblock::DcacheARequest;
 using memblock::dcache_a_protocol_error;
+using memblock::dcache_faulting_load_request_error;
 using memblock::dcache_is_cpu_demand_acquire;
 using memblock::dcache_release_backpressure_observation_valid;
 using memblock::dcache_suppressed_demand_error;
@@ -243,6 +246,39 @@ static void demand_request_classification() {
     request.request_source = 2;
     check_demand(request, false);
 }
+static void faulting_load_requests() {
+    auto verify = [](const DcacheARequest &request, bool allowed, bool valid) {
+        ++checks;
+        const bool actual = dcache_faulting_load_request_error(
+            request, allowed, 0x80000680) == nullptr;
+        if (actual != valid) {
+            std::cerr << "fault request check " << checks << '\n';
+            std::exit(1);
+        }
+    };
+    auto r = acquire();
+    verify(r, true, true);
+    verify(r, false, false);
+    // Coherence grants need not imply a store; allow legal load-class growth.
+    for (unsigned param : {0U, 1U, 2U}) {
+        r.param = param;
+        verify(r, true, true);
+    }
+    r = acquire(); r.address += 64;
+    verify(r, true, false);  // unrelated demand
+    r = acquire(); r.request_source = 3;
+    verify(r, true, false);  // store class cannot impersonate a read
+    r = acquire(); r.opcode = 12;
+    verify(r, true, false);  // CMO
+    r = acquire(); r.opcode = 4;
+    verify(r, true, false);  // unclassified Get
+    r = acquire(); r.size = 5;
+    verify(r, true, false);  // not the target full-line acquire
+    r = acquire(); r.request_source = 6; r.address += 128;
+    verify(r, false, true);  // legal independent background prefetch
+    r.opcode = 4;
+    verify(r, true, false);  // Get user source is unspecified
+}
 static void release_backpressure_observations() {
     auto check_observation = [](
         bool selected, std::uint64_t stalled, std::uint64_t cycles,
@@ -279,6 +315,7 @@ int main(int argc, char **argv) {
     else if (name == "invalid") invalid_op_and_size();
     else if (name == "suppression") suppressed_demand_attribution();
     else if (name == "demand-classification") demand_request_classification();
+    else if (name == "faulting-load") faulting_load_requests();
     else if (name == "release-backpressure")
         release_backpressure_observations();
     else return 2;
@@ -331,6 +368,9 @@ class DcacheAContractTest(unittest.TestCase):
 
     def test_demand_classification_excludes_unspecified_user_fields(self) -> None:
         self.check_case("demand-classification")
+
+    def test_faulting_load_accepts_only_qualified_read_or_background_prefetch(self) -> None:
+        self.check_case("faulting-load")
 
     def test_release_backpressure_endpoints_separate_forced_coverage(self) -> None:
         self.check_case("release-backpressure")

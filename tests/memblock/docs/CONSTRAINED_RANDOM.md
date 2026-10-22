@@ -5,7 +5,7 @@
 `random-mixed` is the canonical workload generator. A verification direction is a constraint set,
 not another scenario implementation. The same scheduler, drivers, scoreboards, architectural
 reference memory, translation machinery, and completion checks are used for realistic traffic,
-balanced coverage, and corner-heavy traffic. The current executable contract is `constraint_schema=52`.
+balanced coverage, and corner-heavy traffic. The current executable contract is `constraint_schema=53`.
 
 The complete top-level interface mapping and interface gaps are in
 `IO_COVERAGE.md`; `VERIFICATION_PLAN.md` owns the cross-domain verification
@@ -51,7 +51,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
 | `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
-| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure`, `miss-burst` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads; `set-pressure` contains same-set replacement traffic; `miss-burst` issues distinct cold-line scalar loads or a scalar/vector-load mixture while their refills are held |
+| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure`, `miss-burst` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads; `set-pressure` contains replacement traffic in disjoint windows of two physical sets; `miss-burst` issues distinct cold-line scalar loads or a scalar/vector-load mixture while their refills are held |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
 | `atomic-error` | Per-mille share of atomic actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
@@ -77,13 +77,13 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `ptw-error-corrupt-first` | Per-mille first-beat share among corrupt responses; the other class corrupts the last beat |
 | `load-merge-depth2`, `load-merge-depth3` | Relative two- and three-load batch weights inside `load-merge` |
 | `load-merge-same-address`, `load-merge-same-beat`, `load-merge-cross-beat` | Relative address patterns inside `load-merge`: exact duplicate, distinct offsets in the critical 32-byte beat, or distinct offsets spanning both beats |
-| `set-pressure-depth9`, `set-pressure-depth10` | Relative same-set access counts; an eight-way DCache must replace at least one or two target lines respectively |
+| `set-pressure-depth9`, `set-pressure-depth10` | Relative counts of nine/ten distinct target lines per window. The generated four-way, 256-set DCache places each 8-KiB-stride window in two physical sets, with total capacity eight; at least one/two target Releases are required over the complete fill |
 | `set-pressure-sb`, `set-pressure-sh`, `set-pressure-sw`, `set-pressure-sd` | Relative access-width weights inside `set-pressure`; clean actions use the corresponding unsigned load width and dirty actions use the store width |
-| `set-pressure-set-q0` .. `set-pressure-set-q3` | Relative weights for the four 32-set quarters of the 128-set DCache index space |
+| `set-pressure-set-q0` .. `set-pressure-set-q3` | Relative weights for four quarters of the 128 low-seven-bit base indices. Each base index selects a pair of physical sets separated by 128 |
 | `set-pressure-dirty` | Per-mille share of dirty-store pressure; zero selects only clean-load replacement, 1000 selects only dirty replacement, and intermediate values require both states |
-| `set-pressure-refill-overlap` | Per-mille share that holds one address-qualified cold refill response per selected pressure set while replacement produces an attributed Release or ReleaseData; zero/1000 are strict endpoints |
+| `set-pressure-refill-overlap` | Per-mille share that holds one address-qualified cold refill response per selected pressure window while replacement produces an attributed Release or ReleaseData; zero/1000 are strict endpoints |
 | `set-pressure-release-backpressure` | Per-mille share that forces the first address-attributed target Release or ReleaseData to retain its full C payload for 16 valid cycles; zero/1000 are strict endpoints and unrelated C traffic does not consume the target stall budget |
-| `set-pressure-window1` .. `set-pressure-window8` | Relative weights for one through eight independently allocated pressure sets. A zero weight disables that exact window count; an overlap action holds one address-qualified cold refill per selected set |
+| `set-pressure-window1` .. `set-pressure-window8` | Relative weights for one through eight independent windows over disjoint pairs of physical sets. A zero weight disables that exact window count; an overlap action holds one address-qualified cold refill per selected window |
 | `miss-burst-depth2` .. `miss-burst-depth17` | Relative weights for distinct cold target lines in one ordinary-load burst. Depths 2..16 hold every response concurrently. Depth 17 is the generated 16-entry DCache capacity plus one: it first reaches 16 externally pending responses, releases one fair response, then requires every target request and architectural operation to finish |
 | `miss-burst-issue-width1` .. `miss-burst-issue-width3` | Relative weights for the same-cycle scalar-load issue width at the head of a burst; widths larger than the composition's scalar-load count are excluded |
 | `miss-burst-scalar-only`, `miss-burst-scalar-vector-load` | Relative composition weights. The mixed class replaces one scalar line with one legal two-flow unit-stride vector-load uop while preserving the selected total target-line depth |
@@ -282,11 +282,16 @@ directly into transaction probabilities or expected DUT results.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=52`, resolved targets, and actual
+Every terminal line prints `constraint_schema=53`, resolved targets, and actual
 counts for operations, atomic/Probe/hypervisor/CMO/DCache state, ordinary and
 segment vector shapes, FOF, NC/MMIO, translation and leaf topology, fences,
 cache events, all load wakeup/cancel lanes, prefetch diagnostics, and manager
 latencies. The simulator and `verify_regression.py` enforce the same gates per seed.
+
+Optional `MEMBLOCK_MIXED_PROGRESS_ACTIONS=N` diagnostics flush seed, action
+count, simulation cycle, and last phase to stderr at mixed-loop boundaries.
+They consume no random draws and advance no DUT cycles. Checkpoints are not
+terminal summaries, coverage evidence, or acceptance; N=0/unset disables them.
 
 ### General Accounting
 
@@ -333,18 +338,39 @@ and uses a fresh line from a 64-MiB region; all members issue in one cycle, targ
 global refill/GrantAck deltas conserve, and scalar writebacks equal the sum of batch depths.
 
 Set pressure reports 1536 clean/dirty x overlap/no-overlap x C-ready/stalled x one-through-eight-window x depth x width x
-translation crosses, four set quarters, and both store-half issue orders. Actions use fresh lines in one through eight
-physical sets. Generated stores, target requests, store writebacks, and SQ dequeues match exactly. Dirty target
+translation crosses, four base-index quarters, and both store-half issue orders. Actions use fresh lines in one through
+eight windows, each spanning two of the generated DCache's 256 four-way sets. Generated stores, target requests, store writebacks, and SQ dequeues match exactly. Dirty target
 ReleaseData reaches at least `depth - 8`; attributed releases carry the stored bytes into manager memory. Clean actions
 require exact initial and reverse-revisit data, one initial target request per line, at least `depth - 8` revisit misses
 and target Releases, zero target ReleaseData, and exact load-writeback/LQ-dequeue conservation. Overlap holds one
 independently addressed cold load and requires at least `depth - 8` target Releases while pending. The C-stall tuple is
 `selected actions, stalled target releases, target stall cycles, payload-stability checks, completed windows` and is
 exactly `1,1,16,16,1` for a selected action or `0,0,0,0,1` otherwise.
-Clean overlap fills and drains the eight baseline ways before holding the unrelated response; dirty
-overlap completes older stores before the younger refill and commits them. Target Releases are
-attributed by line and opcode, so background ProbeAck/Release traffic remains legal without
-satisfying the target oracle.
+Clean overlap first allocates four older target loads per window without issuing them. It then establishes every
+younger held response, issues the older targets, and requires their exact writebacks and observed LQ dequeues before
+allocating the remaining targets. Thus all target accesses and required Releases occur while every associated held
+load remains pending, without assuming that a completed baseline remains resident. At eight windows, initial LQ
+occupancy is at most 40 and retained tail occupancy at most 56, below the 66-flow dispatch watermark. C backpressure
+is armed before the first target issue. Transaction creation order and metadata RNG assignment differ from earlier
+binaries; replay requires the matching frozen runtime. Schema 53 preserves the 1536 accepted replacement bins and adds ownership/construction accounting.
+Dirty overlap allocates every older overflow store into SQ before dispatching the younger held loads, then issues
+address/data and commits only after all holds are established. Baseline batches use at most 32 SQ entries and
+preallocated overflow at most 16, below the 52-entry watermark. It retains the committed baseline and incremental
+ReleaseData gate. Before the action, schema 53 drains baseline SBuffer/D/E, disables the L1 stride prefetcher through its external
+CSR, advances eight cycles and drains DCache idle, establishes every held load, and requires exactly one
+store-class full-line AcquireBlock NtoT per fresh baseline line, unchanged manager error counters, and zero
+completed target Releases of either opcode. The prior prefetch enable is restored after the action. No DUT cycle separates qualification from target
+C-stall arming. Coherence responsibility can remain in a writeback queue; array residency is not a prerequisite.
+A rejected attempt releases its held responses, issues each preallocated overflow once, commits in order with
+independent reference updates, and drains exact WB/queues/SBuffer/D/E/C under every functional oracle. The
+unqualified overlap/stall minima alone are inapplicable. Retries keep the selected dirty/overlap/depth/window/
+width/translation/base-index-quarter/C-backpressure tuple and use fresh addresses/identities without rewinding RNG.
+The cap is four attempts; exhaustion is `stimulus_construction_exhausted`, never PASS or a CPU-bug classification.
+Rejected construction contributes actual store issue-order, cacheable traffic, bus/response latency, WB/SQ/load/LQ,
+and cycle totals, plus separate rejected-manager totals; it does not increment the logical action or accepted bin.
+Only qualified and fully completed attempts populate accepted bins. Release overlap means completed transaction
+acceptance at the final C beat, not first-beat timing. Target Releases are attributed by line and opcode, so
+background ProbeAck/Release traffic remains legal without satisfying the target oracle.
 
 The ordinary miss-burst cross is 288 depth x issue-width x composition x translation bins. Depths
 2 through 17, legal issue width, scalar-only or one scalar+vector-load composition, every enabled
@@ -498,6 +524,9 @@ checks them from the terminal summary:
 | `target_set_pressure_window` | Requested one-through-eight replacement-window class |
 | `actual_set_pressure_window_count` | Authoritative accepted replacement-window distribution |
 | `actual_set_pressure_dual_window` | Two-field compatibility tuple `[non-dual, dual]`; the fields sum to all set-pressure actions and project exactly from the authoritative window distribution |
+| `actual_set_pressure_ownership` | Schema 53: attempts, qualified, accepted, rejected, cleaned, acquisition-reason, error-reason, Release-reason, in-flight. Reasons may overlap; normal termination requires attempts=accepted+rejected, qualified=accepted, rejected=cleaned, in-flight=0, and accepted equal to dirty-overlap cross actions |
+| `actual_set_pressure_rejected_manager` | Schema 53: rejected attempts, stores, baseline stores, overflow stores, held loads, target A, held A, store WB, SQ dequeues, load WB, LQ dequeues, target C, target ReleaseData, global ReleaseData, verified global ReleaseData, expected target ReleaseData, preserved target stores, all A. Each target needs at least one accepted covering A; extra acquisitions are legal on rejection. Target ReleaseData counts transactions, while expected immutable images/preserved stores count distinct lines; WB/SQ and held-load/WB/LQ remain exact |
+| `actual_set_pressure_rejected_issue_order` | Schema 53: rejected STA-first/SDA-first store totals; sum equals rejected stores |
 | `target_bank_conflict` | Requested resident two-/three-way bank-conflict class |
 | `actual_bank_conflict_terminal` | Four-value tuple `actions, accepted loads, writebacks, LQ dequeues`; all members conserve and internal replay/arbitration observations remain diagnostic |
 | `actual_probe_depth` | Authoritative accepted-but-unanswered Probe depth distribution |

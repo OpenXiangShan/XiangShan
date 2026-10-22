@@ -644,6 +644,20 @@ public:
         stream << "]:omitted=" << count - shown;
         return stream.str();
     }
+    const char *faulting_load_requests_error_since(
+        std::uint64_t target_line, bool target_read_allowed,
+        std::uint64_t first_request) const
+    {
+        for (std::size_t index = static_cast<std::size_t>(first_request);
+             index < request_history_.size(); ++index) {
+            const ARequest &request = request_history_[index];
+            if (const char *error = dcache_faulting_load_request_error(
+                    request, target_read_allowed, target_line)) {
+                return error;
+            }
+        }
+        return nullptr;
+    }
     std::uint64_t request_covering_count_since(
         std::uint64_t address, std::uint64_t first_request) const
     {
@@ -654,6 +668,22 @@ public:
             const std::uint64_t bytes = std::uint64_t{1} << request.size;
             const std::uint64_t base = request.address & ~(bytes - 1);
             count += address >= base && address - base < bytes;
+        }
+        return count;
+    }
+    // Accepted external A-channel evidence for a cold full-line store acquire.
+    // Source 3 is the generated interface's store request class; AcquireBlock
+    // NtoT is TileLink opcode 6 / grow param 1, with size 6 for 64 bytes.
+    std::uint64_t store_ntot_line_count_since(
+        std::uint64_t line, std::uint64_t first_request) const
+    {
+        std::uint64_t count = 0;
+        for (std::size_t index = static_cast<std::size_t>(first_request);
+             index < request_history_.size(); ++index) {
+            const ARequest &request = request_history_[index];
+            count += request.address == line && request.opcode == 6 &&
+                request.param == 1 && request.size == 6 &&
+                request.request_source == 3;
         }
         return count;
     }
@@ -691,16 +721,22 @@ public:
     void begin_release_observation()
     {
         release_observation_.clear();
+        observed_release_index_.clear();
         observe_releases_ = true;
     }
     void end_release_observation()
     {
         observe_releases_ = false;
         release_observation_.clear();
+        observed_release_index_.clear();
     }
     std::uint64_t observed_release_covering_count(
         std::uint64_t address, bool data_only = false) const
     {
+        if (const auto indexed =
+                observed_release_index_.line_count(address, data_only)) {
+            return *indexed;
+        }
         std::uint64_t count = 0;
         for (const ReleaseRecord &release : release_observation_) {
             if (data_only && release.opcode != 7) {
@@ -1278,6 +1314,8 @@ private:
                 release_observation_.push_back(
                     {request.opcode, request.size, request.address,
                      current_release_ready_window_stalls()});
+                observed_release_index_.record(
+                    request.opcode, request.size, request.address);
             }
             complete_release_ready_window_transaction();
             ++release_count_;
@@ -1350,6 +1388,8 @@ private:
                 release_observation_.push_back(
                     {request.opcode, request.size, request.address,
                      current_release_ready_window_stalls()});
+                observed_release_index_.record(
+                    request.opcode, request.size, request.address);
             }
             complete_release_ready_window_transaction();
             ++release_count_;
@@ -1491,6 +1531,7 @@ private:
     std::vector<ARequest> request_history_;
     std::array<std::uint64_t, 7> request_classes_{};
     std::vector<ReleaseRecord> release_observation_;
+    DcacheReleaseIndex observed_release_index_;
     bool observe_releases_ = false;
     std::optional<ReleaseDataState> release_data_;
     std::unordered_map<std::uint64_t, std::vector<unsigned char>>

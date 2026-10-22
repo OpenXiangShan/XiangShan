@@ -1450,6 +1450,34 @@ def _check_vector_segment_high_va_coverage(
     )
 
 
+def _check_dirty_pressure_ownership(
+    result: dict[str, Any], dirty_overlap_actions: int
+) -> None:
+    q = _csv_counts(result, "actual_set_pressure_ownership", 9)
+    m = _csv_counts(result, "actual_set_pressure_rejected_manager", 18)
+    orders = _csv_counts(result, "actual_set_pressure_rejected_issue_order", 2)
+    _require(
+        q[0] == q[2] + q[3] and q[1] == q[2]
+        and q[2] == dirty_overlap_actions and q[3] == q[4]
+        and all(reason <= q[3] for reason in q[5:8])
+        and sum(q[5:8]) >= q[3] and q[8] == 0
+        and q[0] <= q[2] * 4 and m[0] == q[4],
+        "dirty set-pressure ownership attempts are not conserved",
+    )
+    _require(
+        m[1] == m[2] + m[3] and m[2] == m[4] * 8
+        and m[0] <= m[4] <= m[0] * 8
+        and m[4] <= m[3] <= m[4] * 2
+        and m[5] >= m[1] and m[6] == m[4] and m[7] == m[1] and m[8] == m[1]
+        and m[9] == m[4] and m[10] == m[4] and m[11] >= m[12]
+        and m[13] >= m[12] and m[14] == m[13]
+        and m[12] >= m[15] and m[15] <= m[1] and m[16] == m[15]
+        and m[17] >= m[5] + m[6] and sum(orders) == m[1]
+        and (m[0] != 0 or (not any(m) and not any(orders))),
+        "rejected dirty set-pressure traffic is not conserved",
+    )
+
+
 def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
@@ -1458,7 +1486,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -3506,6 +3534,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             pressure_overlap_actions = 0
             pressure_overlap_windows = 0
             pressure_clean_overlap_windows = 0
+            pressure_dirty_overlap_actions = 0
             pressure_overlap_min_releases = 0
             pressure_backpressure_actions = 0
             pressure_window_actions = [0] * len(actual_pressure_windows)
@@ -3681,6 +3710,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                                                 pressure_clean_overlap_windows += (
                                                     count * windows
                                                 )
+                                            else:
+                                                pressure_dirty_overlap_actions += count
                                         if backpressure != 0:
                                             pressure_backpressure_actions += count
             _require(
@@ -3855,6 +3886,21 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     == pressure_actions,
                     "set-pressure release-backpressure accounting is not "
                     "conserved",
+                )
+
+            if schema >= 53:
+                _check_dirty_pressure_ownership(result, pressure_dirty_overlap_actions)
+                rejected_manager = _csv_counts(
+                    result, "actual_set_pressure_rejected_manager", 18
+                )
+                _require(
+                    rejected_manager[7] + actual_pressure_manager[6]
+                    <= result.get("store_writebacks", -1)
+                    and rejected_manager[9] + actual_pressure_clean_manager[10]
+                    + pressure_overlap_windows - pressure_clean_overlap_windows
+                    <= result.get("scalar_writebacks", -1)
+                    and rejected_manager[17] <= result.get("tilelink_requests", -1),
+                    "rejected pressure traffic exceeds global terminal effects",
                 )
 
         if schema >= 39:

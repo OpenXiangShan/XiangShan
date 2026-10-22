@@ -967,11 +967,23 @@ public:
     {
         return memory_agent_.request_summary_since(first_request, maximum_records);
     }
+    const char *dcache_faulting_load_requests_error_since(
+        std::uint64_t target_line, bool target_read_allowed,
+        std::uint64_t first_request) const
+    {
+        return memory_agent_.faulting_load_requests_error_since(
+            target_line, target_read_allowed, first_request);
+    }
     std::uint64_t dcache_requests_covering_since(
         std::uint64_t address, std::uint64_t first_request) const
     {
         return memory_agent_.request_covering_count_since(
             address, first_request);
+    }
+    std::uint64_t dcache_store_ntot_line_count_since(
+        std::uint64_t line, std::uint64_t first_request) const
+    {
+        return memory_agent_.store_ntot_line_count_since(line, first_request);
     }
     std::uint64_t dcache_requests_from_source_since(
         std::uint8_t request_source, std::uint64_t first_request) const
@@ -1350,6 +1362,21 @@ public:
     bool scalar_load_pending(const LoadTransaction &transaction) const
     {
         return scoreboard_.pending(transaction);
+    }
+    bool cancel_scalar_load_for_reset(const LoadTransaction &transaction)
+    {
+        // Cancel only at the completed reset boundary. A normal functional
+        // tick or a failed reset cannot justify dropping an obligation.
+        if (!last_reset_completed_cycle_ ||
+            *last_reset_completed_cycle_ != cycle()) {
+            error_ = "scalar reset cancellation requires a just-completed reset";
+            return false;
+        }
+        return scoreboard_.cancel_for_reset(transaction) && check_components();
+    }
+    std::uint64_t scalar_load_reset_canceled() const
+    {
+        return scoreboard_.reset_canceled();
     }
     std::size_t pending_prefetches() const { return scoreboard_.pending_prefetch(); }
     std::size_t pending_scalar_stores() const { return store_scoreboard_.pending(); }
@@ -2296,6 +2323,7 @@ public:
 
     bool reset()
     {
+        last_reset_completed_cycle_.reset();
         // Re-assert external reset for every invocation.  Relying on the
         // constructor's initial value made repeated-reset scenarios silently
         // run without resetting the DUT.
@@ -2326,6 +2354,7 @@ public:
         for (unsigned cycle = 0; cycle < 16; ++cycle) {
             tick(false);
             if (!dut_.io_reset_backend.B()) {
+                last_reset_completed_cycle_ = this->cycle();
                 return true;
             }
         }
@@ -6909,6 +6938,7 @@ private:
     }
 
     UTMemBlock dut_;
+    std::optional<std::uint64_t> last_reset_completed_cycle_;
     SparseMemory bus_memory_;
     SparseMemory memory_;
     TileLinkMemoryAgent memory_agent_;

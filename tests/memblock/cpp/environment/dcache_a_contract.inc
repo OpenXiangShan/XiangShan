@@ -94,10 +94,71 @@ inline const char *dcache_a_protocol_error(
     return nullptr;
 }
 
+// Line-granular index for observed C-channel Release/ReleaseData records.
+// Full-line, line-aligned releases are the only shapes produced by the
+// generated DCache replacement path; those are counted in O(1). Any other
+// shape disables the index so the caller can fall back to the general
+// overlapping-range scan over the retained record vector.
+struct DcacheReleaseIndex {
+    void clear()
+    {
+        lines.clear();
+        data_lines.clear();
+        nonfull = false;
+    }
+
+    void record(std::uint8_t opcode, std::uint8_t size, std::uint64_t address)
+    {
+        if (size != 6 || (address & 63U) != 0) {
+            nonfull = true;
+            return;
+        }
+        ++lines[address];
+        if (opcode == 7) {
+            ++data_lines[address];
+        }
+    }
+
+    std::optional<std::uint64_t> line_count(
+        std::uint64_t address, bool data_only) const
+    {
+        if (nonfull || (address & 63U) != 0) {
+            return std::nullopt;
+        }
+        const auto &counts = data_only ? data_lines : lines;
+        const auto it = counts.find(address);
+        return it == counts.end() ? 0 : it->second;
+    }
+
+    std::unordered_map<std::uint64_t, std::uint64_t> lines;
+    std::unordered_map<std::uint64_t, std::uint64_t> data_lines;
+    bool nonfull = false;
+};
+
 inline bool dcache_is_cpu_demand_acquire(const DcacheARequest &request)
 {
     return (request.opcode == 6 || request.opcode == 7) &&
         request.request_source == 2;
+}
+
+// A faulting single load may speculatively acquire read permission for its
+// independently translated target. Background hardware prefetch is separate.
+// Coherence permission is not a committed store. Unrelated demand and store
+// requests remain forbidden, independently of the permission granted.
+inline const char *dcache_faulting_load_request_error(
+    const DcacheARequest &request, bool target_read_allowed,
+    std::uint64_t target_line)
+{
+    if ((request.opcode == 6 || request.opcode == 7) &&
+        request.request_source == 6) {
+        return nullptr;
+    }
+    if (target_read_allowed && dcache_is_cpu_demand_acquire(request) &&
+        request.size == 6 &&
+        request.address == target_line) {
+        return nullptr;
+    }
+    return "faulting load issued a disallowed DCache request";
 }
 
 inline const char *dcache_suppressed_demand_error(
