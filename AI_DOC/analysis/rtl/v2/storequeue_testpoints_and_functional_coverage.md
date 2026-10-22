@@ -1,5 +1,12 @@
 # V2 StoreQueue 测试点与功能覆盖模型
 
+> **版本状态说明（2026-10-14）**：本文主体基于旧 commit
+> `1567628320ef77e1de1a3ae7a7c7057423e842b4`，其中 CMO error、NC 跨 16B
+> `rdataPtr`、VLS exception redirect 和 misalign replay 等结论不再代表当前 HEAD。
+> 当前版本测试点和 review closure 统一以
+> [V2 StoreQueue 功能特性测试点追踪矩阵](storequeue_functional_feature_testpoints_20261014.md)
+> 为准。本文保留用于追踪历史专项分析，不得直接作为当前版本 coverage closure 清单。
+
 ## 版本元数据
 
 | 项目 | 内容 |

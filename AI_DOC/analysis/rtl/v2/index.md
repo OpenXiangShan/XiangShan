@@ -32,6 +32,9 @@
 
 | 文档 | 关键词 | 覆盖对象 | 使用边界 |
 |---|---|---|---|
+| [V2 StoreQueue 功能特性测试点追踪矩阵](storequeue_functional_feature_testpoints_20261014.md) | 当前 HEAD、功能特性、测试点、追踪矩阵、观察层级、CMO error、misalign replay、rdataPtr 去重、VLS 双 redirect、review closure | 当前 V2 StoreQueue 全部已识别功能特性到测试场景的映射 | 当前版本测试点主入口；按正向、异常、修复回归、协议非法、未支持和观察边界分类，并要求两轮 review。 |
+| [V2 StoreQueue 功能特性](storequeue_functional_features_20261014.md) | StoreQueue、SQ entry、环形指针、地址/数据回填、forwarding、ROB commit、SBuffer、Uncache、MMIO、NC、CMO、CBO.zero、非对齐、向量、异常、redirect、WFI、性能统计 | V2 StoreQueue 的功能职责、状态组织、上下游路径和源码限制 | 作为功能语义总览；具体 coverage 采样信号和 RTL 层次仍需以当前生成 Verilog 为准。 |
+| [V2 MemBlock 功能覆盖率场景分析与建模准则](memblock_functional_coverage_scenario_analysis_modeling_guideline_20261013.md) | 功能覆盖率、场景分析、Scala、Chisel、Verilog、信号映射、组合重建、时序重建、接口代理、采样条件 | V2 MemBlock 后续功能覆盖率场景分析和建模方法 | 功能语义优先从 Scala 分析，最终 coverpoint、cross 和采样条件必须落到当前生成 Verilog 的真实可观测信号；本文不定义具体模块覆盖点。 |
 | [V2 StoreQueue 测试点与功能覆盖模型](storequeue_testpoints_and_functional_coverage.md) | 测试点、功能覆盖、coverpoint、cross、protocol-negative、异常、forwarding、NC、MMIO、CBO、MAB、cross-page、vector、redirect、已知缺陷 | StoreQueue 的接口组合和内部状态/FSM 触发路径 | 定义测试场景与 coverage sample/bins；不实现 UVM/covergroup，也不把未支持路径或已知 RTL 缺陷计入正向功能覆盖。 |
 | [V2 MemBlock 子模块交互黑盒测试点与功能覆盖模型](memblock_submodule_interaction_testpoints.md) | MemBlock、子模块清单、黑盒交互、request/response、posted、Valid sideband、valid/ready、LSQ、DCache、Uncache、共享 xbar、TLB/PTW、PMP、Sbuffer、MAB、向量、Atomics、预取、WB 端口、BEU error、redirect、WFI、MBIST、功能覆盖 | 当前 V2 生成 RTL 的模块间请求、响应、仲裁、背压、取消和错误交互 | 只描述模块边界行为和可观测测试点；不展开 RAM/CAM/状态机等内部实现；当前配置与参数化变体分开统计，静态实例与动态 coverage 分离。 |
 
