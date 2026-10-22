@@ -539,7 +539,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 ) with DeprecatedConfigWarning
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithPABDepth(xiangshan.mem.prefetch.PABDepthParameters(enabled = true))
+  new WithPABDepth(xiangshan.mem.prefetch.PABDepthParameters(enabled = true, windowCycles = 16384, minWindowFills = 128))
     ++ OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
