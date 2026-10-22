@@ -143,10 +143,13 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
   }
 
   private val snapshotEvictedValid = snapshot.req.valid && snapshot.req.bits.evicted.valid
+  // Keep one branch per prediction block. A newly evicted branch reuses the
+  // existing way even if its position differs, rather than allocating another
+  // entry that cannot be exposed alongside it by the VBTB prediction port.
   private val snapshotEvictedHitMask = VecInit(entries.map { e =>
     snapshotEvictedValid && e.entry.valid &&
     e.internalBankIdx === snapshot.req.bits.internalBankIdx && e.setIdx === snapshot.req.bits.setIdx &&
-    e.entry.tag === snapshot.req.bits.evicted.tag && e.entry.position === snapshot.req.bits.evicted.position
+    e.entry.tag === snapshot.req.bits.evicted.tag
   })
   private val snapshotEvictedHit = snapshotEvictedHitMask.asUInt.orR
 
@@ -181,7 +184,7 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
   replacer.io.trainTouch.bits  := Mux(snapshotWriteEvicted, OHToUInt(snapshotEntryWayMask), trainEntryTouchWay)
 
   assert(PopCount(snapshotIncomingHitMask) <= 1.U, "incoming hit mask should be one-hot")
-  assert(PopCount(snapshotEvictedHitMask) <= 1.U, "evicted hit mask should be one-hot")
+  assert(PopCount(snapshotEvictedHitMask) <= 1.U, "evicted block hit mask should be one-hot")
 
   private val vbtbPredReq = s2_fire && io.enable
   XSPerfAccumulate("vbtb_pred_req", vbtbPredReq)
