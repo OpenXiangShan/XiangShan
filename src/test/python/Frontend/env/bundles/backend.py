@@ -4,8 +4,6 @@ from toffee import Bundle, Signal, SignalList
 
 
 class BackendCfVecBundle(Bundle):
-    OPTIONAL_ATTRS = ("cfvec_is_last_in_ftq_entry",)
-
     cfvec_valid = SignalList("io_backend_cfVec_#_valid", 8)
     cfvec_instr = SignalList("io_backend_cfVec_#_bits_instr", 8)
     cfvec_foldpc = SignalList("io_backend_cfVec_#_bits_foldpc", 8)

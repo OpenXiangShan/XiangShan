@@ -18,7 +18,6 @@ class CfVecSlotSnapshot:
     ftq_flag: int = 0
     ftq_value: int = 0
     ftq_offset: int = 0
-    is_last: bool = False
     exception_bits: int = 0
     cross_page_ipf_fix: bool = False
     vtype_illegal: bool = True
@@ -67,7 +66,6 @@ def capture_cfvec_snapshot(cycle: int, read_slot: Callable[[str, int], int]) -> 
             ftq_flag=read_slot("cfvec_ftq_ptr_flag", slot),
             ftq_value=read_slot("cfvec_ftq_ptr_value", slot),
             ftq_offset=read_slot("cfvec_ftq_offset", slot),
-            is_last=bool(read_slot("cfvec_is_last_in_ftq_entry", slot)),
             exception_bits=exception_bits,
             cross_page_ipf_fix=bool(read_slot("cfvec_cross_page_ipf_fix", slot)),
             vtype_illegal=bool(read_slot("cfvec_vtype_illegal", slot)),

@@ -6,8 +6,6 @@ from dataclasses import replace
 from itertools import islice
 from typing import Callable, Deque, Dict, Optional
 
-from toffee.bundle import DummySignal
-
 from ..agents.backend_agent import BackendAgent
 from ..checkers.vtype_checker import VTypeChecker
 from ..bundles import (
@@ -82,7 +80,6 @@ class BackendModel:
         self.dut = None
         self.to_ftq_if = None
         self.cfvec_if = None
-        self._cfvec_is_last_observable = True
         self.from_ftq_if = None
         self.to_ibuf_if = None
         self.status_if = None
@@ -2841,18 +2838,6 @@ class BackendModel:
                 continue
             entry.has_redirect = False
 
-    def _ftq_transition_without_last_is_expected(self) -> bool:
-        if self._current_ftq_entry is None:
-            return False
-        # The full-core Frontend ABI does not expose isLastInFtqEntry. In
-        # that ABI, observing the next FTQ pointer is the boundary evidence
-        # for the current entry, including the normal cacheable path.
-        if self._missing_cfvec_boundary_bit():
-            return True
-        if bool(self._current_ftq_entry.has_redirect):
-            return True
-        return self._has_active_wrong_path_episode() or self._recovery_phase_active()
-
     def _seal_current_ftq_entry(self, *, observed_last_in_entry: bool = False) -> None:
         sealed_ftq = (
             None
@@ -2913,10 +2898,6 @@ class BackendModel:
         self.to_ibuf_if = to_ibuf_if
         self.status_if = status_if
         self.wfi_if = wfi_if
-        is_last_signals = getattr(cfvec_if, "cfvec_is_last_in_ftq_entry", ())
-        self._cfvec_is_last_observable = bool(is_last_signals) and any(
-            not isinstance(signal, DummySignal) for signal in is_last_signals
-        )
 
     def attach_env(self, env) -> None:
         self.env = env
@@ -3013,11 +2994,6 @@ class BackendModel:
 
     def current_frontend_observation(self) -> BackendObservationSnapshot:
         return self._last_observation
-
-    def _missing_cfvec_boundary_bit(self) -> bool:
-        return "cfvec_is_last_in_ftq_entry" in getattr(
-            self.cfvec_if, "_missing_optional_attrs", ()
-        )
 
     def _cfvec_uses_uncache_fetch(self, pc: int) -> bool:
         physical_pc = int(pc)
@@ -3981,17 +3957,8 @@ class BackendModel:
                 or self._current_ftq_entry.ftq_value != ftq_value
             ):
                 if self._current_ftq_entry is not None:
-                    # Redirect/truncation can cut an FTQ entry short before DUT raises
-                    # isLastInFtqEntry for the surviving prefix. Close the prefix so
-                    # later resolve/commit bookkeeping does not silently lose it.
-                    if (
-                        self._cfvec_is_last_observable
-                        and not self._ftq_transition_without_last_is_expected()
-                    ):
-                        self.logger.warning(
-                            "FTQ entry transition without isLastInFtqEntry: flag=%d value=%d",
-                            self._current_ftq_entry.ftq_flag, self._current_ftq_entry.ftq_value,
-                        )
+                    # Redirect/truncation can cut an FTQ entry short. Close the
+                    # surviving prefix before continuing with the new pointer.
                     self._cfvec_queue_close_current_ftq_span(
                         int(self._current_ftq_entry.ftq_flag),
                         int(self._current_ftq_entry.ftq_value),
@@ -4028,10 +3995,10 @@ class BackendModel:
             ftq_flag = int(cfvec.ftq_flag)
             ftq_value = int(cfvec.ftq_value)
             ftq_offset = int(cfvec.ftq_offset)
-            is_last = bool(cfvec.is_last)
-            if not is_last and self._missing_cfvec_boundary_bit():
-                # The IFU enqueues one instruction for an uncache fetch.
-                is_last = self._cfvec_uses_uncache_fetch(int(pc))
+            # The current RTL does not export an FTQ-entry boundary bit. The
+            # uncache path still has one instruction per FTQ entry; cacheable
+            # entries are closed when the observed FTQ pointer changes.
+            is_last = self._cfvec_uses_uncache_fetch(int(pc))
             exception_bits = int(cfvec.exception_bits)
 
             recovery_target_pc = self._current_recovery_target_pc()

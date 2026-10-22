@@ -205,7 +205,6 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
                 "ftq_flag": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_ftqPtr_flag", 0),
                 "ftq_value": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_ftqPtr_value", 0),
                 "ftq_offset": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_ftqOffset", 0),
-                "is_last": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_isLastInFtqEntry", 0),
             }
         )
 

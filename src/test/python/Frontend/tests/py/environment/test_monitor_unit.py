@@ -33,7 +33,6 @@ class _ObserveIf:
         self.cfvec_ftq_ptr_flag = [_Signal() for _ in range(8)]
         self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
         self.cfvec_ftq_offset = [_Signal() for _ in range(8)]
-        self.cfvec_is_last_in_ftq_entry = [_Signal() for _ in range(8)]
         self.cfvec_exception_vec_1 = [_Signal() for _ in range(8)]
         self.cfvec_exception_vec_2 = [_Signal() for _ in range(8)]
         self.cfvec_exception_vec_12 = [_Signal() for _ in range(8)]
