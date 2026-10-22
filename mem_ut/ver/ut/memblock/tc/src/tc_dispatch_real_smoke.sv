@@ -32,7 +32,11 @@ class tc_dispatch_real_smoke extends tc_base;
 
         super.build_phase(phase);
         configure_real_smoke_default_sequences();
-        uvm_top.set_timeout(100us);
+        // The legacy testcase owns the automatic main-table sequence.  Keep a
+        // generous UVM safety bound so a regression-level override such as
+        // +MEMBLOCK_MAIN_TRANS_NUM=1000 is not misclassified as a testcase
+        // timeout before the DUT and responders have drained.
+        uvm_top.set_timeout(100000us, 1);
     endfunction:build_phase
 
     virtual function void configure_real_smoke_env_cfg(input memblock_env_cfg cfg);
