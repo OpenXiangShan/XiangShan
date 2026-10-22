@@ -606,7 +606,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.s3Update.prediction         := s3_prediction
   commonHR.io.s3Update.firstTakenBranchOH := s3_firstTakenBranchOH
   commonHR.io.redirect.valid              := redirect.valid
-  commonHR.io.redirect.cfiPc              := redirect.bits.cfiPc
+  commonHR.io.redirect.cfiPc              := redirect.bits.cfiPc.unGuard
   commonHR.io.redirect.target             := redirect.bits.target.unGuard
   commonHR.io.redirect.taken              := redirect.bits.taken
   commonHR.io.redirect.attribute          := redirect.bits.attribute

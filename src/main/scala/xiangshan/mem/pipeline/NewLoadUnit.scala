@@ -1755,7 +1755,6 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits.ftqIdx := uop.ftqPtr
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel
-  io.rollback.bits.target := uop.pc
   io.rollback.bits.debug_runahead_checkpoint_id := uop.perfDebugInfo.runahead_checkpoint_id
 
   io.exceptionInfo.valid := exceptionInfoValid

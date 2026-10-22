@@ -222,7 +222,7 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle {
 // Backend & Ftq -> Bpu
 class BpuRedirect(implicit p: Parameters) extends BpuBundle {
   // BpuRedirect need the virtual address of the control flow instruction (cfiPc) instead of startPc in other bundles
-  val cfiPc:     Pc              = Pc()
+  val cfiPc:     GuardedPc       = GuardedPc()
   val target:    GuardedPc       = GuardedPc()
   val taken:     Bool            = Bool()
   val attribute: BranchAttribute = new BranchAttribute
