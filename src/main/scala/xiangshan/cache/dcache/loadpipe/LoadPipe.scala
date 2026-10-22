@@ -587,6 +587,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_vaddr = RegEnable(s2_vaddr, s2_fire)
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
+  val s3_replay = RegEnable(resp.bits.replay, s2_fire)
   val s3_tag_match_way = RegEnable(s2_tag_match_way, s2_fire)
   val s3_req_instrtype = RegEnable(s2_req.instrtype, s2_fire)
   val s3_is_prefetch = s3_req_instrtype === DCACHE_PREFETCH_SOURCE.U
@@ -626,7 +627,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 
-  io.replace_access.valid := s3_valid && s3_hit && !s3_kill
+  io.replace_access.valid := s3_valid && s3_hit && !s3_kill && !s3_replay && !s3_is_prefetch
   io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))
   io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 
