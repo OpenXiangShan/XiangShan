@@ -152,7 +152,7 @@ if (catcher.caught_count != 1) begin
 end
 ```
 
-中文伪代码：先安装只匹配 `RM_READONLY_API` query miss 的 catcher；调用生产 item 构造，若 fired WAITING竟然成功则 testcase fatal；调用结束后移除 catcher，并要求恰好捕获一次预期 miss。跨页负向场景采用同样结构，确认首 VPN不完整时立即失败；completed response场景则确认仍能正常构造 item。
+中文伪代码：先安装只匹配 `RM_READONLY_API` query miss 的 catcher；调用生产 item 构造，若 fired WAITING竟然成功则 testcase fatal；调用结束后移除 catcher，并要求恰好捕获一次预期 miss。跨页负向场景采用同样结构，但首 VPN先使用 completed payload，随后在第二 VPN查询时确认立即失败；completed response场景则确认仍能正常构造 item。
 
 ### 4.2 `soft_test_rm_provenance_followup_sequence.sv`
 
