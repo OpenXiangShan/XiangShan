@@ -432,8 +432,8 @@ typedef enum bit [1:0] {
     MEMBLOCK_TLB_LOOKUP_MISS_BUILD = 2'd2
 } memblock_tlb_lookup_result_e;
 
-// 中文注释：exact miss 的多个 raw-hit candidate 按地址覆盖范围仲裁。
-// 枚举值由小到大单调排列，不能用于 exact hit 或改变 raw matcher。
+// 中文注释：枚举值表示DUT raw-hit的实际地址覆盖范围，由小到大单调排列。
+// live表不允许多个coverage同时命中；该值只用于索引、约束和非法重叠诊断。
 typedef enum int unsigned {
     MEMBLOCK_TLB_COVERAGE_4K   = 0,
     MEMBLOCK_TLB_COVERAGE_64K  = 1,
@@ -454,6 +454,38 @@ typedef struct packed {
     bit                        napot;
     bit [51:0]                 normalized_vpn;
 } memblock_tlb_range_index_key_t;
+
+// 中文注释：parent occupancy的上下文作用域直接编码进关联数组key。
+// EXACT_ASID/GLOBAL用于候选查询，ANY_ASID用于global候选检查任意S1 owner，
+// S2_ONLY表示onlyStage2只按VMID隔离，不参与ASID/global语义。
+typedef enum bit [1:0] {
+    MEMBLOCK_TLB_CONTEXT_EXACT_ASID = 2'd0,
+    MEMBLOCK_TLB_CONTEXT_GLOBAL     = 2'd1,
+    MEMBLOCK_TLB_CONTEXT_ANY_ASID   = 2'd2,
+    MEMBLOCK_TLB_CONTEXT_S2_ONLY    = 2'd3
+} memblock_tlb_context_scope_e;
+
+// 中文注释：该key表示某个上下文中的一个大页父区域是否已有更小canonical
+// live entry占用。注册/删除维护count；真正miss只按key做固定次数查询。
+typedef struct packed {
+    memblock_tlb_range_kind_e          range_kind;
+    bit [1:0]                          s2xlate;
+    bit [15:0]                         vmid;
+    memblock_tlb_context_scope_e       context_scope;
+    bit [15:0]                         asid;
+    // 实际owner的raw-hit范围。parent_region表示该owner登记到哪个候选
+    // 区域，两者分离后可区分“区域内child”和“真正覆盖当前地址的parent”。
+    memblock_tlb_range_coverage_rank_e owner_shape;
+    memblock_tlb_range_coverage_rank_e parent_region;
+    bit [51:0]                         normalized_vpn;
+} memblock_tlb_parent_occupancy_key_t;
+
+// 中文注释：owner key把父区域与canonical anchor绑定，用于拒绝重复注册、
+// 精确删除和fatal诊断；正常miss路径不遍历该集合。
+typedef struct packed {
+    memblock_tlb_parent_occupancy_key_t parent_key;
+    memblock_tlb_lookup_key_t           anchor_key;
+} memblock_tlb_parent_owner_key_t;
 
 typedef enum int unsigned {
     // HS/S-stage SFENCE.VMA，只作用于 noS2xlate 的 S1 entry。

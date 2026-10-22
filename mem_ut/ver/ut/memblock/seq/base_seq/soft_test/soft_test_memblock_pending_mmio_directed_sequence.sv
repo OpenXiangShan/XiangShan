@@ -56,6 +56,7 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     soft_test_memblock_dispatch_smoke_sequence;
 
     `uvm_object_utils(soft_test_memblock_pending_mmio_directed_sequence)
+    localparam int unsigned MEMBLOCK_LOAD_MMIO_TEST_MAX_SAMPLE_OFFSET = 2;
 
     extern function new(
         string name = "soft_test_memblock_pending_mmio_directed_sequence"
@@ -79,7 +80,7 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task run_mixed_wrap_overlap_fatal_scenario(input bit one_cycle_late);
     extern virtual task run_new_owner_r_overlap_fatal_scenario();
     extern virtual task run_incompatible_r_overlap_fatal_scenario();
-    extern virtual task run_r2_deleted_load_stale_scenario();
+    extern virtual task run_deleted_load_stale_scenario(input int unsigned sample_offset);
     extern virtual task run_r2_active_survivor_current_scenario();
     extern virtual task run_r2_survivor_with_deleted_history_fatal_scenario();
     extern virtual task run_r3_deleted_load_fatal_scenario();
@@ -147,7 +148,9 @@ task soft_test_memblock_pending_mmio_directed_sequence::body();
     run_mixed_wrap_overlap_fatal_scenario(1'b1);
     run_new_owner_r_overlap_fatal_scenario();
     run_incompatible_r_overlap_fatal_scenario();
-    run_r2_deleted_load_stale_scenario();
+    run_deleted_load_stale_scenario(0);
+    run_deleted_load_stale_scenario(1);
+    run_deleted_load_stale_scenario(2);
     run_r2_active_survivor_current_scenario();
     run_r2_survivor_with_deleted_history_fatal_scenario();
     run_r3_deleted_load_fatal_scenario();
@@ -1161,14 +1164,24 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_r2_survivor_with_del
     run_rob_wrap_admission_fatal_scenario("r2-survivor-with-deleted-history-fatal");
 endtask:run_r2_survivor_with_deleted_history_fatal_scenario
 
-// 中文注释：真实redirect flush删除active owner后，精确R+2的旧loadMmio必须由
+// 中文注释：真实redirect flush先删除active owner后，R/R+1/R+2的旧loadMmio都必须由
 // status与redirect-deleted LQ owner联合唯一证明，并只丢raw、不写MMIO tag。
-task soft_test_memblock_pending_mmio_directed_sequence::run_r2_deleted_load_stale_scenario();
+task soft_test_memblock_pending_mmio_directed_sequence::run_deleted_load_stale_scenario(
+    input int unsigned sample_offset
+);
     memblock_issue_q_item_t fired_items[$];
     memblock_uid_t victim_uids[$];
     memblock_redirect_payload_t redirect;
     memblock_rob_key_t owner_key;
     longint unsigned anchor_sample_seq;
+    string scenario_name;
+
+    if (sample_offset > MEMBLOCK_LOAD_MMIO_TEST_MAX_SAMPLE_OFFSET) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("deleted-load stale scenario offset=%0d exceeds overlap window",
+                             sample_offset))
+    end
+    scenario_name = $sformatf("r%0d-deleted-load-stale", sample_offset);
 
     reset_directed_owner_state();
     build_load_table(2);
@@ -1183,20 +1196,23 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_r2_deleted_load_stal
     redirect.level = 1'b1;
     redirect.rob_key = owner_key;
     prepare_redirect_deleted_owner_window(victim_uids, redirect,
-                                          "r2-deleted-load-stale",
+                                          scenario_name,
                                           anchor_sample_seq);
     if (data.get_status(1).active || !data.get_status(1).flushed ||
         !data.get_status(1).issue_killed ||
         !data.get_status(1).redirect_pending) begin
         `uvm_fatal(get_type_name(),
-                   "R+2 stale scenario did not preserve inactive flushed/killed history")
+                   $sformatf("R+%0d stale scenario did not preserve inactive flushed/killed history",
+                             sample_offset))
     end
-    apply_load_mmio_raw(owner_key.value, anchor_sample_seq + 2,
-                        "r2-deleted-load-stale");
+    apply_load_mmio_raw(owner_key.value, anchor_sample_seq + sample_offset,
+                        scenario_name);
     if (data.get_status(1).mmio_tag_valid) begin
-        `uvm_fatal(get_type_name(), "R+2 stale loadMmio incorrectly tagged deleted uid")
+        `uvm_fatal(get_type_name(),
+                   $sformatf("R+%0d stale loadMmio incorrectly tagged deleted uid",
+                             sample_offset))
     end
-endtask:run_r2_deleted_load_stale_scenario
+endtask:run_deleted_load_stale_scenario
 
 task soft_test_memblock_pending_mmio_directed_sequence::run_r3_deleted_load_fatal_scenario();
     memblock_issue_q_item_t fired_items[$];
@@ -1243,7 +1259,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_r2_no_history_fatal_
     establish_redirect_anchor(redirect, "r2-no-history-fatal", anchor_sample_seq);
     apply_load_mmio_raw(owner_key.value, anchor_sample_seq + 2,
                         "r2-no-history-fatal", 1'b1,
-                        "*cannot prove LOAD MMIO stale ownership at R+2*");
+                        "*cannot prove LOAD MMIO stale ownership in redirect overlap*");
 endtask:run_r2_no_history_fatal_scenario
 
 // 中文注释：overlap 只能命中 redirect epoch 内新建实例时，旧 owner 已无法唯一证明；
@@ -1318,7 +1334,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_r2_non_load_fatal_sc
                                           anchor_sample_seq);
     apply_load_mmio_raw(owner_key.value, anchor_sample_seq + 2,
                         "r2-non-load-fatal", 1'b1,
-                        "*cannot prove LOAD MMIO stale ownership at R+2*");
+                        "*cannot prove LOAD MMIO stale ownership in redirect overlap*");
 endtask:run_r2_non_load_fatal_scenario
 
 task soft_test_memblock_pending_mmio_directed_sequence::run_fault_head_suppress_scenario();

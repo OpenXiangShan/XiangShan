@@ -462,6 +462,12 @@ class memblock_rm_readonly_api extends uvm_object;
         input  memblock_uid_t uid,
         output uid_tlb_view_t view
     );
+    // 中文注释：只判断 UID 首个真实 L2TLB request 是否已经 fire 但 response
+    // 尚未完成。该入口不报 query miss，供 RM commit poll 区分 pending 与错误。
+    extern function bit uid_tlb_translation_pending_for_rm(
+        input memblock_uid_t uid,
+        input bit [51:0] request_vpn
+    );
     extern function bit read_initialized_backing_for_rm(
         input  mem_addr_t      addr,
         input  mem_line_mask_t byte_mask,
@@ -1156,12 +1162,10 @@ function bit memblock_rm_readonly_api::resolve_tlb_entry_key_for_rm(
     return 1'b1;
 endfunction:resolve_tlb_entry_key_for_rm
 
-// A no-request-fire issue proves that the DUT L1 TLB hit, but more than one
-// previously sampled response can raw-hit the same VPN.  In particular, a
-// 4KB entry and a later superpage entry can coexist in the DUT and participate
-// in its multi-hit read.  Resolve all responses visible before this issue with
-// the same widest-coverage policy used by the framework range matcher.  Do not
-// consult responses sampled after the issue boundary.
+// A no-request-fire issue freezes the latest uniquely visible completed
+// response at issue time.  RM consumes that immutable snapshot directly;
+// later cache replacement, fence, or wider historical entries cannot change
+// the UID's translation provenance.
 function bit memblock_rm_readonly_api::resolve_uid_issue_hit_entry_for_rm(
     input  common_data_transaction data,
     input  memblock_uid_tlb_record record,
@@ -1169,25 +1173,6 @@ function bit memblock_rm_readonly_api::resolve_uid_issue_hit_entry_for_rm(
     inout  tlb_request_context_view_t context_view,
     output tlb_entry_view_t entry_view
 );
-    memblock_tlb_range_index_key_t query_keys[$];
-    memblock_tlb_lookup_key_t seen_keys[$];
-    memblock_tlb_lookup_key_t candidate_keys[$];
-    memblock_tlb_entry candidate_entries[$];
-    longint unsigned candidate_tokens[$];
-    longint unsigned candidate_samples[$];
-    int unsigned candidate_ranks[$];
-    memblock_tlb_lookup_key_t anchor_key;
-    memblock_tlb_entry selected_entry;
-    bit seen;
-    int selected_idx;
-    int unsigned max_rank;
-    int unsigned max_rank_count;
-    int unsigned candidate_count;
-    bit derived_valid;
-    bit [43:0] derived_s1_ppn;
-    bit [43:0] derived_s2_ppn;
-    bit [51:0] derived_gvpn;
-
     entry_view = '{default:'0};
     if (data == null || record == null || record.csr_snapshot == null ||
         !record.record_valid || !record.is_waiting() ||
@@ -1195,130 +1180,38 @@ function bit memblock_rm_readonly_api::resolve_uid_issue_hit_entry_for_rm(
         !record.issue_hit_snapshot_valid ||
         record.issue_hit_payload == null ||
         record.issue_hit_response_sample_seq == 0 ||
-        record.uid_wait_start_sample_seq == 0) begin
+        record.uid_wait_start_sample_seq == 0 ||
+        record.issue_hit_entry_generation == 0) begin
         return report_query_miss(
             "uid_tlb_issue_hit",
-            "issue-hit overlap resolver requires a frozen no-request-fire attempt");
+            "issue-hit resolver requires a complete frozen no-request-fire snapshot");
     end
-
-    data.build_tlb_range_query_keys(context_view.request_key, query_keys);
-    foreach (query_keys[qidx]) begin
-        if (!data.completed_tlb_anchor_keys_by_range_key.exists(query_keys[qidx])) begin
-            continue;
-        end
-        foreach (data.completed_tlb_anchor_keys_by_range_key[query_keys[qidx]][bidx]) begin
-            anchor_key =
-                data.completed_tlb_anchor_keys_by_range_key[query_keys[qidx]][bidx];
-            seen = 1'b0;
-            foreach (seen_keys[sidx]) begin
-                if (data.tlb_lookup_key_equal(seen_keys[sidx], anchor_key)) begin
-                    seen = 1'b1;
-                end
-            end
-            if (seen) begin
-                continue;
-            end
-            seen_keys.push_back(anchor_key);
-            if (!data.completed_tlb_entry_by_key.exists(anchor_key) ||
-                data.completed_tlb_entry_by_key[anchor_key] == null ||
-                !data.completed_tlb_response_token_by_key.exists(anchor_key) ||
-                !data.completed_tlb_response_sample_by_key.exists(anchor_key)) begin
-                return report_query_miss(
-                    "uid_tlb_issue_hit",
-                    "completed-response range index has incomplete provenance");
-            end
-            if (data.completed_tlb_response_sample_by_key[anchor_key] >
-                record.uid_wait_start_sample_seq) begin
-                continue;
-            end
-            if (!data.entry_matches_request_raw(
-                    data.completed_tlb_entry_by_key[anchor_key], request_vpn,
-                    record.s2xlate, record.csr_snapshot)) begin
-                return report_query_miss(
-                    "uid_tlb_issue_hit",
-                    "completed-response range index disagrees with raw matcher");
-            end
-            candidate_keys.push_back(anchor_key);
-            candidate_entries.push_back(data.completed_tlb_entry_by_key[anchor_key]);
-            candidate_tokens.push_back(
-                data.completed_tlb_response_token_by_key[anchor_key]);
-            candidate_samples.push_back(
-                data.completed_tlb_response_sample_by_key[anchor_key]);
-            candidate_ranks.push_back(int'(
-                data.get_tlb_range_match_coverage_rank(
-                    data.completed_tlb_entry_by_key[anchor_key])));
-        end
-    end
-
-    // A same-anchor response may have been replaced in the completed cache
-    // after this issue.  Preserve the actual issue-time snapshot as a bounded
-    // candidate even when the current cache no longer contains its generation.
-    seen = 1'b0;
-    foreach (candidate_entries[cidx]) begin
-        if (candidate_entries[cidx].entry_generation ==
-                record.issue_hit_payload.entry_generation &&
-            data.tlb_lookup_key_equal(candidate_keys[cidx],
-                                      record.issue_hit_payload.lookup_key)) begin
-            seen = 1'b1;
-        end
-    end
-    if (!seen &&
-        record.issue_hit_response_sample_seq <= record.uid_wait_start_sample_seq &&
-        data.entry_matches_request_raw(record.issue_hit_payload, request_vpn,
-                                       record.s2xlate, record.csr_snapshot)) begin
-        candidate_keys.push_back(record.issue_hit_payload.lookup_key);
-        candidate_entries.push_back(record.issue_hit_payload);
-        candidate_tokens.push_back(record.issue_hit_response_token);
-        candidate_samples.push_back(record.issue_hit_response_sample_seq);
-        candidate_ranks.push_back(int'(
-            data.get_tlb_range_match_coverage_rank(record.issue_hit_payload)));
-    end
-
-    candidate_count = candidate_entries.size();
-    if (candidate_count == 0) begin
+    if (record.issue_hit_response_sample_seq >
+            record.uid_wait_start_sample_seq ||
+        record.issue_hit_entry_generation !=
+            record.issue_hit_payload.entry_generation ||
+        record.issue_hit_payload.s2xlate != record.s2xlate ||
+        !data.entry_matches_request_raw(record.issue_hit_payload, request_vpn,
+                                        record.s2xlate,
+                                        record.csr_snapshot)) begin
         return report_query_miss(
             "uid_tlb_issue_hit",
-            $sformatf("uid=%0d has no issue-visible completed response", record.uid));
-    end
-    max_rank = candidate_ranks[0];
-    foreach (candidate_ranks[cidx]) begin
-        if (candidate_ranks[cidx] > max_rank) begin
-            max_rank = candidate_ranks[cidx];
-        end
-    end
-    selected_idx = -1;
-    max_rank_count = 0;
-    foreach (candidate_ranks[cidx]) begin
-        if (candidate_ranks[cidx] == max_rank) begin
-            selected_idx = cidx;
-            max_rank_count++;
-        end
-    end
-    if (selected_idx < 0 || max_rank_count != 1) begin
-        return report_query_miss(
-            "uid_tlb_issue_hit",
-            $sformatf("uid=%0d issue-hit overlap is ambiguous candidates=%0d rank=%0d",
-                      record.uid, candidate_count, max_rank));
+            $sformatf("uid=%0d frozen issue-hit provenance/raw match is inconsistent",
+                      record.uid));
     end
 
-    selected_entry = candidate_entries[selected_idx];
-    copy_tlb_entry(selected_entry, entry_view);
-    context_view.entry_key = candidate_keys[selected_idx];
+    copy_tlb_entry(record.issue_hit_payload, entry_view);
+    context_view.entry_key = record.issue_hit_payload.lookup_key;
     context_view.range_hit = context_view.entry_key != context_view.request_key;
-    data.derive_tlb_request_fields(
-        selected_entry, request_vpn, record.s2xlate, record.csr_snapshot,
-        derived_valid, derived_s1_ppn, derived_s2_ppn, derived_gvpn);
-    context_view.request_translation_valid = derived_valid;
-    context_view.request_s1_resolved_ppn = derived_s1_ppn;
-    context_view.request_s2_resolved_ppn = derived_s2_ppn;
-    context_view.request_gvpn = derived_gvpn;
+    context_view.request_translation_valid = record.request_derived_valid;
+    context_view.request_s1_resolved_ppn = record.request_s1_resolved_ppn;
+    context_view.request_s2_resolved_ppn = record.request_s2_resolved_ppn;
+    context_view.request_gvpn = record.request_gvpn;
     `uvm_info("RM_TLB_ISSUE_HIT",
-              $sformatf("uid=%0d vpn=0x%0h candidates=%0d selected_token=%0d selected_sample=%0d selected_generation=%0d selected_rank=%0d frozen_token=%0d frozen_generation=%0d frozen_fault=%0d",
-                        record.uid, request_vpn, candidate_count,
-                        candidate_tokens[selected_idx],
-                        candidate_samples[selected_idx],
-                        selected_entry.entry_generation, max_rank,
+              $sformatf("uid=%0d vpn=0x%0h frozen_token=%0d frozen_sample=%0d frozen_generation=%0d frozen_fault=%0d",
+                        record.uid, request_vpn,
                         record.issue_hit_response_token,
+                        record.issue_hit_response_sample_seq,
                         record.issue_hit_payload.entry_generation,
                         record.issue_hit_payload.has_effective_fault()),
               UVM_LOW)
@@ -1428,6 +1321,30 @@ function bit memblock_rm_readonly_api::read_uid_tlb_for_rm(
     copy_uid_tlb_record(data.uid_tlb_record_by_uid[uid], view);
     return 1'b1;
 endfunction:read_uid_tlb_for_rm
+
+function bit memblock_rm_readonly_api::uid_tlb_translation_pending_for_rm(
+    input memblock_uid_t uid,
+    input bit [51:0] request_vpn
+);
+    common_data_transaction data;
+    memblock_uid_tlb_record record;
+
+    // This is a readiness probe, not a semantic query.  Missing records and
+    // secondary-page lookups remain false so the normal resolver can report
+    // the actual error when the caller is not in a known pending state.
+    if (!try_get_common_data(data) ||
+        !data.uid_tlb_record_by_uid.exists(uid) ||
+        data.uid_tlb_record_by_uid[uid] == null) begin
+        return 1'b0;
+    end
+    record = data.uid_tlb_record_by_uid[uid];
+    return record.record_valid &&
+           request_vpn == record.vpn &&
+           !record.pte_valid &&
+           record.uid_tlb_wait_state ==
+               memblock_uid_tlb_record::MEMBLOCK_UID_TLB_WAITING &&
+           record.uid_tlb_first_request_fire_sample_seq != 0;
+endfunction:uid_tlb_translation_pending_for_rm
 
 function bit memblock_rm_readonly_api::read_memory_map(
     input  bit              overlay,

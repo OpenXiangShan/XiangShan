@@ -19,6 +19,7 @@ class common_data_transaction extends uvm_object;
     // anchor 最迟可在 R+2 出现。该常量只定义 overlap 候选窗口；R+2 仍需
     // redirect-deleted owner 与 status 历史共同唯一证明后才能 stale-drop。
     localparam longint unsigned MEMBLOCK_LOAD_MMIO_REDIRECT_MAX_SAMPLE_OFFSET = 2;
+    localparam int unsigned MEMBLOCK_TLB_FALLBACK_WARNING_LIMIT = 4;
     // 中文注释：主表/公共队列已经收敛后，memory responder 仍允许接收尾请求的最短静默窗口。
     // 该值是 global stop 的固定框架时序，不是 testcase 可改的 plus 参数；DCache/SBuffer
     // 任一观察到新 activity 都会重新起算该窗口，避免在已知尾流量中途提交 global stop。
@@ -87,6 +88,22 @@ class common_data_transaction extends uvm_object;
     // 回到 canonical table 复核，不能把 payload 或 pending handle 存进 index。
     memblock_tlb_lookup_key_t
         tlb_anchor_keys_by_range_key[memblock_tlb_range_index_key_t][$];
+    // 中文注释：parent occupancy count记录一个上下文父区域中已有多少个更小
+    // canonical live entry。真正miss只读count，不扫描live表或owner集合。
+    int unsigned
+        tlb_parent_occupancy_count[memblock_tlb_parent_occupancy_key_t];
+    // 中文注释：owner set把父区域key与canonical anchor绑定。publish写入、统一
+    // delete删除；只用于重复注册检查、精确撤销和fatal诊断。
+    bit tlb_parent_owner_set[memblock_tlb_parent_owner_key_t];
+    longint unsigned parent_lookup_count;
+    longint unsigned parent_block_64k_count;
+    longint unsigned parent_block_2m_count;
+    longint unsigned parent_block_1g_count;
+    longint unsigned parent_block_512g_count;
+    longint unsigned pte_n_override_count;
+    longint unsigned pte_g_override_count;
+    longint unsigned forced_4k_fallback_count;
+    int unsigned     parent_owner_peak_count;
     // Only a real sampled L2TLB response publishes this cache.  It is kept
     // separate from the live canonical table because live entries exist while
     // a miss is still pending and therefore are not completion evidence.
@@ -321,6 +338,15 @@ class common_data_transaction extends uvm_object;
         pma_pmp_model.reset_and_init_v2_profile();
         pma_pmp_last_applied_csr_sample = 0;
         next_tlb_entry_generation = 0;
+        parent_lookup_count = 0;
+        parent_block_64k_count = 0;
+        parent_block_2m_count = 0;
+        parent_block_1g_count = 0;
+        parent_block_512g_count = 0;
+        pte_n_override_count = 0;
+        pte_g_override_count = 0;
+        forced_4k_fallback_count = 0;
+        parent_owner_peak_count = 0;
         sfence_invalidate_pending_q.delete();
         l2tlb_ppn_history_q.delete();
         uid_waiting_by_vpn_s2xlate.delete();
@@ -429,6 +455,17 @@ class common_data_transaction extends uvm_object;
         cancel_waiting_uid_tlb_records("reset_all_tables");
         tlb_entry_by_key.delete();
         tlb_anchor_keys_by_range_key.delete();
+        tlb_parent_occupancy_count.delete();
+        tlb_parent_owner_set.delete();
+        parent_lookup_count = 0;
+        parent_block_64k_count = 0;
+        parent_block_2m_count = 0;
+        parent_block_1g_count = 0;
+        parent_block_512g_count = 0;
+        pte_n_override_count = 0;
+        pte_g_override_count = 0;
+        forced_4k_fallback_count = 0;
+        parent_owner_peak_count = 0;
         completed_tlb_entry_by_key.delete();
         completed_tlb_anchor_keys_by_range_key.delete();
         completed_tlb_response_token_by_key.delete();
@@ -1032,7 +1069,8 @@ class common_data_transaction extends uvm_object;
                   UVM_NONE)
     endfunction:dump_mmio_resolve_failure_context
 
-    // 抽象职责：只在 Load MMIO R+2 且 active ROB owner 已消失时，使用现有
+    // 抽象职责：只在 Load MMIO 与 redirect 的R..R+2窗口重叠且active ROB owner
+    // 已消失时，使用现有
     // status/main table 与单代 redirect-deleted LQ owner证明旧动态实例归属。
     // 本函数只读公共状态，不写 tag、map、queue、redirect 或 cancel 生命周期。
     function bit find_unique_redirect_deleted_load_mmio_owner(
@@ -1461,8 +1499,9 @@ class common_data_transaction extends uvm_object;
                 `uvm_info("MMIO_RESOLVE", stale_reason, UVM_LOW)
                 return MEMBLOCK_MMIO_RESOLVE_CURRENT;
             end
-            if (raw_sample_seq == overlap_redirect_sample_seq +
-                                      MEMBLOCK_LOAD_MMIO_REDIRECT_MAX_SAMPLE_OFFSET &&
+            if (raw_sample_seq >= overlap_redirect_sample_seq &&
+                raw_sample_seq <= overlap_redirect_sample_seq +
+                                  MEMBLOCK_LOAD_MMIO_REDIRECT_MAX_SAMPLE_OFFSET &&
                 active_candidate_count == 0) begin
                 memblock_uid_t deleted_uid;
                 memblock_rob_key_t deleted_rob_key;
@@ -1480,16 +1519,18 @@ class common_data_transaction extends uvm_object;
                         deleted_proof_detail)) begin
                     uid = deleted_uid;
                     stale_reason = $sformatf(
-                        "loadMmio sample=%0d is R+2 of redirect sample=%0d and uniquely matches deleted uid=%0d ROB=%0d/%0d epoch=%0d record=%0d",
+                        "loadMmio sample=%0d overlaps redirect sample=%0d at offset=%0d and uniquely matches deleted uid=%0d ROB=%0d/%0d epoch=%0d record=%0d",
                         raw_sample_seq, overlap_redirect_sample_seq,
+                        raw_sample_seq - overlap_redirect_sample_seq,
                         deleted_uid, deleted_rob_key.flag,
                         deleted_rob_key.value, overlap_redirect_epoch,
                         overlap_cancel_record_id);
                     return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
                 end
                 stale_reason = $sformatf(
-                    "cannot prove LOAD MMIO stale ownership at R+2 sample=%0d redirect_sample=%0d %s",
+                    "cannot prove LOAD MMIO stale ownership in redirect overlap sample=%0d redirect_sample=%0d offset=%0d %s",
                     raw_sample_seq, overlap_redirect_sample_seq,
+                    raw_sample_seq - overlap_redirect_sample_seq,
                     deleted_proof_detail);
                 dump_mmio_resolve_failure_context(rob_value, expected_kind,
                                                   raw_sample_flush_epoch,
@@ -5645,7 +5686,9 @@ class common_data_transaction extends uvm_object;
         bit [15:0] indexed_vmid;
 
         keys.delete();
-        if (entry == null || entry.entry_generation == 0) begin
+        if (entry == null || entry.entry_generation == 0 ||
+            entry.payload_phase !=
+                memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_FINALIZED) begin
             `uvm_fatal("COMMON_DATA", "build_entry_range_index_keys got invalid entry")
         end
         entry.check_inactive_stage_defaults("RANGE_INDEX_BUILD");
@@ -5704,7 +5747,10 @@ class common_data_transaction extends uvm_object;
                 if (!entry.s1_stage_active || !entry.s2_stage_active) begin
                     `uvm_fatal("COMMON_DATA", "allStage range entry has invalid stage shape")
                 end
-                derive_allstage_lookup_shape(entry, effective_level, effective_napot);
+                memblock_tlb_entry::derive_allstage_lookup_shape(
+                    entry.s1_level, entry.s1_pte_n,
+                    entry.s2_level, entry.s2_pte_n,
+                    effective_level, effective_napot);
                 raw_anchor_vpn = {14'b0, entry.s1_tag, entry.s1_addr_low};
                 use_napot = effective_level == 2'd0 && effective_napot;
                 keys.push_back(make_tlb_range_index_key(
@@ -5867,6 +5913,115 @@ class common_data_transaction extends uvm_object;
         entry.range_index_keys.delete();
     endfunction:unregister_tlb_range_index
 
+    // 中文注释：新canonical live entry的唯一生产发布入口。所有range/parent
+    // key和冲突条件先检查，再在同一个零时间function内连续更新主表和两个索引。
+    function void publish_live_tlb_entry(
+        input memblock_tlb_lookup_key_t anchor_key,
+        input memblock_tlb_entry entry,
+        input mmu_csr_runtime_state csr_snapshot);
+        memblock_tlb_lookup_key_t expected_key;
+        memblock_tlb_range_index_key_t range_keys[$];
+        memblock_tlb_parent_occupancy_key_t parent_keys[$];
+        memblock_tlb_parent_owner_key_t owner_key;
+
+        if (entry == null || csr_snapshot == null || has_tlb_entry(anchor_key) ||
+            entry.lookup_key != anchor_key || entry.s2xlate != anchor_key.s2xlate ||
+            entry.entry_generation == 0 || entry.range_index_keys.size() != 0 ||
+            entry.parent_occupancy_keys.size() != 0 ||
+            entry.payload_phase !=
+                memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_FINALIZED) begin
+            `uvm_fatal("COMMON_DATA", "publish_live_tlb_entry got invalid detached entry")
+        end
+        expected_key = csr_snapshot.make_lookup_key(anchor_key.vpn,
+                                                     anchor_key.s2xlate);
+        if (!tlb_lookup_key_equal(expected_key, anchor_key)) begin
+            `uvm_fatal("COMMON_DATA", "publish key disagrees with frozen CSR snapshot")
+        end
+        validate_normal_napot_payload(anchor_key, entry);
+        void'(validate_no_live_tlb_overlap(anchor_key, entry));
+        build_entry_range_index_keys(entry, range_keys);
+        build_tlb_parent_occupancy_keys(entry, parent_keys);
+
+        foreach (range_keys[key_idx]) begin
+            for (int prior_idx = 0; prior_idx < key_idx; prior_idx++) begin
+                if (range_keys[prior_idx] == range_keys[key_idx]) begin
+                    `uvm_fatal("COMMON_DATA", "publish produced duplicate range key")
+                end
+            end
+            if (tlb_anchor_keys_by_range_key.exists(range_keys[key_idx])) begin
+                if (tlb_anchor_keys_by_range_key[range_keys[key_idx]].size() >=
+                    MEMBLOCK_TLB_RANGE_CANDIDATE_MAX) begin
+                    `uvm_fatal("COMMON_DATA", "publish range bucket capacity overflow")
+                end
+                foreach (tlb_anchor_keys_by_range_key[range_keys[key_idx]][bucket_idx]) begin
+                    if (tlb_lookup_key_equal(
+                            tlb_anchor_keys_by_range_key[range_keys[key_idx]][bucket_idx],
+                            anchor_key)) begin
+                        `uvm_fatal("COMMON_DATA", "publish found duplicate range anchor")
+                    end
+                end
+            end
+        end
+        foreach (parent_keys[key_idx]) begin
+            for (int prior_idx = 0; prior_idx < key_idx; prior_idx++) begin
+                if (parent_keys[prior_idx] == parent_keys[key_idx]) begin
+                    `uvm_fatal("COMMON_DATA", "publish produced duplicate parent key")
+                end
+            end
+            owner_key.parent_key = parent_keys[key_idx];
+            owner_key.anchor_key = anchor_key;
+            if (tlb_parent_owner_set.exists(owner_key) ||
+                (tlb_parent_occupancy_count.exists(parent_keys[key_idx]) &&
+                 tlb_parent_occupancy_count[parent_keys[key_idx]] == '1)) begin
+                `uvm_fatal("COMMON_DATA", "publish parent owner duplicate/count overflow")
+            end
+        end
+
+        tlb_entry_by_key[anchor_key] = entry;
+        foreach (range_keys[key_idx]) begin
+            tlb_anchor_keys_by_range_key[range_keys[key_idx]].push_back(anchor_key);
+            entry.range_index_keys.push_back(range_keys[key_idx]);
+        end
+        foreach (parent_keys[key_idx]) begin
+            owner_key.parent_key = parent_keys[key_idx];
+            owner_key.anchor_key = anchor_key;
+            if (!tlb_parent_occupancy_count.exists(parent_keys[key_idx])) begin
+                tlb_parent_occupancy_count[parent_keys[key_idx]] = 0;
+            end
+            tlb_parent_occupancy_count[parent_keys[key_idx]]++;
+            tlb_parent_owner_set[owner_key] = 1'b1;
+            entry.parent_occupancy_keys.push_back(parent_keys[key_idx]);
+        end
+        if (tlb_parent_owner_set.num() > parent_owner_peak_count) begin
+            parent_owner_peak_count = tlb_parent_owner_set.num();
+        end
+    endfunction:publish_live_tlb_entry
+
+    function void unregister_tlb_parent_occupancy_index(
+        input memblock_tlb_lookup_key_t anchor_key,
+        input memblock_tlb_entry entry);
+        memblock_tlb_parent_owner_key_t owner_key;
+
+        if (entry == null || entry.lookup_key != anchor_key) begin
+            `uvm_fatal("COMMON_DATA", "parent unregistration got invalid canonical entry")
+        end
+        foreach (entry.parent_occupancy_keys[key_idx]) begin
+            owner_key.parent_key = entry.parent_occupancy_keys[key_idx];
+            owner_key.anchor_key = anchor_key;
+            if (!tlb_parent_owner_set.exists(owner_key) ||
+                !tlb_parent_occupancy_count.exists(owner_key.parent_key) ||
+                tlb_parent_occupancy_count[owner_key.parent_key] == 0) begin
+                `uvm_fatal("COMMON_DATA", "parent owner/count lifecycle is inconsistent")
+            end
+            tlb_parent_owner_set.delete(owner_key);
+            tlb_parent_occupancy_count[owner_key.parent_key]--;
+            if (tlb_parent_occupancy_count[owner_key.parent_key] == 0) begin
+                tlb_parent_occupancy_count.delete(owner_key.parent_key);
+            end
+        end
+        entry.parent_occupancy_keys.delete();
+    endfunction:unregister_tlb_parent_occupancy_index
+
     // Abstract responsibility: enumerate the bounded set of secondary-index
     // buckets that could raw-hit one exact-miss request.  It does not inspect
     // the table or arbitrate candidates; it only mirrors matcher granularity.
@@ -5963,7 +6118,9 @@ class common_data_transaction extends uvm_object;
                 if (!entry.s1_stage_active || !entry.s2_stage_active) begin
                     `uvm_fatal("COMMON_DATA", "allStage range rank got invalid stage shape")
                 end
-                derive_allstage_lookup_shape(entry, level, napot);
+                memblock_tlb_entry::derive_allstage_lookup_shape(
+                    entry.s1_level, entry.s1_pte_n,
+                    entry.s2_level, entry.s2_pte_n, level, napot);
                 napot = level == 2'd0 && napot;
             end
             default: begin
@@ -5983,6 +6140,329 @@ class common_data_transaction extends uvm_object;
         return MEMBLOCK_TLB_COVERAGE_4K;
     endfunction:get_tlb_range_match_coverage_rank
 
+    function memblock_tlb_range_kind_e get_tlb_range_kind_by_s2xlate(
+        input bit [1:0] s2xlate);
+        case (s2xlate)
+            2'd0, 2'd1: return MEMBLOCK_TLB_RANGE_KIND_S1;
+            2'd2: return MEMBLOCK_TLB_RANGE_KIND_S2;
+            2'd3: return MEMBLOCK_TLB_RANGE_KIND_ALLSTAGE;
+            default: begin
+                `uvm_fatal("COMMON_DATA", "unsupported s2xlate for parent occupancy")
+            end
+        endcase
+        return MEMBLOCK_TLB_RANGE_KIND_S1;
+    endfunction:get_tlb_range_kind_by_s2xlate
+
+    function bit [51:0] normalize_tlb_parent_vpn(
+        input bit [51:0] vpn,
+        input memblock_tlb_range_coverage_rank_e parent_region);
+        bit [51:0] normalized_vpn;
+
+        normalized_vpn = vpn;
+        case (parent_region)
+            MEMBLOCK_TLB_COVERAGE_4K:   begin end
+            MEMBLOCK_TLB_COVERAGE_64K:  normalized_vpn[3:0] = '0;
+            MEMBLOCK_TLB_COVERAGE_2M:   normalized_vpn[8:0] = '0;
+            MEMBLOCK_TLB_COVERAGE_1G:   normalized_vpn[17:0] = '0;
+            MEMBLOCK_TLB_COVERAGE_512G: normalized_vpn[26:0] = '0;
+            default: begin
+                `uvm_fatal("COMMON_DATA", "invalid shape cannot be a parent region")
+            end
+        endcase
+        return normalized_vpn;
+    endfunction:normalize_tlb_parent_vpn
+
+    function memblock_tlb_parent_occupancy_key_t make_tlb_parent_occupancy_key(
+        input bit [51:0] vpn,
+        input memblock_tlb_entry context_entry,
+        input memblock_tlb_range_coverage_rank_e owner_shape,
+        input memblock_tlb_range_coverage_rank_e parent_region,
+        input memblock_tlb_context_scope_e context_scope,
+        input bit [15:0] asid);
+        memblock_tlb_parent_occupancy_key_t parent_key;
+
+        if (context_entry == null) begin
+            `uvm_fatal("COMMON_DATA", "parent occupancy key got null context entry")
+        end
+        parent_key = '{default:'0};
+        parent_key.range_kind = get_tlb_range_kind_by_s2xlate(
+            context_entry.s2xlate);
+        parent_key.s2xlate = context_entry.s2xlate;
+        parent_key.owner_shape = owner_shape;
+        parent_key.parent_region = parent_region;
+        parent_key.context_scope = context_scope;
+        parent_key.normalized_vpn = normalize_tlb_parent_vpn(
+            vpn, parent_region);
+        if (context_entry.s2xlate == 2'd2) begin
+            parent_key.vmid = context_entry.s2_vmid;
+            parent_key.asid = '0;
+        end
+        else begin
+            parent_key.vmid = context_entry.s2xlate == 2'd0 ? '0 :
+                              context_entry.s1_vmid;
+            parent_key.asid = context_scope == MEMBLOCK_TLB_CONTEXT_EXACT_ASID ?
+                              asid : '0;
+        end
+        return parent_key;
+    endfunction:make_tlb_parent_occupancy_key
+
+    // 中文注释：注册key表达已有entry对父区域的所有权。S1 non-global同时
+    // 注册EXACT_ASID和ANY_ASID；global注册GLOBAL和ANY_ASID；S2-only只注册VMID。
+    function void build_tlb_parent_registration_keys_for_region(
+        input bit [51:0] vpn,
+        input memblock_tlb_entry entry,
+        input memblock_tlb_range_coverage_rank_e owner_shape,
+        input memblock_tlb_range_coverage_rank_e parent_region,
+        output memblock_tlb_parent_occupancy_key_t keys[$]);
+        bit context_global;
+
+        keys.delete();
+        if (entry == null) begin
+            `uvm_fatal("COMMON_DATA", "parent registration got null entry")
+        end
+        if (entry.s2xlate == 2'd2) begin
+            keys.push_back(make_tlb_parent_occupancy_key(
+                vpn, entry, owner_shape, parent_region,
+                MEMBLOCK_TLB_CONTEXT_S2_ONLY, '0));
+            return;
+        end
+        context_global = entry.s1_stage_active && entry.s1_pte_g;
+        keys.push_back(make_tlb_parent_occupancy_key(
+            vpn, entry, owner_shape, parent_region,
+            context_global ? MEMBLOCK_TLB_CONTEXT_GLOBAL :
+                             MEMBLOCK_TLB_CONTEXT_EXACT_ASID,
+            entry.s1_asid));
+        keys.push_back(make_tlb_parent_occupancy_key(
+            vpn, entry, owner_shape, parent_region,
+            MEMBLOCK_TLB_CONTEXT_ANY_ASID, '0));
+    endfunction:build_tlb_parent_registration_keys_for_region
+
+    // 中文注释：候选大页查询与注册scope互补。non-global查询当前ASID和GLOBAL，
+    // global查询ANY_ASID，确保任一方global时冲突；S2-only只按VMID查询。
+    function void build_tlb_parent_query_keys_for_region(
+        input bit [51:0] vpn,
+        input memblock_tlb_entry prepared_entry,
+        input memblock_tlb_range_coverage_rank_e owner_shape,
+        input memblock_tlb_range_coverage_rank_e parent_region,
+        output memblock_tlb_parent_occupancy_key_t keys[$]);
+        bit context_global;
+
+        keys.delete();
+        if (prepared_entry == null) begin
+            `uvm_fatal("COMMON_DATA", "parent query got null prepared entry")
+        end
+        if (prepared_entry.s2xlate == 2'd2) begin
+            keys.push_back(make_tlb_parent_occupancy_key(
+                vpn, prepared_entry, owner_shape, parent_region,
+                MEMBLOCK_TLB_CONTEXT_S2_ONLY, '0));
+            return;
+        end
+        context_global = prepared_entry.s1_stage_active &&
+                         prepared_entry.s1_pte_g;
+        if (context_global) begin
+            keys.push_back(make_tlb_parent_occupancy_key(
+                vpn, prepared_entry, owner_shape, parent_region,
+                MEMBLOCK_TLB_CONTEXT_ANY_ASID, '0));
+        end
+        else begin
+            keys.push_back(make_tlb_parent_occupancy_key(
+                vpn, prepared_entry, owner_shape, parent_region,
+                MEMBLOCK_TLB_CONTEXT_EXACT_ASID,
+                prepared_entry.s1_asid));
+            keys.push_back(make_tlb_parent_occupancy_key(
+                vpn, prepared_entry, owner_shape, parent_region,
+                MEMBLOCK_TLB_CONTEXT_GLOBAL, '0));
+        end
+    endfunction:build_tlb_parent_query_keys_for_region
+
+    function void build_tlb_parent_occupancy_keys(
+        input memblock_tlb_entry entry,
+        output memblock_tlb_parent_occupancy_key_t keys[$]);
+        memblock_tlb_range_coverage_rank_e entry_shape;
+        memblock_tlb_parent_occupancy_key_t region_keys[$];
+
+        keys.delete();
+        if (entry == null || entry.entry_generation == 0 ||
+            entry.payload_phase !=
+                memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_FINALIZED) begin
+            `uvm_fatal("COMMON_DATA", "parent occupancy build got invalid entry")
+        end
+        entry_shape = get_tlb_range_match_coverage_rank(entry);
+        // Register the entry's own shape as well as every larger shape.  This
+        // is required when a later global entry is built under another ASID:
+        // same-shape and larger non-global entries must remain discoverable.
+        for (int unsigned region_idx = int'(entry_shape);
+             region_idx <= int'(MEMBLOCK_TLB_COVERAGE_512G);
+             region_idx++) begin
+            build_tlb_parent_registration_keys_for_region(
+                entry.lookup_key.vpn, entry, entry_shape,
+                memblock_tlb_range_coverage_rank_e'(region_idx), region_keys);
+            foreach (region_keys[idx]) keys.push_back(region_keys[idx]);
+        end
+    endfunction:build_tlb_parent_occupancy_keys
+
+    // 中文注释：候选shape的冲突查询分成两组。更小/同尺寸owner只查询
+    // 候选自身区域；更大owner只查询其实际shape区域。owner_shape字段避免
+    // 同一更大区域内互不重叠的小页被误认为覆盖当前候选。
+    function void build_tlb_overlap_query_keys(
+        input bit [51:0] request_vpn,
+        input memblock_tlb_entry prepared_entry,
+        input memblock_tlb_range_coverage_rank_e candidate_shape,
+        output memblock_tlb_parent_occupancy_key_t keys[$]);
+        memblock_tlb_parent_occupancy_key_t shape_keys[$];
+
+        keys.delete();
+        for (int unsigned owner_idx = int'(MEMBLOCK_TLB_COVERAGE_4K);
+             owner_idx <= int'(candidate_shape); owner_idx++) begin
+            build_tlb_parent_query_keys_for_region(
+                request_vpn, prepared_entry,
+                memblock_tlb_range_coverage_rank_e'(owner_idx),
+                candidate_shape, shape_keys);
+            foreach (shape_keys[idx]) keys.push_back(shape_keys[idx]);
+        end
+        for (int unsigned owner_idx = int'(candidate_shape) + 1;
+             owner_idx <= int'(MEMBLOCK_TLB_COVERAGE_512G); owner_idx++) begin
+            build_tlb_parent_query_keys_for_region(
+                request_vpn, prepared_entry,
+                memblock_tlb_range_coverage_rank_e'(owner_idx),
+                memblock_tlb_range_coverage_rank_e'(owner_idx), shape_keys);
+            foreach (shape_keys[idx]) keys.push_back(shape_keys[idx]);
+        end
+    endfunction:build_tlb_overlap_query_keys
+
+    function bit tlb_shape_supported_by_active_modes(
+        input memblock_tlb_entry entry,
+        input memblock_tlb_range_coverage_rank_e shape);
+        if (entry == null) begin
+            `uvm_fatal("COMMON_DATA", "shape mode check got null entry")
+        end
+        if (shape != MEMBLOCK_TLB_COVERAGE_512G) begin
+            return 1'b1;
+        end
+        return (!entry.s1_stage_active ||
+                entry.s1_translation_mode_at_build == MEMBLOCK_SV48_MODE) &&
+               (!entry.s2_stage_active ||
+                entry.s2_translation_mode_at_build == MEMBLOCK_SV48_MODE);
+    endfunction:tlb_shape_supported_by_active_modes
+
+    // 中文注释：真正miss在builder finalize前调用。每个shape只做固定1到2次
+    // count查询，已有child时屏蔽对应大页，不扫描owner或canonical live表。
+    function bit [4:0] derive_allowed_tlb_shape_mask(
+        input bit [51:0] request_vpn,
+        input memblock_tlb_entry prepared_entry);
+        bit [4:0] allowed_shape_mask;
+        memblock_tlb_parent_occupancy_key_t query_keys[$];
+
+        allowed_shape_mask = '0;
+        for (int unsigned shape_idx = 0;
+             shape_idx <= int'(MEMBLOCK_TLB_COVERAGE_512G);
+             shape_idx++) begin
+            allowed_shape_mask[shape_idx] = tlb_shape_supported_by_active_modes(
+                prepared_entry,
+                memblock_tlb_range_coverage_rank_e'(shape_idx));
+        end
+        allowed_shape_mask[MEMBLOCK_TLB_COVERAGE_4K] = 1'b1;
+        for (int unsigned region_idx = int'(MEMBLOCK_TLB_COVERAGE_4K);
+             region_idx <= int'(MEMBLOCK_TLB_COVERAGE_512G);
+             region_idx++) begin
+            bit blocked;
+
+            if (!allowed_shape_mask[region_idx]) continue;
+            blocked = 1'b0;
+            build_tlb_overlap_query_keys(
+                request_vpn, prepared_entry,
+                memblock_tlb_range_coverage_rank_e'(region_idx), query_keys);
+            foreach (query_keys[idx]) begin
+                parent_lookup_count++;
+                if (tlb_parent_occupancy_count.exists(query_keys[idx]) &&
+                    tlb_parent_occupancy_count[query_keys[idx]] != 0) begin
+                    blocked = 1'b1;
+                    break;
+                end
+            end
+            if (blocked) begin
+                allowed_shape_mask[region_idx] = 1'b0;
+                case (memblock_tlb_range_coverage_rank_e'(region_idx))
+                    MEMBLOCK_TLB_COVERAGE_64K:  parent_block_64k_count++;
+                    MEMBLOCK_TLB_COVERAGE_2M:   parent_block_2m_count++;
+                    MEMBLOCK_TLB_COVERAGE_1G:   parent_block_1g_count++;
+                    MEMBLOCK_TLB_COVERAGE_512G: parent_block_512g_count++;
+                    default: begin end
+                endcase
+            end
+        end
+        return allowed_shape_mask;
+    endfunction:derive_allowed_tlb_shape_mask
+
+    // 中文注释：global prepared entry若连4KB都被其他ASID的non-global
+    // owner挡住，说明随机G位使候选扩大了可见上下文。prepared entry尚未
+    // publish，可清G后按当前ASID重新计算；真实同ASID/global冲突仍保持阻塞。
+    function bit [4:0] derive_allowed_tlb_shape_mask_with_global_fallback(
+        input bit [51:0] request_vpn,
+        input memblock_tlb_entry prepared_entry,
+        output bit pte_g_overridden);
+        bit [4:0] allowed_shape_mask;
+
+        if (prepared_entry == null || prepared_entry.entry_generation != 0 ||
+            prepared_entry.range_index_keys.size() != 0 ||
+            prepared_entry.parent_occupancy_keys.size() != 0 ||
+            prepared_entry.payload_phase !=
+                memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_PREPARED) begin
+            `uvm_fatal("COMMON_DATA",
+                       "global fallback requires a detached prepared entry")
+        end
+        pte_g_overridden = 1'b0;
+        allowed_shape_mask = derive_allowed_tlb_shape_mask(
+            request_vpn, prepared_entry);
+        if (!allowed_shape_mask[MEMBLOCK_TLB_COVERAGE_4K] &&
+            prepared_entry.s1_stage_active && prepared_entry.s1_pte_g) begin
+            prepared_entry.s1_pte_g = 1'b0;
+            pte_g_overridden = 1'b1;
+            allowed_shape_mask = derive_allowed_tlb_shape_mask(
+                request_vpn, prepared_entry);
+        end
+        return allowed_shape_mask;
+    endfunction:derive_allowed_tlb_shape_mask_with_global_fallback
+
+    function bit validate_no_live_tlb_overlap(
+        input memblock_tlb_lookup_key_t anchor_key,
+        input memblock_tlb_entry entry);
+        memblock_tlb_range_coverage_rank_e final_shape;
+        memblock_tlb_parent_occupancy_key_t query_keys[$];
+        string witness;
+
+        if (entry == null || entry.lookup_key != anchor_key) begin
+            `uvm_fatal("COMMON_DATA", "live overlap validation got invalid entry")
+        end
+        final_shape = get_tlb_range_match_coverage_rank(entry);
+        build_tlb_overlap_query_keys(anchor_key.vpn, entry, final_shape,
+                                     query_keys);
+        foreach (query_keys[idx]) begin
+            parent_lookup_count++;
+            if (tlb_parent_occupancy_count.exists(query_keys[idx]) &&
+                tlb_parent_occupancy_count[query_keys[idx]] != 0) begin
+                witness = "";
+                foreach (tlb_parent_owner_set[owner_key]) begin
+                    if (owner_key.parent_key == query_keys[idx]) begin
+                        witness = $sformatf(" witness_vpn=0x%0h witness_asid=0x%0h witness_vmid=0x%0h",
+                                            owner_key.anchor_key.vpn,
+                                            owner_key.anchor_key.asid,
+                                            owner_key.anchor_key.vmid);
+                        break;
+                    end
+                end
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("new L2TLB live entry overlaps existing owner vpn=0x%0h shape=%0d owner_shape=%0d region=%0d count=%0d%s",
+                                     anchor_key.vpn, final_shape,
+                                     query_keys[idx].owner_shape,
+                                     query_keys[idx].parent_region,
+                                     tlb_parent_occupancy_count[query_keys[idx]],
+                                     witness))
+            end
+        end
+        return 1'b1;
+    endfunction:validate_no_live_tlb_overlap
+
     // Abstract responsibility: use only request-relevant secondary buckets to
     // find a canonical raw payload for an exact-miss request.  Bucket hit is a
     // candidate filter; entry_matches_request_raw() remains the final truth.
@@ -5995,17 +6475,13 @@ class common_data_transaction extends uvm_object;
         memblock_tlb_lookup_key_t seen_anchor_keys[$];
         memblock_tlb_lookup_key_t candidate_anchor_keys[$];
         memblock_tlb_range_index_key_t candidate_query_keys[$];
-        memblock_tlb_range_coverage_rank_e candidate_ranks[$];
         memblock_tlb_entry candidate_entries[$];
         memblock_tlb_lookup_key_t candidate_anchor;
         memblock_tlb_entry candidate_entry;
-        memblock_tlb_range_coverage_rank_e max_rank;
         int query_idx;
         int bucket_idx;
         int seen_idx;
         int candidate_idx;
-        int selected_idx;
-        int unsigned max_rank_count;
         bit seen;
         string candidate_summary;
 
@@ -6052,8 +6528,6 @@ class common_data_transaction extends uvm_object;
                 end
                 candidate_anchor_keys.push_back(candidate_anchor);
                 candidate_entries.push_back(candidate_entry);
-                candidate_ranks.push_back(
-                    get_tlb_range_match_coverage_rank(candidate_entry));
                 candidate_query_keys.push_back(query_keys[query_idx]);
             end
         end
@@ -6066,14 +6540,6 @@ class common_data_transaction extends uvm_object;
             return 1'b1;
         end
 
-        max_rank = MEMBLOCK_TLB_COVERAGE_4K;
-        foreach (candidate_ranks[candidate_idx]) begin
-            if (candidate_ranks[candidate_idx] > max_rank) begin
-                max_rank = candidate_ranks[candidate_idx];
-            end
-        end
-        max_rank_count = 0;
-        selected_idx = -1;
         candidate_summary = "";
         foreach (candidate_entries[candidate_idx]) begin
             candidate_summary = {candidate_summary,
@@ -6084,28 +6550,16 @@ class common_data_transaction extends uvm_object;
                           candidate_entries[candidate_idx].entry_generation,
                           candidate_query_keys[candidate_idx].level,
                           candidate_query_keys[candidate_idx].napot,
-                          candidate_ranks[candidate_idx],
+                          get_tlb_range_match_coverage_rank(
+                              candidate_entries[candidate_idx]),
                           candidate_query_keys[candidate_idx].range_kind)};
-            if (candidate_ranks[candidate_idx] == max_rank) begin
-                max_rank_count++;
-                selected_idx = candidate_idx;
-            end
         end
-        if (max_rank_count != 1 || selected_idx < 0) begin
-            `uvm_fatal("COMMON_DATA",
-                       $sformatf("ambiguous L2TLB range hit request vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d max_rank=%0d candidates:%s",
-                                 request_key.vpn, request_key.asid,
-                                 request_key.vmid, request_key.s2xlate,
-                                 max_rank, candidate_summary))
-        end
-        anchor_key = candidate_anchor_keys[selected_idx];
-        entry = candidate_entries[selected_idx];
-        `uvm_info("COMMON_DATA",
-                  $sformatf("overlapping L2TLB range hit selects widest raw coverage request vpn=0x%0h s2xlate=%0d selected vpn=0x%0h gen=%0d rank=%0d candidates:%s",
-                            request_key.vpn, request_key.s2xlate,
-                            anchor_key.vpn, entry.entry_generation,
-                            max_rank, candidate_summary), UVM_LOW)
-        return 1'b1;
+        `uvm_fatal("COMMON_DATA",
+                   $sformatf("illegal overlapping L2TLB live hit request vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d candidates=%0d:%s",
+                             request_key.vpn, request_key.asid,
+                             request_key.vmid, request_key.s2xlate,
+                             candidate_entries.size(), candidate_summary))
+        return 1'b0;
     endfunction:find_tlb_range_hit_by_req
 
     function void unregister_completed_tlb_range_index(
@@ -6222,6 +6676,7 @@ class common_data_transaction extends uvm_object;
     function bit find_completed_tlb_response_for_issue(
         input memblock_tlb_lookup_key_t request_key,
         input mmu_csr_runtime_state request_csr_snapshot,
+        input longint unsigned issue_boundary_sample,
         output memblock_tlb_entry entry,
         output longint unsigned response_token,
         output longint unsigned response_sample_seq);
@@ -6229,38 +6684,24 @@ class common_data_transaction extends uvm_object;
         memblock_tlb_lookup_key_t seen_keys[$];
         memblock_tlb_lookup_key_t candidate_keys[$];
         memblock_tlb_entry candidate_entries[$];
-        memblock_tlb_range_coverage_rank_e candidate_ranks[$];
+        longint unsigned candidate_tokens[$];
+        longint unsigned candidate_samples[$];
         memblock_tlb_lookup_key_t anchor_key;
-        memblock_tlb_range_coverage_rank_e max_rank;
+        longint unsigned latest_sample;
         bit seen;
         int qidx;
         int bidx;
         int sidx;
         int cidx;
         int selected_idx;
-        int unsigned max_rank_count;
+        int unsigned latest_sample_count;
 
         entry = null;
         response_token = 0;
         response_sample_seq = 0;
-        if (request_csr_snapshot == null) begin
+        if (request_csr_snapshot == null || issue_boundary_sample == 0) begin
             `uvm_fatal("COMMON_DATA", "completed TLB issue lookup got null CSR snapshot")
         end
-        if (completed_tlb_entry_by_key.exists(request_key)) begin
-            entry = completed_tlb_entry_by_key[request_key];
-            if (entry == null ||
-                !completed_tlb_response_token_by_key.exists(request_key) ||
-                !completed_tlb_response_sample_by_key.exists(request_key) ||
-                !entry_matches_request_raw(entry, request_key.vpn,
-                                           request_key.s2xlate,
-                                           request_csr_snapshot)) begin
-                `uvm_fatal("COMMON_DATA", "completed exact TLB entry failed raw match")
-            end
-            response_token = completed_tlb_response_token_by_key[request_key];
-            response_sample_seq = completed_tlb_response_sample_by_key[request_key];
-            return 1'b1;
-        end
-
         build_tlb_range_query_keys(request_key, query_keys);
         foreach (query_keys[qidx]) begin
             if (!completed_tlb_anchor_keys_by_range_key.exists(query_keys[qidx])) begin
@@ -6275,8 +6716,14 @@ class common_data_transaction extends uvm_object;
                 if (seen) continue;
                 seen_keys.push_back(anchor_key);
                 if (!completed_tlb_entry_by_key.exists(anchor_key) ||
-                    completed_tlb_entry_by_key[anchor_key] == null) begin
-                    `uvm_fatal("COMMON_DATA", "completed TLB range index points to missing entry")
+                    completed_tlb_entry_by_key[anchor_key] == null ||
+                    !completed_tlb_response_token_by_key.exists(anchor_key) ||
+                    !completed_tlb_response_sample_by_key.exists(anchor_key)) begin
+                    `uvm_fatal("COMMON_DATA", "completed TLB range index has incomplete provenance")
+                end
+                if (completed_tlb_response_sample_by_key[anchor_key] >
+                    issue_boundary_sample) begin
+                    continue;
                 end
                 if (!entry_matches_request_raw(completed_tlb_entry_by_key[anchor_key],
                                                request_key.vpn,
@@ -6286,32 +6733,37 @@ class common_data_transaction extends uvm_object;
                 end
                 candidate_keys.push_back(anchor_key);
                 candidate_entries.push_back(completed_tlb_entry_by_key[anchor_key]);
-                candidate_ranks.push_back(get_tlb_range_match_coverage_rank(
-                    completed_tlb_entry_by_key[anchor_key]));
+                candidate_tokens.push_back(
+                    completed_tlb_response_token_by_key[anchor_key]);
+                candidate_samples.push_back(
+                    completed_tlb_response_sample_by_key[anchor_key]);
             end
         end
         if (candidate_entries.size() == 0) return 1'b0;
-        max_rank = MEMBLOCK_TLB_COVERAGE_4K;
-        foreach (candidate_ranks[cidx]) begin
-            if (candidate_ranks[cidx] > max_rank) max_rank = candidate_ranks[cidx];
-        end
-        selected_idx = -1;
-        max_rank_count = 0;
-        foreach (candidate_ranks[cidx]) begin
-            if (candidate_ranks[cidx] == max_rank) begin
-                selected_idx = cidx;
-                max_rank_count++;
+        latest_sample = candidate_samples[0];
+        foreach (candidate_samples[cidx]) begin
+            if (candidate_samples[cidx] > latest_sample) begin
+                latest_sample = candidate_samples[cidx];
             end
         end
-        if (max_rank_count != 1 || selected_idx < 0) begin
+        selected_idx = -1;
+        latest_sample_count = 0;
+        foreach (candidate_samples[cidx]) begin
+            if (candidate_samples[cidx] == latest_sample) begin
+                selected_idx = cidx;
+                latest_sample_count++;
+            end
+        end
+        if (latest_sample_count != 1 || selected_idx < 0) begin
             `uvm_fatal("COMMON_DATA",
-                       $sformatf("ambiguous completed TLB issue hit vpn=0x%0h candidates=%0d rank=%0d",
-                                 request_key.vpn, candidate_entries.size(), max_rank))
+                       $sformatf("ambiguous same-sample completed TLB issue visibility vpn=0x%0h sample=%0d candidates=%0d",
+                                 request_key.vpn, latest_sample,
+                                 latest_sample_count))
         end
         anchor_key = candidate_keys[selected_idx];
         entry = candidate_entries[selected_idx];
-        response_token = completed_tlb_response_token_by_key[anchor_key];
-        response_sample_seq = completed_tlb_response_sample_by_key[anchor_key];
+        response_token = candidate_tokens[selected_idx];
+        response_sample_seq = candidate_samples[selected_idx];
         return 1'b1;
     endfunction:find_completed_tlb_response_for_issue
 
@@ -6329,6 +6781,7 @@ class common_data_transaction extends uvm_object;
         end
         if (!find_completed_tlb_response_for_issue(record.lookup_key,
                                                    record.csr_snapshot,
+                                                   record.uid_wait_start_sample_seq,
                                                    entry,
                                                    response_token,
                                                    response_sample_seq)) begin
@@ -6431,11 +6884,7 @@ class common_data_transaction extends uvm_object;
         if (ppn_reuse_en) begin
             try_apply_l2tlb_ppn_reuse_to_new_entry(entry, ppn_reuse_wt, reused_ppn);
         end
-        insert_tlb_entry(request_key, entry);
-        if (!register_tlb_range_index(request_key, entry)) begin
-            tlb_entry_by_key.delete(request_key);
-            `uvm_fatal("COMMON_DATA", "failed to register new canonical TLB entry in range index")
-        end
+        publish_live_tlb_entry(request_key, entry, csr_snapshot);
         entry_anchor_key = request_key;
         lookup_result = MEMBLOCK_TLB_LOOKUP_MISS_BUILD;
         created = 1'b1;
@@ -6830,6 +7279,7 @@ class common_data_transaction extends uvm_object;
                             reason, entry.entry_generation, key.vpn, key.asid,
                             key.vmid, key.s2xlate), UVM_LOW)
         unregister_tlb_range_index(key, entry);
+        unregister_tlb_parent_occupancy_index(key, entry);
         tlb_entry_by_key.delete(key);
         delete_completed_tlb_entry_by_anchor_key(key, reason);
     endfunction:delete_live_tlb_entry_by_anchor_key
@@ -6907,6 +7357,8 @@ class common_data_transaction extends uvm_object;
         sfence_invalidate_pending_q.delete();
         tlb_anchor_keys_by_range_key.delete();
         tlb_entry_by_key.delete();
+        tlb_parent_occupancy_count.delete();
+        tlb_parent_owner_set.delete();
         completed_tlb_anchor_keys_by_range_key.delete();
         completed_tlb_entry_by_key.delete();
         completed_tlb_response_token_by_key.delete();
@@ -7049,7 +7501,12 @@ class common_data_transaction extends uvm_object;
         input memblock_tlb_lookup_key_t key,
         input mmu_csr_runtime_state csr_snapshot);
         memblock_tlb_entry entry;
+        memblock_tlb_entry prepared_entry;
         tlb_map_builder    builder;
+        bit [4:0]          allowed_shape_mask;
+        bit                pte_n_overridden;
+        bit                pte_g_overridden;
+        bit                forced_4k;
 
         if (csr_snapshot == null) begin
             `uvm_fatal("COMMON_DATA", "build_tlb_entry_for_key_with_csr got null csr_snapshot")
@@ -7058,15 +7515,47 @@ class common_data_transaction extends uvm_object;
         if (builder == null) begin
             `uvm_fatal("COMMON_DATA", "failed to create tlb_map_builder")
         end
-        entry = builder.build_payload_for_key_with_csr(key, csr_snapshot);
+        prepared_entry = builder.prepare_tlb_payload_context(key, csr_snapshot);
+        allowed_shape_mask = derive_allowed_tlb_shape_mask_with_global_fallback(
+            key.vpn, prepared_entry, pte_g_overridden);
+        entry = builder.finalize_tlb_payload_shape_and_payload(
+            prepared_entry, key, csr_snapshot, allowed_shape_mask,
+            pte_n_overridden, forced_4k, 1'b0,
+            MEMBLOCK_TLB_COVERAGE_4K);
         if (entry == null) begin
             `uvm_fatal("COMMON_DATA", "builder returned null payload entry")
         end
         entry.lookup_key = key;
         entry.s2xlate = key.s2xlate;
         entry.entry_generation = allocate_tlb_entry_generation();
+        if (pte_n_overridden) pte_n_override_count++;
+        if (pte_g_overridden) pte_g_override_count++;
+        if (forced_4k) begin
+            forced_4k_fallback_count++;
+            if (forced_4k_fallback_count <= MEMBLOCK_TLB_FALLBACK_WARNING_LIMIT) begin
+                `uvm_warning("L2TLB_SHAPE_FALLBACK",
+                             $sformatf("force ordinary 4KB after occupancy filtering vpn=0x%0h s2xlate=%0d occurrence=%0d",
+                                       key.vpn, key.s2xlate,
+                                       forced_4k_fallback_count))
+            end
+        end
         return entry;
     endfunction:build_tlb_entry_for_key_with_csr
+
+    function void report_l2tlb_parent_occupancy_stats();
+        `uvm_info("L2TLB_PARENT_OCCUPANCY_STATS",
+                  $sformatf("lookup=%0d block_64k=%0d block_2m=%0d block_1g=%0d block_512g=%0d n_override=%0d g_override=%0d forced_4k=%0d owner_peak=%0d",
+                            parent_lookup_count,
+                            parent_block_64k_count,
+                            parent_block_2m_count,
+                            parent_block_1g_count,
+                            parent_block_512g_count,
+                            pte_n_override_count,
+                            pte_g_override_count,
+                            forced_4k_fallback_count,
+                            parent_owner_peak_count),
+                  UVM_LOW)
+    endfunction:report_l2tlb_parent_occupancy_stats
 
     function memblock_tlb_entry build_tlb_entry_for_key(input memblock_tlb_lookup_key_t key);
         if (mmu_csr_state == null) begin
@@ -7158,12 +7647,12 @@ class common_data_transaction extends uvm_object;
         if (uid_waiting_by_vpn_s2xlate[shape_key].size() == 0) begin
             uid_waiting_by_vpn_s2xlate.delete(shape_key);
         end else if (uid_waiting_by_vpn_s2xlate[shape_key].size() >
-                     MEMBLOCK_DUT_L2TLB_DFILTER_SIZE) begin
+                     MEMBLOCK_ROB_SIZE) begin
             `uvm_fatal("COMMON_DATA",
-                       $sformatf("L2TLB WAITING index bucket exceeds DTLB filter capacity caller=%s size=%0d max=%0d",
+                       $sformatf("L2TLB WAITING logical UID bucket exceeds ROB active-window capacity caller=%s size=%0d max=%0d",
                                  caller,
                                  uid_waiting_by_vpn_s2xlate[shape_key].size(),
-                                 MEMBLOCK_DUT_L2TLB_DFILTER_SIZE))
+                                 MEMBLOCK_ROB_SIZE))
         end
     endfunction:prune_uid_waiting_index_bucket
 
@@ -7189,12 +7678,12 @@ class common_data_transaction extends uvm_object;
                 end
             end
             if (uid_waiting_by_vpn_s2xlate[shape_key].size() >=
-                MEMBLOCK_DUT_L2TLB_DFILTER_SIZE) begin
+                MEMBLOCK_ROB_SIZE) begin
                 `uvm_fatal("COMMON_DATA",
-                           $sformatf("L2TLB WAITING index capacity overflow uid=%0d size=%0d max=%0d",
+                           $sformatf("L2TLB WAITING logical UID capacity overflow uid=%0d size=%0d max=%0d",
                                      uid,
                                      uid_waiting_by_vpn_s2xlate[shape_key].size(),
-                                     MEMBLOCK_DUT_L2TLB_DFILTER_SIZE))
+                                     MEMBLOCK_ROB_SIZE))
             end
         end
         uid_waiting_by_vpn_s2xlate[shape_key].push_back(uid);
@@ -7603,7 +8092,8 @@ class common_data_transaction extends uvm_object;
                                $sformatf("WAITING uid=%0d has null request CSR snapshot",
                                          uid))
                 end
-                // The bounded shape bucket is only a candidate filter.  First
+                // The ROB-bounded logical-UID bucket is only a candidate
+                // filter. First
                 // replay the pending request's C-2 context, then require the
                 // UID's own frozen request context to denote the same key.
                 request_candidate_key = request_csr_snapshot.make_lookup_key(
@@ -8145,24 +8635,6 @@ class common_data_transaction extends uvm_object;
                                            entry.s1_level, entry.s1_pte_n);
     endfunction:s1_sector_response_matches_request
 
-    // allStage accepts at the smaller of the two raw page sizes.  Its NAPOT
-    // condition is valid only when the other stage does not reduce coverage.
-    function void derive_allstage_lookup_shape(
-        input memblock_tlb_entry entry,
-        output bit [1:0] effective_level,
-        output bit effective_n);
-        if (entry == null || !entry.s1_stage_active ||
-            !entry.s2_stage_active) begin
-            `uvm_fatal("COMMON_DATA",
-                       "derive_allstage_lookup_shape requires active S1 and S2")
-        end
-        effective_level = (entry.s1_level < entry.s2_level) ?
-                          entry.s1_level : entry.s2_level;
-        effective_n = (entry.s1_pte_n && entry.s2_level != 2'd0) ||
-                      (entry.s2_pte_n && entry.s1_level != 2'd0) ||
-                      (entry.s1_pte_n && entry.s2_pte_n);
-    endfunction:derive_allstage_lookup_shape
-
     // Abstract responsibility: reproduce V2 PtwRespS2.hit() exactly for one
     // response payload.  It is a pure raw match: no lookup-key fallback,
     // UID ownership, payload mutation, or timing side effect is permitted.
@@ -8233,7 +8705,10 @@ class common_data_transaction extends uvm_object;
                     response_filter_csr_snapshot.current_asid(request_s2xlate);
                 response_vmid =
                     response_filter_csr_snapshot.current_vmid(request_s2xlate);
-                derive_allstage_lookup_shape(entry, allstage_level, allstage_n);
+                memblock_tlb_entry::derive_allstage_lookup_shape(
+                    entry.s1_level, entry.s1_pte_n,
+                    entry.s2_level, entry.s2_pte_n,
+                    allstage_level, allstage_n);
                 s1_response_anchor_vpn = {entry.s1_tag, entry.s1_addr_low};
                 return ((entry.s1_asid == response_asid) || entry.s1_pte_g) &&
                        (entry.s1_vmid == response_vmid) &&

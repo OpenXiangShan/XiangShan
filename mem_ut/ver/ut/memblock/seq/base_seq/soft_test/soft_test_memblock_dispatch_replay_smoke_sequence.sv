@@ -31,6 +31,9 @@ class soft_test_memblock_dispatch_replay_smoke_sequence extends soft_test_memblo
     extern virtual function void check_replay_pending_state(input memblock_uid_t uid,
                                                             input int unsigned old_issue_epoch,
                                                             input int unsigned old_replay_seq);
+    extern virtual function void check_sta_tombstone_history(input memblock_uid_t uid,
+                                                            input int unsigned retained_issue_epoch,
+                                                            input int unsigned retained_replay_seq);
     extern virtual function void check_stale_pass_ignored(input memblock_uid_t uid);
     extern virtual function void check_replay_final_status(input memblock_uid_t uid,
                                                            input int unsigned expected_replay_seq);
@@ -44,10 +47,13 @@ endfunction:new
 task soft_test_memblock_dispatch_replay_smoke_sequence::body();
     memblock_issue_q_item_t fired_items[$];
     memblock_issue_q_item_t first_sta_item;
-    memblock_issue_q_item_t replay_sta_item;
+    memblock_issue_q_item_t first_replay_sta_item;
+    memblock_issue_q_item_t second_replay_sta_item;
     status_transaction      status;
     int unsigned            old_sta_issue_epoch;
     int unsigned            old_replay_seq;
+    int unsigned            first_replay_issue_epoch;
+    int unsigned            first_replay_seq;
 
     build_directed_main_table();
     admit_lsq_and_route_issue();
@@ -63,22 +69,36 @@ task soft_test_memblock_dispatch_replay_smoke_sequence::body();
 
     inject_writeback_events_except(fired_items, 1, MEMBLOCK_ISSUE_TARGET_STA);
     submit_raw_sta_iq_feedback(first_sta_item, 1'b0);
+    // 中文注释：同一 current identity 的完全重复 feedback 都进入 recovery queue；
+    // 第一条改变 replay identity 后，第二条必须由 mark_replay_pending() 作为 stale 丢弃。
+    submit_raw_sta_iq_feedback(first_sta_item, 1'b0);
     exception_redirect_replay_task();
     check_replay_pending_state(1, old_sta_issue_epoch, old_replay_seq);
+    check_sta_tombstone_history(1, old_sta_issue_epoch, old_replay_seq);
 
-    fire_replay_sta_item(1, replay_sta_item);
+    fire_replay_sta_item(1, first_replay_sta_item);
+    status = data.get_status(1);
+    first_replay_issue_epoch = status.get_target_issue_epoch(MEMBLOCK_ISSUE_TARGET_STA);
+    first_replay_seq = status.replay_seq;
+
+    submit_raw_sta_iq_feedback(first_replay_sta_item, 1'b0);
+    exception_redirect_replay_task();
+    check_replay_pending_state(1, first_replay_issue_epoch, first_replay_seq);
+    check_sta_tombstone_history(1, old_sta_issue_epoch, old_replay_seq);
+
+    fire_replay_sta_item(1, second_replay_sta_item);
 
     // 中文注释：严格 STA 完成要求当前动态实例先记录 IQ hit；后续 stale 检查和
     // 最终 real-WB 都必须在该阶段之后进入 handler。
-    submit_raw_sta_iq_feedback(replay_sta_item, 1'b1);
+    submit_raw_sta_iq_feedback(second_replay_sta_item, 1'b1);
     status = data.get_status(1);
     if (!status.sta_issue_feedback_success) begin
         `uvm_fatal(get_type_name(), "replay STA IQ hit did not record feedback success")
     end
 
-    submit_writeback_event(make_pass_wb_event_with_snapshot(replay_sta_item,
-                                                            old_sta_issue_epoch,
-                                                            data.get_status(1).replay_seq));
+    submit_writeback_event(make_pass_wb_event_with_snapshot(first_replay_sta_item,
+                                                            first_replay_issue_epoch,
+                                                            first_replay_seq));
     check_stale_pass_ignored(1);
 
     submit_writeback_event(make_pass_wb_event_with_snapshot(first_sta_item,
@@ -86,8 +106,8 @@ task soft_test_memblock_dispatch_replay_smoke_sequence::body();
                                                             old_replay_seq));
     check_stale_pass_ignored(1);
 
-    submit_writeback_event(make_pass_wb_event(replay_sta_item));
-    check_replay_final_status(1, old_replay_seq + 1);
+    submit_writeback_event(make_pass_wb_event(second_replay_sta_item));
+    check_replay_final_status(1, old_replay_seq + 2);
 
     commit_and_deq_lsq();
     check_final_status();
@@ -231,6 +251,37 @@ function void soft_test_memblock_dispatch_replay_smoke_sequence::check_replay_pe
                         uid, old_issue_epoch, old_replay_seq, status.replay_seq),
               UVM_LOW)
 endfunction:check_replay_pending_state
+
+function void soft_test_memblock_dispatch_replay_smoke_sequence::check_sta_tombstone_history(
+    input memblock_uid_t uid,
+    input int unsigned retained_issue_epoch,
+    input int unsigned retained_replay_seq
+);
+    status_transaction                   status;
+    memblock_sta_late_fault_tombstone_t tombstone;
+
+    status = data.get_status(uid);
+    if (status.sta_late_fault_tombstone_q.size() != 1) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("STA tombstone history size mismatch uid=%0d size=%0d",
+                             uid, status.sta_late_fault_tombstone_q.size()))
+    end
+    tombstone = status.sta_late_fault_tombstone_q[0];
+    if (!tombstone.valid ||
+        tombstone.issue_epoch != retained_issue_epoch ||
+        tombstone.replay_seq != retained_replay_seq ||
+        tombstone.dynamic_epoch != status.dynamic_epoch ||
+        tombstone.rob_key != status.get_rob_key() ||
+        !status.active_sq_mapped ||
+        tombstone.sq_key.flag != status.sqIdx_flag ||
+        tombstone.sq_key.value != status.sqIdx_value) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("STA tombstone identity mismatch uid=%0d valid=%0d retained_epoch/seq=%0d/%0d actual_epoch/seq=%0d/%0d",
+                             uid, tombstone.valid,
+                             retained_issue_epoch, retained_replay_seq,
+                             tombstone.issue_epoch, tombstone.replay_seq))
+    end
+endfunction:check_sta_tombstone_history
 
 function void soft_test_memblock_dispatch_replay_smoke_sequence::check_stale_pass_ignored(input memblock_uid_t uid);
     status_transaction status;

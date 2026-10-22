@@ -10,6 +10,15 @@ class tlb_map_builder extends uvm_object;
     localparam bit [3:0] MEMBLOCK_SV39_MODE = 4'd8;
     localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
 
+    typedef struct {
+        bit [1:0] s1_level;
+        bit [1:0] s2_level;
+        bit       s1_pte_n;
+        bit       s2_pte_n;
+        memblock_tlb_range_coverage_rank_e shape;
+        longint unsigned weight;
+    } memblock_tlb_shape_bucket_t;
+
     `uvm_object_utils(tlb_map_builder)
 
     function new(string name = "tlb_map_builder"); super.new(name); endfunction:new
@@ -649,28 +658,160 @@ class tlb_map_builder extends uvm_object;
         end
     endfunction:freeze_pte_profile_modes
 
-    // Abstract responsibility: generate the complete immutable S1/S2 payload
-    // for one lookup miss.  It returns a detached object; table insertion,
-    // entry generation, pending tokens and lifecycle ownership remain outside
-    // this builder.
-    function memblock_tlb_entry build_payload_for_key_with_csr(
+    function memblock_tlb_range_coverage_rank_e coverage_from_level_n(
+        input bit [1:0] level,
+        input bit       pte_n);
+        case (level)
+            2'd0: return pte_n ? MEMBLOCK_TLB_COVERAGE_64K :
+                                MEMBLOCK_TLB_COVERAGE_4K;
+            2'd1: return MEMBLOCK_TLB_COVERAGE_2M;
+            2'd2: return MEMBLOCK_TLB_COVERAGE_1G;
+            2'd3: return MEMBLOCK_TLB_COVERAGE_512G;
+            default: begin
+                `uvm_fatal("L2TLB_PAYLOAD_LEVEL", "invalid coverage level")
+            end
+        endcase
+        return MEMBLOCK_TLB_COVERAGE_4K;
+    endfunction:coverage_from_level_n
+
+    function void get_stage_level_weights(
+        input bit       s1,
+        input bit       active,
+        input bit [3:0] mode,
+        output int unsigned weights[4]);
+        int unsigned total_weight;
+
+        foreach (weights[idx]) weights[idx] = 0;
+        if (!active) begin
+            weights[0] = 1;
+            return;
+        end
+        validate_active_paged_mode(s1, mode, '0);
+        if (!seq_csr_common::get_l2tlb_level_weight_en()) begin
+            weights[0] = 1;
+            return;
+        end
+        foreach (weights[idx]) begin
+            weights[idx] = seq_csr_common::get_l2tlb_level_wt(s1, idx);
+        end
+        if (mode == MEMBLOCK_SV39_MODE) begin
+            weights[3] = 0;
+        end
+        total_weight = weights[0] + weights[1] + weights[2] + weights[3];
+        if (total_weight == 0) begin
+            `uvm_fatal("L2TLB_PAYLOAD_LEVEL",
+                       $sformatf("stage=%s mode=%0d has no positive raw level weight",
+                                 s1 ? "S1" : "S2", mode))
+        end
+    endfunction:get_stage_level_weights
+
+    function void append_or_accumulate_shape_bucket(
+        ref memblock_tlb_shape_bucket_t buckets[$],
+        input memblock_tlb_shape_bucket_t candidate);
+        foreach (buckets[idx]) begin
+            if (buckets[idx].s1_level == candidate.s1_level &&
+                buckets[idx].s2_level == candidate.s2_level &&
+                buckets[idx].s1_pte_n == candidate.s1_pte_n &&
+                buckets[idx].s2_pte_n == candidate.s2_pte_n &&
+                buckets[idx].shape == candidate.shape) begin
+                buckets[idx].weight += candidate.weight;
+                return;
+            end
+        end
+        buckets.push_back(candidate);
+    endfunction:append_or_accumulate_shape_bucket
+
+    // 中文注释：枚举固定的单stage 4种或allStage 16种raw level组合，
+    // 按最终level/N/shape聚合正权重。该函数不创建payload、不读取live表。
+    function void build_shape_candidate_buckets(
+        input memblock_tlb_entry prepared_entry,
+        input bit [4:0] allowed_shape_mask,
+        input bit clear_s1_n,
+        input bit clear_s2_n,
+        output memblock_tlb_shape_bucket_t buckets[$],
+        output longint unsigned total_positive_weight);
+        int unsigned s1_weights[4];
+        int unsigned s2_weights[4];
+
+        buckets.delete();
+        total_positive_weight = 0;
+        if (prepared_entry == null) begin
+            `uvm_fatal("TLB_BUILDER", "shape candidate build got null prepared entry")
+        end
+        get_stage_level_weights(1'b1, prepared_entry.s1_stage_active,
+                                prepared_entry.s1_translation_mode_at_build,
+                                s1_weights);
+        get_stage_level_weights(1'b0, prepared_entry.s2_stage_active,
+                                prepared_entry.s2_translation_mode_at_build,
+                                s2_weights);
+        for (int unsigned s1_raw_level = 0; s1_raw_level < 4; s1_raw_level++) begin
+            for (int unsigned s2_raw_level = 0; s2_raw_level < 4; s2_raw_level++) begin
+                memblock_tlb_shape_bucket_t candidate;
+                longint unsigned raw_weight;
+                bit [1:0] effective_level;
+                bit effective_n;
+
+                raw_weight = longint'(s1_weights[s1_raw_level]) *
+                             longint'(s2_weights[s2_raw_level]);
+                if (raw_weight == 0) begin
+                    continue;
+                end
+                candidate = '{default:'0};
+                candidate.s1_level = prepared_entry.s1_stage_active ?
+                                     s1_raw_level[1:0] : 2'd0;
+                candidate.s2_level = prepared_entry.s2_stage_active ?
+                                     s2_raw_level[1:0] : 2'd0;
+                candidate.s1_pte_n = prepared_entry.s1_stage_active &&
+                                     prepared_entry.s1_pte_n && !clear_s1_n;
+                candidate.s2_pte_n = prepared_entry.s2_stage_active &&
+                                     prepared_entry.s2_pte_n && !clear_s2_n;
+                if (!prepared_entry.has_effective_fault()) begin
+                    if (candidate.s1_pte_n) candidate.s1_level = 2'd0;
+                    if (candidate.s2_pte_n) candidate.s2_level = 2'd0;
+                end
+                case (prepared_entry.s2xlate)
+                    2'd0, 2'd1: candidate.shape = coverage_from_level_n(
+                        candidate.s1_level, candidate.s1_pte_n);
+                    2'd2: candidate.shape = coverage_from_level_n(
+                        candidate.s2_level, candidate.s2_pte_n);
+                    2'd3: begin
+                        memblock_tlb_entry::derive_allstage_lookup_shape(
+                            candidate.s1_level, candidate.s1_pte_n,
+                            candidate.s2_level, candidate.s2_pte_n,
+                            effective_level, effective_n);
+                        candidate.shape = coverage_from_level_n(
+                            effective_level,
+                            effective_level == 2'd0 && effective_n);
+                    end
+                    default: begin
+                        `uvm_fatal("TLB_BUILDER", "unsupported s2xlate in shape selection")
+                    end
+                endcase
+                if (!allowed_shape_mask[candidate.shape]) begin
+                    continue;
+                end
+                candidate.weight = raw_weight;
+                append_or_accumulate_shape_bucket(buckets, candidate);
+            end
+        end
+        foreach (buckets[idx]) total_positive_weight += buckets[idx].weight;
+    endfunction:build_shape_candidate_buckets
+
+    // 中文注释：miss build第一阶段只冻结stage、CSR、PTE profile、PTE字段和fault。
+    // level、PPN、tag、sector和PBMT留给allowed shape确定后的finalize阶段生成。
+    function memblock_tlb_entry prepare_tlb_payload_context(
         input memblock_tlb_lookup_key_t key,
         input mmu_csr_runtime_state csr_state);
         memblock_tlb_entry entry;
-        bit [43:0] s1_canonical_ppn;
-        bit [43:0] s2_canonical_ppn;
-        bit [37:0] s2_input_vpn;
-        bit        s1_resolvable;
-        bit        s2_resolvable;
         bit        s2_request_in_range;
 
         if (csr_state == null) begin
-            `uvm_fatal("TLB_BUILDER", "build_payload_for_key_with_csr got null CSR snapshot")
+            `uvm_fatal("TLB_BUILDER", "prepare_tlb_payload_context got null CSR snapshot")
         end
         entry = memblock_tlb_entry::type_id::create(
-            $sformatf("tlb_entry_%0h_%0d", key.vpn, key.s2xlate));
+            $sformatf("prepared_tlb_entry_%0h_%0d", key.vpn, key.s2xlate));
         if (entry == null) begin
-            `uvm_fatal("TLB_BUILDER", "failed to create payload entry")
+            `uvm_fatal("TLB_BUILDER", "failed to create prepared payload entry")
         end
         entry.reset();
         entry.lookup_key = key;
@@ -681,17 +822,11 @@ class tlb_map_builder extends uvm_object;
 
         if (entry.s1_stage_active) begin
             fill_pte_fields(1'b1, 1'b1, entry);
-            entry.s1_level = choose_level(1'b1, 1'b1,
-                                          entry.s1_translation_mode_at_build);
-            entry.s1_addr_low = key.vpn[2:0];
-            entry.s1_tag = key.vpn[37:3];
         end
 
         s2_request_in_range = 1'b1;
         if (entry.s2_stage_active) begin
             fill_pte_fields(1'b0, 1'b1, entry);
-            entry.s2_level = choose_level(1'b0, 1'b1,
-                                          entry.s2_translation_mode_at_build);
         end
 
         // 中文注释：raw PTE/profile 与候选 level 先冻结，再选择 effective fault。
@@ -705,84 +840,279 @@ class tlb_map_builder extends uvm_object;
             end
         end
 
-        if (entry.s1_stage_active) begin
-            finalize_pte_fields(1'b1, entry);
-            if (!entry.has_effective_fault() && entry.s1_pte_n) begin
-                entry.s1_level = 2'd0;
+        if (entry.s1_stage_active) finalize_pte_fields(1'b1, entry);
+        if (entry.s2_stage_active) finalize_pte_fields(1'b0, entry);
+        entry.check_inactive_stage_defaults("PREPARE");
+        entry.payload_phase = memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_PREPARED;
+        return entry;
+    endfunction:prepare_tlb_payload_context
+
+    // 中文注释：finalize消费parent occupancy生成的allowed mask，选择最终shape后
+    // 才生成tag、PPN、sector、PBMT和request-derived基础字段；它不发布live entry。
+    function memblock_tlb_entry finalize_tlb_payload_shape_and_payload(
+        input memblock_tlb_entry prepared_entry,
+        input memblock_tlb_lookup_key_t key,
+        input mmu_csr_runtime_state csr_state,
+        input bit [4:0] allowed_shape_mask,
+        output bit pte_n_overridden,
+        output bit forced_4k,
+        input bit directed_shape_override_valid,
+        input memblock_tlb_range_coverage_rank_e directed_shape_override);
+        memblock_tlb_shape_bucket_t buckets[$];
+        memblock_tlb_shape_bucket_t selected_bucket;
+        longint unsigned total_positive_weight;
+        longint unsigned weighted_pick;
+        longint unsigned cumulative_weight;
+        bit clear_s1_n;
+        bit clear_s2_n;
+        bit selected;
+        bit [43:0] s1_canonical_ppn;
+        bit [43:0] s2_canonical_ppn;
+        bit [37:0] s2_input_vpn;
+        bit        s1_resolvable;
+        bit        s2_resolvable;
+        bit        s2_request_in_range;
+        bit [1:0]  directed_level;
+        bit        directed_napot;
+
+        if (prepared_entry == null || csr_state == null ||
+            prepared_entry.lookup_key != key ||
+            prepared_entry.s2xlate != key.s2xlate ||
+            prepared_entry.payload_phase !=
+                memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_PREPARED) begin
+            `uvm_fatal("TLB_BUILDER", "finalize got inconsistent prepared payload")
+        end
+        pte_n_overridden = 1'b0;
+        forced_4k = 1'b0;
+        clear_s1_n = 1'b0;
+        clear_s2_n = 1'b0;
+        if (directed_shape_override_valid) begin
+            if (!allowed_shape_mask[directed_shape_override]) begin
+                `uvm_fatal("TLB_BUILDER",
+                           "directed shape override is absent from allowed mask")
             end
+            directed_napot = 1'b0;
+            case (directed_shape_override)
+                MEMBLOCK_TLB_COVERAGE_4K: directed_level = 2'd0;
+                MEMBLOCK_TLB_COVERAGE_64K: begin
+                    directed_level = 2'd0;
+                    directed_napot = 1'b1;
+                end
+                MEMBLOCK_TLB_COVERAGE_2M: directed_level = 2'd1;
+                MEMBLOCK_TLB_COVERAGE_1G: directed_level = 2'd2;
+                MEMBLOCK_TLB_COVERAGE_512G: directed_level = 2'd3;
+                default: `uvm_fatal("TLB_BUILDER", "invalid directed shape override")
+            endcase
+            if (directed_shape_override == MEMBLOCK_TLB_COVERAGE_512G &&
+                ((prepared_entry.s1_stage_active &&
+                  prepared_entry.s1_translation_mode_at_build != MEMBLOCK_SV48_MODE) ||
+                 (prepared_entry.s2_stage_active &&
+                  prepared_entry.s2_translation_mode_at_build != MEMBLOCK_SV48_MODE))) begin
+                `uvm_fatal("TLB_BUILDER",
+                           "directed 512GB shape requires Sv48 on every active stage")
+            end
+            selected_bucket = '{default:'0};
+            selected_bucket.shape = directed_shape_override;
+            selected_bucket.s1_level = prepared_entry.s1_stage_active ?
+                                       directed_level : 2'd0;
+            selected_bucket.s2_level = prepared_entry.s2_stage_active ?
+                                       directed_level : 2'd0;
+            selected_bucket.s1_pte_n = prepared_entry.s1_stage_active ?
+                                       directed_napot : 1'b0;
+            selected_bucket.s2_pte_n = prepared_entry.s2_stage_active ?
+                                       directed_napot : 1'b0;
+            total_positive_weight = 1;
+        end
+        else begin
+            build_shape_candidate_buckets(prepared_entry, allowed_shape_mask,
+                                          clear_s1_n, clear_s2_n,
+                                          buckets, total_positive_weight);
+        end
+        if (!directed_shape_override_valid && total_positive_weight == 0 &&
+            prepared_entry.s2xlate == 2'd3) begin
+            if (prepared_entry.s2_pte_n) begin
+                clear_s2_n = 1'b1;
+                build_shape_candidate_buckets(prepared_entry, allowed_shape_mask,
+                                              clear_s1_n, clear_s2_n,
+                                              buckets, total_positive_weight);
+            end
+            if (total_positive_weight == 0 && prepared_entry.s1_pte_n) begin
+                clear_s1_n = 1'b1;
+                clear_s2_n = 1'b0;
+                build_shape_candidate_buckets(prepared_entry, allowed_shape_mask,
+                                              clear_s1_n, clear_s2_n,
+                                              buckets, total_positive_weight);
+            end
+            if (total_positive_weight == 0 &&
+                prepared_entry.s1_pte_n && prepared_entry.s2_pte_n) begin
+                clear_s1_n = 1'b1;
+                clear_s2_n = 1'b1;
+                build_shape_candidate_buckets(prepared_entry, allowed_shape_mask,
+                                              clear_s1_n, clear_s2_n,
+                                              buckets, total_positive_weight);
+            end
+        end
+        else if (!directed_shape_override_valid && total_positive_weight == 0) begin
+            clear_s1_n = prepared_entry.s1_stage_active && prepared_entry.s1_pte_n;
+            clear_s2_n = prepared_entry.s2_stage_active && prepared_entry.s2_pte_n;
+            if (clear_s1_n || clear_s2_n) begin
+                build_shape_candidate_buckets(prepared_entry, allowed_shape_mask,
+                                              clear_s1_n, clear_s2_n,
+                                              buckets, total_positive_weight);
+            end
+        end
+        pte_n_overridden = total_positive_weight != 0 &&
+                           (clear_s1_n || clear_s2_n);
+
+        if (directed_shape_override_valid) begin
+            selected = 1'b1;
+        end
+        else if (total_positive_weight == 0) begin
+            if (!allowed_shape_mask[MEMBLOCK_TLB_COVERAGE_4K]) begin
+                `uvm_fatal("TLB_BUILDER", "ordinary 4KB fallback is unexpectedly blocked")
+            end
+            selected_bucket = '{default:'0};
+            selected_bucket.shape = MEMBLOCK_TLB_COVERAGE_4K;
+            selected_bucket.s1_level = 2'd0;
+            selected_bucket.s2_level = 2'd0;
+            selected_bucket.s1_pte_n = 1'b0;
+            selected_bucket.s2_pte_n = 1'b0;
+            forced_4k = 1'b1;
+        end
+        else begin
+            weighted_pick = 0;
+            if (total_positive_weight > 1 && !std::randomize(weighted_pick) with {
+                    weighted_pick < total_positive_weight;
+                }) begin
+                `uvm_fatal("L2TLB_PAYLOAD_RANDOM", "failed to select legal TLB shape")
+            end
+            cumulative_weight = 0;
+            selected = 1'b0;
+            foreach (buckets[idx]) begin
+                cumulative_weight += buckets[idx].weight;
+                if (!selected && weighted_pick < cumulative_weight) begin
+                    selected_bucket = buckets[idx];
+                    selected = 1'b1;
+                end
+            end
+            if (!selected) begin
+                `uvm_fatal("L2TLB_PAYLOAD_RANDOM", "weighted TLB shape selection lost candidate")
+            end
+        end
+
+        prepared_entry.s1_level = selected_bucket.s1_level;
+        prepared_entry.s2_level = selected_bucket.s2_level;
+        prepared_entry.s1_pte_n = prepared_entry.s1_stage_active ?
+                                  selected_bucket.s1_pte_n : 1'b0;
+        prepared_entry.s2_pte_n = prepared_entry.s2_stage_active ?
+                                  selected_bucket.s2_pte_n : 1'b0;
+        s2_request_in_range = 1'b1;
+
+        if (prepared_entry.s1_stage_active) begin
+            prepared_entry.s1_addr_low = key.vpn[2:0];
+            prepared_entry.s1_tag = key.vpn[37:3];
             s1_canonical_ppn = make_canonical_ppn(key.vpn[37:0],
-                                                   entry.s1_root_ppn_at_build,
-                                                   entry.s1_level, 1'b0);
-            apply_legal_napot_ppn_encoding(1'b1, entry.s1_level,
-                                            entry.s1_pte_n, s1_canonical_ppn,
-                                            entry);
-            build_s1_sector_payload(s1_canonical_ppn, entry);
-            entry.s1_entry_pbmt = choose_pbmt(1'b1, entry.s2xlate, csr_state);
-            check_pbmt_build_csr_compatibility(1'b1, entry.s2xlate, csr_state,
-                                               entry.s1_entry_pbmt);
-            if (!entry.has_effective_fault()) begin
-                reject_unsupported_valid_s1_nonleaf(entry);
-                s1_resolvable = entry.s1_pte_v &&
-                                (entry.s1_pte_r || entry.s1_pte_w || entry.s1_pte_x) &&
+                                                   prepared_entry.s1_root_ppn_at_build,
+                                                   prepared_entry.s1_level, 1'b0);
+            apply_legal_napot_ppn_encoding(1'b1, prepared_entry.s1_level,
+                                            prepared_entry.s1_pte_n,
+                                            s1_canonical_ppn, prepared_entry);
+            build_s1_sector_payload(s1_canonical_ppn, prepared_entry);
+            prepared_entry.s1_entry_pbmt = choose_pbmt(
+                1'b1, prepared_entry.s2xlate, csr_state);
+            check_pbmt_build_csr_compatibility(
+                1'b1, prepared_entry.s2xlate, csr_state,
+                prepared_entry.s1_entry_pbmt);
+            if (!prepared_entry.has_effective_fault()) begin
+                reject_unsupported_valid_s1_nonleaf(prepared_entry);
+                s1_resolvable = prepared_entry.s1_pte_v &&
+                                (prepared_entry.s1_pte_r ||
+                                 prepared_entry.s1_pte_w ||
+                                 prepared_entry.s1_pte_x) &&
                                 s1_request_fits_mode(key.vpn[37:0],
-                                                      entry.s1_translation_mode_at_build) &&
+                                    prepared_entry.s1_translation_mode_at_build) &&
                                 napot_raw_ppn_is_model_resolvable(1'b1,
-                                    entry.s1_pte_n, s1_canonical_ppn, entry);
-                entry.s1_resolved_ppn_valid = s1_resolvable;
+                                    prepared_entry.s1_pte_n,
+                                    s1_canonical_ppn, prepared_entry);
+                prepared_entry.s1_resolved_ppn_valid = s1_resolvable;
                 if (s1_resolvable) begin
-                    entry.s1_resolved_ppn = resolve_ppn_from_raw(
-                        s1_canonical_ppn, key.vpn[37:0], entry.s1_level,
-                        entry.s1_pte_n);
+                    prepared_entry.s1_resolved_ppn = resolve_ppn_from_raw(
+                        s1_canonical_ppn, key.vpn[37:0],
+                        prepared_entry.s1_level, prepared_entry.s1_pte_n);
                 end
             end
         end
 
-        if (entry.s2_stage_active) begin
-            finalize_pte_fields(1'b0, entry);
-            if (!entry.has_effective_fault() && entry.s2_pte_n) begin
-                entry.s2_level = 2'd0;
+        if (prepared_entry.s2_stage_active) begin
+            if (key.s2xlate == 2'd2) begin
+                s2_request_in_range = s2_request_fits_mode(
+                    key.vpn, prepared_entry.s2_translation_mode_at_build);
             end
-            if (key.s2xlate != 2'd2 && !entry.has_effective_fault()) begin
+            if (key.s2xlate != 2'd2 &&
+                !prepared_entry.has_effective_fault()) begin
                 // This is the protocol raw anchor.  It deliberately uses raw
                 // S1 fields even when a non-LEGAL NAPOT cannot form a model
                 // resolved PPN.
                 s2_input_vpn = derive_allstage_raw_s2_tag(
-                    entry, key.vpn[37:0], entry.s2_translation_mode_at_build);
+                    prepared_entry, key.vpn[37:0],
+                    prepared_entry.s2_translation_mode_at_build);
             end
             else begin
                 // A fault response does not claim a normal allStage GVPN.
                 // s2.tag is nevertheless an encodable payload field.
                 s2_input_vpn = key.vpn[37:0];
             end
-            entry.s2_tag = s2_input_vpn;
+            prepared_entry.s2_tag = s2_input_vpn;
             s2_canonical_ppn = make_canonical_ppn(s2_input_vpn,
-                                                   entry.s2_root_ppn_at_build,
-                                                   entry.s2_level, 1'b1);
-            apply_legal_napot_ppn_encoding(1'b0, entry.s2_level,
-                                            entry.s2_pte_n, s2_canonical_ppn,
-                                            entry);
-            entry.s2_entry_ppn_raw = encode_s2_entry_ppn(s2_canonical_ppn);
-            entry.s2_entry_pbmt = choose_pbmt(1'b0, entry.s2xlate, csr_state);
-            check_pbmt_build_csr_compatibility(1'b0, entry.s2xlate, csr_state,
-                                               entry.s2_entry_pbmt);
-            if (!entry.has_effective_fault()) begin
+                                                   prepared_entry.s2_root_ppn_at_build,
+                                                   prepared_entry.s2_level, 1'b1);
+            apply_legal_napot_ppn_encoding(1'b0, prepared_entry.s2_level,
+                                            prepared_entry.s2_pte_n,
+                                            s2_canonical_ppn, prepared_entry);
+            prepared_entry.s2_entry_ppn_raw = encode_s2_entry_ppn(
+                s2_canonical_ppn);
+            prepared_entry.s2_entry_pbmt = choose_pbmt(
+                1'b0, prepared_entry.s2xlate, csr_state);
+            check_pbmt_build_csr_compatibility(
+                1'b0, prepared_entry.s2xlate, csr_state,
+                prepared_entry.s2_entry_pbmt);
+            if (!prepared_entry.has_effective_fault()) begin
                 s2_resolvable = (key.s2xlate != 2'd2 || s2_request_in_range) &&
                                 napot_raw_ppn_is_model_resolvable(1'b0,
-                                    entry.s2_pte_n, s2_canonical_ppn, entry);
-                entry.s2_resolved_ppn_valid = s2_resolvable;
+                                    prepared_entry.s2_pte_n,
+                                    s2_canonical_ppn, prepared_entry);
+                prepared_entry.s2_resolved_ppn_valid = s2_resolvable;
                 if (s2_resolvable) begin
-                    entry.s2_resolved_ppn = resolve_ppn_from_raw(
-                        s2_canonical_ppn, s2_input_vpn, entry.s2_level,
-                        entry.s2_pte_n);
+                    prepared_entry.s2_resolved_ppn = resolve_ppn_from_raw(
+                        s2_canonical_ppn, s2_input_vpn,
+                        prepared_entry.s2_level, prepared_entry.s2_pte_n);
                 end
             end
         end
 
-        entry.create_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
-        entry.last_hit_cycle = entry.create_cycle;
-        entry.check_inactive_stage_defaults("BUILD");
-        entry.validate_s1_sector_payload_consistency("BUILD");
-        return entry;
+        prepared_entry.create_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        prepared_entry.last_hit_cycle = prepared_entry.create_cycle;
+        prepared_entry.payload_phase =
+            memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_FINALIZED;
+        prepared_entry.check_inactive_stage_defaults("BUILD");
+        prepared_entry.validate_s1_sector_payload_consistency("BUILD");
+        return prepared_entry;
+    endfunction:finalize_tlb_payload_shape_and_payload
+
+    // 中文注释：兼容纯builder单元测试的旧API。运行期miss不得调用该封装绕过
+    // common_data的parent occupancy查询。
+    function memblock_tlb_entry build_payload_for_key_with_csr(
+        input memblock_tlb_lookup_key_t key,
+        input mmu_csr_runtime_state csr_state);
+        memblock_tlb_entry prepared_entry;
+        bit ignored_n_override;
+        bit ignored_forced_4k;
+
+        prepared_entry = prepare_tlb_payload_context(key, csr_state);
+        return finalize_tlb_payload_shape_and_payload(
+            prepared_entry, key, csr_state, 5'b1_1111,
+            ignored_n_override, ignored_forced_4k, 1'b0,
+            MEMBLOCK_TLB_COVERAGE_4K);
     endfunction:build_payload_for_key_with_csr
 
     // Abstract responsibility: preserve the historical builder API while

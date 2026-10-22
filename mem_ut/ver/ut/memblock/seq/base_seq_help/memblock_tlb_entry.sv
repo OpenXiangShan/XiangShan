@@ -26,11 +26,21 @@ class memblock_tlb_entry extends uvm_object;
         MEMBLOCK_TLB_FAULT_STAGE_S2   = 2
     } memblock_tlb_fault_stage_e;
 
+    typedef enum int unsigned {
+        MEMBLOCK_TLB_PAYLOAD_RESET     = 0,
+        MEMBLOCK_TLB_PAYLOAD_PREPARED  = 1,
+        MEMBLOCK_TLB_PAYLOAD_FINALIZED = 2
+    } memblock_tlb_payload_phase_e;
+
     memblock_tlb_lookup_key_t lookup_key;
     // 中文注释：仅 canonical live entry 保存自己已注册的 range index key，
     // 供统一 delete helper 精确反注册。pending/UID snapshot 复制 raw payload
     // 时必须清空该队列，不能把 live-index ownership 带到 request 私有对象。
     memblock_tlb_range_index_key_t range_index_keys[$];
+    // 中文注释：仅canonical live entry保存自己注册过的父区域key。
+    // publish成功后写入，统一delete时精确递减count；snapshot copy/reset只清空，
+    // 不取得或撤销公共parent occupancy所有权。
+    memblock_tlb_parent_occupancy_key_t parent_occupancy_keys[$];
     // The stored widths deliberately match the V2 PtwRespS2 wires.  The
     // lookup key remains wider because it is a framework lookup identity,
     // not a direct copy of either response tag.
@@ -55,6 +65,10 @@ class memblock_tlb_entry extends uvm_object;
     bit [43:0] s2_root_ppn_at_build;
     int unsigned csr_context_seq_at_build;
     longint unsigned entry_generation;
+    // 中文注释：该阶段只描述miss builder内部的payload构造进度。
+    // PREPARED允许occupancy查询和global G fallback；FINALIZED才允许分配
+    // generation并发布。它不表示live/pending/UID所有权生命周期。
+    memblock_tlb_payload_phase_e payload_phase;
 
     // 中文注释：四个 raw fault 每次 miss 都独立随机；effective fault 只保留按 s2xlate
     // 和权重优先级收敛后的唯一 DUT 可见 fault。pmaAF 是不参与该收敛的 legacy sideband。
@@ -118,12 +132,14 @@ class memblock_tlb_entry extends uvm_object;
     function void reset();
         lookup_key = '{default:'0};
         range_index_keys.delete();
+        parent_occupancy_keys.delete();
         s1_tag = '0; s1_asid = '0; s1_vmid = '0; s2_tag = '0; s2_vmid = '0; s2xlate = '0;
         s1_stage_active = 1'b0; s2_stage_active = 1'b0;
         s1_translation_mode_at_build = '0; s2_translation_mode_at_build = '0;
         s1_pte_mode_at_build = '0; s2_pte_mode_at_build = '0;
         s1_root_ppn_at_build = '0; s2_root_ppn_at_build = '0;
         csr_context_seq_at_build = 0; entry_generation = 0;
+        payload_phase = MEMBLOCK_TLB_PAYLOAD_RESET;
         fault_raw_s1_pf = 0; fault_raw_s1_af = 0; fault_raw_s2_gpf = 0; fault_raw_s2_gaf = 0;
         fault_effective_s1_pf = 0; fault_effective_s1_af = 0;
         fault_effective_s2_gpf = 0; fault_effective_s2_gaf = 0;
@@ -148,6 +164,22 @@ class memblock_tlb_entry extends uvm_object;
         return fault_effective_s1_pf || fault_effective_s1_af ||
                fault_effective_s2_gpf || fault_effective_s2_gaf;
     endfunction:has_effective_fault
+
+    // 中文注释：allStage的DUT raw-hit覆盖范围只由最终S1/S2 level和N决定。
+    // builder候选、range index与raw matcher共同调用本函数，禁止各自维护第二份公式。
+    static function void derive_allstage_lookup_shape(
+        input bit [1:0] s1_level_i,
+        input bit       s1_pte_n_i,
+        input bit [1:0] s2_level_i,
+        input bit       s2_pte_n_i,
+        output bit [1:0] effective_level,
+        output bit       effective_n);
+        effective_level = (s1_level_i < s2_level_i) ?
+                          s1_level_i : s2_level_i;
+        effective_n = (s1_pte_n_i && s2_level_i != 2'd0) ||
+                      (s2_pte_n_i && s1_level_i != 2'd0) ||
+                      (s1_pte_n_i && s2_pte_n_i);
+    endfunction:derive_allstage_lookup_shape
 
     // 中文注释：在 build/copy/drive 边界验证冻结的 S1 sector payload，不修改 entry。
     function bit [43:0] get_s1_selected_canonical_ppn();
@@ -291,6 +323,7 @@ class memblock_tlb_entry extends uvm_object;
         // range_index_keys 是 canonical table 的删除所有权，snapshot 只能复制
         // response payload/provenance，不能取得 index ownership。
         range_index_keys.delete();
+        parent_occupancy_keys.delete();
         lookup_key = source.lookup_key; s1_tag = source.s1_tag; s1_asid = source.s1_asid;
         s1_vmid = source.s1_vmid; s2_tag = source.s2_tag; s2_vmid = source.s2_vmid;
         s2xlate = source.s2xlate; s1_stage_active = source.s1_stage_active;
@@ -303,6 +336,7 @@ class memblock_tlb_entry extends uvm_object;
         s2_root_ppn_at_build = source.s2_root_ppn_at_build;
         csr_context_seq_at_build = source.csr_context_seq_at_build;
         entry_generation = source.entry_generation;
+        payload_phase = source.payload_phase;
         fault_raw_s1_pf = source.fault_raw_s1_pf; fault_raw_s1_af = source.fault_raw_s1_af;
         fault_raw_s2_gpf = source.fault_raw_s2_gpf; fault_raw_s2_gaf = source.fault_raw_s2_gaf;
         fault_effective_s1_pf = source.fault_effective_s1_pf;

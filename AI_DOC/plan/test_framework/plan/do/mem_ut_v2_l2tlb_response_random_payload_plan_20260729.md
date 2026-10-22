@@ -1096,6 +1096,12 @@ UID 等待维护一个有界二级索引 `uid_waiting_by_vpn_s2xlate[shape_key]`
 判定。这样 `capture_fired_request()` 只遍历同 VPN/`s2xlate` 的等待候选，不扫描完整
 `uid_tlb_record_by_uid`；response complete 和 release 仍按各自低频职责使用全表或有限候选集合。
 
+> 2026-10-19勘误：上述“单个shape bucket最多`DFILTER_SIZE`个逻辑UID”的推导不成立。
+> `PTWNewFilter`会把相同`vpn/s2xlate`请求合并到同一物理filter entry，因此一个物理entry可对应多个
+> ROB/LSQ逻辑等待者。当前实现以`MEMBLOCK_ROB_SIZE`作为逻辑UID索引的防泄漏上界；物理pending token/
+> filter容量仍保持32。详见
+> `memblock_l2tlb_waiting_uid_logical_fanout_fix_plan_20261019.md`。
+
 #### `check_l2tlb_release_uid_waiting()` 的全表统计
 
 抽象功能描述：`check_l2tlb_release_uid_waiting()` 只在 L2TLB lifecycle 正常 global-stop release 前，
@@ -1149,8 +1155,8 @@ register_uid_tlb_record_on_issue(uid):
   uid_wait_start_sample_seq = current_sample。
   若该值为 0：说明首个 post-reset CSR monitor sample 尚未发布，uvm_fatal；不得由 issue 路径推进 global sample。
   uid_tlb_first_request_fire_sample_seq = 0。
-  若 uid_waiting_by_vpn_s2xlate[{vpn,s2xlate}] 已有 MEMBLOCK_DUT_L2TLB_DFILTER_SIZE 个有效 WAITING UID：
-      uvm_fatal；不得静默丢弃、覆盖或全表 fallback。
+  若 uid_waiting_by_vpn_s2xlate[{vpn,s2xlate}] 已有 MEMBLOCK_ROB_SIZE 个有效 WAITING UID：
+      uvm_fatal；这表示逻辑活跃窗口泄漏，不得静默丢弃、覆盖或全表 fallback。
   将 uid 插入 uid_waiting_by_vpn_s2xlate[{vpn, s2xlate}]；重复插入为 uvm_fatal。
 ```
 

@@ -16,6 +16,7 @@ mode 从对应 sample 的 CSR history 获得。
 | `issue-time CSR` | UID 建立 WAITING 时冻结的历史 CSR，不代表 request 最终 fire 时 DUT 使用的 CSR。 | `memblock_uid_tlb_record.csr_snapshot` | UID 在 CSR=A 下 issue、稍后在 CSR=B 下真正发 request。 |
 | `request-fire CSR` | 本次 DTLB request `valid && ready` 成立时，V2 filter 实际可见的 C-2 CSR。 | `memblock_l2tlb_pending_req.csr_snapshot` | 用它构造本次 token 的 request lookup key。 |
 | `UID request-fire marker` | WAITING UID 已被某次真实 request fire 覆盖的首个 global sample；0 表示尚未观察到请求。 | `uid_tlb_first_request_fire_sample_seq` | C4 只取消 marker 已建立且不晚于 C0 的旧等待实例。 |
+| `logical UID bucket` | 相同`vpn/s2xlate`下等待翻译的ROB/LSQ逻辑UID候选集合，不等同于物理filter entry。 | `uid_waiting_by_vpn_s2xlate` | 33个同VPN UID可合并到少量物理请求。 |
 | `flush barrier` | C0 fence/CSR event 到 C4 filter flush 的 lifecycle 记录。 | `barrier_q` | C0 fire 正常建 token，C4 才取消旧 pending token。 |
 | `pre-ready baseline` | owner 首次开放 ready 前对历史 event 和空状态的启动校验。 | `owner_start_baseline_done`、`pre_ready_hold_until_sample` | 旧 event 只推进 cursor/hold，不建立新的 C0/C4 barrier。 |
 | `reason overlap` | 同一 global sample 内同一 flush 来源被重复发布。 | `sample_producer_reason_mask` | CSR 与 FENCE 可合并；同一 reason 重复立即 fatal。 |
@@ -103,7 +104,7 @@ response payload；它不处理 future fence raw 或直接驱动 response。
 在分配任何 token 或 UID marker 前检查 local/shared admission cutoff；close 后若仍观察到真实 fire 立即 fatal。
 从当前 global sample 查询 C-2 CSR history；warm-up 未完成时 ready 保持 0，已 fire 后缺失 history 则 fatal。
 调用 common_data 的 get_or_create lookup API 得到 canonical entry；随后逐字段 copy 到 token entry_snapshot。
-调用 mark_waiting_uid_records_on_request_fire：只使用 token 保存的 request-fire C-2 CSR 在 bounded
+调用 mark_waiting_uid_records_on_request_fire：只使用 token 保存的 request-fire C-2 CSR 在 ROB-bounded
 {vpn,s2xlate} bucket 中确认候选 UID，并写首次 fire sample；不使用 UID issue-time CSR 做第二次 key 比较。
 分配 request_token、due_sample 和 latency bucket，push pending_q。
 ```
@@ -127,6 +128,10 @@ shape_key = {pending.vpn, pending.s2xlate}
   禁止用 record.csr_snapshot 重建第二个 candidate key；
   marker 为 0 时，写入本次真实 request fire 的 sample。
 ```
+
+该bucket的容量上界是`MEMBLOCK_ROB_SIZE`，用于发现逻辑UID生命周期泄漏；不能使用
+`MEMBLOCK_DUT_L2TLB_DFILTER_SIZE`限制它。后者只限制DUT物理filter/pending request数量，相同
+`vpn/s2xlate`请求可在RTL中合并，一个物理entry可扇出到多个逻辑WAITING UID。
 
 最小例子：UID 在 CSR=A 下 issue，CSR 切换后 request 在 C-2 CSR=B 下 fire。此时 B 是 marker 的唯一
 上下文；A 仅用于说明 UID 的历史来源。若因 A 与 B 不同而不写 marker，C4 cancel 和后续 UID 生命周期都会失去

@@ -185,14 +185,14 @@ class writeback_status_handler extends uvm_object;
                 end
                 if (!tombstone_created) begin
                     `uvm_info("WB_STATUS",
-                              $sformatf("coalesced duplicate STA failed feedback uid=%0d issue_epoch=%0d replay_seq=%0d; keep existing replay/tombstone",
+                              $sformatf("coalesced STA late-fault tombstone uid=%0d issue_epoch=%0d replay_seq=%0d; enqueue current replay with retained tombstone",
                                         uid, issue_epoch, replay_seq), UVM_LOW)
-                    return 1'b1;
+                end else begin
+                    `uvm_info("WB_STATUS",
+                              $sformatf("capture STA late-fault tombstone uid=%0d issue_epoch=%0d replay_seq=%0d; enqueue replay immediately",
+                                        uid, issue_epoch, replay_seq),
+                              UVM_LOW)
                 end
-                `uvm_info("WB_STATUS",
-                          $sformatf("capture STA late-fault tombstone uid=%0d issue_epoch=%0d replay_seq=%0d; enqueue replay immediately",
-                                    uid, issue_epoch, replay_seq),
-                          UVM_LOW)
                 data.push_feedback_event(wb_event);
                 return 1'b1;
             end

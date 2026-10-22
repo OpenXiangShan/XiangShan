@@ -47,7 +47,8 @@ class soft_test_l2tlb_ppn_reuse_sequence extends memblock_dispatch_base_sequence
         input bit [43:0] canonical_ppn);
     extern virtual function void install_entry(
         input memblock_tlb_lookup_key_t anchor_key,
-        input memblock_tlb_entry entry);
+        input memblock_tlb_entry entry,
+        input mmu_csr_runtime_state csr_snapshot);
     extern virtual task check_disabled_and_weight_zero();
     extern virtual task check_completion_history_and_same_sample_reuse();
     extern virtual task check_fifo_invalid_and_reset_lifecycle();
@@ -297,22 +298,23 @@ function memblock_tlb_entry
     entry.s1_pte_d = 1'b1;
     entry.s1_pte_v = 1'b1;
     entry.s1_addr_low = anchor_key.vpn[2:0];
-    entry.s1_resolved_ppn = canonical_ppn;
+    entry.s1_resolved_ppn = builder.resolve_ppn_from_raw(
+        canonical_ppn, anchor_key.vpn[37:0], entry.s1_level, entry.s1_pte_n);
     entry.s1_resolved_ppn_valid = 1'b1;
     builder.build_s1_sector_payload(canonical_ppn, entry);
+    entry.payload_phase = memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_FINALIZED;
     return entry;
 endfunction:make_s1_superpage_entry
 
 function void soft_test_l2tlb_ppn_reuse_sequence::install_entry(
     input memblock_tlb_lookup_key_t anchor_key,
-    input memblock_tlb_entry entry);
-    if (entry == null || data.has_tlb_entry(anchor_key)) begin
+    input memblock_tlb_entry entry,
+    input mmu_csr_runtime_state csr_snapshot);
+    if (entry == null || csr_snapshot == null ||
+        data.has_tlb_entry(anchor_key)) begin
         `uvm_fatal(get_type_name(), "invalid directed PPN reuse entry install")
     end
-    data.insert_tlb_entry(anchor_key, entry);
-    if (!data.register_tlb_range_index(anchor_key, entry)) begin
-        `uvm_fatal(get_type_name(), "failed to register directed PPN reuse range entry")
-    end
+    data.publish_live_tlb_entry(anchor_key, entry, csr_snapshot);
 endfunction:install_entry
 
 task soft_test_l2tlb_ppn_reuse_sequence::check_disabled_and_weight_zero();
@@ -458,6 +460,10 @@ task soft_test_l2tlb_ppn_reuse_sequence::check_fifo_invalid_and_reset_lifecycle(
     fault_entry.copy_from(entry0);
     pma_entry.copy_from(entry0);
     no_derived_entry.copy_from(entry0);
+    expect_true(fault_entry.parent_occupancy_keys.size() == 0 &&
+                pma_entry.parent_occupancy_keys.size() == 0 &&
+                no_derived_entry.parent_occupancy_keys.size() == 0,
+                "TLB payload snapshots must not inherit live parent ownership");
     fault_entry.fault_effective_s1_pf = 1'b1;
     pma_entry.pmaAF = 1'b1;
     data.record_l2tlb_completed_ppn_history(2'd0, 1'b1, 44'h111, '0,
@@ -520,6 +526,11 @@ task soft_test_l2tlb_ppn_reuse_sequence::check_fifo_invalid_and_reset_lifecycle(
     memblock_sync_pkg::last_allocated_l2tlb_event_seq = saved_last_event_seq;
     expect_true(c4_deleted_count == 1 && !data.has_tlb_entry(c4_target_key),
                 "ordinary SFENCE/HFENCE C4 must delete its matching live entry");
+    expect_true(data.tlb_entry_by_key.num() == 0 &&
+                data.tlb_anchor_keys_by_range_key.num() == 0 &&
+                data.tlb_parent_occupancy_count.num() == 0 &&
+                data.tlb_parent_owner_set.num() == 0,
+                "full C4 Fence must clear canonical/range/parent ownership");
     expect_true(data.l2tlb_ppn_history_q.size() == c4_history_size &&
                 data.l2tlb_ppn_history_q[0].ppn_valid &&
                 data.l2tlb_ppn_history_q[0].ppn == 44'h444,
@@ -528,8 +539,12 @@ task soft_test_l2tlb_ppn_reuse_sequence::check_fifo_invalid_and_reset_lifecycle(
     expect_true(data.l2tlb_ppn_history_q.size() == 0,
                 "dedicated PPN history clear must not require live-entry reset");
     data.reset_all_tables(1);
-    expect_true(data.l2tlb_ppn_history_q.size() == 0,
-                "reset_all_tables must clear PPN history for the next testcase");
+    expect_true(data.l2tlb_ppn_history_q.size() == 0 &&
+                data.tlb_entry_by_key.num() == 0 &&
+                data.tlb_anchor_keys_by_range_key.num() == 0 &&
+                data.tlb_parent_occupancy_count.num() == 0 &&
+                data.tlb_parent_owner_set.num() == 0,
+                "reset_all_tables must clear PPN history and all live indexes");
     ignored_ppn = ppn0;
 endtask:check_fifo_invalid_and_reset_lifecycle
 
@@ -574,10 +589,13 @@ task soft_test_l2tlb_ppn_reuse_sequence::check_exact_range_and_target_encoding()
     complete_frozen_response(exact_entry, 38'h000_0000_a00, 2'd0, s1_csr,
                              41, 8, 1'b1, 1'b1, derived_valid, exact_ppn);
 
+    // 中文注释：range-hit子场景保留completed PPN history，但不能保留前一
+    // 子场景的4KB live owner，否则定向2MB entry本身就是非法反向重叠。
+    data.clear_dispatch_l2tlb_live_entries();
     range_raw_ppn = 44'h0000_0000_1c0;
     range_anchor_key = s1_csr.make_lookup_key({26'b0, 38'h000_0000_b00}, 2'd0);
     range_entry = make_s1_superpage_entry(range_anchor_key, s1_csr, range_raw_ppn);
-    install_entry(range_anchor_key, range_entry);
+    install_entry(range_anchor_key, range_entry, s1_csr);
     range_hit_entry = lookup_entry(38'h000_0000_b07, 2'd0, s1_csr, 1'b1, 100,
                                    lookup_result, created);
     expect_true(!created && lookup_result == MEMBLOCK_TLB_LOOKUP_RANGE_HIT &&

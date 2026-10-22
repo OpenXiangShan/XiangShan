@@ -264,6 +264,7 @@ class mmu_csr_runtime_state extends uvm_object;
 
     function bit [15:0] current_vmid(input bit [1:0] s2xlate = 2'd0);
         case (s2xlate)
+            2'd1,
             2'd2,
             2'd3: return hgatp_vmid;
             default: return 16'd0;

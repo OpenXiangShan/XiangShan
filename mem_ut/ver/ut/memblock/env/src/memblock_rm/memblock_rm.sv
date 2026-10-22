@@ -26,7 +26,12 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     bit          observer_mismatch_reported;
     bit          observer_trace_main_emitted[int unsigned];
     bit          observer_trace_translation_emitted[int unsigned];
+    bit          observer_trace_translation_path_emitted[int unsigned];
+    bit          observer_trace_translation_pending_emitted[int unsigned];
     bit          observer_trace_dut_load_emitted[int unsigned];
+    bit          observer_translation_pending_active;
+    memblock_uid_t observer_translation_pending_uid;
+    int unsigned   observer_translation_pending_poll_count;
 
     //aa_test_reg_model		reg_model;
 
@@ -95,10 +100,15 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
         bit all_bytes_pma_pbmt
     );
+    extern function bit observer_note_translation_pending(
+        input memblock_uid_t uid
+    );
+    extern function void observer_clear_translation_pending();
     extern function bit observer_build_commit_item(
         memblock_rm_readonly_api::main_transaction_view_t main_view,
         memblock_rm_readonly_api::status_view_t status_view,
-        output rm_ls_program_item_t item
+        output rm_ls_program_item_t item,
+        output bit translation_pending
     );
     extern function bit observer_capture_commit_actual(
         memblock_rm_readonly_api::main_transaction_view_t main_view,
@@ -140,7 +150,12 @@ function void memblock_rm::build_phase(uvm_phase phase);
     this.observer_mismatch_reported = 1'b0;
     this.observer_trace_main_emitted.delete();
     this.observer_trace_translation_emitted.delete();
+    this.observer_trace_translation_path_emitted.delete();
+    this.observer_trace_translation_pending_emitted.delete();
     this.observer_trace_dut_load_emitted.delete();
+    this.observer_translation_pending_active = 1'b0;
+    this.observer_translation_pending_uid = '0;
+    this.observer_translation_pending_poll_count = 0;
     begin
         memblock_rm_observer_cache observer;
         if (!uvm_config_db#(memblock_rm_observer_cache)::get(this, "", "rm_observer", observer)) begin
@@ -357,10 +372,45 @@ function bit memblock_rm::observer_should_expect_addr_misaligned(
     return 1'b1;
 endfunction:observer_should_expect_addr_misaligned
 
+function bit memblock_rm::observer_note_translation_pending(
+    input memblock_uid_t uid
+);
+    if (!observer_translation_pending_active ||
+        observer_translation_pending_uid != uid) begin
+        observer_translation_pending_active = 1'b1;
+        observer_translation_pending_uid = uid;
+        observer_translation_pending_poll_count = 0;
+    end
+    observer_translation_pending_poll_count++;
+    if (observer_translation_pending_poll_count >=
+        seq_csr_common::get_l2tlb_idle_stop_cycle()) begin
+        `uvm_error("RM_LS_TRANSLATION_PENDING",
+                   $sformatf("uid %0d fired L2TLB translation did not complete after %0d RM polls",
+                             uid, observer_translation_pending_poll_count))
+        observer_translation_pending_active = 1'b0;
+        observer_mismatch_reported = 1'b1;
+        return 1'b0;
+    end
+    if (!observer_trace_translation_pending_emitted.exists(uid)) begin
+        `uvm_info("RM_LS_TRANSLATION_PENDING",
+                  $sformatf("uid %0d commit is waiting for fired L2TLB response; retry next poll",
+                            uid), UVM_LOW)
+        observer_trace_translation_pending_emitted[uid] = 1'b1;
+    end
+    return 1'b1;
+endfunction:observer_note_translation_pending
+
+function void memblock_rm::observer_clear_translation_pending();
+    observer_translation_pending_active = 1'b0;
+    observer_translation_pending_uid = '0;
+    observer_translation_pending_poll_count = 0;
+endfunction:observer_clear_translation_pending
+
 function bit memblock_rm::observer_build_commit_item(
     memblock_rm_readonly_api::main_transaction_view_t main_view,
     memblock_rm_readonly_api::status_view_t status_view,
-    output rm_ls_program_item_t item
+    output rm_ls_program_item_t item,
+    output bit translation_pending
 );
     memblock_rm_readonly_api ro;
     memblock_rm_readonly_api::tlb_request_context_view_t tlb_context;
@@ -373,6 +423,10 @@ function bit memblock_rm::observer_build_commit_item(
     bit entry_stage_one_fault;
     bit entry_stage_two_fault;
     bit entry_translation_fault;
+    bit dut_stops_after_first_page;
+    bit first_byte_is_pma_mmio;
+    bit first_byte_pma_known;
+    bit first_byte_pma_fault;
     bit pbmt_force_s1_pf;
     bit pbmt_force_s2_gpf;
     bit [1:0] effective_pbmt;
@@ -393,6 +447,7 @@ function bit memblock_rm::observer_build_commit_item(
     rm_ls_error_e translation_path_error;
 
     item = new(main_view.uid);
+    translation_pending = 1'b0;
     pma_pmp_view = '{default:'0};
     item.valid = 1'b1;
     item.uid = main_view.uid;
@@ -471,15 +526,26 @@ function bit memblock_rm::observer_build_commit_item(
                                      tlb_context.csr_update_seq));
         return 1'b0;
     end
-    `uvm_info("RM_LS_TRANSLATION",
-              $sformatf("uid=%0d translation_path=%s satp=%0d vsatp=%0d hgatp=%0d s2xlate=%0d csr_seq=%0d",
-                        item.uid, bare_identity ? "BARE_IDENTITY" : "PAGED_ENTRY",
-                        tlb_context.satp_mode, tlb_context.vsatp_mode,
-                        tlb_context.hgatp_mode, tlb_context.s2xlate,
-                        tlb_context.csr_update_seq),
-              UVM_LOW)
+    if (!observer_trace_translation_path_emitted.exists(item.uid)) begin
+        `uvm_info("RM_LS_TRANSLATION",
+                  $sformatf("uid=%0d translation_path=%s satp=%0d vsatp=%0d hgatp=%0d s2xlate=%0d csr_seq=%0d",
+                            item.uid, bare_identity ? "BARE_IDENTITY" : "PAGED_ENTRY",
+                            tlb_context.satp_mode, tlb_context.vsatp_mode,
+                            tlb_context.hgatp_mode, tlb_context.s2xlate,
+                            tlb_context.csr_update_seq),
+                  UVM_LOW)
+        observer_trace_translation_path_emitted[item.uid] = 1'b1;
+    end
     item.translation_key = tlb_context.request_key;
     if (!bare_identity) begin
+        if (ro.uid_tlb_translation_pending_for_rm(
+                item.uid, item.computed_vaddr[63:12])) begin
+            // A real L2TLB request has fired for this UID, but its response
+            // has not published the payload yet.  Let the commit poll retry;
+            // do not reuse the cleared issue-hit snapshot.
+            translation_pending = 1'b1;
+            return 1'b0;
+        end
         if (!ro.resolve_tlb_entry_for_rm(item.uid, item.computed_vaddr[63:12],
                                          tlb_context, entry)) begin
             ls_model.set_error(RM_LS_ERR_TLB_ENTRY_NOT_READY,
@@ -491,6 +557,10 @@ function bit memblock_rm::observer_build_commit_item(
     end
     store_access = item.kind == RM_LS_KIND_STORE;
     misaligned = (item.computed_vaddr & (item.size_bytes - 1)) != 0;
+    pma_pmp_cmd = store_access ? PMA_PMP_CMD_WRITE : PMA_PMP_CMD_READ;
+    first_byte_is_pma_mmio = 1'b0;
+    first_byte_pma_known = 1'b0;
+    first_byte_pma_fault = 1'b0;
     all_bytes_pma_pbmt = 1'b1;
     all_bytes_pma_mmio = 1'b0;
     all_bytes_normal_cacheable = 1'b0;
@@ -510,8 +580,16 @@ function bit memblock_rm::observer_build_commit_item(
     end else begin
         expected_s1_mode = tlb_context.s2xlate == 2'd0 ?
                            tlb_context.satp_mode : tlb_context.vsatp_mode;
+        // 地址未对齐异常在首个地址字节被确认后，DUT不会为后续页发起翻译
+        // 请求。RM仍需处理首页字节，但不能把未被DUT访问的第二页当成缺失
+        // 的测试框架翻译状态。
+        dut_stops_after_first_page = 1'b0;
         for (int unsigned byte_index = 0; byte_index < item.size_bytes; byte_index++) begin
             byte_va = item.computed_vaddr + byte_index;
+            if (ro.uid_tlb_translation_pending_for_rm(item.uid, byte_va[63:12])) begin
+                translation_pending = 1'b1;
+                return 1'b0;
+            end
             if (!ro.resolve_tlb_entry_for_rm(item.uid, byte_va[63:12],
                                              tlb_context, entry)) begin
                 ls_model.set_error(RM_LS_ERR_TLB_ENTRY_NOT_READY,
@@ -551,6 +629,14 @@ function bit memblock_rm::observer_build_commit_item(
                 return 1'b0;
             end
             all_bytes_pma_pbmt &= effective_pbmt == 2'd0;
+            if (byte_index == 0) begin
+                // The first translated byte establishes whether the access
+                // is PMA/PBMT-normal or PBMT-NC/IO for the DUT misalign path.
+                dut_stops_after_first_page =
+                    observer_should_expect_addr_misaligned(
+                        misaligned, store_access, tlb_context,
+                        all_bytes_pma_pbmt);
+            end
             item.expected_pbmt_forced_s1_pf |= pbmt_force_s1_pf;
             item.expected_pbmt_forced_s2_gpf |= pbmt_force_s2_gpf;
             if (byte_index == 0) item.translation_key = tlb_context.entry_key;
@@ -584,6 +670,35 @@ function bit memblock_rm::observer_build_commit_item(
                 item.pa_by_byte[byte_index] = {final_ppn, byte_va[11:0]};
                 item.pa_valid_mask[byte_index] = 1'b1;
             end
+            if (byte_index == 0 && misaligned &&
+                seq_csr_common::get_pma_pmp_model_en() &&
+                !stage_one_fault && !stage_two_fault &&
+                !access_fault && item.pa_valid_mask[0]) begin
+                byte_pma_pmp_view = '{default:'0};
+                if (ro.read_pma_pmp_af_for_rm(
+                        item.uid,
+                        item.dynamic_epoch,
+                        1'b1,
+                        item.pa_by_byte[0][47:0],
+                        1,
+                        pma_pmp_cmd,
+                        byte_pma_pmp_view)) begin
+                    first_byte_pma_known = byte_pma_pmp_view.valid &&
+                                           byte_pma_pmp_view.translation_eligible &&
+                                           byte_pma_pmp_view.af_decided;
+                    first_byte_pma_fault = first_byte_pma_known &&
+                        (store_access ? byte_pma_pmp_view.st_access_fault :
+                                        byte_pma_pmp_view.ld_access_fault);
+                    first_byte_is_pma_mmio = first_byte_pma_known &&
+                        effective_pbmt == 2'd0 &&
+                        !byte_pma_pmp_view.normal_cacheable &&
+                        !first_byte_pma_fault &&
+                        !byte_pma_pmp_view.st_access_fault;
+                    if (first_byte_pma_fault || first_byte_is_pma_mmio) begin
+                        access_fault = 1'b1;
+                    end
+                end
+            end
             // A translation fault terminates the architectural access.  The DUT
             // does not issue later-page TLB requests after this point, so asking
             // the RM to resolve remaining bytes would create a false query miss
@@ -598,6 +713,11 @@ function bit memblock_rm::observer_build_commit_item(
             if (entry_translation_fault) begin
                 break;
             end
+            if (byte_index == 0 &&
+                (dut_stops_after_first_page || first_byte_pma_fault ||
+                 first_byte_is_pma_mmio)) begin
+                break;
+            end
         end
     end
     required_pa_mask = 8'hff >> (8 - item.size_bytes);
@@ -606,7 +726,6 @@ function bit memblock_rm::observer_build_commit_item(
     if (!access_fault && !stage_one_fault && !stage_two_fault &&
         item.pa_valid_mask == required_pa_mask &&
         seq_csr_common::get_pma_pmp_model_en()) begin
-        pma_pmp_cmd = store_access ? PMA_PMP_CMD_WRITE : PMA_PMP_CMD_READ;
         if (!ro.read_pma_pmp_af_for_rm(
                 item.uid,
                 item.dynamic_epoch,
@@ -1056,6 +1175,7 @@ function bit memblock_rm::observer_process_current_commit();
     bit exception_precheck_ready;
     bit exception_match;
     bit any_exception;
+    bit translation_pending;
 
     ro = memblock_rm_readonly_api::get();
     if (!ro.framework_ready_for_rm()) return 1'b0;
@@ -1140,8 +1260,20 @@ function bit memblock_rm::observer_process_current_commit();
         end
         return 1'b0;
     end
-    if (!observer_build_commit_item(main_view, status_view, item) ||
-        !ls_model.add_item(item)) begin
+    if (!observer_build_commit_item(main_view, status_view, item,
+                                    translation_pending)) begin
+        if (translation_pending) begin
+            void'(observer_note_translation_pending(main_view.uid));
+            return 1'b0;
+        end
+        if (!observer_mismatch_reported) begin
+            `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
+            observer_mismatch_reported = 1'b1;
+        end
+        return 1'b0;
+    end
+    observer_clear_translation_pending();
+    if (!ls_model.add_item(item)) begin
         if (!observer_mismatch_reported) begin
             `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
             observer_mismatch_reported = 1'b1;

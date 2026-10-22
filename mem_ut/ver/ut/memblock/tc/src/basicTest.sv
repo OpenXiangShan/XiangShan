@@ -265,6 +265,7 @@ class basicTest extends tcnt_test_base ;
 
       virtual function void report_phase(uvm_phase phase);
             uvm_report_server rs ;
+            // common_data_transaction::get().report_l2tlb_parent_occupancy_stats();
             rs = uvm_report_server::get_server();
             if(rs.get_severity_count(UVM_FATAL)+rs.get_severity_count(UVM_ERROR)== 0) begin
                  $display("--------------------TEST_PASS---------------------");
