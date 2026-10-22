@@ -750,8 +750,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     gSectorPtes(i).pbmt := resp_res.l0.pbmt(i)
     gSectorPtes(i).perm := Cat(resp_res.l0.perm(i).asUInt, resp_res.l0.v(i)).asTypeOf(gSectorPtes(i).perm)
   }
-  val gSectorAllowed = (!HasMptCheck && p(xiangshan.PMParameKey).PlatformGrain >=
-    log2Ceil(l2tlbParams.blockBytes)).B &&
+  val gSectorAllowed = (!HasMptCheck && p(xiangshan.PMParameKey).PlatformGrain >= log2Ceil(l2tlbParams.blockBytes)).B &&
     !(HasBitmapCheck.B && bitmapEnable) && (resp_res.l0.hit || resp_res.sp.hit)
   io.resp.bits.toHptw.resp.setSector(gSectorPtes, resp_res.l0.v, io.csr_dup(0).mPBMTE, gSectorAllowed)
   if (HasBitmapCheck) {

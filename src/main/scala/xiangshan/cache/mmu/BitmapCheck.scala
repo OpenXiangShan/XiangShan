@@ -152,7 +152,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
 
-  val cache_req_arb = Module(new Arbiter(new bitmapCacheReqBundle(),BitmapSize))
+  val cache_req_arb = Module(new Arbiter(new bitmapCacheReqBundle(), BitmapSize))
   for (i <- 0 until BitmapSize) {
     cache_req_arb.io.in(i).valid := is_cache_req(i)
     cache_req_arb.io.in(i).bits.tag := entries(i).ppn

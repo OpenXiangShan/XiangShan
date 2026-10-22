@@ -123,37 +123,51 @@ class TLBFA(
     val sameS1 = ignoreAsid ||
       (old.perm.asUInt === refillEntry.perm.asUInt && old.pbmt === refillEntry.pbmt)
     val sameS2 = old.g_perm.asUInt === refillEntry.g_perm.asUInt && old.g_pbmt === refillEntry.g_pbmt
-    val overlapLevel = old.level.get max refillEntry.level.get
     val overlapNapot = old.n =/= 0.U || refillEntry.n =/= 0.U
     val overlapTag = Wire(Vec(Level + 1, Bool()))
-    overlapTag(0) := overlapLevel > 0.U || Mux(
-      overlapNapot,
-      (old.tag >> (pteNapotBits - sectortlbwidth)) === (refillEntry.tag >> (pteNapotBits - sectortlbwidth)),
-      old.tag(vpnnLen - sectortlbwidth - 1, 0) === refillEntry.tag(vpnnLen - sectortlbwidth - 1, 0)
-    )
+    // Compare disjoint tag slices in parallel, including the x4 extension in the top slice.
+    val sameLowTag = old.tag(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth) ===
+      refillEntry.tag(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth)
+    val sameNapotOffset = old.tag(pteNapotBits - sectortlbwidth - 1, 0) ===
+      refillEntry.tag(pteNapotBits - sectortlbwidth - 1, 0)
+    overlapTag(0) := old.level.get > 0.U || refillEntry.level.get > 0.U ||
+      (sameLowTag && (overlapNapot || sameNapotOffset))
     for (level <- 1 until Level) {
       val high = vpnnLen * (level + 1) - sectortlbwidth - 1
       val low = vpnnLen * level - sectortlbwidth
-      overlapTag(level) := overlapLevel > level.U || old.tag(high, low) === refillEntry.tag(high, low)
+      overlapTag(level) := old.level.get > level.U || refillEntry.level.get > level.U ||
+        old.tag(high, low) === refillEntry.tag(high, low)
     }
     overlapTag(Level) := (old.tag >> (vpnnLen * Level - sectortlbwidth)) ===
       (refillEntry.tag >> (vpnnLen * Level - sectortlbwidth))
-    val laneOverlap = overlapLevel =/= 0.U || overlapNapot ||
+    val laneOverlap = old.level.get =/= 0.U || refillEntry.level.get =/= 0.U || overlapNapot ||
       (old.valididx.asUInt & refillEntry.valididx.asUInt).orR
     mergeWays(way) := v(way) && hNormalRefill && refillSuccess && normal && sameStage && sameVmid &&
       sameAsid && sameTag && old.ppn === refillEntry.ppn && sameS1 && sameS2
     overlapWays(way) := v(way) && hRefill && sameStage && sameVmid && asidOverlap &&
       overlapTag.asUInt.andR && laneOverlap
+    if (!HasMptCheck) {
+      val hNormalEntry = normal && (old.s2xlate === allStage || old.s2xlate === onlyStage2)
+      when(v(way) && hNormalEntry) {
+        assert(
+          old.valididx.asUInt === old.pteidx.asUInt,
+          s"${parentName} normal H-sector valididx and pteidx differ"
+        )
+      }
+    }
   }
   val mergeHit = mergeWays.asUInt.orR
   // Keep refill selection one-hot through write enables and lookup masks.
-  val mergeWayOH = PriorityEncoderOH(mergeWays.asUInt)
+  val mergeWayOH = mergeWays.asUInt
   val replacementWayOH = UIntToOH(io.w.bits.wayIdx, nWays)
   val writeWayOH = Mux(mergeHit, mergeWayOH, replacementWayOH)
-  val writeWay = Mux(mergeHit, PriorityEncoder(mergeWays), io.w.bits.wayIdx)
+  val writeWay = Mux(mergeHit, OHToUInt(mergeWayOH), io.w.bits.wayIdx)
   // UIntToOH(_, 1) is always one, so preserve the original single-way write condition.
   val writeWaySelect = if (nWays == 1) Seq(writeWay === 0.U) else writeWayOH.asBools
   val writeValid = io.w.valid && !io.sfence.valid
+  when(writeValid) {
+    assert(PopCount(mergeWays) <= 1.U, s"${parentName} H-sector refill has multiple merge candidates")
+  }
   val changedWays = Mux(writeValid, writeWayOH | overlapWays.asUInt, 0.U(nWays.W))
 
   for (i <- 0 until ports) {
@@ -170,15 +184,25 @@ class TLBFA(
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
         val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
-        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
+        val hit = e._1.hit(
+          vpn,
+          Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid),
+          vmid = io.csr.hgatp.vmid,
+          hasS2xlate = hasS2xlate,
+          onlyS2 = OnlyS2,
+          onlyS1 = OnlyS1,
+          checkPteIdx = HasMptCheck
+        )
         s2xlate_hit && hit && m._1 && !m._2
       }
     })
 
     hitVec.suggestName("hitVec")
     val hLookup = (!HasMptCheck).B && (req.bits.s2xlate === allStage || req.bits.s2xlate === onlyStage2)
-    assert(!(req.fire && hLookup && PopCount(hitVec) > 1.U),
-      s"${parentName} H-sector lookup has multiple hits")
+    assert(
+      !(req.fire && hLookup && PopCount(hitVec) > 1.U),
+      s"${parentName} H-sector lookup has multiple hits"
+    )
 
     val hitVecReg = RegEnable(hitVec, req.fire)
     // Sector tlb may trigger multi-hit, see def "wbhit"
@@ -249,7 +273,9 @@ class TLBFA(
         entries(way).pteidx := (entries(way).pteidx.asUInt | refillEntry.pteidx.asUInt).asBools
         for (lane <- 0 until tlbcontiguous) {
           entries(way).ppn_low(lane) := Mux(
-            refillEntry.valididx(lane), refillEntry.ppn_low(lane), entries(way).ppn_low(lane)
+            refillEntry.valididx(lane),
+            refillEntry.ppn_low(lane),
+            entries(way).ppn_low(lane)
           )
         }
       }

@@ -856,10 +856,12 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       is_stage_mpt_req(i) || is_stage_mpt_resp(i)
   }
   val duplicateFirstHptwOwner = state.indices.map { i =>
-    ParallelOR(state.indices.filter(_ != i).map { j =>
-      firstHptwOwner(j) && entries(i).req_info.s2xlate === entries(j).req_info.s2xlate &&
-        dup(entries(i).req_info.vpn, entries(j).req_info.vpn)
-    }).asBool
+    ParallelOR(
+      state.indices.filter(_ != i).map { j =>
+        firstHptwOwner(j) && entries(i).req_info.s2xlate === entries(j).req_info.s2xlate &&
+          dup(entries(i).req_info.vpn, entries(j).req_info.vpn)
+      }
+    ).asBool
   }
   val hasPendingHptwResponse = Cat(is_hptw_resp).orR || Cat(is_last_hptw_resp).orR
   val hyper_arb1 = Module(new RRArbiterInit(new LLPTWEntry(), l2tlbParams.llptwsize))
@@ -1050,7 +1052,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (hyper_arb1.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_hptw_req && entries(i).ppn === hyper_arb1.io.out.bits.ppn && entries(i).req_info.s2xlate === allStage && hyper_arb1.io.chosen === i.U) {
+      when (state(i) === state_hptw_req && entries(i).req_info.s2xlate === allStage && hyper_arb1.io.chosen === i.U) {
         state(i) := state_hptw_resp
         entries(i).wait_id := hyper_arb1.io.chosen
       }
@@ -1085,10 +1087,12 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       for (i <- state.indices) {
         // Untranslated duplicates wait for memory coalescing, which also copies their G-stage translation.
         val canCoalesce = if (l2tlbParams.parallelHptw) !is_hptw_req(i) && !is_hptw_resp(i) else true.B
-        when (canCoalesce && state(i) =/= state_idle && state(i) =/= state_mem_out &&
-          state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp &&
-          entries(i).req_info.s2xlate === mpt_arb.get.io.out.bits.req_info.s2xlate &&
-          dup(entries(i).req_info.vpn, mpt_arb.get.io.out.bits.req_info.vpn)) {
+        when (
+          canCoalesce && state(i) =/= state_idle && state(i) =/= state_mem_out &&
+            state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp &&
+            entries(i).req_info.s2xlate === mpt_arb.get.io.out.bits.req_info.s2xlate &&
+            dup(entries(i).req_info.vpn, mpt_arb.get.io.out.bits.req_info.vpn)
+        ) {
           // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
           state(i) := stage_mpt_resp//set all match fsm to state mptResp
           entries(i).wait_id := mpt_arb.get.io.chosen
@@ -1110,11 +1114,13 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     for (i <- state.indices) {
       // Unissued duplicates join this request; an outstanding HPTW must retain its own response ID.
       val canCoalesce = if (l2tlbParams.parallelHptw) !is_hptw_resp(i) else true.B
-      when (canCoalesce && state(i) =/= state_idle && state(i) =/= state_mem_out &&
-        state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp
-      && (if (HasBitmapCheck) state(i) =/= state_bitmap_check && state(i) =/= state_bitmap_resp else true.B)
-      && entries(i).req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate
-      && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
+      when (
+        canCoalesce && state(i) =/= state_idle && state(i) =/= state_mem_out &&
+          state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp &&
+          (if (HasBitmapCheck) state(i) =/= state_bitmap_check && state(i) =/= state_bitmap_resp else true.B) &&
+          entries(i).req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate &&
+          dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)
+      ) {
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
         state(i) := state_mem_waiting
         entries(i).hptw_resp := entries(mem_arb.io.chosen).hptw_resp
@@ -1156,7 +1162,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (hyper_arb2.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_last_hptw_req && entries(i).ppn === hyper_arb2.io.out.bits.ppn && entries(i).req_info.s2xlate === allStage && hyper_arb2.io.chosen === i.U) {
+      when (
+        state(i) === state_last_hptw_req && entries(i).req_info.s2xlate === allStage && hyper_arb2.io.chosen === i.U
+      ) {
         state(i) := state_last_hptw_resp
         entries(i).wait_id := hyper_arb2.io.chosen
       }
@@ -1343,9 +1351,11 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSPerfAccumulate("llptw_out_count", io.out.fire)
   XSPerfAccumulate("llptw_cache_retry_count", io.cache.fire)
   XSPerfAccumulate("llptw_hptw_req_count", io.hptw.req.fire)
-  XSPerfAccumulate("llptw_hptw_serial_blocked_cycle",
+  XSPerfAccumulate(
+    "llptw_hptw_serial_blocked_cycle",
     !l2tlbParams.parallelHptw.B && hasPendingHptwResponse &&
-      (Cat(is_hptw_req).orR || Cat(is_last_hptw_req).orR) && !flush)
+      (Cat(is_hptw_req).orR || Cat(is_last_hptw_req).orR) && !flush
+  )
   if (l2tlbParams.parallelHptw) {
     val outstandingHptw = PopCount(is_hptw_resp) +& PopCount(is_last_hptw_resp)
     val duplicateFirstBlocked = is_hptw_req.zip(duplicateFirstHptwOwner).map { case (request, blocked) =>
@@ -1422,6 +1432,7 @@ class HPTWRefillBundle(implicit p: Parameters) extends PtwBundle {
 
 class HPTWPmpIO(implicit p: Parameters) extends PtwBundle {
   val req = Valid(new PMPReqBundle)
+  val first = Output(Bool())
   val resp = Flipped(new PMPRespBundle)
 }
 
@@ -1452,9 +1463,11 @@ class HPTWCluster(implicit p: Parameters) extends XSModule with HasPtwConst {
     io.csr.vsatp.changed || io.csr.priv.virt_changed ||
     (if (HasMptCheck) io.csr.mmpt.changed else false.B)
   val engines = Seq.tabulate(l2tlbParams.hptwSize)(i => Module(new HPTW(i)))
-  val available = VecInit(engines.zipWithIndex.map { case (engine, i) =>
-    engine.io.req.ready && !io.mem(i).mask
-  })
+  val available = VecInit(
+    engines.zipWithIndex.map { case (engine, i) =>
+      engine.io.req.ready && !io.mem(i).mask
+    }
+  )
   val selected = PriorityEncoderOH(available.asUInt)
   val respArb = Module(new RRArbiterInit(new HPTWRespBundle, l2tlbParams.hptwSize))
 
@@ -1660,10 +1673,13 @@ class HPTW(bankId: Int = 0)(implicit p: Parameters) extends XSModule with HasPtw
   io.resp.bits.resp := resp
   io.resp.bits.source := source
 
-  io.pmp.req.valid := DontCare
+  // The first check cannot finish a walk. Keep its select independent of PTE decoding.
+  io.pmp.first := !idle && !s_pmp_check && !mem_addr_update
+  io.pmp.req.valid := sent_to_pmp
   io.pmp.req.bits.addr := mem_addr
   io.pmp.req.bits.size := 3.U
   io.pmp.req.bits.cmd := TlbCmd.read
+  assert(io.pmp.first === (sent_to_pmp && !mem_addr_update))
 
 
   if (HasMptCheck) {//send to mpt req
@@ -1887,13 +1903,11 @@ class HPTW(bankId: Int = 0)(implicit p: Parameters) extends XSModule with HasPtw
   XSPerfAccumulate("hptw_mem_req_count", io.mem.req.fire)
   XSPerfAccumulate("hptw_mem_req_blocked_cycle", io.mem.req.valid && !io.mem.req.ready)
   if (HasBitmapCheck) {
-    XSPerfAccumulate("hptw_bitmap_req_blocked_cycle",
-      io.bitmap.get.req.valid && !io.bitmap.get.req.ready && !flush)
+    XSPerfAccumulate("hptw_bitmap_req_blocked_cycle", io.bitmap.get.req.valid && !io.bitmap.get.req.ready && !flush)
     XSPerfAccumulate("hptw_bitmap_wait_cycle", !idle && !w_bitmap_resp && !flush)
   }
   if (HasMptCheck) {
-    XSPerfAccumulate("hptw_mpt_req_blocked_cycle",
-      io.mptCheck.get.req.valid && !io.mptCheck.get.req.ready && !flush)
+    XSPerfAccumulate("hptw_mpt_req_blocked_cycle", io.mptCheck.get.req.valid && !io.mptCheck.get.req.ready && !flush)
     XSPerfAccumulate("hptw_mpt_wait_cycle", !idle && w_mpt_resp && !flush)
   }
 
