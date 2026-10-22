@@ -241,8 +241,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   icache.io.fencei      := RegNext(io.fencei)
 
   // IFU-Ibuffer
-  ifu.io.toIBuffer <> ibuffer.io.in
-  ifu.io.ibufferEmpty := ibuffer.io.empty
+  ifu.io.toIBuffer.normalFetch <> ibuffer.io.in.normalFetch
+  ibuffer.io.in.fastFetch.valid := ifu.io.toIBuffer.fastFetch.valid
+  ibuffer.io.in.fastFetch.bits  := ifu.io.toIBuffer.fastFetch.bits
+  ifu.io.ibufferEmpty           := ibuffer.io.empty
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq := ftq.io.toBackend

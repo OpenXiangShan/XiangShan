@@ -28,6 +28,7 @@ import utility.XORFold
 import utility.XSPerfAccumulate
 import utils.DuplicateInit
 import xiangshan.FrontendTdataDistributeIO
+import xiangshan.TriggerAction
 import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.ExceptionType
@@ -65,8 +66,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val fromUncache: InstrUncacheToIfuIO = Flipped(new InstrUncacheToIfuIO)
 
     // IBuffer: enqueue
-    val toIBuffer:    DecoupledIO[FetchToIBuffer] = DecoupledIO(new FetchToIBuffer)
-    val ibufferEmpty: Bool                        = Input(Bool())
+    val toIBuffer:    FetchToIBuffer = new FetchToIBuffer
+    val ibufferEmpty: Bool           = Input(Bool())
 
     // Backend: gpaMem
     val toBackend:    IfuToBackendIO = new IfuToBackendIO
@@ -205,7 +206,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstRawInstrValid = s1_rawInstrValid & s1_firstRange
   private val s1_totalRawInstrValid = s1_rawInstrValid & s1_totalRange
   // Used to compute the count of valid instructions within the fetch range.
-  private val s1_fisrtRawInstrEndMask = s1_instrEndMask.asUInt & s1_firstRange
+  private val s1_firstRawInstrEndMask = s1_instrEndMask.asUInt & s1_firstRange
   private val s1_invalidTaken = VecInit(
     s1_fetchBlock(0).takenCfiOffset.valid && s1_firstEndIsHalfRvi,
     s1_fetchBlock(1).valid && s1_fetchBlock(1).takenCfiOffset.valid && s1_totalEndIsHalfRvi
@@ -223,6 +224,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstEndIndex    = RegEnable(s0_firstEndIndex, s0_fire)
   private val s1_secondEndIndex   = RegEnable(s0_secondEndIndex, s0_fire)
   private val s1_secondStartIndex = RegEnable(s0_secondStartIndex, s0_fire)
+  private val s1_rawFirstData     = cutICacheData(s1_firstICacheData)
+  private val s1_rawSecondData    = cutICacheData(s1_secondICacheData)
+
+  private val s1_icacheMetaIn = RegEnable(s0_icacheMeta, s0_fire)
+  private val s1_instrVec     = s1_compactedInstrVec
 
   // ICache mainPipe send parity check result 1 cycle after io.fromICache.req.fire, here merge into icacheMeta.
   // for better timing.
@@ -383,63 +389,62 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   // ---------------------- Fast Fetch ----------------------
-  private val s1_fastFetchInfo = RegEnable(s0_fastFetchInfo, s0_fire)
+  private val s0_fastFetchData         = genFastFetchData(s0_rawFirstData, s0_fastFetchInfo.startIndex)
+  private val s1_fastFetchInfo         = RegEnable(s0_fastFetchInfo, s0_fire)
+  private val s1_fastFetchData         = RegEnable(s0_fastFetchData, s0_fire)
+  private val s1_fastRawInst           = cutFastData(s1_fastFetchData, s1_fastFetchInfo.startIndex)
+  private val s1_fastNotJumpVec        = Wire(Vec(FastFetchMaxNum, Bool()))
+  private val s1_fastValid             = Wire(Vec(FastFetchMaxNum, Bool()))
   private val backendRedirectWaitFetch = RegInit(false.B)
-  private val fastTrigger     = Module(new FastTrigger)
-  fastTrigger.io.frontendTrigger := io.frontendTrigger
-  fastTrigger.io.pds := DontCare
-  fastTrigger.io.pc  := s1_fastFetchInfo.pc // 不足的部分自动补0
-  fastTrigger.io.data := DontCare
-  private val rawFastTrigger = fastTrigger.io.triggered
-  private val fastHasVSet = (0 until FastFetchWidth).map {
-    s1_fastFetchInfo.rawInstrValid(i) && Seq(VSETIVLI, VSETVL, VSETVLI).map(_ === inst).reduce(_ || _)
-  }.reduce(_ || _)
+  private val frontendTriggerEnabled   = io.frontendTrigger.tEnableVec.reduce(_ || _)
   private val s1_useFastFetch =
-    backendRedirectWaitFetch && !s1_icacheMeta(0).exception.hasException && !s1_icacheMeta(0).isUncache && !fastHasVSet
+    backendRedirectWaitFetch && !frontendTriggerEnabled &&
+      !s1_icacheMeta(0).exception.hasException && !s1_icacheMeta(0).isUncache &&
+      !s1_icacheMeta(0).isBackendException && !s1_icacheMeta(0).hasSatpFlush
 
-  io.toIBuffer.fastFetch.valid := s1_valid && s1_useFastFetch
+  io.toIBuffer.fastFetch.valid         := s1_valid && s1_useFastFetch
+  io.toIBuffer.fastFetch.bits.instrNum := PopCount(s1_fastValid)
   io.toIBuffer.fastFetch.bits.entries.zipWithIndex.map { case (fastEntry, i) =>
     val fastRvcExpander = Module(new RvcExpander)
     val info = s1_fastFetchInfo
-    val rawEndOffset = VecInit(tabulate(FastFetchWidth).map { j => j.U})
-    val pc      = Mux1H(info.validMaskOH(i), info.rawPc)
-    val foldpc  = Mux1H(info.validMaskOH(i), info.rawFoldPc)
-    val endOffset = Mux1H(info.endMaskOH(i), rawEndOffset)
-    val isRvc     = Mux1H(info.validMaskOH(i), info.rawIsRvc)
-    val isPredTaken = Mux1H(info.validMaskOH(i), info.rawIsPredTaken)
-    val inst        = Mux1H(info.validMaskOH(i), info.rawInst)
+    val rawEndOffset = info.rawIsRvC.zipWithIndex.map { case (isRvc, i) => Mux(isRvc, i.U, (i + 1).U) }
+    val pc               = Mux1H(info.validMaskOH(i), info.rawPc)
+    val foldpc           = Mux1H(info.validMaskOH(i), info.rawFoldedPC)
+    val isRvc            = Mux1H(info.validMaskOH(i), info.rawIsRvC)
+    val isPredTaken      = Mux1H(info.validMaskOH(i), info.rawIsPredTaken)
+    val inst             = Mux1H(info.validMaskOH(i), s1_fastRawInst)
     val isLastInFtqEntry = Mux1H(info.validMaskOH(i), info.rawIsLastInFtqEntry)
-    val trigger     = Mux1H(info.validMaskOH(i), rawTrigger)
-    fastRvcExpander.io.in := inst
+    val endOffset        = Mux1H(info.validMaskOH(i), rawEndOffset)
+    fastRvcExpander.io.in      := inst
     fastRvcExpander.io.fsIsOff := io.csrFsIsOff
-    val ill = fastRvcExpander.io.ill
+    val ill          = fastRvcExpander.io.ill
     val expandedInst = Mux(ill, inst, fastRvcExpander.io.out.bits)
+    val attribute    = BranchAttribute.decode(inst, true.B)
+    s1_fastNotJumpVec(i) := !attribute.isDirect && !attribute.isIndirect
+    s1_fastValid(i)   := info.realInstrValid(i) && s1_fastNotJumpVec.take(i).foldLeft(true.B)(_ && _)
 
-    fastEntry.valid     := info.realInstrValid(i)
-    fastEntry.bits.inst := expandedInst
-    fastEntry.bits.pc   := pc
-    fastEntry.bits.foldpc    := foldpc
-    fastEntry.bits.isRvc     := isRvc
-    fastEntry.bits.predTaken := isPredTaken
-    fastEntry.bits.ftqPtr    := info.ftqPtr
-    fastEntry.bits.exceptionType := Mux(ill, ExceptionType.illegalInstr, ExceptionType.None)
-    fastEntry.bits.triggered          := trigger
-    fastEntry.bits.isLastInFtqEntry   := isLastInFtqEntry
-    fastEntry.bits.debug_seqNum       := i.U
-    fastEntry.bits.instrEndOffset     := endOffset
+    fastEntry.valid            := s1_fastValid(i)
+    fastEntry.inst             := expandedInst
+    fastEntry.pc               := pc.unGuard
+    fastEntry.foldpc           := foldpc
+    fastEntry.isRvc            := isRvc
+    fastEntry.predTaken        := isPredTaken && !attribute.isNone
+    fastEntry.ftqPtr           := info.ftqPtr
+    fastEntry.exceptionType    := ExceptionType.fromRvcExpander(ill)
+    fastEntry.triggered        := TriggerAction.None
+    fastEntry.isLastInFtqEntry := isLastInFtqEntry || !s1_fastNotJumpVec(i)
+    fastEntry.debug_seqNum     := 0.U.asTypeOf(new InstSeqNum)
+    fastEntry.instrEndOffset   := endOffset
   }
-  io.toIBuffer.fastFetch.hasVSet := (0 until FastFetchWidth).map {
-    s1_fastFetchInfo.rawInstrValid(i) && Seq(VSETIVLI, VSETVL, VSETVLI).map(_ === inst).reduce(_ || _)
-  }.reduce(_ || _)
   private val s1_fastFetchMask = Mux(
     s1_useFastFetch,
-    UIntToMask(s1_fastFetchInfo.instrCount, IBufferEnqueueWidth),
-    0.U(IBufferEnqueueWidth.W)
+    s1_fastValid.asUInt,
+    0.U(FastFetchMaxNum.W)
   )
 
-  when(backendRedirect){
+  when(backendRedirect) {
     backendRedirectWaitFetch := true.B
-  }.elsewhen(s1_valid || s1_flush){
+  }.elsewhen(s1_valid || s1_flush) {
     backendRedirectWaitFetch := false.B
   }
   /* --------------------------------------------------------------------------------------------------------------
@@ -474,7 +479,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_icacheExceptionIdx = RegEnable(s1_icacheExceptionIdx, s1_fire)
 
-  s2_fire := io.toIBuffer.fire
+  private val normalFetch = io.toIBuffer.normalFetch
+  s2_fire := normalFetch.fire
   dontTouch(s2_fire)
 
   private val s2_alignShiftNum = s2_prevIBufEnqPtr.value(1, 0)
@@ -529,7 +535,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   private val isFirstInstr = RegInit(true.B)
-  when(isFirstInstr && io.toIBuffer.fire) {
+  when(isFirstInstr && normalFetch.fire) {
     isFirstInstr := false.B
   }
 
@@ -539,7 +545,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheUnit.io.req.bits.paddr  := s2_icacheMeta(0).pAddr
   uncacheUnit.io.flush           := s2_flush
   uncacheUnit.io.isFirstInstr    := isFirstInstr
-  uncacheUnit.io.ifuStall        := !io.toIBuffer.ready
+  uncacheUnit.io.ifuStall        := !normalFetch.ready
   uncacheUnit.io.emptyAfter      := io.backendEmpty && io.ibufferEmpty
   io.toUncache <> uncacheUnit.io.toUncache
   uncacheUnit.io.fromUncache <> io.fromUncache
@@ -559,12 +565,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s1_fire && !s1_flush,
     // outfire: When an uncache cross-page occurs and it is not an exception,
     // this instruction fetch should end and prepare to receive the next fetch signal.
-    io.toIBuffer.fire || s2_uncacheCrossPageMask,
+    normalFetch.fire || s2_uncacheCrossPageMask,
     // On flush, waiting for uncache response is handled by the channel itself.
     s2_flush
   )
 
-  s2_ready := (io.toIBuffer.ready && (s2_uncacheCanGo || !s2_useUncacheFetch)) || !s2_valid
+  s2_ready := (normalFetch.ready && (s2_uncacheCanGo || !s2_useUncacheFetch)) || !s2_valid
 
   /* ** prediction result check ** */
   checkerIn.valid              := s2_valid
@@ -586,16 +592,16 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_alignTriggered = frontendTrigger.io.triggered
 
   /* ** send to IBuffer ** */
-  io.toIBuffer.valid          := s2_toIBufferValid
-  io.toIBuffer.bits.instrs    := s2_expandedInstrDataVec
-  io.toIBuffer.bits.valid     := s2_alignedInstrValid
-  io.toIBuffer.bits.enqEnable := s2_fixedInstrValid & !s2_fastFetchMask
-  io.toIBuffer.bits.isRvc     := s2_expandedInstrVec.map(_.isRvc)
-  io.toIBuffer.bits.pc := VecInit(
+  normalFetch.valid          := s2_toIBufferValid
+  normalFetch.bits.instrs    := s2_expandedInstrDataVec
+  normalFetch.bits.valid     := s2_alignedInstrValid
+  normalFetch.bits.enqEnable := s2_fixedInstrValid
+  normalFetch.bits.isRvc     := s2_expandedInstrVec.map(_.isRvc)
+  normalFetch.bits.pc := VecInit(
     s2_alignedInstrPcVec.map(_.unGuard)
   ) // for debug
-  io.toIBuffer.bits.prevIBufEnqPtr := s2_prevIBufEnqPtr
-  io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
+  normalFetch.bits.prevIBufEnqPtr := s2_prevIBufEnqPtr
+  normalFetch.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
     ftqPtr := Mux(s2_blockSel(i) || s2_isCrossBlockInstr(i), s2_fetchBlock(1).ftqIdx, s2_fetchBlock(0).ftqIdx)
   }
 
@@ -608,7 +614,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * Ibuf use this value only for a `allowEnq := prevInstrCount < numEmpty`,
    * and we have `s1_instrCount <= s1_specInstrCount`, so this is safe.
    */
-  io.toIBuffer.bits.prevInstrCount := Mux(
+  normalFetch.bits.prevInstrCount := Mux(
     s1_fire,
     Mux(s1_useUncacheFetch, 1.U, s1_specInstrCount),
     Mux(s2_useUncacheFetch, 1.U, s2_instrCount)
@@ -618,7 +624,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val select = VecInit(s2_blockSel.zip(s2_isCrossBlockInstr).map {
     case (blockSel, isCrossBlock) => blockSel || isCrossBlock
   })
-  private val enq = io.toIBuffer.bits.enqEnable
+  private val enq = normalFetch.bits.enqEnable
 
   private val s2_rvcIll           = VecInit(rvcExpanders.map(_.io.ill))
   private val s2_rvcExceptionMask = s2_fixedInstrValid & s2_rvcIll.asUInt
@@ -627,17 +633,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_icacheExceptionMask = UIntToOH(s2_icacheExceptionIdx, IBufferEnqueueWidth)
 
-  io.toIBuffer.bits.isLastInFtqEntry := (0 until IBufferEnqueueWidth).map { i =>
+  normalFetch.bits.isLastInFtqEntry := (0 until IBufferEnqueueWidth).map { i =>
     if (i == IBufferEnqueueWidth - 1) enq(i)
     else enq(i) ^ ((select(i) === select(i + 1)) & enq(i + 1))
   }
-  io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
+  normalFetch.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
     a.predTaken := s2_expandedInstrVec(i).isPredTaken && !s2_useUncacheFetch
     a.offset    := s2_endOffsetVec(i)
   }
-  io.toIBuffer.bits.foldpc := s2_alignedFoldPc
+  normalFetch.bits.foldpc := s2_alignedFoldPc
   // mark the exception only on first instruction
-  io.toIBuffer.bits.exceptionType := MuxCase(
+  normalFetch.bits.exceptionType := MuxCase(
     s2_rvcException,
     Seq(
       s2_icacheMeta(0).exception.hasException -> s2_icacheMeta(0).exception,
@@ -648,17 +654,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIBuffer.bits.isBackendException := s2_icacheMeta(0).isBackendException
-  io.toIBuffer.bits.hasSatpFlush       := s2_icacheMeta(0).hasSatpFlush
+  normalFetch.bits.isBackendException := s2_icacheMeta(0).isBackendException
+  normalFetch.bits.hasSatpFlush       := s2_icacheMeta(0).hasSatpFlush
   // if we have a rvi crossing page, with previous half normal and latter half has exception,
   // we need to tell backend to calculate the correct xepc
-  io.toIBuffer.bits.exceptionCrossPage :=
+  normalFetch.bits.exceptionCrossPage :=
     // if first block has exception and has a half rvi (implies that previous request does not have exception),
     s2_icacheMeta(0).exception.hasException && s2_prevEndIsHalfRviInfo.valid ||
       // or, the second block has exception while the first block does not, and the first block ends with a half rvi
       !s2_icacheMeta(0).exception.hasException && s2_icacheMeta(1).exception.hasException && s2_firstEndHalfRvi.valid
   // if any fetch block has an exception found by icache, use exceptionIdx calculated in s1, otherwise use rvcExpander
-  io.toIBuffer.bits.exceptionMask := MuxCase(
+  normalFetch.bits.exceptionMask := MuxCase(
     s2_rvcExceptionMask,
     Seq(
       s2_icacheMeta(0).exception.hasException -> s2_icacheExceptionMask,
@@ -667,20 +673,20 @@ class Ifu(implicit p: Parameters) extends IfuModule
     )
   )
 
-  io.toIBuffer.bits.triggered := s2_alignTriggered
+  normalFetch.bits.triggered := s2_alignTriggered
 
-  val enqVec = io.toIBuffer.bits.enqEnable
+  val enqVec = normalFetch.bits.enqEnable
   val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
     val idx  = PopCount(enqVec.take(i + 1))
     val pc   = s2_alignedInstrPcVec(i).toUInt
-    val code = io.toIBuffer.bits.instrs(i)
+    val code = normalFetch.bits.instrs(i)
     val seq  = PerfCCT.createInstMetaAtFetch(idx, pc, code, s2_fire & enqVec(i), clock, reset)
     val res  = WireDefault(0.U.asTypeOf(new InstSeqNum))
     res.seqNum := seq
     // leave uopIdx to 0.U
     res
   })
-  io.toIBuffer.bits.debug_seqNum.zipWithIndex.foreach { case (seqNum, i) =>
+  normalFetch.bits.debug_seqNum.zipWithIndex.foreach { case (seqNum, i) =>
     seqNum := Mux(s2_fire, allocateSeqNum(i), 0.U.asTypeOf(new InstSeqNum))
   }
 
@@ -716,9 +722,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
       s2_fetchBlock(0).startVAddr + 2.U,
       s2_fetchBlock(0).startVAddr + 4.U
     )
-  // Due to the presence of uncache requests, s2_valid && io.toIBuffer.ready is not equivalent to s2_fire.
+  // Due to the presence of uncache requests, s2_valid && normalFetch.ready is not equivalent to s2_fire.
   uncacheFlushWb.valid :=
-    s2_valid && io.toIBuffer.ready && s2_useUncacheFetch && !backendRedirect && (s2_uncacheCanGo || uncacheNeedResend)
+    s2_valid && normalFetch.ready && s2_useUncacheFetch && !backendRedirect && (s2_uncacheCanGo || uncacheNeedResend)
   uncacheFlushWb.bits.canTrain  := false.B
   uncacheFlushWb.bits.ftqIdx    := s2_fetchBlock(0).ftqIdx
   uncacheFlushWb.bits.pc        := s2_fetchBlock(0).startVAddr.toUInt(VAddrBits - 1, 0)
@@ -734,30 +740,30 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val brAttribute = BranchAttribute.decode(inst)
 
     val uncacheRvcException = ExceptionType.fromRvcExpander(uncacheRvcExpander.io.ill)
-    io.toIBuffer.bits.instrs(s2_alignShiftNum) := Mux(
+    normalFetch.bits.instrs(s2_alignShiftNum) := Mux(
       uncacheRvcExpander.io.ill,
       uncacheRvcExpander.io.in,
       uncacheRvcExpander.io.out.bits
     )
 
-    io.toIBuffer.bits.pc(s2_alignShiftNum)    := uncachePc.unGuard
-    io.toIBuffer.bits.isRvc(s2_alignShiftNum) := uncacheIsRvc
-    io.toIBuffer.bits.instrEndOffset(s2_alignShiftNum).offset := Mux(
+    normalFetch.bits.pc(s2_alignShiftNum)    := uncachePc.unGuard
+    normalFetch.bits.isRvc(s2_alignShiftNum) := uncacheIsRvc
+    normalFetch.bits.instrEndOffset(s2_alignShiftNum).offset := Mux(
       uncacheIsRvc || s2_prevEndIsHalfRviInfo.valid,
       0.U,
       1.U
     )
 
-    io.toIBuffer.bits.exceptionType := s2_icacheMeta(0).exception || uncacheException || uncacheRvcException
+    normalFetch.bits.exceptionType := s2_icacheMeta(0).exception || uncacheException || uncacheRvcException
     // execption can happen in next page only when cross page.
-    io.toIBuffer.bits.exceptionCrossPage :=
+    normalFetch.bits.exceptionCrossPage :=
       s2_prevEndIsHalfRviInfo.valid && (s2_icacheMeta(0).exception.hasException || uncacheException.hasException)
-    io.toIBuffer.bits.exceptionMask := UIntToOH(s2_alignShiftNum, IBufferEnqueueWidth)
+    normalFetch.bits.exceptionMask := UIntToOH(s2_alignShiftNum, IBufferEnqueueWidth)
 
     // In uncache scenarios, only a single instruction is allowed for execution,
     // so the valid signal enqueued into the IBuffer must be aligned.
-    io.toIBuffer.bits.valid     := Cat(0.U(FetchBlockInstNum.W), UIntToOH(s2_alignShiftNum))
-    io.toIBuffer.bits.enqEnable := Cat(0.U(FetchBlockInstNum.W), UIntToOH(s2_alignShiftNum))
+    normalFetch.bits.valid     := Cat(0.U(FetchBlockInstNum.W), UIntToOH(s2_alignShiftNum))
+    normalFetch.bits.enqEnable := Cat(0.U(FetchBlockInstNum.W), UIntToOH(s2_alignShiftNum))
 
     uncacheFlushWb.bits.isRVC     := uncacheIsRvc
     uncacheFlushWb.bits.attribute := brAttribute
@@ -767,13 +773,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // S2 can now directly concatenate uncache instructions using s2_prevLastIsHalfRvi during fetch.
   // This fixes the edge case where instructions spanning both cache and uncache channels fell through
   // the cracks of the existing S1 (cache) and S2 (uncache) cross-page handling logic.
-  uncacheRedirect.valid := s2_valid && io.toIBuffer.ready && s2_useUncacheFetch && (s2_uncacheCanGo || uncacheNeedResend)
+  uncacheRedirect.valid := s2_valid && normalFetch.ready && s2_useUncacheFetch && (s2_uncacheCanGo || uncacheNeedResend)
   uncacheRedirect.instrCount            := Mux(uncacheNeedResend, 0.U, 1.U)
   uncacheRedirect.prevIBufEnqPtr        := s2_prevIBufEnqPtr
   uncacheRedirect.halfRviInfo.valid     := uncacheNeedResend
   uncacheRedirect.halfRviInfo.bits.pc   := uncachePc
   uncacheRedirect.halfRviInfo.bits.data := uncacheData(15, 0)
-  private val cancelPredCheck = (~s2_fixedInstrValid & s2_fastFetchMask).orR
+  private val cancelPredCheck = (~s2_fixedInstrValid & s2_fastFetchMask.pad(IBufferEnqueueWidth)).orR
   /* *****************************************************************************
    * IFU Write-back Stage
    * - write back preDecode information to Ftq to update
@@ -786,7 +792,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val wbSecondValid     = RegEnable(s2_secondValid, wbEnable)
   private val wbAlignFetchBlock = RegEnable(s2_fetchBlock, wbEnable)
   private val wbPrevIBufEnqPtr  = RegEnable(s2_prevIBufEnqPtr, wbEnable)
-  private val wbInstrCount      = RegEnable(PopCount(io.toIBuffer.bits.enqEnable), wbEnable)
+  private val wbInstrCount      = RegEnable(PopCount(normalFetch.bits.enqEnable), wbEnable)
   private val advanceFtqIdx     = VecInit(s2_fetchBlock.map(_.ftqIdx))
 
   private val wbFirstEndHalfRvi = RegEnable(s2_firstEndHalfRvi, wbEnable)
@@ -837,18 +843,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   val perfEvents: Seq[(String, Bool)] = Seq(
     ("frontendFlush                ", wbRedirect.valid),
-    ("ifu_req                      ", io.toIBuffer.fire),
-    ("ifu_miss                     ", io.toIBuffer.fire && !s2_icachePerfInfo.hit),
-    ("ifu_req_cacheline_0          ", io.toIBuffer.fire),
-    ("ifu_req_cacheline_1          ", io.toIBuffer.fire && s2_icachePerfInfo.isDoubleLine),
-    ("ifu_req_cacheline_0_hit      ", io.toIBuffer.fire && s2_icachePerfInfo.hit0),
-    ("ifu_req_cacheline_1_hit      ", io.toIBuffer.fire && s2_icachePerfInfo.hit1),
-    ("only_0_hit                   ", io.toIBuffer.fire && s2_icachePerfInfo.hit0NoReq1),
-    ("only_0_miss                  ", io.toIBuffer.fire && s2_icachePerfInfo.miss0NoReq1),
-    ("hit_0_hit_1                  ", io.toIBuffer.fire && s2_icachePerfInfo.hit0Hit1),
-    ("hit_0_miss_1                 ", io.toIBuffer.fire && s2_icachePerfInfo.hit0Miss1),
-    ("miss_0_hit_1                 ", io.toIBuffer.fire && s2_icachePerfInfo.miss0Hit1),
-    ("miss_0_miss_1                ", io.toIBuffer.fire && s2_icachePerfInfo.miss0Miss1)
+    ("ifu_req                      ", normalFetch.fire),
+    ("ifu_miss                     ", normalFetch.fire && !s2_icachePerfInfo.hit),
+    ("ifu_req_cacheline_0          ", normalFetch.fire),
+    ("ifu_req_cacheline_1          ", normalFetch.fire && s2_icachePerfInfo.isDoubleLine),
+    ("ifu_req_cacheline_0_hit      ", normalFetch.fire && s2_icachePerfInfo.hit0),
+    ("ifu_req_cacheline_1_hit      ", normalFetch.fire && s2_icachePerfInfo.hit1),
+    ("only_0_hit                   ", normalFetch.fire && s2_icachePerfInfo.hit0NoReq1),
+    ("only_0_miss                  ", normalFetch.fire && s2_icachePerfInfo.miss0NoReq1),
+    ("hit_0_hit_1                  ", normalFetch.fire && s2_icachePerfInfo.hit0Hit1),
+    ("hit_0_miss_1                 ", normalFetch.fire && s2_icachePerfInfo.hit0Miss1),
+    ("miss_0_hit_1                 ", normalFetch.fire && s2_icachePerfInfo.miss0Hit1),
+    ("miss_0_miss_1                ", normalFetch.fire && s2_icachePerfInfo.miss0Miss1)
   )
   generatePerfEvent()
   perfAnalyzer.io.ifuPerfCtrl.fromFtqBubble    := !io.fromICache.req.valid && io.fromICache.req.ready
@@ -875,12 +881,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.checkPerfInfo.misEndOffset     := checkerRedirect.bits.endOffset
   perfAnalyzer.io.perfInfo.checkPerfInfo.uncacheBubble    := s2_useUncacheFetch && !s2_uncacheCanGo
 
-  perfAnalyzer.io.perfInfo.toIBufferInfo.ibufferFire   := io.toIBuffer.fire
-  perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
+  perfAnalyzer.io.perfInfo.toIBufferInfo.ibufferFire   := normalFetch.fire
+  perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := normalFetch.bits.enqEnable & normalFetch.bits.valid
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s2_fetchBlock(0).startVAddr.toUInt
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s2_fetchBlock(1).startVAddr.toUInt
-  io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
+  normalFetch.bits.topdownInfo                         := perfAnalyzer.io.topdownOut.topdown
 
-  XSPerfAccumulate("2fetch_to_ibuffer", io.toIBuffer.fire && s2_secondValid)
+  XSPerfAccumulate("2fetch_to_ibuffer", normalFetch.fire && s2_secondValid)
 }
-

@@ -41,7 +41,6 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.ras.RasSpecReadReq
 import xiangshan.frontend.ibuffer.IBufPtr
-import xiangshan.frontend.ifu.FastFetchBundle
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
@@ -49,6 +48,8 @@ import xiangshan.frontend.icache.ICacheTopdownInfo
 import xiangshan.frontend.icache.MainPipeToIfuReq
 import xiangshan.frontend.icache.WayLookupBundle
 import xiangshan.frontend.icache.WayLookupWriteBundle
+import xiangshan.frontend.ifu.FastFetchBundle
+import xiangshan.frontend.ifu.NormalFetchBundle
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
 
