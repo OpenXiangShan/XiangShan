@@ -286,9 +286,11 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
                    "completed translation did not use the response payload")
     end
 
-    // A cross-page request must fail immediately when its first VPN is incomplete.
+    // A cross-page request must fail immediately when the first VPN is
+    // completed but the secondary VPN has no current live entry.  This proves
+    // the second page cannot reuse the first page's completed payload.
     init_load_views(1, 64'h0000_0000_8124_4ffd, main_view, status_view);
-    void'(make_uid_tlb_record(1, main_view.vaddr, 2'd0, 2'd0, 1'b1, 1'b0));
+    void'(make_uid_tlb_record(1, main_view.vaddr, 2'd0, 2'd0, 1'b1, 1'b1));
     catcher = new("rm_cross_page_missing_entry_catcher", "RM_READONLY_API",
                   "*tlb_entry_exact_or_range query miss*");
     uvm_report_cb::add(null, catcher);

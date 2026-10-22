@@ -5,7 +5,7 @@
 | 状态 | 已完成 coding、implementation review、远端验证并已归档 |
 | 方案类型 | V2 RM/checker plan |
 | 工作分支 | `mem_ut_uvm_v2` |
-| 关联提交 | `2829a232b2`（`mem_ut: harden L2TLB and RM regression handling`） |
+| 关联提交 | `7632adee72`（`mem_ut: restore RM TLB completion invariant`） |
 | 目标问题 | 采用非冻结查询方案，收窄当前 RM 对“L2TLB request 已 fire、response 尚未完成”的等待逻辑，恢复 commit 边界的强检查语义；已完成 UID record 仍可作为完成事实使用 |
 | 计划目录 | `AI_DOC/plan/rm_plan/undo/` |
 | coding 门禁 | 本文只提供 plan；只有用户明确授权 coding 后才能修改源码或测试 |
@@ -435,6 +435,15 @@ make eda_run tc=tc_sanity mode=base_fun
 `UVM_ERROR=0`、`UVM_FATAL=0`。负向场景若使用 report catcher，必须确认 catcher 只吸收预期的 RM error，
 测试结束时不残留未预期错误。
 
+本轮实际补充验证：
+
+- `tc_rm_pbmt_effective_fault/virtual_base_sequence`，seed `2026102011`，mode
+  `rm_nonfreeze_pbmt_20261022_r4`：首 VPN completed、第二 VPN缺失的跨页负向场景通过，
+  `TEST CASE PASSED`、`UVM_ERROR=0`、`UVM_FATAL=0`。
+- `tc_l2tlb_range_lookup_smoke/virtual_base_sequence`，seed `2026102011`，mode
+  `rm_nonfreeze_range_20261022_r1`：live overlap expected-fatal 场景通过，2个预期 fatal 被 catcher 捕获，
+  `UVM_ERROR=0`、`UVM_FATAL=0`。
+
 ## 9. 验收标准
 
 1. `rob_commit=0`时，RM 仍能等待 status/main view 到达；没有因删除 pending helper而误报。
@@ -493,3 +502,5 @@ make eda_run tc=tc_sanity mode=base_fun
 4. `[IMPLEMENTATION_DELTA]` `soft_test_tc_rm_pbmt_effective_fault.sv` 对 fired WAITING 和跨页缺失
    两个负向场景分别捕获一次 `tlb_entry_exact_or_range` query miss，并保留立即失败断言；这使测试语义
    与删除 pending retry 后的生产路径一致。
+5. `[IMPLEMENTATION_DELTA]` 跨页负向场景进一步收紧为“首 VPN 已完成、第二 VPN 缺失”。原因是只有该
+   组合才能直接证明跨页查询不会把首 VPN 的 completed payload 当作第二 VPN 的 translation fallback。

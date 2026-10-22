@@ -224,8 +224,9 @@ rg -n "observer_build_commit_item" mem_ut/ver/ut/memblock
 ### 6.1 专项验证
 
 1. `memblock_rm_provenance_followup_directed_vseq`，seed `37617171`：编译通过，仿真通过，`UVM_ERROR=0`，`UVM_FATAL=0`。
-2. `tc_rm_pbmt_effective_fault/virtual_base_sequence`，seed `2026102011`：`TEST CASE PASSED`，`UVM_ERROR=0`，`UVM_FATAL=0`；3个预期 readonly error均被 catcher捕获。
+2. `tc_rm_pbmt_effective_fault/virtual_base_sequence`，seed `2026102011`：`TEST CASE PASSED`，`UVM_ERROR=0`，`UVM_FATAL=0`；3个预期 readonly error均被 catcher捕获。跨页负向 case为首 VPN completed、第二 VPN缺失。
 3. `memblock_dispatch_real_smoke_vseq`，cfg `tc_l2tlb_fault_2pct_no_trigger`，seed `37617171`：正常结束，`RM_LS_COMPARE`完成10000条，`UVM_ERROR=0`，`UVM_FATAL=0`。
+4. `tc_l2tlb_range_lookup_smoke/virtual_base_sequence`，seed `2026102011`：`TEST CASE PASSED`，`UVM_ERROR=0`，`UVM_FATAL=0`；2个 live-overlap expected fatal由 catcher捕获。
 
 真实 seed日志：`mem_ut/ver/ut/memblock/sim/rm_nonfreeze_real_20261022/log/tc=basicTest_ts=memblock_dispatch_real_smoke_vseq_cfg=tc_l2tlb_fault_2pct_no_trigger_seed=37617171_rtl.log`。
 
@@ -233,4 +234,4 @@ rg -n "observer_build_commit_item" mem_ut/ver/ut/memblock
 
 主要残余风险是：如果未来证明 DUT/验证框架协议确实允许 `rob_commit`先于 L2TLB response completion，则应修复 commit barrier、monitor 或 completion owner，并重新定义协议；当前 RM 不再用没有统一时间基准的 `#1ns` retry掩盖该问题。
 
-本轮实现与验证无 blocker。方案 A已完成：RM恢复 commit 边界翻译完成不变量，采用非冻结 live lookup，保留真实 completed response payload，删除 pending retry/timeout和 issue snapshot RM fallback。Plan 已按项目规则从 `rm_plan/undo`归档到 `rm_plan/do`。
+本轮实现与验证无 blocker。方案 A已完成：RM恢复 commit 边界翻译完成不变量，采用非冻结 live lookup，保留真实 completed response payload，删除 pending retry/timeout和 issue snapshot RM fallback。Plan 已按项目规则从 `rm_plan/undo`归档到 `rm_plan/do`；review 文档按 review 工作流保留在 `rm_review_doc/undo`。
