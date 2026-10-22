@@ -1,4 +1,4 @@
 interface:
   display_name: "RTL Knowledge Maintainer"
-  short_description: "按版本沉淀 Scala 源码支撑的 RTL 行为知识"
-  default_prompt: "Use $rtl-knowledge-maintainer when I explicitly ask for RTL behavior analysis based on Scala or Chisel source, then update the versioned knowledge base."
+  short_description: "维护版本化 RTL 知识；V2 默认不触发"
+  default_prompt: "Use $rtl-knowledge-maintainer only when RTL knowledge maintenance is triggered. V2 also requires an explicit request to update the documentation or knowledge base; otherwise do not trigger."

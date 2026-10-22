@@ -192,13 +192,24 @@ testcase preset 的 Makefile `cfg=` 入口、编译期宏参数或 connect-time 
 
 只有用户提示词明确要求结合 Scala/Chisel 源码分析、解释、追踪或比较 RTL 模块、信号、
 pipeline、状态机、队列、exception、redirect、replay、flush、writeback 或 V2/V3 RTL 行为时，
-才必须先阅读 `AI_DOC/project_management/rtl_knowledge_base_management_rule.md`，并使用
-`AI_DOC/skills/rtl-knowledge-maintainer/SKILL.md`。触发后必须确定 V2/V3 和权威源码，检索对应
-版本旧知识，并在回答用户前把结论合并到对应版本的 agent 或 flow 长期文档。
+才可能启动 RTL 知识库流程。
+
+V3 满足上述条件时，必须先阅读
+`AI_DOC/project_management/rtl_knowledge_base_management_rule.md`，并使用
+`AI_DOC/skills/rtl-knowledge-maintainer/SKILL.md`。触发后必须确定版本和权威源码，检索旧知识，
+并在回答用户前把结论合并到 V3 agent 或 flow 长期文档。
+
+V2 默认不触发。除上述 Scala/Chisel RTL 分析条件外，当前提示词还必须出现“更新文档”
+“写入知识库”“沉淀知识库”“同步知识库”“维护知识库”等明确要求更新文档或知识库的同类词语，
+才允许启动 V2 知识库流程并阅读上述规则与 skill。仅分析、解释、追踪或比较 V2 RTL，
+或当前分支为 `mem_ut_uvm_v2` 但提示词没有该类词语时，不得启动该流程，也不得更新
+`AI_DOC/analysis/**/v2`。单独的“更新代码”或“更新最新代码”不算更新文档。V2 一旦触发，
+必须确定版本和权威源码，检索旧知识，并在回答前合并结论。
 
 只分析测试框架、UVM/SystemVerilog 验证代码、sequence、driver、monitor、RM、scoreboard、
 plan、项目管理文档、日志或仿真结果时，默认不触发 RTL 知识库更新；即使分析过程中为辅助理解
-自行查看 Scala/RTL 源码，也不得据此更新 RTL 知识库。混合问题只沉淀用户明确要求的 RTL 行为部分。
+自行查看 Scala/RTL 源码，也不得据此更新 RTL 知识库。混合问题只有对应版本触发条件已满足时，
+才沉淀用户明确要求的 RTL 行为部分。
 
 后续新增、修改或复查任何项目内文档，包括 `AI_DOC`、`mem_ut/ver/ut/memblock/rule`
 和 `AGENTS.md` 中的说明性内容时，必须先阅读

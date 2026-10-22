@@ -1,22 +1,38 @@
 ---
 name: rtl-knowledge-maintainer
-description: 结合 XiangShan Scala/Chisel 源码分析并维护版本化 RTL 功能知识库。仅当用户提示词明确要求“结合 Scala/Chisel 源码”分析、解释、追踪或比较 RTL 信号、模块、pipeline、状态机、队列、异常、redirect、replay、flush、writeback、MemBlock/LSQ/DCache/TLB/ROB 行为或 V2/V3 RTL 差异时使用。不要用于只分析测试框架、UVM/SystemVerilog 验证代码、sequence、driver、monitor、RM、scoreboard、plan、项目管理文档、日志或仿真结果的任务；Codex 自行查看 Scala 源码辅助理解也不构成触发。
+description: 维护 XiangShan 版本化 RTL 知识库。V3 仅在用户明确要求结合 Scala/Chisel 源码分析 RTL 行为时使用。V2 默认不使用；除该分析要求外，提示词还必须出现更新文档、写入知识库、沉淀知识库、同步知识库或维护知识库等明确更新文档或知识库的同类词语。不要用于测试框架、UVM、plan、日志或仿真结果分析；自行查看 Scala 源码也不构成触发。
 ---
 
 # RTL 知识库维护
 
-把用户明确要求结合 Scala/Chisel 源码完成的 RTL 行为分析变成对应版本长期知识的增量更新。
+把已经触发的 Scala/Chisel RTL 行为分析合并到对应版本长期知识库。V2 默认不执行本 skill。
 
 ## 触发边界
 
-只有用户提示词同时具备以下两点时执行本 skill：
+V3 只有用户提示词同时具备以下两点时执行本 skill：
 
 1. 明确要求结合 Scala/Chisel 源码。
 2. 目标是分析 RTL 功能、信号条件、内部 flow 或版本行为差异。
 
+V2 默认不触发，也不得更新 V2 知识库。除上述两点外，当前提示词还必须出现明确要求更新文档或知识库的同类词语，例如：
+
+- 更新文档、写入文档、同步文档、沉淀文档、维护文档。
+- 更新知识库、写入知识库、同步知识库、沉淀知识库、维护知识库。
+- 明确要求把本次分析结论写入或更新长期知识文档。
+- `update documentation`、`update the knowledge base` 等语义相同的英文要求。
+
+以下情况不触发 V2：
+
+- 只有分析、解释、追踪、比较或查看源码。
+- “继续”“看看”“分析一下”，但没有更新文档或知识库意图。
+- “更新代码”“更新最新代码”“更新到 kunminghu-v2”。单独的“更新”不算。
+- 当前分支是 `mem_ut_uvm_v2`，但提示词没有上述同类词语。
+
+用户指定 V2，或未指定版本且当前分支为 `mem_ut_uvm_v2` 时，先按 V2 条件判断。不满足时立即停止本 skill，不得为了补写知识库继续读取规则或修改 `AI_DOC/analysis/**/v2`。普通源码分析可以继续。同时比较 V2/V3 时，V2 侧仍受该限制；V3 侧只按本段前两条判断。
+
 只分析测试框架、UVM/SystemVerilog 验证实现、plan 或验证 capability 时不要执行，也不要更新 RTL 知识库。用户未明确提出时，不因分析过程中自行读取 Scala/RTL 源码而触发。
 
-同一问题同时包含测试框架和显式 RTL 源码分析时，只沉淀 RTL 行为结论；测试框架结论进入其原有 flow/analysis 体系。
+同一问题同时包含测试框架和显式 RTL 源码分析时，只有对应版本触发条件已满足，才沉淀 RTL 行为结论；测试框架结论进入其原有 flow/analysis 体系。
 
 ## 强制读取
 
@@ -138,4 +154,4 @@ git diff --check -- AI_DOC AGENTS.md
 - 不得为每次问题创建带日期的重复分析报告。
 - 不得只在旧文档末尾追加与正文矛盾的新结论。
 - 不得覆盖用户已有的无关修改。
-- 不得在知识库未更新时宣称分析完成。
+- 不得在已触发的知识库维护尚未完成时宣称该次维护完成。V2 未触发时，不得因未更新知识库而拒绝完成普通源码分析。
