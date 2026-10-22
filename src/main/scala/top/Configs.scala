@@ -394,13 +394,17 @@ case class L2CacheConfig
     L2Params(
       physicalAddrWidth = 48,
       mshrSize = 32,
-      ways = 4,
-      sets = l2p.sets * l2p.ways / 4,
+      ways = l2p.ways,
+      sets = l2p.sets,
+      replacement = "drrip",
       blockBytes = l2p.blockBytes,
       enableDataECC = l2p.enableDataECC,
       hasMbist = l2p.hasMbist,
       hasSramCtl = l2p.hasSramCtl
     )
+  case CCHIParametersKey => up(CCHIParametersKey).copy(
+    WayIndex_Width = log2Ceil(site(L2ParamsKey).ways)
+  )
 })
 
 case class OpenLLCConfig(size: String, ways: Int = 8, banks: Int = 1) extends Config((site, here, up) => {
@@ -610,7 +614,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
-    ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
+    ++ L2CacheConfig("2MB", ways = 8, inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, nCCHIChannels = 2)
     ++ new BaseConfig(n)
 )
