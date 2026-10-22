@@ -424,8 +424,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_teemsi_ack = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
     val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
     val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
-    val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
-    val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
+    val inner_hc_perfEvents = Output(Vec(numL2PerfEvents, new PerfEvent))
+    val outer_hc_perfEvents = Input(Vec(numL2PerfEvents, new PerfEvent))
     val outer_l2PfCtrl = Output(new PrefetchCtrlFromCore)
 
     // reset signals of frontend & backend are generated in memblock
