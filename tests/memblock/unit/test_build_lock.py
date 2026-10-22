@@ -47,16 +47,6 @@ class BuildLockTest(unittest.TestCase):
             makefile,
         )
         self.assertIn(
-            "\nbootstrap-toffee:\n\t+$(PICKER_LOCKED_MAKE) _bootstrap-toffee\n",
-            makefile,
-        )
-        self.assertIn(
-            "\ntoffee-model:\n\t+$(PICKER_LOCKED_MAKE) _toffee-model\n",
-            makefile,
-        )
-        self.assertIn("TOFFEE_OUTPUT := $(TOFFEE_ROOT)/picker", makefile)
-        self.assertIn("--lang python", makefile)
-        self.assertIn(
             "export-picker _export-picker: $(PICKER_EXPORT_STAMP)", makefile
         )
         self.assertIn(

@@ -36,7 +36,7 @@ def load_toolchain(path: Path = DEFAULT_LOCK) -> dict[str, dict[str, object]]:
     if document.get("schema_version") != 1:
         raise BootstrapError("unsupported toolchain lock schema")
     tools: dict[str, dict[str, object]] = {}
-    for name in ("picker", "xcomm", "toffee", "toffee_test"):
+    for name in ("picker", "xcomm"):
         entry = document.get(name)
         if not isinstance(entry, dict):
             raise BootstrapError(f"toolchain lock has no {name} entry")

@@ -28,16 +28,6 @@ class BootstrapPickerTest(unittest.TestCase):
             tools["xcomm"]["commit"],
             "a5f5dae14f3cdc8f7b35dab7b5dc8c21576b4dbd",
         )
-        self.assertEqual(tools["toffee"]["ref"], "master")
-        self.assertEqual(
-            tools["toffee"]["commit"],
-            "f57dd6ffc295b9b8bad3e3b3ce040b8a849f5c91",
-        )
-        self.assertEqual(tools["toffee_test"]["ref"], "master")
-        self.assertEqual(
-            tools["toffee_test"]["commit"],
-            "abec0edd93cba9f3d91ab1ef7e2fc30bf807eb00",
-        )
 
     def test_missing_checkout_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

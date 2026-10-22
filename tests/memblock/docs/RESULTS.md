@@ -34,8 +34,7 @@ Evidence snapshot: 2026-10-22.
 - Picker: `7499f797b56be57cf950cd40f3d14e9eba133449` (v2.1.0).
 - xcomm: `a5f5dae14f3cdc8f7b35dab7b5dc8c21576b4dbd` (v1.0.0,
   native ABI 3).
-- Toolchain lock: `tests/memblock/toolchain.lock.json`; the optional Toffee
-  snapshot is not imported by the C++ harness.
+- Toolchain lock: `tests/memblock/toolchain.lock.json`.
 - Bootstrap provenance: `build/memblock/tools/picker.json`.
 - General frozen runtime manifest: `build/memblock/runtime/runtime.json`.
 - Latest H fault oracle runtime:
@@ -104,13 +103,6 @@ Supporting oracle and diagnostic improvements retained in this evidence set:
   xcomm 1.0.0 migration also rebuilt the full C++ model and passed `check-rtl`
   and `smoke` (`cycle=38`, 748 driven inputs, 20 checked outputs); the final
   harness requires `libxspcomm.so.3`.
-- The initial Toffee architecture passes 10 pin-free framework/model tests, one
-  adapter-boundary test, and two generated-DUT tests. `toffee_smoke` reaches the
-  canonical `cycle=38` with 24 idle cycles over the 20 quiescent outputs.
-  `l2-flush-contracts` covers all four enable/done combinations with 4 enable
-  and 5 done transitions in the canonical eight-pattern loop, plus separate
-  deassert cycles and pre-edge/post-edge timing checks. The migration manifest
-  accounts for all 90 C++ leaves and currently marks 2 as migrated.
 - The reviewed Debug guard runtime passes all 90 registered leaves, including
   SPEC seed 1/16,384 (`build/memblock/debug-guard-expansion/inventory90.json`).
   This inventory predates schema 53 and does not replace its runtime checks.
@@ -170,72 +162,17 @@ case as the expected value.
 
 ## Independent Review Records
 
-### Toffee Framework
+### C++ Verification Environment Decision
 
-- Review ID: `toffee-framework-20261022-01`.
-- Trigger: material replacement of the verification control architecture,
-  adapter boundary, timing oracle, runtime publication, and migration accounting.
-- Reviewed state: worktree based on `e076c2c4cd1d040c3c5c9c3cf6234b9483eb62e4`.
-- Independence: fresh-context non-author reviews; later passes reviewed the
-  concrete fixes rather than the author's proposed root causes.
-- Verdict: `pass-with-known-migration-gap` for the framework/runtime slice.
-- Residual gap: native Toffee coverage remains `2/90`; the other 88 C++ leaves
-  stay canonical and are explicitly `planned`. This is not migration closure.
-
-| ID | Review finding | Stable evidence | Disposition |
-| --- | --- | --- | --- |
-| T1 | Driver, monitor, and sequencer responsibilities were collapsed. | `agent/control.py`, `monitor/control.py`, `sequence/control.py`, `test_uvm_sequence.py` | Fixed with separate concrete UVM roles and cycle-token sequencing. |
-| T2 | Runtime tests could silently import worktree source. | `toffee/pyproject.toml`, runtime-only pytest commands | Fixed by removing pytest source-path injection and embedding `memblock_toffee` in the runtime. |
-| T3 | Frozen runtime omitted the port manifest. | `freeze_toffee_runtime.py`, `runtime/config/expected_ports.json` | Fixed; runtime smoke/control pass without source-tree manifest overrides. |
-| T4 | Runtime integrity could fail open or omit sidecars. | `runtime.py`, `environment.json`, `rtl.json`, `toolchain.lock.json` | Fixed with fail-closed discovery and 62 hashed artifacts. |
-| T5 | Migration accounting was directory/marker based. | `suite_manifest.json`, `check_suite_manifest.py` | Fixed with concrete node-bound Toffee tests and status consistency checks. |
-| T6 | L2 retained metrics mixed canonical-loop and deassert transitions. | `model/control.py`, control output | Fixed with canonical-loop counters (`4` enable, `5` done). |
-| T7 | Runtime/package names and caches leaked outside ownership boundaries. | adapter loader, `.gitignore` | Fixed; generated package/class selection is adapter-only and generated caches are ignored. |
-
-Final verification for this slice: 11 Toffee unit/adapter tests, generated-DUT
-smoke (`cycle=38`, 20 checked idle outputs), control (`cycle=24`, four
-combinations, `4/5` canonical-loop transitions), two-worker HTML/JUnit
-regression, 292 C++ unit tests, `check-rtl`, and canonical `smoke`. Runtime
-metadata is `build/memblock/toffee/runtime/runtime.json`; retained report output
-was produced under `TOFFEE_RESULT_ROOT=/tmp/kmhv2-toffee-repo-regression-final3`.
-
-No CPU RTL bug was claimed, so no CPU bug document or DingTalk notification was
-created.
-
-### Toffee Framework Hardening
-
-- Review ID: `toffee-framework-20261023-02`.
-- Trigger: material changes to transaction completion, cycle ownership,
-  testcase/task lifecycle, environment composition, runtime identity, and
-  replacement publication.
-- Reviewed state: `HEAD=2c9f753c6` plus the staged Toffee framework diff
-  (`sha256=22669c4084570032178bcae2f04b55d6a348d01bcb4d285b29855091d6fd185a`).
-- Independence: a fresh-context reviewer examined the stabilized snapshot; a
-  focused re-review checked every accepted fix and returned `pass` with no open
-  finding.
-- Initial verdict: `fail`; final verdict: `pass`, with native Toffee migration
-  still explicitly limited to `2/90` scenarios.
-
-| ID | Review finding | Stable evidence | Disposition |
-| --- | --- | --- | --- |
-| T8 | Issued requests could remain outstanding without failing teardown. | `uvm.py`, `env/memblock.py`, sequencer/environment unit tests | Fixed; queue and outstanding handles are audited at component finish and Env teardown. |
-| T9 | Concurrent drivers could reserve the same cycle token. | `timing.py`, `agent/control.py`, `sequence/control.py` | Fixed with serialized async cycle reservations and unique-token tests. |
-| T10 | Upstream testcase and `main_coro` paths globally canceled component tasks before fixture teardown. | `testcase.py`, `toffee_runtime.py`, managed-testcase tests | Fixed; the managed testcase initializes Toffee loop state and directly awaits intent while Env owns task cleanup. |
-| T11 | Runtime validation accepted undeclared generated-package files. | `runtime.py`, runtime unit tests | Fixed; the actual package file set must equal declared artifacts. |
-| T12 | Default run IDs collided at one-second resolution. | `Makefile` | Fixed with nanosecond run IDs; explicit IDs remain supported. |
-| T13 | Runtime replacement had a crash-visible old-to-new gap. | `freeze_toffee_runtime.py`, freeze/runtime tests | Fixed; replacement requires atomic directory exchange and fails closed without moving the old runtime. |
-| T14 | Generated `pyc` files made runtime identity timestamp-dependent. | `freeze_toffee_runtime.py`, frozen manifest | Fixed; Python caches are excluded and the current runtime has no `pyc` artifact. |
-| T15 | The documented registry extension omitted default-component selection. | `TOFFEE_ARCHITECTURE.md`, Env constructor | Fixed; the example selects `dcache`, and invalid defaults fail at construction. |
-
-Final verification: `toffee-ci` passed 40 framework/adapter tests and a two-worker
-smoke/control regression (`2 passed`, HTML and JUnit generated); repository
-`unit` passed 295 tests; `check-rtl` and canonical C++ `smoke` passed. The final
-runtime metadata hash is
-`bd1edd0920fdc08a8271493d071b9411b4a991b27e9576d5925b0521a8af202d`,
-with schema 2, 66 artifacts, runtime identity `6d526acb...`, and source identity
-`cd3b90cd...`. Retained run output is under
-`build/memblock/toffee/results/final-toffee-ci-20261023/`. No CPU RTL bug or
-coverage-completion claim follows from framework work.
+- Review ID: `verification-architecture-20261023-01`.
+- The team evaluated a Python/Toffee orchestration layer and retained the
+  existing C++ harness as the implementation path. The two Python vertical-slice
+  tests were removed; `smoke` and `l2-flush-contracts` remain C++ scenarios.
+- The architecture review reinforced the existing boundaries: typed drivers,
+  passive observations, independent models and scoreboards, immutable runtime
+  provenance, isolated build ownership, and run-specific result paths.
+- No Toffee dependency, migration manifest, or `x/90` migration claim remains.
+  All 90 registered leaves continue to use the C++ control path.
 
 ### Agent Workflow
 
