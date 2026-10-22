@@ -718,7 +718,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // T+2.  Combinational depth per stage is unchanged; only the background
   // cache fill moves one cycle later.  The L1 direct-response path does not
   // go through cache.io.refill and is unaffected.
-  val refill_valid_d1 = GatedValidRegNext(refill_valid, false.B) // T+1
+  // Cancel pending refills on a flush at T+1 before they reach the cache at T+2.
+  // This also gates levelOH, which controls the actual cache writes.
+  val refill_valid_d1 = GatedValidRegNext(refill_valid, false.B) && !flush // T+1
   val from_llptw_d1 = RegEnable(refill_from_llptw, refill_valid)
   val from_ptw_d1 = RegEnable(refill_from_ptw, refill_valid)
   // all three sources valid at T+1: llptw_mem.refill via its own RegNext,
@@ -1252,6 +1254,10 @@ object PTWDelayN {
 // Supports H-extension two-stage address translation
 class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TLBIO)
+  // Software page walks do not issue CCHI memory requests.
+  io.cchi.upREQ.valid := false.B
+  io.cchi.upREQ.bits := 0.U.asTypeOf(io.cchi.upREQ.bits)
+  io.cchi.dnDAT.ready := true.B
 
   val flush = VecInit(Seq.fill(PtwWidth)(false.B))
   val flushCond = io.sfence.valid ||

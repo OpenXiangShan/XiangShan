@@ -863,11 +863,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
 
+  val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
   val bitmap_arb = Option.when(HasBitmapCheck)(Module(new TwoLevelRRArbiter(new bitmapReqBundle(), l2tlbParams.llptwsize)))
   val way_info = Option.when(HasBitmapCheck)(Wire(Vec(l2tlbParams.llptwsize, UInt(l2tlbParams.l0nWays.W))))
   if (HasBitmapCheck) {
     for (i <- 0 until l2tlbParams.llptwsize) {
-      bitmap_arb.get.io.in(i).valid := is_bitmap_req(i)
+      // mem_resp_hit pulses at T+1; the refill victim way is only valid at T+2.
+      // Cache-hit requests keep using entries(i).way_info without this delay.
+      bitmap_arb.get.io.in(i).valid := is_bitmap_req(i) && !mem_resp_hit(i)
       bitmap_arb.get.io.in(i).bits.bmppn  := entries(i).ppn
       bitmap_arb.get.io.in(i).bits.vpn := entries(i).req_info.vpn
       bitmap_arb.get.io.in(i).bits.id := i.U
@@ -939,7 +942,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSError(RegNext(dup_req_fire && Cat(dup_vec_wait).orR, init = false.B), "mem req but some entries already waiting, should not happed")
 
   XSError(io.in.fire && ((to_mem_out && to_cache) || (to_wait && to_cache)), "llptw enq, to cache conflict with to mem")
-  val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
   val enq_state_normal = if (HasMptCheck) (
     MuxCase(state_addr_check, Seq(
       to_mem_out -> state_mem_out, // same to the blew, but the mem resp now
@@ -1126,7 +1128,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   if (HasBitmapCheck) {
     for (i <- 0 until l2tlbParams.llptwsize) {
-      way_info.get(i) := DataHoldBypass(io.l0_way_info.get, mem_resp_hit(i))
+      // Delay each entry's receive pulse to match the cache refill at T+2.
+      // Bypass the way to a bitmap request sent on that cycle, then hold it.
+      val refill_way_valid = RegNext(mem_resp_hit(i) && !flush, init = false.B) && !flush
+      way_info.get(i) := DataHoldBypass(io.l0_way_info.get, refill_way_valid)
     }
   }
 
@@ -1509,7 +1514,11 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
 
   if (HasBitmapCheck) {
-    val way_info = DataHoldBypass(io.l0_way_info.get, RegNext(io.mem.resp.fire, init=false.B))
+    // The cache refill and its victim way arrive two cycles after mem.resp.
+    // The bitmap FSM also sends its earliest memory-backed request at T+2.
+    val mem_resp_d1 = RegNext(io.mem.resp.fire && !flush, init = false.B)
+    val refill_way_valid = RegNext(mem_resp_d1 && !flush, init = false.B) && !flush
+    val way_info = DataHoldBypass(io.l0_way_info.get, refill_way_valid)
     val cache_hitway = RegEnable(io.req.bits.bitmapCheck.get.hitway, io.req.fire)
     val cache_level = RegEnable(io.req.bits.bitmapCheck.get.SPlevel, io.req.fire)
     io.bitmap.get.req.valid := !s_bitmap_check
