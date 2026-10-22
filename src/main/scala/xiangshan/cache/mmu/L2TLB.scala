@@ -324,7 +324,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val toFsm_toLLPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check && cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
   val toFsm_toPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check && !cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
 
-  val firstMissDirect = Constantin.createRecord(s"ptwFirstMissDirect$hartId", true)
+  val firstMissDirect = Constantin.createRecord(s"ptwFirstMissDirect$hartId", false)
   val secondPtw = Constantin.createRecord(s"ptwSecondLane$hartId", true)
   val bitmapEnabled = if (HasBitmapCheck) csr_dup(0).mbmc.BME === 1.U && csr_dup(0).mbmc.CMODE === 0.U else false.B
   val mptEnabled = if (HasMptCheck) mptEn.get else false.B
