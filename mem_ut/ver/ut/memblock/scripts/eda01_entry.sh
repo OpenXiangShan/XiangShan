@@ -3,8 +3,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIM_DIR="$SCRIPT_DIR"
-MEMBLOCK_XS_ROOT="$(cd "$SIM_DIR/../../../../../" && pwd)"
+MEMBLOCK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SIM_DIR="$MEMBLOCK_DIR/sim"
+MEMBLOCK_XS_ROOT="$(cd "$MEMBLOCK_DIR/../../../.." && pwd)"
 MEMBLOCK_PROJECT_PARENT="$(dirname "$MEMBLOCK_XS_ROOT")"
 
 TARGET="${1:-}"

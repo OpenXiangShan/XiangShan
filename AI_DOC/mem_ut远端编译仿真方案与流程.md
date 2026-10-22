@@ -52,8 +52,8 @@ memblock UVM 环境位于：
 该方案由以下文件实现：
 
 - `mem_ut/ver/ut/memblock/sim/Makefile`
-- `mem_ut/ver/ut/memblock/sim/remote_eda_make.sh`
-- `mem_ut/ver/ut/memblock/sim/eda01_entry.sh`
+- `mem_ut/ver/ut/memblock/scripts/remote_eda_make.sh`
+- `mem_ut/ver/ut/memblock/scripts/eda01_entry.sh`
 
 职责分别如下：
 
@@ -164,7 +164,7 @@ $MEMBLOCK_XS_HOME/build/rtl/filelist.f
 - `MEMBLOCK_XS_HOME` 必须指向当前 XiangShan worktree 根目录。
 - `MEMBLOCK_PROJECT` 保留为当前 XiangShan worktree 的上一级目录，兼容旧脚本。
 
-当前该规则已经在 `mem_ut/ver/ut/memblock/sim/eda01_entry.sh` 中通过脚本相对路径自动处理，避免 V2/V3 多 worktree 共存时误读其他 worktree 的 RTL。
+当前该规则已经在 `mem_ut/ver/ut/memblock/scripts/eda01_entry.sh` 中通过脚本相对路径自动处理，避免 V2/V3 多 worktree 共存时误读其他 worktree 的 RTL。
 
 ## 8. 当前已验证结论
 

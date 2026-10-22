@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SIM_DIR="$(cd "$SCRIPT_DIR/../sim" && pwd)"
+
 usage() {
     cat <<'EOF'
 Usage:
@@ -30,10 +33,10 @@ ACTION="$1"
 TARGET="${2:-}"
 
 REMOTE_HOST="${REMOTE_HOST:-eda01}"
-REMOTE_WORKDIR="${REMOTE_WORKDIR:-$(pwd)}"
-REMOTE_ENTRY="${REMOTE_ENTRY:-$REMOTE_WORKDIR/eda01_entry.sh}"
-REMOTE_PID_FILE="${REMOTE_PID_FILE:-$(pwd)/.eda_remote.pid}"
-REMOTE_LAUNCH_LOG="${REMOTE_LAUNCH_LOG:-$(pwd)/.eda_remote.launch.log}"
+REMOTE_WORKDIR="${REMOTE_WORKDIR:-$SIM_DIR}"
+REMOTE_ENTRY="${REMOTE_ENTRY:-$SCRIPT_DIR/eda01_entry.sh}"
+REMOTE_PID_FILE="${REMOTE_PID_FILE:-$SIM_DIR/.eda_remote.pid}"
+REMOTE_LAUNCH_LOG="${REMOTE_LAUNCH_LOG:-$SIM_DIR/.eda_remote.launch.log}"
 REMOTE_BOOTSTRAP="${REMOTE_BOOTSTRAP:-}"
 
 SSH_OPTS=(

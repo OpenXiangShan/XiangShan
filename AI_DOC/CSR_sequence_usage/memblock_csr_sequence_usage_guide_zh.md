@@ -683,7 +683,7 @@ rg 'UVM_ERROR :|UVM_FATAL :' <log>
 | 已通过 cfg | <span class="path">seq/csr_scalar_stress/cfg/</span> | load/store/mixed/STA-STD 可复制参考 |
 | factory 入口 | <span class="path">tc/src/basicTest.sv</span> | VSEQ 选择和 topology capability 白名单 |
 | 编译注册 | <span class="path">seq/seq.f</span>、<span class="path">seq/seq_pkg.sv</span> | include directory 和 class include 顺序 |
-| 仿真入口 | <span class="path">sim/Makefile</span>、<span class="path">sim/remote_eda_make.sh</span> | eda01 跨节点编译/运行 |
+| 仿真入口 | <span class="path">sim/Makefile</span>、<span class="path">scripts/remote_eda_make.sh</span> | eda01 跨节点编译/运行 |
 
 配套文档：
 

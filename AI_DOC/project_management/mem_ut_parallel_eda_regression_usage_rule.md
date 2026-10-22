@@ -12,7 +12,7 @@ AI_DOC/project_management/mem_ut_parallel_regression_execution_rule.md
 适用脚本：
 
 ```text
-mem_ut/ver/ut/memblock/sim/run_eda_regression.sh
+mem_ut/ver/ut/memblock/scripts/run_eda_regression.sh
 ```
 
 适用场景：
@@ -35,7 +35,7 @@ cd mem_ut/ver/ut/memblock/sim
 查看脚本当前支持的参数：
 
 ```bash
-./run_eda_regression.sh --help
+../scripts/run_eda_regression.sh --help
 ```
 
 执行前应满足：
@@ -51,7 +51,7 @@ cd mem_ut/ver/ut/memblock/sim
 ### 2.1 编译一次并执行随机 seed
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --cfg default \
   --mode base_fun_regression \
@@ -65,7 +65,7 @@ cd mem_ut/ver/ut/memblock/sim
 ### 2.2 复用已有 simv 执行多个指定 seed
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --cfg default \
   --mode base_fun_regression \
@@ -79,7 +79,7 @@ cd mem_ut/ver/ut/memblock/sim
 也可以重复使用 `--seed`：
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --seed 666670 \
   --seed 666671 \
@@ -89,7 +89,7 @@ cd mem_ut/ver/ut/memblock/sim
 ### 2.3 临时传递 plusargs
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --cfg default \
   --seed 666673 \
@@ -103,7 +103,7 @@ cd mem_ut/ver/ut/memblock/sim
 ### 2.4 Debug、波形和覆盖率
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --cfg default \
   --seed 666674 \
@@ -122,7 +122,7 @@ cd mem_ut/ver/ut/memblock/sim
 需要代码覆盖率时使用：
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --mode base_fun_cov \
   --compile \
@@ -135,7 +135,7 @@ cd mem_ut/ver/ut/memblock/sim
 ### 2.5 只检查参数和配置
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --cfg default \
   --count 20 \
@@ -232,7 +232,7 @@ seed 范围为 `1..2147483646`。脚本会先将十进制 seed 规范化再去�
 首次为某个 mode 建立 `simv` 时使用 `--compile`：
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --mode base_fun_regression \
   --seed 1001 \
@@ -252,7 +252,7 @@ fingerprint 包含 wave、coverage、`simv` hash 和文件身份。
 后续使用同一 mode 时传入 `--no-compile`：
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc tc_sanity \
   --mode base_fun_regression \
   --count 100 \
@@ -507,7 +507,7 @@ less <result_dir>/status/seed_<seed>.final.log
 列表，再通过 `--seeds` 显式传入：
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc <原tc> \
   --cfg <原cfg> \
   --ts <原ts> \
@@ -522,7 +522,7 @@ less <result_dir>/status/seed_<seed>.final.log
 原回归没有波形时，可以在上一轮完全退出后复用原 mode，使用首错候选原 seed 重新编译并开启 debug：
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc <原tc> \
   --cfg <原cfg> \
   --ts <原ts> \
@@ -593,7 +593,7 @@ ls ../seq/plus_cfg/<cfg>.cfg
 后续修改 `run_eda_regression.sh` 的公开参数、默认值、结果字段、监控联停顺序、结果分类或输出文件时，必须同步更新本文档，并至少执行：
 
 ```bash
-bash -n mem_ut/ver/ut/memblock/sim/run_eda_regression.sh
-mem_ut/ver/ut/memblock/sim/run_eda_regression.sh --help
+bash -n mem_ut/ver/ut/memblock/scripts/run_eda_regression.sh
+mem_ut/ver/ut/memblock/scripts/run_eda_regression.sh --help
 git diff --check -- AI_DOC/project_management/mem_ut_parallel_eda_regression_usage_rule.md AGENTS.md
 ```

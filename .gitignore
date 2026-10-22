@@ -373,9 +373,7 @@ simulator_out.txt
 *.log
 *.err
 
-# Generated RTL is covered by the project-wide build ignore rule above.
-/mem_ut/ver/ut/memblock/sim/*/exec/
-/mem_ut/ver/ut/memblock/sim/*/log/
-/mem_ut/ver/ut/memblock/sim/*/wave/
-/mem_ut/ver/ut/memblock/sim/*/cov/
-/mem_ut/ver/ut/memblock/sim/*/partitionlib/
+# Keep only the simulation Makefile under version control. All generated
+# simulator state, logs, waves, coverage data and local debug files stay local.
+/mem_ut/ver/ut/memblock/sim/*
+!/mem_ut/ver/ut/memblock/sim/Makefile

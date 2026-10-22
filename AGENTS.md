@@ -180,7 +180,7 @@ testcase preset 的 Makefile `cfg=` 入口、编译期宏参数或 connect-time 
 网页文档、分析文档或项目管理规则时，必须先阅读
 `AI_DOC/project_management/ai_doc_file_management_rule.md`。
 
-后续使用、修改或 review `mem_ut/ver/ut/memblock/sim/run_eda_regression.sh`，包括远端编译一次、
+后续使用、修改或 review `mem_ut/ver/ut/memblock/scripts/run_eda_regression.sh`，包括远端编译一次、
 多 seed 并发仿真、runtime plusargs、UVM 错误联停、结果文件判读或脚本参数调整时，必须先阅读
 `AI_DOC/project_management/mem_ut_parallel_eda_regression_usage_rule.md`。
 
@@ -315,8 +315,8 @@ cd mem_ut/ver/ut/memblock/sim
 
 这些目标会调用：
 
-- `mem_ut/ver/ut/memblock/sim/remote_eda_make.sh`
-- `mem_ut/ver/ut/memblock/sim/eda01_entry.sh`
+- `mem_ut/ver/ut/memblock/scripts/remote_eda_make.sh`
+- `mem_ut/ver/ut/memblock/scripts/eda01_entry.sh`
 
 ## 远端环境初始化规则
 

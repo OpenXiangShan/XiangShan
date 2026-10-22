@@ -18,6 +18,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+SIM_DIR="$(cd "$SCRIPT_DIR/../sim" && pwd)"
 DEFAULT_REMOTE_HOST="eda01"
 FALLBACK_REMOTE_HOST="172.28.10.101"
 JOB_PROTOCOL="EDA_REGRESSION_JOB_V1"
@@ -508,7 +509,7 @@ LAUNCH_TIMEOUT="$(normalize_bounded_decimal launch-timeout "$LAUNCH_TIMEOUT" 1 3
 PROBE_INTERVAL="$(normalize_bounded_decimal probe-interval "$PROBE_INTERVAL" 1 3600)" || exit 2
 SSH_RETRIES="$(normalize_bounded_decimal ssh-retries "$SSH_RETRIES" 1 100)" || exit 2
 
-PLUS_FILE="$SCRIPT_DIR/../seq/plus_cfg"
+PLUS_FILE="$SIM_DIR/../seq/plus_cfg"
 CFG_FILE="$PLUS_FILE/$CFG.cfg"
 [[ -f "$CFG_FILE" && -r "$CFG_FILE" ]] || { log_error "cfg file is not a readable regular file: $CFG_FILE"; exit 2; }
 
@@ -544,7 +545,7 @@ for arg in "${USER_PLUSARGS[@]}"; do USER_PLUSARGS_STRING+="${USER_PLUSARGS_STRI
 RUN_ID="${TC}_${CFG}_$(date '+%Y%m%d_%H%M%S')_$$_$RANDOM"
 NOTE="eda_reg_$(date '+%Y%m%d_%H%M%S')_$$_$RANDOM"
 if [[ -z "$OUTPUT_DIR" ]]; then
-    OUTPUT_DIR="$SCRIPT_DIR/.eda_regression/$RUN_ID"
+    OUTPUT_DIR="$SIM_DIR/.eda_regression/$RUN_ID"
 elif [[ "$OUTPUT_DIR" != /* ]]; then
     OUTPUT_DIR="$PWD/$OUTPUT_DIR"
 fi
@@ -576,7 +577,7 @@ mkdir -p "$FROZEN_PLUS_FILE" || exit 2
 cp -- "$CFG_FILE" "$FROZEN_PLUS_FILE/$CFG.cfg" || exit 2
 chmod 0444 "$FROZEN_PLUS_FILE/$CFG.cfg" || exit 2
 CFG_HASH="$(sha256sum "$FROZEN_PLUS_FILE/$CFG.cfg" | awk '{print $1}')"
-if ! EFFECTIVE_PLUSARGS="$(make -s -C "$SCRIPT_DIR" eda_print_effective_plusargs \
+if ! EFFECTIVE_PLUSARGS="$(make -s -C "$SIM_DIR" eda_print_effective_plusargs \
     cfg="$CFG" plus_file="$FROZEN_PLUS_FILE" plus_arg="$USER_PLUSARGS_STRING" | paste -sd' ' -)"; then
     log_error "failed to resolve effective plusargs through Makefile"
     exit 2
@@ -678,10 +679,10 @@ validate_shared_output_dir || { log_error "output directory is not proven shared
 SHARED_PATH_VALIDATION="PASS"
 write_config || exit 3
 
-REMOTE_BOOTSTRAP="$(make -s -C "$SCRIPT_DIR" eda_print_bootstrap)"
+REMOTE_BOOTSTRAP="$(make -s -C "$SIM_DIR" eda_print_bootstrap)"
 [[ -n "$REMOTE_BOOTSTRAP" ]] || { log_error "Makefile returned empty REMOTE_BOOTSTRAP"; exit 3; }
 
-LOCK_ROOT="$SCRIPT_DIR/.eda_regression/locks"
+LOCK_ROOT="$SIM_DIR/.eda_regression/locks"
 mkdir -p "$LOCK_ROOT"
 LOCK_FILE="$LOCK_ROOT/$MODE.lock"; LOCK_INFO="$LOCK_ROOT/$MODE.owner"
 OWNER_FILE="$LOCK_ROOT/$MODE.owners.tsv"; QUARANTINE_FILE="$LOCK_ROOT/$MODE.quarantine.tsv"
@@ -1401,8 +1402,8 @@ active_jobs() {
 active_seed_count() { active_jobs | awk '$0 ~ /^seed:/ {n++} END {print n+0}'; }
 pending_seed_exists() { local job; for job in "${JOB_ORDER[@]}"; do [[ "$job" == seed:* && "${RESULT_STATE[$job]}" == PENDING && "${REMOTE_PHASE[$job]}" == PENDING ]] && return 0; done; return 1; }
 
-SIMV_PATH="$SCRIPT_DIR/$MODE/exec/simv"
-FINGERPRINT_PATH="$SCRIPT_DIR/$MODE/exec/.eda_compile_fingerprint"
+SIMV_PATH="$SIM_DIR/$MODE/exec/simv"
+FINGERPRINT_PATH="$SIM_DIR/$MODE/exec/.eda_compile_fingerprint"
 simv_exists() {
     ssh_retry "$(quote_cmd test -x "$SIMV_PATH")" >/dev/null 2>&1
 }
@@ -1416,7 +1417,7 @@ write_fingerprint() {
     local hash identity mock_meta
     mkdir -p "$(dirname "$FINGERPRINT_PATH")" || return 1
     if [[ -n "${EDA_REGRESSION_REMOTE_ENTRY:-}" ]]; then
-        mock_meta="$SCRIPT_DIR/$MODE/exec/mock_capabilities"
+        mock_meta="$SIM_DIR/$MODE/exec/mock_capabilities"
         [[ -f "$mock_meta" ]] || return 1
         [[ "$(read_key "$mock_meta" cfg)" == "$CFG" ]] || return 1
         [[ "$(read_key "$mock_meta" cfg_sha256)" == "$CFG_HASH" ]] || return 1
@@ -1429,7 +1430,7 @@ write_fingerprint() {
     {
         printf 'mode=%s\ntiming=rtl\nwave=%s\nccov=%s\n' "$MODE" "$WAVE_VALUE" "$CCOV_VALUE"
         printf 'simv=%s\nsha256=%s\nidentity=%s\n' "$SIMV_PATH" "$hash" "$identity"
-        printf 'git_commit=%s\ncreated_at=%s\n' "$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)" "$(date '+%F %T %Z')"
+        printf 'git_commit=%s\ncreated_at=%s\n' "$(git -C "$SIM_DIR" rev-parse HEAD 2>/dev/null || echo unknown)" "$(date '+%F %T %Z')"
     } | atomic_write "$FINGERPRINT_PATH"
 }
 verify_fingerprint() {
@@ -1640,7 +1641,7 @@ while :; do
         done
         [[ -n "$next_job" ]] || break
         seed="${JOB_SEED[$next_job]}"
-        log="$SCRIPT_DIR/$MODE/log/tc=${TC}_ts=${TS}_cfg=${CFG}_seed=${seed}_rtl_${NOTE}.log"
+        log="$SIM_DIR/$MODE/log/tc=${TC}_ts=${TS}_cfg=${CFG}_seed=${seed}_rtl_${NOTE}.log"
         if [[ -e "$log" ]]; then set_seed_state "$next_job" INFRA "unique simulation log already exists"; REMOTE_PHASE[$next_job]="EXIT_CONFIRMED"; continue; fi
         if create_managed_job "$next_job" batch_run "$seed" "$log"; then
             [[ "$MONITOR_ON" -eq 0 ]] || start_watcher "$next_job"

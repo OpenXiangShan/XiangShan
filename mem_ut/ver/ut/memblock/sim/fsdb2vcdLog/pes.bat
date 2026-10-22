@@ -1,3 +1,0 @@
-where
-detach
-quit

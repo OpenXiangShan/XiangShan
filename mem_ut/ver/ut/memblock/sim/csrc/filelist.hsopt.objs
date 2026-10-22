@@ -1,7 +1,0 @@
-HSOPT_OBJS +=rmapats_mop.o  \
-    rmapats.o  \
-    rmar.o rmar_nd.o 
-
-include filelist.hsopt.llvm2_0.objs
-HSOPT_OBJS += $(LLVM_OBJS)
-

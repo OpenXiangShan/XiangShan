@@ -6,7 +6,7 @@
 恢复回归时的完整闭环：
 
 ```text
-mem_ut/ver/ut/memblock/sim/run_eda_regression.sh
+mem_ut/ver/ut/memblock/scripts/run_eda_regression.sh
 ```
 
 执行前必须同时阅读：
@@ -93,7 +93,7 @@ cd mem_ut/ver/ut/memblock/sim
 timeout 进行单 seed debug 复现。默认允许复用原 mode 并重新编译，从而覆盖原 mode 的编译产物：
 
 ```bash
-./run_eda_regression.sh \
+../scripts/run_eda_regression.sh \
   --tc <原tc> \
   --cfg <原cfg> \
   --ts <原ts> \

@@ -55,7 +55,7 @@ V2 使用独立 worktree，因此 `mem_ut/ver/ut/memblock/cfg/rtl.f` 不得硬�
 -F $MEMBLOCK_XS_HOME/build/rtl/filelist.f
 ```
 
-`scripts/generate_memblock_rtl.sh` 和 `mem_ut/ver/ut/memblock/sim/eda01_entry.sh`
+`scripts/generate_memblock_rtl.sh` 和 `mem_ut/ver/ut/memblock/scripts/eda01_entry.sh`
 默认将 `MEMBLOCK_XS_HOME` 导出为当前 V2 XiangShan worktree 根目录。
 
 ## 当前状态

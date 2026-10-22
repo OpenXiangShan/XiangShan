@@ -24,12 +24,13 @@ USER_CFG_LOCAL_TEMPLATE ?= ../cfg/user_cfg.local.default.sv
 
 REMOTE_HOST ?= eda01
 REMOTE_WORKDIR ?= $(CURR_DIR)
-REMOTE_ENTRY ?= $(REMOTE_WORKDIR)/eda01_entry.sh
+MEMBLOCK_SCRIPT_DIR ?= $(abspath $(CURDIR)/../scripts)
+REMOTE_ENTRY ?= $(MEMBLOCK_SCRIPT_DIR)/eda01_entry.sh
 REMOTE_STATE_DIR ?= $(CURR_DIR)/.eda_remote
 REMOTE_PID_FILE ?= $(REMOTE_STATE_DIR)/$(tc)_$(ts)_$(mode).pid
 REMOTE_LAUNCH_LOG ?= $(REMOTE_STATE_DIR)/$(tc)_$(ts)_$(mode).launch.log
 REMOTE_BOOTSTRAP ?= source /usr/share/Modules/init/bash >/dev/null 2>&1 || true; module load synopsys/vcs/Q-2020.03-SP2 license; module load synopsys/verdi/R-2020.12-SP1 license
-REMOTE_WRAPPER := $(CURR_DIR)/remote_eda_make.sh
+REMOTE_WRAPPER := $(MEMBLOCK_SCRIPT_DIR)/remote_eda_make.sh
 REMOTE_SIM_TOOLS ?= vcs
 
 .PHONY: eda_compile eda_batch_run eda_run eda_run_bg eda_status eda_tail eda_kill eda_print_bootstrap eda_print_effective_plusargs ensure_user_cfg_local
