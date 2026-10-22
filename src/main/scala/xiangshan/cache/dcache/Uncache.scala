@@ -244,9 +244,14 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   val entriesEmpty = Wire(Bool())
   val axiWIdQ = Module(new Queue(UInt(INDEX_WIDTH.W), UncacheBufferSize))
 
-  val busRespFire = WireDefault(false.B)
-  val busRespId = Wire(UInt(INDEX_WIDTH.W))
-  busRespId := 0.U
+  val busReadRespFire = io.axi.r.fire && io.axi.r.bits.last
+  val busWriteRespFire = io.axi.b.fire
+  // R and B may complete different entries in the same cycle.
+  val busRespDone = VecInit((0 until UncacheBufferSize).map { i =>
+    (busReadRespFire && io.axi.r.bits.id === i.U) ||
+      (busWriteRespFire && io.axi.b.bits.id === i.U)
+  })
+  val busRespFire = busRespDone.asUInt.orR
 
   val empty = Wire(Bool())
   val f1_needDrain = Wire(Bool())
@@ -301,7 +306,7 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
       x.cmd === e.cmd && x.nc && e.nc &&
       x.memBackTypeMM === e.memBackTypeMM &&
       continueAndAlign(x.mask | e.mask) &&
-      !(busRespFire && busRespId === eid || states(eid).isWaitReturn())
+      !(busRespDone(eid) || states(eid).isWaitReturn())
   }
 
   def canMergeSecondary(eid: UInt): Bool = {
@@ -443,20 +448,19 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   }
 
   val axiWEntry = entries(axiWIdQ.io.deq.bits)
-  io.axi.w.valid := axiWIdQ.io.deq.valid && !io.wfi.wfiReq
+  // AW has already fired for queued writes; keep sending W during WFI drain.
+  io.axi.w.valid := axiWIdQ.io.deq.valid
   io.axi.w.bits := 0.U.asTypeOf(io.axi.w.bits)
   when(io.axi.w.valid) {
     io.axi.w.bits.data := axiWEntry.data
     io.axi.w.bits.strb := axiWEntry.mask
     io.axi.w.bits.last := true.B
   }
-  axiWIdQ.io.deq.ready := io.axi.w.ready && !io.wfi.wfiReq
+  axiWIdQ.io.deq.ready := io.axi.w.ready
 
   def completeBusResp(id: UInt): Unit = {
     states(id).updateUncacheResp()
     noPending(id) := true.B
-    busRespFire := true.B
-    busRespId := id
     (0 until UncacheBufferSize).map(j =>
       when(id =/= j.U && states(j).isValid() && states(j).isWaitSame() && addrMatch(entries(id), entries(j))) {
         states(j).setWaitSame(false.B)
@@ -474,23 +478,20 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
     difftest.mask   := entries(q0_canSentIdx).mask
   }
 
-  when(io.axi.r.fire && io.axi.r.bits.last) {
+  when(busReadRespFire) {
     val id = io.axi.r.bits.id
-    when(!isStore(entries(id))) {
-      entries(id).updateReadData(io.axi.r.bits.data, io.axi.r.bits.resp)
-      completeBusResp(id)
-    }
+    entries(id).updateReadData(io.axi.r.bits.data, io.axi.r.bits.resp)
+    completeBusResp(id)
   }
 
-  when(io.axi.b.fire) {
+  when(busWriteRespFire) {
     val id = io.axi.b.bits.id
     entries(id).updateRespErr(io.axi.b.bits.resp)
     completeBusResp(id)
   }
 
   val axiStoreRspErr = io.axi.b.fire && axiDenied(io.axi.b.bits.resp)
-  val axiLoadRspErr = io.axi.r.fire && io.axi.r.bits.last &&
-    !isStore(entries(io.axi.r.bits.id)) && axiDenied(io.axi.r.bits.resp)
+  val axiLoadRspErr = busReadRespFire && axiDenied(io.axi.r.bits.resp)
   io.busError.ecc_error.valid := axiStoreRspErr || axiLoadRspErr
   io.busError.ecc_error.bits := Mux(axiStoreRspErr,
     entries(io.axi.b.bits.id).addr >> blockOffBits << blockOffBits,
