@@ -171,6 +171,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val pabOrigins = Input(Vec(cfg.nMissEntries, new PABMissOrigin(PAddrBits - blockOffBits)))
     val pabRefill = Output(Valid(new PABRefillObservation))
     val pabRetire = Output(Valid(UInt((PAddrBits - blockOffBits).W)))
+    val victimDemandHits = Input(Vec(LoadPipelineWidth, Valid(UInt((PAddrBits - blockOffBits).W))))
+    val dcacheVictim = Output(Valid(new PABLine(PAddrBits - blockOffBits)))
+    val dcacheInstall = Output(Valid(UInt((PAddrBits - blockOffBits).W)))
 
 
     // data sram
@@ -462,6 +465,26 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
                    Mux(s1_need_replacement, s1_repl_way, OHToUInt(s1_tag_ecc_match_way)))
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
+  // Passive old-line observation. Metadata must belong to the victim way, not
+  // the incoming refill tag. Capture use concurrent with the metadata read too.
+  val victimObservationEnabled = p(xiangshan.mem.prefetch.PABDepthKey).enabled
+  val recentVictimHits = RegNext(io.victimDemandHits, 0.U.asTypeOf(io.victimDemandHits))
+  // Access metadata writes have an extra registered write stage. Cover both
+  // pending edges as well as the current S2 load observation.
+  val olderVictimHits = RegNext(recentVictimHits, 0.U.asTypeOf(recentVictimHits))
+  def victimUsedNow(block: UInt): Bool = (io.victimDemandHits ++ recentVictimHits ++ olderVictimHits).map(d =>
+    d.valid && d.bits === block).reduce(_ || _)
+  val s1_victim_way = Mux(s1_req.replace, s1_req.replace_way_en, s1_way_en)
+  val s1_victim_meta = Wire(chiselTypeOf(io.extra_meta_resp.head))
+  s1_victim_meta := Mux(GatedValidRegNext(s0_fire),
+    Mux1H(s1_victim_way, io.extra_meta_resp), RegEnable(s1_victim_meta, s1_valid))
+  val s1_victim_block = Mux(s1_req.replace, s1_req.addr,
+    Cat(s1_repl_tag, get_untag(s1_req.vaddr)))(PAddrBits - 1, blockOffBits)
+  val s1_victim_used_seen = RegInit(false.B)
+  when (s0_fire) { s1_victim_used_seen := false.B }
+    .elsewhen (s1_valid && victimUsedNow(s1_victim_block)) { s1_victim_used_seen := true.B }
+  val s1_victim_used = s1_victim_meta.access || s1_victim_used_seen || victimUsedNow(s1_victim_block)
+
   val s1_tag = s1_hit_tag
   val s1_coh = s1_hit_coh
 
@@ -491,6 +514,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
   val s2_repl_pf  = RegEnable(s1_repl_pf, s1_fire)
+  val s2_victim_block = RegEnable(s1_victim_block, s1_fire)
+  val s2_victim_source = RegEnable(s1_victim_meta.prefetch, s1_fire)
+  val s2_victim_used = RegInit(false.B)
+  when (s1_fire) { s2_victim_used := s1_victim_used }
+    .elsewhen (s2_valid && victimUsedNow(s2_victim_block)) { s2_victim_used := true.B }
 
   val s2_has_pesudo_inj = RegEnable(io.pseudo_error.valid, false.B, s1_fire)
   val s2_real_tag_has_error = dcacheParameters.tagCode.decode(RegEnable(s1_real_tag, s1_fire)).error
@@ -642,6 +670,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_refill_latency = RegEnable(s2_refill_latency, s2_fire_to_s3)
   val s3_sc_fail  = Wire(Bool()) // miss or lr mismatch
   val s3_need_replacement = RegEnable(s2_need_replacement && !s2_refill_tag_eq_way, s2_fire_to_s3)
+  val s3_victim_block = RegEnable(s2_victim_block, s2_fire_to_s3)
+  val s3_victim_source = RegEnable(s2_victim_source, s2_fire_to_s3)
+  val s3_victim_used = RegInit(false.B)
+  when (s2_fire_to_s3) { s3_victim_used := s2_victim_used || victimUsedNow(s2_victim_block) }
+    .elsewhen (s3_valid && victimUsedNow(s3_victim_block)) { s3_victim_used := true.B }
 
   val (_, probe_shrink_param, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
@@ -1067,6 +1100,18 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.pabRetire.valid := s3_fire && !s3_req.replace &&
     (s3_req.probe || s3_req.isStore || s3_req.isAMO)
   io.pabRetire.bits := s3_req.addr(PAddrBits - 1, blockOffBits)
+
+  // Observe committed voluntary removal of a valid old line (clean or dirty).
+  // Invalid-way fills, same-line upgrades and probes are not capacity victims.
+  io.dcacheVictim.valid := victimObservationEnabled.B && s3_fire && !s3_req.probe &&
+    (miss_wb || s3_req.replace && !s3_replace_nothing) && !s3_tag_error_wb
+  io.dcacheVictim.bits.blockAddr := s3_victim_block
+  io.dcacheVictim.bits.source := s3_victim_source
+  io.dcacheVictim.bits.used := s3_victim_used || victimUsedNow(s3_victim_block)
+  // Any successful reinstallation supersedes an older eviction record.
+  io.dcacheInstall.valid := victimObservationEnabled.B && s3_fire && s3_req.miss &&
+    miss_new_coh.isValid() && !s3_l2_error_wb.asUInt.orR
+  io.dcacheInstall.bits := s3_req.addr(PAddrBits - 1, blockOffBits)
 
   io.tag_write.valid := s3_fire && s3_req.miss
   io.tag_write.bits.idx := s3_idx

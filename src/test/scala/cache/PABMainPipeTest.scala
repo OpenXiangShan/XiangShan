@@ -40,6 +40,7 @@ class PABMainPipeTop(implicit p: Parameters) extends DCacheModule {
   mp.io.refill_info.bits.miss_param := TLPermissions.toB
   mp.io.refill_info.bits.error.tl_denied := io.error(0)
   mp.io.refill_info.bits.error.tl_corrupt := io.error(1)
+  mp.io.victimDemandHits := 0.U.asTypeOf(mp.io.victimDemandHits)
   mp.io.pabOrigins := 0.U.asTypeOf(mp.io.pabOrigins)
   mp.io.pabOrigins(0).eligible := io.eligible
   mp.io.pabOrigins(0).source := Mux(io.reuse, 2.U, 3.U)

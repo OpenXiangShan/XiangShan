@@ -16,7 +16,9 @@ class PABConfigurationTest extends AnyFlatSpec {
     val disabled = new WithPABDepth(PABDepthParameters()) ++ new DefaultConfig(2)
     assert(dynamic(XSTileKey) == fixed(XSTileKey))
     assert(dynamic(XSTileKey) == disabled(XSTileKey))
-    assert(dynamic(PABDepthKey) == PABDepthParameters(enabled = true))
+    val windowCycles = dynamic(PABDepthKey).windowCycles
+    assert(Set(0, 16384).contains(windowCycles))
+    assert(dynamic(PABDepthKey) == PABDepthParameters(enabled = true, windowCycles = windowCycles))
     assert(fixed(PABDepthKey) == PABDepthParameters(enabled = true, autoDepth = false))
     assert(!disabled(PABDepthKey).enabled)
     for (core <- dynamic(XSTileKey)) {
@@ -33,6 +35,11 @@ class PABConfigurationTest extends AnyFlatSpec {
     intercept[IllegalArgumentException] { PABDepthParameters(unusedLow = 80, unusedHigh = 40) }
     intercept[IllegalArgumentException] { PABDepthParameters(windowInserts = 0) }
     intercept[IllegalArgumentException] { PABDepthParameters(creditHalfUnits = 0) }
+    intercept[IllegalArgumentException] { PABDepthParameters(windowCycles = 1) }
+    intercept[IllegalArgumentException] { PABDepthParameters(minWindowFills = 0) }
+    assert((new DCacheVictimFillConfig)(PABDepthKey).windowCycles == 0)
+    assert((new DCacheVictimCycleConfig)(PABDepthKey).windowCycles == 16384)
+    assert((new DCacheVictimCycleConfig)(PABDepthKey).minWindowFills == 128)
   }
 }
 

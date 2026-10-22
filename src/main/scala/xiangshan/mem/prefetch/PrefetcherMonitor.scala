@@ -279,10 +279,15 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     control.io.events.late := ShiftRegister(io.prefetch_info.pabinfo.late, 2, 0.U(4.W), true.B)
     depth := control.io.depth
     val window = control.io.window
+    XSPerfAccumulate("stream_fills", control.io.events.insert)
     XSPerfAccumulate("pab_refills", control.io.events.insert)
     XSPerfAccumulate("pab_late", control.io.events.late)
     XSPerfAccumulate("pab_unused_victim_hits", control.io.events.unused)
     XSPerfAccumulate("pab_windows", window.valid)
+    XSPerfAccumulate("victim_cycle_checks", control.io.cycleCheck)
+    XSPerfAccumulate("victim_deferred_checks", control.io.deferred)
+    XSPerfAccumulate("victim_window_fills", Mux(window.valid, window.bits.fills, 0.U))
+    XSPerfAccumulate("victim_window_cycles", Mux(window.valid, window.bits.cycles, 0.U))
     XSPerfAccumulate("pab_depth_increases", window.valid && window.bits.depthAfter > window.bits.depthBefore)
     XSPerfAccumulate("pab_depth_decreases", window.valid && window.bits.depthAfter < window.bits.depthBefore)
     for (level <- PABDepthPolicy.levels) {
@@ -291,7 +296,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     val trace = Constantin.createRecord(s"tracePABDepth$hart", initValue = true)
     val table = ChiselDB.createTable(s"PABDepthWindow$hart", new PABDepthWindow, basicDB = true)
     table.log(window.bits, window.valid && trace, s"StreamMonitor$hart", clock, reset)
-    println(s"PAB depth policy: initial=${params.initialDepth}, window=${params.windowInserts}, " +
+    println(s"DCache victim depth policy: initial=${params.initialDepth}, window=${params.windowInserts}, " +
       s"levels=${PABDepthPolicy.levels.mkString(",")}, parameters=$params")
   }
 

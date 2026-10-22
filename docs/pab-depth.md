@@ -1,3 +1,6 @@
+> This document describes the original c3ba20f01 PAB baseline. This branch uses
+> real DCache victim feedback; see [dcache-victim-depth.md](dcache-victim-depth.md).
+
 # PAB-based Stream depth control
 
 `feat-pab-depth` is based on `6891f912cddf49318ca89d69a37da44dda49c882`.

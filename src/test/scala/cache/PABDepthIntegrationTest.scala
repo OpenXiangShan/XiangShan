@@ -108,7 +108,7 @@ class PABDepthIntegrationTest extends AnyFlatSpec with ChiselSim {
       assert(windows == Vector((16, 8, 1), (8, 4, 1)))
     }
   }
-  for ((name, config) <- Seq("dynamic" -> new DefaultConfig,
+  for ((name, config) <- Seq("dynamic" -> new DCacheVictimFillConfig,
     "fixed" -> new PABFixedDepthConfig,
     "disabled" -> (new WithPABDepth(PABDepthParameters()) ++ new DefaultConfig))) {
     it should s"generate real $name Stream addresses while preserving outer distances and Stride control" in {
