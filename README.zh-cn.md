@@ -12,6 +12,8 @@
 
 香山用户文档已单独发布，您可在此处查看：[docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/)、[XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
 
+我们将性能数据保存到 [XiangShan Dashboard](https://dashboard.xiangshan.cc)，您可以在其中查看每个 commit 的 EMU-Performance CI 数据、每日 0.3c SPEC 回归以及每周 1.0c SPEC 回归的性能数据。
+
 我们正在使用 [Weblate](https://hosted.weblate.org/projects/openxiangshan/) 将本项目文档翻译为英文及其他语言。欢迎大家参与翻译工作，帮助我们一起完善文档！
 
 所有香山文档均采用 CC-BY-4.0 协议授权。
@@ -102,7 +104,6 @@ make bsp
 make idea
 ```
 
-
 ## 生成 Verilog
 
 * 运行 `make verilog` 以生成 verilog 代码。该命令会在 `build/rtl/` 目录下生成多个 `.sv` 文件（例如 `build/rtl/XSTop.sv`）。
@@ -173,6 +174,16 @@ HIT GOOD LOOP at pc = 0xf0001cb0
 ## 致谢
 
 香山处理器是绝佳的微架构学术研究平台，能够充分支持学术界的试验创新想法。香山处理器中已经实现或参考借鉴了如下论文，列举如下：[致谢](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)。我们非常鼓励并期待，未来能够基于香山处理器实现更多的学术创新。
+
+## Star 历史
+
+<a href="https://www.star-history.com/?repos=openxiangshan%2Fxiangshan&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=openxiangshan/xiangshan&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=openxiangshan/xiangshan&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=openxiangshan/xiangshan&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## 许可证
 
