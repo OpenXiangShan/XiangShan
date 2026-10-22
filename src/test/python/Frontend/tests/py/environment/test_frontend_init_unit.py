@@ -456,7 +456,7 @@ def test_runtime_translation_activation_preserves_pages_context_and_startup(
     assert records[-1].value == active
     assert env.monitor.expected_pc == scenario.va and env.get_errors() == []
     # ClearMonitor discards this context; arm must restore it after the clear.
-    assert env.monitor._translation_s2xlate == scenario.s2xlate
+    assert env.flow_checker._translation_s2xlate == scenario.s2xlate
     assert env.current_cycle == activation_cycle
     assert env.init_result is startup and startup.metadata() == startup_metadata
     assert env.init_history == [startup]
