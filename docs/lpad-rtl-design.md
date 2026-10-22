@@ -1104,7 +1104,7 @@ retELP = savedPELP && LPE(返回目标的特权级, 返回目标的虚拟化状�
 | SRET，在 VS 中执行 | vsstatus.SPELP | SretEvent 的相应输出将 SPELP 清 0 |
 | SRET，在 M/HS 中执行 | mstatus.SPELP | SretEvent 的相应输出将 SPELP 清 0 |
 | MNRET | mnstatus.MNPELP | MNretEvent 将 MNPELP 清 0 |
-| DRET | dcsr.PELP | 当前保留 PELP；DretEvent 补齐 V/PRV 输出赋值 |
+| DRET | dcsr.PELP | 正常 DRET 清 PELP；NewCSR 保留旧值计算的恢复结果，critical-error 立即重入仲裁尚未修复 |
 
 恢复值从事件计算出的目标 `privState` 选择 LPE，再通过：
 
