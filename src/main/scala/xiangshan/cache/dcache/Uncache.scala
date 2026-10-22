@@ -495,6 +495,8 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
 
   when(busWriteRespFire) {
     val id = io.axi.b.bits.id
+    assert(id < UncacheBufferSize.U && states(id).isInflight() && isStore(entries(id)),
+      "Uncache B must complete a valid inflight write")
     entries(id).updateRespErr(io.axi.b.bits.resp)
     completeBusResp(id)
   }

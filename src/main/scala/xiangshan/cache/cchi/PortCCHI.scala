@@ -179,8 +179,9 @@ object DCacheCCHI {
       dat.Resp := probeResp(tlParam, dirty)
       dat.DataID := dataId
       dat.Data := beatData
-      // FlitUpDAT.BE is one bit per byte of a Data_Width beat
-      dat.BE := Mux(corrupt, 0.U, ~0.U((dat.paramCCHI.Data_Width / 8).W))
+      // All bytes are present; corruption is reported through RespErr (DERR).
+      dat.RespErr := Mux(corrupt, "b10".U(2.W), "b00".U(2.W))
+      dat.BE := ~0.U((dat.paramCCHI.Data_Width / 8).W)
     }
 
     // tgtId = DBIDResp/CompDBIDResp SrcID, dbid = its DBID (both echoed back).
@@ -192,8 +193,9 @@ object DCacheCCHI {
       dat.Resp := 0b110.U(3.W) // WriteBackFull: CopyBackWrData_UD_PD
       dat.DataID := dataId
       dat.Data := beatData
-      // FlitUpDAT.BE is one bit per byte of a Data_Width beat
-      dat.BE := Mux(corrupt, 0.U, ~0.U((dat.paramCCHI.Data_Width / 8).W))
+      // All bytes are present; corruption is reported through RespErr (DERR).
+      dat.RespErr := Mux(corrupt, "b10".U(2.W), "b00".U(2.W))
+      dat.BE := ~0.U((dat.paramCCHI.Data_Width / 8).W)
     }
   }
 
