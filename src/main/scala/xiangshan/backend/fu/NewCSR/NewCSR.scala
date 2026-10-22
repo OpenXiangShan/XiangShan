@@ -248,6 +248,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val oldPrivState = Input(new PrivState)
 
     val distributedWenLegal = Output(Bool())
+    val mhpmeventWrite = new DistributedCSRIO
 
     val trapTargetPc = ValidIO(new TargetPCBundle)
     val xretTargetPc = ValidIO(new TargetPCBundle)
@@ -516,6 +517,17 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
   }
+
+  // Direct writes already broadcast the mhpmevent address. For Ssccfg writes,
+  // skip cyclecfg/instretcfg and broadcast the resolved target and masked data.
+  val indirectHpmWrites = mhpmevents.zip(sireg2.toMcfg.drop(2))
+  io.mhpmeventWrite.w.valid := indirectHpmWrites.map(_._2.valid).reduce(_ || _)
+  io.mhpmeventWrite.w.bits.addr := Mux1H(indirectHpmWrites.map { case (event, write) =>
+    write.valid -> event.addr.U(12.W)
+  })
+  io.mhpmeventWrite.w.bits.data := Mux1H(indirectHpmWrites.map { case (_, write) =>
+    write.valid -> write.bits
+  })
 
   mcountinhibit.fromScntinhibit := scountinhibit.toMcntinhibit
   scountinhibit.fromMcntinhibit := mcountinhibit.toScntinhibit
