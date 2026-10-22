@@ -441,13 +441,6 @@ class memblock_rm_readonly_api extends uvm_object;
         output tlb_request_context_view_t context_view,
         output tlb_entry_view_t entry_view
     );
-    extern function bit resolve_uid_issue_hit_entry_for_rm(
-        input  common_data_transaction data,
-        input  memblock_uid_tlb_record record,
-        input  bit [51:0] request_vpn,
-        inout  tlb_request_context_view_t context_view,
-        output tlb_entry_view_t entry_view
-    );
     // 中文注释：RM 与 software-only 检查共用的纯值 PBMT/PBMTE 语义入口。
     // 只消费 readonly view，不访问 common_data owner，也不修改任何 entry。
     extern static function bit eval_pbmt_fault_overlay(
@@ -461,12 +454,6 @@ class memblock_rm_readonly_api extends uvm_object;
     extern function bit read_uid_tlb_for_rm(
         input  memblock_uid_t uid,
         output uid_tlb_view_t view
-    );
-    // 中文注释：只判断 UID 首个真实 L2TLB request 是否已经 fire 但 response
-    // 尚未完成。该入口不报 query miss，供 RM commit poll 区分 pending 与错误。
-    extern function bit uid_tlb_translation_pending_for_rm(
-        input memblock_uid_t uid,
-        input bit [51:0] request_vpn
     );
     extern function bit read_initialized_backing_for_rm(
         input  mem_addr_t      addr,
@@ -1162,65 +1149,9 @@ function bit memblock_rm_readonly_api::resolve_tlb_entry_key_for_rm(
     return 1'b1;
 endfunction:resolve_tlb_entry_key_for_rm
 
-// A no-request-fire issue freezes the latest uniquely visible completed
-// response at issue time.  RM consumes that immutable snapshot directly;
-// later cache replacement, fence, or wider historical entries cannot change
-// the UID's translation provenance.
-function bit memblock_rm_readonly_api::resolve_uid_issue_hit_entry_for_rm(
-    input  common_data_transaction data,
-    input  memblock_uid_tlb_record record,
-    input  bit [51:0] request_vpn,
-    inout  tlb_request_context_view_t context_view,
-    output tlb_entry_view_t entry_view
-);
-    entry_view = '{default:'0};
-    if (data == null || record == null || record.csr_snapshot == null ||
-        !record.record_valid || !record.is_waiting() ||
-        record.uid_tlb_first_request_fire_sample_seq != 0 ||
-        !record.issue_hit_snapshot_valid ||
-        record.issue_hit_payload == null ||
-        record.issue_hit_response_sample_seq == 0 ||
-        record.uid_wait_start_sample_seq == 0 ||
-        record.issue_hit_entry_generation == 0) begin
-        return report_query_miss(
-            "uid_tlb_issue_hit",
-            "issue-hit resolver requires a complete frozen no-request-fire snapshot");
-    end
-    if (record.issue_hit_response_sample_seq >
-            record.uid_wait_start_sample_seq ||
-        record.issue_hit_entry_generation !=
-            record.issue_hit_payload.entry_generation ||
-        record.issue_hit_payload.s2xlate != record.s2xlate ||
-        !data.entry_matches_request_raw(record.issue_hit_payload, request_vpn,
-                                        record.s2xlate,
-                                        record.csr_snapshot)) begin
-        return report_query_miss(
-            "uid_tlb_issue_hit",
-            $sformatf("uid=%0d frozen issue-hit provenance/raw match is inconsistent",
-                      record.uid));
-    end
-
-    copy_tlb_entry(record.issue_hit_payload, entry_view);
-    context_view.entry_key = record.issue_hit_payload.lookup_key;
-    context_view.range_hit = context_view.entry_key != context_view.request_key;
-    context_view.request_translation_valid = record.request_derived_valid;
-    context_view.request_s1_resolved_ppn = record.request_s1_resolved_ppn;
-    context_view.request_s2_resolved_ppn = record.request_s2_resolved_ppn;
-    context_view.request_gvpn = record.request_gvpn;
-    `uvm_info("RM_TLB_ISSUE_HIT",
-              $sformatf("uid=%0d vpn=0x%0h frozen_token=%0d frozen_sample=%0d frozen_generation=%0d frozen_fault=%0d",
-                        record.uid, request_vpn,
-                        record.issue_hit_response_token,
-                        record.issue_hit_response_sample_seq,
-                        record.issue_hit_payload.entry_generation,
-                        record.issue_hit_payload.has_effective_fault()),
-              UVM_LOW)
-    return 1'b1;
-endfunction:resolve_uid_issue_hit_entry_for_rm
-
-// Resolve one RM byte translation and return the entry by value.  The first
-// request VPN belongs to the UID's completed dynamic attempt, so its payload
-// must not be replaced by a later response in the live canonical table.
+// Resolve one RM byte translation and return the entry by value.  A completed
+// UID uses the payload captured by the real response completion path; a
+// waiting UID and every secondary page use the current canonical lookup.
 function bit memblock_rm_readonly_api::resolve_tlb_entry_for_rm(
     input  memblock_uid_t uid,
     input  bit [51:0] request_vpn,
@@ -1258,29 +1189,16 @@ function bit memblock_rm_readonly_api::resolve_tlb_entry_for_rm(
         end
         else if (record.record_valid && !record.pte_valid &&
                  record.uid_tlb_wait_state ==
-                    memblock_uid_tlb_record::MEMBLOCK_UID_TLB_WAITING &&
-                 record.uid_tlb_first_request_fire_sample_seq == 0 &&
-                 record.issue_hit_snapshot_valid &&
-                 record.issue_hit_payload != null &&
-                 record.issue_hit_response_sample_seq != 0 &&
-                 record.issue_hit_entry_generation ==
-                    record.issue_hit_payload.entry_generation) begin
-            if (record.issue_hit_payload.s2xlate != record.s2xlate) begin
-                return report_query_miss(
-                    "uid_tlb_entry",
-                    $sformatf("uid=%0d issue-hit payload s2xlate=%0d does not match record=%0d",
-                              uid, record.issue_hit_payload.s2xlate,
-                              record.s2xlate));
-            end
-            if (!resolve_uid_issue_hit_entry_for_rm(
-                    data, record, request_vpn, context_view, entry_view)) begin
+                    memblock_uid_tlb_record::MEMBLOCK_UID_TLB_WAITING) begin
+            if (!resolve_tlb_entry_key_for_rm(uid, request_vpn, context_view) ||
+                !read_tlb_entry_for_rm(context_view.entry_key, entry_view)) begin
                 return 1'b0;
             end
         end
         else begin
             return report_query_miss(
                 "uid_tlb_entry",
-                $sformatf("uid=%0d request VPN=0x%0h has no completed/issue-hit payload record_valid=%0d pte_valid=%0d wait_state=%0d request_fire=%0d issue_hit=%0d",
+                $sformatf("uid=%0d request VPN=0x%0h has no completed/current payload record_valid=%0d pte_valid=%0d wait_state=%0d request_fire=%0d issue_hit=%0d",
                           uid, request_vpn, record.record_valid,
                           record.pte_valid, record.uid_tlb_wait_state,
                           record.uid_tlb_first_request_fire_sample_seq,
@@ -1321,30 +1239,6 @@ function bit memblock_rm_readonly_api::read_uid_tlb_for_rm(
     copy_uid_tlb_record(data.uid_tlb_record_by_uid[uid], view);
     return 1'b1;
 endfunction:read_uid_tlb_for_rm
-
-function bit memblock_rm_readonly_api::uid_tlb_translation_pending_for_rm(
-    input memblock_uid_t uid,
-    input bit [51:0] request_vpn
-);
-    common_data_transaction data;
-    memblock_uid_tlb_record record;
-
-    // This is a readiness probe, not a semantic query.  Missing records and
-    // secondary-page lookups remain false so the normal resolver can report
-    // the actual error when the caller is not in a known pending state.
-    if (!try_get_common_data(data) ||
-        !data.uid_tlb_record_by_uid.exists(uid) ||
-        data.uid_tlb_record_by_uid[uid] == null) begin
-        return 1'b0;
-    end
-    record = data.uid_tlb_record_by_uid[uid];
-    return record.record_valid &&
-           request_vpn == record.vpn &&
-           !record.pte_valid &&
-           record.uid_tlb_wait_state ==
-               memblock_uid_tlb_record::MEMBLOCK_UID_TLB_WAITING &&
-           record.uid_tlb_first_request_fire_sample_seq != 0;
-endfunction:uid_tlb_translation_pending_for_rm
 
 function bit memblock_rm_readonly_api::read_memory_map(
     input  bit              overlay,

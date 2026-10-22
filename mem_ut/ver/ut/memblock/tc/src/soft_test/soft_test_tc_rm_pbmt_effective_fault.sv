@@ -228,37 +228,36 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
     rm_ls_program_item_t item;
     memblock_rm_expected_error_catcher catcher;
     pma_pmp_eval_t pma_eval;
-    bit translation_pending;
     bit saved_pma_pmp_model_en;
     bit [47:0] permission_fault_mmio_pa;
-    int unsigned saved_idle_stop_cycle;
 
     if (env == null || env.rm == null) begin
         `uvm_fatal(get_type_name(), "RM component is unavailable for production-path checks")
     end
     data = common_data_transaction::get();
     saved_pma_pmp_model_en = seq_csr_common::pma_pmp_model_en;
-    saved_idle_stop_cycle = seq_csr_common::l2tlb_idle_stop_cycle;
     seq_csr_common::pma_pmp_model_en = 1'b0;
-    seq_csr_common::l2tlb_idle_stop_cycle = 3;
     for (int unsigned uid = 0; uid < 7; uid++) begin
         data.uid_tlb_record_by_uid.delete(uid);
         env.rm.observer_trace_translation_emitted.delete(uid);
         env.rm.observer_trace_translation_path_emitted.delete(uid);
-        env.rm.observer_trace_translation_pending_emitted.delete(uid);
     end
     env.rm.observer_mismatch_reported = 1'b0;
-    env.rm.observer_clear_translation_pending();
 
-    // A fired request is retried without consuming the final translation trace.
+    // A fired request that has no completed/current entry is an immediate RM error.
     init_load_views(0, 64'h0000_0000_8123_4000, main_view, status_view);
     record = make_uid_tlb_record(0, main_view.vaddr, 2'd0, 2'd0, 1'b1, 1'b0);
-    if (env.rm.observer_build_commit_item(main_view, status_view, item,
-                                          translation_pending) ||
-        !translation_pending ||
-        !env.rm.observer_note_translation_pending(0) ||
-        env.rm.observer_trace_translation_emitted.exists(0)) begin
-        `uvm_fatal(get_type_name(), "pending translation was not retained for retry")
+    catcher = new("rm_fired_missing_entry_catcher", "RM_READONLY_API",
+                  "*tlb_entry_exact_or_range query miss*");
+    uvm_report_cb::add(null, catcher);
+    if (env.rm.observer_build_commit_item(main_view, status_view, item)) begin
+        uvm_report_cb::delete(null, catcher);
+        `uvm_fatal(get_type_name(), "fired incomplete translation unexpectedly succeeded")
+    end
+    uvm_report_cb::delete(null, catcher);
+    if (catcher.caught_count != 1) begin
+        `uvm_fatal(get_type_name(),
+                   "fired incomplete translation did not produce one readonly query miss")
     end
     entry = data.build_tlb_entry_for_key_with_csr(record.lookup_key,
                                                    record.csr_snapshot);
@@ -280,22 +279,27 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
     record.request_s1_resolved_ppn = 44'h34567;
     record.request_gvpn = record.vpn;
     record.mark_completed();
-    if (!env.rm.observer_build_commit_item(main_view, status_view, item,
-                                           translation_pending) ||
-        translation_pending || !item.translation_valid ||
+    if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
+        !item.translation_valid ||
         !env.rm.observer_trace_translation_emitted.exists(0)) begin
         `uvm_fatal(get_type_name(),
-                   "completed pending translation did not retry through final trace")
+                   "completed translation did not use the response payload")
     end
-    env.rm.observer_clear_translation_pending();
 
-    // A cross-page request must also report pending before any byte lookup.
+    // A cross-page request must fail immediately when its first VPN is incomplete.
     init_load_views(1, 64'h0000_0000_8124_4ffd, main_view, status_view);
     void'(make_uid_tlb_record(1, main_view.vaddr, 2'd0, 2'd0, 1'b1, 1'b0));
-    if (env.rm.observer_build_commit_item(main_view, status_view, item,
-                                          translation_pending) ||
-        !translation_pending) begin
-        `uvm_fatal(get_type_name(), "cross-page first VPN pending was not retried")
+    catcher = new("rm_cross_page_missing_entry_catcher", "RM_READONLY_API",
+                  "*tlb_entry_exact_or_range query miss*");
+    uvm_report_cb::add(null, catcher);
+    if (env.rm.observer_build_commit_item(main_view, status_view, item)) begin
+        uvm_report_cb::delete(null, catcher);
+        `uvm_fatal(get_type_name(), "cross-page incomplete translation unexpectedly succeeded")
+    end
+    uvm_report_cb::delete(null, catcher);
+    if (catcher.caught_count != 1) begin
+        `uvm_fatal(get_type_name(),
+                   "cross-page incomplete translation did not produce one readonly query miss")
     end
 
     // Missing provenance remains a real readonly query error, not pending.
@@ -303,10 +307,8 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
     catcher = new("rm_query_miss_catcher", "RM_READONLY_API",
                   "*tlb_request_context query miss*");
     uvm_report_cb::add(null, catcher);
-    if (env.rm.observer_build_commit_item(main_view, status_view, item,
-                                          translation_pending) ||
-        translation_pending) begin
-        `uvm_fatal(get_type_name(), "missing UID TLB record was treated as pending")
+    if (env.rm.observer_build_commit_item(main_view, status_view, item)) begin
+        `uvm_fatal(get_type_name(), "missing UID TLB record unexpectedly succeeded")
     end
     uvm_report_cb::delete(null, catcher);
     if (catcher.caught_count != 1) begin
@@ -322,9 +324,8 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
                         main_view, status_view);
         void'(make_uid_tlb_record(uid, main_view.vaddr, 2'd0, pbmt[1:0],
                                   1'b1, 1'b1));
-        if (!env.rm.observer_build_commit_item(main_view, status_view, item,
-                                               translation_pending) ||
-            translation_pending || !item.expected_exception[4] ||
+        if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
+            !item.expected_exception[4] ||
             item.pa_valid_mask != 8'h01 || !item.uncache_path) begin
             `uvm_fatal(get_type_name(),
                        $sformatf("cross-page PBMT=%0d did not stop after the first byte", pbmt))
@@ -351,8 +352,7 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
         `uvm_fatal(get_type_name(),
                    "S1 permission-fault precondition is not allowed PMA MMIO")
     end
-    if (!env.rm.observer_build_commit_item(main_view, status_view, item,
-                                           translation_pending) ||
+    if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
         item.expected_exception !== 24'h002000) begin
         `uvm_fatal(get_type_name(),
                    "S1 permission PF was not preserved exclusively over PMA MMIO")
@@ -371,38 +371,14 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
         `uvm_fatal(get_type_name(),
                    "S2 permission-fault precondition is not allowed PMA MMIO")
     end
-    if (!env.rm.observer_build_commit_item(main_view, status_view, item,
-                                           translation_pending) ||
+    if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
         item.expected_exception !== 24'h200000) begin
         `uvm_fatal(get_type_name(),
                    "S2 permission GPF was not preserved exclusively over PMA MMIO")
     end
 
-    // The production pending helper reports exactly once at its configured bound.
     env.rm.observer_mismatch_reported = 1'b0;
-    env.rm.observer_clear_translation_pending();
-    env.rm.observer_trace_translation_pending_emitted.delete(6);
-    catcher = new("rm_pending_timeout_catcher", "RM_LS_TRANSLATION_PENDING",
-                  "*did not complete after 3 RM polls*");
-    uvm_report_cb::add(null, catcher);
-    if (!env.rm.observer_note_translation_pending(6) ||
-        !env.rm.observer_note_translation_pending(6) ||
-        env.rm.observer_note_translation_pending(6)) begin
-        `uvm_fatal(get_type_name(), "pending timeout bound did not trigger exactly")
-    end
-    uvm_report_cb::delete(null, catcher);
-    if (catcher.caught_count != 1 ||
-        !env.rm.observer_mismatch_reported ||
-        env.rm.observer_translation_pending_active ||
-        env.rm.observer_translation_pending_poll_count != 3 ||
-        !env.rm.observer_trace_translation_pending_emitted.exists(6)) begin
-        `uvm_fatal(get_type_name(), "pending timeout/error throttling state is invalid")
-    end
-
-    env.rm.observer_mismatch_reported = 1'b0;
-    env.rm.observer_clear_translation_pending();
     seq_csr_common::pma_pmp_model_en = saved_pma_pmp_model_en;
-    seq_csr_common::l2tlb_idle_stop_cycle = saved_idle_stop_cycle;
     for (int unsigned uid = 0; uid < 7; uid++) begin
         data.uid_tlb_record_by_uid.delete(uid);
     end

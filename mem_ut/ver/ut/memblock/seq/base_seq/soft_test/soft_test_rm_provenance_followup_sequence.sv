@@ -29,6 +29,28 @@ class memblock_uncache_owner_expected_fatal_catcher extends uvm_report_catcher;
     endfunction:catch
 endclass:memblock_uncache_owner_expected_fatal_catcher
 
+class memblock_rm_readonly_expected_error_catcher extends uvm_report_catcher;
+    int unsigned caught_count;
+    string expected_message_pattern;
+
+    function new(
+        string name = "memblock_rm_readonly_expected_error_catcher",
+        string message_pattern = "*query miss*");
+        super.new(name);
+        caught_count = 0;
+        expected_message_pattern = message_pattern;
+    endfunction:new
+
+    virtual function action_e catch();
+        if (get_severity() == UVM_ERROR && get_id() == "RM_READONLY_API" &&
+            uvm_pkg::uvm_is_match(expected_message_pattern, get_message())) begin
+            caught_count++;
+            return CAUGHT;
+        end
+        return THROW;
+    endfunction:catch
+endclass:memblock_rm_readonly_expected_error_catcher
+
 class soft_test_rm_provenance_followup_sequence extends memblock_dispatch_base_sequence;
 
     `uvm_object_utils(soft_test_rm_provenance_followup_sequence)
@@ -139,7 +161,8 @@ task soft_test_rm_provenance_followup_sequence::check_l1_hit_issue_snapshot_life
     localparam memblock_uid_t TEST_UID = 8;
     localparam bit [51:0] TEST_VPN = 52'h0000_0000_8d34a;
     // The production L2TLB token allocator starts at zero.  Exercise token 0
-    // through cache publication, UID freeze, RM query, and invalidation.
+    // through cache publication, provenance capture, current-live RM query,
+    // and invalidation.  The issue snapshot is diagnostic only.
     localparam longint unsigned TEST_TOKEN = 0;
     localparam longint unsigned TEST_SAMPLE = 64'h29;
     mmu_csr_runtime_state csr;
@@ -177,9 +200,30 @@ task soft_test_rm_provenance_followup_sequence::check_l1_hit_issue_snapshot_life
     data.publish_live_tlb_entry(key, overwritten_live_entry, csr);
     expect_true(memblock_rm_readonly_api::get().resolve_tlb_entry_for_rm(
                     TEST_UID, TEST_VPN, context_view, entry_view) &&
-                entry_view.entry_generation == completed_generation,
-                "RM did not use immutable no-request-fire issue-hit payload");
+                entry_view.entry_generation == overwritten_live_entry.entry_generation &&
+                entry_view.entry_generation != completed_generation,
+                "RM did not use the current live entry while issue provenance was present");
 
+    data.delete_live_tlb_entry_by_anchor_key(
+        key, "RM issue-hit non-freeze query miss");
+    begin
+        memblock_rm_readonly_expected_error_catcher catcher;
+
+        catcher = new("rm_issue_snapshot_no_fallback_catcher",
+                      "*tlb_entry_exact_or_range query miss*");
+        uvm_report_cb::add(null, catcher);
+        expect_true(!memblock_rm_readonly_api::get().resolve_tlb_entry_for_rm(
+                        TEST_UID, TEST_VPN, context_view, entry_view),
+                    "RM unexpectedly resolved deleted live entry from issue snapshot");
+        uvm_report_cb::delete(null, catcher);
+        expect_true(catcher.caught_count == 1,
+                    "deleted live entry did not produce one readonly query miss");
+    end
+
+    // Deleting the canonical live entry also retires the same-key completed
+    // cache entry.  Republish the sampled response before checking reissue
+    // capture; this keeps the lifecycle assertion independent of table cleanup.
+    data.record_completed_tlb_response(completed_entry, TEST_TOKEN, TEST_SAMPLE);
     record.mark_request_fire(TEST_SAMPLE + 2);
     expect_true(!record.issue_hit_snapshot_valid &&
                 record.uid_tlb_first_request_fire_sample_seq == TEST_SAMPLE + 2,
@@ -198,8 +242,6 @@ task soft_test_rm_provenance_followup_sequence::check_l1_hit_issue_snapshot_life
     expect_true(!data.completed_tlb_entry_by_key.exists(key),
                 "completed-response cache delete left the anchor visible");
     data.uid_tlb_record_by_uid.delete(TEST_UID);
-    data.delete_live_tlb_entry_by_anchor_key(
-        key, "RM issue-hit live replacement cleanup");
 endtask:check_l1_hit_issue_snapshot_lifecycle
 
 task soft_test_rm_provenance_followup_sequence::check_l1_hit_overlap_resolution();
@@ -216,8 +258,10 @@ task soft_test_rm_provenance_followup_sequence::check_l1_hit_overlap_resolution(
     memblock_uid_tlb_record record;
     memblock_tlb_entry exact_pf_entry;
     memblock_tlb_entry super_normal_entry;
+    memblock_tlb_entry current_live_entry;
     memblock_rm_readonly_api::tlb_request_context_view_t context_view;
     memblock_rm_readonly_api::tlb_entry_view_t entry_view;
+    memblock_rm_readonly_expected_error_catcher catcher;
 
     csr = mmu_csr_runtime_state::type_id::create("rm_overlap_csr");
     csr.reset();
@@ -270,14 +314,32 @@ task soft_test_rm_provenance_followup_sequence::check_l1_hit_overlap_resolution(
                 record.issue_hit_response_sample_seq == EXACT_SAMPLE &&
                 record.issue_hit_payload.has_effective_fault(),
                 "capture did not preserve the latest issue-visible exact PF");
+    current_live_entry = data.build_tlb_entry_for_key_with_csr(exact_key, csr);
+    current_live_entry.fault_effective_s1_pf = 1'b0;
+    current_live_entry.fault_stage_selected =
+        memblock_tlb_entry::MEMBLOCK_TLB_FAULT_STAGE_NONE;
+    data.publish_live_tlb_entry(exact_key, current_live_entry, csr);
     expect_true(memblock_rm_readonly_api::get().resolve_tlb_entry_for_rm(
                     TEST_UID, TEST_VPN, context_view, entry_view),
-                "RM overlap issue-hit resolver failed");
-    expect_true(entry_view.entry_generation == exact_pf_entry.entry_generation &&
-                entry_view.fault_effective_s1_pf &&
+                "RM current-live resolver failed with issue provenance present");
+    expect_true(entry_view.entry_generation == current_live_entry.entry_generation &&
+                entry_view.entry_generation != exact_pf_entry.entry_generation &&
+                !entry_view.fault_effective_s1_pf &&
                 !context_view.range_hit &&
-                !context_view.request_translation_valid,
-                "RM did not retain the frozen latest-sample exact PF response");
+                context_view.request_translation_valid,
+                "RM used frozen exact PF instead of the current live entry");
+
+    data.delete_live_tlb_entry_by_anchor_key(
+        exact_key, "RM overlap non-freeze query miss");
+    catcher = new("rm_overlap_snapshot_no_fallback_catcher",
+                  "*tlb_entry_exact_or_range query miss*");
+    uvm_report_cb::add(null, catcher);
+    expect_true(!memblock_rm_readonly_api::get().resolve_tlb_entry_for_rm(
+                    TEST_UID, TEST_VPN, context_view, entry_view),
+                "RM overlap resolver fell back to issue snapshot after live deletion");
+    uvm_report_cb::delete(null, catcher);
+    expect_true(catcher.caught_count == 1,
+                "RM overlap live deletion did not produce one readonly query miss");
 
     data.delete_completed_tlb_entry_by_anchor_key(
         exact_key, "RM overlap directed cleanup");
