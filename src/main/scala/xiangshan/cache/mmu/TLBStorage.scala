@@ -123,22 +123,24 @@ class TLBFA(
     val sameTag = old.tag === refillEntry.tag
     val sameS1 = ignoreAsid || (old.perm.asUInt === refillEntry.perm.asUInt && old.pbmt === refillEntry.pbmt)
     val sameS2 = old.g_perm.asUInt === refillEntry.g_perm.asUInt && old.g_pbmt === refillEntry.g_pbmt
-    val overlapLevel = old.level.get max refillEntry.level.get
     val overlapNapot = old.n =/= 0.U || refillEntry.n =/= 0.U
     val overlapTag = Wire(Vec(Level + 1, Bool()))
-    overlapTag(0) := overlapLevel > 0.U || Mux(
-      overlapNapot,
-      (old.tag >> (pteNapotBits - sectortlbwidth)) === (refillEntry.tag >> (pteNapotBits - sectortlbwidth)),
-      old.tag(vpnnLen - sectortlbwidth - 1, 0) === refillEntry.tag(vpnnLen - sectortlbwidth - 1, 0)
-    )
+    // Check each VPN slice independently so superpage overlap is detected in one cycle.
+    val sameLowTag = old.tag(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth) ===
+      refillEntry.tag(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth)
+    val sameNapotOffset = old.tag(pteNapotBits - sectortlbwidth - 1, 0) ===
+      refillEntry.tag(pteNapotBits - sectortlbwidth - 1, 0)
+    overlapTag(0) := old.level.get > 0.U || refillEntry.level.get > 0.U ||
+      (sameLowTag && (overlapNapot || sameNapotOffset))
     for (level <- 1 until Level) {
       val high = vpnnLen * (level + 1) - sectortlbwidth - 1
       val low = vpnnLen * level - sectortlbwidth
-      overlapTag(level) := overlapLevel > level.U || old.tag(high, low) === refillEntry.tag(high, low)
+      overlapTag(level) := old.level.get > level.U || refillEntry.level.get > level.U ||
+        old.tag(high, low) === refillEntry.tag(high, low)
     }
     overlapTag(Level) := (old.tag >> (vpnnLen * Level - sectortlbwidth)) ===
       (refillEntry.tag >> (vpnnLen * Level - sectortlbwidth))
-    val laneOverlap = overlapLevel =/= 0.U || overlapNapot ||
+    val laneOverlap = old.level.get =/= 0.U || refillEntry.level.get =/= 0.U || overlapNapot ||
       (old.valididx.asUInt & refillEntry.valididx.asUInt).orR
     mergeWays(way) := v(way) && hNormalRefill && refillSuccess && normal && sameStage && sameVmid &&
       sameAsid && sameTag && old.ppn === refillEntry.ppn && sameS1 && sameS2
@@ -147,13 +149,16 @@ class TLBFA(
   }
   val mergeHit = mergeWays.asUInt.orR
   // Keep refill selection one-hot through write enables and lookup masks.
-  val mergeWayOH = PriorityEncoderOH(mergeWays.asUInt)
+  val mergeWayOH = mergeWays.asUInt
   val replacementWayOH = UIntToOH(io.w.bits.wayIdx, nWays)
   val writeWayOH = Mux(mergeHit, mergeWayOH, replacementWayOH)
-  val writeWay = Mux(mergeHit, PriorityEncoder(mergeWays), io.w.bits.wayIdx)
+  val writeWay = Mux(mergeHit, OHToUInt(mergeWayOH), io.w.bits.wayIdx)
   // UIntToOH(_, 1) is always one, so preserve the original single-way write condition.
   val writeWaySelect = if (nWays == 1) Seq(writeWay === 0.U) else writeWayOH.asBools
   val writeValid = io.w.valid && !io.sfence.valid
+  when(writeValid) {
+    assert(PopCount(mergeWays) <= 1.U, s"${parentName} H-sector refill has multiple merge candidates")
+  }
   val changedWays = Mux(writeValid, writeWayOH | overlapWays.asUInt, 0.U(nWays.W))
 
   for (i <- 0 until ports) {

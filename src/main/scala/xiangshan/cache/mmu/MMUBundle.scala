@@ -836,6 +836,50 @@ abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwCon
 abstract class PtwModule(outer: L2TLB) extends LazyModuleImp(outer)
   with HasXSParameter with HasPtwConst
 
+class HptwSectorPtePermBundle(implicit p: Parameters) extends PtwBundle {
+  val d = Bool()
+  val a = Bool()
+  val u = Bool()
+  val x = Bool()
+  val w = Bool()
+  val r = Bool()
+  val v = Bool()
+
+  def toPtePerm: UInt = Cat(d, a, false.B, u, x, w, r, v)
+}
+
+// HPTW sector candidates do not use G or RSW, or the exact unsupported PPN/reserved bits.
+class HptwSectorPteBundle(implicit p: Parameters) extends PtwBundle {
+  val n = UInt(pteNLen.W)
+  val pbmt = UInt(ptePbmtLen.W)
+  val reservedNonZero = Bool()
+  val ppnHighNonZero = Bool()
+  val ppn = UInt(ppnLen.W)
+  val perm = new HptwSectorPtePermBundle
+
+  def fromPte(pte: PteBundle): Unit = {
+    n := pte.n
+    pbmt := pte.pbmt
+    reservedNonZero := pte.reserved.orR
+    ppnHighNonZero := (if (ppnLen < ptePPNLen) pte.ppn_high.orR else false.B)
+    ppn := pte.ppn
+    perm := Cat(pte.perm.d, pte.perm.a, pte.perm.u, pte.perm.x, pte.perm.w, pte.perm.r, pte.perm.v).asTypeOf(perm)
+  }
+
+  def toPte: UInt = {
+    val reserved = Wire(UInt(pteResLen.W))
+    reserved := reservedNonZero
+    val fullPpn = if (ppnLen < ptePPNLen) {
+      val ppnHigh = Wire(UInt((ptePPNLen - ppnLen).W))
+      ppnHigh := ppnHighNonZero
+      Cat(ppnHigh, ppn)
+    } else {
+      ppn(ptePPNLen - 1, 0)
+    }
+    Cat(n, pbmt, reserved, fullPpn, 0.U(pteRswLen.W), perm.toPtePerm)
+  }
+}
+
 class PteBundle(implicit p: Parameters) extends PtwBundle{
   val n = UInt(pteNLen.W)
   val pbmt = UInt(ptePbmtLen.W)
@@ -971,6 +1015,29 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
 
   override def toPrintable: Printable = {
     p"ppn:0x${Hexadecimal(ppn)} perm:b${Binary(perm.asUInt)}"
+  }
+}
+
+// LLPTW also checks guest PPN ranges, so retain all architectural PPN bits and permissions.
+class LlptwSectorPteBundle(implicit p: Parameters) extends PtwBundle {
+  val n = UInt(pteNLen.W)
+  val pbmt = UInt(ptePbmtLen.W)
+  val reservedNonZero = Bool()
+  val ppn = UInt(ptePPNLen.W)
+  val perm = UInt(pteFlagLen.W)
+
+  def fromPte(pte: PteBundle): Unit = {
+    n := pte.n
+    pbmt := pte.pbmt
+    reservedNonZero := pte.reserved.orR
+    ppn := pte.getPPN()
+    perm := pte.perm.asUInt
+  }
+
+  def toPte: UInt = {
+    val reserved = Wire(UInt(pteResLen.W))
+    reserved := reservedNonZero
+    Cat(n, pbmt, reserved, ppn, 0.U(pteRswLen.W), perm)
   }
 }
 
@@ -1308,14 +1375,17 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     demandPerm.g := false.B
     val validLeaf = entry.v && (demandPerm.r || demandPerm.x) && demandPerm.u && demandPerm.a &&
       !(demandPerm.w && !demandPerm.r) && !gpf && !gaf && entry.n.get === 0.U
+    // Matching non-G permissions imply the level-zero leaf checks; PBMT legality is shared.
+    val normalPageValid = entry.pbmt =/= 3.U && (pbmte || entry.pbmt === 0.U) && (entry.ppn >> ppnLen) === 0.U
     for (i <- 0 until tlbcontiguous) {
       val candidatePerm = WireInit(ptes(i).getPerm())
       candidatePerm.g := false.B
-      val compatible = ptes(i).getPPN() >> sectortlbwidth === entry.ppn >> sectortlbwidth &&
+      val compatible = ptes(i).ppn >> sectortlbwidth === entry.ppn.pad(ppnLen)(ppnLen - 1, sectortlbwidth) &&
         candidatePerm.asUInt === demandPerm.asUInt && ptes(i).pbmt === entry.pbmt
-      val validPte = eligible(i) && ptes(i).isLeaf() && ptes(i).n === 0.U &&
-        !ptes(i).isGpf(0.U, pbmte) && !ptes(i).isAf()
-      valididx(i) := enable && validLeaf && (entry.level.get =/= 0.U || (validPte && compatible))
+      val validPte = eligible(i) && ptes(i).perm.v && ptes(i).n === 0.U &&
+        ptes(i).reserved === 0.U && ptes(i).ppn_high === 0.U
+      valididx(i) := enable && validLeaf &&
+        (entry.level.get =/= 0.U || (normalPageValid && validPte && compatible))
       ppn_low(i) := Mux(entry.level.get =/= 0.U, i.U, ptes(i).ppn(sectortlbwidth - 1, 0))
     }
   }

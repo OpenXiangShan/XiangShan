@@ -1052,7 +1052,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (hyper_arb1.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_hptw_req && entries(i).ppn === hyper_arb1.io.out.bits.ppn && entries(i).req_info.s2xlate === allStage && hyper_arb1.io.chosen === i.U) {
+      when (state(i) === state_hptw_req && entries(i).req_info.s2xlate === allStage && hyper_arb1.io.chosen === i.U) {
         state(i) := state_hptw_resp
         entries(i).wait_id := hyper_arb1.io.chosen
       }
@@ -1162,7 +1162,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (hyper_arb2.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_last_hptw_req && entries(i).ppn === hyper_arb2.io.out.bits.ppn && entries(i).req_info.s2xlate === allStage && hyper_arb2.io.chosen === i.U) {
+      when (
+        state(i) === state_last_hptw_req && entries(i).req_info.s2xlate === allStage && hyper_arb2.io.chosen === i.U
+      ) {
         state(i) := state_last_hptw_resp
         entries(i).wait_id := hyper_arb2.io.chosen
       }
@@ -1429,6 +1431,7 @@ class HPTWRefillBundle(implicit p: Parameters) extends PtwBundle {
 
 class HPTWPmpIO(implicit p: Parameters) extends PtwBundle {
   val req = Valid(new PMPReqBundle)
+  val first = Output(Bool())
   val resp = Flipped(new PMPRespBundle)
 }
 
@@ -1666,10 +1669,13 @@ class HPTW(bankId: Int = 0)(implicit p: Parameters) extends XSModule with HasPtw
   io.resp.bits.resp := resp
   io.resp.bits.source := source
 
-  io.pmp.req.valid := DontCare
+  // The first check cannot finish a walk. Keep its select independent of PTE decoding.
+  io.pmp.first := !idle && !s_pmp_check && !mem_addr_update
+  io.pmp.req.valid := sent_to_pmp
   io.pmp.req.bits.addr := mem_addr
   io.pmp.req.bits.size := 3.U
   io.pmp.req.bits.cmd := TlbCmd.read
+  assert(io.pmp.first === (sent_to_pmp && !mem_addr_update))
 
 
   if (HasMptCheck) {//send to mpt req
