@@ -92,13 +92,18 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val fastHasVSet = fastEntries.map { entry =>
     entry.valid && Seq(VSETIVLI, VSETVL, VSETVLI).map(_ === entry.inst).reduce(_ || _)
   }.reduce(_ || _)
-  private val fastReady = !io.flush && !resumingVType && !fastHasVSet
+  private val fastReady = !io.flush && !resumingVType && !fastHasVSet && io.empty
   private val fastFire  = fastValid && fastReady
 
   private val hasFastFetch  = RegNext(fastFire, init = false.B)
-  private val fastFetchMask = RegNext(Mux(fastFire, UIntToMask(fastNum, NumWriteBank), 0.U), init = 0.U)
-  private val normalLaneValid  = normalBits.valid & ~fastFetchMask
-  private val normalLaneEnqEnable = normalBits.enqEnable & ~fastFetchMask
+  private val fastFetchMask = RegInit(0.U(NumWriteBank.W))
+  fastFetchMask := Mux(
+    fastFire,
+    UIntToMask(fastNum.pad(log2Ceil(NumWriteBank)), NumWriteBank),
+    0.U(NumWriteBank.W)
+  )
+  private val normalLaneValid     = normalBits.valid & ~fastFetchMask.pad(IBufferEnqueueWidth)
+  private val normalLaneEnqEnable = normalBits.enqEnable & ~fastFetchMask.pad(IBufferEnqueueWidth)
 
   // IBuffer is organized as raw registers
   // This is due to IBuffer is a huge queue, read & write port logic should be precisely controlled
@@ -197,7 +202,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   allowEnq := normalBits.prevInstrCount < nextNumInvalid
 
   private val enqOffset = VecInit.tabulate(EnqueueWidth)(i => PopCount(normalLaneValid.asBools.take(i)))
-  private val enqData   = VecInit.tabulate(EnqueueWidth)(i => Wire(new IBufEntry).fromNormalFetch(io.in.normal.bits, i))
+  private val enqData   = VecInit.tabulate(EnqueueWidth)(i => Wire(new IBufEntry).fromNormalFetch(normalFetch.bits, i))
   private val enqBankOffset =
     WireDefault(0.U.asTypeOf(Vec(NumWriteBank, Vec(EnqueueWidth / NumWriteBank, UInt(log2Ceil(EnqueueWidth).W)))))
   private val enqBankEntrys =
@@ -217,7 +222,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val deqExceptionOffset = Wire(UInt(log2Ceil(DecodeWidth).W))
 
   // Current Exception Wire
-  private val currentException  = Wire(new IBufExceptionEntry).fromNormalFetch(io.in.normal.bits)
+  private val currentException  = Wire(new IBufExceptionEntry).fromNormalFetch(normalFetch.bits)
   private val enqExceptionIndex = PriorityEncoder(normalBits.exceptionMask)
 
   private val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid
@@ -249,49 +254,6 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     )
   }.otherwise {
     normalNumDeq := 0.U
-  }
-
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  // Normal bypass
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  // timing optimization：
-  // Normal bypass selection relies on the IFU-to-IBuffer pre-alignment contract:
-  // valid instructions from IFU are packed contiguously after the leading
-  // bank-alignment bubbles. The low bits of enqPtr identify the write-bank
-  // offset of the first valid instruction.
-  //
-  // Example with NumWriteBank = 4 and bankOffset = 3:
-  // lane index:  0 1 2 3 4 5 6 7 8 ...
-  // valid mark:  0 0 0 1 1 1 1 1 0 ...
-  //
-  // In general, normal bypass entry idx selects lane idx + bankOffset from the
-  // sliding window [idx, idx + NumWriteBank - 1]. This avoids computing
-  // enqOffset with a prefix PopCount on the normal bypass path.
-  private val normalBypassExceptionMask = Wire(Vec(DecodeWidth, Bool()))
-  normalBypassEntries.zipWithIndex.foreach { case (entry, idx) =>
-    val bankOffset = enqPtrDup(2).value(log2Ceil(NumWriteBank) - 1, 0)
-    val bankOH     = UIntToOH(bankOffset, NumWriteBank)
-
-    val selectedValid = Mux1H(
-      bankOH,
-      VecInit.tabulate(NumWriteBank)(i =>
-        normalLaneValid(i + idx) && normalLaneEnqEnable(i + idx)
-      )
-    )
-
-    entry.valid := selectedValid && normalFire && !io.flush
-    entry.bits := Mux1H(
-      bankOH,
-      VecInit.tabulate(NumWriteBank)(i =>
-        enqData(i + idx)
-      )
-    )
-    normalBypassExceptionMask(idx) := Mux1H(
-      bankOH,
-      VecInit.tabulate(NumWriteBank)(i =>
-        normalBits.exceptionMask(i + idx) && normalLaneValid(i + idx) && normalLaneEnqEnable(i + idx)
-      )
-    )
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -389,11 +351,11 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       val fastLaneValid =
         if (i < fastEntries.length) fastEntries(i).valid else false.B
       val fastLaneBits =
-        if (i < fastEntries.length) Wire(new IBufOutEntry).fromFastFetch(io.in.fastFetch, i)
+        if (i < fastEntries.length) Wire(new IBufOutEntry).fromFastFetch(io.in.fastFetch.bits, i)
         else 0.U.asTypeOf(new IBufOutEntry)
       when(fastFire) {
-        outNext.valid          := fastLaneValid
-        outNext.bits           := fastLaneBits
+        outNext.valid := fastLaneValid
+        outNext.bits  := fastLaneBits
       }.elsewhen(normalBypass) {
         outNext.valid := normalBypassEntry.valid
         outNext.bits := Mux(
@@ -600,13 +562,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private def numStages     = 2
   private val topdownStages = RegInit(VecInit.fill(numStages)(0.U.asTypeOf(new FrontendTopDownBundle)))
 
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  // TopDown
-  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private def numStages     = 2
-  private val topdownStages = RegInit(VecInit.fill(numStages)(0.U.asTypeOf(new FrontendTopDownBundle)))
-
-  topdownStages(0) := io.in.normal.bits.topdownInfo
+  topdownStages(0) := normalFetch.bits.topdownInfo
   for (i <- 1 until numStages) {
     topdownStages(i) := topdownStages(i - 1)
   }

@@ -18,6 +18,7 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import utility.SignExt
+import utility.UIntToMask
 import utility.XORFold
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.GuardedPc
@@ -25,6 +26,7 @@ import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.icache.MainPipeToIfuReq
 
 trait PreDecodeHelper extends HasIfuParameters {
   def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
@@ -210,80 +212,153 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     Mux1H(UIntToOH(shamt), Seq(s0, s1, s2, s3))
   }
 
+  /**
+    * Select the raw window used by fast fetch.
+    *
+    * The cache line is split into 8-byte chunks. `startIndex` is the byte offset
+    * inside the line, and `startIndex(5, 3)` selects the 8-byte-aligned chunk
+    * that contains the first instruction. Two adjacent chunks are concatenated
+    * to form the 16-byte window consumed by [[cutFastData]]. The `b111` entry
+    * indexes the chunks line-relative, so the last chunk wraps to the line start.
+    */
+  def genFastFetchData(cacheline: UInt, startIndex: UInt): UInt = {
+    val fastFetchBitsWidth = FastFetchBytes * 8
+    val windowWidth = fastFetchBitsWidth * 2
+    val dataVec     = cacheline.asTypeOf(Vec(ICacheLineBytes / FastFetchBytes, UInt(fastFetchBitsWidth.W)))
+    val result      = MuxLookup(startIndex(5, 3), 0.U(windowWidth.W))(Seq(
+      "b000".U -> Cat(dataVec(1), dataVec(0)),
+      "b001".U -> Cat(dataVec(2), dataVec(1)),
+      "b010".U -> Cat(dataVec(3), dataVec(2)),
+      "b011".U -> Cat(dataVec(4), dataVec(3)),
+      "b100".U -> Cat(dataVec(5), dataVec(4)),
+      "b101".U -> Cat(dataVec(6), dataVec(5)),
+      "b110".U -> Cat(dataVec(7), dataVec(6)),
+      "b111".U -> Cat(dataVec(0), dataVec(7))
+    ))
+    result
+  }
+
+  /**
+    * Align the fast-fetch window to the first instruction and build candidate
+    * 32-bit instructions.
+    *
+    * `startIndex(2, 1)` is the 2-byte offset inside the first chunk, so only
+    * four shift amounts are possible. Keep the explicit shift table instead of
+    * a variable shifter: EDA tools may infer the same logic, but this makes the
+    * intended structure explicit. The shift amounts are in bits: 2/4/6 bytes
+    * become 16/32/48 bits. The window is then viewed as `FastFetchWidth`
+    * 16-bit slots; adjacent slots are concatenated into instructions. The last
+    * slot is zero-extended because its upper half is not guaranteed to be
+    * inside the window.
+    */
+  def cutFastData(fastFetch: UInt, startIndex: UInt): Vec[UInt] = {
+    val width = FastFetchBytes * 8
+    val useData = MuxLookup(startIndex(2, 1), 0.U(width.W))(Seq(
+      "b00".U -> fastFetch(width - 1, 0),
+      "b01".U -> (fastFetch >> 16)(width - 1, 0),
+      "b10".U -> (fastFetch >> 32)(width - 1, 0),
+      "b11".U -> (fastFetch >> 48)(width - 1, 0)
+    ))
+    val dataVec = useData.asTypeOf(Vec(FastFetchWidth, UInt(16.W)))
+    val result  = Wire(Vec(FastFetchWidth, UInt(32.W)))
+    for (i <- 0 until FastFetchWidth - 1) {
+      result(i) := Cat(dataVec(i + 1), dataVec(i))
+    }
+    result(FastFetchWidth - 1) := Cat(0.U(16.W), dataVec(FastFetchWidth - 1))
+    result
+  }
+
+  /**
+    * Collect the fast-fetch metadata directly from the ICache request.
+    *
+    * The fast path bypasses the normal s2 predecode latency, so everything that
+    * IBuffer and decode need must be derived here: 2-byte slot boundaries, RVC
+    * information, PCs, predicted-taken CFI placement, and instruction ordering
+    * inside the FTQ entry.
+    */
   def genFastInfo(req: MainPipeToIfuReq): FastFetchInfo = {
     val maybeRvcMap = req.maybeRvcMap
     val firstRange  = req.firstRange
-    val startVAddr  = req.info(0).startVAddr
-    val predTakenMask = UIntToOH(req.info(0).takenCfiOffset.bits, FetchBlockInstNum)
-    val predTaken     = req.info(0).takenCfiOffset.valid
+    val startVAddr  = req.info(0).startVAddr.toUInt
+    val predTaken   = req.info(0).takenCfiOffset.valid
+    val takenCfiIdx = req.info(0).takenCfiOffset.bits
+    val altTakenCfiIdx = req.info(0).takenCfiOffset.bits - 1.U
+    val ftqPtr      = req.info(0).ftqIdx
+
+    val validMaskOH         = Wire(Vec(FastFetchMaxNum, UInt(FastFetchWidth.W)))
+    val rawIsRvC            = Wire(Vec(FastFetchWidth, Bool()))
+    val rawPredTaken        = Wire(Vec(FastFetchWidth, Bool()))
+    val rawPc               = Wire(Vec(FastFetchWidth, new GuardedPc))
+    val rawEndMask          = Wire(Vec(FastFetchWidth, Bool()))
+    val rawInstrValid       = Wire(Vec(FastFetchWidth + 1, Bool()))
+    val rawIsRvI            = Wire(Vec(FastFetchWidth + 1, Bool()))
+    val fixedMask           = Wire(Vec(FastFetchWidth + 1, Bool()))
+
+    // Walk the 2-byte slots from left to right. A slot starts an instruction
+    // iff the previous slot did not start one, or the previous instruction was
+    // RVC and therefore occupied only one slot.
+    for (i <- 0 until FastFetchWidth) {
+      rawInstrValid(i) := (if (i == 0) true.B else !rawInstrValid(i - 1) || maybeRvcMap(i - 1))
+      rawIsRvI(i)      := rawInstrValid(i) && !maybeRvcMap(i)
+      rawIsRvC(i)      := rawInstrValid(i) && maybeRvcMap(i)
+      rawEndMask(i)    := !rawInstrValid(i) || rawIsRvC(i)
+      fixedMask(i)     := (takenCfiIdx === i.U) && rawIsRvI(i)
+      rawPredTaken(i)  := predTaken &&
+        (((takenCfiIdx === i.U) && rawIsRvC(i)) || ((altTakenCfiIdx === i.U) && rawIsRvI(i)))
+      rawPc(i)         := GuardedPcInit(startVAddr + (2 * i).U)
+    }
+    // Sentinel slot describing the instruction that ends at the window edge.
+    rawInstrValid(FastFetchWidth) := !rawInstrValid(FastFetchWidth - 1) || maybeRvcMap(FastFetchWidth - 1)
+    rawIsRvI(FastFetchWidth)      := rawInstrValid(FastFetchWidth) && !maybeRvcMap(FastFetchWidth)
+    fixedMask(FastFetchWidth)     := (takenCfiIdx === FastFetchWidth.U) && rawIsRvI(FastFetchWidth)
+
+    // The fast path must not resolve a predicted-taken 4-byte instruction on
+    // its own: mask out the slot it would consume and leave the final boundary
+    // and target to predChecker. This also covers a block that ends in the
+    // middle of a 4-byte instruction, while keeping the fast-fetch width equal
+    // to the final fetch width.
+    val fixedRangeLow        = firstRange(FastFetchWidth - 1, 0) & ~fixedMask.asUInt(FastFetchWidth - 1, 0)
+    val fixedRangeEnd        = firstRange(FastFetchWidth) & ~fixedMask(FastFetchWidth)
+    val fixedRange           = Cat(fixedRangeEnd, fixedRangeLow)
+    val blockEndsInFastFetch = !fixedRange(FastFetchWidth)
+    // One-hot of the last valid slot in `fixedRange`.
+    val lastSlotOH           = fixedRange & ~(fixedRange >> 1)
+
+    // Start slot of each fast-fetch instruction. Instruction 0 starts at slot 0;
+    // each following instruction starts after the previous RVC/RVI instruction.
+    // Fast fetch returns at most FastFetchMaxNum instructions.
+    validMaskOH(0) := "b0001".U
+    validMaskOH(1) := Mux(rawIsRvI(0), "b0100".U, "b0010".U)
+    validMaskOH(2) := Mux(
+      rawIsRvI(0),
+      Mux(rawIsRvI(2), "b0000".U, "b1000".U),
+      Mux(rawIsRvI(1), "b1000".U, "b0100".U)
+    )
 
     val info = Wire(new FastFetchInfo)
-    val instrValid = Wire(Vec(5, Bool()))
-    val isRvc      = Wire(Vec(5, Bool()))
-    val isRvI      = Wire(Vec(5, Bool()))
-    val endMask    = Wire(Vec(5, Bool()))
-    val pc         = Wire(Vec(5, new GuardedPc))
-    val fixedRange = Wire(Vec(5, Bool()))
-    fixedRange    := ~(isRvI & predTakenMask) & firstRange
-    instrValid(0) := true.B
-    isRvc(0)      := maybeRvcMap(0)
-    isRvI(0)      := !maybeRvcMap(0)
-    endMask(0)    := instrValid(0) && maybeRvcMap(0)
-    for (i <- 1 until 5) {
-      instrValid(i) := (instrValid(i - 1) && maybeRvcMap(i - 1)) || !instrValid(i - 1)
-      isRvc(i)      := instrValid(i) && maybeRvcMap(i)
-      isRvI(i)      := instrValid(i) && !maybeRvcMap(i)
-      endMask(i)    := (instrValid(i) && maybeRvcMap(i)) || (isRvI(i - 1))
-    }
-    for(i <- 0 until 4) {
-      pc(i) := GuardedPcInit(startVAddr + i.U)
-    }
-    endMaskOH(0) := MuxLookup(isRvI, "b0000".U, Seq(
-      "b0001".U -> "b0010".U,
-      "bxxx0".U -> "b0001".U
-    ))
-    endMaskOH(1) := MuxLookup(isRvI, "b0000".U, Seq(
-      "b0001".U -> "b0100".U,
-      "b0101".U -> "b1000".U,
-      "b0010".U -> "b0100".U,
-      "bxx00".U -> "b0010".U
-    ))
-    endMaskOH(2) := MuxLookup(isRvI, "b0000".U, Seq(
-      "b0001".U -> "b1000".U,
-      "b0010".U -> "b1000".U,
-      "b0100".U -> "b1000".U,
-      "bx000".U -> "b0100".U
-    ))
-    endMaskOH(3) := MuxLookup(isRvI, "b0000".U, Seq(
-      "b0000".U -> "b1000".U
-    ))
-
-    validMaskOH(0) := "b0001".U
-    validMaskOH(1) := MuxLookup(isRvI, "b0000".U, Seq(
-      "b0001".U -> "b0100".U,
-      "bxxx0".U -> "b0010".U
-    ))
-    validMaskOH(2) := MuxLookup(isRvI, "b0000".U, Seq(
-      "b0001".U -> "b1000".U,
-      "b0010".U -> "b1000".U,
-      "bxx00".U -> "b0100".U,
-    ))
-    validMaskOH(3) := MuxLookup(isRvI, "b0000".U, Seq(
-      "b0000".U -> "b1000".U
-    ))
-
-    // 最多允许3条指令
-    info.realInstrValid := UIntToMask(PopCount(instrValid & fixedRange)).toUInt & "b0111".U
-    info.rawIsRvc    := isRvc
-    info.rawIsRvI    := isRvI
-    info.rawPc       := pc
-    info.rawFoldedPC := pc.map{pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth)}
-    info.endMaskOH   := endMaskOH
-    info.validMaskOH := validMaskOH
-    info.rawIsLastInFtqEntry := (0 until 4).map { i =>
-      fixedRange(i) ^ fixedRange(i + 1)
-    }
-    info.ftqPtr      := req.info(0).ftqIdx
+    // Number of instructions that end inside the fast window. Each end slot is
+    // counted once, so this is the number of complete instructions to enqueue.
+    val instrCount = PopCount(VecInit((0 until FastFetchWidth).map(i => rawEndMask(i) && fixedRange(i))))
+    // Mark the low `instrCount` entries valid; the mask naturally clamps to
+    // FastFetchMaxNum because only FastFetchMaxNum entries exist.
+    info.realInstrValid := UIntToMask(instrCount, FastFetchMaxNum)
+    info.rawIsPredTaken := rawPredTaken
+    info.rawIsRvC       := rawIsRvC
+    info.rawPc          := rawPc
+    info.rawFoldedPC    := rawPc.map(pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth))
+    info.instrNum       := Mux(instrCount > FastFetchMaxNum.U, FastFetchMaxNum.U, instrCount)
+    info.validMaskOH    := validMaskOH
+    info.ftqPtr         := ftqPtr
+    info.startIndex     := startVAddr(log2Ceil(ICacheLineBytes) - 1, 0)
+    // An instruction is the last one in its FTQ entry iff the FTQ entry ends
+    // inside the fast window and this is its final slot. For RVC the final slot
+    // is the instruction slot itself; for RVI it is the next (upper) slot.
+    info.rawIsLastInFtqEntry := VecInit((0 until FastFetchWidth).map { i =>
+      blockEndsInFastFetch && (
+        (rawIsRvC(i) && lastSlotOH(i)) ||
+          (if (i < FastFetchWidth - 1) rawIsRvI(i) && lastSlotOH(i + 1) else false.B)
+      )
+    })
+    info
   }
 }
-

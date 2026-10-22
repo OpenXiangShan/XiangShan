@@ -24,7 +24,9 @@ import xiangshan.TriggerAction
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
+import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.InstrEndOffset
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
@@ -197,19 +199,16 @@ class InstrCompactBundle(width: Int)(implicit p: Parameters) extends IfuBundle {
 }
 
 class FastFetchInfo(implicit p: Parameters) extends IfuBundle {
-  val instrCount:          UInt           = UInt(log2Ceil(FastFetchWidth + 1).W)
-  val realInstrValid:      UInt           = UInt(FastFetchWidth.W)
-  val rawInstrValid:       Vec[Bool]      = Vec(FastFetchWidth, Bool())
-  val rawIsRvc:            Vec[Bool]      = Vec(FastFetchWidth, Bool())
-  val rawIsRvI:            Vec[Bool]      = Vec(FastFetchWidth, Bool())
+  val realInstrValid:      UInt           = UInt(FastFetchMaxNum.W)
   val rawIsPredTaken:      Vec[Bool]      = Vec(FastFetchWidth, Bool())
-  val rawInst:             Vec[UInt]      = Vec(FastFetchWidth, UInt(32.W))
+  val rawIsRvC:            Vec[Bool]      = Vec(FastFetchWidth, Bool())
   val rawPc:               Vec[GuardedPc] = Vec(FastFetchWidth, new GuardedPc)
   val rawFoldedPC:         Vec[UInt]      = Vec(FastFetchWidth, UInt(MemPredPCWidth.W))
-  val validMaskOH:         Vec[UInt]      = Vec(FastFetchWidth, UInt(FastFetchWidth.W))
-  val endMaskOH:           Vec[UInt]      = Vec(FastFetchWidth, UInt(FastFetchWidth.W))
+  val instrNum:            UInt           = UInt(log2Ceil(FastFetchMaxNum + 1).W)
+  val validMaskOH:         Vec[UInt]      = Vec(FastFetchMaxNum, UInt(FastFetchWidth.W))
   val rawIsLastInFtqEntry: Vec[Bool]      = Vec(FastFetchWidth, Bool())
   val ftqPtr:              FtqPtr         = new FtqPtr
+  val startIndex:          UInt           = UInt(log2Ceil(ICacheLineBytes).W)
 }
 
 class FastFetchEntry(implicit p: Parameters) extends IfuBundle {
@@ -228,7 +227,8 @@ class FastFetchEntry(implicit p: Parameters) extends IfuBundle {
 }
 
 class FastFetchBundle(implicit p: Parameters) extends IfuBundle {
-  val entries: Vec[FastFetchEntry] = Vec(FastFetchWidth, new FastFetchEntry)
+  val instrNum: UInt                = UInt(log2Ceil(FastFetchMaxNum + 1).W)
+  val entries:  Vec[FastFetchEntry] = Vec(FastFetchMaxNum, new FastFetchEntry)
 }
 
 class NormalFetchBundle(implicit p: Parameters) extends IfuBundle {
