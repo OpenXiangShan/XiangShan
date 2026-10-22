@@ -1,0 +1,181 @@
+digraph memblock_rm_dual_granularity_arch {
+  graph [
+    rankdir=TB,
+    bgcolor="white",
+    pad="0.20",
+    nodesep="0.30",
+    ranksep="0.42",
+    splines=ortho,
+    fontname="Noto Sans CJK SC",
+    fontsize=16,
+    labelloc=t,
+    label="MemBlock 双粒度参考模型架构"
+  ];
+
+  node [
+    shape=plain,
+    fontname="Noto Sans CJK SC",
+    fontsize=11
+  ];
+
+  edge [
+    color="#64748B",
+    penwidth=1.6,
+    arrowsize=0.7,
+    fontname="Noto Sans CJK SC",
+    fontsize=9
+  ];
+
+  subgraph cluster_inputs {
+    label="输入事实";
+    color="#CBD5E1";
+    penwidth=1.2;
+    style="rounded";
+    fontname="Noto Sans CJK SC";
+    fontsize=12;
+    fontcolor="#334155";
+
+    framework [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="7" COLOR="#94A3B8">
+        <TR><TD BGCOLOR="#E2E8F0"><B>测试框架</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Main table / 配置约束</TD></TR>
+        <TR><TD ALIGN="LEFT">commit / replay / redirect</TD></TR>
+        <TR><TD ALIGN="LEFT">指令及事务生命周期</TD></TR>
+      </TABLE>
+    >];
+
+    runtime [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="7" COLOR="#94A3B8">
+        <TR><TD BGCOLOR="#E2E8F0"><B>运行时上下文</B></TD></TR>
+        <TR><TD ALIGN="LEFT">CSR / TLB / S1-S2</TD></TR>
+        <TR><TD ALIGN="LEFT">PMA / PMP / PBMT</TD></TR>
+        <TR><TD ALIGN="LEFT">初始化内存 / Store overlay</TD></TR>
+      </TABLE>
+    >];
+
+    dut_obs [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="7" COLOR="#94A3B8">
+        <TR><TD BGCOLOR="#E2E8F0"><B>DUT 观测</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Load / STA / STD 写回</TD></TR>
+        <TR><TD ALIGN="LEFT">Store 最终内存结果</TD></TR>
+        <TR><TD ALIGN="LEFT">关键内部状态与协议事件</TD></TR>
+      </TABLE>
+    >];
+  }
+
+  identity [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8" COLOR="#1D4ED8">
+      <TR><TD BGCOLOR="#1D4ED8"><FONT COLOR="white"><B>只读抽象与身份关联</B></FONT></TD></TR>
+      <TR><TD ALIGN="LEFT">readonly API / observer cache</TD></TR>
+      <TR><TD ALIGN="LEFT">UID / ROB / LQ / SQ 统一关联</TD></TR>
+      <TR><TD ALIGN="LEFT">issue epoch / flush epoch / replay 过滤</TD></TR>
+    </TABLE>
+  >];
+
+  subgraph cluster_blackbox {
+    label="";
+    color="#2563EB";
+    penwidth=1.8;
+    style="rounded";
+    fontname="Noto Sans CJK SC";
+    fontsize=12;
+    fontcolor="#1E40AF";
+
+    black_header [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8" COLOR="#1D4ED8">
+        <TR><TD BGCOLOR="#1D4ED8"><FONT COLOR="white"><B>整体抽象黑盒模型（架构主判定）</B></FONT></TD></TR>
+      </TABLE>
+    >];
+
+    arch_sem [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="7" COLOR="#60A5FA">
+        <TR><TD BGCOLOR="#DBEAFE"><B>架构语义与期望状态</B></TD></TR>
+        <TR><TD ALIGN="LEFT">程序序与访存语义</TD></TR>
+        <TR><TD ALIGN="LEFT">地址转换与权限异常</TD></TR>
+        <TR><TD ALIGN="LEFT">Load 数据 / Store 字节状态</TD></TR>
+      </TABLE>
+    >];
+
+    arch_cmp [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="7" COLOR="#60A5FA">
+        <TR><TD BGCOLOR="#DBEAFE"><B>架构结果比较</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Load 写回数据与异常</TD></TR>
+        <TR><TD ALIGN="LEFT">Store mask / commit</TD></TR>
+        <TR><TD ALIGN="LEFT">check_store 最终内存</TD></TR>
+      </TABLE>
+    >];
+
+    black_header -> arch_sem [color="#2563EB"];
+    black_header -> arch_cmp [color="#2563EB"];
+  }
+
+  subgraph cluster_whitebox {
+    label="";
+    color="#059669";
+    penwidth=1.8;
+    style="rounded";
+    fontname="Noto Sans CJK SC";
+    fontsize=12;
+    fontcolor="#047857";
+
+    white_header [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8" COLOR="#047857">
+        <TR><TD BGCOLOR="#047857"><FONT COLOR="white"><B>局部白盒检查器（特性补充与定位）</B></FONT></TD></TR>
+      </TABLE>
+    >];
+
+    lsq_chk [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="7" COLOR="#34D399">
+        <TR><TD BGCOLOR="#D1FAE5"><B>LSQ 与执行路径</B></TD></TR>
+        <TR><TD ALIGN="LEFT">RAR / RAW / Replay Queue</TD></TR>
+        <TR><TD ALIGN="LEFT">STA / STD 配对与转发</TD></TR>
+        <TR><TD ALIGN="LEFT">分配、释放及索引回卷</TD></TR>
+      </TABLE>
+    >];
+
+    mem_chk [label=<
+      <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="7" COLOR="#34D399">
+        <TR><TD BGCOLOR="#D1FAE5"><B>翻译、缓存与恢复</B></TD></TR>
+        <TR><TD ALIGN="LEFT">DTLB / PTW 请求响应关联</TD></TR>
+        <TR><TD ALIGN="LEFT">DCache / Sbuffer / Uncache</TD></TR>
+        <TR><TD ALIGN="LEFT">redirect 回收与迟到响应隔离</TD></TR>
+      </TABLE>
+    >];
+  }
+
+  result [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="8" COLOR="#C2410C">
+      <TR><TD BGCOLOR="#C2410C"><FONT COLOR="white"><B>统一检查结果</B></FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>黑盒：</B>架构 Pass / Fail</TD></TR>
+      <TR><TD ALIGN="LEFT"><B>白盒：</B>局部错误与定位信息</TD></TR>
+      <TR><TD ALIGN="LEFT">UVM error / 诊断 / 覆盖率反馈</TD></TR>
+    </TABLE>
+  >];
+
+  scope [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="7" COLOR="#D97706">
+      <TR><TD BGCOLOR="#FEF3C7"><B>能力边界</B></TD></TR>
+      <TR><TD ALIGN="LEFT">当前完整数据闭环：普通标量 Load / Store</TD></TR>
+      <TR><TD ALIGN="LEFT">分阶段扩展：Vector / AMO / CBO / Prefetch</TD></TR>
+    </TABLE>
+  >];
+
+  framework -> identity;
+  runtime -> identity;
+  dut_obs -> identity;
+
+  identity -> black_header [color="#2563EB", penwidth=2.0];
+  identity -> white_header [color="#059669", penwidth=2.0];
+  white_header -> lsq_chk [color="#059669", penwidth=2.0];
+  white_header -> mem_chk [color="#059669", penwidth=2.0];
+
+  arch_cmp -> result [color="#2563EB", penwidth=2.0];
+  lsq_chk -> result [color="#059669", penwidth=2.0];
+  mem_chk -> result [color="#059669", penwidth=2.0];
+  result -> scope [color="#D97706", style=dashed, arrowhead=none, constraint=false];
+
+  { rank=same; framework; runtime; dut_obs; }
+  { rank=same; black_header; white_header; }
+  { rank=same; arch_sem; arch_cmp; lsq_chk; mem_chk; }
+  { rank=same; result; scope; }
+}
