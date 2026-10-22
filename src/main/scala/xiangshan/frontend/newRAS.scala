@@ -723,7 +723,7 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   stack.redirect_meta_TOSW := recover_cfi.TOSW
   stack.redirect_meta_TOSR := recover_cfi.TOSR
   stack.redirect_meta_NOS  := recover_cfi.NOS
-  stack.redirect_callAddr  := SignExt(recover_cfi.pc, VAddrBits + 1) + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
+  stack.redirect_callAddr  := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
   val updateValid = RegNext(io.update.valid, init = false.B)
   val update      = Wire(new BranchPredictionUpdate)
@@ -742,7 +742,7 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   stack.commit_valid      := updateValid
   stack.commit_push_valid := updateValid && update.is_call_taken
   stack.commit_pop_valid  := updateValid && update.is_ret_taken
-  stack.commit_push_addr := update.ftb_entry.getFallThrough(update_pc) + Mux(
+  stack.commit_push_addr := update.ftb_entry.getFallThrough(Cat(io.update.bits.pcGuard, update_pc)) + Mux(
     update.ftb_entry.last_may_be_rvi_call,
     2.U,
     0.U

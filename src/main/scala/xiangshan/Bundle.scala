@@ -94,7 +94,7 @@ class PredictorAnswer(implicit p: Parameters) extends XSBundle {
 
 class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
   // from backend
-  val pc = UInt(VAddrBits.W)
+  val pc = UInt((VAddrBits + 1).W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val ssp = UInt(log2Up(RasSize).W)

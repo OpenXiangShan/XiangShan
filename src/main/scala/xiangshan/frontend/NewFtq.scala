@@ -1478,6 +1478,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val update = io.toBpu.update.bits
   update.false_hit   := commit_hit === h_false_hit
   update.pc          := commit_pc_bundle.startAddr(VAddrBits - 1, 0)
+  update.pcGuard     := commit_pc_bundle.startAddr(VAddrBits)
   update.meta        := commit_meta
   update.cfi_idx     := commit_cfi
   update.full_target := commit_target(VAddrBits - 1, 0)
@@ -1669,7 +1670,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ftb_modified_entry_strong_bias          = ftb_modified_entry && ftbEntryGen.is_strong_bias_modified
 
   def getFtbEntryLen(pc: UInt, entry: FTBEntry) = (entry.getFallThrough(pc) - pc) >> instOffsetBits
-  val gen_ftb_entry_len = getFtbEntryLen(update.pc, ftbEntryGen.new_entry)
+  val gen_ftb_entry_len = getFtbEntryLen(commit_pc_bundle.startAddr, ftbEntryGen.new_entry)
   XSPerfHistogram("ftb_init_entry_len", gen_ftb_entry_len, ftb_new_entry, 0, PredictWidth + 1, 1)
   XSPerfHistogram("ftb_modified_entry_len", gen_ftb_entry_len, ftb_modified_entry, 0, PredictWidth + 1, 1)
   val s3_ftb_entry_len = getFtbEntryLen(from_bpu.s3.pc(0), from_bpu.last_stage_ftb_entry)

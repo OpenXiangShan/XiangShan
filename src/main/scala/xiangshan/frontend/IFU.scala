@@ -1104,8 +1104,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_instr_range         = RegEnable(io.toIbuffer.bits.enqEnable, wb_enable)
 
   val wb_pc_lower_result = RegEnable(f3_pc_lower_result, wb_enable)
-  val wb_pc_high         = RegEnable(f3_pc_high(VAddrBits - PcCutPoint - 1, 0), wb_enable)
-  val wb_pc_high_plus1   = RegEnable(f3_pc_high_plus1(VAddrBits - PcCutPoint - 1, 0), wb_enable)
+  val wb_pc_high         = RegEnable(f3_pc_high, wb_enable)
+  val wb_pc_high_plus1   = RegEnable(f3_pc_high_plus1, wb_enable)
   val wb_pc              = CatPC(wb_pc_lower_result, wb_pc_high, wb_pc_high_plus1)
 
   // val wb_pc             = RegEnable(f3_pc, wb_enable)

@@ -325,8 +325,7 @@ class CtrlBlockImp(
   val loadRedirectPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).startAddr + loadRedirectPcFtqOffset
 
   redirectGen.io.loadReplay.bits.cfiUpdate.pc := loadRedirectPcRead
-  val load_target = loadRedirectPcRead
-  redirectGen.io.loadReplay.bits.cfiUpdate.target := SignExt(load_target, VAddrBits + 1)
+  redirectGen.io.loadReplay.bits.cfiUpdate.target := loadRedirectPcRead
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 

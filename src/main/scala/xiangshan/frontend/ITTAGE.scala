@@ -443,7 +443,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(3))
   val debug_pc_s3 = RegEnable(debug_pc_s2, io.s2_fire(3))
 
-  val s2_tageTarget        = Wire(UInt(VAddrBits.W))
+  val s2_tageTarget        = Wire(UInt((VAddrBits + 1).W))
   val s2_providerTarget    = Wire(UInt(VAddrBits.W))
   val s2_altProviderTarget = Wire(UInt(VAddrBits.W))
   val s2_provided          = Wire(Bool())
@@ -594,9 +594,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   }.reduce(_ | _)
 
   s2_tageTarget := Mux1H(Seq(
-    (provided && !(providerNull && altProvided), providerCatTarget),
-    (altProvided && providerNull, altproviderCatTarget),
-    (!provided, baseTarget(VAddrBits - 1, 0))
+    (provided && !(providerNull && altProvided), Cat(s2_pc_guard_dup(0), providerCatTarget)),
+    (altProvided && providerNull, Cat(s2_pc_guard_dup(0), altproviderCatTarget)),
+    (!provided, baseTarget)
   ))
   s2_provided          := provided
   s2_provider          := providerInfo.tableIdx
@@ -614,7 +614,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     fp & s3_tageTarget <-
       io.out.s3.full_pred zip s3_tageTarget_dup
   )
-    yield fp.jalr_target := SignExt(s3_tageTarget, VAddrBits + 1)
+    yield fp.jalr_target := s3_tageTarget
 
   resp_meta.provider.valid    := s3_provided
   resp_meta.provider.bits     := s3_provider
