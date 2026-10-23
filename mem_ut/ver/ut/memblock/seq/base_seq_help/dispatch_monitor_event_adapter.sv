@@ -565,6 +565,17 @@ class dispatch_monitor_event_adapter extends uvm_object;
         if (!data.lookup_active_uid_by_rob(rob_key, uid)) begin
             return 1'b0;
         end
+        // STD value-only raw 只能归属于尚未消费本次真实 STD writeback 的 owner。
+        // std_writeback 可能先于 std_fault 在 fault barrier 中间态置位，因此不能只依赖
+        // target_entry_done() 的 pass/fault 判断。
+        begin
+            status_transaction status;
+
+            status = data.get_status(uid);
+            if (status.std_writeback || status.std_pass || status.std_fault) begin
+                return 1'b0;
+            end
+        end
         return fill_current_issue_snapshot(candidate, uid, rob_key,
                                            sample_flush_epoch_valid,
                                            sample_flush_epoch,

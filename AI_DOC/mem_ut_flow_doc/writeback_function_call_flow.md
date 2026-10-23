@@ -1982,7 +1982,8 @@ LDA replayInst：
 
 STD real writeback：
   adapter不读取悬空ROB flag/SQ payload；只对ROB value做两个完整key probe；
-  唯一命中后补status ROB/SQ并进入原handler；STD不建token且无STD replay。
+  每个active owner先检查std_writeback/std_pass/std_fault，已消费的旧target不再作为候选；
+  过滤后唯一命中才补status ROB/SQ并进入原handler，零命中或双未完成候选继续fatal；STD不建token且无STD replay。
 
 STA IQ feedback replay：
   STA fire注册IQ+real-WB双pending token；

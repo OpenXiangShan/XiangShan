@@ -63,7 +63,7 @@ raw event 到统一语义的映射：
 函数/task：
 
 - `fill_current_issue_snapshot()`、`attach_current_issue_snapshot()`：使用 active ROB map 和当前 status 校验 active/target/epoch/owner，再补 UID、ROB、LQ/SQ、`issue_epoch/replay_seq`；不修改 pass/fault 状态。
-- `probe_std_candidate()`、`resolve_std_uid_by_rob_value_only()`：对 STD 缺失 ROB flag 的情况固定探测 flag 0/1，先过滤合法 STD current candidate，再要求唯一命中并从 status 补 SQ；零命中、双命中或 owner 不一致均 fatal。
+- `probe_std_candidate()`、`resolve_std_uid_by_rob_value_only()`：对 STD 缺失 ROB flag 的情况固定探测 flag 0/1，先过滤 active、未消费 STD target 且 snapshot 合法的 current candidate，再要求唯一命中并从 status 补 SQ；`std_writeback/std_pass/std_fault` 任一置位的旧 owner 不再参与候选，零命中、双未完成候选或 owner 不一致均保持 fatal。
 - `check_raw_int_wb_capability()`、`check_raw_int_wb_metadata()`：按 V2 source/lane 检查 metadata presence、exceptionVec 位图及当前 unsupported trigger/flush/replay 组合。
 - `convert_raw_int_wb(raw,wb_event)`：按 `SCALAR_LDA/STA/STD` source kind 选择 target，完成 current snapshot、metadata 和 key 归一化后设置 `real_wb_valid`。
 - `convert_raw_iq_feedback(raw,wb_event)`：当前只接受 STA IQ feedback。香山源码中 IQ feedback 是 IssueQueue response，`hit=1` 表示 finalSuccess，`hit=0` 表示 failed；adapter 只设置 `iq_feedback_valid/iq_feedback_hit/iq_feedback_failed/iq_feedback_flush_state`。STA `hit=0` 同时设置 `replay_valid` 和可选 `ptw_back_replay`；STD IQ feedback 不是当前 V2 completion source，入口直接 fatal。
@@ -91,7 +91,7 @@ raw event 到统一语义的映射：
 | `raw_rob_to_key(valid,flag,value,key)`、`raw_lq_to_key(...)`、`raw_sq_to_key(...)` | raw valid/flag/value、输出 key | 将 monitor 原始字段转成统一 key，invalid 时返回 0。 |
 | `event_has_active_uid(wb_event)` | event | 快速判断 event 是否能反查到 active uid，避免无效 monitor event 进入状态机。 |
 | `fill_current_issue_snapshot()`、`attach_current_issue_snapshot()` | partial event、raw sample epoch | 通过 current active map/status 补齐 UID、资源 key 和 target issue/replay 快照；旧实例、缺 key 或 owner 不一致不允许进入 handler。 |
-| `probe_std_candidate()`、`resolve_std_uid_by_rob_value_only()` | STD ROB value-only raw | 最多探测两个 ROB flag，唯一命中后补完整 ROB/SQ identity，不扫描主表。 |
+| `probe_std_candidate()`、`resolve_std_uid_by_rob_value_only()` | STD ROB value-only raw | 最多探测两个 ROB flag；先排除 `std_writeback/std_pass/std_fault` 已置位的 completed owner，再对未完成 owner补完整 ROB/SQ identity，不扫描主表。 |
 | `check_raw_int_wb_capability()`、`check_raw_int_wb_metadata()` | raw int writeback | 按 V2 split lane 检查真实字段能力、exception mask 和 unsupported metadata 行为。 |
 | `convert_raw_int_wb(raw,wb_event)` | raw int writeback | 将 V2 `SCALAR_LDA/STA/STD` 转换成 LOAD/STA/STD target event，完成 snapshot/key 校验后设置 `real_wb_valid`。 |
 | `convert_raw_iq_feedback(raw,wb_event)` | raw IQ feedback | 将受支持的 STA IssueQueue response 转成 `iq_feedback_*` event；不再把 `hit` 写成 `real_wb_valid`，STD feedback 直接 fatal。 |

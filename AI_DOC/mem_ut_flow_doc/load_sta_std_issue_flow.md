@@ -1441,7 +1441,8 @@ required key 完整时，才能进入 real writeback handler 设置 `std_writeba
 writebackStd raw：
   保留真实 robIdx_value，不伪造 robIdx_flag/sqIdx；
   对 flag=0 和 flag=1 各查询一次 active ROB map；
-  零命中或双命中 fatal；唯一命中后从 status 补 SQ key，并核对 SQ map owner；
+  对每个 active owner 先排除 std_writeback/std_pass/std_fault 已置位的已消费 target；
+  过滤后零命中或双未完成候选仍 fatal；唯一命中后从 status 补 SQ key，并核对 SQ map owner；
   归一化成功后调用 writeback_status_handler，才设置 STD writeback/pass。
 ```
 
