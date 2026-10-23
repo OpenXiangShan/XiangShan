@@ -66,43 +66,28 @@ make -C tests/memblock smoke PICKER=/path/to/picker JOBS=8
 
 ## Harness Layout
 
-Picker compiles `cpp/memblock_main.cpp` as one generated translation unit. The
-included modules keep ownership explicit without changing the generated build:
+The C++ harness separates test scenarios, verification components, and DUT access.
+Scenarios generate transactions; drivers and memory-side agents execute them;
+monitors, independent reference models, and scoreboards check observable results.
 
-| Path | Responsibility |
+| Area | Responsibility |
 | --- | --- |
-| `cpp/memblock_main.cpp` | Command-line parsing and scenario dispatch |
-| `cpp/scenarios/*.inc` | Focused and mixed sequences grouped by verification domain |
-| `cpp/random/*.inc` | Constraint policy, presets, coverage, and random closure gates |
-| `cpp/memblock_env.hpp` | Stable environment facade |
-| `cpp/environment/*.inc` | Reference model, monitors, agents, scoreboards, and orchestration |
-| `scripts/` | RTL preparation, Picker setup, regression control, verification, and reporting |
-| `unit/` | Python tests for the harness, documents, generators, and controllers |
+| `cpp/memblock_main.cpp`, `cpp/scenarios/` | CLI dispatch, focused scenarios, and mixed-traffic orchestration |
+| `cpp/random/` | Constraints, seeded generation, and coverage |
+| `cpp/memblock_env.hpp`, `cpp/environment/` | Environment coordination and domain verification components |
+| `cpp/environment/dut_adapter.*` | Boundary to generated DUT ports and Picker types |
+| `cpp/scenarios/catalog.json` | Shared scenario inventory for CLI, Make, and benchmarks |
+| `scripts/`, `Makefile` | Generation, build, regression, and result processing |
+| `unit/` | Tests for verification infrastructure and tooling |
 
-The harness follows UVM-style responsibilities without a SystemVerilog class
-runtime: scenarios and seeded generators produce transactions, typed drivers
-drive the DUT, agents provide manager responses, monitors sample external
-events, independent models compute expected effects, scoreboards check
-completion, and assertions cover selected protocol invariants.
+Domain components own their protocol and expectation state. The environment
+coordinates their execution, while the DUT adapter isolates hardware-interface
+details. Reference models compute expectations independently of DUT internals;
+structured failures carry diagnostics through to regression results.
 
-The Picker export enables read-only `mem_direct` observation and does not enable
-VPI. Internal signals are for localization only; they never determine an
-architectural PASS/FAIL. For a focused replay, set:
-
-```sh
-export MEMBLOCK_MEM_DIRECT_TRACE_FILE=/unique/path/memblock-trace.log
-export MEMBLOCK_MEM_DIRECT_DEBUG_LINE=0x1234
-export MEMBLOCK_MEM_DIRECT_TRACE_ALL_A=1
-export MEMBLOCK_MEM_DIRECT_TRACE_APPEND=1
-```
-
-The trace includes selected load/refill, StoreMisalignBuffer, and load-exception
-events. A missing internal name disables only that diagnostic field. Use a
-unique trace path for each concurrent simulation.
-
-`scripts/generate_cpp.py` derives repetitive lane accessors from the checked RTL
-manifest. Do not hard-code a flattened port without first adding it to
-`config/expected_ports.json`.
+Scenarios and environment implementations compile separately and reuse the
+compiled Picker model. This keeps ordinary testbench changes independent of
+RTL-model rebuilding.
 
 ## Build From A Clean Checkout
 
@@ -171,7 +156,7 @@ dependency that can start a rebuild.
 | --- | --- | --- |
 | Root `out/`, `build/rtl/`, and `build/XSTop.*` from `make verilog` | Mill/RTL generation | Exclusive per checkout. Do not test this tree while RTL is being regenerated. Regenerate after an RTL, configuration, or generation-option change. |
 | `build/memblock/rtl.f` and `rtl.json` | `make prepare-rtl` | Exclusive with builds and final checks. Treat both files as one generated unit. |
-| `config/expected_ports.json`, `docs/PORTS.md`, `sv/memblock_protocol_sva.sv`, and `cpp/generated_port_defaults.hpp` | `make ports` | Exclusive write with explicit review. Do not regenerate to hide an interface mismatch. |
+| `config/expected_ports.json`, `docs/PORTS.md`, `sv/memblock_protocol_sva.sv`, `cpp/generated_port_defaults.hpp`, `cpp/generated_interface_types.hpp`, and `cpp/environment/dut_adapter.*` | `make ports` | Exclusive write with explicit review. Do not regenerate to hide an interface mismatch. |
 | `build/memblock/tools/` and `build/memblock/picker/` | `bootstrap-picker`, export, model, and harness targets | One build owner. The Picker lock covers selected public targets, not every preparation or result path. |
 | `build/memblock/runtime/` | `freeze-runtime` | Replace only when no campaign uses that runtime. Active jobs may read a frozen runtime concurrently. |
 | Regression and benchmark JSON/Markdown | Controllers and verifiers | Use a unique output path. Do not share default result files across concurrent controllers. |
@@ -222,7 +207,13 @@ arbitrary parallel Make commands safe.
 
 ## Focused Tests
 
-After the shared build is ready, focused targets run the same prepared binary:
+After the shared build is ready, focused targets run the same prepared binary.
+List its registered CLI scenarios with `UTMemBlock_example --list-tests`; validate
+catalog/module coverage and generated Make recipes with `make check-scenarios`.
+Add or change leaf names, defaults, aliases, and benchmark inclusion in
+`cpp/scenarios/catalog.json`, then regenerate Make targets with
+`python3 scripts/scenario_catalog.py generate-make --output cpp/scenarios/generated_targets.mk`.
+Focused invocations include:
 
 ```sh
 make smoke PICKER="$PICKER" JOBS=8
@@ -427,6 +418,21 @@ no random stream, DUT cycle, oracle, coverage gate, or acceptance requirement.
 The controller retains the output tail for a failed/timed-out seed. A live
 checkpoint proves progress only when actions or cycles advance; a final checkpoint
 alone does not prove completion or a design deadlock.
+
+The Picker export enables read-only `mem_direct` observation and does not enable
+VPI. Internal signals are for localization only; they never determine an
+architectural PASS/FAIL. For a focused replay, set:
+
+```sh
+export MEMBLOCK_MEM_DIRECT_TRACE_FILE=/unique/path/memblock-trace.log
+export MEMBLOCK_MEM_DIRECT_DEBUG_LINE=0x1234
+export MEMBLOCK_MEM_DIRECT_TRACE_ALL_A=1
+export MEMBLOCK_MEM_DIRECT_TRACE_APPEND=1
+```
+
+The trace includes selected load/refill, StoreMisalignBuffer, and load-exception
+events. A missing internal name disables only that diagnostic field. Use a
+unique trace path for each concurrent simulation.
 
 Before calling a failure an RTL bug, replay it deterministically, minimize it
 without weakening the oracle, and exclude driver, manager, reference-model,

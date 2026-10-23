@@ -111,7 +111,7 @@ defensive MMIO source adapter.
 ## Validation
 
 The focused test is implemented in
-[`memblock_main.cpp`](../cpp/memblock_main.cpp) as `run_uncache_errors` and is
+[`scenarios/manager_errors.inc`](../cpp/scenarios/manager_errors.inc) as `run_uncache_errors` and is
 dispatched as `--test uncache-errors`. It checks denied and corrupt responses
 separately, uses independent ROB/LQ identities, verifies scalar writeback
 exception masks and RF suppression, and accounts for the automatic Uncache LQ
