@@ -49,7 +49,7 @@ class StoreUnitS0(param: ExeUnitParams)(
     val prefetchReq = Flipped(DecoupledIO(new StorePrefetchReq))
 
     // Tlb request
-    val tlbReq = DecoupledIO(new TlbReq)
+    val tlbReq = DecoupledIO(new TlbReq(hasCboAccess = HasShadowStack))
     val tlbReqKill = Output(Bool())
 
     // DCache request
@@ -214,9 +214,13 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.fullva := sink.bits.fullva
   io.tlbReq.bits.checkfullva := isVector || isScalar
   io.tlbReq.bits.cmd := Mux(isCboNoZero, TlbCmd.read, TlbCmd.write)
+  io.tlbReq.bits.isCbo.foreach(_ := isCbo)
   io.tlbReq.bits.hyperinst := LSUOpType.isHsv(uop.fuOpType)
   io.tlbReq.bits.hlvx := false.B
   io.tlbReq.bits.isPrefetch := isHwPrefetch
+  if(HasShadowStack) {
+    io.tlbReq.bits.shadowStackUser.get := LSUOpType.isShadowStackStore(uop.fuOpType)
+  }
   io.tlbReq.bits.size := sink.bits.size
   io.tlbReq.bits.kill := false.B
   io.tlbReq.bits.memidx.is_ld := false.B
@@ -315,6 +319,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isHwPrefetch = accessType.isPrefetch()
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
+  val isShadowStackStore = if (HasShadowStack) LSUOpType.isShadowStackStore(fuOpType) else false.B
   val align = in.align.get
   val isUnalignHead = in.unalignHead.get
   val cross4KPage = in.cross4KPage.get
@@ -340,9 +345,10 @@ class StoreUnitS1(param: ExeUnitParams)(
   val tlbException = tlbResp.bits.excp.head
   // The reason for considering the ld case is because of CboNoZero
   // pf: page fault, af: access fault, gpf: guest page fault
-  val pf = tlbHit && (tlbException.pf.st || tlbException.pf.ld)
-  val af = tlbHit && (tlbException.af.st || tlbException.af.ld)
-  val gpf = tlbHit && (tlbException.gpf.st || tlbException.gpf.ld)
+  val shadowStackMisaligned = isShadowStackStore && !align
+  val pf = tlbHit && (tlbException.pf.st || tlbException.pf.ld) && !shadowStackMisaligned
+  val af = tlbHit && (tlbException.af.st || tlbException.af.ld) || shadowStackMisaligned
+  val gpf = tlbHit && (tlbException.gpf.st || tlbException.gpf.ld) && !shadowStackMisaligned
   val hasException = pf || af || gpf
 
   val killDCache = kill || tlbMiss || hasException
@@ -366,7 +372,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isBreakPoint = TriggerAction.isExp(triggerAction)
 
   // Unalign tail inject to s0
-  val unalignTailInjectValid = fire && isUnalignHead
+  val unalignTailInjectValid = fire && isUnalignHead && !isShadowStackStore
   val unalignTail = Wire(io.unalignTail.bits.cloneType)
   connectSamePort(unalignTail, in)
   unalignTail.entrance := StoreEntrance.unalignTail.U
@@ -621,14 +627,16 @@ class StoreUnitS2(param: ExeUnitParams)(
   val isMMIO = tlbHit && tlbAccessible && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
   val isUncache = isNC || isMMIO
   val memBackTypeMM = !(pmp.mmio && tlbAccessible) // paddr is valid
+  val isShadowStackStore = if (HasShadowStack) LSUOpType.isShadowStackStore(uop.fuOpType) else false.B
 
   val afInaccessible = uop.exceptionVec(storeAccessFault) || pmpInaccessible
   val afVectorUncache = isVector && isUncache
   val afCboUncache = isCbo && isUncache
   val afUnalignMMIO = isMMIO && !align
+  val afShadowStackNonIdempotent = Option.when(HasShadowStack) (isShadowStackStore && isMMIO)
 
-  val af = afInaccessible || afVectorUncache || afCboUncache || afUnalignMMIO
-  val am = !align && isScalar && isNC && !pmpInaccessible
+  val af = afInaccessible || afVectorUncache || afCboUncache || afUnalignMMIO || afShadowStackNonIdempotent.getOrElse(false.B)
+  val am = !align && isScalar && isNC && !pmpInaccessible && !isShadowStackStore
   val hasException = in.hasException.get || af || am
 
   // DCache
@@ -855,7 +863,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val stin = Flipped(Decoupled(new ExuInput(param)))
   val prefetchReq = Flipped(DecoupledIO(new StorePrefetchReq))
   // TLB / PMA / PMP
-  val tlb = new TlbRequestIO
+  val tlb = new TlbRequestIO(hasCboAccess = HasShadowStack)
   val pmp = Flipped(new PMPRespBundle)
   // DCache
   val dcache = new DCacheStoreIO

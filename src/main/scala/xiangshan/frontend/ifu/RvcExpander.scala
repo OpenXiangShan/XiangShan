@@ -29,7 +29,14 @@ class RvcExpander(implicit p: Parameters) extends IfuModule {
   }
   val io: RVCExpanderIO = IO(new RVCExpanderIO)
 
-  private val decoder = new RVCDecoder(io.in, io.fsIsOff, XLEN, fLen, useAddiForMv = true)
+  private val decoder = new RVCDecoder(
+    io.in,
+    io.fsIsOff,
+    XLEN,
+    fLen,
+    useAddiForMv = true,
+    hasZicfiss = HasShadowStack
+  )
 
   if (HasCExtension) {
     io.out := decoder.decode

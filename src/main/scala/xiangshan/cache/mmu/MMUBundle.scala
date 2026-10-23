@@ -628,7 +628,7 @@ class MemBlockidxBundle(implicit p: Parameters) extends TlbBundle {
   val idx = UInt(log2Ceil(VirtualLoadQueueMaxStoreQueueSize).W)
 }
 
-class TlbReq(implicit p: Parameters) extends TlbBundle {
+class TlbReq(hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbBundle {
   /**
     * TODO:
     * 1. remove size, either kill or no_translate
@@ -644,6 +644,8 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
   val memidx = Output(new MemBlockidxBundle)
   val isPrefetch = Output(Bool())
+  val isCbo = Option.when(hasCboAccess)(Output(Bool()))
+  val shadowStackUser = Option.when(HasShadowStack)(Output(Bool()))
   // do not translate, but still do pmp/pma check
   val no_translate = Output(Bool())
   val pmp_addr = Output(UInt(PAddrBits.W)) // load s1 send prefetch paddr
@@ -694,8 +696,8 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   }
 }
 
-class TlbRequestIO(nRespDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
-  val req = DecoupledIO(new TlbReq)
+class TlbRequestIO(nRespDups: Int = 1, hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbBundle {
+  val req = DecoupledIO(new TlbReq(hasCboAccess))
   val req_kill = Output(Bool())
   val resp = Flipped(DecoupledIO(new TlbResp(nRespDups)))
 }
@@ -764,16 +766,16 @@ class TlbRefilltoMemIO()(implicit p: Parameters) extends TlbBundle {
   val memidx = new MemBlockidxBundle
 }
 
-class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends
+class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters) extends
   MMUIOBaseBundle {
   val hartId = Input(UInt(hartIdLen.W))
-  val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups)))
+  val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups, hasCboAccess)))
   val flushPipe = Vec(Width, Input(Bool()))
   val redirect = Flipped(ValidIO(new Redirect)) // flush the signal need_gpa in tlb
   val ptw = new TlbPtwIOwithMemIdx(Width)
   val refill_to_mem = Output(new TlbRefilltoMemIO())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
-  val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize)))
+  val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize, hasShadowStackAccess = HasShadowStack && !q.fetchi)))
   val tlbreplay = Vec(Width, Output(Bool()))
 }
 
@@ -833,6 +835,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
   }
 
   def isPf(level: UInt, pbmte: Bool) = {
+    val isSspEncoding = if (HasShadowStack) !perm.r && perm.w && !perm.x else false.B
     val pf = WireInit(false.B)
     when (reserved =/= 0.U){
       pf := true.B
@@ -840,7 +843,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
       pf := true.B
     }.elsewhen (isNext()) {
       pf := (perm.u || perm.a || perm.d || n =/= 0.U || pbmt =/= 0.U)
-    }.elsewhen (!perm.v || (!perm.r && perm.w)) {
+    }.elsewhen (!perm.v || (!perm.r && perm.w && !isSspEncoding)) {
       pf := true.B
     // 1. only support 64KB napot page now (ppn(3, 0) === 4'b1000)
     // 2. n should always be 0 when superpage (when level =/= 0.U)

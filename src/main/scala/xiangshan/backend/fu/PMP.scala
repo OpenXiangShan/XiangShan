@@ -365,15 +365,17 @@ class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with P
   io.pma := pma
 }
 
-class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle {
+class PMPReqBundle(lgMaxSize: Int = 3, hasShadowStackAccess: Boolean = false)(implicit p: Parameters) extends PMPBundle {
   val addr = Output(UInt(PMPAddrBits.W))
   val size = Output(UInt(log2Ceil(lgMaxSize+1).W))
   val cmd = Output(TlbCmd())
+  val isShadowStackAccess = Option.when(hasShadowStackAccess)(Output(Bool()))
 
-  def apply(addr: UInt, size: UInt, cmd: UInt): Unit = {
+  def apply(addr: UInt, size: UInt, cmd: UInt, isShadowStackAccess: Bool = false.B): Unit = {
     this.addr := addr
     this.size := size
     this.cmd := cmd
+    this.isShadowStackAccess.foreach(_ := isShadowStackAccess)
   }
 
   def apply(addr: UInt): Unit = { // req minimal permission and req align size
@@ -401,9 +403,11 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
 }
 
 trait PMPCheckMethod extends PMPConst {
-  def pmp_check(cmd: UInt, cfg: PMPConfig) = {
+  def pmp_check(cmd: UInt, cfg: PMPConfig, isShadowStackAccess: Option[Bool] = None) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
+    // SSPOPCHK executes in LDU; report its PMP R+W denial through the load response.
+    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) &&
+      (!cfg.r || isShadowStackAccess.map(_ && !cfg.w).getOrElse(false.B))
     resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !cfg.w
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     resp.mmio := false.B
@@ -495,9 +499,9 @@ class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
   }
 }
 
-class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
+class PMPCheckIO(lgMaxSize: Int, hasShadowStackAccess: Boolean = false)(implicit p: Parameters) extends PMPBundle {
   val check_env = Input(new PMPCheckerEnv())
-  val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
+  val req = Flipped(Valid(new PMPReqBundle(lgMaxSize, hasShadowStackAccess))) // usage: assign the valid to fire signal
   val resp = new PMPRespBundle()
 
   def apply(keyIDen: Bool, cmode: Bool, mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
@@ -564,13 +568,14 @@ class PMPChecker
   lgMaxSize: Int = 3,
   sameCycle: Boolean = false,
   leaveHitMux: Boolean = false,
-  pmpUsed: Boolean = true
+  pmpUsed: Boolean = true,
+  hasShadowStackAccess: Boolean = false
 )(implicit p: Parameters) extends PMPModule
   with PMPCheckMethod
   with PMACheckMethod
 {
   require(!(leaveHitMux && sameCycle))
-  val io = IO(new PMPCheckIO(lgMaxSize))
+  val io = IO(new PMPCheckIO(lgMaxSize, hasShadowStackAccess))
 
   val req = io.req.bits
 
@@ -593,7 +598,10 @@ class PMPChecker
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(check_addr, req.size, io.check_env.pma, io.check_env.mode, io.check_env.debug, lgMaxSize)
 
   val cmd = if(leaveHitMux) RegEnable(req.cmd, io.req.valid) else req.cmd
-  val resp_pmp = pmp_check(cmd, res_pmp.cfg)
+  val isShadowStackAccess = req.isShadowStackAccess.map { access =>
+    if (leaveHitMux) RegEnable(access, io.req.valid) else access
+  }
+  val resp_pmp = pmp_check(cmd, res_pmp.cfg, isShadowStackAccess)
   val resp_pma = pma_check(cmd, res_pma.cfg)
 
   def keyid_check(leaveHitMux: Boolean = false, valid: Bool = true.B, addr: UInt) = {
