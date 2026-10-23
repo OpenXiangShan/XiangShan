@@ -628,7 +628,7 @@ class MemBlockidxBundle(implicit p: Parameters) extends TlbBundle {
   val idx = UInt(log2Ceil(VirtualLoadQueueMaxStoreQueueSize).W)
 }
 
-class TlbReq(implicit p: Parameters) extends TlbBundle {
+class TlbReq(hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbBundle {
   /**
     * TODO:
     * 1. remove size, either kill or no_translate
@@ -644,6 +644,7 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
   val memidx = Output(new MemBlockidxBundle)
   val isPrefetch = Output(Bool())
+  val isCbo = Option.when(hasCboAccess)(Output(Bool()))
   val shadowStackUser = Option.when(HasShadowStack)(Output(Bool()))
   // do not translate, but still do pmp/pma check
   val no_translate = Output(Bool())
@@ -695,8 +696,8 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   }
 }
 
-class TlbRequestIO(nRespDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
-  val req = DecoupledIO(new TlbReq)
+class TlbRequestIO(nRespDups: Int = 1, hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbBundle {
+  val req = DecoupledIO(new TlbReq(hasCboAccess))
   val req_kill = Output(Bool())
   val resp = Flipped(DecoupledIO(new TlbResp(nRespDups)))
 }
@@ -765,10 +766,10 @@ class TlbRefilltoMemIO()(implicit p: Parameters) extends TlbBundle {
   val memidx = new MemBlockidxBundle
 }
 
-class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends
+class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters) extends
   MMUIOBaseBundle {
   val hartId = Input(UInt(hartIdLen.W))
-  val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups)))
+  val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups, hasCboAccess)))
   val flushPipe = Vec(Width, Input(Bool()))
   val redirect = Flipped(ValidIO(new Redirect)) // flush the signal need_gpa in tlb
   val ptw = new TlbPtwIOwithMemIdx(Width)

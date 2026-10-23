@@ -45,11 +45,12 @@ import freechips.rocketchip.rocket.PMPConfig
   * @param p: XiangShan Paramemters, like XLEN
   */
 
-class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)(implicit p: Parameters) extends TlbModule
+class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters,
+  hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbModule
   with HasCSRConst
   with HasPerfEvents
 {
-  val io = IO(new TlbIO(Width, nRespDups, q))
+  val io = IO(new TlbIO(Width, nRespDups, q, hasCboAccess))
 
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
@@ -73,7 +74,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val redirect = io.redirect
   val EffectiveVa = Wire(Vec(Width, UInt(XLEN.W)))
   val req_in = req
-  val req_out = Reg(Vec(Width, new TlbReq))
+  val req_out = Reg(Vec(Width, new TlbReq(hasCboAccess)))
   for (i <- 0 until Width) {
     when (req(i).fire) {
       req_out(i) := req(i).bits
@@ -515,6 +516,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val sspBareAf = Option.when(HasShadowStack) (isShadowStack && !s1_valid) // store af
     val sspPermAf = Option.when(HasShadowStack) (sspWrongPageAf.get || sspBareAf.get) // store af
     val writeSspAf = Option.when(HasShadowStack) (isSspPage.get && isSt && !isShadowStack) // store af
+    // CBOs fault on SS pages even when their permission-check command is read.
+    val cboSspAf = Option.when(HasShadowStack && hasCboAccess) (isSspPage.get && req_out(idx).isCbo.get)
     val sspPermPf = Option.when(HasShadowStack) (isShadowStack && isSspReadOnlyPage.get) // sore pf
     val instFetchSspAf = Option.when(HasShadowStack) (isInst && isSspPage.get) // inst af
 
@@ -554,7 +557,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val s2_valid = portTranslateEnable(idx) && (onlyS2 || allS2xlate)
 
     val fault_valid = s1_valid || s2_valid
-    val isSspAf = Option.when(HasShadowStack) (sspPermAf.get || writeSspAf.get)
+    val isSspAf = Option.when(HasShadowStack) (sspPermAf.get || writeSspAf.get || cboSspAf.getOrElse(false.B))
     val isMptAf = Option.when(HasMptCheck) ((mptInstf.get || mptWf.get || mptRf.get || mptAf.get) && mptValid.get)
     // when pf and gpf can't happens simultaneously
     val isAf = af || (if (HasMptCheck) isMptAf.get else false.B) || (if (HasShadowStack) (isSspAf.get || instFetchSspAf.get) else false.B)
@@ -903,8 +906,10 @@ object TLBDiffId {
   }
 }
 
-class TLBNonBlock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(false), q)
-class TLBBLock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(true), q)
+class TLBNonBlock(Width: Int, nRespDups: Int = 1, q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters)
+  extends TLB(Width, nRespDups, Seq.fill(Width)(false), q, hasCboAccess)
+class TLBBLock(Width: Int, nRespDups: Int = 1, q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters)
+  extends TLB(Width, nRespDups, Seq.fill(Width)(true), q, hasCboAccess)
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbReplaceIO(Width, q))
