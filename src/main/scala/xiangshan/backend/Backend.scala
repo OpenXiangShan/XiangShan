@@ -496,6 +496,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   }
 
   vecRegion.in.fromMem.vldS3WakeUp := io.mem.vldS3WakeUp
+  vecRegion.in.fromMem.sqDeqPtr := io.mem.sqDeqPtr
 
   vecRegion.in.diff.foreach(_.diffVlRat := ctrlBlock.io.diff_vl_rat.get)
   vecRegion.in.fromVecExcpMod.r := vecExcpMod.o.toVPRF.r
