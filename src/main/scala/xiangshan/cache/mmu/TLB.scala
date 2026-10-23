@@ -446,10 +446,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp(idx).valid := resp(idx).valid || noTranslate
     pmp(idx).bits.addr := addr
     pmp(idx).bits.size := size
-    // Preserve SSPOPCHK's actual read access for PMA while requiring PMP write permission.
-    pmp(idx).bits.cmd := (if (HasShadowStack) {
-      Mux(isShadowStackAccess && cmd === TlbCmd.read, TlbCmd.ss_read, cmd)
-    } else cmd)
+    pmp(idx).bits.cmd := cmd
+    pmp(idx).bits.isShadowStackAccess.foreach(_ := isShadowStackAccess)
   }
 
   def pbmt_check(idx: Int, d: Int, pbmt: UInt, g_pbmt: UInt, s2xlate: UInt):Unit = {

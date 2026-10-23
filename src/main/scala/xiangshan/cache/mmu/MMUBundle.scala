@@ -471,8 +471,6 @@ object TlbCmd {
 
   def atom_read  = "b100".U // lr
   def atom_write = "b101".U // sc / amo
-  // SSPOPCHK permission check: PMP requires R+W, PMA requires R.
-  def ss_read = "b011".U
 
   def apply() = UInt(3.W)
   def isRead(a: UInt) = a(1,0)===read
@@ -480,7 +478,6 @@ object TlbCmd {
   def isExec(a: UInt) = a(1,0)===exec
 
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
-  def isShadowStackRead(a: UInt) = a===ss_read
 }
 
 // Svpbmt extension
@@ -777,7 +774,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val ptw = new TlbPtwIOwithMemIdx(Width)
   val refill_to_mem = Output(new TlbRefilltoMemIO())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
-  val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize)))
+  val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize, hasShadowStackAccess = HasShadowStack && !q.fetchi)))
   val tlbreplay = Vec(Width, Output(Bool()))
 }
 

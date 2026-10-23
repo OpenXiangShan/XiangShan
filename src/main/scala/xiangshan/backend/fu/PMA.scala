@@ -211,8 +211,7 @@ trait PMAMethod extends PMAConst {
 trait PMACheckMethod extends PMPConst {
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    val isSsRead = if (hasShadowStack) TlbCmd.isShadowStackRead(cmd) else false.B
-    resp.ld := (TlbCmd.isRead(cmd) || isSsRead) && !cfg.r
+    resp.ld := TlbCmd.isRead(cmd) && !cfg.r
     resp.st := Mux(TlbCmd.isAmo(cmd), !cfg.atomic || !cfg.w, Mux(TlbCmd.isWrite(cmd), !cfg.w, false.B))
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     resp.mmio := !cfg.c
