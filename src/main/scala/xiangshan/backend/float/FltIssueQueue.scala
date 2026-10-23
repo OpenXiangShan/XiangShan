@@ -5,7 +5,7 @@ import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility.{PerfCCT, SelectOne, XSPerfAccumulate}
+import utility.{PerfCCT, PerfCounterOptionsKey, SelectOne, XSPerfAccumulate}
 import utils.NamedUInt
 import xiangshan._
 import xiangshan.backend.Bundles.{DispatchOutUop, IQCancelSource, IssueQueueInDebug, RegionInUop, TopdownIQInfo, UopIdx}
@@ -296,6 +296,7 @@ class FltIssueQueue(
     enq.bits.payload.fromEnq(inEnqBits)
     enq.bits.status.fromEnq(inEnqBits)
     enq.bits.debugLastIssueCancelSource.foreach(_ := IQCancelSource.none)
+    enq.bits.perfLoadM4Woken.foreach(_ := false.B)
   }
 
   // NewAgeDetector can be used here, because the 2nd port has uop only if the 1st port has uop.
@@ -488,6 +489,28 @@ class FltIssueQueue(
   }
   XSPerfAccumulate("fma_src3_issue_m4", PopCount(out.deq.map(d => d.valid && d.bits.fmaSrc3Wait.get === 2.U)))
   XSPerfAccumulate("fma_src3_issue_m4_d1", PopCount(out.deq.map(d => d.valid && d.bits.fmaSrc3Wait.get === 1.U)))
+
+  private val entryLoadM4PerfEvents = entries.zip(enqEntriesKeepNext ++ fastEntriesKeepNext).zipWithIndex.map {
+    case ((entry, keepNext), entryIdx) =>
+      // Include wakeup-to-issue in the same cycle. Unlike the functional M4
+      // timing state, this provenance survives M2 confirmation and entry moves.
+      // Ordinary M2/D1 wakeups and source cancellation take priority over M4.
+      val loadM4Wake = entryFmaM4LoadWake(entryIdx) && keepNext.bits.status.fmaSrc3Wait.get === 2.U
+      val woken = entry.bits.perfLoadM4Woken.getOrElse(false.B) || loadM4Wake
+      val valid = entry.valid && !entry.bits.status.robIdx.needFlush(in.flush)
+      val issue = valid && woken && entryDeqSel(entryIdx)
+      // Source cancellation also covers entries that have not issued yet.
+      // Merge all causes before counting, and retire the provenance on the
+      // first cancel so a later pipeline/IQ indication cannot count it again.
+      val cancel = valid && woken && (entryCancel(entryIdx) || entrySrcCancel(entryIdx).asUInt.orR)
+      val issued = entry.bits.status.issued || entryDeqSel(entryIdx)
+      keepNext.bits.perfLoadM4Woken.foreach(_ := woken && !cancel)
+      (issue, cancel && !issued, cancel && issued)
+  }
+  XSPerfAccumulate("load_fma_src3_m4_issue", PopCount(entryLoadM4PerfEvents.map(_._1)))
+  XSPerfAccumulate("load_fma_src3_m4_cancel_total", PopCount(entryLoadM4PerfEvents.map(e => e._2 || e._3)))
+  XSPerfAccumulate("load_fma_src3_m4_cancel_before_issue", PopCount(entryLoadM4PerfEvents.map(_._2)))
+  XSPerfAccumulate("load_fma_src3_m4_cancel_after_issue", PopCount(entryLoadM4PerfEvents.map(_._3)))
 
   private val deqPrevValid = RegInit(VecInit(Seq.fill(param.numDeq)(false.B)))
   private val deqPrevRobIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(new RobPtr))))
@@ -775,6 +798,8 @@ object FltIssueQueue {
 
   class Entry(implicit p: Parameters, param: IssueParam) extends VecIssueQueue.Entry {
     val debugLastIssueCancelSource = Option.when(param.backendParams.debugEn)(IQCancelSource())
+    // Track one load-M4 wakeup episode until cancellation or entry retirement.
+    val perfLoadM4Woken = Option.when(p(PerfCounterOptionsKey).enablePerfPrint)(Bool())
   }
 
   class WbFuBusyTableReadBundle(implicit p: Parameters, param: IssueParam) extends XSBundle {
