@@ -84,3 +84,19 @@ def test_overwritten_injection_is_rejected():
     pair.value = item.before
     with pytest.raises(AssertionError, match="overwritten"):
         agent.verify_persisted(item)
+
+
+def test_bank_and_metadata_readbacks_follow_the_unique_resident_way():
+    agent, signals, pair, base, _ = make_agent()
+    raw = agent.read_resident_bank(base, bank=3)
+    assert raw >> 2 == 0x123456789ABCDEF0
+    assert agent.read_resident_meta(base) == pair.value & ((1 << agent.META_BITS) - 1)
+    mutation = agent.inject_data_ecc(base, bank=3)
+    assert agent.read_resident_bank(base, bank=3) == raw ^ 2 == mutation.after
+    agent.restore_all()
+    assert agent.read_resident_bank(base, bank=3) == raw
+    signals[agent.ROOT + "metaArray.banks_0.validArray_0"].value = 0
+    with pytest.raises(AssertionError, match="one resident way"):
+        agent.read_resident_bank(base, bank=3)
+    with pytest.raises(AssertionError, match="one resident way"):
+        agent.read_resident_meta(base)

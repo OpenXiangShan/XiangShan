@@ -127,6 +127,24 @@ class ICacheECCInjectionAgent:
             words.append((raw >> 2) & ((1 << 64) - 1))
         return b"".join(word.to_bytes(8, "little") for word in words)
 
+    def read_resident_bank(self, paddr: int, *, bank: int, vaddr: int | None = None) -> int:
+        """Read the selected raw {data, parity, padding} SRAM word."""
+        if not 0 <= int(bank) < 8:
+            raise ValueError("data bank must be 0..7")
+        ways = self.resident_ways(paddr, vaddr=vaddr)
+        if len(ways) != 1:
+            raise AssertionError(f"bank readback requires one resident way, got {ways}")
+        path = self.ROOT + f"dataArray.banks_{int(bank)}.ways_{ways[0]}.array.array_ext.Memory"
+        return int(self._array(path, rows=256, width=self.DATA_BITS)[self._set(paddr, vaddr)].value)
+
+    def read_resident_meta(self, paddr: int, *, vaddr: int | None = None) -> int:
+        """Read the resident way's raw {tag, maybeRvcMap, parity} entry."""
+        ways = self.resident_ways(paddr, vaddr=vaddr)
+        if len(ways) != 1:
+            raise AssertionError(f"meta readback requires one resident way, got {ways}")
+        _, _, pin, shift = self._meta(self._set(paddr, vaddr), ways[0])
+        return (int(pin.value) >> shift) & ((1 << self.META_BITS) - 1)
+
     def _mutate(self, pin, *, path, row, mask, new_bits, kind, paddr, way) -> SRAMMutation:
         before = int(pin.value)
         after = (before & ~mask) | (int(new_bits) & mask)

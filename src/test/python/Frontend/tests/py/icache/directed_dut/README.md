@@ -127,3 +127,27 @@ When editing a test, preserve its pytest node ID, parameter cases, markers,
 stimulus timing, and failure conditions unless the change explicitly intends
 to alter test behavior. `funcov_closure_pending` tests are excluded by the
 normal regression runner and exercised by its separate reachability mode.
+
+`test_icache_data_ecc_ibuffer_dut.py` implements the four Data-bank parity
+testpoints at CSV rows 832–835. Its 47 parameters cover:
+
+| Request | Fault placement | Parameters |
+| --- | --- | --- |
+| Single line | Each bank 0–7, multiple banks, all eight banks | 11 |
+| Cross line | Line 0: each selected bank 4–7, multiple banks, all four | 6 |
+| Cross line | Line 1: each selected bank 0–3, including independent bank 1/2 faults, multiple/all banks | 6 |
+| Cross line | Both lines: all 16 individual bank pairs and the remaining single/multiple/all combinations | 24 |
+
+Each parameter warms real SRAM through ordinary fetch/refill, parks in a
+separate loop, checks a clean SRAM refetch, then flips only parity bits and
+checks the faulted refetch. The request address/endPosition determine expected
+banks independently of S2 ECC selection. Live post-drive observations join
+physical reads, SRAM data/code, delayed corrupt and the IBuffer handshake by
+full FTQ pointer and PC. Hwe must belong to a valid, enabled target instruction;
+the clean baseline uses IBuffer's valid/enqEnable exception gates.
+
+Run with the standard runner and `TB_ENABLE_DUT_TESTS=1`; the module accepts
+`-n 4` for parallel pytest workers. Per-case `checks/*.data_ecc.json` files
+retain build/probe provenance and clean/faulted stage evidence alongside the
+normal logs and waves. These leaves have no canonical coverage bins yet, so
+checker success does not backannotate CSV coverage or status as HIT.
