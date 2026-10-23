@@ -233,8 +233,15 @@ object RobPtr {
   }
 }
 
+class IntrEvaluation extends Bundle {
+  val start = Bool()
+  val done = Bool()
+  val hasInterrupt = Bool()
+}
+
 class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val intrBitSet = Input(Bool())
+  val intrEvaluation = Input(new IntrEvaluation)
   val trapTarget = Input(new TargetPCBundle)
   val isXRet     = Input(Bool())
   val wfiEvent   = Input(Bool())
@@ -273,6 +280,7 @@ class RobEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val canAcceptForDispatch = Output(Bool())
   val isEmpty = Output(Bool())
+  val boundaryInterruptPending = Output(Bool())
   // valid vector, for robIdx gen and walk
   val needAlloc = Vec(RenameWidth, Input(Bool()))
   val req = Vec(RenameWidth, Flipped(ValidIO(new DynInst)))
