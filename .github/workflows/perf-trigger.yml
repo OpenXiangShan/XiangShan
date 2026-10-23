@@ -39,14 +39,13 @@ on:
         options:
           - spec06-rva23-novec-gcc16-0.3c
           - spec06-rva23-novec-gcc16-1.0c
-          - spec06-rva23-novec-xscc-0.3c
-          - spec06-rva23-novec-xscc-1.0c
+          - spec06-rv64gcb-xscc-1.0c
           - spec17-rva23-novec-gcc16-0.3c
           - spec17-rva23-novec-gcc16-1.0c
+          - spec17-rva23-novec-xscc-0.3c
+          - spec17-rva23-novec-xscc-1.0c
           - spec26-gcc15-0.3c
           - spec26-gcc15-1.0c
-          - legacy-spec06-gcc15-0.3c
-          - legacy-spec06-gcc15-1.0c
           - custom
         default: spec06-rva23-novec-gcc16-1.0c
       benchmarks:

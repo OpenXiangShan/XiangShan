@@ -160,17 +160,17 @@ jobs:
             spec06-rva23-novec-gcc16*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/checkpoint" >> $GITHUB_ENV
               ;;
-            spec06-rva23-novec-xscc*)
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_rva23_novec_260911/checkpoint" >> $GITHUB_ENV
+            spec06-rv64gcb-xscc*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_rv64gcb_261013/checkpoint-0-0-0" >> $GITHUB_ENV
               ;;
             spec17-rva23-novec-gcc16*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/checkpoint" >> $GITHUB_ENV
               ;;
+            spec17-rva23-novec-xscc*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec17_rate_xscc_rva23_novec_261011/checkpoint" >> $GITHUB_ENV
+              ;;
             spec26-gcc15*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/checkpoint" >> $GITHUB_ENV
-              ;;
-            legacy-spec06-gcc15*)
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/checkpoint" >> $GITHUB_ENV
               ;;
             custom)
               echo "CKPT_HOME=${{ inputs.checkpoint_path }}" >> $GITHUB_ENV
@@ -185,11 +185,8 @@ jobs:
             spec06-rva23-novec-gcc16-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
-            spec06-rva23-novec-xscc-0.3c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_rva23_novec_260911/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
-              ;;
-            spec06-rva23-novec-xscc-1.0c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_rva23_novec_260911/json/checkpoints_all.json" >> $GITHUB_ENV
+            spec06-rv64gcb-xscc-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_rv64gcb_261013/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
               ;;
             spec17-rva23-novec-gcc16-0.3c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
@@ -197,17 +194,17 @@ jobs:
             spec17-rva23-novec-gcc16-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
+            spec17-rva23-novec-xscc-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_xscc_rva23_novec_261011/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
+              ;;
+            spec17-rva23-novec-xscc-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_xscc_rva23_novec_261011/json/checkpoints_all.json" >> $GITHUB_ENV
+              ;;
             spec26-gcc15-0.3c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
               ;;
             spec26-gcc15-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_all.json" >> $GITHUB_ENV
-              ;;
-            legacy-spec06-gcc15-0.3c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
-              ;;
-            legacy-spec06-gcc15-1.0c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
             custom)
               if [[ -z "${{ inputs.json_path }}" ]]; then

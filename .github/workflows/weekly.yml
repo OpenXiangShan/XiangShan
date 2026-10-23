@@ -26,7 +26,7 @@ jobs:
     uses: ./.github/workflows/perf-template.yml
     with:
       test_branch: ${{ github.event.inputs.test_branch }}
-      benchmark_type: spec06-rva23-novec-xscc-1.0c
+      benchmark_type: spec06-rv64gcb-xscc-1.0c
       artifact_name: score-xscc
       servers: all
   
