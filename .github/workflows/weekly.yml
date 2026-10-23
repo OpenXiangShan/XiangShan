@@ -19,7 +19,7 @@ jobs:
     with:
       test_branch: ${{ github.event.inputs.test_branch }}
       benchmark_type: spec06-rva23-novec-gcc16-1.0c
-      servers: all
+      high_priority: true
 
   run-xscc:
     name: Run SPEC06 XSCC Performance Test
@@ -28,8 +28,8 @@ jobs:
       test_branch: ${{ github.event.inputs.test_branch }}
       benchmark_type: spec06-rv64gcb-xscc-1.0c
       artifact_name: score-xscc
-      servers: all
-  
+      high_priority: true
+
   run-spec17:
     name: Run SPEC17 GCC16 Performance Test
     uses: ./.github/workflows/perf-template.yml
@@ -37,4 +37,4 @@ jobs:
       test_branch: ${{ github.event.inputs.test_branch }}
       benchmark_type: spec17-rva23-novec-gcc16-1.0c
       artifact_name: score-spec17
-      servers: all
+      high_priority: true
