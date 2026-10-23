@@ -1,0 +1,400 @@
+#include "mixed/scenario.hpp"
+
+namespace memblock::scenarios::mixed {
+
+std::uint64_t MixedScenario::gstage_boundary_loads()
+{
+    std::uint64_t count = 0;
+    for (unsigned cross = 0; cross < gstage_boundary_crosses.size(); ++cross) {
+        if ((cross / 3U) % 2U == 0) {
+            count += gstage_boundary_crosses[cross];
+        }
+    }
+    return count;
+}
+
+bool MixedScenario::gstage_boundary_complete()
+{
+    for (unsigned cross = 0; cross < gstage_boundary_crosses.size(); ++cross) {
+        if (constraints.gstage_boundary_cross_enabled(cross) &&
+            gstage_boundary_crosses[cross] == 0) {
+            return false;
+        }
+    }
+    for (unsigned cross = 0; cross < vector_gstage_boundary_crosses.size();
+         ++cross) {
+        if (constraints.vector_gstage_boundary_cross_enabled(cross) &&
+            vector_gstage_boundary_crosses[cross] == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool MixedScenario::canonical_boundary_complete()
+{
+    for (unsigned cross = 0; cross < canonical_boundary_crosses.size(); ++cross) {
+        if (constraints.canonical_boundary_cross_enabled(cross) &&
+            canonical_boundary_crosses[cross] == 0) {
+            return false;
+        }
+    }
+    for (unsigned cross = 0; cross < vector_canonical_boundary_crosses.size();
+         ++cross) {
+        if (constraints.vector_canonical_boundary_cross_enabled(cross) &&
+            vector_canonical_boundary_crosses[cross] == 0) {
+            return false;
+        }
+    }
+    return constraint_coverage.operations[RandomConstraints::vector_store] ==
+        constraint_coverage.vector_directions[1] + std::accumulate(
+                                                       vector_canonical_boundary_crosses.begin(),
+                                                       vector_canonical_boundary_crosses.end(), std::uint64_t{0}) +
+        std::accumulate(vector_gstage_boundary_crosses.begin(),
+            vector_gstage_boundary_crosses.end(), std::uint64_t{0});
+}
+
+std::uint64_t MixedScenario::canonical_boundary_loads()
+{
+    std::uint64_t count = 0;
+    for (unsigned cross = 0; cross < canonical_boundary_crosses.size(); ++cross) {
+        if ((cross / 3U) % 2U == 0) {
+            count += canonical_boundary_crosses[cross];
+        }
+    }
+    return count;
+}
+
+std::string MixedScenario::canonical_boundary_summary()
+{
+    std::ostringstream stream;
+    stream << "actual_canonical_boundary=" << std::accumulate(
+                                                  canonical_boundary_crosses.begin(), canonical_boundary_crosses.end(),
+                                                  std::uint64_t{0});
+    stream << " actual_canonical_boundary_cross=";
+    for (unsigned cross = 0; cross < canonical_boundary_crosses.size(); ++cross) {
+        stream << (cross == 0 ? "" : ",") << canonical_boundary_crosses[cross];
+    }
+    stream << " actual_canonical_boundary_controls=" << canonical_boundary_controls
+           << " actual_canonical_boundary_recoveries=" << canonical_boundary_recoveries
+           << " actual_canonical_boundary_store_checks=" << canonical_boundary_store_checks;
+    stream << " actual_vector_canonical_boundary=" << std::accumulate(
+                                                          vector_canonical_boundary_crosses.begin(),
+                                                          vector_canonical_boundary_crosses.end(), std::uint64_t{0});
+    stream << " actual_vector_canonical_boundary_cross=";
+    for (unsigned cross = 0; cross < vector_canonical_boundary_crosses.size();
+         ++cross) {
+        stream << (cross == 0 ? "" : ",")
+               << vector_canonical_boundary_crosses[cross];
+    }
+    stream << " actual_vector_canonical_boundary_controls="
+           << vector_canonical_boundary_controls
+           << " actual_vector_canonical_boundary_recoveries="
+           << vector_canonical_boundary_recoveries
+           << " actual_vector_canonical_boundary_store_checks="
+           << vector_canonical_boundary_store_checks
+           << " actual_vector_canonical_boundary_flows="
+           << vector_canonical_boundary_flows;
+    return stream.str();
+}
+
+std::string MixedScenario::gstage_boundary_summary()
+{
+    std::ostringstream stream;
+    const auto append_crosses = [&](const char *name, const auto &crosses) {
+        stream << name << '=' << std::accumulate(
+                                     crosses.begin(), crosses.end(), std::uint64_t{0})
+               << ' ' << name << "_cross=";
+        for (unsigned cross = 0; cross < crosses.size(); ++cross) {
+            stream << (cross == 0 ? "" : ",") << crosses[cross];
+        }
+    };
+    append_crosses("actual_gstage_boundary", gstage_boundary_crosses);
+    stream << " actual_gstage_boundary_controls=" << gstage_boundary_controls
+           << " actual_gstage_boundary_recoveries=" << gstage_boundary_recoveries
+           << " actual_gstage_boundary_store_checks=" << gstage_boundary_store_checks
+           << ' ';
+    append_crosses("actual_vector_gstage_boundary", vector_gstage_boundary_crosses);
+    stream << " actual_vector_gstage_boundary_controls=" << vector_gstage_boundary_controls
+           << " actual_vector_gstage_boundary_recoveries=" << vector_gstage_boundary_recoveries
+           << " actual_vector_gstage_boundary_store_checks=" << vector_gstage_boundary_store_checks
+           << " actual_vector_gstage_boundary_flows=" << vector_gstage_boundary_flows;
+    return stream.str();
+}
+
+void MixedScenario::report_progress(bool force)
+{
+    if (progress_interval == 0 ||
+        (!force && actions < next_progress_action)) {
+        return;
+    }
+    std::cerr << "MEMBLOCK_RANDOM_MIXED_PROGRESS seed=" << options.seed
+              << " actions=" << actions << " cycle=" << environment.cycle()
+              << " phase=" << phase << std::endl;
+    next_progress_action = progress_interval >
+            std::numeric_limits<std::uint64_t>::max() - actions
+        ? std::numeric_limits<std::uint64_t>::max()
+        : actions + progress_interval;
+}
+
+std::string MixedScenario::load_feedback_summary(const memblock::Environment::ScalarLoadFeedbackStats &feedback)
+{
+    std::ostringstream stream;
+    stream << "load_wakeups=" << feedback.wakeups[0] << ','
+           << feedback.wakeups[1] << ',' << feedback.wakeups[2]
+           << " load_cancels=" << feedback.ld2_cancels[0] << ','
+           << feedback.ld2_cancels[1] << ',' << feedback.ld2_cancels[2];
+    return stream.str();
+}
+
+std::string MixedScenario::raw_load_feedback_summary()
+{
+    const auto &feedback = environment.scalar_load_feedback_stats();
+    std::ostringstream stream;
+    stream << "raw_load_wakeups=" << feedback.wakeups[0] << ','
+           << feedback.wakeups[1] << ',' << feedback.wakeups[2]
+           << " raw_load_cancels=" << feedback.ld2_cancels[0] << ','
+           << feedback.ld2_cancels[1] << ','
+           << feedback.ld2_cancels[2];
+    return stream.str();
+}
+
+unsigned long MixedScenario::total_ifetch_prefetches()
+{
+    const auto &stats = environment.ifetch_prefetch_stats();
+    return std::accumulate(
+        stats.requests.begin(), stats.requests.end(), std::uint64_t{0});
+}
+
+bool MixedScenario::finish()
+{
+    phase = "redirect-recovery-context";
+    if (!environment.run_until_all_complete(4096) ||
+        !environment.run_until_queues_retired(4096) ||
+        !flush_pending_translation_fences() ||
+        !environment.activate_bare()) {
+        return false;
+    }
+    phase = "redirect-recovery";
+    const std::uint64_t canceled_rob_offset = rob_offset;
+    auto canceled = make_load(
+        cache1_base + 0xf800, memblock::LoadOp::ld, 2);
+    if (!environment.enqueue_load(canceled) || !environment.issue_load(canceled) ||
+        !environment.redirect_after(
+            memblock::rob_pointer_value(canceled_rob_offset - 1),
+            memblock::rob_pointer_flag(canceled_rob_offset - 1), false) ||
+        !environment.run_cycles(96)) {
+        return false;
+    }
+    coverage.sample(canceled);
+    ++actions;
+    --lq_offset;
+    const std::uint64_t survivor_lq = lq_offset++;
+    const memblock::LoadTransaction survivor{
+        .address = canceled.address,
+        .op = canceled.op,
+        .rob = canceled.rob,
+        .rob_flag = canceled.rob_flag,
+        .lq = memblock::lq_pointer_value(survivor_lq),
+        .lq_flag = memblock::lq_pointer_flag(survivor_lq),
+        .sq = memblock::sq_pointer_value(sq_offset),
+        .sq_flag = memblock::sq_pointer_flag(sq_offset),
+        .pdest = static_cast<std::uint8_t>(canceled.pdest + 1),
+        .lane = 1,
+    };
+    if (!issue_load(survivor)) {
+        return false;
+    }
+    ++coverage.redirect_recovery;
+    ++coverage.cacheable;
+
+    phase = "final-drain";
+    if (!environment.run_until_all_complete(2048) ||
+        !environment.run_until_queues_retired(4096) ||
+        !environment.run_cycles(32)) {
+        return false;
+    }
+    coverage.dcache_request_stalls = environment.dcache_request_stalls();
+    coverage.dcache_response_delays = environment.dcache_response_delays();
+    coverage.ptw_request_stalls = environment.ptw_request_stalls();
+    coverage.ptw_response_delays = environment.ptw_response_delays();
+    coverage.uncache_request_stalls = environment.uncache_request_stalls();
+    coverage.uncache_response_delays = environment.uncache_response_delays();
+    coverage.dispatch_widths =
+        environment.lsq_enqueue_widths_observed();
+    coverage.dispatch_lanes =
+        environment.lsq_enqueue_lanes_observed();
+    const std::uint64_t probe_requests = environment.dcache_probes();
+    const std::uint64_t expected_probe_sources = std::min<std::uint64_t>(
+        probe_requests, memblock::kDcacheProbeSourceCount);
+    const std::uint64_t expected_probe_source_reuses =
+        probe_requests - expected_probe_sources;
+    const std::uint64_t expected_probe_source_wraps = probe_requests == 0
+        ? 0
+        : (probe_requests - 1U) / memblock::kDcacheProbeSourceCount;
+    if (actions != options.transactions || environment.ptw_requests() < 3 ||
+        environment.uncache_requests() < 2 ||
+        !environment.dcache_grants_drained() ||
+        environment.tilelink_release_data() <= release_before ||
+        environment.lq_dequeued() + environment.lq_canceled() !=
+            environment.lq_allocated() ||
+        environment.sq_dequeued() + environment.sq_canceled() !=
+            environment.sq_allocated() ||
+        environment.redirect_cancellation_events_observed() == 0 ||
+        environment.lq_redirect_canceled_observed() !=
+            environment.lq_canceled() ||
+        environment.sq_redirect_canceled_observed() !=
+            environment.sq_canceled() ||
+        environment.lq_canceled_unobserved() != 0 ||
+        environment.sq_canceled_unobserved() != 0 ||
+        !coverage.complete(
+            constraints.concurrent_actions_per_mille != 0) ||
+        !canonical_boundary_complete() ||
+        !gstage_boundary_complete() ||
+        !constraint_coverage.complete(
+            constraints, options.backpressure,
+            environment.dcache_response_latency_stats(),
+            environment.ptw_response_latency_stats(),
+            environment.uncache_response_latency_stats(),
+            canonical_boundary_loads(), gstage_boundary_loads()) ||
+        (constraints.probes_per_mille != 0 &&
+            environment.dcache_max_probe_outstanding() <
+                constraints.maximum_enabled_probe_depth()) ||
+        environment.dcache_probe_sources() != expected_probe_sources ||
+        environment.dcache_probe_source_reuses() !=
+            expected_probe_source_reuses ||
+        environment.dcache_probe_source_wraps() !=
+            expected_probe_source_wraps ||
+        total_ifetch_prefetches() == 0 ||
+        !coverage.backpressure_complete(options.backpressure)) {
+        phase = "coverage-gates";
+        return false;
+    }
+    return true;
+}
+
+int MixedScenario::run()
+{
+    report_progress();
+    initialize_memory();
+    const bool completed = execute();
+    report_progress(true);
+    if (!completed) {
+        std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
+                  << " transactions=" << actions
+                  << " requested=" << options.transactions
+                  << " cycle=" << environment.cycle()
+                  << " phase=" << phase
+                  << " lq=" << environment.lq_dequeued() << '+'
+                  << environment.lq_canceled() << '/'
+                  << environment.lq_allocated()
+                  << " sq=" << environment.sq_dequeued() << '+'
+                  << environment.sq_canceled() << '/'
+                  << environment.sq_allocated()
+                  << " lsq_monitor_schema=2"
+                  << " lsq_enqueued_observed="
+                  << environment.lq_enqueued_observed() << ','
+                  << environment.sq_enqueued_observed()
+                  << " redirect_cancels_observed="
+                  << environment.redirect_cancellation_events_observed() << ','
+                  << environment.lq_redirect_canceled_observed() << ','
+                  << environment.sq_redirect_canceled_observed()
+                  << " unobserved_cancels="
+                  << environment.lq_canceled_unobserved() << ','
+                  << environment.sq_canceled_unobserved()
+                  << " ptw=" << environment.ptw_requests()
+                  << " uncache=" << environment.uncache_requests()
+                  << " release_data=" << environment.tilelink_release_data()
+                  << " probe_max_outstanding="
+                  << environment.dcache_max_probe_outstanding()
+                  << " probe_source_space="
+                  << memblock::kDcacheProbeSourceCount
+                  << " probe_source_lifecycle="
+                  << environment.dcache_probe_sources() << ','
+                  << environment.dcache_probe_source_reuses() << ','
+                  << environment.dcache_probe_source_wraps()
+                  << " ifetch_prefetches=" << total_ifetch_prefetches()
+                  << " l2_stride_prefetches="
+                  << environment.hardware_prefetch_stats().l2_source_counts[12]
+                  << " reason="
+                  << (environment.error().empty()
+                             ? "mixed_coverage_or_accounting_gate_failed"
+                             : environment.error())
+                  << ' ' << load_feedback_summary(
+                                environment.scalar_load_feedback_stats())
+                  << ' ' << raw_load_feedback_summary()
+                  << ' ' << coverage.summary() << ' '
+                  << canonical_boundary_summary() << ' '
+                  << gstage_boundary_summary() << ' '
+                  << constraint_coverage.summary(
+                         constraints,
+                         environment.dcache_response_latency_stats(),
+                         environment.ptw_response_latency_stats(),
+                         environment.uncache_response_latency_stats())
+                  << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_RANDOM_MIXED_PASS"
+              << " seed=" << options.seed
+              << " transactions=" << actions
+              << " cycle=" << environment.cycle()
+              << " scalar_writebacks=" << environment.writebacks()
+              << " prefetch_writebacks=" << environment.prefetch_writebacks()
+              << " store_writebacks=" << environment.store_writebacks()
+              << " vector_load_writebacks="
+              << environment.vector_load_writebacks()
+              << " vector_store_writebacks="
+              << environment.vector_store_writebacks()
+              << " tilelink_requests=" << environment.tilelink_requests()
+              << " dcache_gets=" << environment.dcache_gets()
+              << " dcache_refills=" << environment.dcache_refills()
+              << " dcache_acquire_perms="
+              << environment.dcache_acquire_perms()
+              << " probes=" << environment.dcache_probes()
+              << " grant_acks=" << environment.dcache_grant_acks()
+              << " release_data=" << environment.tilelink_release_data()
+              << " probe_max_outstanding="
+              << environment.dcache_max_probe_outstanding()
+              << " probe_source_space=" << memblock::kDcacheProbeSourceCount
+              << " probe_source_lifecycle="
+              << environment.dcache_probe_sources() << ','
+              << environment.dcache_probe_source_reuses() << ','
+              << environment.dcache_probe_source_wraps()
+              << " ifetch_prefetches=" << total_ifetch_prefetches()
+              << " l2_stride_prefetches="
+              << environment.hardware_prefetch_stats().l2_source_counts[12]
+              << " ptw_requests=" << environment.ptw_requests()
+              << " uncache_requests=" << environment.uncache_requests()
+              << ' ' << load_feedback_summary(
+                            environment.scalar_load_feedback_stats())
+              << ' ' << raw_load_feedback_summary()
+              << " lq=" << environment.lq_dequeued() << '+'
+              << environment.lq_canceled() << '/'
+              << environment.lq_allocated()
+              << " sq=" << environment.sq_dequeued() << '+'
+              << environment.sq_canceled() << '/'
+              << environment.sq_allocated()
+              << " lsq_monitor_schema=2"
+              << " lsq_enqueued_observed="
+              << environment.lq_enqueued_observed() << ','
+              << environment.sq_enqueued_observed()
+              << " redirect_cancels_observed="
+              << environment.redirect_cancellation_events_observed() << ','
+              << environment.lq_redirect_canceled_observed() << ','
+              << environment.sq_redirect_canceled_observed()
+              << " unobserved_cancels="
+              << environment.lq_canceled_unobserved() << ','
+              << environment.sq_canceled_unobserved()
+              << ' ' << coverage.summary() << ' '
+              << canonical_boundary_summary() << ' '
+              << gstage_boundary_summary() << ' '
+              << constraint_coverage.summary(
+                     constraints, environment.dcache_response_latency_stats(),
+                     environment.ptw_response_latency_stats(),
+                     environment.uncache_response_latency_stats())
+              << '\n';
+    return 0;
+}
+
+} // namespace memblock::scenarios::mixed

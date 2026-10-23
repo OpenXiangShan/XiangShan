@@ -17,106 +17,16 @@ from pathlib import Path
 from typing import Any
 
 import run_regression
+import scenario_catalog
 
-
-SCENARIOS = (
-    "smoke",
-    "l2-flush-contracts",
-    "top-control-contracts",
-    "trace-bridge-contracts",
-    "dft-bridge-contracts",
-    "pin-space",
-    "frontend-bridge",
-    "frontend-reset-recovery",
-    "single-load",
-    "load-feedback",
-    "topdown-contracts",
-    "memory-violation",
-    "rar-violation",
-    "ifetch-prefetch",
-    "hardware-prefetch",
-    "fp-loads",
-    "trigger-contracts",
-    "metadata-contracts",
-    "dcache-errors",
-    "dcache-coherence",
-    "atomic-contracts",
-    "atomic-dchannel-errors",
-    "uncache-errors",
-    "uncache-widths",
-    "uncache-outstanding",
-    "sbuffer-flush",
-    "sbuffer-timeout",
-    "mmio-contracts",
-    "cbo-zero-contracts",
-    "cmo-contracts",
-    "wfi-safety",
-    "reset-recovery",
-    "reset-partial-load",
-    "reset-tree-contracts",
-    "vector-load",
-    "vector-split-load",
-    "vector-fof",
-    "vector-segment",
-    "vector-segment-canonical",
-    "vector-segment-fof",
-    "vector-issue-order",
-    "vector-store-forwarding",
-    "store-forwarding",
-    "dcache-release",
-    "store-rdata-order",
-    "store-tlb-miss-preserve",
-    "iq-slow-feedback",
-    "redirect",
-    "queue-pressure",
-    "scalar-misaligned",
-    "misaligned-stores",
-    "vector-addressing",
-    "exception-contracts",
-    "pmp-contracts",
-    "hypervisor-contracts",
-    "pointer-masking-contracts",
-    "mbmc-contracts",
-    "l2-tlb-contracts",
-    "ifetch-ptw-bridge",
-    "two-stage-translation",
-    "translation-matrix",
-    "translation-fence",
-    "translation-fence-selective",
-    "translation-fence-sv48",
-    "translation-fence-sv48-selective",
-    "translation-fence-sv39-sv48x4",
-    "translation-fence-sv39-sv48x4-selective",
-    "translation-fence-sv48-sv39x4",
-    "translation-fence-sv48-sv39x4-selective",
-    "translation-inflight-context",
-    "translation-inflight-context-sv48",
-    "translation-inflight-context-sv39-sv48x4",
-    "translation-inflight-context-sv48-sv39x4",
-    "translation-context",
-    "translation-bare",
-    "ptw-errors",
-    "translation-faults",
-    "translation-permissions",
-    "translation-pbmt",
-    "translation-superpages",
-    "vector-guest-fault",
-    "vector-guest-fault-split",
-    "scalar-guest-fault",
-    "random-loads",
-    "random-vector-loads",
-    "random-vector-forwarding",
-    "random-forwarding",
-    "random-mixed",
-    "random-stress",
-    "random-boundary-hunt",
+_CATALOG = scenario_catalog.load_catalog()
+SCENARIOS = tuple(
+    entry["name"] for entry in scenario_catalog.benchmark_scenarios(_CATALOG)
 )
-
 TRANSACTION_OVERRIDES = {
-    "frontend-bridge": 4096,
-    "random-forwarding": 48,
-    "random-vector-forwarding": 24,
-    "random-boundary-hunt": 512,
+    entry["name"]: entry["benchmark_transactions"]
+    for entry in scenario_catalog.benchmark_scenarios(_CATALOG)
+    if "benchmark_transactions" in entry
 }
 
 MAX_PARALLEL_LEAVES = 8
@@ -190,6 +100,7 @@ def parse_terminal(
             raise BenchmarkError(
                 f"terminal summary {name} is {fields[name]!r}, expected {expected}"
             )
+    run_regression.attach_failure_reports(fields, output)
     return fields
 
 

@@ -96,6 +96,42 @@ def validate_worker_environment(
         )
 
 
+def attach_failure_reports(fields: dict[str, Any], output: str) -> None:
+    """Retain structured diagnostics without replacing the terminal verdict.
+
+    Captured output can end in the middle of a long diagnostic line. Preserve
+    that parse error explicitly; it must not erase an already observed failure.
+    """
+    reports = []
+    errors = []
+    prefix = "MEMBLOCK_FAILURES "
+    for line in output.splitlines():
+        if not line.startswith(prefix):
+            continue
+        try:
+            report = json.loads(line[len(prefix):])
+            if (not isinstance(report, dict) or report.get("schema_version") != 1
+                    or type(report.get("truncated")) is not bool
+                    or not isinstance(report.get("failures"), list)):
+                raise ValueError("unsupported failure report schema")
+            for failure in report["failures"]:
+                if (not isinstance(failure, dict)
+                        or any(not isinstance(failure.get(key), str)
+                               for key in ("component", "code", "classification", "message", "file"))
+                        or type(failure.get("line")) is not int
+                        or failure["line"] <= 0
+                        or (failure.get("cycle") is not None
+                            and (type(failure["cycle"]) is not int or failure["cycle"] < 0))):
+                    raise ValueError("invalid failure record")
+            reports.append(report)
+        except (ValueError, TypeError) as error:
+            errors.append(str(error))
+    if reports:
+        fields["failure_reports"] = reports
+    if errors:
+        fields["failure_report_errors"] = errors
+
+
 def parse_summary(
     output: str,
     *,
@@ -143,6 +179,7 @@ def parse_summary(
             raise RegressionError(
                 f"terminal summary {name} is {fields.get(name)!r}, expected {expected}"
             )
+    attach_failure_reports(fields, output)
     return fields
 
 

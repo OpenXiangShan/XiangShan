@@ -1,5 +1,5 @@
-// This file is included inside memblock_main.cpp's anonymous namespace.
-// Keep scenario-local helpers here; shared infrastructure belongs in memblock_env.hpp.
+// This file is included inside its generated scenario module private namespace.
+// Keep scenario-local helpers here; shared scenario interfaces belong in shared.hpp.
 
 int run_translation_permissions(int argc, char **argv)
 {

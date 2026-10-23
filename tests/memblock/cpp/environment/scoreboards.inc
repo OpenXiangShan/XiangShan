@@ -1,4 +1,4 @@
-// This file is included inside memblock_env.hpp's memblock namespace.
+// This file is included inside implementation.hpp's private memblock namespace.
 
 class LoadScoreboard {
 public:
@@ -27,7 +27,7 @@ public:
         if (!transaction.check_data &&
             transaction.expected_trigger != kTriggerDebugMode) {
             if (error_.empty()) {
-                error_ = "load data checking may only be disabled for DebugMode trigger";
+                error_.record("load data checking may only be disabled for DebugMode trigger");
             }
             return;
         }
@@ -57,7 +57,7 @@ public:
             message << "duplicate outstanding scalar load ROB value rob="
                     << static_cast<unsigned>(transaction.rob)
                     << " flag=" << transaction.rob_flag;
-            error_ = message.str();
+            error_.record(message.str());
         }
     }
 
@@ -74,7 +74,7 @@ public:
                 transaction.expected_debug_is_perf_cnt,
                 transaction.address, static_cast<std::uint16_t>(transaction.op)});
         if (!inserted && error_.empty()) {
-            error_ = "duplicate outstanding scalar load ROB value";
+            error_.record("duplicate outstanding scalar load ROB value");
         } else if (inserted) {
             ++pending_prefetch_;
         }
@@ -161,7 +161,7 @@ public:
             it->second.pdest != transaction.pdest ||
             it->second.address != transaction.address ||
             it->second.op != static_cast<std::uint16_t>(transaction.op)) {
-            error_ = "reset cancellation does not match a pending scalar load";
+            error_.record("reset cancellation does not match a pending scalar load");
             return false;
         }
         expected_.erase(it);
@@ -179,10 +179,13 @@ public:
             rob_identity(writeback.rob_value, writeback.rob_flag));
         return it == expected_.end() ? nullptr : &it->second;
     }
+    const FailureState &failures() const { return error_; }
+    void set_failure_cycle(std::uint64_t cycle) { error_.set_cycle(cycle); }
+
     bool ok() const { return error_.empty(); }
     std::uint64_t observed() const { return observed_; }
     std::uint64_t prefetch_observed() const { return prefetch_observed_; }
-    const std::string &error() const { return error_; }
+    const std::string &error() const { return error_.message(); }
     std::string pending_summary() const
     {
         std::ostringstream message;
@@ -264,7 +267,7 @@ private:
                 message << "unchecked";
             }
         }
-        error_ = message.str();
+        error_.record(message.str());
     }
 
     std::unordered_map<RobIdentity, Expected, RobIdentityHash> expected_;
@@ -272,7 +275,7 @@ private:
     std::uint64_t reset_canceled_ = 0;
     std::uint64_t prefetch_observed_ = 0;
     std::size_t pending_prefetch_ = 0;
-    std::string error_;
+    FailureState error_{"scalar-load", "completion-contract"};
 };
 
 class StoreScoreboard {
@@ -309,7 +312,7 @@ public:
                 false,
             });
         if (!inserted && error_.empty()) {
-            error_ = "duplicate outstanding scalar store ROB value";
+            error_.record("duplicate outstanding scalar store ROB value");
         }
     }
 
@@ -396,7 +399,7 @@ public:
                 } else {
                     message << "unchecked";
                 }
-                error_ = message.str();
+                error_.record(message.str());
             }
             return;
         }
@@ -451,9 +454,12 @@ public:
 
     bool done() const { return expected_.empty(); }
     std::size_t pending() const { return expected_.size(); }
+    const FailureState &failures() const { return error_; }
+    void set_failure_cycle(std::uint64_t cycle) { error_.set_cycle(cycle); }
+
     bool ok() const { return error_.empty(); }
     std::uint64_t observed() const { return observed_; }
-    const std::string &error() const { return error_; }
+    const std::string &error() const { return error_.message(); }
 
     bool mark_address_issued(
         const StoreTransaction &transaction, std::uint64_t issue_cycle)
@@ -462,14 +468,14 @@ public:
             rob_identity(transaction.rob, transaction.rob_flag));
         if (it == expected_.end()) {
             if (error_.empty()) {
-                error_ = "store-address issue was not expected";
+                error_.record("store-address issue was not expected");
             }
             return false;
         }
         if (static_cast<std::uint8_t>(transaction.address_lane) !=
             it->second.issue_address_lane) {
             if (error_.empty()) {
-                error_ = "scalar store-address issue lane differs from expectation";
+                error_.record("scalar store-address issue lane differs from expectation");
             }
             return false;
         }
@@ -487,7 +493,7 @@ public:
     {
         if (lane >= kScalarStoreLanes) {
             if (error_.empty()) {
-                error_ = "invalid scalar store-data issue lane";
+                error_.record("invalid scalar store-data issue lane");
             }
             return false;
         }
@@ -495,13 +501,13 @@ public:
             rob_identity(transaction.rob, transaction.rob_flag));
         if (match == expected_.end()) {
             if (error_.empty()) {
-                error_ = "scalar store-data issue was not expected";
+                error_.record("scalar store-data issue was not expected");
             }
             return false;
         }
         if (lane != match->second.issue_data_lane) {
             if (error_.empty()) {
-                error_ = "scalar store-data issue lane differs from expectation";
+                error_.record("scalar store-data issue lane differs from expectation");
             }
             return false;
         }
@@ -578,12 +584,12 @@ private:
                         << ':' << entry.first.flag;
             }
         }
-        error_ = message.str();
+        error_.record(message.str());
     }
 
     std::unordered_map<RobIdentity, Expected, RobIdentityHash> expected_;
     std::uint64_t observed_ = 0;
-    std::string error_;
+    FailureState error_{"scalar-store", "completion-contract"};
 };
 
 class VectorMemoryScoreboard {
@@ -641,7 +647,7 @@ public:
         if (!transaction.check_data &&
             transaction.expected_trigger != kTriggerDebugMode) {
             if (error_.empty()) {
-                error_ = "vector data checking may only be disabled for DebugMode trigger";
+                error_.record("vector data checking may only be disabled for DebugMode trigger");
             }
             return;
         }
@@ -650,7 +656,7 @@ public:
              (transaction.fof_unspecified_elements &
               ~active_vector_elements(transaction)) != 0)) {
             if (error_.empty()) {
-                error_ = "FOF unspecified elements must be active load elements";
+                error_.record("FOF unspecified elements must be active load elements");
             }
             return;
         }
@@ -659,7 +665,7 @@ public:
              (transaction.allowed_additional_exception_mask &
               ~kExceptionLoadPageFault) != 0)) {
             if (error_.empty()) {
-                error_ = "optional vector exceptions are restricted to FOF load page faults";
+                error_.record("optional vector exceptions are restricted to FOF load page faults");
             }
             return;
         }
@@ -676,7 +682,7 @@ public:
             });
         if (duplicate) {
             if (error_.empty()) {
-                error_ = "duplicate outstanding vector memory uop";
+                error_.record("duplicate outstanding vector memory uop");
             }
             return;
         }
@@ -855,12 +861,15 @@ public:
             expected_.begin(), expected_.end(),
             [](const auto &entry) { return entry.second.store; }));
     }
+    const FailureState &failures() const { return error_; }
+    void set_failure_cycle(std::uint64_t cycle) { error_.set_cycle(cycle); }
+
     bool ok() const { return error_.empty(); }
     std::uint64_t load_observed() const { return load_observed_; }
     std::uint64_t store_observed() const { return store_observed_; }
     std::uint64_t fof_fix_observed() const { return fof_fix_observed_; }
     std::uint64_t page_fault_observed() const { return page_fault_observed_; }
-    const std::string &error() const { return error_; }
+    const std::string &error() const { return error_.message(); }
 
     std::string pending_summary() const
     {
@@ -1036,7 +1045,7 @@ private:
                         << static_cast<unsigned>(byte);
             }
         }
-        error_ = message.str();
+        error_.record(message.str());
     }
 
     std::unordered_multimap<RobIdentity, Expected, RobIdentityHash> expected_;
@@ -1044,5 +1053,5 @@ private:
     std::uint64_t store_observed_ = 0;
     std::uint64_t fof_fix_observed_ = 0;
     std::uint64_t page_fault_observed_ = 0;
-    std::string error_;
+    FailureState error_{"vector-memory", "completion-contract"};
 };

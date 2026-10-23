@@ -1,19 +1,8 @@
-// This file is included inside memblock_env.hpp's memblock namespace.
+// This file is included inside implementation.hpp's private memblock namespace.
 
 class UncacheMemoryAgent {
 public:
-    struct DeviceAccess {
-        std::uint64_t sequence;
-        bool write;
-        std::uint8_t size;
-        std::uint8_t source;
-        std::uint64_t address;
-        std::uint8_t mask;
-        std::uint64_t data;
-        std::uint64_t read_data;
-        bool denied;
-        bool corrupt;
-    };
+    using DeviceAccess = UncacheDeviceAccess;
 
     explicit UncacheMemoryAgent(SparseMemory &memory) : memory_(memory) {}
 
@@ -72,13 +61,13 @@ public:
         inject_corrupt_ = false;
     }
 
-    void drive(UTMemBlock &dut)
+    void drive(DutAdapter &dut)
     {
         const bool accept_a = !random_backpressure_ ||
                               (!force_a_stall_ && (next_random() & 3U) != 0);
-        dut.auto_inner_buffers_out_a_ready.ImmSet(accept_a);
+        dut.uncache.a.ready.set(accept_a);
         if (responses_.empty()) {
-            dut.auto_inner_buffers_out_d_valid.ImmSet(std::uint64_t{0});
+            dut.uncache.d.valid.set(std::uint64_t{0});
             d_presenting_ = false;
             return;
         }
@@ -86,27 +75,27 @@ public:
             if (d_gap_ != 0) {
                 --d_gap_;
                 ++response_delay_cycles_;
-                dut.auto_inner_buffers_out_d_valid.ImmSet(std::uint64_t{0});
+                dut.uncache.d.valid.set(std::uint64_t{0});
                 return;
             }
             d_presenting_ = true;
         }
         const Response &response = responses_.front();
-        dut.auto_inner_buffers_out_d_bits_opcode.ImmSet(response.opcode);
-        dut.auto_inner_buffers_out_d_bits_param.ImmSet(std::uint64_t{0});
-        dut.auto_inner_buffers_out_d_bits_size.ImmSet(response.size);
-        dut.auto_inner_buffers_out_d_bits_source.ImmSet(response.source);
-        dut.auto_inner_buffers_out_d_bits_sink.ImmSet(std::uint64_t{0});
-        dut.auto_inner_buffers_out_d_bits_denied.ImmSet(response.denied);
-        dut.auto_inner_buffers_out_d_bits_data.ImmSet(response.data);
-        dut.auto_inner_buffers_out_d_bits_corrupt.ImmSet(response.corrupt);
-        dut.auto_inner_buffers_out_d_valid.ImmSet(std::uint64_t{1});
+        dut.uncache.d.opcode.set(response.opcode);
+        dut.uncache.d.param.set(std::uint64_t{0});
+        dut.uncache.d.size.set(response.size);
+        dut.uncache.d.source.set(response.source);
+        dut.uncache.d.sink.set(std::uint64_t{0});
+        dut.uncache.d.denied.set(response.denied);
+        dut.uncache.d.data.set(response.data);
+        dut.uncache.d.corrupt.set(response.corrupt);
+        dut.uncache.d.valid.set(std::uint64_t{1});
     }
 
-    void capture_before_tick(UTMemBlock &dut)
+    void capture_before_tick(DutAdapter &dut)
     {
-        const bool a_valid = dut.auto_inner_buffers_out_a_valid.B();
-        const bool a_ready = dut.auto_inner_buffers_out_a_ready.B();
+        const bool a_valid = dut.uncache.a.valid.boolean();
+        const bool a_ready = dut.uncache.a.ready.boolean();
         if (a_valid && !a_ready) {
             ++request_stall_cycles_;
             force_a_stall_ = false;
@@ -114,22 +103,22 @@ public:
         a_fire_ = a_valid && a_ready;
         if (a_fire_) {
             request_ = Request{
-                static_cast<std::uint8_t>(dut.auto_inner_buffers_out_a_bits_opcode.U()),
-                static_cast<std::uint8_t>(dut.auto_inner_buffers_out_a_bits_size.U()),
-                static_cast<std::uint8_t>(dut.auto_inner_buffers_out_a_bits_source.U()),
-                dut.auto_inner_buffers_out_a_bits_address.U(),
-                static_cast<std::uint8_t>(dut.auto_inner_buffers_out_a_bits_mask.U()),
-                dut.auto_inner_buffers_out_a_bits_data.U(),
+                static_cast<std::uint8_t>(dut.uncache.a.opcode.value()),
+                static_cast<std::uint8_t>(dut.uncache.a.size.value()),
+                static_cast<std::uint8_t>(dut.uncache.a.source.value()),
+                dut.uncache.a.address.value(),
+                static_cast<std::uint8_t>(dut.uncache.a.mask.value()),
+                dut.uncache.a.data.value(),
             };
             if (request_->opcode != 0 && request_->opcode != 1 &&
                 request_->opcode != 4) {
-                error_ = "unsupported uncache TileLink A opcode";
+                error_.record("unsupported uncache TileLink A opcode");
             }
             if (request_->size > 6) {
-                error_ = "oversized uncache TileLink A request";
+                error_.record("oversized uncache TileLink A request");
             }
             if (request_->size > 3) {
-                error_ = "uncache TileLink A request exceeds the 8-byte beat";
+                error_.record("uncache TileLink A request exceeds the 8-byte beat");
             } else {
                 const unsigned transfer_bytes = 1U << request_->size;
                 const unsigned beat_offset =
@@ -139,25 +128,25 @@ public:
                 if ((request_->address & (transfer_bytes - 1U)) != 0 ||
                     beat_offset + transfer_bytes > 8 ||
                     request_->mask != expected_mask) {
-                    error_ = "uncache TileLink A size/address/mask mismatch";
+                    error_.record("uncache TileLink A size/address/mask mismatch");
                 }
             }
         }
         d_fire_ = !responses_.empty() &&
-                  dut.auto_inner_buffers_out_d_valid.B() &&
-                  dut.auto_inner_buffers_out_d_ready.B();
+                  dut.uncache.d.valid.boolean() &&
+                  dut.uncache.d.ready.boolean();
         if (d_fire_) {
             const Response &expected = responses_.front();
             denied_d_beat_count_ += expected.denied;
             corrupt_d_beat_count_ += expected.corrupt;
-            if (dut.auto_inner_buffers_out_d_bits_opcode.U() != expected.opcode ||
-                dut.auto_inner_buffers_out_d_bits_size.U() != expected.size ||
-                dut.auto_inner_buffers_out_d_bits_source.U() != expected.source ||
-                dut.auto_inner_buffers_out_d_bits_sink.U() != 0 ||
-                dut.auto_inner_buffers_out_d_bits_denied.B() != expected.denied ||
-                dut.auto_inner_buffers_out_d_bits_corrupt.B() != expected.corrupt ||
-                dut.auto_inner_buffers_out_d_bits_data.U() != expected.data) {
-                error_ = "uncache TileLink D response identity or payload mismatch";
+            if (dut.uncache.d.opcode.value() != expected.opcode ||
+                dut.uncache.d.size.value() != expected.size ||
+                dut.uncache.d.source.value() != expected.source ||
+                dut.uncache.d.sink.value() != 0 ||
+                dut.uncache.d.denied.boolean() != expected.denied ||
+                dut.uncache.d.corrupt.boolean() != expected.corrupt ||
+                dut.uncache.d.data.value() != expected.data) {
+                error_.record("uncache TileLink D response identity or payload mismatch");
             }
         }
     }
@@ -182,8 +171,11 @@ public:
         request_.reset();
     }
 
+    const FailureState &failures() const { return error_; }
+    void set_failure_cycle(std::uint64_t cycle) { error_.set_cycle(cycle); }
+
     bool ok() const { return error_.empty(); }
-    const std::string &error() const { return error_; }
+    const std::string &error() const { return error_.message(); }
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
@@ -297,11 +289,11 @@ private:
             std::ostringstream message;
             message << "unsupported uncache TileLink A opcode "
                     << static_cast<unsigned>(request.opcode);
-            error_ = message.str();
+            error_.record(message.str());
             return;
         }
         if (corrupt) {
-            error_ = "cannot inject corrupt on a data-less Uncache AccessAck";
+            error_.record("cannot inject corrupt on a data-less Uncache AccessAck");
             return;
         }
         const std::uint64_t beat_base = request.address & ~std::uint64_t{7};
@@ -383,5 +375,5 @@ private:
     bool inject_corrupt_ = false;
     std::optional<DeviceWindow> device_window_;
     std::vector<DeviceAccess> device_accesses_;
-    std::string error_;
+    FailureState error_{"uncache", "manager-contract"};
 };

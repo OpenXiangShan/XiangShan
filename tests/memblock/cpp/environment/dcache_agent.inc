@@ -1,4 +1,4 @@
-// This file is included inside memblock_env.hpp's memblock namespace.
+// This file is included inside implementation.hpp's private memblock namespace.
 
 class TileLinkMemoryAgent {
 public:
@@ -88,7 +88,7 @@ public:
                               }) != held_responses_.end();
         if (pending || held || hold_next_response_address_ == line ||
             building_held_response_address_ == line) {
-            error_ = "DCache response hold address is already active";
+            error_.record("DCache response hold address is already active");
             return;
         }
         pending_held_response_addresses_.push_back(line);
@@ -110,7 +110,7 @@ public:
     {
         if (held_responses_.size() != 1 ||
             building_held_response_address_) {
-            error_ = "no complete held DCache response to release";
+            error_.record("no complete held DCache response to release");
             return;
         }
         release_held_response_at(held_responses_.front().address);
@@ -121,7 +121,7 @@ public:
         const std::uint64_t line = address & ~(kLineBytes - 1U);
         if (scheduled_held_response_release_ &&
             scheduled_held_response_release_->first == line) {
-            error_ = "DCache held response already has a scheduled release";
+            error_.record("DCache held response already has a scheduled release");
             return;
         }
         const auto held = std::find_if(
@@ -131,7 +131,7 @@ public:
             });
         if (held == held_responses_.end() ||
             building_held_response_address_ == line) {
-            error_ = "no complete held DCache response at requested address";
+            error_.record("no complete held DCache response at requested address");
             return;
         }
         const bool was_empty = d_beats_.empty();
@@ -156,16 +156,16 @@ public:
                 return response.address == line;
             });
         if (after_ticks == 0) {
-            error_ = "scheduled DCache response release requires at least one tick";
+            error_.record("scheduled DCache response release requires at least one tick");
             return;
         }
         if (scheduled_held_response_release_) {
-            error_ = "a DCache held response release is already scheduled";
+            error_.record("a DCache held response release is already scheduled");
             return;
         }
         if (held == held_responses_.end() || held->beats.empty() ||
             building_held_response_address_ == line) {
-            error_ = "no complete held DCache response to schedule for release";
+            error_.record("no complete held DCache response to schedule for release");
             return;
         }
         scheduled_held_response_release_ = std::make_pair(line, after_ticks);
@@ -176,11 +176,11 @@ public:
         unsigned stall_valid_cycles)
     {
         if (release_ready_window_active_) {
-            error_ = "DCache release ready window is already active";
+            error_.record("DCache release ready window is already active");
             return;
         }
         if (target_lines.empty()) {
-            error_ = "DCache release ready window has no target lines";
+            error_.record("DCache release ready window has no target lines");
             return;
         }
         release_ready_window_active_ = true;
@@ -220,7 +220,7 @@ public:
                     << " bypass="
                     << release_ready_window_bypass_non_target_
                     << " release_data=" << release_data_.has_value();
-            error_ = message.str();
+            error_.record(message.str());
             return;
         }
         release_ready_window_active_ = false;
@@ -231,7 +231,7 @@ public:
     {
         if (hold_c_until_probe_requests_ ||
             target_requests <= probe_request_count_) {
-            error_ = "invalid DCache Probe C hold target";
+            error_.record("invalid DCache Probe C hold target");
             return;
         }
         hold_c_until_probe_requests_ = target_requests;
@@ -287,7 +287,7 @@ public:
         last_accepted_probe_source_.reset();
     }
 
-    void drive(UTMemBlock &dut)
+    void drive(DutAdapter &dut)
     {
         const bool accept_a = !random_backpressure_ ||
                               (!force_a_stall_ && (next_random() & 3U) != 0);
@@ -301,26 +301,26 @@ public:
                  : !random_backpressure_ || (next_random() & 3U) != 0);
         const bool accept_e = !random_backpressure_ ||
                               (!force_e_stall_ && (next_e_random() & 3U) != 0);
-        dut.auto_inner_dcache_client_out_a_ready.ImmSet(accept_a);
-        dut.auto_inner_dcache_client_out_c_ready.ImmSet(accept_c);
-        dut.auto_inner_dcache_client_out_e_ready.ImmSet(accept_e);
+        dut.dcache.a.ready.set(accept_a);
+        dut.dcache.c.ready.set(accept_c);
+        dut.dcache.e.ready.set(accept_e);
         if (b_beats_.empty()) {
-            dut.auto_inner_dcache_client_out_b_valid.ImmSet(std::uint64_t{0});
+            dut.dcache.b.valid.set(std::uint64_t{0});
         } else {
             const BBeat &beat = b_beats_.front();
-            dut.auto_inner_dcache_client_out_b_bits_opcode.ImmSet(beat.opcode);
-            dut.auto_inner_dcache_client_out_b_bits_param.ImmSet(beat.param);
-            dut.auto_inner_dcache_client_out_b_bits_size.ImmSet(beat.size);
-            dut.auto_inner_dcache_client_out_b_bits_source.ImmSet(beat.source);
-            dut.auto_inner_dcache_client_out_b_bits_address.ImmSet(beat.address);
-            dut.auto_inner_dcache_client_out_b_bits_mask.ImmSet(beat.mask);
+            dut.dcache.b.opcode.set(beat.opcode);
+            dut.dcache.b.param.set(beat.param);
+            dut.dcache.b.size.set(beat.size);
+            dut.dcache.b.source.set(beat.source);
+            dut.dcache.b.address.set(beat.address);
+            dut.dcache.b.mask.set(beat.mask);
             auto bytes = beat.data;
-            dut.auto_inner_dcache_client_out_b_bits_data.ImmSetBytes(bytes);
-            dut.auto_inner_dcache_client_out_b_bits_corrupt.ImmSet(beat.corrupt);
-            dut.auto_inner_dcache_client_out_b_valid.ImmSet(std::uint64_t{1});
+            dut.dcache.b.data.set_bytes(bytes);
+            dut.dcache.b.corrupt.set(beat.corrupt);
+            dut.dcache.b.valid.set(std::uint64_t{1});
         }
         if (d_beats_.empty()) {
-            dut.auto_inner_dcache_client_out_d_valid.ImmSet(std::uint64_t{0});
+            dut.dcache.d.valid.set(std::uint64_t{0});
             d_presenting_ = false;
             return;
         }
@@ -329,30 +329,30 @@ public:
             if (d_gap_ != 0) {
                 --d_gap_;
                 ++response_delay_cycles_;
-                dut.auto_inner_dcache_client_out_d_valid.ImmSet(std::uint64_t{0});
+                dut.dcache.d.valid.set(std::uint64_t{0});
                 return;
             }
             d_presenting_ = true;
         }
 
         const DBeat &beat = d_beats_.front();
-        dut.auto_inner_dcache_client_out_d_bits_opcode.ImmSet(beat.opcode);
-        dut.auto_inner_dcache_client_out_d_bits_param.ImmSet(beat.param);
-        dut.auto_inner_dcache_client_out_d_bits_size.ImmSet(beat.size);
-        dut.auto_inner_dcache_client_out_d_bits_source.ImmSet(beat.source);
-        dut.auto_inner_dcache_client_out_d_bits_sink.ImmSet(beat.sink);
-        dut.auto_inner_dcache_client_out_d_bits_denied.ImmSet(beat.denied);
-        dut.auto_inner_dcache_client_out_d_bits_echo_isKeyword.ImmSet(beat.keyword);
+        dut.dcache.d.opcode.set(beat.opcode);
+        dut.dcache.d.param.set(beat.param);
+        dut.dcache.d.size.set(beat.size);
+        dut.dcache.d.source.set(beat.source);
+        dut.dcache.d.sink.set(beat.sink);
+        dut.dcache.d.denied.set(beat.denied);
+        dut.dcache.d.echo_is_keyword.set(beat.keyword);
         auto bytes = beat.data;
-        dut.auto_inner_dcache_client_out_d_bits_data.ImmSetBytes(bytes);
-        dut.auto_inner_dcache_client_out_d_bits_corrupt.ImmSet(beat.corrupt);
-        dut.auto_inner_dcache_client_out_d_valid.ImmSet(std::uint64_t{1});
+        dut.dcache.d.data.set_bytes(bytes);
+        dut.dcache.d.corrupt.set(beat.corrupt);
+        dut.dcache.d.valid.set(std::uint64_t{1});
     }
 
-    void capture_before_tick(UTMemBlock &dut)
+    void capture_before_tick(DutAdapter &dut)
     {
-        const bool a_valid = dut.auto_inner_dcache_client_out_a_valid.B();
-        const bool a_ready = dut.auto_inner_dcache_client_out_a_ready.B();
+        const bool a_valid = dut.dcache.a.valid.boolean();
+        const bool a_ready = dut.dcache.a.ready.boolean();
         if (a_valid && !a_ready) {
             ++request_stall_cycles_;
             force_a_stall_ = false;
@@ -361,65 +361,65 @@ public:
         if (a_fire_) {
             captured_a_ = ARequest{
                 .opcode = static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_a_bits_opcode.U()),
+                    dut.dcache.a.opcode.value()),
                 .param = static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_a_bits_param.U()),
+                    dut.dcache.a.param.value()),
                 .size = static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_a_bits_size.U()),
+                    dut.dcache.a.size.value()),
                 .source = static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_a_bits_source.U()),
-                .address = dut.auto_inner_dcache_client_out_a_bits_address.U(),
-                .keyword = dut.auto_inner_dcache_client_out_a_bits_echo_isKeyword.B(),
+                    dut.dcache.a.source.value()),
+                .address = dut.dcache.a.address.value(),
+                .keyword = dut.dcache.a.echo_is_keyword.boolean(),
                 .request_source = static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_a_bits_user_reqSource.U()),
+                    dut.dcache.a.user_req_source.value()),
                 .virtual_address =
-                    dut.auto_inner_dcache_client_out_a_bits_user_vaddr.U(),
+                    dut.dcache.a.user_vaddr.value(),
                 .alias = static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_a_bits_user_alias.U()),
-                .need_hint = dut.auto_inner_dcache_client_out_a_bits_user_needHint.B(),
+                    dut.dcache.a.user_alias.value()),
+                .need_hint = dut.dcache.a.user_need_hint.boolean(),
                 .mask = static_cast<std::uint32_t>(
-                    dut.auto_inner_dcache_client_out_a_bits_mask.U()),
-                .corrupt = dut.auto_inner_dcache_client_out_a_bits_corrupt.B(),
-                .cycle = dut.xclock.clk,
+                    dut.dcache.a.mask.value()),
+                .corrupt = dut.dcache.a.corrupt.boolean(),
+                .cycle = dut.cycle(),
                 .index = request_count_,
             };
             if (const char *error = dcache_a_protocol_error(
                     *captured_a_, kDcacheMissEntries, kDcacheCmoSource,
                     kDcacheSourceCount)) {
-                error_ = std::string("DCache TileLink A contract: ") + error +
-                    ':' + request_record_summary(*captured_a_);
+                error_.record(std::string("DCache TileLink A contract: ") + error +
+                    ':' + request_record_summary(*captured_a_));
             }
         }
-        const bool b_valid = dut.auto_inner_dcache_client_out_b_valid.B();
-        const bool b_ready = dut.auto_inner_dcache_client_out_b_ready.B();
+        const bool b_valid = dut.dcache.b.valid.boolean();
+        const bool b_ready = dut.dcache.b.ready.boolean();
         if (b_valid && !b_ready) {
             ++probe_stall_cycles_;
         }
         b_fire_ = b_valid && b_ready;
-        const bool c_valid = dut.auto_inner_dcache_client_out_c_valid.B();
-        const bool c_ready = dut.auto_inner_dcache_client_out_c_ready.B();
+        const bool c_valid = dut.dcache.c.valid.boolean();
+        const bool c_ready = dut.dcache.c.ready.boolean();
         c_valid_sampled_ = c_valid;
         std::optional<CRequest> current_c;
         if (c_valid) {
             current_c = CRequest{
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_c_bits_opcode.U()),
+                    dut.dcache.c.opcode.value()),
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_c_bits_param.U()),
+                    dut.dcache.c.param.value()),
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_c_bits_size.U()),
+                    dut.dcache.c.size.value()),
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_c_bits_source.U()),
-                dut.auto_inner_dcache_client_out_c_bits_address.U(),
+                    dut.dcache.c.source.value()),
+                dut.dcache.c.address.value(),
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_c_bits_user_alias.U()),
-                dut.auto_inner_dcache_client_out_c_bits_user_vaddr.U(),
+                    dut.dcache.c.user_alias.value()),
+                dut.dcache.c.user_vaddr.value(),
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_dcache_client_out_c_bits_user_reqSource.U()),
-                dut.auto_inner_dcache_client_out_c_bits_user_needHint.B(),
-                dut.auto_inner_dcache_client_out_c_bits_echo_isKeyword.B(),
-                dut.auto_inner_dcache_client_out_c_bits_corrupt.B(),
-                dut.auto_inner_dcache_client_out_c_bits_data.GetBytes(),
+                    dut.dcache.c.user_req_source.value()),
+                dut.dcache.c.user_need_hint.boolean(),
+                dut.dcache.c.echo_is_keyword.boolean(),
+                dut.dcache.c.corrupt.boolean(),
+                dut.dcache.c.data.bytes(),
             };
         }
         if (current_c && release_ready_window_active_ &&
@@ -434,9 +434,9 @@ public:
         }
         if (stalled_c_request_) {
             if (!current_c) {
-                error_ = "DCache TileLink C dropped valid while stalled";
+                error_.record("DCache TileLink C dropped valid while stalled");
             } else if (*current_c != *stalled_c_request_) {
-                error_ = "DCache TileLink C changed payload while stalled";
+                error_.record("DCache TileLink C changed payload while stalled");
             } else {
                 ++c_payload_stability_checks_;
                 if (release_ready_window_active_ &&
@@ -463,14 +463,14 @@ public:
         if (c_fire_) {
             captured_c_ = std::move(current_c);
             if (captured_c_->opcode < 4 || captured_c_->opcode > 7) {
-                error_ = "unsupported DCache TileLink C opcode";
+                error_.record("unsupported DCache TileLink C opcode");
             }
             if (captured_c_->size > 6) {
-                error_ = "oversized DCache TileLink C request";
+                error_.record("oversized DCache TileLink C request");
             }
         }
-        const bool e_valid = dut.auto_inner_dcache_client_out_e_valid.B();
-        const bool e_ready = dut.auto_inner_dcache_client_out_e_ready.B();
+        const bool e_valid = dut.dcache.e.valid.boolean();
+        const bool e_ready = dut.dcache.e.ready.boolean();
         if (e_valid && !e_ready) {
             ++grant_ack_stall_cycles_;
             force_e_stall_ = false;
@@ -478,34 +478,34 @@ public:
         e_fire_ = e_valid && e_ready;
         if (e_fire_) {
             const std::uint16_t sink = static_cast<std::uint16_t>(
-                dut.auto_inner_dcache_client_out_e_bits_sink.U());
+                dut.dcache.e.sink.value());
             const auto expected = std::find_if(
                 expected_grant_acks_.begin(), expected_grant_acks_.end(),
                 [&](const auto &entry) { return entry.first == sink; });
             if (expected == expected_grant_acks_.end()) {
-                error_ = "unexpected DCache TileLink E GrantAck";
+                error_.record("unexpected DCache TileLink E GrantAck");
             } else {
                 accepted_grant_ack_index_ = static_cast<std::size_t>(
                     std::distance(expected_grant_acks_.begin(), expected));
             }
         }
         d_fire_ = !d_beats_.empty() &&
-                  dut.auto_inner_dcache_client_out_d_valid.B() &&
-                  dut.auto_inner_dcache_client_out_d_ready.B();
+                  dut.dcache.d.valid.boolean() &&
+                  dut.dcache.d.ready.boolean();
         if (d_fire_) {
             const DBeat &expected = d_beats_.front();
             const auto actual_data =
-                dut.auto_inner_dcache_client_out_d_bits_data.GetBytes();
-            if (dut.auto_inner_dcache_client_out_d_bits_opcode.U() != expected.opcode ||
-                dut.auto_inner_dcache_client_out_d_bits_param.U() != expected.param ||
-                dut.auto_inner_dcache_client_out_d_bits_size.U() != expected.size ||
-                dut.auto_inner_dcache_client_out_d_bits_source.U() != expected.source ||
-                dut.auto_inner_dcache_client_out_d_bits_sink.U() != expected.sink ||
-                dut.auto_inner_dcache_client_out_d_bits_echo_isKeyword.B() != expected.keyword ||
-                dut.auto_inner_dcache_client_out_d_bits_denied.B() != expected.denied ||
-                dut.auto_inner_dcache_client_out_d_bits_corrupt.B() != expected.corrupt ||
+                dut.dcache.d.data.bytes();
+            if (dut.dcache.d.opcode.value() != expected.opcode ||
+                dut.dcache.d.param.value() != expected.param ||
+                dut.dcache.d.size.value() != expected.size ||
+                dut.dcache.d.source.value() != expected.source ||
+                dut.dcache.d.sink.value() != expected.sink ||
+                dut.dcache.d.echo_is_keyword.boolean() != expected.keyword ||
+                dut.dcache.d.denied.boolean() != expected.denied ||
+                dut.dcache.d.corrupt.boolean() != expected.corrupt ||
                 actual_data != expected.data) {
-                error_ = "DCache TileLink D response identity or payload mismatch";
+                error_.record("DCache TileLink D response identity or payload mismatch");
             }
         }
     }
@@ -552,7 +552,7 @@ public:
                 if (response.source >= active_request_sources_.size() ||
                     !active_request_sources_[response.source] ||
                     outstanding_requests_ == 0) {
-                    error_ = "DCache TileLink D completed an inactive A source";
+                    error_.record("DCache TileLink D completed an inactive A source");
                 } else {
                     active_request_sources_[response.source] = false;
                     --outstanding_requests_;
@@ -565,7 +565,7 @@ public:
         if (a_fire_ && captured_a_) {
             if (captured_a_->source >= active_request_sources_.size() ||
                 active_request_sources_[captured_a_->source]) {
-                error_ = "DCache TileLink A source reused before D completion";
+                error_.record("DCache TileLink A source reused before D completion");
             } else {
                 active_request_sources_[captured_a_->source] = true;
                 ++outstanding_requests_;
@@ -619,8 +619,11 @@ public:
         }
     }
 
+    const FailureState &failures() const { return error_; }
+    void set_failure_cycle(std::uint64_t cycle) { error_.set_cycle(cycle); }
+
     bool ok() const { return error_.empty(); }
-    const std::string &error() const { return error_; }
+    const std::string &error() const { return error_.message(); }
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t last_request_address() const { return last_request_address_; }
     const std::array<std::uint64_t, 7> &request_classes() const
@@ -891,7 +894,7 @@ public:
         if ((address & (kLineBytes - 1)) != 0 || cap > 2 ||
             expected_report > 5 ||
             (!expected_data.empty() && expected_data.size() != kLineBytes)) {
-            error_ = "invalid DCache Probe request or expectation";
+            error_.record("invalid DCache Probe request or expectation");
             return false;
         }
         std::vector<unsigned char> data(kBeatBytes, 0);
@@ -905,7 +908,7 @@ public:
                 [source](const auto &response) {
                     return response.b_source == source;
                 })) {
-            error_ = "DCache Probe source reused while still outstanding";
+            error_.record("DCache Probe source reused while still outstanding");
             return false;
         }
         next_probe_source_ = static_cast<std::uint8_t>(
@@ -947,7 +950,7 @@ public:
         std::uint64_t base, const std::vector<unsigned char> &bytes)
     {
         if (bytes.empty() || bytes.size() % kBeatBytes != 0) {
-            error_ = "expected ReleaseData line is not beat sized";
+            error_.record("expected ReleaseData line is not beat sized");
             return;
         }
         expected_release_lines_[base] = bytes;
@@ -969,7 +972,7 @@ public:
                         << " expected=0x" << static_cast<unsigned>(expected[index])
                         << " actual=0x"
                         << static_cast<unsigned>(memory_.read_byte(address + index));
-                error_ = message.str();
+                error_.record(message.str());
                 return false;
             }
         }
@@ -1184,7 +1187,7 @@ private:
         case 7: { // AcquirePerm -> Grant
             ++acquire_perm_count_;
             if (corrupt) {
-                error_ = "cannot inject corrupt on a data-less DCache Grant";
+                error_.record("cannot inject corrupt on a data-less DCache Grant");
                 return;
             }
             const std::uint16_t sink =
@@ -1215,7 +1218,7 @@ private:
             std::ostringstream message;
             message << "unsupported DCache TileLink A opcode "
                     << static_cast<unsigned>(request.opcode);
-            error_ = message.str();
+            error_.record(message.str());
             break;
         }
         }
@@ -1246,7 +1249,7 @@ private:
                 return expected.base == response.address;
             });
         if (expected_it == probe_responses_.end()) {
-            error_ = "unexpected DCache ProbeAck address";
+            error_.record("unexpected DCache ProbeAck address");
             return;
         }
         ProbeResponseState &expected = *expected_it;
@@ -1271,13 +1274,13 @@ private:
                     << " actual_address=0x" << response.address << std::dec
                     << " corrupt=" << response.corrupt
                     << " beat=" << expected.received;
-            error_ = message.str();
+            error_.record(message.str());
             return;
         }
         if (with_data) {
             const std::size_t offset = expected.received * kBeatBytes;
             if (offset + kBeatBytes > expected.expected_data.size()) {
-                error_ = "DCache ProbeAckData exceeded one cache line";
+                error_.record("DCache ProbeAckData exceeded one cache line");
                 return;
             }
             for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
@@ -1286,7 +1289,7 @@ private:
                     message << "DCache ProbeAckData byte mismatch base=0x"
                             << std::hex << expected.base << " beat=" << std::dec
                             << expected.received << " byte=" << byte;
-                    error_ = message.str();
+                    error_.record(message.str());
                     return;
                 }
                 memory_.write_byte(
@@ -1325,7 +1328,7 @@ private:
             std::ostringstream message;
             message << "unsupported DCache TileLink C opcode "
                     << static_cast<unsigned>(request.opcode);
-            error_ = message.str();
+            error_.record(message.str());
             return;
         }
 
@@ -1340,14 +1343,14 @@ private:
         if (release_data_->base != base || release_data_->size != request.size ||
             release_data_->source != request.source ||
             release_data_->beats != beats) {
-            error_ = "interleaved or inconsistent DCache ReleaseData transaction";
+            error_.record("interleaved or inconsistent DCache ReleaseData transaction");
             return;
         }
         const auto expected = expected_release_lines_.find(base);
         const bool has_expected_line = expected != expected_release_lines_.end();
         const std::size_t offset = release_data_->received * kBeatBytes;
         if (has_expected_line && offset + kBeatBytes > expected->second.size()) {
-            error_ = "ReleaseData exceeded expected immutable line image";
+            error_.record("ReleaseData exceeded expected immutable line image");
             return;
         }
         for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
@@ -1363,7 +1366,7 @@ private:
                         << static_cast<unsigned>(expected_byte)
                         << " actual=0x"
                         << static_cast<unsigned>(request.data.at(byte));
-                error_ = message.str();
+                error_.record(message.str());
                 return;
             }
         }
@@ -1498,7 +1501,7 @@ private:
                         *building_held_response_address_;
                 });
             if (held == held_responses_.end()) {
-                error_ = "DCache held response builder lost its transaction";
+                error_.record("DCache held response builder lost its transaction");
                 building_held_response_address_.reset();
                 return;
             }
@@ -1613,5 +1616,5 @@ private:
     bool c_valid_sampled_ = false;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
-    std::string error_;
+    FailureState error_{"dcache", "manager-contract"};
 };

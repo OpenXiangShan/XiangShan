@@ -38,6 +38,8 @@ PICKER_BUILD_LOCK := $(PREPARED_DIR)/.picker-build.lock
 PICKER_LOCKED_MAKE = $(PYTHON) scripts/with_build_lock.py --lock $(PICKER_BUILD_LOCK) -- $(MAKE) --no-print-directory MEMBLOCK_PICKER_BUILD_LOCK_HELD=1
 PICKER_OFFSET := $(PICKER_OUTPUT)/MemBlock_offset.yaml
 CPP_DEFAULTS := cpp/generated_port_defaults.hpp
+CPP_TYPES := cpp/generated_interface_types.hpp
+CPP_ADAPTERS := cpp/environment/dut_adapter.hpp cpp/environment/dut_adapter.cpp
 PICKER_HARNESS := $(PICKER_OUTPUT)/UT_MemBlock
 PICKER_EXPORT_STAMP := $(PICKER_OUTPUT)/.export.stamp
 PICKER_MODEL_STAMP := $(PICKER_OUTPUT)/build/UT_MemBlock/.model.stamp
@@ -49,31 +51,46 @@ RUNTIME_METADATA := $(RUNTIME_DIR)/runtime.json
 FROZEN_RTL_METADATA := $(RUNTIME_DIR)/rtl.json
 CPP_MAIN := cpp/memblock_main.cpp
 CPP_ENV := cpp/memblock_env.hpp
-CPP_SCENARIOS := $(sort $(wildcard cpp/scenarios/*.inc))
-CPP_ENV_PARTS := $(sort $(wildcard cpp/environment/*.inc))
+CPP_SCENARIOS := $(sort $(wildcard cpp/scenarios/*.inc cpp/scenarios/*.hpp cpp/scenarios/*.json cpp/scenarios/*.cpp cpp/scenarios/mixed/*.hpp))
+CPP_HEADERS := $(sort $(wildcard cpp/*.hpp))
+SCENARIO_MAKE := cpp/scenarios/generated_targets.mk
+CPP_ENV_PARTS := $(sort $(wildcard cpp/environment/*.inc cpp/environment/*.hpp cpp/environment/*.cpp))
 CPP_RANDOM_PARTS := $(sort $(wildcard cpp/random/*.inc))
-CPP_SUPPORT := $(CPP_SCENARIOS) $(CPP_ENV_PARTS) $(CPP_RANDOM_PARTS)
+CPP_SUPPORT := $(CPP_SCENARIOS) $(CPP_ENV_PARTS) $(CPP_RANDOM_PARTS) $(CPP_HEADERS)
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime smoke l2-flush-contracts top-control-contracts trace-bridge-contracts dft-bridge-contracts pin-space frontend-bridge frontend-reset-recovery single-load load-feedback topdown-contracts memory-violation rar-violation ifetch-prefetch hardware-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths uncache-outstanding sbuffer-flush sbuffer-timeout mmio-contracts cbo-zero-contracts cmo-contracts wfi-safety reset-recovery reset-partial-load reset-tree-contracts scalar-misaligned misaligned-stores exception-contracts pmp-contracts hypervisor-contracts pointer-masking-contracts mbmc-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-all translation-context translation-bare ptw-errors translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-fof vector-segment vector-addressing vector-issue-order vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve iq-slow-feedback dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
-.PHONY: vector-segment-fof vector-segment-canonical
+.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime translation-fence-all translation-inflight-context-all random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
 
-ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS)
+ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS) $(CPP_TYPES) $(CPP_ADAPTERS)
 
 $(PORT_JSON) $(PORT_DOC) &: $(RTL) $(CONFIG) scripts/rtl_ports.py
 	$(PYTHON) scripts/rtl_ports.py generate --rtl $(RTL) --config $(CONFIG) --json $(PORT_JSON) --markdown $(PORT_DOC)
 
+
+include $(SCENARIO_MAKE)
+
+$(SCENARIO_MAKE): cpp/scenarios/catalog.json scripts/scenario_catalog.py $(CPP_SCENARIOS)
+	$(PYTHON) scripts/scenario_catalog.py generate-make --output $@
+
+.PHONY: check-scenarios
+check-scenarios:
+	$(PYTHON) scripts/scenario_catalog.py check --output $(SCENARIO_MAKE)
+
 $(SVA): $(PORT_JSON) scripts/generate_sva.py
 	$(PYTHON) scripts/generate_sva.py generate --manifest $(PORT_JSON) --output $(SVA)
 
-$(CPP_DEFAULTS): $(PORT_JSON) scripts/generate_cpp.py
-	$(PYTHON) scripts/generate_cpp.py generate --manifest $(PORT_JSON) --output $(CPP_DEFAULTS)
+$(CPP_DEFAULTS) $(CPP_TYPES) &: $(PORT_JSON) scripts/generate_cpp.py
+	$(PYTHON) scripts/generate_cpp.py generate --manifest $(PORT_JSON) --output $(CPP_DEFAULTS) --types-output $(CPP_TYPES)
+
+$(CPP_ADAPTERS) &: config/semantic_ports.json $(PORT_JSON) $(CPP_DEFAULTS) $(CPP_TYPES) scripts/generate_semantic_ports.py
+	$(PYTHON) scripts/generate_semantic_ports.py generate
 
 check-ports:
 	$(PYTHON) scripts/rtl_ports.py check --rtl $(RTL) --config $(CONFIG) --json $(PORT_JSON) --markdown $(PORT_DOC)
 	$(PYTHON) scripts/generate_sva.py check --manifest $(PORT_JSON) --output $(SVA)
-	$(PYTHON) scripts/generate_cpp.py check --manifest $(PORT_JSON) --output $(CPP_DEFAULTS)
+	$(PYTHON) scripts/generate_cpp.py check --manifest $(PORT_JSON) --output $(CPP_DEFAULTS) --types-output $(CPP_TYPES)
+	$(PYTHON) scripts/generate_semantic_ports.py check
 
 check-docs:
 	$(PYTHON) scripts/check_io_coverage.py check --manifest $(PORT_JSON) --doc docs/IO_COVERAGE.md --constraints cpp/random/constraints.inc --related-doc docs/CONSTRAINED_RANDOM.md
@@ -83,7 +100,7 @@ prepare-rtl: $(PREPARED_FILELIST) $(PREPARED_METADATA)
 $(PREPARED_FILELIST) $(PREPARED_METADATA) &: $(SOURCE_FILELIST) $(RTL) $(CONFIG) $(SVA) scripts/prepare_rtl.py
 	$(PYTHON) scripts/prepare_rtl.py generate --source $(SOURCE_FILELIST) --bind $(SVA) --config $(CONFIG) --output $(PREPARED_FILELIST) --metadata $(PREPARED_METADATA)
 
-check-rtl: check-ports check-docs
+check-rtl: check-ports check-docs check-scenarios
 	$(PYTHON) scripts/prepare_rtl.py check --source $(SOURCE_FILELIST) --bind $(SVA) --config $(CONFIG) --output $(PREPARED_FILELIST) --metadata $(PREPARED_METADATA)
 
 bootstrap-picker:
@@ -113,13 +130,14 @@ $(PICKER_MODEL_STAMP): $(PICKER_EXPORT_STAMP)
 	@test -s $(PICKER_OFFSET)
 	@touch $@
 
-$(PICKER_HARNESS_STAMP): $(PICKER_MODEL_STAMP) scripts/prepare_picker_harness.py $(CPP_MAIN) $(CPP_ENV) $(CPP_SUPPORT) $(CPP_DEFAULTS)
+$(PICKER_HARNESS_STAMP): $(PICKER_MODEL_STAMP) scripts/prepare_picker_harness.py scripts/scenario_catalog.py $(CPP_MAIN) $(CPP_ENV) $(CPP_SUPPORT) $(CPP_DEFAULTS) $(CPP_TYPES) $(CPP_ADAPTERS)
 	$(PYTHON) scripts/prepare_picker_harness.py --picker-output $(PICKER_OUTPUT) --main-source $(CPP_MAIN)
 	@touch $@
 
 $(PICKER_TEST_BINARY): $(PICKER_HARNESS_STAMP)
 	CXXFLAGS=-I$(CURDIR)/cpp $(MAKE) -C $(PICKER_HARNESS) compile NPROC=$(JOBS)
 	@test -x $@
+	@touch $@
 
 picker-harness _picker-harness: $(PICKER_TEST_BINARY)
 
@@ -146,165 +164,6 @@ freeze-runtime:
 
 endif
 
-smoke: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test smoke
-
-l2-flush-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test l2-flush-contracts
-
-top-control-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test top-control-contracts
-
-trace-bridge-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test trace-bridge-contracts
-
-dft-bridge-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test dft-bridge-contracts
-
-pin-space: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test pin-space
-
-frontend-bridge: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test frontend-bridge --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),4096)
-
-frontend-reset-recovery: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test frontend-reset-recovery
-
-single-load: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test single-load
-
-load-feedback: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test load-feedback
-
-topdown-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test topdown-contracts
-
-memory-violation: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test memory-violation
-
-rar-violation: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test rar-violation
-
-ifetch-prefetch: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test ifetch-prefetch
-
-hardware-prefetch: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test hardware-prefetch
-
-fp-loads: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test fp-loads
-
-trigger-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test trigger-contracts
-
-metadata-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test metadata-contracts
-
-dcache-errors: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test dcache-errors
-
-dcache-coherence: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test dcache-coherence
-
-atomic-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test atomic-contracts
-
-atomic-dchannel-errors: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test atomic-dchannel-errors
-
-uncache-errors: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test uncache-errors
-
-uncache-widths: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test uncache-widths
-
-uncache-outstanding: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test uncache-outstanding
-
-sbuffer-flush: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test sbuffer-flush
-
-sbuffer-timeout: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test sbuffer-timeout
-
-mmio-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test mmio-contracts
-
-cbo-zero-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test cbo-zero-contracts
-
-cmo-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test cmo-contracts
-
-wfi-safety: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test wfi-safety
-
-reset-recovery: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test reset-recovery
-
-reset-partial-load: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test reset-partial-load
-
-reset-tree-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test reset-tree-contracts
-
-scalar-misaligned: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test scalar-misaligned
-
-misaligned-stores: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test misaligned-stores
-
-exception-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test exception-contracts
-
-pmp-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test pmp-contracts
-
-hypervisor-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test hypervisor-contracts
-
-pointer-masking-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test pointer-masking-contracts
-
-mbmc-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test mbmc-contracts
-
-l2-tlb-contracts: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test l2-tlb-contracts
-
-ifetch-ptw-bridge: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test ifetch-ptw-bridge
-
-two-stage-translation: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test two-stage-translation
-
-translation-matrix: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-matrix
-
-translation-fence: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-fence
-
-translation-fence-selective: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-fence-selective
-
-translation-fence-sv48: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-fence-sv48
-
-translation-fence-sv48-selective: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-fence-sv48-selective
-
-translation-fence-sv39-sv48x4: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-fence-sv39-sv48x4
-
-translation-fence-sv39-sv48x4-selective: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-fence-sv39-sv48x4-selective
-
-translation-fence-sv48-sv39x4: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-fence-sv48-sv39x4
-
-translation-fence-sv48-sv39x4-selective: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-fence-sv48-sv39x4-selective
-
 translation-fence-all:
 	$(MAKE) translation-fence
 	$(MAKE) translation-fence-selective
@@ -315,60 +174,15 @@ translation-fence-all:
 	$(MAKE) translation-fence-sv48-sv39x4
 	$(MAKE) translation-fence-sv48-sv39x4-selective
 
-translation-inflight-context: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-inflight-context
-
-translation-inflight-context-sv48: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-inflight-context-sv48
-
-translation-inflight-context-sv39-sv48x4: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-inflight-context-sv39-sv48x4
-
-translation-inflight-context-sv48-sv39x4: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-inflight-context-sv48-sv39x4
-
 translation-inflight-context-all:
 	$(MAKE) translation-inflight-context
 	$(MAKE) translation-inflight-context-sv48
 	$(MAKE) translation-inflight-context-sv39-sv48x4
 	$(MAKE) translation-inflight-context-sv48-sv39x4
 
-translation-context: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-context
-
-translation-bare: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-bare
-
-ptw-errors: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test ptw-errors
-
-translation-faults: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-faults
-
-translation-permissions: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-permissions
-
-translation-pbmt: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-pbmt
-
-translation-superpages: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test translation-superpages
-
-vector-guest-fault: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-guest-fault
-
-vector-guest-fault-split: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-guest-fault-split
-
 known-bug-sentinel: $(PICKER_TEST_BINARY)
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/check_known_bug.py --binary $(PICKER_TEST_BINARY) --timeout-seconds 300 --expect repaired-pass
-
-random-mixed-hunt: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-mixed --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --hunt-boundaries --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))
-
-random-boundary-hunt: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-boundary-hunt --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),512)
 
 hunt-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
 	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(HUNT_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),16384) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --scenarios random-mixed --hunt-boundaries --continue-on-failure --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))
@@ -378,75 +192,6 @@ random-boundary-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
 
 verify-boundary-hunt:
 	$(PYTHON) scripts/verify_boundary_hunt.py --input $(BOUNDARY_HUNT_RESULT) --min-seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --expect repaired-all-pass
-
-scalar-guest-fault: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test scalar-guest-fault
-
-vector-load: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-load
-
-vector-split-load: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-split-load
-
-vector-fof: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-fof
-
-vector-segment: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-segment
-
-vector-segment-canonical: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-segment-canonical
-
-vector-segment-fof: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-segment-fof
-
-vector-addressing: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-addressing
-
-vector-issue-order: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-issue-order
-
-vector-store-forwarding: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test vector-store-forwarding
-
-store-forwarding: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test store-forwarding
-
-store-rdata-order: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test store-rdata-order
-
-store-tlb-miss-preserve: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test store-tlb-miss-preserve
-
-iq-slow-feedback: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test iq-slow-feedback
-
-dcache-release: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test dcache-release
-
-redirect: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test redirect
-
-queue-pressure: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test queue-pressure
-
-random-loads: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-loads --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
-
-random-vector-loads: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-vector-loads --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
-
-random-forwarding: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-forwarding --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),48)
-
-random-vector-forwarding: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-vector-forwarding --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),24)
-
-random-mixed: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-mixed --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) $(CONSTRAINT_ARGS)
-
-random-stress: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-stress --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
 
 regression: $(PICKER_TEST_BINARY)
 	$(MAKE) check-rtl

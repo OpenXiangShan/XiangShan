@@ -1762,3 +1762,16 @@ inline unsigned sample_response_latency(
     }
     return 100 + static_cast<unsigned>((random >> 16) % 301);
 }
+
+struct UncacheDeviceAccess {
+        std::uint64_t sequence;
+        bool write;
+        std::uint8_t size;
+        std::uint8_t source;
+        std::uint64_t address;
+        std::uint8_t mask;
+        std::uint64_t data;
+        std::uint64_t read_data;
+        bool denied;
+        bool corrupt;
+    };

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "UT_MemBlock.hpp"
+#include "generated_interface_types.hpp"
 
 #include <array>
 #include <cstddef>
@@ -9953,20 +9954,7 @@ inline std::uint64_t sample_all_outputs(UTMemBlock &dut)
     return digest;
 }
 
-inline constexpr unsigned kSweptInputCount = 747U;
-inline constexpr unsigned kSampledOutputCount = 586U;
-inline constexpr unsigned kSweptInputBitCount = 7153U;
-inline constexpr unsigned kSampledOutputBitCount = 5434U;
-inline constexpr unsigned kPinSpacePatternCount = 256U;
 
-inline constexpr unsigned kHcPerfEventInputCount = 68;
-inline constexpr unsigned kHcPerfEventOutputCount = 68;
-inline constexpr unsigned kHcPerfEventFirstInputLane = 1;
-inline constexpr unsigned kHcPerfEventHighestInputLane = 68;
-inline constexpr unsigned kHcPerfEventFirstOutputLane = 0;
-inline constexpr unsigned kHcPerfEventHighestOutputLane = 67;
-inline constexpr unsigned kHcPerfEventFirstSharedLane = 1;
-inline constexpr unsigned kHcPerfEventLastSharedLane = 67;
 
 inline void drive_hc_perf_event(
     UTMemBlock &dut, unsigned lane, std::uint8_t value)
@@ -10199,25 +10187,7 @@ inline std::uint8_t sample_hc_perf_event_output(
     }
 }
 
-inline constexpr unsigned kLsqEnqueueLanes = 6;
 
-struct LsqEnqueue {
-    std::uint8_t need_alloc = 0;
-    std::uint32_t exception_mask = 0;
-    std::uint8_t trigger = 15;
-    bool flush_pipe = false;
-    std::uint64_t fu_type = 0;
-    std::uint16_t fu_op_type = 0;
-    std::uint8_t uop_idx = 0;
-    bool last_uop = true;
-    bool rob_flag = false;
-    std::uint8_t rob_value = 0;
-    bool lq_flag = false;
-    std::uint8_t lq_value = 0;
-    bool sq_flag = false;
-    std::uint8_t sq_value = 0;
-    std::uint8_t num_ls_elem = 1;
-};
 
 inline void clear_lsq_enqueue_valids(UTMemBlock &dut)
 {
@@ -10490,11 +10460,6 @@ inline void drive_lsq_enqueue(
     }
 }
 
-struct LsqEnqueueObservation {
-    bool valid = false;
-    std::uint8_t need_alloc = 0;
-    std::uint8_t num_ls_elem = 0;
-};
 
 inline LsqEnqueueObservation sample_lsq_enqueue(
     UTMemBlock &dut, unsigned lane)
@@ -10541,29 +10506,6 @@ inline LsqEnqueueObservation sample_lsq_enqueue(
     }
 }
 
-struct ScalarLoadIssue {
-    std::uint64_t pc = 0;
-    bool predecode_rvc = false;
-    std::uint64_t ftq_ptr = 0;
-    std::uint8_t ftq_offset = 0;
-    std::uint16_t fu_op_type = 0;
-    bool rf_wen = true;
-    bool fp_wen = false;
-    std::uint32_t imm = 0;
-    std::uint8_t pdest = 0;
-    bool rob_flag = false;
-    std::uint8_t rob_value = 0;
-    bool lq_flag = false;
-    std::uint8_t lq_value = 0;
-    bool sq_flag = false;
-    std::uint8_t sq_value = 0;
-    bool store_set_hit = false;
-    bool wait_for_rob_flag = false;
-    std::uint8_t wait_for_rob_value = 0;
-    bool load_wait_bit = false;
-    bool load_wait_strict = false;
-    std::uint64_t src = 0;
-};
 
 inline void clear_scalar_load_issue_valids(UTMemBlock &dut)
 {
@@ -10684,23 +10626,6 @@ inline void drive_scalar_load_issue(
     }
 }
 
-struct ScalarLoadWriteback {
-    bool valid = false;
-    std::uint32_t exception_mask = 0;
-    bool rf_wen = false;
-    bool fp_wen = false;
-    bool flush_pipe = false;
-    std::uint8_t trigger = 15;
-    bool is_from_load_unit = false;
-    bool debug_is_mmio = false;
-    bool debug_is_ncio = false;
-    bool debug_is_perf_cnt = false;
-    std::uint8_t pdest = 0;
-    bool rob_flag = false;
-    std::uint8_t rob_value = 0;
-    bool replay = false;
-    std::uint64_t data = 0;
-};
 
 inline ScalarLoadWriteback sample_scalar_load_writeback(
     UTMemBlock &dut, unsigned lane)
@@ -10780,13 +10705,6 @@ inline ScalarLoadWriteback sample_scalar_load_writeback(
     }
 }
 
-struct HardwarePrefetchOutputs {
-    bool l2_valid = false;
-    std::uint64_t l2_addr = 0;
-    std::uint8_t l2_source = 0;
-    bool l3_valid = false;
-    std::uint64_t l3_addr = 0;
-};
 
 inline HardwarePrefetchOutputs sample_hardware_prefetch_outputs(
     UTMemBlock &dut)
@@ -10801,14 +10719,7 @@ inline HardwarePrefetchOutputs sample_hardware_prefetch_outputs(
     };
 }
 
-inline constexpr unsigned kScalarLoadFeedbackLanes = 3;
 
-struct ScalarLoadWakeup {
-    bool valid = false;
-    bool rf_wen = false;
-    bool fp_wen = false;
-    std::uint8_t pdest = 0;
-};
 
 inline ScalarLoadWakeup sample_scalar_load_wakeup(
     UTMemBlock &dut, unsigned lane)
@@ -10849,16 +10760,6 @@ inline bool sample_scalar_load_cancel(UTMemBlock &dut, unsigned lane)
     }
 }
 
-struct MemoryViolation {
-    bool valid = false;
-    bool is_rvc = false;
-    bool rob_flag = false;
-    std::uint8_t rob_value = 0;
-    bool ftq_flag = false;
-    std::uint8_t ftq_value = 0;
-    std::uint8_t ftq_offset = 0;
-    bool level = false;
-};
 
 inline MemoryViolation sample_memory_violation(UTMemBlock &dut)
 {
@@ -10879,12 +10780,7 @@ inline bool sample_sbuffer_empty(UTMemBlock &dut)
     return dut.io_mem_to_ooo_sbIsEmpty.B();
 }
 
-inline constexpr unsigned kIfetchPrefetchLanes = 3;
 
-struct IfetchPrefetch {
-    bool valid = false;
-    std::uint64_t vaddr = 0;
-};
 
 inline IfetchPrefetch sample_ifetch_prefetch(
     UTMemBlock &dut, unsigned lane)
@@ -10910,18 +10806,6 @@ inline IfetchPrefetch sample_ifetch_prefetch(
     }
 }
 
-struct ScalarStoreIssue {
-    std::uint64_t fu_type = 0;
-    std::uint16_t fu_op_type = 0;
-    std::uint32_t imm = 0;
-    std::uint8_t pdest = 0;
-    bool rf_wen = false;
-    bool rob_flag = false;
-    std::uint8_t rob_value = 0;
-    bool sq_flag = false;
-    std::uint8_t sq_value = 0;
-    std::uint64_t src = 0;
-};
 
 inline void clear_scalar_store_issue_valids(UTMemBlock &dut)
 {
@@ -11013,17 +10897,6 @@ inline void drive_scalar_store_data(
     }
 }
 
-struct ScalarStoreWriteback {
-    bool valid = false;
-    std::uint32_t exception_mask = 0;
-    std::uint8_t trigger = 15;
-    bool flush_pipe = false;
-    bool debug_is_mmio = false;
-    bool debug_is_ncio = false;
-    bool debug_is_perf_cnt = false;
-    bool rob_flag = false;
-    std::uint8_t rob_value = 0;
-};
 
 inline ScalarStoreWriteback sample_scalar_store_address_writeback(
     UTMemBlock &dut, unsigned lane)
@@ -11100,39 +10973,6 @@ inline ScalarStoreWriteback sample_scalar_store_data_writeback(
     }
 }
 
-struct VectorMemoryIssue {
-    std::uint64_t ftq_ptr = 0;
-    std::uint8_t ftq_offset = 0;
-    std::uint64_t fu_type = 0;
-    std::uint16_t fu_op_type = 0;
-    bool vec_wen = true;
-    bool v0_wen = false;
-    bool vl_wen = false;
-    bool vma = false;
-    bool vta = false;
-    std::uint8_t vsew = 0;
-    std::uint8_t vlmul = 0;
-    bool vm = true;
-    std::uint8_t vstart = 0;
-    std::uint8_t vuop_idx = 0;
-    bool last_uop = true;
-    std::array<unsigned char, 16> vmask{};
-    std::uint8_t nf = 0;
-    std::uint8_t veew = 0;
-    bool is_vleff = false;
-    std::uint8_t pdest = 0;
-    bool rob_flag = false;
-    std::uint8_t rob_value = 0;
-    bool lq_flag = false;
-    std::uint8_t lq_value = 0;
-    bool sq_flag = false;
-    std::uint8_t sq_value = 0;
-    std::array<std::array<unsigned char, 16>, 5> src{};
-    std::uint8_t flow_num = 2;
-    bool is_part_replay = false;
-    std::uint16_t replay_mask = 0;
-    std::uint8_t replay_mb_index = 0;
-};
 
 inline void clear_vector_memory_issue_valids(UTMemBlock &dut)
 {
@@ -11262,33 +11102,6 @@ inline void drive_vector_memory_issue(
     }
 }
 
-struct VectorMemoryWriteback {
-    bool valid = false;
-    std::uint32_t exception_mask = 0;
-    std::uint8_t trigger = 15;
-    bool debug_is_mmio = false;
-    bool debug_is_ncio = false;
-    bool debug_is_perf_cnt = false;
-    std::uint16_t fu_op_type = 0;
-    bool vec_wen = false;
-    bool v0_wen = false;
-    bool vl_wen = false;
-    bool flush_pipe = false;
-    std::uint8_t vsew = 0;
-    std::uint8_t vlmul = 0;
-    std::uint8_t vstart = 0;
-    std::uint8_t vuop_idx = 0;
-    std::vector<unsigned char> vmask;
-    std::uint8_t vl = 0;
-    std::uint8_t nf = 0;
-    std::uint8_t veew = 0;
-    std::uint8_t pdest = 0;
-    bool rob_flag = false;
-    std::uint8_t rob_value = 0;
-    bool replay = false;
-    std::vector<unsigned char> data;
-    std::uint8_t vd_index_in_field = 0;
-};
 
 inline VectorMemoryWriteback sample_vector_memory_writeback(
     UTMemBlock &dut, unsigned lane)
@@ -11369,7 +11182,5 @@ inline VectorMemoryWriteback sample_vector_memory_writeback(
     }
 }
 
-inline constexpr unsigned kDrivenInputCount = 748U;
-inline constexpr unsigned kQuiescentOutputCount = 20U;
 
 } // namespace memblock::generated

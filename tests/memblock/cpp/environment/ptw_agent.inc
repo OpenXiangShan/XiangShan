@@ -1,4 +1,4 @@
-// This file is included inside memblock_env.hpp's memblock namespace.
+// This file is included inside implementation.hpp's private memblock namespace.
 
 class PtwMemoryAgent {
 public:
@@ -88,13 +88,13 @@ public:
         pending_response_error_.reset();
     }
 
-    void drive(UTMemBlock &dut)
+    void drive(DutAdapter &dut)
     {
         const bool accept_a = !random_backpressure_ ||
                               (!force_a_stall_ && (next_random() & 3U) != 0);
-        dut.auto_inner_ptw_to_l2_buffer_out_a_ready.ImmSet(accept_a);
+        dut.ptw_memory.a.ready.set(accept_a);
         if (responses_.empty()) {
-            dut.auto_inner_ptw_to_l2_buffer_out_d_valid.ImmSet(std::uint64_t{0});
+            dut.ptw_memory.d.valid.set(std::uint64_t{0});
             d_presenting_ = false;
             return;
         }
@@ -102,29 +102,29 @@ public:
             if (d_gap_ != 0) {
                 --d_gap_;
                 ++response_delay_cycles_;
-                dut.auto_inner_ptw_to_l2_buffer_out_d_valid.ImmSet(
+                dut.ptw_memory.d.valid.set(
                     std::uint64_t{0});
                 return;
             }
             d_presenting_ = true;
         }
         const Response &response = responses_.front();
-        dut.auto_inner_ptw_to_l2_buffer_out_d_bits_opcode.ImmSet(response.opcode);
-        dut.auto_inner_ptw_to_l2_buffer_out_d_bits_param.ImmSet(response.param);
-        dut.auto_inner_ptw_to_l2_buffer_out_d_bits_size.ImmSet(response.size);
-        dut.auto_inner_ptw_to_l2_buffer_out_d_bits_source.ImmSet(response.source);
-        dut.auto_inner_ptw_to_l2_buffer_out_d_bits_sink.ImmSet(std::uint64_t{0});
-        dut.auto_inner_ptw_to_l2_buffer_out_d_bits_denied.ImmSet(response.denied);
+        dut.ptw_memory.d.opcode.set(response.opcode);
+        dut.ptw_memory.d.param.set(response.param);
+        dut.ptw_memory.d.size.set(response.size);
+        dut.ptw_memory.d.source.set(response.source);
+        dut.ptw_memory.d.sink.set(std::uint64_t{0});
+        dut.ptw_memory.d.denied.set(response.denied);
         auto data = response.data;
-        dut.auto_inner_ptw_to_l2_buffer_out_d_bits_data.ImmSetBytes(data);
-        dut.auto_inner_ptw_to_l2_buffer_out_d_bits_corrupt.ImmSet(response.corrupt);
-        dut.auto_inner_ptw_to_l2_buffer_out_d_valid.ImmSet(std::uint64_t{1});
+        dut.ptw_memory.d.data.set_bytes(data);
+        dut.ptw_memory.d.corrupt.set(response.corrupt);
+        dut.ptw_memory.d.valid.set(std::uint64_t{1});
     }
 
-    void capture_before_tick(UTMemBlock &dut)
+    void capture_before_tick(DutAdapter &dut)
     {
-        const bool a_valid = dut.auto_inner_ptw_to_l2_buffer_out_a_valid.B();
-        const bool a_ready = dut.auto_inner_ptw_to_l2_buffer_out_a_ready.B();
+        const bool a_valid = dut.ptw_memory.a.valid.boolean();
+        const bool a_ready = dut.ptw_memory.a.ready.boolean();
         if (a_valid && !a_ready) {
             ++request_stall_cycles_;
             force_a_stall_ = false;
@@ -133,38 +133,38 @@ public:
         if (a_fire_) {
             request_ = Request{
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_ptw_to_l2_buffer_out_a_bits_opcode.U()),
+                    dut.ptw_memory.a.opcode.value()),
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_ptw_to_l2_buffer_out_a_bits_param.U()),
+                    dut.ptw_memory.a.param.value()),
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_ptw_to_l2_buffer_out_a_bits_size.U()),
+                    dut.ptw_memory.a.size.value()),
                 static_cast<std::uint8_t>(
-                    dut.auto_inner_ptw_to_l2_buffer_out_a_bits_source.U()),
-                dut.auto_inner_ptw_to_l2_buffer_out_a_bits_address.U(),
+                    dut.ptw_memory.a.source.value()),
+                dut.ptw_memory.a.address.value(),
             };
             if (request_->opcode != 4 && request_->opcode != 6) {
-                error_ = "unsupported PTW TileLink A opcode";
+                error_.record("unsupported PTW TileLink A opcode");
             }
             if (request_->size > 6) {
-                error_ = "oversized PTW TileLink A request";
+                error_.record("oversized PTW TileLink A request");
             }
         }
         d_fire_ = !responses_.empty() &&
-                  dut.auto_inner_ptw_to_l2_buffer_out_d_valid.B() &&
-                  dut.auto_inner_ptw_to_l2_buffer_out_d_ready.B();
+                  dut.ptw_memory.d.valid.boolean() &&
+                  dut.ptw_memory.d.ready.boolean();
         if (d_fire_) {
             const Response &expected = responses_.front();
             const auto actual_data =
-                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_data.GetBytes();
-            if (dut.auto_inner_ptw_to_l2_buffer_out_d_bits_opcode.U() != expected.opcode ||
-                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_param.U() != expected.param ||
-                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_size.U() != expected.size ||
-                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_source.U() != expected.source ||
-                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_sink.U() != 0 ||
-                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_denied.B() != expected.denied ||
-                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_corrupt.B() != expected.corrupt ||
+                dut.ptw_memory.d.data.bytes();
+            if (dut.ptw_memory.d.opcode.value() != expected.opcode ||
+                dut.ptw_memory.d.param.value() != expected.param ||
+                dut.ptw_memory.d.size.value() != expected.size ||
+                dut.ptw_memory.d.source.value() != expected.source ||
+                dut.ptw_memory.d.sink.value() != 0 ||
+                dut.ptw_memory.d.denied.boolean() != expected.denied ||
+                dut.ptw_memory.d.corrupt.boolean() != expected.corrupt ||
                 actual_data != expected.data) {
-                error_ = "PTW TileLink D response identity or payload mismatch";
+                error_.record("PTW TileLink D response identity or payload mismatch");
             }
         }
     }
@@ -193,8 +193,11 @@ public:
         request_.reset();
     }
 
+    const FailureState &failures() const { return error_; }
+    void set_failure_cycle(std::uint64_t cycle) { error_.set_cycle(cycle); }
+
     bool ok() const { return error_.empty(); }
-    const std::string &error() const { return error_; }
+    const std::string &error() const { return error_.message(); }
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
@@ -320,7 +323,7 @@ private:
             std::ostringstream message;
             message << "unsupported PTW TileLink A opcode "
                     << static_cast<unsigned>(request.opcode);
-            error_ = message.str();
+            error_.record(message.str());
             return 0;
         }
         const std::uint64_t transfer_bytes = std::uint64_t{1} << request.size;
@@ -444,5 +447,5 @@ private:
     std::uint64_t corrupt_d_beat_count_ = 0;
     std::uint64_t last_error_response_address_ = 0;
     std::uint8_t last_error_response_source_ = 0;
-    std::string error_;
+    FailureState error_{"ptw", "manager-contract"};
 };

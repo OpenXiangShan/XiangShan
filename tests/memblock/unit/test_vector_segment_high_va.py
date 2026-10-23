@@ -295,7 +295,7 @@ class CompiledHighVaTest(unittest.TestCase):
         root = Path(cls.workspace.name)
         facade = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         includes = re.findall(r"^#include <[^>]+>$", facade, re.MULTILINE)
-        generated = (MEMBLOCK_ROOT / "cpp/generated_port_defaults.hpp").read_text()
+        generated = (MEMBLOCK_ROOT / "cpp/generated_interface_types.hpp").read_text()
         constants = []
         for name in ("kScalarLoadFeedbackLanes", "kIfetchPrefetchLanes"):
             match = re.search(rf"^inline constexpr unsigned {name} = .*?;",
@@ -309,11 +309,11 @@ class CompiledHighVaTest(unittest.TestCase):
                 "struct ConstraintCoverage {", 1)[1].split(
                 "struct MixedCoverage {", 1)[0]
         )
-        main_source = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main_source = (MEMBLOCK_ROOT / "cpp/scenarios/shared.hpp").read_text()
         (root / "translation_types.inc").write_text(
             "struct TranslationContext {" + main_source.split(
                 "struct TranslationContext {", 1)[1].split(
-                "Options parse_options(", 1)[0]
+                '#include "../random/coverage.inc"', 1)[0]
         )
         source = root / "high_va.cpp"
         source.write_text(

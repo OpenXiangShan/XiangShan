@@ -1,5 +1,5 @@
 // Constrained-random policy: legal knobs, presets, overrides, and validation.
-// Included inside memblock_main.cpp's anonymous namespace.
+// Included inside scenarios/shared.hpp's memblock::scenarios namespace.
 
 struct RandomConstraints {
     enum Operation : unsigned {
@@ -3060,7 +3060,7 @@ private:
     }
 };
 
-RandomConstraints resolve_random_constraints(const Options &options)
+inline RandomConstraints resolve_random_constraints(const Options &options)
 {
     RandomConstraints constraints =
         RandomConstraints::preset(options.constraint_profile);

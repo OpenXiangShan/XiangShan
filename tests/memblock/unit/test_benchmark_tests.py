@@ -47,8 +47,8 @@ class BenchmarkTestsTest(unittest.TestCase):
         }
 
     def test_scenario_inventory_matches_cpp_dispatch(self) -> None:
-        source = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text(encoding="utf-8")
-        dispatched = set(re.findall(r'options\.test == "([^"]+)"', source))
+        dispatched = {entry["name"] for entry in benchmark_tests.scenario_catalog.load_catalog()
+                      if entry["benchmark_order"] is not None}
         self.assertEqual(set(benchmark_tests.SCENARIOS), dispatched)
         self.assertEqual(len(benchmark_tests.SCENARIOS), len(dispatched))
 

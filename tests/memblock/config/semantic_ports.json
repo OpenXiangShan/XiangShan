@@ -1,0 +1,3168 @@
+{
+  "schema_version": 1,
+  "purpose": "Semantic access mapping for private harness ports; expected_ports.json owns the generated DUT interface.",
+  "ports": [
+    {
+      "raw": "auto_inner_beu_local_int_sink_in_0",
+      "semantic": "interrupts.bus_error.lane_0",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_buffers_out_a_bits_address",
+      "semantic": "uncache.a.address",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_buffers_out_a_bits_data",
+      "semantic": "uncache.a.data",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "auto_inner_buffers_out_a_bits_mask",
+      "semantic": "uncache.a.mask",
+      "direction": "output",
+      "width": 8
+    },
+    {
+      "raw": "auto_inner_buffers_out_a_bits_opcode",
+      "semantic": "uncache.a.opcode",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_buffers_out_a_bits_size",
+      "semantic": "uncache.a.size",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_buffers_out_a_bits_source",
+      "semantic": "uncache.a.source",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_buffers_out_a_ready",
+      "semantic": "uncache.a.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_buffers_out_a_valid",
+      "semantic": "uncache.a.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_bits_corrupt",
+      "semantic": "uncache.d.corrupt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_bits_data",
+      "semantic": "uncache.d.data",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_bits_denied",
+      "semantic": "uncache.d.denied",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_bits_opcode",
+      "semantic": "uncache.d.opcode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_bits_param",
+      "semantic": "uncache.d.param",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_bits_sink",
+      "semantic": "uncache.d.sink",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_bits_size",
+      "semantic": "uncache.d.size",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_bits_source",
+      "semantic": "uncache.d.source",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_ready",
+      "semantic": "uncache.d.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_buffers_out_d_valid",
+      "semantic": "uncache.d.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_clint_int_sink_in_0",
+      "semantic": "interrupts.clint.lane_0",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_clint_int_sink_in_1",
+      "semantic": "interrupts.clint.lane_1",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_address",
+      "semantic": "dcache.a.address",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_corrupt",
+      "semantic": "dcache.a.corrupt",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_echo_isKeyword",
+      "semantic": "dcache.a.echo_is_keyword",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_mask",
+      "semantic": "dcache.a.mask",
+      "direction": "output",
+      "width": 32
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_opcode",
+      "semantic": "dcache.a.opcode",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_param",
+      "semantic": "dcache.a.param",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_size",
+      "semantic": "dcache.a.size",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_source",
+      "semantic": "dcache.a.source",
+      "direction": "output",
+      "width": 6
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_user_alias",
+      "semantic": "dcache.a.user_alias",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_user_needHint",
+      "semantic": "dcache.a.user_need_hint",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_user_reqSource",
+      "semantic": "dcache.a.user_req_source",
+      "direction": "output",
+      "width": 5
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_bits_user_vaddr",
+      "semantic": "dcache.a.user_vaddr",
+      "direction": "output",
+      "width": 44
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_ready",
+      "semantic": "dcache.a.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_a_valid",
+      "semantic": "dcache.a.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_bits_address",
+      "semantic": "dcache.b.address",
+      "direction": "input",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_bits_corrupt",
+      "semantic": "dcache.b.corrupt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_bits_data",
+      "semantic": "dcache.b.data",
+      "direction": "input",
+      "width": 256
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_bits_mask",
+      "semantic": "dcache.b.mask",
+      "direction": "input",
+      "width": 32
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_bits_opcode",
+      "semantic": "dcache.b.opcode",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_bits_param",
+      "semantic": "dcache.b.param",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_bits_size",
+      "semantic": "dcache.b.size",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_bits_source",
+      "semantic": "dcache.b.source",
+      "direction": "input",
+      "width": 6
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_ready",
+      "semantic": "dcache.b.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_b_valid",
+      "semantic": "dcache.b.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_address",
+      "semantic": "dcache.c.address",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_corrupt",
+      "semantic": "dcache.c.corrupt",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_data",
+      "semantic": "dcache.c.data",
+      "direction": "output",
+      "width": 256
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_echo_isKeyword",
+      "semantic": "dcache.c.echo_is_keyword",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_opcode",
+      "semantic": "dcache.c.opcode",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_param",
+      "semantic": "dcache.c.param",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_size",
+      "semantic": "dcache.c.size",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_source",
+      "semantic": "dcache.c.source",
+      "direction": "output",
+      "width": 6
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_user_alias",
+      "semantic": "dcache.c.user_alias",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_user_needHint",
+      "semantic": "dcache.c.user_need_hint",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_user_reqSource",
+      "semantic": "dcache.c.user_req_source",
+      "direction": "output",
+      "width": 5
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_bits_user_vaddr",
+      "semantic": "dcache.c.user_vaddr",
+      "direction": "output",
+      "width": 44
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_ready",
+      "semantic": "dcache.c.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_c_valid",
+      "semantic": "dcache.c.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_corrupt",
+      "semantic": "dcache.d.corrupt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_data",
+      "semantic": "dcache.d.data",
+      "direction": "input",
+      "width": 256
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_denied",
+      "semantic": "dcache.d.denied",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_echo_isKeyword",
+      "semantic": "dcache.d.echo_is_keyword",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_opcode",
+      "semantic": "dcache.d.opcode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_param",
+      "semantic": "dcache.d.param",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_sink",
+      "semantic": "dcache.d.sink",
+      "direction": "input",
+      "width": 10
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_size",
+      "semantic": "dcache.d.size",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_bits_source",
+      "semantic": "dcache.d.source",
+      "direction": "input",
+      "width": 6
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_ready",
+      "semantic": "dcache.d.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_d_valid",
+      "semantic": "dcache.d.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_e_bits_sink",
+      "semantic": "dcache.e.sink",
+      "direction": "output",
+      "width": 10
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_e_ready",
+      "semantic": "dcache.e.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_dcache_client_out_e_valid",
+      "semantic": "dcache.e.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_debug_int_sink_in_0",
+      "semantic": "interrupts.debug.lane_0",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_a_bits_address",
+      "semantic": "frontend.icache.ingress.a.address",
+      "direction": "input",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_a_bits_source",
+      "semantic": "frontend.icache.ingress.a.source",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_a_ready",
+      "semantic": "frontend.icache.ingress.a.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_a_valid",
+      "semantic": "frontend.icache.ingress.a.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_d_bits_corrupt",
+      "semantic": "frontend.icache.ingress.d.corrupt",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_d_bits_data",
+      "semantic": "frontend.icache.ingress.d.data",
+      "direction": "output",
+      "width": 256
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_d_bits_opcode",
+      "semantic": "frontend.icache.ingress.d.opcode",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_d_bits_source",
+      "semantic": "frontend.icache.ingress.d.source",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_in_d_valid",
+      "semantic": "frontend.icache.ingress.d.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_address",
+      "semantic": "frontend.icache.egress.a.address",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_corrupt",
+      "semantic": "frontend.icache.egress.a.corrupt",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_data",
+      "semantic": "frontend.icache.egress.a.data",
+      "direction": "output",
+      "width": 256
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_mask",
+      "semantic": "frontend.icache.egress.a.mask",
+      "direction": "output",
+      "width": 32
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_opcode",
+      "semantic": "frontend.icache.egress.a.opcode",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_param",
+      "semantic": "frontend.icache.egress.a.param",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_size",
+      "semantic": "frontend.icache.egress.a.size",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_source",
+      "semantic": "frontend.icache.egress.a.source",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_user_alias",
+      "semantic": "frontend.icache.egress.a.user_alias",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_user_needHint",
+      "semantic": "frontend.icache.egress.a.user_need_hint",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_bits_user_reqSource",
+      "semantic": "frontend.icache.egress.a.user_req_source",
+      "direction": "output",
+      "width": 5
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_ready",
+      "semantic": "frontend.icache.egress.a.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_a_valid",
+      "semantic": "frontend.icache.egress.a.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_bits_corrupt",
+      "semantic": "frontend.icache.egress.d.corrupt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_bits_data",
+      "semantic": "frontend.icache.egress.d.data",
+      "direction": "input",
+      "width": 256
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_bits_denied",
+      "semantic": "frontend.icache.egress.d.denied",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_bits_opcode",
+      "semantic": "frontend.icache.egress.d.opcode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_bits_param",
+      "semantic": "frontend.icache.egress.d.param",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_bits_sink",
+      "semantic": "frontend.icache.egress.d.sink",
+      "direction": "input",
+      "width": 10
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_bits_size",
+      "semantic": "frontend.icache.egress.d.size",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_bits_source",
+      "semantic": "frontend.icache.egress.d.source",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_ready",
+      "semantic": "frontend.icache.egress.d.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icache_out_d_valid",
+      "semantic": "frontend.icache.egress.d.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_bits_address",
+      "semantic": "frontend.icache_control.ingress.a.address",
+      "direction": "input",
+      "width": 30
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_bits_corrupt",
+      "semantic": "frontend.icache_control.ingress.a.corrupt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_bits_data",
+      "semantic": "frontend.icache_control.ingress.a.data",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_bits_mask",
+      "semantic": "frontend.icache_control.ingress.a.mask",
+      "direction": "input",
+      "width": 8
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_bits_opcode",
+      "semantic": "frontend.icache_control.ingress.a.opcode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_bits_param",
+      "semantic": "frontend.icache_control.ingress.a.param",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_bits_size",
+      "semantic": "frontend.icache_control.ingress.a.size",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_bits_source",
+      "semantic": "frontend.icache_control.ingress.a.source",
+      "direction": "input",
+      "width": 5
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_ready",
+      "semantic": "frontend.icache_control.ingress.a.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_a_valid",
+      "semantic": "frontend.icache_control.ingress.a.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_bits_corrupt",
+      "semantic": "frontend.icache_control.ingress.d.corrupt",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_bits_data",
+      "semantic": "frontend.icache_control.ingress.d.data",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_bits_denied",
+      "semantic": "frontend.icache_control.ingress.d.denied",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_bits_opcode",
+      "semantic": "frontend.icache_control.ingress.d.opcode",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_bits_param",
+      "semantic": "frontend.icache_control.ingress.d.param",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_bits_sink",
+      "semantic": "frontend.icache_control.ingress.d.sink",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_bits_size",
+      "semantic": "frontend.icache_control.ingress.d.size",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_bits_source",
+      "semantic": "frontend.icache_control.ingress.d.source",
+      "direction": "output",
+      "width": 5
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_ready",
+      "semantic": "frontend.icache_control.ingress.d.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_in_d_valid",
+      "semantic": "frontend.icache_control.ingress.d.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_a_bits_address",
+      "semantic": "frontend.icache_control.egress.a.address",
+      "direction": "output",
+      "width": 30
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_a_bits_data",
+      "semantic": "frontend.icache_control.egress.a.data",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_a_bits_mask",
+      "semantic": "frontend.icache_control.egress.a.mask",
+      "direction": "output",
+      "width": 8
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_a_bits_opcode",
+      "semantic": "frontend.icache_control.egress.a.opcode",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_a_bits_size",
+      "semantic": "frontend.icache_control.egress.a.size",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_a_bits_source",
+      "semantic": "frontend.icache_control.egress.a.source",
+      "direction": "output",
+      "width": 5
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_a_ready",
+      "semantic": "frontend.icache_control.egress.a.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_a_valid",
+      "semantic": "frontend.icache_control.egress.a.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_d_bits_data",
+      "semantic": "frontend.icache_control.egress.d.data",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_d_bits_opcode",
+      "semantic": "frontend.icache_control.egress.d.opcode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_d_bits_size",
+      "semantic": "frontend.icache_control.egress.d.size",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_d_bits_source",
+      "semantic": "frontend.icache_control.egress.d.source",
+      "direction": "input",
+      "width": 5
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_d_ready",
+      "semantic": "frontend.icache_control.egress.d.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_icachectrl_out_d_valid",
+      "semantic": "frontend.icache_control.egress.d.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_in_a_bits_address",
+      "semantic": "frontend.instruction_uncache.ingress.a.address",
+      "direction": "input",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_in_a_ready",
+      "semantic": "frontend.instruction_uncache.ingress.a.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_in_a_valid",
+      "semantic": "frontend.instruction_uncache.ingress.a.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_in_d_bits_corrupt",
+      "semantic": "frontend.instruction_uncache.ingress.d.corrupt",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_in_d_bits_data",
+      "semantic": "frontend.instruction_uncache.ingress.d.data",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_in_d_bits_source",
+      "semantic": "frontend.instruction_uncache.ingress.d.source",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_in_d_valid",
+      "semantic": "frontend.instruction_uncache.ingress.d.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_a_bits_address",
+      "semantic": "frontend.instruction_uncache.egress.a.address",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_a_bits_corrupt",
+      "semantic": "frontend.instruction_uncache.egress.a.corrupt",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_a_bits_param",
+      "semantic": "frontend.instruction_uncache.egress.a.param",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_a_ready",
+      "semantic": "frontend.instruction_uncache.egress.a.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_a_valid",
+      "semantic": "frontend.instruction_uncache.egress.a.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_bits_corrupt",
+      "semantic": "frontend.instruction_uncache.egress.d.corrupt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_bits_data",
+      "semantic": "frontend.instruction_uncache.egress.d.data",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_bits_denied",
+      "semantic": "frontend.instruction_uncache.egress.d.denied",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_bits_opcode",
+      "semantic": "frontend.instruction_uncache.egress.d.opcode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_bits_param",
+      "semantic": "frontend.instruction_uncache.egress.d.param",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_bits_sink",
+      "semantic": "frontend.instruction_uncache.egress.d.sink",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_bits_size",
+      "semantic": "frontend.instruction_uncache.egress.d.size",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_bits_source",
+      "semantic": "frontend.instruction_uncache.egress.d.source",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_ready",
+      "semantic": "frontend.instruction_uncache.egress.d.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_frontendBridge_instr_uncache_out_d_valid",
+      "semantic": "frontend.instruction_uncache.egress.d.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_nmi_int_sink_in_0",
+      "semantic": "interrupts.nmi.lane_0",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_nmi_int_sink_in_1",
+      "semantic": "interrupts.nmi.lane_1",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_plic_int_sink_in_0_0",
+      "semantic": "interrupts.plic.lane_0_0",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_plic_int_sink_in_1_0",
+      "semantic": "interrupts.plic.lane_1_0",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_a_bits_address",
+      "semantic": "ptw_memory.a.address",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_a_bits_opcode",
+      "semantic": "ptw_memory.a.opcode",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_a_bits_param",
+      "semantic": "ptw_memory.a.param",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_a_bits_size",
+      "semantic": "ptw_memory.a.size",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_a_bits_source",
+      "semantic": "ptw_memory.a.source",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_a_ready",
+      "semantic": "ptw_memory.a.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_a_valid",
+      "semantic": "ptw_memory.a.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_bits_corrupt",
+      "semantic": "ptw_memory.d.corrupt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_bits_data",
+      "semantic": "ptw_memory.d.data",
+      "direction": "input",
+      "width": 256
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_bits_denied",
+      "semantic": "ptw_memory.d.denied",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_bits_opcode",
+      "semantic": "ptw_memory.d.opcode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_bits_param",
+      "semantic": "ptw_memory.d.param",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_bits_sink",
+      "semantic": "ptw_memory.d.sink",
+      "direction": "input",
+      "width": 10
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_bits_size",
+      "semantic": "ptw_memory.d.size",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_bits_source",
+      "semantic": "ptw_memory.d.source",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_ready",
+      "semantic": "ptw_memory.d.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "auto_inner_ptw_to_l2_buffer_out_d_valid",
+      "semantic": "ptw_memory.d.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dcacheError_ecc_error_bits",
+      "semantic": "errors.dcache.ecc_error_bits",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "io_dcacheError_ecc_error_valid",
+      "semantic": "errors.dcache.ecc_error_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_bcknd_cgen",
+      "semantic": "dft.bcknd_cgen",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_cgen",
+      "semantic": "dft.cgen",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_frnt_cgen",
+      "semantic": "dft.frnt_cgen",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_frnt_ram_aux_ckbp",
+      "semantic": "dft.frnt_ram_aux_ckbp",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_frnt_ram_aux_clk",
+      "semantic": "dft.frnt_ram_aux_clk",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_frnt_ram_bp_clken",
+      "semantic": "dft.frnt_ram_bp_clken",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_frnt_ram_bypass",
+      "semantic": "dft.frnt_ram_bypass",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_frnt_ram_hold",
+      "semantic": "dft.frnt_ram_hold",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_frnt_ram_mcp_hold",
+      "semantic": "dft.frnt_ram_mcp_hold",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_ram_aux_ckbp",
+      "semantic": "dft.ram_aux_ckbp",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_ram_aux_clk",
+      "semantic": "dft.ram_aux_clk",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_ram_bp_clken",
+      "semantic": "dft.ram_bp_clken",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_ram_bypass",
+      "semantic": "dft.ram_bypass",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_ram_hold",
+      "semantic": "dft.ram_hold",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_ram_mcp_hold",
+      "semantic": "dft.ram_mcp_hold",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_bcknd_lgc_rst_n",
+      "semantic": "dft.reset_bcknd_lgc_rst_n",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_bcknd_mode",
+      "semantic": "dft.reset_bcknd_mode",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_bcknd_scan_mode",
+      "semantic": "dft.reset_bcknd_scan_mode",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_frnt_lgc_rst_n",
+      "semantic": "dft.reset_frnt_lgc_rst_n",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_frnt_mode",
+      "semantic": "dft.reset_frnt_mode",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_frnt_scan_mode",
+      "semantic": "dft.reset_frnt_scan_mode",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_lgc_rst_n",
+      "semantic": "dft.reset_lgc_rst_n",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_mode",
+      "semantic": "dft.reset_mode",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_dft_reset_scan_mode",
+      "semantic": "dft.reset_scan_mode",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_req_0_bits_s2xlate",
+      "semantic": "translation.ifetch_request.s2xlate",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_req_0_bits_vpn",
+      "semantic": "translation.ifetch_request.vpn",
+      "direction": "input",
+      "width": 38
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_req_0_ready",
+      "semantic": "translation.ifetch_request.ready",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_req_0_valid",
+      "semantic": "translation.ifetch_request.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_addr_low",
+      "semantic": "translation.ifetch_response.s1_addr_low",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_af",
+      "semantic": "translation.ifetch_response.s1_af",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_asid",
+      "semantic": "translation.ifetch_response.s1_entry_asid",
+      "direction": "output",
+      "width": 16
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_level",
+      "semantic": "translation.ifetch_response.s1_entry_level",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_n",
+      "semantic": "translation.ifetch_response.s1_entry_n",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_pbmt",
+      "semantic": "translation.ifetch_response.s1_entry_pbmt",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_a",
+      "semantic": "translation.ifetch_response.s1_entry_perm_a",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_d",
+      "semantic": "translation.ifetch_response.s1_entry_perm_d",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_g",
+      "semantic": "translation.ifetch_response.s1_entry_perm_g",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_r",
+      "semantic": "translation.ifetch_response.s1_entry_perm_r",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_u",
+      "semantic": "translation.ifetch_response.s1_entry_perm_u",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_w",
+      "semantic": "translation.ifetch_response.s1_entry_perm_w",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_x",
+      "semantic": "translation.ifetch_response.s1_entry_perm_x",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_ppn",
+      "semantic": "translation.ifetch_response.s1_entry_ppn",
+      "direction": "output",
+      "width": 41
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_tag",
+      "semantic": "translation.ifetch_response.s1_entry_tag",
+      "direction": "output",
+      "width": 35
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_v",
+      "semantic": "translation.ifetch_response.s1_entry_v",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_entry_vmid",
+      "semantic": "translation.ifetch_response.s1_entry_vmid",
+      "direction": "output",
+      "width": 14
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pf",
+      "semantic": "translation.ifetch_response.s1_pf",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_0",
+      "semantic": "translation.ifetch_response.s1_ppn_low_0",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_1",
+      "semantic": "translation.ifetch_response.s1_ppn_low_1",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_2",
+      "semantic": "translation.ifetch_response.s1_ppn_low_2",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_3",
+      "semantic": "translation.ifetch_response.s1_ppn_low_3",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_4",
+      "semantic": "translation.ifetch_response.s1_ppn_low_4",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_5",
+      "semantic": "translation.ifetch_response.s1_ppn_low_5",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_6",
+      "semantic": "translation.ifetch_response.s1_ppn_low_6",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_7",
+      "semantic": "translation.ifetch_response.s1_ppn_low_7",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pteidx_0",
+      "semantic": "translation.ifetch_response.s1_pteidx_0",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pteidx_1",
+      "semantic": "translation.ifetch_response.s1_pteidx_1",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pteidx_2",
+      "semantic": "translation.ifetch_response.s1_pteidx_2",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pteidx_3",
+      "semantic": "translation.ifetch_response.s1_pteidx_3",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pteidx_4",
+      "semantic": "translation.ifetch_response.s1_pteidx_4",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pteidx_5",
+      "semantic": "translation.ifetch_response.s1_pteidx_5",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pteidx_6",
+      "semantic": "translation.ifetch_response.s1_pteidx_6",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_pteidx_7",
+      "semantic": "translation.ifetch_response.s1_pteidx_7",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_valididx_0",
+      "semantic": "translation.ifetch_response.s1_valididx_0",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_valididx_1",
+      "semantic": "translation.ifetch_response.s1_valididx_1",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_valididx_2",
+      "semantic": "translation.ifetch_response.s1_valididx_2",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_valididx_3",
+      "semantic": "translation.ifetch_response.s1_valididx_3",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_valididx_4",
+      "semantic": "translation.ifetch_response.s1_valididx_4",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_valididx_5",
+      "semantic": "translation.ifetch_response.s1_valididx_5",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_valididx_6",
+      "semantic": "translation.ifetch_response.s1_valididx_6",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s1_valididx_7",
+      "semantic": "translation.ifetch_response.s1_valididx_7",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_level",
+      "semantic": "translation.ifetch_response.s2_entry_level",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_n",
+      "semantic": "translation.ifetch_response.s2_entry_n",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt",
+      "semantic": "translation.ifetch_response.s2_entry_pbmt",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_a",
+      "semantic": "translation.ifetch_response.s2_entry_perm_a",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_d",
+      "semantic": "translation.ifetch_response.s2_entry_perm_d",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_g",
+      "semantic": "translation.ifetch_response.s2_entry_perm_g",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_r",
+      "semantic": "translation.ifetch_response.s2_entry_perm_r",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_u",
+      "semantic": "translation.ifetch_response.s2_entry_perm_u",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_w",
+      "semantic": "translation.ifetch_response.s2_entry_perm_w",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_x",
+      "semantic": "translation.ifetch_response.s2_entry_perm_x",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn",
+      "semantic": "translation.ifetch_response.s2_entry_ppn",
+      "direction": "output",
+      "width": 38
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_tag",
+      "semantic": "translation.ifetch_response.s2_entry_tag",
+      "direction": "output",
+      "width": 38
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid",
+      "semantic": "translation.ifetch_response.s2_entry_vmid",
+      "direction": "output",
+      "width": 14
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_gaf",
+      "semantic": "translation.ifetch_response.s2_gaf",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2_gpf",
+      "semantic": "translation.ifetch_response.s2_gpf",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_bits_s2xlate",
+      "semantic": "translation.ifetch_response.s2xlate",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_ready",
+      "semantic": "translation.ifetch_response.ready",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_fetch_to_mem_itlb_resp_valid",
+      "semantic": "translation.ifetch_response.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_fromTopToBackend_clintTime_bits",
+      "semantic": "top.input.clint_time_bits",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "io_fromTopToBackend_clintTime_valid",
+      "semantic": "top.input.clint_time_valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_fromTopToBackend_msiInfo_bits",
+      "semantic": "top.input.msi_info_bits",
+      "direction": "input",
+      "width": 12
+    },
+    {
+      "raw": "io_fromTopToBackend_msiInfo_valid",
+      "semantic": "top.input.msi_info_valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_hartId",
+      "semantic": "top.hart_id",
+      "direction": "input",
+      "width": 6
+    },
+    {
+      "raw": "io_inner_beu_errors_icache_ecc_error_bits",
+      "semantic": "errors.frontend_input.icache_ecc_error_bits",
+      "direction": "input",
+      "width": 48
+    },
+    {
+      "raw": "io_inner_beu_errors_icache_ecc_error_valid",
+      "semantic": "errors.frontend_input.icache_ecc_error_valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_inner_reset_vector",
+      "semantic": "top.inner_reset_vector",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "io_l2_flush_done",
+      "semantic": "control.l2_flush_done",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_hint_bits_isKeyword",
+      "semantic": "control.l2_hint.is_keyword",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_hint_bits_sourceId",
+      "semantic": "control.l2_hint.source_id",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_l2_hint_valid",
+      "semantic": "control.l2_hint.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_pmp_resp_ld",
+      "semantic": "translation.l2_protection.ld",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_pmp_resp_mmio",
+      "semantic": "translation.l2_protection.mmio",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_req_bits_cmd",
+      "semantic": "translation.l2_request.cmd",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "io_l2_tlb_req_req_bits_isPrefetch",
+      "semantic": "translation.l2_request.is_prefetch",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_req_bits_kill",
+      "semantic": "translation.l2_request.kill",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_req_bits_no_translate",
+      "semantic": "translation.l2_request.no_translate",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_req_bits_vaddr",
+      "semantic": "translation.l2_request.vaddr",
+      "direction": "input",
+      "width": 50
+    },
+    {
+      "raw": "io_l2_tlb_req_req_valid",
+      "semantic": "translation.l2_request.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_resp_bits_excp_0_af_ld",
+      "semantic": "translation.l2_response.excp_0_af_ld",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_resp_bits_excp_0_gpf_ld",
+      "semantic": "translation.l2_response.excp_0_gpf_ld",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_resp_bits_excp_0_pf_ld",
+      "semantic": "translation.l2_response.excp_0_pf_ld",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_resp_bits_miss",
+      "semantic": "translation.l2_response.miss",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_l2_tlb_req_resp_bits_paddr_0",
+      "semantic": "translation.l2_response.paddr_0",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "io_l2_tlb_req_resp_bits_pbmt_0",
+      "semantic": "translation.l2_response.pbmt_0",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "io_l2_tlb_req_resp_valid",
+      "semantic": "translation.l2_response.valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_lqCancelCnt",
+      "semantic": "queues.retirement.lq_cancel_cnt",
+      "direction": "output",
+      "width": 7
+    },
+    {
+      "raw": "io_mem_to_ooo_lqDeq",
+      "semantic": "queues.retirement.lq_deq",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_gpaddr",
+      "semantic": "queues.observation.gpaddr",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_isForVSnonLeafPTE",
+      "semantic": "queues.observation.is_for_v_snon_leaf_pte",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value",
+      "semantic": "queues.observation.load_mmio_uop_0_rob_idx_value",
+      "direction": "output",
+      "width": 8
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value",
+      "semantic": "queues.observation.load_mmio_uop_1_rob_idx_value",
+      "direction": "output",
+      "width": 8
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value",
+      "semantic": "queues.observation.load_mmio_uop_2_rob_idx_value",
+      "direction": "output",
+      "width": 8
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_loadMmio_0",
+      "semantic": "queues.observation.load_mmio_0",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_loadMmio_1",
+      "semantic": "queues.observation.load_mmio_1",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_loadMmio_2",
+      "semantic": "queues.observation.load_mmio_2",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_storeMmio",
+      "semantic": "queues.observation.store_mmio",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value",
+      "semantic": "queues.observation.store_mmio_uop_rob_idx_value",
+      "direction": "output",
+      "width": 8
+    },
+    {
+      "raw": "io_mem_to_ooo_lsqio_vaddr",
+      "semantic": "queues.observation.vaddr",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "io_mem_to_ooo_sqCancelCnt",
+      "semantic": "queues.retirement.sq_cancel_cnt",
+      "direction": "output",
+      "width": 6
+    },
+    {
+      "raw": "io_mem_to_ooo_sqDeq",
+      "semantic": "queues.retirement.sq_deq",
+      "direction": "output",
+      "width": 2
+    },
+    {
+      "raw": "io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit",
+      "semantic": "feedback.scalar_store.lane_0_feedback_slow_hit",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag",
+      "semantic": "feedback.scalar_store.lane_0_feedback_slow_sq_idx_flag",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value",
+      "semantic": "feedback.scalar_store.lane_0_feedback_slow_sq_idx_value",
+      "direction": "output",
+      "width": 6
+    },
+    {
+      "raw": "io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid",
+      "semantic": "feedback.scalar_store.lane_0_feedback_slow_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit",
+      "semantic": "feedback.scalar_store.lane_1_feedback_slow_hit",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag",
+      "semantic": "feedback.scalar_store.lane_1_feedback_slow_sq_idx_flag",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value",
+      "semantic": "feedback.scalar_store.lane_1_feedback_slow_sq_idx_value",
+      "direction": "output",
+      "width": 6
+    },
+    {
+      "raw": "io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid",
+      "semantic": "feedback.scalar_store.lane_1_feedback_slow_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_clintTime_bits",
+      "semantic": "top.backend.clint_time_bits",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_clintTime_valid",
+      "semantic": "top.backend.clint_time_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug",
+      "semantic": "top.backend.external_interrupt_debug",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip",
+      "semantic": "top.backend.external_interrupt_meip",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip",
+      "semantic": "top.backend.external_interrupt_msip",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_externalInterrupt_mtip",
+      "semantic": "top.backend.external_interrupt_mtip",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31",
+      "semantic": "top.backend.external_interrupt_nmi_nmi_31",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43",
+      "semantic": "top.backend.external_interrupt_nmi_nmi_43",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip",
+      "semantic": "top.backend.external_interrupt_seip",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_hartId",
+      "semantic": "top.backend.hart_id",
+      "direction": "output",
+      "width": 6
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_l2FlushDone",
+      "semantic": "top.backend.l2_flush_done",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_msiInfo_bits",
+      "semantic": "top.backend.msi_info_bits",
+      "direction": "output",
+      "width": 12
+    },
+    {
+      "raw": "io_mem_to_ooo_topToBackendBypass_msiInfo_valid",
+      "semantic": "top.backend.msi_info_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_hit",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_isVecPartReplay",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_is_vec_part_replay",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_flag",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_lq_idx_flag",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_value",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_lq_idx_value",
+      "direction": "output",
+      "width": 7
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_sq_idx_flag",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_value",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_sq_idx_value",
+      "direction": "output",
+      "width": 6
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMask",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_vec_replay_mask",
+      "direction": "output",
+      "width": 16
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMbIdx",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_vec_replay_mb_idx",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid",
+      "semantic": "feedback.vector_store.lane_0_feedback_slow_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_hit",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_isVecPartReplay",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_is_vec_part_replay",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_flag",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_lq_idx_flag",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_lq_idx_value",
+      "direction": "output",
+      "width": 7
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_sq_idx_flag",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_value",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_sq_idx_value",
+      "direction": "output",
+      "width": 6
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMask",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_vec_replay_mask",
+      "direction": "output",
+      "width": 16
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMbIdx",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_vec_replay_mb_idx",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid",
+      "semantic": "feedback.vector_store.lane_1_feedback_slow_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_writebackVldu_0_valid",
+      "semantic": "feedback.vector_writeback.lane_0_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_mem_to_ooo_writebackVldu_1_valid",
+      "semantic": "feedback.vector_writeback.lane_1_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_backendToTopBypass_cpuCriticalError",
+      "semantic": "top.backend_input.cpu_critical_error",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_backendToTopBypass_cpuHalted",
+      "semantic": "top.backend_input.cpu_halted",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_backendToTopBypass_msiAck",
+      "semantic": "top.backend_input.msi_ack",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_cache_error_enable",
+      "semantic": "control.csr.cache_error_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr",
+      "semantic": "control.csr.distribute_csr_w_addr",
+      "direction": "input",
+      "width": 12
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data",
+      "semantic": "control.csr.distribute_csr_w_data",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_distribute_csr_w_valid",
+      "semantic": "control.csr.distribute_csr_w_valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_flush_l2_enable",
+      "semantic": "control.csr.flush_l2_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable",
+      "semantic": "control.csr.hd_misalign_ld_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_hd_misalign_st_enable",
+      "semantic": "control.csr.hd_misalign_st_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_ldld_vio_check_enable",
+      "semantic": "control.csr.ldld_vio_check_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_debugMode",
+      "semantic": "control.trigger.debug_mode",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_0",
+      "semantic": "control.trigger.t_enable_vec_0",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_1",
+      "semantic": "control.trigger.t_enable_vec_1",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_2",
+      "semantic": "control.trigger.t_enable_vec_2",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3",
+      "semantic": "control.trigger.t_enable_vec_3",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr",
+      "semantic": "control.trigger.t_update_addr",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action",
+      "semantic": "control.trigger.t_update_tdata_action",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain",
+      "semantic": "control.trigger.t_update_tdata_chain",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_load",
+      "semantic": "control.trigger.t_update_tdata_load",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType",
+      "semantic": "control.trigger.t_update_tdata_match_type",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select",
+      "semantic": "control.trigger.t_update_tdata_select",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store",
+      "semantic": "control.trigger.t_update_tdata_store",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_tdata2",
+      "semantic": "control.trigger.t_update_tdata_tdata2",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid",
+      "semantic": "control.trigger.t_update_valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp",
+      "semantic": "control.trigger.trigger_can_raise_bp_exp",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_active_stride",
+      "semantic": "control.prefetch.l1_d_pf_active_stride",
+      "direction": "input",
+      "width": 6
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_active_threshold",
+      "semantic": "control.prefetch.l1_d_pf_active_threshold",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable",
+      "semantic": "control.prefetch.l1_d_pf_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_agt",
+      "semantic": "control.prefetch.l1_d_pf_enable_agt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_pht",
+      "semantic": "control.prefetch.l1_d_pf_enable_pht",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_stride",
+      "semantic": "control.prefetch.l1_d_pf_enable_stride",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_train_on_hit",
+      "semantic": "control.prefetch.l1_d_pf_train_on_hit",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency",
+      "semantic": "control.prefetch.l2_pf_delay_latency",
+      "direction": "input",
+      "width": 10
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_enable",
+      "semantic": "control.prefetch.l2_pf_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_pbop_enable",
+      "semantic": "control.prefetch.l2_pf_pbop_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_recv_enable",
+      "semantic": "control.prefetch.l2_pf_recv_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_store_only",
+      "semantic": "control.prefetch.l2_pf_store_only",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable",
+      "semantic": "control.prefetch.l2_pf_tp_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable",
+      "semantic": "control.prefetch.l2_pf_vbop_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_power_down_enable",
+      "semantic": "control.csr.power_down_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_sbuffer_timeout",
+      "semantic": "control.csr.sbuffer_timeout",
+      "direction": "input",
+      "width": 22
+    },
+    {
+      "raw": "io_ooo_to_mem_csrCtrl_uncache_write_outstanding_enable",
+      "semantic": "control.csr.uncache_write_outstanding_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_flushSb",
+      "semantic": "backend.input.flush_sb",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_isStoreException",
+      "semantic": "backend.input.is_store_exception",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_lsqio_pendingMMIOld",
+      "semantic": "queues.backend.pending_mmi_old",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_lsqio_pendingPtr_flag",
+      "semantic": "queues.backend.pending_ptr_flag",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_lsqio_pendingPtr_value",
+      "semantic": "queues.backend.pending_ptr_value",
+      "direction": "input",
+      "width": 8
+    },
+    {
+      "raw": "io_ooo_to_mem_lsqio_pendingst",
+      "semantic": "queues.backend.pendingst",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_lsqio_scommit",
+      "semantic": "queues.backend.scommit",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_ooo_to_mem_sfence_bits_addr",
+      "semantic": "translation.fence.addr",
+      "direction": "input",
+      "width": 50
+    },
+    {
+      "raw": "io_ooo_to_mem_sfence_bits_flushPipe",
+      "semantic": "translation.fence.flush_pipe",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_sfence_bits_hg",
+      "semantic": "translation.fence.hg",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_sfence_bits_hv",
+      "semantic": "translation.fence.hv",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_sfence_bits_id",
+      "semantic": "translation.fence.id",
+      "direction": "input",
+      "width": 16
+    },
+    {
+      "raw": "io_ooo_to_mem_sfence_bits_rs1",
+      "semantic": "translation.fence.rs1",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_sfence_bits_rs2",
+      "semantic": "translation.fence.rs2",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_sfence_valid",
+      "semantic": "translation.fence.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_hPBMTE",
+      "semantic": "translation.csr.h_pbmte",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_hgatp_changed",
+      "semantic": "translation.csr.hgatp_changed",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_hgatp_mode",
+      "semantic": "translation.csr.hgatp_mode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_hgatp_ppn",
+      "semantic": "translation.csr.hgatp_ppn",
+      "direction": "input",
+      "width": 44
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_hgatp_vmid",
+      "semantic": "translation.csr.hgatp_vmid",
+      "direction": "input",
+      "width": 16
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_mPBMTE",
+      "semantic": "translation.csr.m_pbmte",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_mbmc_BCLEAR",
+      "semantic": "translation.csr.mbmc_bclear",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_mbmc_BMA",
+      "semantic": "translation.csr.mbmc_bma",
+      "direction": "input",
+      "width": 58
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_mbmc_BME",
+      "semantic": "translation.csr.mbmc_bme",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_mbmc_CMODE",
+      "semantic": "translation.csr.mbmc_cmode",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_pmm_henvcfg",
+      "semantic": "translation.csr.pmm_henvcfg",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_pmm_hstatus",
+      "semantic": "translation.csr.pmm_hstatus",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_pmm_menvcfg",
+      "semantic": "translation.csr.pmm_menvcfg",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_pmm_mseccfg",
+      "semantic": "translation.csr.pmm_mseccfg",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_pmm_senvcfg",
+      "semantic": "translation.csr.pmm_senvcfg",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_debug",
+      "semantic": "translation.csr.priv_debug",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_dmode",
+      "semantic": "translation.csr.priv_dmode",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_imode",
+      "semantic": "translation.csr.priv_imode",
+      "direction": "input",
+      "width": 2
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_mxr",
+      "semantic": "translation.csr.priv_mxr",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_spvp",
+      "semantic": "translation.csr.priv_spvp",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_sum",
+      "semantic": "translation.csr.priv_sum",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_virt",
+      "semantic": "translation.csr.priv_virt",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_virt_changed",
+      "semantic": "translation.csr.priv_virt_changed",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_vmxr",
+      "semantic": "translation.csr.priv_vmxr",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_priv_vsum",
+      "semantic": "translation.csr.priv_vsum",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_satp_asid",
+      "semantic": "translation.csr.satp_asid",
+      "direction": "input",
+      "width": 16
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_satp_changed",
+      "semantic": "translation.csr.satp_changed",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_satp_mode",
+      "semantic": "translation.csr.satp_mode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_satp_ppn",
+      "semantic": "translation.csr.satp_ppn",
+      "direction": "input",
+      "width": 44
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_vsatp_asid",
+      "semantic": "translation.csr.vsatp_asid",
+      "direction": "input",
+      "width": 16
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_vsatp_changed",
+      "semantic": "translation.csr.vsatp_changed",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_vsatp_mode",
+      "semantic": "translation.csr.vsatp_mode",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_ooo_to_mem_tlbCsr_vsatp_ppn",
+      "semantic": "translation.csr.vsatp_ppn",
+      "direction": "input",
+      "width": 44
+    },
+    {
+      "raw": "io_outer_beu_errors_icache_ecc_error_bits",
+      "semantic": "errors.frontend_output.icache_ecc_error_bits",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "io_outer_beu_errors_icache_ecc_error_valid",
+      "semantic": "errors.frontend_output.icache_ecc_error_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_cpu_critical_error",
+      "semantic": "top.output.cpu_critical_error",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_cpu_halt",
+      "semantic": "top.output.cpu_halt",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_l2PfCtrl_l2_pbop_en",
+      "semantic": "control.l2_prefetch_output.l2_pbop_en",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_l2PfCtrl_l2_pf_delay_latency",
+      "semantic": "control.l2_prefetch_output.l2_pf_delay_latency",
+      "direction": "output",
+      "width": 10
+    },
+    {
+      "raw": "io_outer_l2PfCtrl_l2_pf_master_en",
+      "semantic": "control.l2_prefetch_output.l2_pf_master_en",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_l2PfCtrl_l2_pf_recv_en",
+      "semantic": "control.l2_prefetch_output.l2_pf_recv_en",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_l2PfCtrl_l2_tp_en",
+      "semantic": "control.l2_prefetch_output.l2_tp_en",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_l2PfCtrl_l2_vbop_en",
+      "semantic": "control.l2_prefetch_output.l2_vbop_en",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_l2_flush_en",
+      "semantic": "top.output.l2_flush_en",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_msi_ack",
+      "semantic": "top.output.msi_ack",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_power_down_en",
+      "semantic": "top.output.power_down_en",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_outer_reset_vector",
+      "semantic": "top.output.reset_vector",
+      "direction": "input",
+      "width": 48
+    },
+    {
+      "raw": "io_redirect_bits_isVlsException",
+      "semantic": "queues.redirect.is_vls_exception",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_redirect_bits_level",
+      "semantic": "queues.redirect.level",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_redirect_bits_robIdx_flag",
+      "semantic": "queues.redirect.rob_idx_flag",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_redirect_bits_robIdx_value",
+      "semantic": "queues.redirect.rob_idx_value",
+      "direction": "input",
+      "width": 8
+    },
+    {
+      "raw": "io_redirect_valid",
+      "semantic": "queues.redirect.valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_resetInFrontendBypass_fromFrontend",
+      "semantic": "reset.frontend.from_frontend",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_resetInFrontendBypass_toL2Top",
+      "semantic": "reset.frontend.to_l2_top",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_reset_backend",
+      "semantic": "reset.backend",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_topDownInfo_fromL2Top_l2Miss",
+      "semantic": "top_down.input.l2_miss",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_topDownInfo_fromL2Top_l3Miss",
+      "semantic": "top_down.input.l3_miss",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_topDownInfo_toBackend_l1Miss",
+      "semantic": "top_down.output.l1_miss",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_topDownInfo_toBackend_l2TopMiss_l2Miss",
+      "semantic": "top_down.output.l2_top_miss_l2_miss",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_topDownInfo_toBackend_l2TopMiss_l3Miss",
+      "semantic": "top_down.output.l2_top_miss_l3_miss",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_topDownInfo_toBackend_replayAllocate",
+      "semantic": "top_down.output.replay_allocate",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_topDownInfo_toBackend_sbFull",
+      "semantic": "top_down.output.sb_full",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_topDownInfo_toBackend_sqFull",
+      "semantic": "top_down.output.sq_full",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_fromEncoder_enable",
+      "semantic": "trace.backend.from_encoder_enable",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_fromEncoder_stall",
+      "semantic": "trace.backend.from_encoder_stall",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_ftqOffset",
+      "semantic": "trace.backend.to_encoder_groups_0_ftq_offset",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_iaddr",
+      "semantic": "trace.backend.to_encoder_groups_0_iaddr",
+      "direction": "input",
+      "width": 50
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_ilastsize",
+      "semantic": "trace.backend.to_encoder_groups_0_ilastsize",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_iretire",
+      "semantic": "trace.backend.to_encoder_groups_0_iretire",
+      "direction": "input",
+      "width": 7
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_itype",
+      "semantic": "trace.backend.to_encoder_groups_0_itype",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_valid",
+      "semantic": "trace.backend.to_encoder_groups_0_valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_ftqOffset",
+      "semantic": "trace.backend.to_encoder_groups_1_ftq_offset",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_iaddr",
+      "semantic": "trace.backend.to_encoder_groups_1_iaddr",
+      "direction": "input",
+      "width": 50
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_ilastsize",
+      "semantic": "trace.backend.to_encoder_groups_1_ilastsize",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_iretire",
+      "semantic": "trace.backend.to_encoder_groups_1_iretire",
+      "direction": "input",
+      "width": 7
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_itype",
+      "semantic": "trace.backend.to_encoder_groups_1_itype",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_valid",
+      "semantic": "trace.backend.to_encoder_groups_1_valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_ftqOffset",
+      "semantic": "trace.backend.to_encoder_groups_2_ftq_offset",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_iaddr",
+      "semantic": "trace.backend.to_encoder_groups_2_iaddr",
+      "direction": "input",
+      "width": 50
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_ilastsize",
+      "semantic": "trace.backend.to_encoder_groups_2_ilastsize",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_iretire",
+      "semantic": "trace.backend.to_encoder_groups_2_iretire",
+      "direction": "input",
+      "width": 7
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_itype",
+      "semantic": "trace.backend.to_encoder_groups_2_itype",
+      "direction": "input",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_valid",
+      "semantic": "trace.backend.to_encoder_groups_2_valid",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_mstatus",
+      "semantic": "trace.backend.to_encoder_mstatus",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_priv",
+      "semantic": "trace.backend.to_encoder_priv",
+      "direction": "input",
+      "width": 3
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_trap_cause",
+      "semantic": "trace.backend.to_encoder_trap_cause",
+      "direction": "input",
+      "width": 64
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_fromBackend_toEncoder_trap_tval",
+      "semantic": "trace.backend.to_encoder_trap_tval",
+      "direction": "input",
+      "width": 50
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_fromEncoder_enable",
+      "semantic": "trace.top.from_encoder_enable",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_fromEncoder_stall",
+      "semantic": "trace.top.from_encoder_stall",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_bits_iaddr",
+      "semantic": "trace.top.to_encoder_groups_0_iaddr",
+      "direction": "output",
+      "width": 50
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_bits_ilastsize",
+      "semantic": "trace.top.to_encoder_groups_0_ilastsize",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_bits_iretire",
+      "semantic": "trace.top.to_encoder_groups_0_iretire",
+      "direction": "output",
+      "width": 7
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_bits_itype",
+      "semantic": "trace.top.to_encoder_groups_0_itype",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_valid",
+      "semantic": "trace.top.to_encoder_groups_0_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_bits_iaddr",
+      "semantic": "trace.top.to_encoder_groups_1_iaddr",
+      "direction": "output",
+      "width": 50
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_bits_ilastsize",
+      "semantic": "trace.top.to_encoder_groups_1_ilastsize",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_bits_iretire",
+      "semantic": "trace.top.to_encoder_groups_1_iretire",
+      "direction": "output",
+      "width": 7
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_bits_itype",
+      "semantic": "trace.top.to_encoder_groups_1_itype",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_valid",
+      "semantic": "trace.top.to_encoder_groups_1_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_bits_iaddr",
+      "semantic": "trace.top.to_encoder_groups_2_iaddr",
+      "direction": "output",
+      "width": 50
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_bits_ilastsize",
+      "semantic": "trace.top.to_encoder_groups_2_ilastsize",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_bits_iretire",
+      "semantic": "trace.top.to_encoder_groups_2_iretire",
+      "direction": "output",
+      "width": 7
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_bits_itype",
+      "semantic": "trace.top.to_encoder_groups_2_itype",
+      "direction": "output",
+      "width": 4
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_valid",
+      "semantic": "trace.top.to_encoder_groups_2_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_mstatus",
+      "semantic": "trace.top.to_encoder_mstatus",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_priv",
+      "semantic": "trace.top.to_encoder_priv",
+      "direction": "output",
+      "width": 3
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_trap_cause",
+      "semantic": "trace.top.to_encoder_trap_cause",
+      "direction": "output",
+      "width": 64
+    },
+    {
+      "raw": "io_traceCoreInterfaceBypass_toL2Top_toEncoder_trap_tval",
+      "semantic": "trace.top.to_encoder_trap_tval",
+      "direction": "output",
+      "width": 50
+    },
+    {
+      "raw": "io_uncacheError_ecc_error_bits",
+      "semantic": "errors.uncache.ecc_error_bits",
+      "direction": "output",
+      "width": 48
+    },
+    {
+      "raw": "io_uncacheError_ecc_error_valid",
+      "semantic": "errors.uncache.ecc_error_valid",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "io_wfi_wfiReq",
+      "semantic": "control.wfi.wfi_req",
+      "direction": "input",
+      "width": 1
+    },
+    {
+      "raw": "io_wfi_wfiSafe",
+      "semantic": "control.wfi.wfi_safe",
+      "direction": "output",
+      "width": 1
+    },
+    {
+      "raw": "reset",
+      "semantic": "reset.external",
+      "direction": "input",
+      "width": 1
+    }
+  ]
+}

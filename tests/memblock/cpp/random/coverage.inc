@@ -1,5 +1,5 @@
 // Scenario-facing functional coverage models and closure gates.
-// Included inside memblock_main.cpp's anonymous namespace.
+// Included inside scenarios/shared.hpp's memblock::scenarios namespace.
 
 struct LoadCoverage {
     std::array<std::uint64_t, 7> operations{};
