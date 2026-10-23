@@ -226,8 +226,8 @@ def test_toffee_funcov_registry_model_contains_all_python_recorder_bins(tmp_path
         for point in group["points"]
         for item in point["bins"]
     }
-    assert len(keys) == 573
-    assert len(sink.bin_ids) == 573
+    assert len(keys) == 620
+    assert len(sink.bin_ids) == 620
 
 
 def test_toffee_session_coverage_merges_native_groups_without_frontend_metadata(tmp_path) -> None:
@@ -588,7 +588,7 @@ def test_toffee_remaining_ifu_models_contain_all_124_bins() -> None:
 
 
 
-def test_all_573_bins_are_native_installed(tmp_path) -> None:
+def test_all_620_bins_are_native_installed(tmp_path) -> None:
     hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-all-native",
@@ -611,10 +611,10 @@ def test_all_573_bins_are_native_installed(tmp_path) -> None:
         for point in group["points"]
         for item in point["bins"]
     }
-    assert len(all_bins) == 573
+    assert len(all_bins) == 620
     assert native_bins == all_bins
     assert all_bins == set(sink.bin_ids)
-    assert len(runtime.cycle_models) == 12
+    assert len(runtime.cycle_models) == 13
 
 
 def test_native_only_sink_skips_bridge_groups_before_native_install(tmp_path) -> None:
@@ -638,10 +638,11 @@ def test_native_only_sink_skips_bridge_groups_before_native_install(tmp_path) ->
         for point in group["points"]
         for item in point["bins"]
     }
-    assert len(installed_bins) == 573
+    assert len(installed_bins) == 620
     assert len(sink._native_group_names) == len(sink.cov_groups)
 
-def test_direct_runtime_models_partition_all_573_bins(tmp_path) -> None:
+
+def test_direct_runtime_models_partition_all_620_bins(tmp_path) -> None:
     hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-contract",
@@ -655,8 +656,8 @@ def test_direct_runtime_models_partition_all_573_bins(tmp_path) -> None:
     for model in runtime.cycle_models:
         keys.extend(model.hit_counts())
 
-    assert len(keys) == 573
-    assert len(set(keys)) == 573
+    assert len(keys) == 620
+    assert len(set(keys)) == 620
     assert set(keys) == set(sink.hit_counts())
 
 

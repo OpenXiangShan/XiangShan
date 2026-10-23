@@ -20,6 +20,16 @@ methodology or a parallel coverage registry.
 - `sv/`: SystemVerilog observation/bind sources used by simulator-specific
   coverage flows; they do not create a second canonical registry.
 
+`py/icache/icache_data_ecc_ibuffer_funcov.py` observes the four Data-bank
+injection leaves as request-owned input scenarios. Their four point mappings
+own 47 bank-set distribution bins (BIN-1140–1186). Real refill and parity-only
+SRAM readback must match physical reads and returned data/code; flush, other
+exception and saved-half exclusions are tracked through IBuffer handoff.
+Corrupt/Hwe delivery correctness remains in `env/checkers/icache_data_ecc_checker.py`.
+The native adapter joins the same Toffee runtime and shared post-drive snapshot;
+the directed testcase's JSON is diagnostic/checker evidence, not a second
+coverage ledger.
+
 The legacy JSON ledger and fallback/audit runtime have been removed. Use
 `src/test/python/Frontend/docs/03_funcov_model/skills.md` for testpoint,
 sampling, report and HIT-evidence rules; use `src/test/python/Frontend/README.md`

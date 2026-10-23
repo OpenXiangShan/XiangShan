@@ -57,6 +57,16 @@ def half_aligned_cross_line(pruned_start, end_position):
 def validate_target_probes(recorder):
     """Fail early for mandatory scalars of explicitly targeted affected bins."""
     targets = set(recorder.coverage_targets.get("bin_ids", ()))
+    from .icache_data_ecc_ibuffer_funcov import GROUP, SIGNALS
+
+    data_ecc_targets = {d.bin_id for d in getattr(recorder, "definitions", ())
+                        if d.coverage_group == GROUP} & targets
+    if data_ecc_targets:
+        missing_ecc = {key: candidates for key, candidates in SIGNALS.items()
+                       if recorder._read_first_dut_signal(recorder.env.dut, candidates) is None}
+        if missing_ecc:
+            raise AssertionError({"reason": "required Data ECC probes are unobservable",
+                                  "bins": sorted(data_ecc_targets), "missing": missing_ecc})
     requirements = (
         ({720, 726, 731, 734, 737, 758}, "icache_fencei", ICACHE_FENCEI),
         ({608, 634, 759, 760, 761, 763, 768}, "main_pmp_instr", MAIN_PMP_INSTR),

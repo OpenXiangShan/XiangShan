@@ -149,5 +149,21 @@ the clean baseline uses IBuffer's valid/enqEnable exception gates.
 Run with the standard runner and `TB_ENABLE_DUT_TESTS=1`; the module accepts
 `-n 4` for parallel pytest workers. Per-case `checks/*.data_ecc.json` files
 retain build/probe provenance and clean/faulted stage evidence alongside the
-normal logs and waves. These leaves have no canonical coverage bins yet, so
-checker success does not backannotate CSV coverage or status as HIT.
+normal logs and waves. The canonical `icache_data_ecc_ibuffer` group has four
+points (`single_line`, `cross_line0`, `cross_line1`, `cross_both`) and 47
+distribution bins, BIN-1140 through BIN-1186. Each parameter declares its exact
+bin target; when functional coverage is enabled it also requires that sample.
+
+The independent coverage sampler records clean real refill writes, SRAM
+readback and parity-only mutations, physical set/way/bank reads, returned
+data/code, clean Meta and other-exception inputs, and continuous flush/half-RVI
+exclusion through the matching IBuffer handshake. It uses the shared post-drive
+snapshot and full FTQ flag/index plus PC. Corrupt, Hwe and exceptionMask are
+checker results and never gate a coverage hit. Its retained probe paths and
+transaction diagnostics are included in the per-case JSON checks.
+
+Each CSV leaf owns one whole point; a point sample and all its distribution
+bins being covered are distinct measures. Toffee reports native bin hints in
+`funcov/toffee.funcov.json`, including samples from failed cases. HIT review
+therefore also requires the same run's passing testcase and checker evidence;
+the sampler does not update CSV status or evidence.

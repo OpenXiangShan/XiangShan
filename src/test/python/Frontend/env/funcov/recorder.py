@@ -51,6 +51,10 @@ from .py.ftq.sampler import (
     reset_ftq_coverage_state,
 )
 from .py.ifu.owner_v3_funcov import derive_owner_v3_from_source
+from .py.icache.icache_data_ecc_ibuffer_funcov import (
+    ICACHE_DATA_ECC_IBUFFER_SAMPLER_BIN_KEYS,
+    reset_icache_data_ecc_ibuffer_state,
+)
 from .py.icache import (
     ICACHE_MISSUNIT_SAMPLER_BIN_KEYS,
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
@@ -158,6 +162,7 @@ FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     | set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)
     | set(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS)
     | set(ICACHE_HITMISS_SAMPLER_BIN_KEYS)
+    | set(ICACHE_DATA_ECC_IBUFFER_SAMPLER_BIN_KEYS)
 )
 
 
@@ -749,6 +754,7 @@ class FrontendFuncovSampleHub:
         reset_icache_missunit_coverage_state(self)
         reset_icache_waylookup_coverage_state(self)
         reset_icache_hitmiss_coverage_state(self)
+        reset_icache_data_ecc_ibuffer_state(self)
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut

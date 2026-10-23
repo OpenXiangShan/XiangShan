@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from .py.ftq.two_fetch_toffee import TwoFetchToffeeCoverage
 from .py.icache.icache_hitmiss_toffee import ICacheHitMissToffeeCoverage
+from .py.icache.icache_data_ecc_ibuffer_toffee import ICacheDataEccIBufferToffeeCoverage
 from .py.icache.icache_mainpipe_toffee import ICacheMainpipeToffeeCoverage
 from .py.icache.icache_missunit_toffee import ICacheMissunitToffeeCoverage
 from .py.icache.icache_prefetchpipe_toffee import ICachePrefetchpipeToffeeCoverage
@@ -30,6 +31,7 @@ def create_toffee_runtime(recorder, sink) -> ToffeeRuntime:
 
     hitmiss = create(ICacheHitMissToffeeCoverage)
     mainpipe = create(ICacheMainpipeToffeeCoverage)
+    data_ecc_ibuffer = create(ICacheDataEccIBufferToffeeCoverage)
     prefetchpipe = create(ICachePrefetchpipeToffeeCoverage)
     missunit = create(ICacheMissunitToffeeCoverage)
     waylookup = create(ICacheWaylookupToffeeCoverage)
@@ -48,6 +50,7 @@ def create_toffee_runtime(recorder, sink) -> ToffeeRuntime:
         cycle_models=(
             hitmiss,
             mainpipe,
+            data_ecc_ibuffer,
             prefetchpipe,
             missunit,
             waylookup,

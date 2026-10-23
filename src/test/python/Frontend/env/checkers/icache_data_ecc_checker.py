@@ -7,35 +7,7 @@ This adapter targets V3's 64-byte line, 32-byte fetch alignment and bank parity.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-
-def request_bank_masks(start_pc: int, end_position: int) -> tuple[int, int]:
-    """endPosition names a halfword relative to the 32-byte aligned block."""
-    assert start_pc >= 0 and start_pc % 2 == 0, "unaligned request PC"
-    assert 0 <= end_position < 32, "invalid endPosition"
-    end_pc = (start_pc & ~31) + 2 * end_position
-    assert start_pc <= end_pc < start_pc + 64, "invalid fetch range"
-    base = start_pc & ~63
-    masks = [0, 0]
-    for pc in range(start_pc, end_pc + 1, 2):
-        line, offset = divmod(pc - base, 64)
-        masks[line] |= 1 << (offset // 8)
-    assert not masks[0] & masks[1], "one bank cannot read two lines in one request"
-    return tuple(masks)
-
-
-def parity(data: int) -> int:
-    assert 0 <= data < 1 << 64, "data must fit one 64-bit bank"
-    return data.bit_count() & 1
-
-
-@dataclass(frozen=True)
-class BankRead:
-    valid: int
-    ready: int
-    waymask: int
-    sets: tuple[int, ...]
+from env.support.icache_data_ecc import BankRead, parity, request_bank_masks
 
 
 class DataEccRequestChecker:

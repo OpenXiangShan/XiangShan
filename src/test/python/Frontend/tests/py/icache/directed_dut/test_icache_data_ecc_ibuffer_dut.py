@@ -2,18 +2,19 @@
 
 Each parameter runs a clean baseline and a faulted refetch. The oracle joins
 FTQ requests, physical SRAM bank reads, returned parity and IBuffer handshakes
-at the environment's post-drive observation boundary. These four leaves have
-no canonical coverage bins yet: JSON results are checker evidence, not HITs.
+at the environment's post-drive observation boundary. Four canonical Toffee
+points retain the 47 bank-set combinations independently of checker results.
 """
 
 from __future__ import annotations
 
 import json
+import csv
 import os
 import re
 import traceback
 from dataclasses import asdict, is_dataclass
-from itertools import product
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,9 @@ from env.checkers.icache_data_ecc_checker import (
 )
 from env.runtime.frontend_init import FrontendInitConfig, ProgramImage, initialize_frontend
 from env.runtime.pylib import frontend_build_root_path
+from env.support.icache_data_ecc import (
+    SINGLE_BANKS, LINE0_BANKS, LINE1_BANKS, BOTH_BANKS, fault_banks, scenario_bin_name,
+)
 from tests.py.icache.directed_dut.programs import CNOP, build_idle_loop_program
 from tests.py.icache.directed_dut.support import (
     cycle_limit,
@@ -245,8 +249,18 @@ def _park(env, observer):
 
 def _json_value(value):
     if is_dataclass(value):
-        return asdict(value)
+        return _json_ready(asdict(value))
+    if isinstance(value, (set, frozenset)):
+        return sorted(value)
     raise TypeError(f"not JSON serializable: {type(value).__name__}")
+
+
+def _json_ready(value):
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_json_ready(item) for item in value]
+    return value
 
 
 def _run_scenario(env, request, kind, faults):
@@ -301,6 +315,17 @@ def _run_scenario(env, request, kind, faults):
         _redirect(env, target)
         observer.wait(lambda: measured.delivery is not None, "faulted target Hwe at IBuffer")
         measured.assert_complete()
+        coverage = env.functional_coverage
+        if coverage is not None:
+            target_bin = request.node.get_closest_marker("funcov_bins").args[0]
+            result["coverage_bin"] = target_bin
+            result["coverage_detail"] = coverage.hit_detail_by_bin_id(target_bin)
+            state = getattr(coverage, "_icache_data_ecc_ibuffer_state", None)
+            result["coverage_diagnostics"] = [] if state is None else state.diagnostics
+            assert coverage.hit_count_by_bin_id(target_bin) > 0, {
+                "missing_data_ecc_condition_sample": target_bin,
+                "diagnostics": result["coverage_diagnostics"],
+            }
         assert not env.get_errors(), env.get_errors()
         result["outcome"] = "passed"
     except Exception:
@@ -315,6 +340,12 @@ def _run_scenario(env, request, kind, faults):
         result["baseline"] = None if baseline is None else baseline.evidence
         result["faulted"] = None if measured is None else measured.evidence
         result["checker_errors"] = env.get_errors()
+        coverage = env.functional_coverage
+        state = getattr(coverage, "_icache_data_ecc_ibuffer_state", None)
+        if state is not None:
+            result["coverage_diagnostics"] = state.diagnostics
+            result["coverage_pending"] = [asdict(c) for c in state.pending.values()]
+            result["coverage_refills"] = list(state.refills.values())
         try:
             env.icache_ecc_agent.restore_all()
         finally:
@@ -322,7 +353,7 @@ def _run_scenario(env, request, kind, faults):
             directory.mkdir(parents=True, exist_ok=True)
             name = re.sub(r"[^A-Za-z0-9_.=-]", "_", request.node.name)
             path = directory / f"{name}.data_ecc.json"
-            path.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=_json_value) + "\n")
+            path.write_text(json.dumps(_json_ready(result), ensure_ascii=False, indent=2, default=_json_value) + "\n")
             request.node.user_properties.append(("data_ecc_evidence", str(path)))
 
 
@@ -330,32 +361,35 @@ def _bank_id(banks):
     return "banks_" + "_".join(map(str, banks))
 
 
-_SINGLE_BANKS = [(bank,) for bank in range(8)] + [(0, 1), (0, 7), tuple(range(8))]
-_LINE0_BANKS = [(bank,) for bank in range(4, 8)] + [(6, 7), tuple(range(4, 8))]
-_LINE1_BANKS = [(bank,) for bank in range(4)] + [(1, 2), tuple(range(4))]
-# All 16 individual bank pairs, followed by the remaining cardinality classes.
-_BOTH_BANKS = [((left,), (right,)) for left, right in product(range(4, 8), range(4))]
-_BOTH_BANKS += [pair for pair in product(((6,), (6, 7), tuple(range(4, 8))),
-                                       ((1,), (0, 1, 2), tuple(range(4))))
-                if pair not in _BOTH_BANKS]
+@lru_cache(maxsize=1)
+def _coverage_ids():
+    registry = Path(__file__).resolve().parents[4] / "docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    with registry.open(encoding="utf-8-sig", newline="") as handle:
+        return {row["Bin_Name"]: row["Bin_ID"] for row in csv.DictReader(handle)
+                if row["Coverage_Group"] == "icache_data_ecc_ibuffer"}
 
 
-@pytest.mark.parametrize("banks", _SINGLE_BANKS, ids=_bank_id)
+def _target(kind, banks):
+    bin_id = _coverage_ids()[scenario_bin_name(kind, fault_banks(kind, banks))]
+    return pytest.param(banks, marks=pytest.mark.funcov_bins(bin_id))
+
+
+@pytest.mark.parametrize("banks", [_target("single", b) for b in SINGLE_BANKS], ids=_bank_id)
 def test_icache_data_ecc_ibuffer_single_line(env, request, banks):
     _run_scenario(env, request, "single", tuple((0, bank) for bank in banks))
 
 
-@pytest.mark.parametrize("banks", _LINE0_BANKS, ids=_bank_id)
+@pytest.mark.parametrize("banks", [_target("line0", b) for b in LINE0_BANKS], ids=_bank_id)
 def test_icache_data_ecc_ibuffer_cross_line0(env, request, banks):
     _run_scenario(env, request, "line0", tuple((0, bank) for bank in banks))
 
 
-@pytest.mark.parametrize("banks", _LINE1_BANKS, ids=_bank_id)
+@pytest.mark.parametrize("banks", [_target("line1", b) for b in LINE1_BANKS], ids=_bank_id)
 def test_icache_data_ecc_ibuffer_cross_line1(env, request, banks):
     _run_scenario(env, request, "line1", tuple((1, bank) for bank in banks))
 
 
-@pytest.mark.parametrize("banks", _BOTH_BANKS,
+@pytest.mark.parametrize("banks", [_target("both", b) for b in BOTH_BANKS],
                          ids=lambda pair: "line0_" + _bank_id(pair[0]) + "-line1_" + _bank_id(pair[1]))
 def test_icache_data_ecc_ibuffer_cross_both(env, request, banks):
     faults = tuple((line, bank) for line, selected in enumerate(banks) for bank in selected)
