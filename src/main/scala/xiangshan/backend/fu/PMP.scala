@@ -32,6 +32,8 @@ import xiangshan.cache.mmu.TlbCmd
 trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes
   val CoarserGrain: Boolean = PlatformGrain > PMPOffBits
+  // SoC-level PMA checkers have no core parameters and do not handle shadow-stack commands.
+  protected def hasShadowStack: Boolean = p.lift(XSCoreParamsKey).exists(_.HasShadowStack)
 }
 
 abstract class PMPBundle(implicit val p: Parameters) extends Bundle with PMPConst
@@ -403,7 +405,9 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
 trait PMPCheckMethod extends PMPConst {
   def pmp_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
+    val isSsRead = if (hasShadowStack) TlbCmd.isShadowStackRead(cmd) else false.B
+    // SSPOPCHK executes in LDU; report its PMP R+W denial through the load response.
+    resp.ld := (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r) || (isSsRead && !(cfg.r && cfg.w))
     resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !cfg.w
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     resp.mmio := false.B

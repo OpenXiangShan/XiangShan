@@ -446,10 +446,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp(idx).valid := resp(idx).valid || noTranslate
     pmp(idx).bits.addr := addr
     pmp(idx).bits.size := size
-    // W=1, R=0 is a reserved PMP encoding, so checking W also guarantees R.
-    // SSPOPCHK is the only shadow-stack request whose original TLB command is read.
+    // Preserve SSPOPCHK's actual read access for PMA while requiring PMP write permission.
     pmp(idx).bits.cmd := (if (HasShadowStack) {
-      Mux(isShadowStackAccess && cmd === TlbCmd.read, TlbCmd.write, cmd)
+      Mux(isShadowStackAccess && cmd === TlbCmd.read, TlbCmd.ss_read, cmd)
     } else cmd)
   }
 

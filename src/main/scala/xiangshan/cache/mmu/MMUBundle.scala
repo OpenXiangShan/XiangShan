@@ -471,6 +471,8 @@ object TlbCmd {
 
   def atom_read  = "b100".U // lr
   def atom_write = "b101".U // sc / amo
+  // SSPOPCHK permission check: PMP requires R+W, PMA requires R.
+  def ss_read = "b011".U
 
   def apply() = UInt(3.W)
   def isRead(a: UInt) = a(1,0)===read
@@ -478,6 +480,7 @@ object TlbCmd {
   def isExec(a: UInt) = a(1,0)===exec
 
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
+  def isShadowStackRead(a: UInt) = a===ss_read
 }
 
 // Svpbmt extension

@@ -961,9 +961,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     uop.exceptionVec(loadAccessFault) || uop.exceptionVec(loadPageFault) || uop.exceptionVec(loadGuestPageFault)
   )
   val tlbAccessable = !tlbUnaccessable
-  // SSPOPCHK is checked as a write by PMP/PMA so that W permission implies R+W.
-  // Its denied response therefore arrives on st even though it executes in LDU.
-  val pmpUnaccessable = (pmp.ld || (isShadowStackLoad && pmp.st)) && tlbHit
+  val pmpUnaccessable = pmp.ld && tlbHit
 
   val isNC = tlbHit && tlbAccessable && Pbmt.isNC(pbmt)
   val isMMIO = tlbHit && tlbAccessable && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
