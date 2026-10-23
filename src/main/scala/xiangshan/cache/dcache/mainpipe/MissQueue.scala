@@ -54,6 +54,9 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val lqIdx = new LqPtr
   // store
   val full_overwrite = Bool()
+  // probe-inval deferral cap: install VALID even if probed during acquire (livelock breaker
+  // after repeated deferral bounces; store reqs only, false for all other sources)
+  val pi_force = Bool()
 
   // amo
   val word_idx = UInt(log2Up(blockWords).W)
@@ -109,6 +112,11 @@ class MissQueueRefillInfo(implicit p: Parameters) extends MissReqStoreData {
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
   val error      = new TLError()
+  // TSO fix: a probe raced this load's acquire -> install the refill INVALID (reader re-acquires).
+  val pending_inval = Bool()
+  // grant custody info: did the grant carry data? (AcquirePerm/no-data Grant = authority without
+  // bytes -- discarding such an install LOSES the line, see custody classes in MainPipe)
+  val grant_has_data = Bool()
 }
 
 class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
@@ -498,6 +506,14 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val mainpipe_req_fired = RegInit(true.B)
 
+  // TSO fix: set when a probe for this line arrives DURING the acquire (pre-grant). Without this the
+  // grant installs a stale, un-invalidated line -- the probe was ProbeAck'd NtoN before the line
+  // existed, so its invalidation is lost -> reader reads stale (off-by-one) -> TSO violation.
+  val got_probe_during_acquire = RegInit(false.B)
+  // set the cycle a pi_force store merges into this entry -- beats a same-cycle probe record
+  // (keeps the deferral cap provably bounded)
+  val pi_force_merge_now = WireDefault(false.B)
+
   val release_entry = s_grantack && w_mainpipe_resp && w_refill_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
@@ -569,6 +585,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     w_grantlast := false.B
     w_l2hint := false.B
     mainpipe_req_fired := false.B
+    got_probe_during_acquire := false.B
 
     no_pending := !io.acquire_fired_by_pipe_reg
 
@@ -621,6 +638,13 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       }
       full_overwrite := miss_req_pipe_reg_bits.isFromStore && miss_req_pipe_reg_bits.full_overwrite
       assert(is_alias_match(req.vaddr, miss_req_pipe_reg_bits.vaddr), "alias bits should be the same when merging store")
+      // deferral-cap: a forced store merging into this MSHR must complete this round --
+      // drop any already-recorded probe mark (the merged load loses one deferral instance,
+      // rare + bounded; recording is disabled going forward via !req.pi_force)
+      when (miss_req_pipe_reg_bits.pi_force) {
+        got_probe_during_acquire := false.B
+        pi_force_merge_now := true.B
+      }
     }
 
     should_refill_data := should_refill_data_reg || miss_req_pipe_reg_bits.isFromLoad
@@ -898,9 +922,29 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.main_pipe_req.bits.occupy_way := req.occupy_way
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
 
-  io.probe.block := req_valid && w_grantlast &&
+  val probe_block_match =
     get_block_addr(req.addr) === get_block_addr(io.probe.req.bits.addr) &&
     is_alias_match(req.vaddr, io.probe.req.bits.vaddr)
+  io.probe.block := req_valid && w_grantlast && probe_block_match
+
+  // Record a probe that races THIS MSHR's acquire (pre-grant, so it is NOT blocked and gets
+  // ProbeAck'd NtoN before the line is installed). Consumed at refill (MainPipe) to install the
+  // line INVALID so the requester re-acquires the post-write value.
+  // LOAD: forwarding is suppressed (io.forwardInfo below) and the load replays from the LQ.
+  // STORE: the store is NOT performed against the stale refill; MainPipe returns store_hit_resp
+  // with replay=true and the Sbuffer (entry still inflight, data+mask kept) retries after the
+  // missq-replay timeout; the retry misses on the INVALID line and opens a fresh Acquire, so L2
+  // re-registers this core. (Re-acquiring inside the MSHR for an already-granted line is an L2
+  // protocol hazard and was reverted: store stuck => CPU hang.)
+  // PREFETCH: same stale-install hole; install-INVALID only wastes the prefetch.
+  // AMO excluded (its resp returns data computed from the refill; needs its own replay design).
+  // pi_force (deferral cap): a store that already bounced PiForceThreshold times skips recording,
+  // so that round installs VALID (baseline behavior) and provably completes.
+  when (req_valid && !w_grantlast && probe_block_match && io.probe.req.valid &&
+        (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && !req.pi_force &&
+        !pi_force_merge_now) {
+    got_probe_during_acquire := true.B
+  }
 
   io.replace.block := req_valid &&
     get_block_addr(req.addr) === get_block_addr(io.replace.req.bits.addr) &&
@@ -918,6 +962,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
+  io.refill_info.bits.pending_inval := got_probe_during_acquire
+  io.refill_info.bits.grant_has_data := hasData
   io.refill_info.bits.miss_dirty := isDirty
   io.refill_info.bits.error.tl_denied  := denied
   io.refill_info.bits.error.tl_corrupt := corrupt
@@ -929,11 +975,15 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val w_grantfirst_forward_info = Mux(isKeyword, w_grantlast, w_grantfirst)
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)
-  io.forwardInfo.inflight := req_valid
+  // TSO fix: if a probe raced this acquire, the refill data is STALE. Suppress forwarding of it to
+  // loads (both the MSHR-forward and the D-channel forward are gated by `check()`=inflight, and by
+  // the per-beat valids) so the waiting load misses on the Nothing-installed array and re-acquires
+  // the post-write value instead of consuming the stale forwarded beat.
+  io.forwardInfo.inflight := req_valid && !got_probe_during_acquire
   io.forwardInfo.paddr := req.addr
   io.forwardInfo.raw_data := refill_and_store_data
-  io.forwardInfo.firstbeat_valid := w_grantfirst_forward_info
-  io.forwardInfo.lastbeat_valid := w_grantlast_forward_info
+  io.forwardInfo.firstbeat_valid := w_grantfirst_forward_info && !got_probe_during_acquire
+  io.forwardInfo.lastbeat_valid := w_grantlast_forward_info && !got_probe_during_acquire
   io.forwardInfo.denied := denied
   io.forwardInfo.corrupt := corrupt
 

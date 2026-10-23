@@ -209,6 +209,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val lqDeqRobIdx = Output(new RobPtr)
     val lqDeqUopIdx = Output(UopIdx())
+
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -223,6 +225,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAR.io.redirect  <> io.redirect
   loadQueueRAR.io.release   <> io.release
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
+  loadQueueRAR.io.csrCtrl   <> io.csrCtrl
   for (w <- 0 until LoadPipelineWidth) {
     loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
     loadQueueRAR.io.query(w).resp   <> io.ldu.ldld_nuke_query(w).resp // to load_s2

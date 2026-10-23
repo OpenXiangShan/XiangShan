@@ -391,6 +391,10 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
   val id     = UInt(reqIdWidth.W)
+  // probe-inval deferral cap: this store already bounced pi_force-threshold times on
+  // probe-raced acquires -- install VALID this round (skip the deferral) so the store
+  // provably completes (livelock breaker; bug18-residual only for this rare instance)
+  val pi_force = Bool()
   def dump(cond: Bool) = {
     XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)

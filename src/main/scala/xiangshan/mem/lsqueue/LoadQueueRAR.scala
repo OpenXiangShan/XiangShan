@@ -47,6 +47,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     // global
     val lqFull = Output(Bool())
+
+    // CSR controls
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
   private val PartialPAddrStride: Int = 6
@@ -131,6 +134,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   release2Cycle.valid := RegNext(io.release.valid)
   //val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
 
+  // Debug wires for current logic.
+
   // LoadQueueRAR enqueue condition:
   // There are still not completed load instructions before the current load instruction.
   // (e.g. "not completed" means that load instruction get the data or exception).
@@ -175,10 +180,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       //  So NC requests are not allowed to have RAR
       released(enqIndex) := enq.bits.is_nc || (
         enq.bits.data_valid &&
-        (release2Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
-        release1Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
+        (release2Cycle.valid && enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+        || release1Cycle.valid && enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
       )
     }
     val debug_robIdx = enq.bits.uop.robIdx.asUInt
@@ -223,7 +226,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // LoadQueueRAR Query
   // Load-to-Load violation check condition:
-  // 1. Physical address match by CAM port.
+  // 1. Physical address match by CAM port, or we're in TSO mode
   // 2. release or nc_with_data is set.
   // 3. Younger than current load instruction.
   val ldLdViolation = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -238,7 +241,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val matchMaskReg = Wire(Vec(LoadQueueRARSize, Bool()))
     for(i <- 0 until LoadQueueRARSize) {
       matchMaskReg(i) := (allocated(i) &
-                         paddrModule.io.releaseViolationMmask(w)(i) &
+                         (io.csrCtrl.tso_enable || paddrModule.io.releaseViolationMmask(w)(i)) &
                          robIdxMask(i) &&
                          released(i))
       }
@@ -248,7 +251,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
     query.resp.bits.rep_frm_fetch := ParallelORR(ldLdViolationMask)
   }
-
 
   // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
   // update release flag in 1 cycle
@@ -264,6 +266,11 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       released(i) := true.B
     }
   })
+
+  // Debug: which allocated entries does THIS cycle's release CAM-match (i.e. the snoop that
+  // should set `released` next cycle). If release_valid pulses but camHit/rawCamHit stay 0,
+  // the snoop's paddr isn't matching any allocated entry (CAM/lifecycle bug). If release_valid
+  // itself never pulses, no snoop is reaching the RAR at all.
 
   io.lqFull := freeList.io.empty
 

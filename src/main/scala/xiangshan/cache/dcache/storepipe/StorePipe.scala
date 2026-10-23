@@ -172,6 +172,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
     io.miss_req.valid := s2_valid && !s2_hit && s2_is_prefetch
   }
   io.miss_req.bits := DontCare
+  io.miss_req.bits.pi_force := false.B
   // only send out a prefetch write to Dcache
   io.miss_req.bits.source := DCACHE_PREFETCH_SOURCE.U
   io.miss_req.bits.pf_source := L1_HW_PREFETCH_STORE

@@ -212,6 +212,7 @@ class Sbuffer(implicit p: Parameters)
   val prefetcher = Module(new StorePfWrapper())
   val writeReq = dataModule.io.writeReq
 
+  // Actuall store buffer metadata
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
   val debug_mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
@@ -221,6 +222,11 @@ class Sbuffer(implicit p: Parameters)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
+  // probe-inval deferral cap: consecutive replay=true bounces per entry (probe raced the
+  // store's acquire and the install was deferred). At PiForceThreshold the retry carries
+  // pi_force so the MSHR installs VALID regardless -- livelock breaker, provable progress.
+  val piDeferCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(2.W))))
+  val PiForceThreshold = 3.U
 
   val sbuffer_out_s0_fire = Wire(Bool())
 
@@ -310,10 +316,32 @@ class Sbuffer(implicit p: Parameters)
   // sbuffer_in_s2:
   // * use cacheline level buffer to update sbuffer data and mask
   // * remove dcache write block (if there is)
+  
+  // When TSO active, behaves as a queue, where no duplicated ptags are allowed, and merge only happens at tail
+  val tsoActive = RegInit(true.B)
+  // If we're transitioning to TSO. During the time, block all enqueuing, and drain the buffer
+  val tsoTransitioning = RegInit(false.B)
+  val tsoTail = RegInit(0.U(log2Up(StoreBufferSize).W))
+  val tsoLast = tsoTail -% 1.U
 
   val activeMask = VecInit(stateVec.map(s => s.isActive()))
-  val validMask  = VecInit(stateVec.map(s => s.isValid()))
-  val drainIdx = PriorityEncoder(activeMask)
+  val validMask  = VecInit(stateVec.map(s => s.isValid())).asUInt
+  val validBeforeTail = WireDefault((UIntToOH(tsoTail, StoreBufferSize) - 1.U) & validMask)
+  val validAfterTail = WireDefault((~(UIntToOH(tsoTail, StoreBufferSize) - 1.U)).asUInt & validMask)
+
+  val drainIdx: UInt = WireDefault(Mux(tsoActive,
+    PriorityEncoder(Mux(validAfterTail.orR, validAfterTail(StoreBufferSize-1, 0), validBeforeTail(StoreBufferSize-1, 0))),
+    PriorityEncoder(activeMask)
+  ))
+
+  // Transition in & out of tsoTransitioning
+  when(tsoTransitioning && !validMask.orR) {
+    tsoTransitioning := false.B
+    tsoActive := !tsoActive
+  }
+  when((!tsoTransitioning) && (tsoActive =/= io.csrCtrl.tso_enable)) {
+    tsoTransitioning := true.B
+  }
 
   val inflightMask = VecInit(stateVec.map(s => s.isInflight()))
 
@@ -335,11 +363,15 @@ class Sbuffer(implicit p: Parameters)
     assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in(i).fire && io.in(i).bits.vecValid))
   }
 
+  val tsoMergeLast = mergeIdx.map(_ === tsoLast)
+
   // insert condition
   // firstInsert: the first invalid entry
   // if first entry canMerge or second entry has the same ptag with the first entry,
   // secondInsert equal the first invalid entry, otherwise, the second invalid entry
   val invalidMask = VecInit(stateVec.map(s => s.isInvalid()))
+  val tsoInsertFirstMask = UIntToOH(tsoTail) & invalidMask.asUInt
+  val tsoInsertSecondMask = UIntToOH(tsoTail + 1.U) & invalidMask.asUInt
   val evenInvalidMask = GetEvenBits(invalidMask.asUInt)
   val oddInvalidMask = GetOddBits(invalidMask.asUInt)
 
@@ -366,28 +398,57 @@ class Sbuffer(implicit p: Parameters)
     enbufferSelReg := ~enbufferSelReg
   }
 
-  val firstInsertIdx = Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx) // slow to generate, for debug only
+  val firstInsertIdx = Mux(tsoActive, tsoTail, Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx)) // slow to generate, for debug only
   val secondInsertIdx = Mux(sameTag,
     firstInsertIdx,
-    Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
+    Mux(
+      tsoActive,
+      Mux(canMerge(0) || !io.in(0).bits.vecValid, tsoTail, tsoTail + 1.U),
+      Mux(!enbufferSelReg, evenInsertIdx, oddInsertIdx)
+    )
   ) // slow to generate, for debug only
-  val firstInsertVec = Mux(enbufferSelReg, evenInsertVec, oddInsertVec)
+  val firstInsertVec = Mux(
+    tsoActive,
+    tsoInsertFirstMask,
+    Mux(enbufferSelReg, evenInsertVec, oddInsertVec)
+  )
   val secondInsertVec = Mux(sameTag,
     firstInsertVec,
-    Mux(~enbufferSelReg, evenInsertVec, oddInsertVec)
+    Mux(
+      tsoActive,
+      Mux(canMerge(0) || !io.in(0).bits.vecValid, tsoInsertFirstMask, tsoInsertSecondMask),
+      Mux(!enbufferSelReg, evenInsertVec, oddInsertVec)
+    )
   ) // slow to generate, for debug only
-  val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(enbufferSelReg, evenCanInsert, oddCanInsert)
-  val secondCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(sameTag,
-    firstCanInsert,
-    Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
-  ) && (EnsbufferWidth >= 1).B
+  val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && firstInsertVec.orR  && !(tsoActive && canMerge(0) && !tsoMergeLast(0))
+  val secondCanInsert = sbuffer_state =/= x_drain_sbuffer && secondInsertVec.orR && !(tsoActive && canMerge(1) && !(tsoMergeLast(1) && sameTag))
   val forward_need_uarch_drain = WireInit(false.B)
   val merge_need_uarch_drain = WireInit(false.B)
   val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
-  io.in(0).ready := firstCanInsert
-  io.in(1).ready := secondCanInsert && io.in(0).ready
+  io.in(0).ready := !tsoTransitioning && firstCanInsert
+  io.in(1).ready := !tsoTransitioning && secondCanInsert && io.in(0).ready
+  assert(io.in(0).valid || !io.in(1).valid) // 1 valid implies 0 valid
+
+  val tsoTailInc = (
+    Mux(io.in(0).fire && io.in(0).bits.vecValid && !canMerge(0), 1.U, 0.U)
+    +& Mux(io.in(1).fire && io.in(1).bits.vecValid && !canMerge(1) && !sameTag, 1.U, 0.U)
+  )
+  assert(!tsoActive || !(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || sameTag)
+  assert(!tsoActive || !(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || canMerge(0))
+  assert(!tsoActive || !(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || tsoMergeLast(0))
+  tsoTail := tsoTail + tsoTailInc
+
+  // Some TSO assertions
+  // Valid is always continous
+  def hasContinousOnes(i: UInt): Bool = {
+    val leastSigBit = i & (-i)
+    PopCount(i +& leastSigBit) === 1.U
+  }
+  assert(!tsoActive || (hasContinousOnes(validMask.asUInt) || hasContinousOnes((~validMask).asUInt)))
+  // Only at most one inflight
+  assert(!tsoActive || (PopCount(inflightMask) <= 1.U))
 
   for (i <- 0 until EnsbufferWidth) {
     // train
@@ -435,6 +496,7 @@ class Sbuffer(implicit p: Parameters)
     (0 until StoreBufferSize).map(entryIdx => {
       when(insertVec(entryIdx)){
         stateVec(entryIdx).state_valid := true.B
+        piDeferCount(entryIdx) := 0.U
         stateVec(entryIdx).w_sameblock_inflight := sameBlockInflightMask.orR // set w_sameblock_inflight when a line is first allocated
         when(sameBlockInflightMask.orR){
           waitInflightMask(entryIdx) := sameBlockInflightMask
@@ -481,9 +543,12 @@ class Sbuffer(implicit p: Parameters)
     val accessValid = in.fire && in.bits.vecValid
     accessIdx(i).valid := RegNext(accessValid)
     accessIdx(i).bits := RegEnable(Mux(canMerge(i), mergeIdx(i), insertIdx), accessValid)
-
     XSDebug(accessValid && canMerge(i), p"merge req $i to line [${mergeIdx(i)}]\n")
     XSDebug(accessValid && !canMerge(i), p"insert req $i to line[$insertIdx]\n")
+
+    // tsoActive && accessValid && canMerge(i) -> mergeIdx(i) == tsoLast
+    assert(!(tsoActive && accessValid && canMerge(i)) || mergeIdx(i) === tsoLast)
+
     when(accessValid){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
@@ -624,7 +689,7 @@ class Sbuffer(implicit p: Parameters)
   // sbuffer_out_s0
   // ---------------------------------------------------------------------------
 
-  val need_drain = needDrain(sbuffer_state)
+  val need_drain = needDrain(sbuffer_state) || tsoActive
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val sbuffer_out_s0_evictionIdx = Mux(missqReplayHasTimeOut,
     missqReplayTimeOutIdx,
@@ -698,6 +763,8 @@ class Sbuffer(implicit p: Parameters)
   io.dcache.req.bits.data  := data(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.mask  := mask(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.id := sbuffer_out_s1_evictionIdx
+  // deferral cap reached => force-install this retry (skip probe-inval deferral in the MSHR)
+  io.dcache.req.bits.pi_force := piDeferCount(sbuffer_out_s1_evictionIdx) === PiForceThreshold
 
   XSDebug(sbuffer_out_s1_fire,
     p"send buf [$sbuffer_out_s1_evictionIdx] to Dcache, req fire\n"
@@ -714,9 +781,22 @@ class Sbuffer(implicit p: Parameters)
   io.dcache.hit_resps.map(resp => {
     val dcache_resp_id = resp.bits.id
     when (resp.fire) {
-      stateVec(dcache_resp_id).state_inflight := false.B
-      stateVec(dcache_resp_id).state_valid := false.B
-      assert(!resp.bits.replay)
+      when (resp.bits.replay) {
+        // Probed-during-acquire store miss: MainPipe installed the refill INVALID and the
+        // store was NOT performed. The entry still holds the store data -- keep it and
+        // retry after the missq-replay timeout (same mechanism as io.dcache.replay_resp).
+        // The retried store re-misses and re-acquires fresh data + L2 registration.
+        missqReplayCount(dcache_resp_id) := 0.U
+        stateVec(dcache_resp_id).w_timeout := true.B
+        // deferral cap: saturating count of consecutive bounces; at threshold the next
+        // retry goes out with pi_force and completes unconditionally
+        when (piDeferCount(dcache_resp_id) =/= PiForceThreshold) {
+          piDeferCount(dcache_resp_id) := piDeferCount(dcache_resp_id) + 1.U
+        }
+      } .otherwise {
+        stateVec(dcache_resp_id).state_inflight := false.B
+        stateVec(dcache_resp_id).state_valid := false.B
+      }
       assert(!resp.bits.miss) // not need to resp if miss, to be opted
       assert(stateVec(dcache_resp_id).state_inflight === true.B)
     }
@@ -726,12 +806,13 @@ class Sbuffer(implicit p: Parameters)
     // When a new req allocate a new line in sbuffer, sameblock_inflight check will ignore
     // current dcache.hit_resps. Then, in the next cycle, we have plenty of time to check
     // if the same block is still inflight
+    // (replay=true keeps the entry inflight, so same-block waiters must keep waiting)
     (0 until StoreBufferSize).map(i => {
       when(
         stateVec(i).w_sameblock_inflight &&
         stateVec(i).state_valid &&
-        GatedValidRegNext(resp.fire) &&
-        waitInflightMask(i) === UIntToOH(RegEnable(id_to_sbuffer_id(dcache_resp_id), resp.fire))
+        GatedValidRegNext(resp.fire && !resp.bits.replay) &&
+        waitInflightMask(i) === UIntToOH(RegEnable(id_to_sbuffer_id(dcache_resp_id), resp.fire && !resp.bits.replay))
       ){
         stateVec(i).w_sameblock_inflight := false.B
       }
@@ -739,7 +820,8 @@ class Sbuffer(implicit p: Parameters)
   })
 
   io.dcache.hit_resps.zip(dataModule.io.maskFlushReq).map{case (resp, maskFlush) => {
-    maskFlush.valid := resp.fire
+    // replay=true: entry will retry -- its byte mask MUST be preserved
+    maskFlush.valid := resp.fire && !resp.bits.replay
     maskFlush.bits.wvec := UIntToOH(resp.bits.id)
   }}
 
@@ -770,7 +852,9 @@ class Sbuffer(implicit p: Parameters)
       val dcache_resp_id = resp.bits.id
       difftest.coreid := io.hartId
       difftest.index  := index.U
-      difftest.valid  := resp.fire
+      // replay=true: the store was NOT performed (probed-during-acquire miss, line installed
+      // INVALID, entry retries) -- it must not commit to difftest golden memory yet
+      difftest.valid  := resp.fire && !resp.bits.replay
       difftest.addr   := getAddr(ptag(dcache_resp_id))
       difftest.data   := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
       difftest.mask   := mask(dcache_resp_id).asUInt
@@ -978,6 +1062,15 @@ class Sbuffer(implicit p: Parameters)
   //XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire)
   XSPerfAccumulate("replay_resp_valid", io.dcache.replay_resp.fire)
   XSPerfAccumulate("coh_timeout", cohHasTimeOut)
+  XSPerfAccumulate("tso_merge_0", tsoActive && io.in(0).fire && tsoMergeLast(0))
+  XSPerfAccumulate("tso_merge_1", tsoActive && io.in(1).fire && tsoMergeLast(1))
+  XSPerfAccumulate("tso_append_0", tsoActive && io.in(0).fire && !canMerge(0))
+  XSPerfAccumulate("tso_append_1", tsoActive && io.in(1).fire && !canMerge(1))
+  XSPerfAccumulate("tso_blocked_0", tsoActive && io.in(0).valid && !io.in(0).ready)
+  XSPerfAccumulate("tso_blocked_1", tsoActive && io.in(1).valid && !io.in(1).ready)
+  XSPerfAccumulate("tso_blocked_dup_0", tsoActive && io.in(0).valid && !io.in(0).ready && canMerge(0) && !tsoMergeLast(0))
+  XSPerfAccumulate("tso_blocked_dup_1", tsoActive && io.in(1).valid && !io.in(1).ready && canMerge(1) && !tsoMergeLast(1))
+  XSPerfAccumulate("tso_blocked_seq_1", tsoActive && io.in(1).valid && !io.in(1).ready && !io.in(0).ready)
 
   // val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire, io.lsu.resp.fire)
   // XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)

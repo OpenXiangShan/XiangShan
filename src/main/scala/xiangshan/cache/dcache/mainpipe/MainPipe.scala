@@ -32,6 +32,8 @@ import xiangshan.mem.HasL1PrefetchSourceParameter
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
+  // probe-inval deferral cap (see DCacheLineReq.pi_force) -- valid for store reqs only
+  val pi_force = Bool()
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
   val occupy_way = UInt(nWays.W)
@@ -98,6 +100,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.id := store.id
     req.miss_fail_cause_evict_btot := false.B
+    req.pi_force := store.pi_force
     req
   }
 }
@@ -522,7 +525,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_valid = RegInit(false.B)
   val s3_req = RegEnable(s2_req, s2_valid_to_s3)
   val s3_miss_param = RegEnable(io.refill_info.bits.miss_param, s2_valid_to_s3)
+  val s3_pending_inval_raw = RegEnable(io.refill_info.bits.pending_inval, s2_valid_to_s3)
+  val s3_grant_has_data = RegEnable(io.refill_info.bits.grant_has_data, s2_valid_to_s3)
   val s3_miss_dirty = RegEnable(io.refill_info.bits.miss_dirty, s2_fire_to_s3)
+  // GRANT CUSTODY classes for the probe-raced-acquire deferral (install INVALID + retry):
+  //  1. no-data grant (AcquirePerm, full-overwrite store): authority WITHOUT bytes -- L2
+  //     relinquished its copy; discarding the install loses the line's only valid data
+  //     (proven: coremark refill-check zeros @0x80003940). MUST NOT defer.
+  //  2. dirty data grant: writeback responsibility transferred with the bytes -- L2 may later
+  //     evict its copy as clean; discarding loses the dirty data. MUST NOT defer.
+  //  3. clean data grant: L2/L3 retain valid bytes -- discarding is safe, requester re-acquires.
+  // Only class 3 defers; classes 1-2 fall back to the baseline VALID install (bug18 tracking
+  // residual for those sub-cases, counted below -- the litmus-critical case, a partial store to
+  // a line another core holds, is class 3).
+  val s3_pending_inval = s3_pending_inval_raw && s3_grant_has_data && !s3_miss_dirty
   val s3_tag = RegEnable(s2_tag, s2_valid_to_s3)
   val s3_tag_match = RegEnable(s2_tag_match, s2_fire_to_s3)
   val s3_coh = RegEnable(s2_coh, s2_fire_to_s3)
@@ -581,7 +597,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       Cat(wr, toT, true.B)   -> Dirty))
   }
 
-  val miss_new_coh = ClientMetadata(missCohGen(s3_req.cmd, s3_miss_param, s3_miss_dirty))
+  // TSO fix: if a probe raced this load's acquire (pre-grant), install the refilled line INVALID
+  // (Nothing) so the load re-misses and re-acquires the post-write value -- RAR-timing-independent,
+  // and boot-safe (the mid-acquire probe is still ProbeAck'd NtoN; only the install state changes).
+  val miss_new_coh = ClientMetadata(Mux(s3_pending_inval, Nothing, missCohGen(s3_req.cmd, s3_miss_param, s3_miss_dirty)))
 
   // report ecc error
   val s3_tag_error_beu = RegEnable(s2_tag_error, s2_fire)
@@ -832,6 +851,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.miss_req.valid := s2_valid && s2_can_go_to_mq
   val miss_req = io.miss_req.bits
   miss_req := DontCare
+  // pi_force: only meaningful for sbuffer store reqs; mask non-store garbage (AMO path DontCare)
+  miss_req.pi_force := s2_req.pi_force && s2_req.isStore
   miss_req.source := s2_req.source
   miss_req.pf_source := L1_HW_PREFETCH_NULL
   miss_req.cmd := s2_req.cmd
@@ -870,8 +891,19 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_hit_resp.valid := s3_valid && (s3_store_can_go || (s3_miss_can_go && s3_req.isStore))
   io.store_hit_resp.bits.data := DontCare
   io.store_hit_resp.bits.miss := false.B
-  io.store_hit_resp.bits.replay := false.B
+  // Probed-during-acquire store miss (pending_inval): the line is installed INVALID (see
+  // miss_new_coh) and the store must NOT count as performed -- mark the resp replay=true so
+  // the Sbuffer keeps the entry (it still holds the store data) and retries; the retry
+  // re-misses and re-acquires fresh data + L2 registration. s3_req.miss gates this to the
+  // MissQueue-install leg only (a hit store always completes with replay=false).
+  io.store_hit_resp.bits.replay := s3_req.miss && s3_pending_inval
   io.store_hit_resp.bits.id := s3_req.id
+  // validation counter: how often a probed-during-acquire store install is bounced back to the
+  // Sbuffer for retry (fix fires) -- watch this stays low/terminating in emu + FPGA runs
+  // custody-fallback counters: probed installs that could NOT defer (classes 1-2) and installed
+  // VALID untracked = residual bug18 exposure for those sub-cases; if these fire in TSO litmus
+  // runs, escalate (always-AcquireBlock for stores, or release-back design)
+
 
   val atomic_hit_resp = Wire(new MainPipeResp)
   atomic_hit_resp.source := s3_req.source
