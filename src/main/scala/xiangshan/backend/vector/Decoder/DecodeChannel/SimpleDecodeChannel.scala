@@ -40,6 +40,10 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   val rawInst = in.rawInst
   val instFields = rawInst.asTypeOf(new XSInstBitFields)
 
+  // FRM has no dependency on committed FP flags. CSR writes retain both
+  // barriers, so pure FRM reads can overlap ordinary instructions safely.
+  val isReadOnlyFrm = rawInst === BitPat("b000000000010_00000_?1?_?????_1110011")
+
   val patterns = instSeq
 
 
@@ -148,6 +152,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).valid := uopInfos(i).valid
     out.uop(i).bits.renameInfo := uopInfos(i).bits
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
+    out.uop(i).bits.renameInfo.noSpec := uopInfos(i).bits.noSpec && !isReadOnlyFrm
+    out.uop(i).bits.renameInfo.blockBack := uopInfos(i).bits.blockBack && !isReadOnlyFrm
     out.uop(i).bits.fuType := fuTypes(i)
     out.uop(i).bits.opcode := opcodes(i) | cboOpcode
     out.uop(i).bits.lsrc1 := Mux(isMop, 0.U, instFields.RS1)
