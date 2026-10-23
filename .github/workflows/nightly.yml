@@ -35,11 +35,12 @@ jobs:
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0-int.json" \
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
-            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_all.json" \
-            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec06_gcc16_rv64gcb_260819/json/checkpoints_all.json" \
-            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec06_xscc_rva23_novec_260911/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_xscc_rva23_novec_260911/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec06_xscc_rv64gcb_261013/checkpoint-0-0-0/cluster-0-0.json" \
             --random ":${FUZZ_NUM}:${CKPT_BASE}/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json" \
-            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec26_gcc15_rv64gc_base_260517/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec17_rate_xscc_rva23_novec_261011/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_all.json" \
           )
           # copy-pasted from perf-template.yml, is there a better way to do this?
           SHORT_SHA=$(git rev-parse --short=9 HEAD)
