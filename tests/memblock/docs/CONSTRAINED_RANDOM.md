@@ -357,9 +357,9 @@ Dirty overlap allocates every older overflow store into SQ before dispatching th
 address/data and commits only after all holds are established. Baseline batches use at most 32 SQ entries and
 preallocated overflow at most 16, below the 52-entry watermark. It retains the committed baseline and incremental
 ReleaseData gate. Before the action, schema 53 drains baseline SBuffer/D/E, disables the L1 stride prefetcher through its external
-CSR, advances eight cycles and drains DCache idle, establishes every held load, and requires exactly one
+CSR, runs 4 + 8 + 4 = 16 DUT cycles and drains DCache idle, establishes every held load, and requires exactly one
 store-class full-line AcquireBlock NtoT per fresh baseline line, unchanged manager error counters, and zero
-completed target Releases of either opcode. The prior prefetch enable is restored after the action. No DUT cycle separates qualification from target
+completed target Releases of either opcode; the current source drains the release channel before the ownership snapshot and after selected C backpressure, so an in-flight target ReleaseData is counted before qualification (normal seed 531/6,144, post-fix 90-leaf 90/90, and post-fix matrix 12/12 pass; mutation sensitivity still pending, review `independent-review-schema53-20261023`). The prior prefetch enable is restored after the action. No DUT cycle separates qualification from target
 C-stall arming. Coherence responsibility can remain in a writeback queue; array residency is not a prerequisite.
 A rejected attempt releases its held responses, issues each preallocated overflow once, commits in order with
 independent reference updates, and drains exact WB/queues/SBuffer/D/E/C under every functional oracle. The

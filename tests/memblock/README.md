@@ -328,11 +328,25 @@ RTL metadata into `build/memblock/runtime`. The runtime is made read-only and
 make extended-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
   DURATION_SECONDS=21600 MIXED_TRANSACTIONS=8192
 make final-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  DURATION_SECONDS=28800 MIXED_TRANSACTIONS=16384 \
-  TIMEOUT_SECONDS=1800
+  DURATION_SECONDS=172800 MIXED_TRANSACTIONS=16384 \
+  TIMEOUT_SECONDS=12000
 make long-final-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
   DURATION_SECONDS=43200 MIXED_TRANSACTIONS=32768
 ```
+
+> **Measured performance note (2026-10-23):** the full 90-leaf benchmark passes
+> in 3,750.501 s and the final 8-job six-scenario matrix passes 12/12 in
+> 3,287.102 s; the `random-mixed` seed 1/16,384 leaf takes 3,721.673 s under the
+> 8-job benchmark, while the slower 6,144-action seeds 531/532 take
+> 3,287.100/3,273.502 s (~1.9 actions/s). Extrapolating the slow seeds gives
+> ~8,765 s for a 16,384-action seed and ~148.6 h for 1,000,000 actions. Use
+> `TIMEOUT_SECONDS=12000` or higher. The final-acceptance defaults are
+> conservatively calibrated to **48 h / 128 seeds** and
+> **200 h / 8 x 1,000,000 actions** to preserve the original seed/action
+> coverage; the acceptance change is independently reviewed (`pass-with-gaps`)
+> and the required matrix/timeout gates are applied. The optional
+> `extended-regression` and `long-final-regression` historical budgets are not
+> part of final acceptance and must be recalibrated before use.
 
 The exact duration, worker, seed, action-count, frozen-runtime, and verifier
 requirements are in
@@ -345,14 +359,14 @@ per seed:
 ```sh
 make endurance-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
   ENDURANCE_SEEDS=8 ENDURANCE_TRANSACTIONS=1000000 \
-  ENDURANCE_TIMEOUT_SECONDS=28800 CONSTRAINTS=spec
+  ENDURANCE_TIMEOUT_SECONDS=720000 CONSTRAINTS=spec
 make verify-endurance-results PICKER="$PICKER" REGRESSION_JOBS=8 \
   ENDURANCE_SEEDS=8 ENDURANCE_TRANSACTIONS=1000000
 ```
 
-Final acceptance composes unit tests, the full scenario benchmark, known-bug
-sentinel, boundary hunt, the eight-hour mixed campaign, and the endurance
-campaign:
+Final acceptance composes unit tests, the full scenario benchmark, the
+six-scenario matrix, known-bug sentinel, boundary hunt, the 48-hour mixed
+campaign, and the 200-hour endurance campaign:
 
 ```sh
 make final-acceptance PICKER="$PICKER" JOBS=8 REGRESSION_JOBS=8
@@ -418,6 +432,13 @@ no random stream, DUT cycle, oracle, coverage gate, or acceptance requirement.
 The controller retains the output tail for a failed/timed-out seed. A live
 checkpoint proves progress only when actions or cycles advance; a final checkpoint
 alone does not prove completion or a design deadlock.
+
+For current-revision rejected-construction coverage, set
+`MEMBLOCK_FORCE_DIRTY_OWNERSHIP_REJECT_ONCE=1`. It forces exactly the first
+refill-overlap ownership attempt through the rejected cleanup path, then clears
+itself so the retry follows the normal accepted path. This is harness-only
+fault injection, not natural ownership loss and not a CPU-bug oracle; it is used
+only for focused cleanup/accounting evidence.
 
 The Picker export enables read-only `mem_direct` observation and does not enable
 VPI. Internal signals are for localization only; they never determine an

@@ -38,6 +38,14 @@ Evidence snapshot: 2026-10-23.
 - Architecture refactor runtime:
   `build/memblock/architecture-stage2/runtime/runtime.json`; base `7f83653dc`
   plus the reviewed architecture changes and bounded differential evidence below.
+- Post-fix schema-53 high-finding remediation runtime:
+  `build/memblock/review-schema53-20261023/runtime/runtime.json`; binary SHA
+  `6e5a8e5cc03b4d0677026fbd66d38f8d432a105f2712b6b552b56a10a50c49f4`.
+  Post-fix 90-leaf (90/90) and matrix (12/12) evidence is recorded below.
+- Round-5 manager-response runtime:
+  `build/memblock/review-schema53-20261023/runtime-round5/runtime.json`; binary
+  SHA `e375c12d6b242660f7dd066d442f3ee611e75adc4d8dd9b3e7d635d7fdf36a50`.
+  Stale-response `redirect` plus 90/90 and 8-job 12/12 gates are recorded below.
 - Latest H fault oracle runtime:
   `build/memblock/hypervisor-oracle-runtime/runtime.json`; independently
   reviewed correction and finite replay evidence are recorded below.
@@ -48,9 +56,11 @@ Evidence snapshot: 2026-10-23.
   `build/memblock/dirty-ownership-prototype/inventory90.json` and
   `matrix.json`; `campaign-failure-summary.json` retains the compact failure
   evidence.
-- Latest schema-53 prefetch-quiesce and release-index runtime:
-  `build/memblock/prefetch-index-runtime/runtime.json`; the focused replay,
-  inventory, matrix, and review evidence are recorded below.
+- Pre-fix schema-53 prefetch-quiesce and release-index runtime:
+  `build/memblock/prefetch-index-runtime/runtime.json`; retained as provenance
+  for the earlier replay attempt. The current focused replay uses the
+  `architecture-stage2/runtime` above; see the current-head note below the
+  capability table.
 - Retained schema-52 mixed capability runtime:
   `build/memblock/schema52-runtime-v3/runtime.json`.
 - Latest directed reset runtime:
@@ -91,7 +101,68 @@ evidence, not closure evidence.
 | 50 | G-only scalar and singleton vector-store upper-limit faults, with 12 scalar and 18 vector bins, exact VA/GPA/cause/marker, controls, and recovery. | Focused seeds 241-251 pass; standard SPEC/coverage/corner seeds 261-263 pass 18,432 total actions. The profiles total 9,338.358 simulator seconds (2.594 hours). Evidence: `build/memblock/gstage-range-runtime/`, `build/memblock/gstage-mixed-focused/`, `build/memblock/gstage-mixed-regression/`. | Nested boundary composition and GPA wrap remain gaps. No closure claim. |
 | 51 | Successful high-half canonical segment load/store traffic, with Sv39/Sv48 x direction x alignment bins and independent full-width VA walks. | `vector-segment-canonical` passes all 12 shared cases; full `vector-segment` passes in 380.498 seconds; focused mixed seeds 281-286 pass. Standard coverage seed 291, SPEC seed 292, and corner seed 293 each pass 6,144 actions with all eight bins populated; total 8,503.323 simulator seconds (2.362 hours). Evidence: `build/memblock/segment-high-va-verified-runtime/`, `build/memblock/segment-high-va-development/verified/`, `build/memblock/segment-high-va-regression/`. | The three-profile capability matrix is complete but remains below the closure duration and seed count. Nested high-half composition, segment noncanonical faults, arbitrary partial-fault progress, and broader vector progress/shape crosses remain gaps. |
 | 52 | Schema-51 high-half segment coverage plus all four nested VS/G pairs crossed with load/store and aligned/misaligned bins, using per-byte independent two-stage walks. | `vector-segment-canonical` passes 12/12. Focused mixed seed 286 passes all 24 bins with 150 segment actions, 300 data uops, and 356 active elements. Coverage seed 301 now passes 6,144 actions in 1,481.949 seconds with all 24 bins; its direct replay and controller terminal line are byte-identical. Evidence: `build/memblock/schema52-runtime-v3/`, `build/memblock/schema52-focused-v3/`, `build/memblock/schema52-regression-v3/`. | SPEC seed 302 and corner seed 303 were explicitly stopped at about 40 minutes on user request; neither is claimed as a pass. The prior v1 runtime SPEC/corner runs passed, but coverage exposed the release-window oracle defect fixed here. High-half FOF, segment noncanonical faults, arbitrary partial-fault progress, and broader vector progress/shape crosses remain gaps. |
-| 53 | Dirty held-refill overlap requires externally proven retained baseline coherence responsibility; up to four fresh construction attempts preserve the selected profile tuple, normal rejected cleanup retains every functional oracle, and separate accounting conserves attempts and traffic. | Reviewed private compact 424/512 and DCache-SPEC 425/512 each qualify 411 actions; forced rejection crosses all 384 enabled bins with 411 cleaned rejections and 411 accepted retries. V2 compact 424/512 and forced eight-window 424/128 pass. Evidence: `build/memblock/dirty-ownership-prototype/`. | Independent review v2 passes with gaps; focused controls and 278 units/RTL/docs pass. Integrated compact 424/512 passes with terminal byte-identical to reviewed private v2. The completed 90-leaf inventory passes 89/90: SPEC `random-mixed` seed 1 stops after 4,916 of 16,384 actions with 12 dirty-ownership construction rejections, every one an early target Release with zero acquisition or error reasons. The two-seed six-scenario matrix passes 10/12: SPEC `random-mixed` seeds 531 and 532 stop after 4,151 and 4,215 of 6,144 actions. Rejected-manager tuples show six- and eight-window depth-9/10 baseline actions, while forced one-window dirty probes complete 1,365 actions. A diagnostic replay places the first early target Release after the baseline snapshot (`after_baseline=0`) during held-refill setup, with the target line's only A request being its baseline store NtoT; the global A summary shows a background L1 stride prefetch to a different line in the target set evicting it during hold setup. The UT now quiesces the L1 stride prefetcher through its external CSR for the set-pressure action, advances eight cycles and drains DCache idle, restores the prior enable after the action, and counts releases through an O(1) full-line index with a non-full fallback. A focused prefetch replay and full campaign reruns were stopped by operator request before completion; no acceptance claim follows. This is a UT stimulus-precondition failure under mixed traffic, not a functional RTL bug. Forced rejection is harness injection; no natural ownership-loss, historical sensitivity, or closure claim. |
+| 53 | Dirty held-refill overlap requires externally proven retained baseline coherence responsibility; up to four fresh construction attempts preserve the selected profile tuple, normal rejected cleanup retains every functional oracle, and separate accounting conserves attempts and traffic. | Reviewed private compact 424/512 and DCache-SPEC 425/512 each qualify 411 actions; forced rejection crosses all 384 enabled bins with 411 cleaned rejections and 411 accepted retries. V2 compact 424/512 and forced eight-window 424/128 pass. Evidence: `build/memblock/dirty-ownership-prototype/`. | Independent review v2 passes with gaps; focused controls and 278 units/RTL/docs pass. Integrated compact 424/512 passes with terminal byte-identical to reviewed private v2. The completed 90-leaf inventory passes 89/90: SPEC `random-mixed` seed 1 stops after 4,916 of 16,384 actions with 12 dirty-ownership construction rejections, every one an early target Release with zero acquisition or error reasons. The two-seed six-scenario matrix passes 10/12: SPEC `random-mixed` seeds 531 and 532 stop after 4,151 and 4,215 of 6,144 actions. Rejected-manager tuples show six- and eight-window depth-9/10 baseline actions, while forced one-window dirty probes complete 1,365 actions. A diagnostic replay places the first early target Release after the baseline snapshot (`after_baseline=0`) during held-refill setup, with the target line's only A request being its baseline store NtoT; the global A summary shows a background L1 stride prefetch to a different line in the target set evicting it during hold setup. The UT now quiesces the L1 stride prefetcher through its external CSR for the set-pressure action, runs 4 + 8 + 4 = 16 DUT cycles and drains DCache idle, restores the prior enable after the action, and counts releases through an O(1) full-line index with a non-full fallback. A focused prefetch replay and full campaign reruns were stopped by operator request before completion; no acceptance claim follows. This is a UT stimulus-precondition failure under mixed traffic, not a functional RTL bug. Forced rejection is harness injection; no natural ownership-loss, historical sensitivity, or closure claim. |
+
+> **Current-head schema-53 focused replay (2026-10-23):** the `89/90`,
+> `10/12`, `4,916`, `4,151`, and `4,215` values in the schema-53 row above are
+> the pre-fix `dirty-ownership-runtime` record. Focused replays on the current
+> `architecture-stage2/runtime` (binary SHA-256
+> `624547e5bcf4ee5ae3f8fa8176ae0e25c422570f0b8852a15a0a2af0987126d3`)
+> now pass seed 1/16,384 (3,586.58 s) and seeds 531/6,144 and 532/6,144
+> (3,199.39 s and 3,192.78 s, run concurrently), each with
+> `actual_set_pressure_ownership=384,384,384,0,0,0,0,0,0` and zero
+> construction rejects. The per-bin proof is the terminal
+> `actual_set_pressure_cross`: 1,536/1,536 cells are nonzero and all 384
+> dirty-overlap cells are exactly 1; the ownership tuple alone is only a
+> counter. These are focused replays, not the full 90-leaf benchmark or the
+> 12/12 matrix; the full current-head gate runs are recorded next. Evidence:
+> `build/memblock/review-schema53-20261023/`.
+
+> **Pre-fix integrated gate (2026-10-23):** the full 90-leaf benchmark
+> passes 90/90 with zero leaf failures in 3,748.449 s; the two-seed
+> six-scenario matrix passes 12/12 in 3,415.183 s. The `random-mixed` leaves
+> are 3,721.019 s (seed 1/16,384) and 3,242.321 / 3,225.725 s (seeds
+> 531/532, 6,144 each). Evidence: `benchmark90.json`, `benchmark90.md`, and
+> `matrix-531-532.json` under `build/memblock/review-schema53-20261023/`.
+> These are gate-2/gate-3 capability results on the pre-fix runtime, not
+> closure: the independent review records two High false-pass gaps below.
+
+> **Schema-53 high-finding remediation (2026-10-23):** the current source adds
+> a release-channel drain before the ownership snapshot and after selected C
+> backpressure, requires dirty target Releases to be ReleaseData, and provides
+> the harness-only `MEMBLOCK_FORCE_DIRTY_OWNERSHIP_REJECT_ONCE` hook. On the
+> rebuilt private runtime (binary SHA
+> `6e5a8e5cc03b4d0677026fbd66d38f8d432a105f2712b6b552b56a10a50c49f4`), normal
+> seed 531/6,144 passes in 3,241.51 s with 384/384 accepted and zero rejects.
+> The forced run rejects exactly once at action 4,018 and exercises cleanup
+> (`actual_set_pressure_ownership=385,384,384,1,1,0,0,0,0`, nonzero
+> `actual_set_pressure_rejected_manager`); its terminal then fails only the
+> coverage gate because the injected retry duplicates one set-pressure bin
+> (`actual_set_pressure_cross` sum 1,537). That is harness-injection
+> perturbation, not a functional RTL failure. A second forced run with seed
+> 1/16,384 rejects once at action 4,727 and likewise fails only the coverage
+> gate from duplicated bins; it is retained as cleanup evidence, not a pass.
+>
+> **Post-fix integrated gate:** 90/90 leaves pass in 3,771.461 s; the two-seed
+> six-scenario matrix passes 12/12 in 3,467.092 s. The final 8-job matrix gate
+> also passes 12/12 in 3,255.288 s (`matrix-8.json`; `random-mixed`
+> 531/532 = 3,239.406/3,253.553 s). The post-fix `random-mixed` leaves are
+> 3,741.241 s (seed 1/16,384) and 3,256.142 / 3,260.364 s (seeds 531/532,
+> 6,144). Evidence: `benchmark90-fixed.json`, `benchmark90-fixed.md`,
+> `matrix-fixed.json`, and `matrix-8.json`.
+> This closes the accepted-path mitigation for the tested seeds; the forced
+> rejection is still a harness-injection terminal with a coverage-only failure,
+> and no closure claim follows.
+>
+> **Round-5 current-head gate:** the stale/canceled-D-response test in
+> `redirect` passes (`redirect_cancels_observed=2,2,0`,
+> `surviving_writebacks=2`). On the rebuilt `runtime-round5` (binary SHA
+> `e375c12d6b242660f7dd066d442f3ee611e75adc4d8dd9b3e7d635d7fdf36a50`), the
+> 90-leaf benchmark passes 90/90 in 3,750.501 s and the 8-job matrix passes
+> 12/12 in 3,287.102 s (`matrix-round5.json`; `random-mixed` 531/532 =
+> 3,287.100/3,273.502 s); `verify-matrix` passes. This is the current
+> manager-response late/canceled coverage; malformed/duplicate manager
+> responses remain a planned gap.
 
 Supporting oracle and diagnostic improvements retained in this evidence set:
 
@@ -100,8 +171,14 @@ Supporting oracle and diagnostic improvements retained in this evidence set:
 - The accepted-A DCache monitor checks opcode, grow, size, source, alignment,
   mask, corrupt, and defined user-address relationships without filtering legal
   prefetch or demand-merged traffic.
-- The latest complete Python unit evidence is 303 tests (architecture refactor
-  below). The Picker 2.1.0 / xcomm 1.0.0 migration also rebuilt the full C++ model and passed `check-rtl`
+- `redirect` now holds a cold D response, redirects the load, releases the
+  stale D beat, and requires no writeback plus a fresh successful load:
+  `MEMBLOCK_REDIRECT_PASS ... surviving_writebacks=2
+  redirect_cancels_observed=2,2,0`. This covers late/canceled manager
+  responses; malformed/duplicate responses remain a planned gap.
+- The latest complete Python unit evidence is 305 tests (303 at the architecture
+  refactor; two release-index edge tests added below); the `278` and `283` counts in older schema records are historical
+  snapshots. The Picker 2.1.0 / xcomm 1.0.0 migration also rebuilt the full C++ model and passed `check-rtl`
   and `smoke` (`cycle=38`, 748 driven inputs, 20 checked outputs); the final
   harness requires `libxspcomm.so.3`.
 - The reviewed Debug guard runtime passes all 90 registered leaves, including
@@ -113,9 +190,16 @@ Supporting oracle and diagnostic improvements retained in this evidence set:
   leaf passes under the current runtime in 1,701.059 seconds
   (`build/memblock/schema52-runtime-v3/benchmark-random-mixed.json`).
 
-No current closure campaign has completed. In particular, the current records
-do not establish the eight-hour/128-seed breadth campaign or the 8,000,000-action
-endurance campaign required by `Regression Acceptance`.
+No current closure campaign has completed. The gate-2 90-leaf benchmark and
+gate-3 two-seed matrix pass on the pre-fix, post-fix, and round-5 runtimes, but
+they are not the duration campaign. The historical 8-hour/128-seed and
+8-hour/1M-action budgets were recalibrated to **48 h/128 seeds** and **200 h/8 x
+1,000,000 actions** using the measured 3,721.673 s fast seed, the 6,144-action
+531/532 slow-seed rates (~8,765 s extrapolated for 16,384 actions), and
+~148.6 h extrapolated for 1M at the slow rate. The material acceptance change is
+independently reviewed (`pass-with-gaps`), and the required 200 h endurance
+timeout, matrix gate, timeout/provenance checks, and exact-eight check are
+applied; no 48-hour or 200-hour campaign has been run.
 
 ## Confirmed CPU Bugs
 
@@ -383,21 +467,98 @@ Superseded implementation narratives and intermediate attempts are available via
 
 ### Schema 53 Prefetch Interference in Dirty Ownership
 
-- Record `schema53-prefetch-quiesce-20261022` is **self-reviewed only**;
-  independent review and campaign replays were stopped by operator request.
+- Record `schema53-prefetch-quiesce-20261022` was **self-reviewed only**; the
+  earlier independent review and campaign replays were stopped by operator
+  request. Current-head focused replays now pass seed 1/16,384 and seeds
+  531/532 at 6,144 actions; see the current-head note above. An independent
+  review at `c81aa3d65` completed with verdict `pass-with-gaps`; findings are
+  recorded below.
 - SPEC 531 diagnostic shows a legal L1 stride prefetch evicting a baseline
   target during hold setup, with zero bad acquisitions/error-state changes.
   This is a UT ownership-precondition defect, not an RTL data/ordering bug.
   Evidence: `dirty-fast-diag2/fastdiag2-531.log`.
 - The implementation quiesces that prefetcher through its external CSR for
-  ownership-sensitive actions, advances eight cycles, drains DCache idle and
+  ownership-sensitive actions, runs 4 + 8 + 4 = 16 DUT cycles, drains DCache idle and
   restores the prior enable afterward. Ordinary mixed traffic retains prefetch.
   A full-line Release index falls back to the original range scan for non-full
   or unaligned records. Five directed terminals and the index-only failing
   seed-1 replay match the prior runtime (`dirty-index-probe/inventory-index.json`).
-- 283 units and RTL/docs checks pass; runtime:
-  `prefetch-index-runtime/runtime.json`. Focused quiesce replay and campaign
-  acceptance remain incomplete. Training state, other background agents and
-  mixed interaction after this restricted quiesce remain unproven. Architecture
-  refactor checks do not supply that missing independent functional review or
-  closure evidence.
+- 283 units and RTL/docs checks passed at the time; current unit evidence is 305.
+  Runtime `prefetch-index-runtime/runtime.json` retains the earlier attempt;
+  the current-head focused replay uses `architecture-stage2/runtime` and is
+  recorded above. Training state, other background agents and mixed interaction
+  after this restricted quiesce remain unproven. Architecture refactor checks do
+  not supply independent functional review or closure evidence.
+
+### Schema 53 Current-Head Independent Review
+
+- Review `independent-review-schema53-20261023`, base `c81aa3d65`, current
+  `architecture-stage2` runtime, fresh-context non-author, verdict
+  **`pass-with-gaps`**. Report:
+  `review-schema53-20261023/independent-review-schema53.txt`.
+- Confirmed evidence: the three focused terminals contain 1,536 nonzero
+  `actual_set_pressure_cross` cells; all 384 dirty-overlap cells are exactly 1;
+  PASS is gated by `constraint_coverage.complete`. The
+  `ownership=384,384,384,...` tuple alone is a counter, not the bin proof.
+- Accepted findings (must be fixed before closure):
+  1. **High** — the ownership proof can pass with a baseline line evicted during
+     hold setup when its ReleaseData is still in flight; `target_releases`
+     counts only completed C, and the accepted-path drain does not call
+     `run_until_dcache_release_idle`.
+  2. **High** — the rejected-attempt cleanup/accounting path is not exercised at
+     `c81aa3d65`; all three current focused seeds have zero rejects, and the
+     only forced-rejection evidence predates the refactor.
+  3. **Medium** — the quiesce changes the measured stimulus; actual cost is
+     4 + 8 + 4 = 16 DUT cycles per set-pressure action, not “advances eight
+     cycles”; training state and later-seed interaction are not restored/proven.
+  4. **Medium** — dirty target Releases are not constrained to ReleaseData; a
+     clean Release of a dirty target could pass if other lines satisfy the
+     minimum. The rejected validator also accepts zero target ReleaseData.
+  5. **Low** — the release-index fallback is point-cover for non-full records;
+     unaligned records, duplicate ReleaseData, and fallback attribution are
+     untested. O(1) applies to the covering count, not stalled/cycle scans.
+- Disposition: all findings accepted. The 384/384 focused replay is valid bin
+  evidence for the quiesced stimulus, but it is not full-campaign acceptance and
+  does not close the two High gaps. No CPU RTL bug is claimed by this review.
+- Remediation (2026-10-23, round 2): High 1 is mitigated by a release-channel
+  drain before the ownership snapshot and again after selected C backpressure;
+  High 2 now has a harness-only forced-rejection path with current-revision
+  runtime evidence (`385,384,384,1,1,...`, one reject at action 4,018); Medium 4
+  now rejects clean Releases of dirty target lines. Normal seed 531/6,144 passes
+  on the rebuilt private runtime. The forced terminal fails only its coverage
+  gate because the injected retry duplicates one bin; that is harness
+  perturbation, not a functional failure. Post-fix 90-leaf (90/90) and matrix
+  (12/12) pass; release-index edge tests for unaligned record and duplicate
+  ReleaseData are added (305 units); fallback attribution remains point-cover,
+  and mutation sensitivity remains pending.
+
+### Acceptance Recalibration Review
+
+- Review `acceptance-recalibration-review-20261023`, fresh-context non-author,
+  scope limited to acceptance arithmetic/consistency, verdict
+  **`pass-with-gaps`**. Report:
+  `review-schema53-20261023/acceptance-recalibration-review.txt`.
+- Confirmed measured basis: 90-leaf 3,771.461 s (jobs=8); matrix 3,467.092 s
+  (jobs=4) and 3,255.288 s (final 8-job gate); `random-mixed` seed 1/16,384
+  3,741.241 s; seeds 531/532 at 6,144 actions 3,256.142/3,260.364 s (focused)
+  and 3,239.406/3,253.553 s (8-job gate); worst 16,384 extrapolation 8,694.3 s;
+  worst 1M extrapolation 147.41 h.
+- Accepted findings and dispositions:
+  1. **High** — 168 h endurance left only ~14 h (9.7% with the load proxy);
+     `ENDURANCE_TIMEOUT_SECONDS` changed to **720000 (200 h)**.
+  2. **Medium** — the docs still cited pre-fix timings; all current-head text now
+     uses the post-fix JSONs and notes that the matrix used jobs=4.
+  3. **Medium** — the verifier did not enforce the recorded timeout;
+     `--min-timeout-seconds` is now required for final (12000) and endurance
+     (720000), and the recorded runtime artifact/root/external dependencies must
+     match the supplied frozen runtime metadata.
+  4. **Medium** — the six-scenario matrix was not an executable final gate;
+     `matrix-regression` and `verify-matrix` are now invoked by
+     `final-acceptance`.
+  5. **Low** — `verify-final-results` used a misleading 4096 transaction value;
+     changed to 16384.
+  6. **Low** — endurance now requires exactly eight results in addition to
+     `--min-results 8`.
+- Residual risk: no 48 h/200 h campaign has run; the 1M time is a linear
+  extrapolation from 6,144-action seeds; 48 h/128 has limited margin under a
+  >20% host slowdown (56 h is the documented optional robustness value).
