@@ -56,7 +56,7 @@ class TageTableInfo(
     require(tagWidth > 0, "tagWidth must be > 0")
     if (HistoryLength > 0)
       Set( // FoldedHistoryInfo(unfolded history length, folded history length)
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(getNumSets(numBanks)))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(getNumSets(numBanks)) + log2Ceil(numBanks))),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
       )
@@ -69,7 +69,7 @@ class TageTableInfo(
     require(tagWidth > 0, "tagWidth must be > 0")
     if (HistoryLength > 0)
       List( // FoldedHistoryInfo(unfolded history length, folded history length)
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(getNumSets(numBanks)))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(getNumSets(numBanks)) + log2Ceil(numBanks))),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
       )
