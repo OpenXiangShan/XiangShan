@@ -472,6 +472,8 @@ class StoreUnitS1(param: ExeUnitParams)(
   stageInfo.isForVSnonLeafPTE.get := isForVSnonLeafPTE
   stageInfo.paddr.get := paddr
   stageInfo.gpaddr.get := gpaddr
+  // pointer-masked address from the TLB, reported in tval on a store fault
+  stageInfo.fullva := fullva
   stageInfo.needRSReplay.get := needRSReplay
   stageInfo.hasException.get := hasException || isDebugMode || isBreakPoint
   stageInfo.uop.trigger := triggerAction
