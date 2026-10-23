@@ -34,9 +34,6 @@ trait TopHelper extends HasTageParameters {
       foldedHist.forTag(1) := Cat(tageFoldedHist(2), 0.U(1.W))
       foldedHist
     })
-
-  def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
-    PriorityEncoderOH(hitTableMask.reverse).reverse
 }
 
 trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
