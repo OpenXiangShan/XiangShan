@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from random import Random
 
 from env.core.transactions import CommitTarget
+from env.funcov.py.icache.signal_contract import MAIN_EXCEPTIONS, TO_IFU_EXCEPTIONS
 from env.runtime.frontend_init import (
     ClearMonitor,
     ConfigureAgent,
@@ -212,9 +213,8 @@ _MAINPIPE_SIGNALS = {
     "s1_ftq1_value": _aliases(
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_1_ftqIdx_value"
     ),
-    "s1_exception": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.s1_exception_0_value"
-    ),
+    "s1_exception_0": MAIN_EXCEPTIONS[0],
+    "s1_exception_1": MAIN_EXCEPTIONS[1],
     "s1_mmio": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_isMmio"),
     "backend_redirect": _aliases(
         "Frontend_top.Frontend.inner_ftq.backendRedirect_valid"
@@ -226,9 +226,8 @@ _MAINPIPE_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_valid",
         "TOP.Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
     ),
-    "to_ifu_exception": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_bits_info_0_icacheMeta_exception_value"
-    ),
+    "to_ifu_exception_0": TO_IFU_EXCEPTIONS[0],
+    "to_ifu_exception_1": TO_IFU_EXCEPTIONS[1],
 }
 
 
@@ -277,6 +276,9 @@ def _sample_mainpipe(env, cycle: int) -> dict:
 
 
 def register_mainpipe_observer(env) -> list[dict]:
+    # Validate before initialization/reset invokes the observer for the first time.
+    for aliases in _MAINPIPE_SIGNALS.values():
+        _require_mainpipe_signal(env, aliases)
     samples: list[dict] = []
 
     def observe(cycle, active_env) -> None:
@@ -301,7 +303,8 @@ def completed_dual_transactions(samples: Sequence[dict]) -> list[dict]:
         if (
             sample["s1_valid"] == 1
             and sample["s1_req1_valid"] == 1
-            and (sample["s1_exception"] == 0)
+            and (sample["s1_exception_0"] == 0)
+            and (sample["s1_exception_1"] == 0)
             and (sample["s1_mmio"] == 0)
             and (sample["s1_flush"] == 0)
         ):

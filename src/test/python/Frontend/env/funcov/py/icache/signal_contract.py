@@ -4,6 +4,17 @@ ICACHE = "Frontend_top.Frontend.inner_icache."
 MAIN = ICACHE + "mainPipe."
 PREFETCH = ICACHE + "prefetcher."
 
+# Request-local ITLB/PMP exceptions, before registered TileLink errors are merged.
+MAIN_EXCEPTIONS = tuple((MAIN + f"s1_exception_{req}_value",) for req in range(2))
+# Final to-IFU exceptions include TileLink errors. The generated ICache aliases
+# remain readable when the simulator optimizes away MainPipe's output ports.
+TO_IFU_EXCEPTIONS = tuple(
+    (ICACHE + f"__Vtogcov__io_toIfu_req_bits_info_{req}_icacheMeta_exception_value",)
+    for req in range(2)
+)
+
+MAIN_S2_END_OFFSETS = tuple((MAIN + f"s2_blkEndOffset_{req}",) for req in range(2))
+
 # Frontend.scala registers io.fencei before delivering it to ICache.
 ICACHE_FENCEI = (
     "Frontend_top.Frontend.inner_icache_io_fencei_REG",
@@ -50,6 +61,10 @@ def validate_target_probes(recorder):
         ({720, 726, 731, 734, 737, 758}, "icache_fencei", ICACHE_FENCEI),
         ({608, 634, 759, 760, 761, 763, 768}, "main_pmp_instr", MAIN_PMP_INSTR),
         ({616, 635, 638}, "main_pmp_mmio", MAIN_PMP_MMIO),
+        ({613, 616, 635, 638}, "main_exception_0", MAIN_EXCEPTIONS[0]),
+        ({613, 616}, "main_exception_1", MAIN_EXCEPTIONS[1]),
+        ({642, 773, 774, 775}, "main_s2_end_offset_0", MAIN_S2_END_OFFSETS[0]),
+        ({642, 773, 774, 775}, "main_s2_end_offset_1", MAIN_S2_END_OFFSETS[1]),
         ({609, 612, 613, 614, 1139}, "to_ifu_valid", TO_IFU_VALID),
         ({613, 614}, "to_ifu_ready", TO_IFU_READY),
         ({612, 1139}, "to_ifu_maybe_rvc_map", TO_IFU_MAP),

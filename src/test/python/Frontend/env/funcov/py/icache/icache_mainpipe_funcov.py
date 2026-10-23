@@ -3,7 +3,14 @@ from __future__ import annotations
 from typing import Any, Iterable, Optional
 
 from ...native_toffee import BinEvidence
-from .signal_contract import MAIN_PMP_INSTR, MAIN_PMP_MMIO, TO_IFU_MAP, half_aligned_cross_line
+from .signal_contract import (
+    MAIN_EXCEPTIONS,
+    MAIN_PMP_INSTR,
+    MAIN_PMP_MMIO,
+    MAIN_S2_END_OFFSETS,
+    TO_IFU_MAP,
+    half_aligned_cross_line,
+)
 
 from .flush_from_bpu import (
     BpuS3Flush,
@@ -224,7 +231,8 @@ _SIGNALS = {
         _MAIN + "s1_exceptionInfo_0_itlbException_value",
         _MAIN + "__Vtogcov__s1_exceptionInfo_0_itlbException_value",
     ),
-    "exception": (_MAIN + "s1_exception_value",),
+    "exception": MAIN_EXCEPTIONS[0],  # Protection bins describe request 0.
+    "req1_exception": MAIN_EXCEPTIONS[1],
     "is_mmio": (_MAIN + "s1_isMmio",),
     "pbmt": (_MAIN + "s1_wayLookupEntry_0_itlbPbmt",),
     "s2_valid": (),
@@ -280,6 +288,7 @@ _EVIDENCE_SCALARS = frozenset(
         "pmp_mmio",
         "itlb_exception",
         "exception",
+        "req1_exception",
         "is_mmio",
         "pbmt",
         "s2_valid",
@@ -403,16 +412,24 @@ def _s2_valid_lines(prev: Optional[dict[str, Any]], s: dict[str, Any]) -> tuple[
     )
 
 
-def _s2_bank_selected(offset: Optional[int], line: int, bank: int, cross: bool) -> bool:
-    if offset is None:
-        return False
+def _s2_bank_selected(
+    offset: Optional[int], end_offset: Optional[int], line: int, bank: int, cross: bool
+) -> Optional[bool]:
+    if offset is None or end_offset is None:
+        return None
     bank_low = (int(offset) >> 3) & (_DATA_BANKS - 1)
-    # ICacheMainPipe passes s2_valid as getBankSel's end offset, so the high
-    # bank is zero whenever the s2 context is active.
-    bank_high = 0
+    bank_high = (int(end_offset) >> 3) & (_DATA_BANKS - 1)
     if line == 0:
         return bank >= bank_low and (cross or bank <= bank_high)
     return cross and bank <= bank_high
+
+
+def _valid_requests_exception_free(s: dict[str, Any]) -> bool:
+    """Require known clean exceptions only for requests participating in s1."""
+    return _off(s["exception"]) and (
+        _off(s["req1_valid"])
+        or (_on(s["req1_valid"]) and _off(s["req1_exception"]))
+    )
 
 
 def _pure_cache_hit(
@@ -423,9 +440,9 @@ def _pure_cache_hit(
     """Return true only when every valid fetch line is a non-refill hit."""
     if not _on(s["s1_valid"]) or not _off(s["s1_flush"]):
         return False
-    if _on(s["pmp_mmio"]) or _on(s["is_mmio"]):
+    if not _off(s["pmp_mmio"]) or not _off(s["is_mmio"]):
         return False
-    if _on(s["itlb_exception"]) or _on(s["exception"]):
+    if not _off(s["itlb_exception"]) or not _valid_requests_exception_free(s):
         return False
     if not _known((s["cross0"], s["cross1"], s["req1_valid"])):
         return False
@@ -451,7 +468,7 @@ def _all_valid_lines_cache_hit(
         return False
     if not _off(s["pmp_mmio"]) or not _off(s["is_mmio"]):
         return False
-    if not _off(s["itlb_exception"]) or not _off(s["exception"]):
+    if not _off(s["itlb_exception"]) or not _valid_requests_exception_free(s):
         return False
     if not _known((s["cross0"], s["cross1"], s["req1_valid"])):
         return False
@@ -725,6 +742,7 @@ def _snapshot(recorder) -> dict[str, Any]:
                 recorder,
                 tuple(_MAIN + f"s2_isCrossLine_{req}" for req in range(2)),
             ),
+            "s2_end_offset": _read_candidates(recorder, MAIN_S2_END_OFFSETS),
             "s2_offset": _read_names(
                 recorder,
                 tuple(_MAIN + f"s2_offset_{req}" for req in range(2)),
@@ -1712,6 +1730,8 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "s2_valid_lines": tuple(valid_lines),
         "s2_prior_req1_valid": prior_req1_valid,
         "s2_cross_lines": tuple(s["s2_cross"]),
+        "s2_offsets": tuple(s["s2_offset"]),
+        "s2_block_end_offsets": tuple(s["s2_end_offset"]),
         "s2_context_source": (
             "observed_s2_valid"
             if s2_valid_observed is not None
@@ -1790,7 +1810,11 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
                     s["s2_sram_data"][bank_index], s["s2_sram_code"][bank_index]
                 ):
                     continue
-                selected = _s2_bank_selected(s["s2_offset"][req], line, bank, cross)
+                selected = _s2_bank_selected(
+                    s["s2_offset"][req], s["s2_end_offset"][req], line, bank, cross
+                )
+                if selected is None:
+                    continue
                 bank_valid = s["s2_bank_sram"][bank_index]
                 item = (req, line, bank)
                 if selected and _on(bank_valid) and _on(port_hit):

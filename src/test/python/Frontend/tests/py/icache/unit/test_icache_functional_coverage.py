@@ -4362,8 +4362,11 @@ def _set_mainpipe_data_source(
     bank_valid: int,
     port_hit: int,
     offset: int = 0,
+    end_offset: int | None = 0,
 ) -> None:
     recorder.env.dut.set(_MAIN + "s2_offset_0", offset)
+    if end_offset is not None:
+        recorder.env.dut.set(_MAIN + "s2_blkEndOffset_0", end_offset)
     recorder.env.dut.set(_MAIN + f"s2_sramDatas_0_{bank}", 1)
     recorder.env.dut.set(_MAIN + f"s2_sramCodes_0_{bank}", 0)
     recorder.env.dut.set(_MAIN + f"s2_bankSramValid_0_{bank}", bank_valid)
@@ -4400,6 +4403,42 @@ def test_mainpipe_data_ecc_selected_and_unselected_bins_are_distinct():
         "icache_mainpipe_s2_ecc",
         "data_ecc_selected_valid_sram_bank",
     )
+
+
+def test_mainpipe_data_ecc_uses_the_observed_end_offset_and_rejects_unknown_range():
+    for end_offset in (0, 62, None):
+        recorder = _Recorder()
+        _prime_mainpipe_s2(recorder)
+        _set_mainpipe_data_source(
+            recorder, bank=1, bank_valid=1, port_hit=1, end_offset=end_offset
+        )
+        sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+        assert _hit(
+            recorder, "icache_mainpipe_s2_ecc", "data_ecc_selected_valid_sram_bank"
+        ) == (end_offset == 62)
+        assert _hit(
+            recorder, "icache_mainpipe_s2_ecc", "data_ecc_unselected_bank_ignored"
+        ) == (end_offset == 0)
+
+
+def test_mainpipe_cross_line_ecc_classifies_each_port_independently():
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    _set_mainpipe_data_source(
+        recorder, bank=1, bank_valid=1, port_hit=1, offset=48, end_offset=30
+    )
+    recorder.env.dut.set(_MAIN + "s2_isCrossLine_0", 1)
+    recorder.env.dut.set(_MAIN + "s2_sramHits_0_1", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    for bin_name, expected in (
+        ("data_ecc_unselected_bank_ignored", ((0, 0, 1),)),
+        ("data_ecc_selected_valid_sram_bank", ((0, 1, 1),)),
+    ):
+        assert _hit(recorder, "icache_mainpipe_s2_ecc", bin_name)
+        evidence = recorder.hit_evidence[("icache_mainpipe_s2_ecc", bin_name)]
+        assert evidence["s2_matching_req_line_banks"] == expected
+        assert evidence["s2_offsets"][0] == 48
+        assert evidence["s2_block_end_offsets"][0] == 30
 
 
 def test_mainpipe_data_ecc_mshr_bypass_and_port_miss_bins():

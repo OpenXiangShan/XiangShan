@@ -155,7 +155,8 @@ def _dual_sample(cycle, *, misses=(0, 0), fire=0, raw=0, registered=0):
         "cycle": cycle,
         "s1_valid": 1,
         "s1_req1_valid": 1,
-        "s1_exception": 0,
+        "s1_exception_0": 0,
+        "s1_exception_1": 0,
         "s1_mmio": 0,
         "s1_flush": 0,
         "s1_fire": fire,
@@ -199,6 +200,28 @@ def test_dual_transactions_preserve_patterns_addresses_and_registered_evidence(
     assert transaction["req1_addr"] == 0x80060040
     assert transaction["fire_cycle"] == 2
     assert transaction["registered_exact"] is True
+
+
+@pytest.mark.parametrize("req_index", [0, 1])
+def test_dual_transactions_reject_an_exception_in_either_request(req_index):
+    sample = _dual_sample(0, fire=1)
+    sample[f"s1_exception_{req_index}"] = 3
+    assert support.completed_dual_transactions([sample]) == []
+
+
+@pytest.mark.parametrize("missing", [
+    "s1_exception_0", "s1_exception_1", "to_ifu_exception_0", "to_ifu_exception_1",
+])
+def test_mainpipe_observer_rejects_missing_exception_probes_before_registration(missing):
+    callbacks = []
+    dut = SimpleNamespace()
+    for key, aliases in support._MAINPIPE_SIGNALS.items():
+        if key != missing:
+            setattr(dut, aliases[0], SimpleNamespace(value=0))
+    env = SimpleNamespace(dut=dut, register_cycle_observer=callbacks.append)
+    with pytest.raises(AssertionError, match="missing_internal_signals"):
+        support.register_mainpipe_observer(env)
+    assert callbacks == []
 
 
 def test_dual_transactions_reject_late_registered_evidence():

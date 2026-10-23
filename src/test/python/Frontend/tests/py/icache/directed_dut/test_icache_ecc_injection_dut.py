@@ -55,7 +55,9 @@ pytestmark = pytest.mark.skipif(
     ],
 )
 def test_icache_sram_ecc_refetch(env, kind, bin_name):
-    base = target = 0x80040000
+    base = 0x80040000
+    target = base + 0x30 if kind == "unselected" else base
+    fault_line = base + 0x40 if kind == "unselected" else target
     register_mainpipe_observer(env)
     initialize_frontend(env, make_cacheable_init_config(env.config, base, latency=8))
     run_initialization_steps(
@@ -63,7 +65,7 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
         (
             LoadProgram(
                 ProgramImage(
-                    payload=build_nop_program(1024), base_addr=target
+                    payload=build_nop_program(1024), base_addr=base
                 )
             ),
         ),
@@ -90,6 +92,11 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
         # Fetch the target once so tag/valid/data are written by the real refill path.
         agent.wait_resident(target, max_cycles=4096)
         env.step(16)
+        if kind == "unselected":
+            # Bank 1 comes from the second line of the cross-line read. It is
+            # unselected by port 0, but selected by port 1: check both results.
+            _drive_soft_prefetch(env, [fault_line])
+            agent.wait_resident(fault_line)
         if kind == "multiway":
             second = target + 0x4000
             run_initialization_steps(
@@ -109,7 +116,7 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
         elif kind == "meta":
             mutation = agent.inject_meta_ecc(target)
         else:
-            mutation = agent.inject_data_ecc(target, bank=1 if kind == "unselected" else 0)
+            mutation = agent.inject_data_ecc(fault_line, bank=1 if kind == "unselected" else 0)
         env.step(2)
         agent.verify_persisted(mutation)
         injection_cycle = int(env.current_cycle)
@@ -138,8 +145,23 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
         assert detail is not None and detail["evidence"], {"missing_ecc_evidence": bin_id}
         s2_evidence = detail["evidence"][-1]
         if kind == "unselected":
-            env.step(4)
-            assert not [s for s in beu_samples if s["cycle"] >= injection_cycle], beu_samples
+            assert (0, 0, 1) in s2_evidence["s2_matching_req_line_banks"], s2_evidence
+            assert s2_evidence["s2_offsets"][0] == 0x30, s2_evidence
+            assert s2_evidence["s2_cross_lines"][0] == 1, s2_evidence
+            assert tuple(s2_evidence["s2_corrupt"][:2]) == (0, 1), s2_evidence
+            assert s2_evidence["error_valid"] == 1, s2_evidence
+            # Error addresses preserve the selected port's start offset.
+            expected_beu_addr = target + 0x40
+            for _ in range(12):
+                if any(s["cycle"] >= injection_cycle and s["paddr"] == expected_beu_addr
+                       for s in beu_samples):
+                    break
+                env.step(1)
+            else:
+                raise AssertionError({"missing_selected_port_beu_error": expected_beu_addr,
+                                      "beu_errors": beu_samples, "coverage": detail})
+            assert not [s for s in beu_samples
+                        if s["cycle"] >= injection_cycle and s["paddr"] == target], beu_samples
             assert not env.get_errors()
             return
         assert s2_evidence["s2_corrupt"][0] == 1, s2_evidence
