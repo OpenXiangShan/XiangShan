@@ -53,6 +53,12 @@ class DcacheReleaseIndexTest(unittest.TestCase):
     def test_unaligned_query_disables_index(self) -> None:
         self.check_case("unaligned")
 
+    def test_duplicate_release_data_is_counted(self) -> None:
+        self.check_case("duplicate")
+
+    def test_unaligned_record_disables_index(self) -> None:
+        self.check_case("unaligned-record")
+
     def test_clear_resets_counts_and_flag(self) -> None:
         self.check_case("clear")
 

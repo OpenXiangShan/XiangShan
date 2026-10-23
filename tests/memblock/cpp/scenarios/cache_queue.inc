@@ -818,6 +818,80 @@ int run_redirect(int argc, char **argv)
                   << " phase=recovery reason=" << environment.error() << '\n';
         return 1;
     }
+    constexpr std::uint64_t stale_line =
+        memblock::kDefaultMemoryBase + 0x4400;
+    environment.memory().fill_incrementing(stale_line, 64, 0x5a);
+    environment.hold_dcache_response_at(stale_line);
+    const memblock::LoadTransaction stale{
+        .address = stale_line + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 24,
+        .lq = 1,
+        .sq = 0,
+        .pdest = 32,
+        .lane = 2,
+    };
+    const std::uint64_t stale_writebacks_before = environment.writebacks();
+    if (!environment.enqueue_load(stale) || !environment.issue_load(stale)) {
+        std::cerr << "MEMBLOCK_REDIRECT_FAIL cycle=" << environment.cycle()
+                  << " phase=stale-issue reason=" << environment.error() << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 1024 && !environment.dcache_response_held_at(stale_line);
+         ++cycle) {
+        if (!environment.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_REDIRECT_FAIL cycle=" << environment.cycle()
+                      << " phase=stale-hold reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+    }
+    if (!environment.dcache_response_held_at(stale_line) ||
+        !environment.redirect_after(23, false, false) ||
+        !environment.release_held_dcache_response_at(stale_line) ||
+        !environment.run_cycles(128)) {
+        std::cerr << "MEMBLOCK_REDIRECT_FAIL cycle=" << environment.cycle()
+                  << " phase=stale-cancel reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+    if (environment.writebacks() != stale_writebacks_before ||
+        environment.dcache_response_held_at(stale_line) ||
+        environment.lq_redirect_canceled_observed() != 2 ||
+        environment.lq_canceled_unobserved() != 0 ||
+        environment.sq_canceled_unobserved() != 0) {
+        std::cerr << "MEMBLOCK_REDIRECT_FAIL cycle=" << environment.cycle()
+                  << " phase=stale-side-effect"
+                  << " writebacks_before=" << stale_writebacks_before
+                  << " writebacks_after=" << environment.writebacks()
+                  << " held=" << environment.dcache_response_held_at(stale_line)
+                  << " lq_canceled="
+                  << environment.lq_redirect_canceled_observed()
+                  << " unobserved=" << environment.lq_canceled_unobserved()
+                  << ',' << environment.sq_canceled_unobserved() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction stale_recovery{
+        .address = stale_line + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 26,
+        .lq = 2,
+        .sq = 0,
+        .pdest = 33,
+        .lane = 0,
+    };
+    environment.expect_load(stale_recovery);
+    if (!environment.enqueue_load(stale_recovery) ||
+        !environment.issue_load(stale_recovery) ||
+        !environment.run_until_complete(512)) {
+        std::cerr << "MEMBLOCK_REDIRECT_FAIL cycle=" << environment.cycle()
+                  << " phase=stale-recovery reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_REDIRECT_PASS"
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()

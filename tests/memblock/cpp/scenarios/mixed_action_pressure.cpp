@@ -1,9 +1,17 @@
 #include "mixed/scenario.hpp"
 
+#include <cstdlib>
+
 namespace memblock::scenarios::mixed {
 
 bool MixedScenario::execute_set_pressure(ActionWindow &window)
 {
+    // Harness-only negative-path control. Unset in normal campaigns; when set,
+    // exactly one ownership attempt is forced through rejected construction so
+    // current-revision cleanup/accounting has runtime evidence.
+    static bool force_reject_once =
+        std::getenv("MEMBLOCK_FORCE_DIRTY_OWNERSHIP_REJECT_ONCE") != nullptr;
+
     auto &set_pressure_depth_index = window.set_pressure_depth_index;
     auto &set_pressure_width = window.set_pressure_width;
     auto &set_pressure_set = window.set_pressure_set;
@@ -954,6 +962,15 @@ bool MixedScenario::execute_set_pressure(ActionWindow &window)
                 return false;
             }
             if (qualify_ownership) {
+                // A target ReleaseData that was already in flight when the
+                // hold was established must complete before the external
+                // ownership proof samples completed Releases. Otherwise an
+                // early eviction would be invisible to target_releases().
+                phase = "random-set-pressure-dirty-release-idle";
+                if (!environment.run_until_dcache_release_idle(
+                        set_pressure_completion_timeout)) {
+                    return false;
+                }
                 // No DUT tick between this external proof and arming C
                 // backpressure. Responsibility may reside in a writeback
                 // queue; array residency is neither observed nor required.
@@ -974,8 +991,15 @@ bool MixedScenario::execute_set_pressure(ActionWindow &window)
                         environment.dcache_corrupt_d_beats(),
                     }};
                 const auto early_releases = target_releases(false);
-                const bool ownership_qualified = bad_acquisitions == 0 &&
+                bool ownership_qualified = bad_acquisitions == 0 &&
                     !errors_changed && early_releases == 0;
+                if (force_reject_once && qualify_ownership) {
+                    // Harness-only negative-path injection: force the first
+                    // ownership attempt to exercise rejected cleanup, then
+                    // clear the flag so the retry follows the normal path.
+                    force_reject_once = false;
+                    ownership_qualified = false;
+                }
                 if (!ownership_qualified) {
                     ++constraint_coverage.set_pressure_ownership[3];
                     constraint_coverage.set_pressure_ownership[5] +=
@@ -1130,6 +1154,22 @@ bool MixedScenario::execute_set_pressure(ActionWindow &window)
             }
             phase = "random-set-pressure-dirty-release-window";
             if (!finish_release_backpressure(true)) {
+                return false;
+            }
+            // Complete any release that was held by the selected C
+            // backpressure before checking its opcode. A dirty target must
+            // not escape as a clean Release.
+            phase = "random-set-pressure-release-idle";
+            if (!environment.run_until_dcache_release_idle(
+                    set_pressure_completion_timeout)) {
+                return false;
+            }
+            const auto target_release_total = target_releases(false);
+            const auto target_release_data = target_releases(true);
+            if ((set_pressure_dirty &&
+                    target_release_total != target_release_data) ||
+                (!set_pressure_dirty && target_release_data != 0)) {
+                phase = "random-set-pressure-target-release-kind";
                 return false;
             }
 
