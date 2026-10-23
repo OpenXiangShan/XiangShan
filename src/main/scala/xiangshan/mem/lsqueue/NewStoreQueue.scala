@@ -553,6 +553,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         io.ctrlInfo.deqPtr.operation_flag
       )
 
+      val s1SelectNext16BMatch = (s1SelectOH & s1Next16BMatchVec.asUInt).orR
+
       val s2SelectDataEntry   = RegEnable(s1SelectDataEntry, s1Valid)
       val s2SelectCtrlEntry   = RegEnable(s1SelectCtrlEntry, s1Valid)
       val s2DataInValid       = RegEnable(s1DataInvalid, s1Valid)
@@ -572,6 +574,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2UnalignQueueMatch = RegEnable(s1UnalignQueueMatch, s1Valid)
       val s2LoadStart        = RegEnable(s1LoadStart, s1Valid)
       val s2LoadEnd          = RegEnable(s1LoadEnd, s1Valid)
+      val s2LoadInNext16B    = RegEnable(s1SelectNext16BMatch, s1Valid)
       val s2ForwardValid     = RegEnable(s1SelectOH.orR, s1Valid) // indicate whether forward is valid.
       val s2DeqPtr             = io.ctrlInfo.deqPtr
       val s2PhysicalQueueUpper = io.ctrlInfo.physicalQueueUpper
@@ -632,7 +635,21 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2SelectMask         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.byteMask, j)
       )
-      val s2OutMask            = ParallelLookUp(s2ByteSelectOffset, s2SelectMask) & s2LoadMaskEnd
+      val s2RotatedMask        = ParallelLookUp(s2ByteSelectOffset, s2SelectMask)
+      // The byte rotation above is circular.  When the load starts after the
+      // store, the useful part is the low portion of the rotated mask; when
+      // it starts before the store, the useful part is the high portion.  The
+      // other portion is data wrapped around from the opposite end of the
+      // 16-byte word and must not be forwarded.
+      // A right shift of an all-one mask directly gives the low portion with
+      // length VLENB - offset, avoiding another subtract/decode chain here.
+      val s2ForwardMaskBoundary = Fill(VLENB, true.B) >> s2ByteSelectOffset
+      val s2ForwardMask        = Mux(
+        s2LoadInNext16B || s2LoadStart >= s2SelectDataEntry.byteStart,
+        s2ForwardMaskBoundary,
+        ~s2ForwardMaskBoundary
+      )
+      val s2OutMask            = s2RotatedMask & s2ForwardMask & s2LoadMaskEnd
 
       val s2FullOverlap        = s2SelectDataEntry.byteStart <= s2LoadStart && s2SelectDataEntry.byteEnd >= s2LoadEnd
       // First condition: access extends beyond the lower log2Ceil(VLEN/8) bits.
