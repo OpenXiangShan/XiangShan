@@ -4717,6 +4717,8 @@ def verify_regression(
     *,
     min_duration_seconds: float,
     min_results: int,
+    min_timeout_seconds: float | None = None,
+    exact_results: bool = False,
     expected_transactions: int,
     expected_scenario: str | None = None,
     expected_scenarios: tuple[str, ...] | None = None,
@@ -4734,6 +4736,11 @@ def verify_regression(
         "minimum duration must be finite and positive",
     )
     _require(min_results > 0, "minimum result count must be positive")
+    if min_timeout_seconds is not None:
+        _require(
+            math.isfinite(min_timeout_seconds) and min_timeout_seconds > 0,
+            "minimum timeout must be finite and positive",
+        )
     if expected_scenarios is None:
         scenarios = (expected_scenario or "random-mixed",)
     else:
@@ -4830,6 +4837,15 @@ def verify_regression(
             configuration.get("jobs") == expected_jobs,
             "configured worker count differs from verifier expectation",
         )
+    if min_timeout_seconds is not None:
+        recorded_timeout = configuration.get("timeout_seconds")
+        _require(
+            isinstance(recorded_timeout, (int, float))
+            and not isinstance(recorded_timeout, bool)
+            and math.isfinite(recorded_timeout)
+            and recorded_timeout >= min_timeout_seconds,
+            "configured timeout is below verifier requirement",
+        )
     requested_duration = configuration.get("duration_seconds")
     if allow_finite and requested_duration is None:
         pass
@@ -4909,6 +4925,11 @@ def verify_regression(
 
     result_count = observed["result_count"]
     _require(result_count >= min_results, f"only {result_count} results were recorded")
+    if exact_results:
+        _require(
+            result_count == min_results,
+            f"expected exactly {min_results} results, observed {result_count}",
+        )
     _require(
         max(observed["completion_offsets"], default=-1) >= min_duration_seconds,
         "no recorded result completed after the required duration",
@@ -4947,7 +4968,32 @@ def verify_regression(
         _require(isinstance(runtime, dict), "frozen runtime metadata is absent")
         _require(isinstance(runtime.get("artifacts"), dict), "runtime artifacts are absent")
     if runtime_metadata is not None:
-        run_regression.verify_runtime_metadata(runtime_metadata)
+        frozen = run_regression.verify_runtime_metadata(runtime_metadata)
+        recorded_artifacts = runtime.get("artifacts")
+        _require(
+            set(recorded_artifacts) == set(frozen["artifacts"]),
+            "recorded runtime artifact set differs from frozen runtime",
+        )
+        for role, frozen_path in frozen["artifacts"].items():
+            recorded_path = recorded_artifacts.get(role)
+            _require(
+                isinstance(recorded_path, str)
+                and Path(recorded_path).resolve() == frozen_path,
+                f"recorded runtime {role} artifact differs from frozen runtime",
+            )
+        _require(
+            Path(str(runtime.get("metadata", ""))).resolve() == frozen["metadata"],
+            "recorded runtime metadata path differs from frozen runtime",
+        )
+        _require(
+            Path(str(runtime.get("root", ""))).resolve() == frozen["root"],
+            "recorded runtime root differs from frozen runtime",
+        )
+        _require(
+            runtime.get("external_dependencies")
+            == [str(path) for path in frozen["external_dependencies"]],
+            "recorded runtime external dependencies differ from frozen runtime",
+        )
 
     return {
         "elapsed_seconds": float(elapsed),
@@ -4964,6 +5010,8 @@ def main() -> int:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--min-duration-seconds", type=float, default=14400)
     parser.add_argument("--min-results", type=int, default=1)
+    parser.add_argument("--min-timeout-seconds", type=float)
+    parser.add_argument("--exact-results", action="store_true")
     parser.add_argument("--scenario")
     parser.add_argument("--scenarios", help="comma-separated ordered test names")
     parser.add_argument("--transactions", type=int, default=64)
@@ -4992,6 +5040,8 @@ def main() -> int:
             args.input,
             min_duration_seconds=args.min_duration_seconds,
             min_results=args.min_results,
+            min_timeout_seconds=args.min_timeout_seconds,
+            exact_results=args.exact_results,
             expected_transactions=args.transactions,
             expected_scenario=(
                 None if expected_scenarios is not None else args.scenario
