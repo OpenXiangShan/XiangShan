@@ -100,7 +100,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.redirect.isRet  := redirect.bits.attribute.isReturn
   stack.redirect.meta   := redirect.bits.meta.ras
   // Redirected branch PC points to end of instruction.
-  stack.redirect.callAddr := redirect.bits.cfiPc.signGuard + 2.U
+  stack.redirect.callAddr := redirect.bits.cfiPc + 2.U
 
   private val commitValid    = RegNext(io.commit.valid && io.enable, init = false.B)
   private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid && io.enable)

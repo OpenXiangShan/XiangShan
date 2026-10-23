@@ -384,23 +384,17 @@ class CtrlBlockImp(
   redirectGen.io.oldestExuRedirect.bits := oldestExuRedirect.bits
   redirectGen.io.oldestExuRedirect.bits.isFromLoad := false.B
   redirectGen.io.loadReplay <> loadReplay
-  val loadRedirectTargetOffset = Reg(UInt(GuardedVAddrBits.W))
+  val loadRedirectPcOffset = Reg(UInt(GuardedVAddrBits.W))
   when(memViolation.valid) {
     // similar to robFlushPCOffset
     val thisPcOffset = SignExt(memViolation.bits.getPcOffset(), GuardedVAddrBits)
     // nextPcOffset is a positive value, does not need signExt
     val nextPcOffset = memViolation.bits.getNextPcOffset()
-    loadRedirectTargetOffset := Mux(memViolation.bits.flushItself(), thisPcOffset, nextPcOffset)
+    loadRedirectPcOffset := Mux(memViolation.bits.flushItself(), thisPcOffset, nextPcOffset)
   }
-  val loadRedirectStartPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).toUInt
-  val load_target = loadRedirectStartPcRead + loadRedirectTargetOffset
-  redirectGen.io.loadReplay.bits.target := load_target
-  // TODO loadRedirectPcOffset is useful?
-  val loadRedirectPcOffset = Reg(UInt(VAddrBits.W))
-  when(memViolation.valid) {
-    loadRedirectPcOffset := memViolation.bits.getPcOffset()
-  }
-  redirectGen.io.loadReplay.bits.pc := loadRedirectStartPcRead + loadRedirectPcOffset
+  val loadRedirectStartPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).toUInt + loadRedirectPcOffset
+  redirectGen.io.loadReplay.bits.pc := loadRedirectStartPcRead
+  redirectGen.io.loadReplay.bits.target := loadRedirectStartPcRead // not typo, target is the same as pc for loadReplay
 
   redirectGen.io.robFlush := s1_robFlushRedirect
   redirectGen.io.robFlush.bits.isFromLoad := false.B
