@@ -14,9 +14,8 @@ env:
   AM_HOME: /nfs/home/share/ci-workloads/nexus-am
   PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
   CKPT_JSON: /nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/json/checkpoints_all.json
-  # temporarily disabled due to known issue, enable these when a weekly 1.0c regression test passes
-#  CKPT_JSON_XSCC: /nfs/share/checkpoints_profiles/spec06_xscc_rva23_novec_260911/json/checkpoints_all.json
-# CKPT_JSON_SPEC17: /nfs/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json
+  CKPT_JSON_XSCC: /nfs/share/checkpoints_profiles/spec06_xscc_rv64gcb_261013/checkpoint-0-0-0/cluster-0-0.json
+  CKPT_JSON_SPEC17: /nfs/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json
   # random checkpoints number, per CKPT_JSON
   FUZZ_NUM: 5
   # filtering/sorting checkpoints based on ETA, to avoid long-running jobs
