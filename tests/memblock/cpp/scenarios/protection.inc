@@ -1625,6 +1625,7 @@ int run_pmp_contracts(int argc, char **argv)
     constexpr std::uint8_t pmp_locked_napot_deny = 0x98;
     constexpr std::uint8_t pmp_locked_tor_read = 0x89;
     constexpr std::uint8_t pmp_locked_napot_rwx = 0x9f;
+    constexpr std::uint8_t pmp_locked_off = 0x80;
     constexpr std::uint8_t pmp_napot_w_only = 0x1a;
     constexpr std::uint8_t pmp_napot_x_only = 0x1c;
     auto napot_address = [](std::uint64_t base, std::uint64_t size) {
@@ -2190,6 +2191,42 @@ int run_pmp_contracts(int argc, char **argv)
         total_dcache_requests += environment.tilelink_requests();
     }
 
+    // A locked OFF entry must stay locked even though it currently matches
+    // no address.  Attempt to turn it into a NAPOT allow entry; in S mode the
+    // original address must remain denied.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t base = 0x81100000ULL;
+        environment.memory().fill_incrementing(base, 0x1000, 0x6e);
+        if (!environment.reset() ||
+            !environment.activate_bare() ||
+            !environment.configure_pmp(
+                {base >> 2}, {pmp_locked_off}) ||
+            !environment.configure_pmp(
+                {napot_address(base, 0x1000)},
+                {pmp_napot_read_write})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=locked-off-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction denied{
+            .address = base + 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 121, .lane = 0,
+            .expected_exception_mask =
+                memblock::kExceptionLoadAccessFault,
+        };
+        if (!run_load(environment, denied, "locked-off-rewrite-rejected")) {
+            return 1;
+        }
+        ++denied_cases;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
     // A TOR entry's upper bound is the following entry's pmpaddr.  When that
     // following entry is locked, the TOR base address is locked too.  Attempt
     // to move the base beyond the upper bound: the original range must remain
@@ -2526,7 +2563,8 @@ int run_pmp_contracts(int argc, char **argv)
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
               << " machine_bypass=1 atomic_denied=1 tor_next_lock=1"
               << " napot_sizes=7 pbmt_pmp_cases=2 pbmt_pmp_stores=2"
-              << " warl_permission=2 locked_immutable=1 split_pmp_edge=1"
+              << " warl_permission=2 locked_immutable=1 locked_off=1"
+              << " split_pmp_edge=1 split_pmp_store=1"
               << '\n';
     return 0;
 }

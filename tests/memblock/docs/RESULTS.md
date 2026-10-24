@@ -182,6 +182,14 @@ remain unchanged. The scenario passes 59 cases with `split_pmp_edge=1`; the
 allowed prefix request explains the one-request increase over ordinary denied
 loads.
 
+### 2026-10-24 locked-OFF PMP entry immutability
+
+`pmp-contracts` adds a locked `A=OFF` entry and attempts to reconfigure it as a
+4-KiB NAPOT allow entry. The lock must reject the address/config rewrite, so
+the original S-mode load remains `LoadAccessFault` with no manager request.
+The scenario passes 61 cases with `locked_off=1`, covering the lock behavior
+of an entry that currently matches no address.
+
 ### 2026-10-24 split store across a PMP boundary
 
 `pmp-contracts` adds the store-side counterpart of the split-load PMP edge. An
