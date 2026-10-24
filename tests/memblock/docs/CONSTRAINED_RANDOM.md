@@ -265,8 +265,8 @@ as a control. Inside CMO it selects all CLEAN/FLUSH/INVAL operations, sets
 `cmo-dirty=1000` and `cmo-younger-overlap=1000`, disables CMO errors, and
 keeps the ordinary Probe and error subclasses off. Because each CMO action
 warms a line, drains a dirty store, issues a younger load, and may accept a
-Probe burst, use a smaller action budget (for example 256 actions) and more
-seeds rather than the ordinary 16,384-action budget. The direction targets the
+Probe burst, use a smaller action budget (256 or 512 actions) and more seeds rather
+than the ordinary 16,384-action budget. The direction targets the
 dirty + younger-overlap + Probe composition and is not a substitute for the
 ordinary mixed profiles.
 

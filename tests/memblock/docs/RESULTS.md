@@ -311,7 +311,10 @@ selects all CLEAN/FLUSH/INVAL operations, sets `cmo-dirty=1000`,
 subclasses, and keeps the CMO Probe-depth weights enabled. A 4-seed x
 256-action campaign on the current build passes **4/4** (1,024 actions,
 372.5 s, artifact `build/memblock/regression-cmo-stress-4x256.json`); the
-shared verifier accepts the new profile.
+shared verifier accepts the new profile. A longer 4-seed x 512-action campaign
+also passes **4/4** (2,048 actions, 882.6 s, artifact
+`build/memblock/regression-cmo-stress-4x512.json`), confirming the direction
+under twice the CMO action count.
 
 The generator's clean CMO path now commits the CMO **before** applying the
 ROB `flushAfter` redirect, matching the design: the CMO store sets `flushPipe`
