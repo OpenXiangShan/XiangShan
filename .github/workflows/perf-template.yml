@@ -35,6 +35,11 @@ on:
         required: false
         type: boolean
         default: false
+      enable_tea:
+        description: Enable TEA collection with Verilator
+        required: false
+        type: boolean
+        default: false
       enable_rolling:
         description: Enable rolling DB dump, which implies enable_db
         required: false
@@ -126,8 +131,13 @@ jobs:
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
 
+          if [[ "${{ inputs.enable_tea }}" == "true" && ( "${{ inputs.emulator }}" != "verilator" || -z "${{ inputs.cst_file }}" ) ]]; then
+            echo "TEA requires Verilator and a Constantin file enabling enableTea0"
+            exit 1
+          fi
+
           if [[ -z "${{ inputs.servers }}" ]]; then
-            if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
+            if [[ "${{ inputs.emulator }}" == "gsim" || "${{ inputs.enable_tea }}" == "true" ]]; then
               echo "SERVER_LIST=node" >> $GITHUB_ENV
             else
               echo "SERVER_LIST=open" >> $GITHUB_ENV
@@ -137,6 +147,9 @@ jobs:
           fi
 
           SPEC_TAG="-${{ inputs.xs_config }}"
+          if [[ "${{ inputs.enable_tea }}" == "true" ]]; then
+            SPEC_TAG="${SPEC_TAG}-tea"
+          fi
           # Set CST_COMPILE_OPT and CST_RUN_OPT based on cst_file
           if [[ -n "${{ inputs.cst_file }}" ]]; then
             if [[ ! -f "${{ inputs.cst_file }}" ]]; then
@@ -243,6 +256,8 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
 
       - name: Build EMU with DRAMsim3
+        env:
+          WITH_TEA: ${{ inputs.enable_tea && '1' || '0' }}
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             proxychains -q python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
@@ -252,7 +267,7 @@ jobs:
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
               --llvm-profdata llvm-profdata --trace-fst \
               --emulator ${{ inputs.emulator }} \
-              ${{ inputs.enable_db && '--enable-db' || '' }} \
+              ${{ (inputs.enable_db || inputs.enable_tea) && '--enable-db' || '' }} \
               ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
               $CST_COMPILE_OPT
             mkdir -p $SPEC_DIR
@@ -285,7 +300,7 @@ jobs:
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
-            ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
+            ${{ ( inputs.enable_db || inputs.enable_rolling || inputs.enable_tea ) && '--dump-db' || '' }} \
             --run \
             "${EXTRA_OPTS[@]}" \
             $CST_RUN_OPT
