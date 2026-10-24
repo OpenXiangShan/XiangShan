@@ -123,12 +123,6 @@ jobs:
           SHORT_SHA=$(git rev-parse --short=9 HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
           echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
-          if [[ "${{ inputs.servers }}" == "node030" ]]; then
-            mkdir -p "$RUNNER_TEMP/tea-perf"
-            cp -a /nfs/home/share/ci-workloads/env-scripts/perf_trigger "$RUNNER_TEMP/tea-perf/"
-            sed -i '/^SERVER_POOL = \[/a\    "node030",' "$RUNNER_TEMP/tea-perf/perf_trigger/main.py"
-            echo "SCRIPTS_HOME=$RUNNER_TEMP/tea-perf" >> $GITHUB_ENV
-          fi
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
 
@@ -251,7 +245,11 @@ jobs:
       - name: Build EMU with DRAMsim3
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
-            proxychains -q ssh node030 "cd '$GITHUB_WORKSPACE' && PATH='$PATH' NOOP_HOME='$GITHUB_WORKSPACE' proxychains -q python3 scripts/xiangshan.py --build \
+            BUILD_SERVER=node030
+            if [[ "${{ inputs.servers }}" =~ ^node[0-9]+$ ]]; then
+              BUILD_SERVER="${{ inputs.servers }}"
+            fi
+            proxychains -q ssh "$BUILD_SERVER" "cd '$GITHUB_WORKSPACE' && PATH='$PATH' NOOP_HOME='$GITHUB_WORKSPACE' proxychains -q python3 scripts/xiangshan.py --build \
               --config '${{ inputs.xs_config }}' \
               --make-threads 8 \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
