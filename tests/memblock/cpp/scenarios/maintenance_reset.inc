@@ -3637,3 +3637,117 @@ int run_redirect_atomic_flush(int argc, char **argv)
               << '\n';
     return 0;
 }
+
+int run_redirect_store_flush(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    const std::uint64_t load_line =
+        memblock::kDefaultMemoryBase + 0x4a0000;
+    const std::uint64_t store_line = load_line + 0x20000;
+    constexpr std::uint64_t store_value = 0x123456789abcdef0ULL;
+    environment.memory().fill_incrementing(load_line, 64, 0x63);
+    environment.memory().fill_incrementing(store_line, 64, 0x2b);
+    if (!environment.reset() ||
+        !environment.configure_stride_prefetch(false) ||
+        !environment.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_REDIRECT_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction warm{
+        .address = store_line + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 240,
+        .lane = 0,
+    };
+    environment.expect_load(warm);
+    if (!environment.set_rob_head(warm.rob, warm.rob_flag) ||
+        !environment.enqueue_load(warm) ||
+        !environment.issue_load(warm, 2048) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_REDIRECT_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=warm reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction older{
+        .address = load_line + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 1,
+        .pdest = 241,
+        .lane = 1,
+    };
+    environment.expect_load(older);
+    environment.hold_dcache_response_at(load_line);
+    if (!environment.set_rob_head(older.rob, older.rob_flag) ||
+        !environment.enqueue_load(older) ||
+        !environment.issue_load(older, 2048)) {
+        std::cerr << "MEMBLOCK_REDIRECT_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=older-issue reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::StoreTransaction younger{
+        .address = store_line + 24,
+        .data = store_value,
+        .op = memblock::StoreOp::sd,
+        .rob = 1,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    environment.expect_store(younger);
+    if (!environment.enqueue_store(younger, 0) ||
+        !environment.issue_store_address(younger, 2048) ||
+        !environment.issue_store_data(younger, 2048) ||
+        !environment.run_cycles(256) ||
+        !environment.redirect_after(older.rob, older.rob_flag, false) ||
+        !environment.release_held_dcache_response_at(load_line) ||
+        !environment.run_cycles(64) ||
+        !environment.run_until_load_writebacks(2, 4096) ||
+        !environment.run_until_store_complete(4096) ||
+        !environment.run_until_sbuffer_empty(8192) ||
+        environment.sq_dequeued() + environment.sq_canceled() !=
+            environment.sq_allocated()) {
+        std::cerr << "MEMBLOCK_REDIRECT_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=flush reason="
+                  << environment.error() << " sq="
+                  << environment.sq_dequeued() << '+'
+                  << environment.sq_canceled() << '/'
+                  << environment.sq_allocated() << '\n';
+        return 1;
+    }
+    const std::uint64_t expected =
+        environment.memory().expected_load(
+            store_line + 24, memblock::LoadOp::ld);
+    const memblock::LoadTransaction fresh{
+        .address = store_line + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 2,
+        .lq = 2,
+        .pdest = 242,
+        .lane = 0,
+    };
+    environment.expect_load_data(fresh, expected);
+    if (!environment.set_rob_head(fresh.rob, fresh.rob_flag) ||
+        !environment.enqueue_load(fresh) ||
+        !environment.issue_load(fresh, 2048) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_REDIRECT_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=fresh reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    std::cout << "MEMBLOCK_REDIRECT_STORE_FLUSH_PASS"
+              << " cycle=" << environment.cycle()
+              << " younger_store_canceled=1 fresh_readback=1"
+              << " expected=0x" << std::hex << expected << std::dec
+              << '\n';
+    return 0;
+}

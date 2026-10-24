@@ -277,9 +277,10 @@ the redirect returns `old + operand` (`0x5f5e6e6d7d7c8c8b` for the CMO case,
 The failure is deterministic; the generic case proves the trigger is not
 CMO-specific.
 
-The younger-store control `cmo-store-flush` passes: the SBuffer/SQ flush
-drops the younger store and the fresh load sees the old value, isolating the
-leak to the atomic path. The real `make benchmark-tests` run passes **85/85**
+The younger-store controls `cmo-store-flush` and `redirect-store-flush` pass:
+the SBuffer/SQ flush drops the younger store and the fresh load sees the old
+value for both the CMO and generic redirect sources, isolating the leak to the
+atomic path. The real `make benchmark-tests` run passes **85/85**
 scenarios (781.966 s, `build/memblock/test-scale.json`) because the dedicated
 reproducer/control scenarios have `benchmark_order: null`; `cmo-contracts` and
 `atomic-contracts` pass. See
