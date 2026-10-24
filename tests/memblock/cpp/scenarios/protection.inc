@@ -2177,9 +2177,52 @@ int run_pmp_contracts(int argc, char **argv)
             }
             ++denied_cases;
 
-            // The positive PBMT/Uncache routing is covered by
-            // translation-pbmt/uncache-widths; this case isolates the
-            // PMP-before-PBMT priority.
+            // The store variant uses the TLB-hit store-issue sequence.
+            // The positive PBMT/Uncache routing is covered separately by
+            // translation-pbmt/uncache-widths.
+            const memblock::StoreTransaction denied_store{
+                .address = virtual_address,
+                .oracle_address = physical_address,
+                .data = 0x8877665544332211ULL,
+                .op = memblock::StoreOp::sd,
+                .rob = 1,
+                .sq = 0,
+                .address_lane = 1,
+                .data_lane = 0,
+                .expected_exception_mask =
+                    memblock::kExceptionStoreAccessFault,
+            };
+            environment.expect_store(denied_store);
+            const std::uint64_t denied_dcache_before =
+                environment.tilelink_requests();
+            const std::uint64_t denied_uncache_before =
+                environment.uncache_requests();
+            if (!environment.set_rob_head(
+                    denied_store.rob, denied_store.rob_flag) ||
+                !environment.enqueue_store(denied_store, 0) ||
+                !environment.issue_store_address_until_tlb_hit(
+                    denied_store, 4096) ||
+                !environment.issue_store_data(denied_store, 2048) ||
+                !environment.run_until_store_complete(8192) ||
+                environment.tilelink_requests() != denied_dcache_before ||
+                environment.uncache_requests() != denied_uncache_before) {
+                std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=pbmt-pmp-"
+                          << (io ? "io" : "nc") << "-denied-store reason="
+                          << environment.error() << " dcache="
+                          << environment.tilelink_requests() -
+                                 denied_dcache_before
+                          << " uncache="
+                          << environment.uncache_requests() -
+                                 denied_uncache_before << '\n';
+                return 1;
+            }
+            if (environment.sq_dequeued() + environment.sq_canceled() <
+                    environment.sq_allocated() &&
+                !environment.account_sq_cancellation(1)) {
+                return 1;
+            }
+            ++denied_cases;
             total_cycles += environment.cycle();
             total_load_writebacks += environment.writebacks();
             total_dcache_requests += environment.tilelink_requests();
@@ -2196,7 +2239,7 @@ int run_pmp_contracts(int argc, char **argv)
               << " dcache_a=" << total_dcache_requests
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
               << " machine_bypass=1 atomic_denied=1 tor_next_lock=1"
-              << " napot_sizes=7 pbmt_pmp_cases=2"
+              << " napot_sizes=7 pbmt_pmp_cases=2 pbmt_pmp_stores=2"
               << '\n';
     return 0;
 }

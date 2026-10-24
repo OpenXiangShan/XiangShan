@@ -159,11 +159,12 @@ scenario passes 49 cases with `tor_next_lock=1` and `napot_sizes=7`.
 
 `pmp-contracts` adds two Sv39 cases whose page-table pages are PMP-allowed but
 whose final physical page is PMP-denied, once with PBMT=NC and once with
-PBMT=IO. Each translated load must terminate with `LoadAccessFault` and must
-issue no DCache or Uncache data request; PTW traffic remains allowed. The
+PBMT=IO. Each translated load must terminate with `LoadAccessFault` and must issue no
+DCache or Uncache data request; a TLB-hit store variant must terminate with
+`StoreAccessFault` and issue no data request. PTW traffic remains allowed. The
 positive PBMT/Uncache routing is covered separately by `translation-pbmt` and
-`uncache-widths`. The scenario passes 51 cases with `pbmt_pmp_cases=2`. The
-store and misalignment priority variants remain gaps.
+`uncache-widths`. The scenario passes 53 cases with `pbmt_pmp_cases=2` and
+`pbmt_pmp_stores=2`. Misalignment priority remains a gap.
 
 ### 2026-10-24 replacement composed with an atomic refill
 
