@@ -320,7 +320,7 @@ cacheable tests pass.
 
 | Point family | Values and crosses to generate | Current status |
 | --- | --- | --- |
-| Integer loads | `lb/lbu/lh/lhu/lw/lwu/ld`, all destination classes, all issue lanes, zero/sign-extension patterns, signed `src + imm` address generation | Implemented; directed loads cross immediate 0, 1, 2047, -1, and -2048, including cache-line boundaries, while random scenarios retain zero as the dominant realistic case |
+| Integer loads | `lb/lbu/lh/lhu/lw/lwu/ld`, all destination classes, all issue lanes, zero/sign-extension patterns, signed `src + imm` address generation | Implemented; directed loads cross immediate 0, 1, 2047, -1, and -2048, including cache-line boundaries, while random scenarios retain zero as the dominant realistic case. `single-load` also holds an older aligned or split cross-line load's refill while a younger store to the same line/byte is issued; the load must retain its pre-store value and the store must not become the pending ROB head first |
 | Integer stores | `sb/sh/sw/sd`, address-first/data-first, byte masks, all issue lanes, commit timing, signed `src + imm` address generation | Partial; issue/commit and modeled readback are covered, and store forwarding crosses immediate 0, 1, 2047, -1, and -2048. The scoreboard rejects a writeback on a lane other than its expected issue lane, with an explicit legal remap for misaligned lane-0 address completion, but the boundary exposes no complete store payload monitor |
 | Floating loads/stores | FLH/FLW/FLD and narrow/widening formats, NaN-boxing, memory exceptions, integer/FP destination separation | Implemented for the MemBlock-observable load boundary: `fp-loads` checks cacheable and PBMT=IO FLH/FLW/FLD destination class and exact payload/NaN-boxing, cacheable cross-line/page misalignment, and page, PMP, permission, guest-page, PBMT=NC misalignment, denied, and corrupt exception write suppression. Store-data formatting is upstream because `issueStd.src(0)` already carries formatted raw bits |
 | Vector unit stride | EEW 8/16/32/64, SEW 8/16/32/64, LMUL fractional 1/8 through 8, legal derived EMUL, `vl=0..VLMAX`, `vstart` at start/middle/end, `vm`, mask holes, `vma/vta` | Implemented for modeled operations; `vector-addressing` exhausts all 78 legal ELEN=64 EEW/SEW/LMUL/EMUL configurations with 404 load/readback and 202 store uops, independent `vsew/veew/vlmul` checks, exact data/readback, conservative two-flow unit-stride LSQ allocation, queue wrap, and ROB wrap. The constrained-random generator exposes the same shape and execution-policy dimensions as weights and checks complete multi-uop instructions under mixed translation/cache traffic |
@@ -452,7 +452,12 @@ The environment makes only these behavioral assumptions:
 - Issue inputs use legal operation encodings and consistent LSQ/ROB pointers;
   typed drivers hold `valid` and payload stable until acceptance.
 - Backend allocation, commit, redirect, and age information follow their legal
-  order; the scoreboard removes only architecturally younger work.
+  order; the scoreboard removes only architecturally younger work. In
+  particular, the mixed heterogeneous window never makes a page-crossing
+  younger store the pending ROB head or commits it while an older load is
+  outstanding. Page-crossing scalar-store replay and readback remain directed
+  contracts in `scalar-misaligned` and `misaligned-stores`; the mixed window
+  retains line-crossing misaligned stores.
 - Reference page tables, sparse memory, permissions, masks, and instruction
   fields are testbench-owned. Manager responses correspond to captured requests
   and obey their modeled opcode, source, size, address, mask, and beat rules.

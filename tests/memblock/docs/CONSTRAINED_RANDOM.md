@@ -326,7 +326,10 @@ policy-incompatible VLMAX classes remain zero. Each enabled class occurs, and ev
 produces one through eight data uops, with every enabled multi-uop shape producing a multi-uop
 instruction. Heterogeneous windows overlap scalar load/store, vector load/store, and prefetch;
 `special-concurrent` adds NC/MMIO loads, and windows report all 16 reachable direction x addressing x
-single/multi-uop classes. The five binary policy marginals report false/true counts and conserve against
+single/multi-uop classes. The selected scalar store stays within one 4-KiB page; page-crossing
+scalar-store replay and readback remain directed contracts in
+`scalar-misaligned`/`misaligned-stores` so the window never makes a younger store the backend ROB
+head while an older load is pending. Line-crossing misaligned stores remain in the window. The five binary policy marginals report false/true counts and conserve against
 `actual_vector_shape_ops`; a mask/tail endpoint requires an actual inactive body/tail element.
 
 Ordinary VFOF reports the ordinary/fault split, later/first-fault position, stage-1-mode and EEW
@@ -344,6 +347,9 @@ Load merge reports 12 depth x address-pattern x critical-beat bins and three tra
 bins. Every enabled shape and regime occurs. A batch skips lines already observed at the manager
 and uses a fresh line from a 64-MiB region; all members issue in one cycle, target requests and
 global refill/GrantAck deltas conserve, and scalar writebacks equal the sum of batch depths.
+GrantAck conservation pairs each acknowledgement with a GrantData refill or a data-less
+AcquirePerm Grant, so legal background prefetch grants are counted while a duplicate or unpaired
+acknowledgement still fails.
 
 Set pressure reports 1536 clean/dirty x overlap/no-overlap x C-ready/stalled x one-through-eight-window x depth x width x
 translation crosses, four base-index quarters, and both store-half issue orders. Actions use fresh lines in one through
