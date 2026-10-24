@@ -117,6 +117,13 @@ as binary SHA-256
 `constrained-random` source is unchanged and the frozen binary includes the
 atomic composition.
 
+A 4-seed x 16,384-action `coverage` run on this current frozen runtime passes
+**4/4** (65,536 actions, 949.906 s, artifact
+`build/memblock/regression-20261024-round19-coverage-4.json`). The 16-seed
+262,144-action capability run remains evidence on the prior runtime; the
+constrained-random source is unchanged. The open CMO/atomic redirect bug is in
+a directed scenario and does not affect this campaign.
+
 ### 2026-10-24 single-set replacement and Probe composition
 
 `dcache-release` was corrected from stale 128-set/8-way constants to the
