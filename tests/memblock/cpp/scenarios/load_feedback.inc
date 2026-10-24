@@ -211,6 +211,233 @@ int run_single_load(int argc, char **argv)
         return 1;
     }
 
+    // An older load owns the miss MSHR; a younger speculative store to the
+    // same line must not be allowed to merge bytes into that MSHR and leak
+    // them into the older load.  Hold the refill after the load requests it,
+    // issue the younger store while the load is still pending, then release
+    // the refill.  The load expectation was captured from pre-store memory.
+    memblock::Environment younger_merge(argc, argv);
+    constexpr std::uint64_t younger_merge_line = base + 0x600;
+    younger_merge.memory().fill_incrementing(
+        younger_merge_line, 64, 0x21);
+    if (!younger_merge.reset() ||
+        !younger_merge.configure_stride_prefetch(false) ||
+        !younger_merge.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL phase=younger-merge-reset"
+                  << " reason=" << younger_merge.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction older_load{
+        .address = younger_merge_line + 0x18,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .sq = 0,
+        .pdest = 30,
+        .lane = 0,
+    };
+    younger_merge.expect_load(older_load);
+    const std::uint64_t younger_merge_requests =
+        younger_merge.tilelink_requests();
+    younger_merge.hold_dcache_response_at(younger_merge_line);
+    if (!younger_merge.enqueue_load(older_load) ||
+        !younger_merge.issue_load(older_load, 1024)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << younger_merge.cycle()
+                  << " phase=younger-merge-load-issue reason="
+                  << younger_merge.error() << '\n';
+        return 1;
+    }
+    bool refill_held = false;
+    for (unsigned cycle = 0; cycle < 2048; ++cycle) {
+        if (younger_merge.dcache_requests_covering_since(
+                younger_merge_line, younger_merge_requests) != 0 &&
+            younger_merge.dcache_response_held_at(younger_merge_line)) {
+            refill_held = true;
+            break;
+        }
+        if (!younger_merge.run_cycles(1)) {
+            break;
+        }
+    }
+    if (!refill_held || !younger_merge.scalar_load_pending(older_load)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << younger_merge.cycle()
+                  << " phase=younger-merge-refill-hold reason="
+                  << younger_merge.error()
+                  << " requests="
+                  << younger_merge.dcache_requests_covering_since(
+                         younger_merge_line, younger_merge_requests)
+                  << " held="
+                  << younger_merge.dcache_response_held_at(
+                         younger_merge_line)
+                  << " pending="
+                  << younger_merge.scalar_load_pending(older_load) << '\n';
+        return 1;
+    }
+    const memblock::StoreTransaction younger_store{
+        .address = younger_merge_line + 0x18,
+        .data = 0x8877665544332211ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 1,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    younger_merge.expect_store(younger_store);
+    if (!younger_merge.enqueue_store(younger_store, 0) ||
+        !younger_merge.issue_store_address(younger_store, 1024) ||
+        !younger_merge.issue_store_data(younger_store, 1024) ||
+        !younger_merge.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << younger_merge.cycle()
+                  << " phase=younger-merge-store-issue reason="
+                  << younger_merge.error()
+                  << " store_writebacks="
+                  << younger_merge.store_writebacks() << '\n';
+        return 1;
+    }
+    if (!younger_merge.release_held_dcache_response() ||
+        !younger_merge.run_until_load_writebacks(1, 4096) ||
+        !younger_merge.run_until_store_complete(4096) ||
+        !younger_merge.commit_store(younger_store, 4096)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << younger_merge.cycle()
+                  << " phase=younger-merge-completion reason="
+                  << younger_merge.error()
+                  << " load_writebacks="
+                  << younger_merge.writebacks()
+                  << " store_writebacks="
+                  << younger_merge.store_writebacks() << '\n';
+        return 1;
+    }
+
+    // The same ordering contract for a split misaligned load: the second part
+    // of the older load owns the cold-line MSHR, and a younger store that
+    // crosses the same boundary must not merge its byte into the older load's
+    // forwarded result.
+    memblock::Environment split_merge(argc, argv);
+    constexpr std::uint64_t split_merge_line = base + 0x700;
+    constexpr std::uint64_t split_merge_next = split_merge_line + 0x40;
+    split_merge.memory().fill_incrementing(
+        split_merge_line, 64, 0x90);
+    split_merge.memory().fill_incrementing(
+        split_merge_next, 64, 0x30);
+    if (!split_merge.reset() ||
+        !split_merge.enable_misaligned_accesses() ||
+        !split_merge.configure_stride_prefetch(false) ||
+        !split_merge.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL phase=split-merge-reset"
+                  << " reason=" << split_merge.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction split_warm{
+        .address = split_merge_line + 0x20,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .sq = 0,
+        .pdest = 40,
+        .lane = 0,
+    };
+    split_merge.expect_load(split_warm);
+    if (!split_merge.set_rob_head(split_warm.rob, split_warm.rob_flag) ||
+        !split_merge.enqueue_load(split_warm) ||
+        !split_merge.issue_load(split_warm, 1024) ||
+        !split_merge.run_until_load_writebacks(1, 4096) ||
+        !split_merge.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << split_merge.cycle()
+                  << " phase=split-merge-warm reason="
+                  << split_merge.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction split_older_load{
+        .address = split_merge_line + 0x3f,
+        .op = memblock::LoadOp::lw,
+        .rob = 1,
+        .lq = 1,
+        .sq = 0,
+        .pdest = 41,
+        .lane = 1,
+    };
+    split_merge.expect_load(split_older_load);
+    const std::uint64_t split_requests_before =
+        split_merge.tilelink_requests();
+    split_merge.hold_dcache_response_at(split_merge_next);
+    if (!split_merge.set_rob_head(
+            split_older_load.rob, split_older_load.rob_flag) ||
+        !split_merge.enqueue_load(split_older_load) ||
+        !split_merge.issue_load(split_older_load, 1024)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << split_merge.cycle()
+                  << " phase=split-merge-load-issue reason="
+                  << split_merge.error() << '\n';
+        return 1;
+    }
+    bool split_refill_held = false;
+    for (unsigned cycle = 0; cycle < 2048; ++cycle) {
+        if (split_merge.dcache_requests_covering_since(
+                split_merge_next, split_requests_before) != 0 &&
+            split_merge.dcache_response_held_at(split_merge_next)) {
+            split_refill_held = true;
+            break;
+        }
+        if (!split_merge.run_cycles(1)) {
+            break;
+        }
+    }
+    if (!split_refill_held ||
+        !split_merge.scalar_load_pending(split_older_load)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << split_merge.cycle()
+                  << " phase=split-merge-refill-hold reason="
+                  << split_merge.error()
+                  << " requests="
+                  << split_merge.dcache_requests_covering_since(
+                         split_merge_next, split_requests_before)
+                  << " held="
+                  << split_merge.dcache_response_held_at(split_merge_next)
+                  << " pending="
+                  << split_merge.scalar_load_pending(split_older_load)
+                  << '\n';
+        return 1;
+    }
+    const memblock::StoreTransaction split_younger_store{
+        .address = split_merge_line + 0x3f,
+        .data = 0x000000000000a55aULL,
+        .op = memblock::StoreOp::sh,
+        .rob = 2,
+        .sq = 0,
+        .address_lane = 1,
+        .data_lane = 0,
+        .expected_address_writeback_lane = 0,
+    };
+    split_merge.expect_store(split_younger_store);
+    if (!split_merge.enqueue_store(split_younger_store, 0) ||
+        !split_merge.issue_store_address(split_younger_store, 1024) ||
+        !split_merge.issue_store_data(split_younger_store, 1024) ||
+        !split_merge.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << split_merge.cycle()
+                  << " phase=split-merge-store-issue reason="
+                  << split_merge.error() << '\n';
+        return 1;
+    }
+    if (!split_merge.release_held_dcache_response() ||
+        !split_merge.run_until_load_writebacks(2, 4096) ||
+        !split_merge.run_until_store_complete(4096) ||
+        !split_merge.commit_store(split_younger_store, 4096)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                  << split_merge.cycle()
+                  << " phase=split-merge-completion reason="
+                  << split_merge.error()
+                  << " load_writebacks=" << split_merge.writebacks()
+                  << " store_writebacks="
+                  << split_merge.store_writebacks() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_SINGLE_LOAD_PASS"
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()

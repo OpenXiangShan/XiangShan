@@ -714,18 +714,66 @@ auto Environment::Impl::issue_load_batch(const std::vector<LoadTransaction> &tra
     return false;
 }
 
+namespace {
+
+void trace_load_expectation(
+    const SparseMemory &memory, const LoadTransaction &transaction,
+    std::uint64_t expected, const char *source)
+{
+    const std::uint64_t address =
+        transaction.oracle_address.value_or(transaction.address);
+    const unsigned bytes = 1U << (static_cast<unsigned>(transaction.op) & 3U);
+    if (!debug_trace::enabled_for(transaction.address, bytes) &&
+        !debug_trace::enabled_for(address, bytes)) {
+        return;
+    }
+    std::uint8_t window[16]{};
+    for (unsigned index = 0; index < sizeof(window); ++index) {
+        window[index] = memory.read_byte(address + index);
+    }
+    std::uint8_t line[64]{};
+    std::uint8_t next_line[64]{};
+    const std::uint64_t line_base = address & ~std::uint64_t{63};
+    for (unsigned index = 0; index < sizeof(line); ++index) {
+        line[index] = memory.read_byte(line_base + index);
+        next_line[index] = memory.read_byte(line_base + 64 + index);
+    }
+    std::ostringstream text;
+    text << "load-expect source=" << source
+         << " vaddr=0x" << std::hex << transaction.address
+         << " paddr=0x" << address
+         << " op=" << std::dec << static_cast<unsigned>(transaction.op)
+         << " rob=" << static_cast<unsigned>(transaction.rob)
+         << ':' << transaction.rob_flag
+         << " lq=" << static_cast<unsigned>(transaction.lq)
+         << ':' << transaction.lq_flag
+         << " sq=" << static_cast<unsigned>(transaction.sq)
+         << ':' << transaction.sq_flag
+         << " lane=" << transaction.lane
+         << " expected=0x" << std::hex << expected
+         << " bytes=" << debug_trace::hex_bytes(window, sizeof(window))
+         << " line=0x" << line_base << ':'
+         << debug_trace::hex_bytes(line, sizeof(line))
+         << " next=0x" << (line_base + 64) << ':'
+         << debug_trace::hex_bytes(next_line, sizeof(next_line));
+    debug_trace::emit(text.str());
+}
+
+} // namespace
+
 auto Environment::Impl::expect_load(const LoadTransaction &transaction)  -> void
 {
-    scoreboard_.expect(
-        transaction,
-        memory_.expected_load(
-            transaction.oracle_address.value_or(transaction.address),
-            transaction.op));
+    const std::uint64_t expected = memory_.expected_load(
+        transaction.oracle_address.value_or(transaction.address),
+        transaction.op);
+    trace_load_expectation(memory_, transaction, expected, "computed");
+    scoreboard_.expect(transaction, expected);
 }
 
 auto Environment::Impl::expect_load_data(const LoadTransaction &transaction,
     std::uint64_t data)  -> void
 {
+    trace_load_expectation(memory_, transaction, data, "explicit");
     scoreboard_.expect(transaction, data);
 }
 

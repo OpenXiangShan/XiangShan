@@ -2,6 +2,42 @@
 
 namespace memblock {
 
+namespace {
+
+void trace_reference_store(
+    const SparseMemory &memory, const char *kind, std::uint64_t address,
+    unsigned bytes, std::uint64_t data, unsigned rob, bool rob_flag,
+    unsigned sq, bool sq_flag, const char *extra)
+{
+    if (!debug_trace::enabled_for(address, bytes)) {
+        return;
+    }
+    std::uint8_t window[16]{};
+    for (unsigned index = 0; index < sizeof(window); ++index) {
+        window[index] = memory.read_byte(address + index);
+    }
+    const std::uint64_t line_base = address & ~std::uint64_t{63};
+    std::uint8_t line[64]{};
+    for (unsigned index = 0; index < sizeof(line); ++index) {
+        line[index] = memory.read_byte(line_base + index);
+    }
+    std::ostringstream text;
+    text << kind << " addr=0x" << std::hex << address
+         << " bytes=" << std::dec << bytes
+         << " data=0x" << std::hex << data
+         << " rob=" << std::dec << rob << ':' << rob_flag
+         << " sq=" << sq << ':' << sq_flag
+         << " window=" << debug_trace::hex_bytes(window, sizeof(window))
+         << " line=0x" << std::hex << line_base << ':'
+         << debug_trace::hex_bytes(line, sizeof(line));
+    if (extra != nullptr && extra[0] != '\0') {
+        text << ' ' << extra;
+    }
+    debug_trace::emit(text.str());
+}
+
+} // namespace
+
 auto Environment::Impl::run_until_store_complete(unsigned timeout)  -> bool
 {
     for (unsigned cycle = 0; cycle < timeout && !store_scoreboard_.done(); ++cycle) {
@@ -388,6 +424,10 @@ auto Environment::Impl::commit_store(const StoreTransaction &transaction,
                 ? 0
                 : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
     }
+    trace_reference_store(
+        memory_, "store-commit", address, bytes, transaction.data,
+        transaction.rob, transaction.rob_flag, transaction.sq,
+        transaction.sq_flag, "");
     return true;
 }
 
@@ -442,6 +482,20 @@ auto Environment::Impl::commit_vector_store(const VectorMemoryTransaction &trans
                 element_address + byte,
                 transaction.data[element * element_bytes + byte]);
         }
+        std::ostringstream extra;
+        extra << "vector=true eew=" << vector_data_eew(transaction)
+              << " element=" << element
+              << " active=" << std::hex << active;
+        std::uint64_t element_data = 0;
+        for (unsigned byte = 0; byte < element_bytes; ++byte) {
+            element_data |= std::uint64_t{
+                transaction.data[element * element_bytes + byte]}
+                << (8 * byte);
+        }
+        trace_reference_store(
+            memory_, "vstore-commit", element_address, element_bytes,
+            element_data, transaction.rob, transaction.rob_flag,
+            transaction.sq, transaction.sq_flag, extra.str().c_str());
     }
     return true;
 }
@@ -464,6 +518,10 @@ auto Environment::Impl::record_committed_store(const StoreTransaction &transacti
                 ? 0
                 : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
     }
+    trace_reference_store(
+        memory_, "store-record", address, bytes, transaction.data,
+        transaction.rob, transaction.rob_flag, transaction.sq,
+        transaction.sq_flag, "");
 }
 
 auto Environment::Impl::record_atomic_result(std::uint64_t address,
@@ -474,6 +532,9 @@ auto Environment::Impl::record_atomic_result(std::uint64_t address,
             address + byte,
             static_cast<std::uint8_t>(value >> (8 * byte)));
     }
+    trace_reference_store(
+        memory_, "atomic-result", address, 8, value, 0, false, 0, false,
+        "");
 }
 
 auto Environment::Impl::record_committed_vector_store(const VectorMemoryTransaction &transaction)  -> void
@@ -491,6 +552,16 @@ auto Environment::Impl::record_committed_vector_store(const VectorMemoryTransact
                 address + byte,
                 transaction.data[element * element_bytes + byte]);
         }
+        std::uint64_t element_data = 0;
+        for (unsigned byte = 0; byte < element_bytes; ++byte) {
+            element_data |= std::uint64_t{
+                transaction.data[element * element_bytes + byte]}
+                << (8 * byte);
+        }
+        trace_reference_store(
+            memory_, "vstore-record", address, element_bytes, element_data,
+            transaction.rob, transaction.rob_flag, transaction.sq,
+            transaction.sq_flag, "");
     }
 }
 

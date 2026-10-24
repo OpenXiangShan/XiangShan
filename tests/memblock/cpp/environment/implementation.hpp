@@ -8,6 +8,7 @@
 #include "feedback_monitor.hpp"
 #include "scoreboards.hpp"
 #include "queue_accounting.hpp"
+#include "debug_trace.hpp"
 
 namespace memblock {
 #include "dcache_agent.inc"
@@ -1136,7 +1137,42 @@ private:
                 debug_mshr_forward_data_[lane][byte] = debug_signal(
                     dut_, mshr_prefix + "forwardData_" + data_suffix);
             }
+            const std::string sq_prefix =
+                "MemBlock_top.MemBlock.inner_lsq.storeQueue.";
+            const auto sq_suffix = lane == 0
+                ? std::string{}
+                : std::string("_") + std::to_string(lane);
+            debug_sq_forward_mask1_[lane] =
+                debug_signal(dut_, sq_prefix + "forwardMask1" + sq_suffix);
+            debug_sq_forward_mask2_[lane] =
+                debug_signal(dut_, sq_prefix + "forwardMask2" + sq_suffix);
+            debug_sq_need_forward_[lane] =
+                debug_signal(dut_, sq_prefix + "needForward" + sq_suffix);
         }
+        const std::string sq_prefix =
+            "MemBlock_top.MemBlock.inner_lsq.storeQueue.";
+        debug_sq_deq0_flag_ =
+            debug_signal(dut_, sq_prefix + "deqPtrExt_0_flag");
+        debug_sq_deq0_value_ =
+            debug_signal(dut_, sq_prefix + "deqPtrExt_0_value");
+        debug_sq_deq1_flag_ =
+            debug_signal(dut_, sq_prefix + "deqPtrExt_1_flag");
+        debug_sq_deq1_value_ =
+            debug_signal(dut_, sq_prefix + "deqPtrExt_1_value");
+        debug_sq_enq_flag_ =
+            debug_signal(dut_, sq_prefix + "enqPtrExt_0_flag");
+        debug_sq_enq_value_ =
+            debug_signal(dut_, sq_prefix + "enqPtrExt_0_value");
+        debug_sq_cmt_flag_ =
+            debug_signal(dut_, sq_prefix + "cmtPtrExt_0_flag");
+        debug_sq_cmt_value_ =
+            debug_signal(dut_, sq_prefix + "cmtPtrExt_0_value");
+        debug_sq_allocated_24_ =
+            debug_signal(dut_, sq_prefix + "allocated_24");
+        debug_sq_committed_24_ =
+            debug_signal(dut_, sq_prefix + "committed_24");
+        debug_sq_completed_24_ =
+            debug_signal(dut_, sq_prefix + "completed_24");
         const std::string lq_exception_prefix =
             "MemBlock_top.MemBlock.inner_lsq.loadQueue.exceptionBuffer.";
         debug_lq_exception_valid_ = debug_signal(
@@ -1328,6 +1364,22 @@ private:
                      << " from_d=" << debug_u(debug_s2_from_d_[lane])
                      << " miss=" << debug_u(debug_s2_miss_[lane])
                      << " full_fwd=" << debug_u(debug_s2_full_fwd_[lane])
+                     << " sq_deq0=" << debug_u(debug_sq_deq0_flag_) << ':'
+                     << debug_u(debug_sq_deq0_value_)
+                     << " sq_deq1=" << debug_u(debug_sq_deq1_flag_) << ':'
+                     << debug_u(debug_sq_deq1_value_)
+                     << " sq_enq=" << debug_u(debug_sq_enq_flag_) << ':'
+                     << debug_u(debug_sq_enq_value_)
+                     << " sq_cmt=" << debug_u(debug_sq_cmt_flag_) << ':'
+                     << debug_u(debug_sq_cmt_value_)
+                     << " sq24=" << debug_u(debug_sq_allocated_24_) << ','
+                     << debug_u(debug_sq_committed_24_) << ','
+                     << debug_u(debug_sq_completed_24_)
+                     << " sq_fwd1=0x" << std::hex
+                     << debug_u(debug_sq_forward_mask1_[lane])
+                     << " sq_fwd2=0x" << debug_u(debug_sq_forward_mask2_[lane])
+                     << std::dec
+                     << " sq_need=" << debug_u(debug_sq_need_forward_[lane])
                      << " d_data="
                      << debug_byte_array(debug_s2_d_data_[lane]);
                 emit(text.str());
@@ -1469,6 +1521,20 @@ private:
     std::array<ReadPort *, kScalarLoadLanes> debug_s2_from_d_{};
     std::array<ReadPort *, kScalarLoadLanes> debug_s2_miss_{};
     std::array<ReadPort *, kScalarLoadLanes> debug_s2_full_fwd_{};
+    std::array<ReadPort *, kScalarLoadLanes> debug_sq_forward_mask1_{};
+    std::array<ReadPort *, kScalarLoadLanes> debug_sq_forward_mask2_{};
+    std::array<ReadPort *, kScalarLoadLanes> debug_sq_need_forward_{};
+    ReadPort *debug_sq_deq0_flag_ = nullptr;
+    ReadPort *debug_sq_deq0_value_ = nullptr;
+    ReadPort *debug_sq_deq1_flag_ = nullptr;
+    ReadPort *debug_sq_deq1_value_ = nullptr;
+    ReadPort *debug_sq_enq_flag_ = nullptr;
+    ReadPort *debug_sq_enq_value_ = nullptr;
+    ReadPort *debug_sq_cmt_flag_ = nullptr;
+    ReadPort *debug_sq_cmt_value_ = nullptr;
+    ReadPort *debug_sq_allocated_24_ = nullptr;
+    ReadPort *debug_sq_committed_24_ = nullptr;
+    ReadPort *debug_sq_completed_24_ = nullptr;
     std::array<std::array<ReadPort *, 16>, kScalarLoadLanes> debug_s2_d_data_{};
     std::array<ReadPort *, kScalarLoadLanes> debug_s3_valid_{};
     std::array<ReadPort *, kScalarLoadLanes> debug_s3_paddr_{};

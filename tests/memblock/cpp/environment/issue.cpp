@@ -243,9 +243,63 @@ auto Environment::Impl::enqueue_vector(const VectorMemoryTransaction &transactio
     return check_components();
 }
 
+namespace {
+
+void trace_vector_issue(const VectorMemoryTransaction &transaction)
+{
+    if (!transaction.store) {
+        return;
+    }
+    const unsigned element_bytes = 1U << vector_data_eew(transaction);
+    const unsigned elements = 16U >> vector_data_eew(transaction);
+    const std::uint16_t active = active_vector_elements(transaction);
+    for (unsigned element = 0; element < elements; ++element) {
+        if (((active >> element) & 1U) == 0) {
+            continue;
+        }
+        const std::uint64_t address =
+            vector_element_address(transaction, element);
+        if (!debug_trace::enabled_for(address, element_bytes)) {
+            continue;
+        }
+        std::uint64_t element_data = 0;
+        for (unsigned byte = 0; byte < element_bytes; ++byte) {
+            element_data |= std::uint64_t{
+                transaction.data[element * element_bytes + byte]}
+                << (8 * byte);
+        }
+        std::ostringstream text;
+        text << "vstore-issue addr=0x" << std::hex << address
+             << " bytes=" << std::dec << element_bytes
+             << " data=0x" << std::hex << element_data
+             << " rob=" << std::dec
+             << static_cast<unsigned>(transaction.rob)
+             << ':' << transaction.rob_flag
+             << " sq=" << static_cast<unsigned>(transaction.sq)
+             << ':' << transaction.sq_flag
+             << " element=" << element
+             << " uop=" << static_cast<unsigned>(transaction.vuop_idx)
+             << '/' << static_cast<unsigned>(transaction.flow_num)
+             << " vl=" << static_cast<unsigned>(transaction.vl)
+             << " vstart=" << static_cast<unsigned>(transaction.vstart)
+             << " mask=0x" << std::hex << active
+             << " eew=" << std::dec
+             << static_cast<unsigned>(transaction.eew)
+             << " vsew=" << static_cast<unsigned>(
+                    vector_vsew(transaction))
+             << " vlmul=" << static_cast<unsigned>(transaction.vlmul)
+             << " addressing=" << static_cast<unsigned>(
+                    transaction.addressing);
+        debug_trace::emit(text.str());
+    }
+}
+
+} // namespace
+
 auto Environment::Impl::issue_vector(const VectorMemoryTransaction &transaction,
     unsigned timeout)  -> bool
 {
+    trace_vector_issue(transaction);
     const generated::VectorMemoryIssue issue =
         make_vector_memory_issue(transaction);
 
@@ -394,9 +448,39 @@ auto Environment::Impl::issue_load_vector_pair(const LoadTransaction &load,
     return false;
 }
 
+namespace {
+
+void trace_store_issue(
+    const char *kind, const StoreTransaction &transaction)
+{
+    const std::uint64_t address =
+        transaction.oracle_address.value_or(transaction.address);
+    const unsigned bytes = scalar_store_bytes(transaction.op);
+    if (!debug_trace::enabled_for(transaction.address, bytes) &&
+        !debug_trace::enabled_for(address, bytes)) {
+        return;
+    }
+    std::ostringstream text;
+    text << kind << " vaddr=0x" << std::hex << transaction.address
+         << " paddr=0x" << address
+         << " op=" << std::dec << static_cast<unsigned>(transaction.op)
+         << " bytes=" << bytes
+         << " data=0x" << std::hex << transaction.data
+         << " rob=" << std::dec << static_cast<unsigned>(transaction.rob)
+         << ':' << transaction.rob_flag
+         << " sq=" << static_cast<unsigned>(transaction.sq)
+         << ':' << transaction.sq_flag
+         << " address_lane=" << transaction.address_lane
+         << " data_lane=" << transaction.data_lane;
+    debug_trace::emit(text.str());
+}
+
+} // namespace
+
 auto Environment::Impl::issue_store_address(const StoreTransaction &transaction,
     unsigned timeout)  -> bool
 {
+    trace_store_issue("store-address-issue", transaction);
     if (!scalar_immediate_is_valid(transaction.immediate)) {
         error_.record("scalar store immediate exceeds signed 12-bit range");
         return false;
@@ -900,6 +984,7 @@ auto Environment::Impl::run_until_uncache_drained(std::uint64_t request_target,
 auto Environment::Impl::issue_store_data(const StoreTransaction &transaction,
     unsigned timeout)  -> bool
 {
+    trace_store_issue("store-data-issue", transaction);
     generated::ScalarStoreIssue issue;
     issue.fu_type = kFuTypeStore;
     issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);

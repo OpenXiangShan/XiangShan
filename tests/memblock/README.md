@@ -432,7 +432,22 @@ export MEMBLOCK_MEM_DIRECT_TRACE_APPEND=1
 
 The trace includes selected load/refill, StoreMisalignBuffer, and load-exception
 events. A missing internal name disables only that diagnostic field. Use a
-unique trace path for each concurrent simulation.
+unique trace path for each concurrent simulation. The internal trace is compiled
+only when the harness is built with `MEMBLOCK_MEM_DIRECT_DEBUG`.
+
+The independent reference-memory transcript is always available and needs no
+internal signal. Set a half-open address interval to log every load
+expectation, scalar/vector/atomic store update, and intersecting store issue,
+together with the surrounding reference line:
+
+```sh
+export MEMBLOCK_TRACE_ADDR_LO=0x8027afc0
+export MEMBLOCK_TRACE_ADDR_HI=0x8027b040
+```
+
+It prints to stderr and changes no stimulus, cycle, random stream, or oracle.
+Use it first when a data mismatch needs a store/load history before enabling
+the internal trace.
 
 Before calling a failure an RTL bug, replay it deterministically, minimize it
 without weakening the oracle, and exclude driver, manager, reference-model,
