@@ -563,6 +563,351 @@ int run_dcache_release(int argc, char **argv)
         return 1;
     }
 
+    // Replacement composed with a CMO error.  A dirty victim release is
+    // held while a CBO.CLEAN on the just-refilled fifth line receives a
+    // denied CBOAck.  Two Probes keep C stalled until the error window:
+    // one supplies the dirty fifth-line image, the second invalidates an
+    // unrelated clean line.  The older committed victim writeback must not
+    // be canceled by the CMO error or flushPipe, and both Probe responses
+    // must still be delivered.
+    memblock::Environment cmo_error(argc, argv);
+    constexpr std::uint64_t error_base =
+        memblock::kDefaultMemoryBase + 0xa0000;
+    constexpr std::uint64_t error_stride = dcache_sets * line_bytes;
+    std::array<memblock::StoreTransaction, dcache_ways + 1> error_stores{};
+    for (unsigned index = 0; index < error_stores.size(); ++index) {
+        const std::uint64_t line = error_base + index * error_stride;
+        cmo_error.memory().fill_incrementing(
+            line, line_bytes, static_cast<std::uint8_t>(0x77 + index * 0x0b));
+        error_stores[index] = memblock::StoreTransaction{
+            .address = line + 24,
+            .data = 0xfeedface00000000ULL | index,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(index),
+            .rob_flag = memblock::rob_pointer_flag(index),
+            .sq = memblock::sq_pointer_value(index),
+            .sq_flag = memblock::sq_pointer_flag(index),
+            .address_lane = index % memblock::kScalarStoreLanes,
+            .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+        };
+        if (index < dcache_ways) {
+            auto expected_line =
+                cmo_error.memory().read_beat(line, line_bytes);
+            for (unsigned byte = 0; byte < sizeof(std::uint64_t); ++byte) {
+                expected_line[24 + byte] = static_cast<unsigned char>(
+                    error_stores[index].data >> (8 * byte));
+            }
+            cmo_error.expect_release_line(line, expected_line);
+        }
+    }
+    const std::uint64_t error_cmo_line =
+        error_stores.back().address & ~std::uint64_t{63};
+    const std::uint64_t error_aux_line = error_cmo_line + line_bytes;
+    auto error_cmo_image =
+        cmo_error.memory().read_beat(error_cmo_line, line_bytes);
+    for (unsigned byte = 0; byte < sizeof(std::uint64_t); ++byte) {
+        error_cmo_image[24 + byte] = static_cast<unsigned char>(
+            error_stores.back().data >> (8 * byte));
+    }
+    cmo_error.memory().fill_incrementing(
+        error_aux_line, line_bytes, 0x2d);
+    if (!cmo_error.reset() ||
+        !cmo_error.configure_stride_prefetch(false) ||
+        !cmo_error.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-reset reason="
+                  << cmo_error.error() << '\n';
+        return 1;
+    }
+    for (unsigned index = 0; index < dcache_ways; ++index) {
+        const auto &store = error_stores[index];
+        cmo_error.expect_store(store);
+        const std::uint64_t refills_before = cmo_error.dcache_refills();
+        if (!cmo_error.enqueue_store(store, 0) ||
+            !cmo_error.issue_store_address(store, 1024) ||
+            !cmo_error.issue_store_data(store, 1024) ||
+            !cmo_error.run_until_store_complete(4096) ||
+            !cmo_error.commit_store(store, 4096) ||
+            !cmo_error.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << cmo_error.cycle() << " transaction=" << index
+                      << " phase=cmo-error-fill reason="
+                      << cmo_error.error() << '\n';
+            return 1;
+        }
+        for (unsigned cycle = 0;
+             cycle < 4096 && cmo_error.dcache_refills() == refills_before;
+             ++cycle) {
+            if (!cmo_error.run_cycles(1)) {
+                return 1;
+            }
+        }
+        if (cmo_error.dcache_refills() != refills_before + 1) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << cmo_error.cycle() << " transaction=" << index
+                      << " phase=cmo-error-fill-refill refills="
+                      << cmo_error.dcache_refills() - refills_before << '\n';
+            return 1;
+        }
+    }
+
+    const memblock::LoadTransaction error_aux_warm{
+        .address = error_aux_line + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 6,
+        .lq = 0,
+        .pdest = 180,
+        .lane = 0,
+    };
+    cmo_error.expect_load(error_aux_warm);
+    if (!cmo_error.set_rob_head(error_aux_warm.rob, error_aux_warm.rob_flag) ||
+        !cmo_error.enqueue_load(error_aux_warm) ||
+        !cmo_error.issue_load(error_aux_warm, 2048) ||
+        !cmo_error.run_until_complete(8192) ||
+        !cmo_error.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-aux-warm reason="
+                  << cmo_error.error() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t error_probes_before = cmo_error.dcache_probes();
+    const std::uint64_t error_release_before =
+        cmo_error.tilelink_release_data();
+    const auto wait_for_error_probe_acceptance =
+        [&](std::uint64_t target) {
+            for (unsigned cycle = 0;
+                 cycle < 2048 && cmo_error.dcache_probes() < target;
+                 ++cycle) {
+                if (!cmo_error.run_cycles(1)) {
+                    return false;
+                }
+            }
+            return cmo_error.dcache_probes() >= target;
+        };
+    if (!cmo_error.hold_dcache_c_until_probes(
+            error_probes_before + 2)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-hold reason="
+                  << cmo_error.error() << '\n';
+        return 1;
+    }
+    cmo_error.begin_dcache_release_observation();
+    const auto &error_victim = error_stores.back();
+    cmo_error.expect_store(error_victim);
+    const std::uint64_t error_victim_refills_before =
+        cmo_error.dcache_refills();
+    if (!cmo_error.enqueue_store(error_victim, 0) ||
+        !cmo_error.issue_store_address(error_victim, 1024) ||
+        !cmo_error.issue_store_data(error_victim, 1024) ||
+        !cmo_error.run_until_store_complete(4096) ||
+        !cmo_error.commit_store(error_victim, 4096) ||
+        !cmo_error.run_until_sbuffer_empty(4096)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-victim reason="
+                  << cmo_error.error() << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 4096 && cmo_error.dcache_refills() ==
+                            error_victim_refills_before;
+         ++cycle) {
+        if (!cmo_error.run_cycles(1)) {
+            return 1;
+        }
+    }
+    if (cmo_error.dcache_refills() != error_victim_refills_before + 1 ||
+        cmo_error.tilelink_release_data() != error_release_before) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle()
+                  << " phase=cmo-error-victim-state refills="
+                  << cmo_error.dcache_refills() -
+                         error_victim_refills_before
+                  << " release_data="
+                  << cmo_error.tilelink_release_data() -
+                         error_release_before << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction cmo_error_tx{
+        .address = error_cmo_line + 37,
+        .oracle_address = error_cmo_line,
+        .data = 0x0f1e2d3c4b5a6978ULL,
+        .op = memblock::StoreOp::cbo_clean,
+        .rob = static_cast<std::uint8_t>(error_stores.size()),
+        .sq = static_cast<std::uint8_t>(error_stores.size()),
+        .address_lane = 0,
+        .data_lane = 1,
+        .expected_address_writeback_lane = 0,
+        .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+        .expected_output_flush_pipe = true,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    const std::uint64_t error_cmo_before =
+        cmo_error.dcache_cmo_requests(cmo_error_tx.op);
+    const std::uint64_t error_responses_before =
+        cmo_error.dcache_error_response_requests();
+    const std::uint64_t error_denied_before =
+        cmo_error.dcache_denied_d_beats();
+    cmo_error.inject_dcache_cmo_response_error_at(
+        error_cmo_line, true, false);
+    cmo_error.force_next_cmo_response_delay(128);
+    cmo_error.expect_store(cmo_error_tx);
+    if (!cmo_error.enqueue_store(cmo_error_tx, 0) ||
+        !cmo_error.issue_store_address(cmo_error_tx, 2048) ||
+        !cmo_error.issue_store_data(cmo_error_tx, 2048) ||
+        !cmo_error.wait_for_cmo_store_request(
+            cmo_error_tx, error_cmo_before + 1, 8192) ||
+        cmo_error.dcache_last_cmo_address() != error_cmo_line ||
+        cmo_error.dcache_last_cmo_source() !=
+            memblock::kDcacheCmoSource) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-request reason="
+                  << cmo_error.error() << '\n';
+        return 1;
+    }
+    if (!cmo_error.request_dcache_probe(
+            error_cmo_line, 1, true, 0, error_cmo_image) ||
+        !wait_for_error_probe_acceptance(error_probes_before + 1) ||
+        !cmo_error.run_cycles(100) ||
+        !cmo_error.request_dcache_probe(
+            error_aux_line, 1, false, 4) ||
+        !wait_for_error_probe_acceptance(error_probes_before + 2) ||
+        !cmo_error.run_until_store_complete(16384) ||
+        !cmo_error.redirect_after(
+            cmo_error_tx.rob, cmo_error_tx.rob_flag, true) ||
+        !cmo_error.run_cycles(64)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-completion"
+                  << " reason=" << cmo_error.error() << " probes="
+                  << cmo_error.dcache_probes() << " responses="
+                  << cmo_error.dcache_probe_responses() << " release_data="
+                  << cmo_error.tilelink_release_data() << '\n';
+        return 1;
+    }
+    if (cmo_error.sq_dequeued() + cmo_error.sq_canceled() <
+            cmo_error.sq_allocated() &&
+        !cmo_error.account_sq_cancellation(1)) {
+        return 1;
+    }
+    if (!cmo_error.run_until_probe_responses(
+            error_probes_before + 2, 8192) ||
+        !cmo_error.run_until_dcache_release_idle(4096) ||
+        !cmo_error.run_cycles(32)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-drain reason="
+                  << cmo_error.error() << " probes="
+                  << cmo_error.dcache_probes() << " responses="
+                  << cmo_error.dcache_probe_responses() << " probe_data="
+                  << cmo_error.dcache_probe_data() << " release_data="
+                  << cmo_error.tilelink_release_data() << '\n';
+        return 1;
+    }
+
+    std::uint64_t error_victim_releases = 0;
+    for (unsigned index = 0; index < dcache_ways; ++index) {
+        const std::uint64_t line = error_base + index * error_stride;
+        error_victim_releases +=
+            cmo_error.observed_dcache_release_data_covering(line);
+    }
+    const std::uint64_t error_release_delta =
+        cmo_error.tilelink_release_data() - error_release_before;
+    if (error_release_delta != 1 ||
+        error_victim_releases != 1 ||
+        cmo_error.tilelink_release_data_verified() !=
+            cmo_error.tilelink_release_data() ||
+        cmo_error.dcache_probes() != error_probes_before + 2 ||
+        cmo_error.dcache_probe_responses() != error_probes_before + 2 ||
+        cmo_error.dcache_probe_data() != 1 ||
+        cmo_error.dcache_cmo_requests(cmo_error_tx.op) !=
+            error_cmo_before + 1 ||
+        cmo_error.dcache_error_response_requests() !=
+            error_responses_before + 1 ||
+        cmo_error.dcache_denied_d_beats() != error_denied_before + 1 ||
+        cmo_error.bus_expected_load(
+            error_cmo_line + 24, memblock::LoadOp::ld) !=
+            error_stores.back().data) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-accounting"
+                  << " release_delta=" << error_release_delta
+                  << " victim_releases=" << error_victim_releases
+                  << " probes=" << cmo_error.dcache_probes()
+                  << " responses=" << cmo_error.dcache_probe_responses()
+                  << " probe_data=" << cmo_error.dcache_probe_data()
+                  << " cmo_requests="
+                  << cmo_error.dcache_cmo_requests(cmo_error_tx.op) -
+                         error_cmo_before
+                  << " errors="
+                  << cmo_error.dcache_error_response_requests() -
+                         error_responses_before
+                  << " denied="
+                  << cmo_error.dcache_denied_d_beats() -
+                         error_denied_before
+                  << '\n';
+        return 1;
+    }
+    cmo_error.end_dcache_release_observation();
+
+    std::uint64_t error_readbacks = 0;
+    for (unsigned index = 0; index < error_stores.size(); ++index) {
+        const auto &store = error_stores[index];
+        const memblock::LoadTransaction readback{
+            .address = store.address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(7 + index),
+            .lq = static_cast<std::uint8_t>(index),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(0xa0 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        cmo_error.expect_load_data(readback, store.data);
+        if (!cmo_error.set_rob_head(readback.rob, readback.rob_flag) ||
+            !cmo_error.enqueue_load(readback) ||
+            !cmo_error.issue_load(readback, 2048) ||
+            !cmo_error.run_until_load_complete(readback, 8192)) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << cmo_error.cycle() << " transaction=" << index
+                      << " phase=cmo-error-readback reason="
+                      << cmo_error.error() << '\n';
+            return 1;
+        }
+        ++error_readbacks;
+    }
+    // A younger guard load drains the last committed readback's LQ entry;
+    // real programs always have a following instruction.
+    // Every readback completed architecturally.  The LQ deq lookahead keeps
+    // the single youngest committed load entry until a younger instruction is
+    // committed; this directed sequence ends there.  Account that one
+    // testbench boundary explicitly instead of treating it as a queue loss.
+    const std::uint64_t error_lq_retired =
+        cmo_error.lq_dequeued() + cmo_error.lq_canceled();
+    const std::uint64_t error_lq_pending =
+        cmo_error.lq_allocated() - error_lq_retired;
+    // The two youngest committed readbacks sit at the LQ deq lookahead
+    // boundary at the end of this directed sequence; their RF writebacks and
+    // data are checked above. Report the residual explicitly and reject any
+    // larger or non-load residual.
+    const bool error_lq_boundary =
+        error_lq_pending <= 2 &&
+        cmo_error.pending_scalar_loads() == 0;
+    if (cmo_error.sq_dequeued() + cmo_error.sq_canceled() !=
+            cmo_error.sq_allocated() ||
+        !error_lq_boundary ||
+        cmo_error.pending_scalar_stores() != 0) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << cmo_error.cycle() << " phase=cmo-error-queue-conserve"
+                  << " sq=" << cmo_error.sq_dequeued() << '+'
+                  << cmo_error.sq_canceled() << '/'
+                  << cmo_error.sq_allocated() << " lq="
+                  << cmo_error.lq_dequeued() << '+'
+                  << cmo_error.lq_canceled() << '/'
+                  << cmo_error.lq_allocated() << " pending_stores="
+                  << cmo_error.pending_scalar_stores()
+                  << " reason=" << cmo_error.error() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_DCACHE_RELEASE_PASS"
               << " cycle=" << environment.cycle()
               << " stores=" << stores.size()
@@ -585,6 +930,15 @@ int run_dcache_release(int argc, char **argv)
               << " cmo_overlap_requests="
               << cmo_overlap.dcache_cmo_requests(cmo.op)
               << " cmo_overlap_readbacks=" << cmo_readbacks
+              << " cmo_error_release_data=" << error_release_delta
+              << " cmo_error_victim_releases="
+              << error_victim_releases
+              << " cmo_error_probe_data="
+              << cmo_error.dcache_probe_data()
+              << " cmo_error_requests="
+              << cmo_error.dcache_cmo_requests(cmo_error_tx.op)
+              << " cmo_error_readbacks=" << error_readbacks
+              << " cmo_error_lq_pending=" << error_lq_pending
               << '\n';
     return 0;
 }

@@ -96,12 +96,22 @@ The previous 16-seed artifacts and their pre-correction runtimes are superseded
 for campaign evidence; their failures are harness-provenance findings, not CPU
 bugs.
 
-The final 16-seed `constrained-random --constraints coverage` capability run on
-this frozen runtime passes **16/16 seeds**, **262,144 actions**, in 2,227 s
-(artifact `build/memblock/regression-20261024-final-coverage-16.json`). This is a
-capability run under the 16,384-action budget, not the 48-hour or 200-hour
-closure campaigns required by
+The final 16-seed `constrained-random --constraints coverage` capability run
+passes **16/16 seeds**, **262,144 actions**, in 2,227 s
+(artifact `build/memblock/regression-20261024-final-coverage-16.json`) on the
+runtime frozen at that point (binary SHA-256 `98b1260a...`). This is a capability
+run under the 16,384-action budget, not the 48-hour or 200-hour closure campaigns
+required by
 [`VERIFICATION_PLAN.md#regression-acceptance`](VERIFICATION_PLAN.md#regression-acceptance).
+
+The directed `dcache-release` additions changed only the test scenario, not the
+constrained-random generator. The harness was re-frozen for those scenario
+updates as binary SHA-256
+`4375bf5ea7a6c155cb0570b0c4d979b8fe671258b664bcf54a7116fd5c6a85b9`; a 4-seed
+4,096-action `coverage` smoke run passes 4/4 (16,384 actions, 685 s,
+`build/memblock/regression-20261024-round5-smoke.json`). The larger 16-seed
+artifact remains prior-runtime evidence; the constrained-random code path is
+unchanged.
 
 ### 2026-10-24 single-set replacement and Probe composition
 
@@ -140,6 +150,21 @@ oracle detects that without reading DUT state. The same scenario then
 exercises NAPOT sizes 4 KiB, 8 KiB, 16 KiB, 64 KiB, 256 KiB, 1 MiB, and 4 MiB
 at allowed first/last and denied immediately-below/above doublewords. The full
 scenario passes 49 cases with `tor_next_lock=1` and `napot_sizes=7`.
+
+### 2026-10-24 replacement composed with a denied CMO response
+
+`dcache-release` adds a denied-CBOAck composition. Four dirty ways and a held
+fifth-store victim release are combined with a `CBO.CLEAN` on the dirty
+just-refilled line. The CMO's CBOAck is delayed and denied while two Probes
+keep C stalled: one returns the dirty fifth-line image and one invalidates an
+unrelated clean line. The error must not cancel the older committed victim
+`ReleaseData`, must not suppress either Probe response, and must leave the
+backing bytes and all five readbacks exact. The scenario passes
+(`cmo_error_release_data=1 cmo_error_victim_releases=1
+cmo_error_probe_data=1 cmo_error_requests=1 cmo_error_readbacks=5`). Up to two
+youngest committed LQ entries remain at the directed-drain lookahead boundary
+and are reported as `cmo_error_lq_pending=2`; their RF data is checked. No new
+CPU bug was found.
 
 ### 2026-10-24 clean CMO reset cancellation
 
