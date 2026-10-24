@@ -37,20 +37,14 @@ bool MixedScenario::observe_action(ActionWindow &window)
             requests_before, environment.tilelink_requests());
     }
     if (probe_candidate && constraints.probes_per_mille != 0 &&
-        (probe_coverage_incomplete() ||
-            random() % 1000 < constraints.probes_per_mille)) {
+        random() % 1000 < constraints.probes_per_mille) {
         phase = "random-probe";
-        const std::optional<unsigned> missing_probe_cross =
-            constraint_coverage.first_missing_probe_cross(constraints);
-        const bool to_b = missing_probe_cross
-            ? (*missing_probe_cross / 2U) % 2U != 0
-            : random() % 1000 < constraints.probe_to_b_per_mille;
-        const bool need_data = missing_probe_cross
-            ? *missing_probe_cross % 2U != 0
-            : random() % 1000 < constraints.probe_need_data_per_mille;
-        const unsigned probe_depth_class = missing_probe_cross
-            ? *missing_probe_cross / 4U
-            : constraints.choose_probe_depth(random());
+        const bool to_b =
+            random() % 1000 < constraints.probe_to_b_per_mille;
+        const bool need_data =
+            random() % 1000 < constraints.probe_need_data_per_mille;
+        const unsigned probe_depth_class =
+            constraints.choose_probe_depth(random());
         const unsigned probe_depth = probe_depth_class + 1U;
         const bool probe_overlap = probe_depth > 1U;
 

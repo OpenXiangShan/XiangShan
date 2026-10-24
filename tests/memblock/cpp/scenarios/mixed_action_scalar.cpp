@@ -4,7 +4,6 @@ namespace memblock::scenarios::mixed {
 
 bool MixedScenario::execute_scalar_load(ActionWindow &window)
 {
-    auto &closing_stride_stream = window.closing_stride_stream;
     auto &dcache_load_error_denied = window.dcache_load_error_denied;
     auto &bank_conflict_action = window.bank_conflict_action;
     auto &bank_conflict_depth_index = window.bank_conflict_depth_index;
@@ -142,9 +141,8 @@ bool MixedScenario::execute_scalar_load(ActionWindow &window)
         const bool error_response =
             dcache_load_error_denied.has_value();
         const bool stride_shaped = !error_response &&
-            (closing_stride_stream ||
-                (constraints.stride_stream_per_mille != 0 &&
-                    random() % 1000 < constraints.stride_stream_per_mille));
+            constraints.stride_stream_per_mille != 0 &&
+            random() % 1000 < constraints.stride_stream_per_mille;
         std::uint64_t address = 0;
         if (error_response) {
             constexpr std::uint64_t error_lines =

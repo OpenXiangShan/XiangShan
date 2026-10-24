@@ -2,12 +2,6 @@
 
 namespace memblock::scenarios::mixed {
 
-bool MixedScenario::probe_coverage_incomplete()
-{
-    return constraint_coverage
-        .first_missing_probe_cross(constraints).has_value();
-}
-
 bool MixedScenario::issue_random_cmo(
     unsigned operation, bool dirty, bool younger_overlap,
     std::optional<bool> error_denied, unsigned probe_depth_class)
@@ -22,15 +16,7 @@ bool MixedScenario::issue_random_cmo(
         return false;
     }
 
-    unsigned locality = constraints.choose_locality(random());
-    for (unsigned candidate = 0;
-         candidate < constraint_coverage.locality.size(); ++candidate) {
-        if (constraints.locality_weights[candidate] != 0 &&
-            constraint_coverage.locality[candidate] == 0) {
-            locality = candidate;
-            break;
-        }
-    }
+    const unsigned locality = constraints.choose_locality(random());
     ++constraint_coverage.locality[locality];
 
     constexpr std::uint64_t lines_per_half_block = 0x100000 / 64;

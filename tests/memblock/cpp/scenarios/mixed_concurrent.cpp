@@ -12,23 +12,10 @@ bool MixedScenario::run_concurrent_windows()
         std::optional<unsigned> special_kind;
         if (actions + 8 <= concurrent_action_limit &&
             constraints.special_concurrent_per_mille != 0 &&
-            constraints.uses_concurrent_special_operations()) {
-            for (unsigned index = 0;
-                 index < constraint_coverage.special_concurrent.size();
-                 ++index) {
-                if (constraints.operation_weights[
-                        RandomConstraints::noncacheable + index] != 0 &&
-                    constraint_coverage.special_concurrent[index] == 0) {
-                    special_kind = RandomConstraints::noncacheable + index;
-                    break;
-                }
-            }
-            if (!special_kind &&
-                random() % 1000 <
-                    constraints.special_concurrent_per_mille) {
-                special_kind =
-                    constraints.choose_concurrent_special_operation(random());
-            }
+            constraints.uses_concurrent_special_operations() &&
+            random() % 1000 < constraints.special_concurrent_per_mille) {
+            special_kind =
+                constraints.choose_concurrent_special_operation(random());
         }
         TranslationContext translation = choose_translation_context();
         if (special_kind &&

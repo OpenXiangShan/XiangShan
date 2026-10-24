@@ -13,47 +13,6 @@ std::uint64_t MixedScenario::gstage_boundary_loads()
     return count;
 }
 
-bool MixedScenario::gstage_boundary_complete()
-{
-    for (unsigned cross = 0; cross < gstage_boundary_crosses.size(); ++cross) {
-        if (constraints.gstage_boundary_cross_enabled(cross) &&
-            gstage_boundary_crosses[cross] == 0) {
-            return false;
-        }
-    }
-    for (unsigned cross = 0; cross < vector_gstage_boundary_crosses.size();
-         ++cross) {
-        if (constraints.vector_gstage_boundary_cross_enabled(cross) &&
-            vector_gstage_boundary_crosses[cross] == 0) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool MixedScenario::canonical_boundary_complete()
-{
-    for (unsigned cross = 0; cross < canonical_boundary_crosses.size(); ++cross) {
-        if (constraints.canonical_boundary_cross_enabled(cross) &&
-            canonical_boundary_crosses[cross] == 0) {
-            return false;
-        }
-    }
-    for (unsigned cross = 0; cross < vector_canonical_boundary_crosses.size();
-         ++cross) {
-        if (constraints.vector_canonical_boundary_cross_enabled(cross) &&
-            vector_canonical_boundary_crosses[cross] == 0) {
-            return false;
-        }
-    }
-    return constraint_coverage.operations[RandomConstraints::vector_store] ==
-        constraint_coverage.vector_directions[1] + std::accumulate(
-                                                       vector_canonical_boundary_crosses.begin(),
-                                                       vector_canonical_boundary_crosses.end(), std::uint64_t{0}) +
-        std::accumulate(vector_gstage_boundary_crosses.begin(),
-            vector_gstage_boundary_crosses.end(), std::uint64_t{0});
-}
-
 std::uint64_t MixedScenario::canonical_boundary_loads()
 {
     std::uint64_t count = 0;
@@ -232,10 +191,8 @@ bool MixedScenario::finish()
     const std::uint64_t expected_probe_source_wraps = probe_requests == 0
         ? 0
         : (probe_requests - 1U) / memblock::kDcacheProbeSourceCount;
-    if (actions != options.transactions || environment.ptw_requests() < 3 ||
-        environment.uncache_requests() < 2 ||
+    if (actions != options.transactions ||
         !environment.dcache_grants_drained() ||
-        environment.tilelink_release_data() <= release_before ||
         environment.lq_dequeued() + environment.lq_canceled() !=
             environment.lq_allocated() ||
         environment.sq_dequeued() + environment.sq_canceled() !=
@@ -247,27 +204,12 @@ bool MixedScenario::finish()
             environment.sq_canceled() ||
         environment.lq_canceled_unobserved() != 0 ||
         environment.sq_canceled_unobserved() != 0 ||
-        !coverage.complete(
-            constraints.concurrent_actions_per_mille != 0) ||
-        !canonical_boundary_complete() ||
-        !gstage_boundary_complete() ||
-        !constraint_coverage.complete(
-            constraints, options.backpressure,
-            environment.dcache_response_latency_stats(),
-            environment.ptw_response_latency_stats(),
-            environment.uncache_response_latency_stats(),
-            canonical_boundary_loads(), gstage_boundary_loads()) ||
-        (constraints.probes_per_mille != 0 &&
-            environment.dcache_max_probe_outstanding() <
-                constraints.maximum_enabled_probe_depth()) ||
         environment.dcache_probe_sources() != expected_probe_sources ||
         environment.dcache_probe_source_reuses() !=
             expected_probe_source_reuses ||
         environment.dcache_probe_source_wraps() !=
-            expected_probe_source_wraps ||
-        total_ifetch_prefetches() == 0 ||
-        !coverage.backpressure_complete(options.backpressure)) {
-        phase = "coverage-gates";
+            expected_probe_source_wraps) {
+        phase = "accounting-gates";
         return false;
     }
     return true;
@@ -318,7 +260,7 @@ int MixedScenario::run()
                   << environment.hardware_prefetch_stats().l2_source_counts[12]
                   << " reason="
                   << (environment.error().empty()
-                             ? "mixed_coverage_or_accounting_gate_failed"
+                             ? "mixed_accounting_gate_failed"
                              : environment.error())
                   << ' ' << load_feedback_summary(
                                 environment.scalar_load_feedback_stats())

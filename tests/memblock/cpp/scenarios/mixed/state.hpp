@@ -243,7 +243,6 @@ struct TailState {
         memblock::StoreOp::hsvw,
         memblock::StoreOp::hsvd,
     }};
-    static constexpr unsigned stride_training_loads = 8;
     static constexpr std::uint64_t random_stride_base = AddressConstants::cache0_base + 0x50000;
     static constexpr std::uint64_t random_stride_bytes = 128;
     static constexpr unsigned random_stride_slots = 2048;
@@ -252,9 +251,6 @@ struct TailState {
     unsigned concurrent_action_limit{};
     std::array<std::uint64_t, 16> atomic_values{};
     unsigned stride_stream_loads = 0;
-    bool ordinary_constraint_coverage_closed = false;
-
-    std::uint64_t release_before{};
 };
 
 struct VectorShapeState {
@@ -263,7 +259,6 @@ struct VectorShapeState {
 };
 
 struct ActionWindow {
-    bool closing_stride_stream{};
     unsigned int kind{};
     bool nc_store{};
     bool mmio_store{};

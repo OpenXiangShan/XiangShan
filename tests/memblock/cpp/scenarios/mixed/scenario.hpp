@@ -34,8 +34,6 @@ private:
         ? 16384 : 2048;
 
     std::uint64_t gstage_boundary_loads();
-    bool gstage_boundary_complete();
-    bool canonical_boundary_complete();
     std::uint64_t canonical_boundary_loads();
     std::string canonical_boundary_summary();
     std::string gstage_boundary_summary();
@@ -187,7 +185,6 @@ private:
     bool issue_random_vector_segment_fof(
         bool first_fault, unsigned stage1_mode,
         const RandomVectorSegmentShape &shape);
-    bool probe_coverage_incomplete();
     bool issue_random_cmo(
         unsigned operation, bool dirty, bool younger_overlap,
         std::optional<bool> error_denied, unsigned probe_depth_class);
@@ -210,7 +207,7 @@ private:
         unsigned site, unsigned slot);
     bool ptw_error_target_level_enabled(
         unsigned site, unsigned target_level);
-    bool run_prefix();
+    bool initialize_run();
     void initialize_memory();
     bool prepare_tail();
     ActionDisposition select_action(ActionWindow &window);

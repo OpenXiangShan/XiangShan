@@ -77,7 +77,7 @@ bool MixedScenario::run_serial_action()
 
 bool MixedScenario::execute()
 {
-    if (!run_prefix()) return false;
+    if (!initialize_run()) return false;
     phase = "random-translation-map";
     if (!prepare_random_translation_contexts()) return false;
     if (!prepare_tail()) return false;

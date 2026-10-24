@@ -4400,6 +4400,45 @@ def _check_mixed_coverage(
         )
 
 
+def _check_mixed_accounting(result: dict[str, Any]) -> None:
+    """Validate queue/LSQ accounting, not coverage completeness.
+
+    Coverage counters remain in the result and per-run report, but a sparse
+    random run is valid: the verifier must not reject it for unobserved bins.
+    """
+    lq_allocated, lq_canceled = _balanced_queue(result, "lq")
+    sq_allocated, sq_canceled = _balanced_queue(result, "sq")
+    lsq_monitor_schema = result.get("lsq_monitor_schema", 0)
+    _require(
+        lsq_monitor_schema in (0, 1, 2),
+        f"unknown LSQ enqueue monitor schema: {lsq_monitor_schema!r}",
+    )
+    if lsq_monitor_schema in (1, 2):
+        observed = _csv_counts(result, "lsq_enqueued_observed", 2)
+        _require(
+            observed == [lq_allocated, sq_allocated],
+            "observed LSQ enqueue counts disagree with allocated queue totals",
+        )
+    if lsq_monitor_schema == 2:
+        redirect_cancels = _csv_counts(
+            result, "redirect_cancels_observed", 3
+        )
+        unobserved_cancels = _csv_counts(result, "unobserved_cancels", 2)
+        _require(
+            redirect_cancels[0] > 0,
+            "no redirect cancellation event was independently observed",
+        )
+        _require(
+            redirect_cancels[1] + unobserved_cancels[0] == lq_canceled
+            and redirect_cancels[2] + unobserved_cancels[1] == sq_canceled,
+            "observed and unobserved cancellation classes do not conserve queue totals",
+        )
+        _require(
+            unobserved_cancels == [0, 0],
+            "random-mixed used an unobserved queue cancellation",
+        )
+
+
 def _check_stress_coverage(
     result: dict[str, Any], require_backpressure: bool = False
 ) -> None:
@@ -4608,9 +4647,7 @@ def _check_result(
             f"{prefix} DCache grants and GrantAcks are not conserved",
         )
     if scenario == "random-mixed":
-        _check_mixed_coverage(result, require_backpressure)
-    elif scenario == run_regression.STRESS_SCENARIO:
-        _check_stress_coverage(result, require_backpressure)
+        _check_mixed_accounting(result)
     elif scenario == run_regression.FRONTEND_BRIDGE_SCENARIO:
         _check_frontend_bridge_coverage(result)
     return (

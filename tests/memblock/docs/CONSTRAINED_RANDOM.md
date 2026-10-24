@@ -7,6 +7,12 @@ not another scenario implementation. The same scheduler, drivers, scoreboards, a
 reference memory, translation machinery, and completion checks are used for realistic traffic,
 balanced coverage, and corner-heavy traffic. The current executable contract is `constraint_schema=53`.
 
+> **Contract note (2026-10-24):** coverage counters are observational. The
+> generator no longer has a mandatory coverage prefix, a minimum action count,
+> or a coverage-completeness PASS gate. Historical "closes all bins" statements
+> below describe stimulus generated under the older gated contract and are not
+> current acceptance requirements.
+
 The complete top-level interface mapping and interface gaps are in
 `IO_COVERAGE.md`; `VERIFICATION_PLAN.md` owns the cross-domain verification
 gap inventory. This document defines configurable behavioral dimensions and the
@@ -159,11 +165,12 @@ and cannot use a Bare-only context.
   requires `special-concurrent=0`. Endpoint error or vector-policy settings must leave every other
   enabled compatibility class reachable.
 
-`random-mixed` requires at least 6144 actions so the mandatory architectural
-prefix, replacement windows, CMO/atomic Probe bins, miss-burst and Segment FOF
-crosses, and overlap traffic can close together. `--allow-short-mixed` is a
-debug-only relaxation for a narrowed constraint set; all online and offline
-coverage gates remain active, and regression controllers do not use it.
+`random-mixed` has no minimum action count and no mandatory architectural
+prefix. Every run is constrained-random traffic from its first action; short
+runs are valid. Coverage is still sampled and summarized, but it is not a PASS
+gate: sparse coverage is reported, not failed. The regression and benchmark
+drivers write one coverage/statistics report per run under `coverage-reports/`
+next to the result file.
 
 The constraint interface, not the CLI wrapper, is the verification abstraction.
 A new direction must be a field on `RandomConstraints` and must use the common
@@ -295,19 +302,21 @@ terminal summaries, coverage evidence, or acceptance; N=0/unset disables them.
 
 ### General Accounting
 
-- Every enabled architectural or stimulus-coverage class must occur; a zero
-  target enables no observed class, a 0/1000 binary endpoint excludes the
-  opposite class, and an intermediate target requires both classes.
+- Coverage counters record which classes actually occurred; a zero target
+  describes a disabled class, while intermediate and endpoint weights describe
+  sampling probability rather than an obligation to observe both outcomes.
 - Class marginals, totals, and accounting tuples reconstruct source counts
-  exactly; disabled bins remain zero. These are per-seed gates unless a field
-  explicitly requires campaign-level distribution analysis.
+  exactly; disabled bins remain zero. These are per-seed statistics, not PASS
+  gates. Coverage is reported for analysis and never rejects an otherwise
+  functional run.
 - Functional PASS uses independent data, exception, identity, cancellation,
   queue, and protocol oracles. Internal bank selection, arbitration, replay
   count, MSHR/FSM state, cycle timing, prefetch causality, and feedback pulses
   are diagnostic unless an external contract explicitly requires them.
-- The mandatory prefix closes width/lane legality, translation pairs, fault
-  metadata, dirty eviction, redirect, and queue accounting. The configurable
-  tail determines workload direction and composes those mechanisms under pressure.
+- There is no mandatory prefix and no coverage-completeness requirement. The
+  random tail determines workload direction from the first action; functional
+  oracles still check every generated transaction, and coverage counters record
+  what happened for later analysis.
 
 ### Stimulus Closure
 
@@ -468,12 +477,12 @@ controls/recovery/store checks conserve at four/one/one, vector flows use `16 >>
 qualifier is present. G-only activation drains prior work, flushes pending fences, invalidates the
 ordinary context, and issues HFENCE.GVMA; the next ordinary action reenters its own context.
 
-Canonical and G-only prefixes are finite and run before sampled replacement. At rate 1000 ordinary
-coverage still closes first. After ordinary and Probe requirements close, both subclasses sample
-independently; a collision resolves by random equal choice, so both remain reachable even at rate
-1000. Their fault actions do not populate ordinary DCache outcomes, successful vector shape/policy
-counters, or ordinary leaf-topology accounting. Scalar ordinary plus canonical/G-only scalar faults
-conserve against scalar operation counts and are excluded from DCache outcomes.
+Canonical and G-only boundary subclasses are selected by independent weighted random draws at their
+configured rates; a collision resolves by random equal choice, so both remain reachable even at rate
+1000. There is no missing-bin prefix and no coverage-closure gate. Their fault actions do not populate
+ordinary DCache outcomes, successful vector shape/policy counters, or ordinary leaf-topology
+accounting. Scalar ordinary plus canonical/G-only scalar faults conserve against scalar operation
+counts and are excluded from DCache outcomes.
 
 Segment high-VA coverage has 24 bins. Eight stage-1 bins use
 `(stage1_mode * 2 + store) * 2 + misaligned`; sixteen nested bins use all
@@ -482,10 +491,9 @@ eight. A bin requires nonzero `vector-segment-high-va`, segment operation, the
 selected stage-1 or nested translation traffic, a reachable
 shape/direction/alignment, and enabled segment-store/load weights. Non-FOF
 loads require `vector-segment-fof != 1000`; misaligned bins require data EEW
-above eight bits, using SEW for indexed addressing. A finite missing-bin prefix
-contains at most 24 instructions, and weighted replacement starts only after
-ordinary coverage closes, preserving ordinary shape/regime/leaf reachability
-even at target 1000. Each action uses the randomized ordinary physical address
+above eight bits, using SEW for indexed addressing. The subclass is selected by
+a weighted random draw when enabled; there is no missing-bin prefix and no
+coverage-closure gate. Each action uses the randomized ordinary physical address
 through a full-XLEN high-half alias and its own 4-KiB mappings; all active
 effective VA bytes are independently walked through the selected stage-1 or
 two-stage page table to the declared physical bytes. Shape, NF, stride/index

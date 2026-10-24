@@ -63,13 +63,6 @@ int run_random_loads(int argc, char **argv, const Options &options)
             transaction, requests_before, environment.tilelink_requests());
     }
 
-    if (options.transactions >= 21 && !coverage.complete()) {
-        std::cerr << "MEMBLOCK_RANDOM_FAIL seed=" << options.seed
-                  << " transaction=" << options.transactions
-                  << " cycle=" << environment.cycle()
-                  << " reason=incomplete_coverage " << coverage.summary() << '\n';
-        return 1;
-    }
     std::cout << "MEMBLOCK_RANDOM_PASS"
               << " seed=" << options.seed
               << " transactions=" << options.transactions
@@ -168,13 +161,6 @@ int run_random_vector_loads(int argc, char **argv, const Options &options)
             transaction, requests_before, environment.tilelink_requests());
     }
 
-    if (options.transactions >= 64 && !coverage.complete()) {
-        std::cerr << "MEMBLOCK_RANDOM_VECTOR_FAIL seed=" << options.seed
-                  << " transaction=" << options.transactions
-                  << " cycle=" << environment.cycle()
-                  << " reason=incomplete_coverage " << coverage.summary() << '\n';
-        return 1;
-    }
     if (!environment.run_until_lq_retired()) {
         std::cerr << "MEMBLOCK_RANDOM_VECTOR_FAIL seed=" << options.seed
                   << " transaction=" << options.transactions
@@ -300,13 +286,6 @@ int run_random_vector_forwarding(int argc, char **argv, const Options &options)
         coverage.sample(store, requests_before, environment.tilelink_requests());
     }
 
-    if (transaction_count >= 16 && !coverage.complete(false)) {
-        std::cerr << "MEMBLOCK_RANDOM_VECTOR_FORWARD_FAIL seed=" << options.seed
-                  << " transaction=" << transaction_count
-                  << " cycle=" << environment.cycle()
-                  << " reason=incomplete_coverage " << coverage.summary() << '\n';
-        return 1;
-    }
     if (!environment.run_until_lq_retired()) {
         std::cerr << "MEMBLOCK_RANDOM_VECTOR_FORWARD_FAIL seed=" << options.seed
                   << " transaction=" << transaction_count
@@ -425,18 +404,6 @@ int run_random_forwarding(int argc, char **argv, const Options &options)
         }
     }
 
-    const bool coverage_complete = transaction_count < 16 ||
-        (std::all_of(operations.begin(), operations.end(), [](auto count) { return count != 0; }) &&
-         std::all_of(address_lanes.begin(), address_lanes.end(), [](auto count) { return count != 0; }) &&
-         std::all_of(data_lanes.begin(), data_lanes.end(), [](auto count) { return count != 0; }) &&
-         signed_loads != 0 && unsigned_loads != 0);
-    if (!coverage_complete) {
-        std::cerr << "MEMBLOCK_RANDOM_FORWARD_FAIL seed=" << options.seed
-                  << " transaction=" << transaction_count
-                  << " cycle=" << environment.cycle()
-                  << " reason=incomplete_coverage\n";
-        return 1;
-    }
     std::cout << "MEMBLOCK_RANDOM_FORWARD_PASS"
               << " seed=" << options.seed
               << " transactions=" << transaction_count

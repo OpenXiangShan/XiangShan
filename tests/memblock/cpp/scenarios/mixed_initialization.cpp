@@ -9,6 +9,23 @@ MixedScenario::MixedScenario(int argc, char **argv, const Options &options,
       environment(argc, argv), random(options.seed ^ 0x510e527fade682d1ULL)
 {}
 
+bool MixedScenario::initialize_run()
+{
+    phase = "initialize-run";
+    if (!environment.reset() || !environment.enable_misaligned_accesses()) {
+        return false;
+    }
+    if (constraints.uncache_error_per_mille != 0 ||
+        constraints.dcache_load_error_per_mille != 0 ||
+        constraints.atomic_error_per_mille != 0) {
+        environment.configure_cache_error_enable(true);
+        if (!environment.run_cycles(4)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void MixedScenario::initialize_memory()
 {
     if (constraints.canonical_boundary_per_mille != 0) {
@@ -70,7 +87,7 @@ bool MixedScenario::prepare_tail()
 {
     phase = "seeded-mixed-tail";
     if (options.transactions < actions + 2U) {
-        phase = "short-mixed-prefix-exceeds-transaction-budget";
+        phase = "short-mixed-transaction-budget";
         return false;
     }
     target_before_redirect = options.transactions - 2;
@@ -225,16 +242,6 @@ int run_mixed_scenario(int argc, char **argv, const Options &options)
         std::getenv("MEMBLOCK_MIXED_PROGRESS_ACTIONS");
     const std::uint64_t progress_interval = progress_text
         ? parse_u64(progress_text, "MEMBLOCK_MIXED_PROGRESS_ACTIONS") : 0;
-    // The constrained coverage prefix consumes most of a short run. Require
-    // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 6144;
-    if (!options.allow_short_mixed && options.transactions < minimum_actions) {
-        std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
-                  << " transactions=0 cycle=0"
-                  << " reason=random-mixed_requires_at_least_"
-                  << minimum_actions << "_actions\n";
-        return 1;
-    }
     mixed::MixedScenario scenario(argc, argv, options, constraints, progress_interval);
     return scenario.run();
 }

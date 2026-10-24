@@ -39,7 +39,6 @@ STRESS_SCENARIO = "random-stress"
 CONSTRAINED_SCENARIO = "random-mixed"
 CONSTRAINT_PROFILES = ("coverage", "spec", "corner")
 DEFAULT_JOBS = 8
-MINIMUM_MIXED_TRANSACTIONS = 6144
 DEFAULT_TRANSACTIONS = 16384
 DEFAULT_MIXED_TRANSACTIONS = 16384
 DEFAULT_TIMEOUT_SECONDS = 1800
@@ -393,6 +392,34 @@ def write_results(path: Path, document: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+def write_coverage_report(
+    result: dict[str, Any], directory: Path, unique: int
+) -> Path:
+    """Write an informational coverage/statistics report for one run.
+
+    Coverage is observational: a sparse report is valid and never changes the
+    run status. The report keeps the terminal summary, parsed metrics, and the
+    exact command so a later analysis can reconstruct what was observed.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    scenario = str(result.get("scenario", "unknown"))
+    seed = result.get("seed", "na")
+    path = directory / f"{scenario}-seed{seed}-{unique}.json"
+    document = {
+        "schema_version": 1,
+        "scenario": result.get("scenario"),
+        "seed": result.get("seed"),
+        "status": result.get("status"),
+        "elapsed_seconds": result.get("elapsed_seconds"),
+        "summary": result.get("summary", ""),
+        "metrics": result.get("metrics", {}),
+        "command": result.get("command", []),
+        "terminal": result.get("output", ""),
+    }
+    write_results(path, document)
+    return path
+
+
 def main() -> int:
     default_binary = (
         Path(__file__).resolve().parents[3]
@@ -507,12 +534,10 @@ def main() -> int:
         or args.seeds < 1
         or args.transactions < 1
         or args.forwarding_transactions < 1
-        or args.mixed_transactions < MINIMUM_MIXED_TRANSACTIONS
+        or args.mixed_transactions < 1
     ):
         print(
-            "run_regression.py: error: jobs and transaction counts must be positive; "
-            "mixed transactions must be at least "
-            f"{MINIMUM_MIXED_TRANSACTIONS}",
+            "run_regression.py: error: jobs and transaction counts must be positive",
             file=sys.stderr,
         )
         return 2
@@ -577,6 +602,16 @@ def main() -> int:
                 now = time.monotonic()
                 result["submitted_offset_seconds"] = round(submitted_offset, 6)
                 result["completed_offset_seconds"] = round(now - started, 6)
+                try:
+                    result["coverage_report"] = str(
+                        write_coverage_report(
+                            result,
+                            args.output.parent / "coverage-reports",
+                            len(results),
+                        )
+                    )
+                except OSError as error:
+                    result["coverage_report_error"] = str(error)
                 results.append(result)
                 if result["status"] != "pass" or args.progress_interval_seconds == 0:
                     print(

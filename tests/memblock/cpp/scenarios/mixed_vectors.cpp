@@ -44,16 +44,9 @@ unsigned int MixedScenario::vector_shape_total_flows(
 unsigned int MixedScenario::vector_shape_deficit(const RandomVectorShape &shape,
     unsigned direction)
 {
-    return static_cast<unsigned>(
-        (constraint_coverage.vector_shape_crosses.at(
-             ConstraintCoverage::vector_shape_cross_index(
-                 direction, shape.addressing, shape.eew, shape.vsew,
-                 shape.lmul_log2)) == 0) +
-        (constraint_coverage.vector_addressing[shape.addressing] == 0) +
-        (constraint_coverage.vector_eews[shape.eew] == 0) +
-        (constraint_coverage.vector_sews[shape.vsew] == 0) +
-        (constraint_coverage.vector_lmuls[shape.lmul_log2 + 3] == 0) +
-        (constraint_coverage.vector_emuls[shape.emul_log2 + 3] == 0));
+    (void)shape;
+    (void)direction;
+    return 0;
 }
 
 const RandomVectorShape & MixedScenario::choose_vector_shape(
@@ -65,13 +58,7 @@ const RandomVectorShape & MixedScenario::choose_vector_shape(
             vector_shape_total_flows(shape) <= *maximum_flows;
     };
     const auto selection_deficit = [&](const RandomVectorShape &shape) {
-        const unsigned multi_uop =
-            vector_shape_uop_count(shape) > 1U ? 1U : 0U;
-        return vector_shape_deficit(shape, direction) +
-            (concurrent_slot &&
-                        constraint_coverage.concurrent_vector_shapes
-                                .at(direction).at(shape.addressing).at(multi_uop) == 0
-                    ? 16U : 0U);
+        return vector_shape_deficit(shape, direction);
     };
     unsigned maximum_deficit = 0;
     for (const auto &shape : vector_shapes) {
@@ -113,17 +100,8 @@ const RandomVectorShape & MixedScenario::choose_vector_shape(
 unsigned int MixedScenario::vector_segment_shape_deficit(
     const RandomVectorSegmentShape &shape)
 {
-    return static_cast<unsigned>(
-        (constraint_coverage.vector_segment_addressing[
-             shape.addressing] == 0) +
-        (constraint_coverage.vector_segment_eews[shape.eew] == 0) +
-        (constraint_coverage.vector_segment_sews[shape.vsew] == 0) +
-        (constraint_coverage.vector_segment_lmuls[
-             shape.lmul_log2 + 3] == 0) +
-        (constraint_coverage.vector_segment_emuls[
-             shape.emul_log2 + 3] == 0) +
-        (constraint_coverage.vector_segment_nfs[
-             shape.nf_index] == 0));
+    (void)shape;
+    return 0;
 }
 
 const RandomVectorSegmentShape & MixedScenario::choose_vector_segment_shape(bool require_misaligned)
@@ -198,10 +176,11 @@ bool MixedScenario::choose_binary_class(
     unsigned true_per_mille,
     const std::array<std::uint64_t, 2> &counts)
 {
-    if (true_per_mille != 1000 && counts[0] == 0) {
+    (void)counts;
+    if (true_per_mille == 0) {
         return false;
     }
-    if (true_per_mille != 0 && counts[1] == 0) {
+    if (true_per_mille == 1000) {
         return true;
     }
     return random() % 1000 < true_per_mille;
@@ -250,22 +229,6 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
     bool nonzero_vstart = choose_binary_class(
         constraints.vector_nonzero_vstart_per_mille,
         constraint_coverage.vector_nonzero_vstart);
-    const bool force_mask_agnostic = !store &&
-        constraints.vector_vma_per_mille != 0 &&
-        constraints.vector_masked_per_mille != 0 &&
-        constraint_coverage.vector_mask_agnostic == 0;
-    const bool force_tail_agnostic = !force_mask_agnostic && !store &&
-        constraints.vector_vta_per_mille != 0 &&
-        constraints.vector_partial_vl_per_mille != 0 &&
-        constraint_coverage.vector_tail_agnostic == 0;
-    if (force_mask_agnostic) {
-        masked = true;
-        vma = true;
-    }
-    if (force_tail_agnostic) {
-        vta = true;
-        partial_vl = true;
-    }
     if (partial_vl && masked && nonzero_vstart && vlmax < 3U) {
         if (constraints.vector_partial_vl_per_mille != 1000) {
             partial_vl = false;

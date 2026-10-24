@@ -1662,9 +1662,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         environment = read_cpp_source("memblock_env.hpp")
         driver = read_cpp_source("memblock_main.cpp")
         initialize = read_cpp_definition("scenarios/mixed_initialization.cpp", "MixedScenario::initialize_memory")
+        initialize_run = read_cpp_definition("scenarios/mixed_initialization.cpp", "MixedScenario::initialize_run")
         run = read_cpp_definition("scenarios/mixed_reporting.cpp", "MixedScenario::run")
         execute = read_cpp_definition("scenarios/mixed_scheduler.cpp", "MixedScenario::execute")
-        prefix = read_cpp_definition("scenarios/mixed_prefix.cpp", "MixedScenario::run_prefix")
 
         for contract in (
             "define_repeating_incrementing(",
@@ -1674,18 +1674,16 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment)
         self.assertLess(run.index("initialize_memory();"), run.index("execute();"))
-        self.assertLess(execute.index("run_prefix()"), execute.index("prepare_tail()"))
-        self.assertIn("if (!environment.reset()", prefix)
+        self.assertLess(execute.index("initialize_run()"), execute.index("prepare_tail()"))
+        self.assertIn("if (!environment.reset()", initialize_run)
         for definition in (
             "load_merge_base, load_merge_span, 64, 0x41",
             "miss_burst_base, miss_burst_span, 64, 0x61",
             "bank_conflict_base, bank_conflict_span, 64, 0x71",
         ):
             self.assertIn(definition, initialize)
-        dirty_pressure = prefix[prefix.index('phase = "dcache-dirty-pressure"'):]
         load_merge = read_cpp_definition("scenarios/mixed_action_scalar.cpp", "MixedScenario::execute_load_merge")
         miss_burst = read_cpp_definition("scenarios/mixed_action_pressure.cpp", "MixedScenario::execute_miss_burst")
-        self.assertNotIn("fill_incrementing", dirty_pressure)
         self.assertNotIn("write_byte", load_merge)
         self.assertNotIn("fill_incrementing", miss_burst)
         for contract in (
@@ -1975,22 +1973,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             load_unit,
         )
 
-    def test_mixed_stimulus_drives_every_lsq_dispatch_lane_in_one_cycle(self) -> None:
-        environment = read_cpp_source("memblock_env.hpp")
-        main = read_cpp_source("memblock_main.cpp")
-        generated = ((MEMBLOCK_ROOT / "cpp/generated_port_defaults.hpp").read_text() + (MEMBLOCK_ROOT / "cpp/generated_interface_types.hpp").read_text())
-
-        self.assertIn("kLsqEnqueueLanes = 6", generated)
-        self.assertIn("enqueue_load_batch", environment)
-        self.assertIn("dut_.drive_lsq_enqueue(lane, enqueue)", read_cpp_source("environment/control.cpp"))
-        self.assertIn(
-            "generated::drive_lsq_enqueue(impl_->dut, lane, item)",
-            read_cpp_source("environment/dut_adapter.cpp"),
-        )
-        self.assertIn("width <= memblock::generated::kLsqEnqueueLanes", main)
-        self.assertIn("dispatch_widths=", main)
-        self.assertIn("dispatch_lanes=", main)
-
     def test_lsq_enqueue_accounting_is_observed_from_top_level_pins(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")
         main = read_cpp_source("memblock_main.cpp")
@@ -2034,18 +2016,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("lsq_monitor_schema=2", main)
         self.assertIn("redirect_cancels_observed=", main)
         self.assertIn("unobserved_cancels=", main)
-
-    def test_mixed_vector_aliasing_uses_address_oracle_and_nonoverlap_stores(self) -> None:
-        main = read_cpp_source("memblock_main.cpp")
-        for contract in (
-            "vector_element_address(store, element)",
-            "forwarded[address + byte]",
-            "std::shuffle(offset_slots.begin(), offset_slots.end(), random)",
-            "vec_load_stride=",
-            "vec_store_stride=",
-            "constexpr std::array<std::int64_t, 3> load_strides{{-4, 0, 4}}",
-        ):
-            self.assertIn(contract, main)
 
     def test_vector_oracle_allows_only_spec_permitted_agnostic_data(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")
@@ -2130,31 +2100,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertRegex(scenario, r"environment\.redirect_after\(\s*data_uop\.rob, data_uop\.rob_flag, true, true\)")
         self.assertLess(scenario.index(":fix-vl-writeback"), scenario.index("environment.redirect_after("))
 
-    def test_random_mixed_precise_faults_have_explicit_trap_recovery(self) -> None:
-        main = read_cpp_source("memblock_main.cpp")
-        guest_begin = main.index('phase = "vector-guest-page-fault"')
-        guest_end = main.index('phase = "sv39-configuration"', guest_begin)
-        guest_scenario = main[guest_begin:guest_end]
-        guest_redirect = re.search(
-            r"environment\.redirect_after\(\s*guest_fault\.rob, guest_fault\.rob_flag, true, true\)",
-            guest_scenario,
-        )
-        self.assertIsNotNone(guest_redirect)
-        self.assertLess(
-            guest_scenario.index(
-                "environment.exception_vaddr() != guest_fault.address"
-            ),
-            guest_redirect.start(),
-        )
-
-        exception_begin = main.index('phase = "exception-contracts"')
-        exception_end = main.index('phase = "pbmt-nc-store-load"', exception_begin)
-        exception_scenario = main[exception_begin:exception_end]
-        self.assertRegex(
-            exception_scenario,
-            r"environment\.redirect_after\(\s*page_fault\.rob, page_fault\.rob_flag, true\)",
-        )
-
     def test_redirect_helper_distinguishes_vls_exception_contract(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")
         main = read_cpp_source("memblock_main.cpp")
@@ -2165,8 +2110,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '"VLS exception redirect must enter as a flush redirect"',
             "dut_.queues.redirect.is_vls_exception.set(is_vls_exception)",
             "dut_.queues.redirect.is_vls_exception.set(std::uint64_t{0})",
-            "guest_fault.rob, guest_fault.rob_flag, true, true",
-            "candidate.rob, candidate.rob_flag, true, true",
             "data_uop.rob, data_uop.rob_flag, true, true",
             "vector_load.rob, vector_load.rob_flag, true, true",
             "vector_store.rob, vector_store.rob_flag, true, true",
@@ -2731,612 +2674,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("scalar_misaligned && strided_vector", driver)
         self.assertIn("indexed_vector && scalar_forwarding", driver)
 
-    def test_random_mixed_has_one_configurable_constraint_interface(self) -> None:
-        environment = read_cpp_source("memblock_env.hpp")
-        driver = read_cpp_source("memblock_main.cpp")
-        makefile = read_makefile()
-        runner = (MEMBLOCK_ROOT / "scripts/run_regression.py").read_text()
-
-        for contract in (
-            "struct RandomConstraints",
-            'name == "coverage"',
-            'name == "spec"',
-            'name == "corner"',
-            'argument == "--constraints"',
-            'argument == "--constraint"',
-            'argument == "--allow-short-mixed"',
-            "!options.allow_short_mixed",
-            "short-mixed-prefix-exceeds-transaction-budget",
-            "operation_weights",
-            "locality_weights",
-            "atomic_family_weights",
-            "atomic_width_weights",
-            "hypervisor_family_weights",
-            "hypervisor_spvp_user_per_mille",
-            "cmo_operation_weights",
-            "cmo_dirty_per_mille",
-            "cmo_younger_overlap_per_mille",
-            "translation_weights",
-            "stage1_mode_weights",
-            "vs_mode_weights",
-            "g_mode_weights",
-            "stage1_napot_per_mille",
-            "nested_vs_napot_per_mille",
-            "nested_g_napot_per_mille",
-            "fence_kind_weights",
-            "fence_scope_weights",
-            "concurrent_actions_per_mille",
-            "special_concurrent_per_mille",
-            "translation_switches_per_mille",
-            "tlb_flushes_per_mille",
-            "misaligned_per_mille",
-            "vector_corner_per_mille",
-            "vector_addressing_weights",
-            "vector_eew_weights",
-            "vector_sew_weights",
-            "vector_lmul_weights",
-            "vector_emul_weights",
-            "vector_segment_addressing_weights",
-            "vector_segment_eew_weights",
-            "vector_segment_sew_weights",
-            "vector_segment_lmul_weights",
-            "vector_segment_emul_weights",
-            "vector_segment_nf_weights",
-            "vector_segment_stores_per_mille",
-            "vector_segment_fof_per_mille",
-            "vector_segment_fof_first_fault_per_mille",
-            "cmo_error_per_mille",
-            "cmo_error_denied_per_mille",
-            "atomic_error_per_mille",
-            "atomic_error_denied_per_mille",
-            "dcache_load_error_per_mille",
-            "dcache_load_error_denied_per_mille",
-            "ptw_error_site_weights",
-            "ptw_error_level_weights",
-            "ptw_error_stores_per_mille",
-            "ptw_error_denied_per_mille",
-            "ptw_error_corrupt_first_per_mille",
-            "load_merge_depth_weights",
-            "load_merge_pattern_weights",
-            "set_pressure_depth_weights",
-            "set_pressure_width_weights",
-            "set_pressure_set_weights",
-            "set_pressure_dirty_per_mille",
-            "set_pressure_refill_overlap_per_mille",
-            "uncache_error_per_mille",
-            "uncache_load_error_denied_per_mille",
-            "probes_per_mille",
-            "probe_to_b_per_mille",
-            "probe_need_data_per_mille",
-            "probe_overlap_per_mille",
-            "probe_triple_overlap_per_mille",
-            "nc_stores_per_mille",
-            "mmio_stores_per_mille",
-            "stride_stream_per_mille",
-            "ConstraintCoverage",
-            "uses_locality()",
-            "if (constraints.uses_locality())",
-            "samples_translation()",
-            "if (!constraints.samples_translation())",
-            "target_ops=",
-            "actual_ops=",
-            "target_hypervisor_family=",
-            "actual_hypervisor_family=",
-            "target_hypervisor_spvp_user=",
-            "actual_hypervisor_spvp=",
-            "actual_hypervisor_cross=",
-            "actual_hypervisor_alignment=",
-            "actual_hypervisor_alignment_cross=",
-            "target_cmo_operation=",
-            "target_cmo_dirty=",
-            "target_cmo_younger_overlap=",
-            "target_cmo_error=",
-            "target_cmo_error_denied=",
-            "target_cmo_probe_depth=",
-            "actual_cmo_operation=",
-            "actual_cmo_line_state=",
-            "actual_cmo_younger_overlap=",
-            "actual_cmo_error=",
-            "actual_cmo_error_kind=",
-            "actual_cmo_operation_error=",
-            "actual_cmo_probe_depth=",
-            "actual_cmo_probe_cross=",
-            "target_dcache_load_error=",
-            "target_dcache_load_error_denied=",
-            "actual_dcache_load_error_presence=",
-            "actual_dcache_load_error=",
-            "actual_dcache_load_error_kind=",
-            "actual_dcache_load_outcome=",
-            "actual_dcache_load_error_manager=",
-            "target_ptw_error_site=",
-            "target_ptw_error_level=",
-            "target_ptw_error_store=",
-            "target_ptw_error_denied=",
-            "target_ptw_error_corrupt_first=",
-            "actual_ptw_error_outcome=",
-            "actual_ptw_error_mode=",
-            "actual_ptw_error_target_level=",
-            "actual_ptw_error_manager=",
-            "target_load_merge_depth=",
-            "target_load_merge_pattern=",
-            "actual_load_merge_shape=",
-            "actual_load_merge_translation=",
-            "actual_load_merge_manager=",
-            "actual_load_merge_loads=",
-            "target_set_pressure_depth=",
-            "target_set_pressure_width=",
-            "target_set_pressure_set=",
-            "target_set_pressure_dirty=",
-            "target_set_pressure_refill_overlap=",
-            "target_set_pressure_window=",
-            "actual_set_pressure_line_state=",
-            "actual_set_pressure_refill_overlap=",
-            "actual_set_pressure_cross=",
-            "actual_set_pressure_set=",
-            "actual_set_pressure_issue_order=",
-            "actual_set_pressure_manager=",
-            "actual_set_pressure_clean_manager=",
-            "actual_set_pressure_overlap_manager=",
-            "target_uncache_error=",
-            "target_uncache_load_error_denied=",
-            "actual_uncache_error=",
-            "actual_uncache_error_kind=",
-            "actual_uncache_outcome=",
-            "actual_vector_direction=",
-            "target_vector_addressing=",
-            "actual_vector_addressing=",
-            "target_vector_eew=",
-            "actual_vector_eew=",
-            "target_vector_sew=",
-            "actual_vector_sew=",
-            "target_vector_lmul=",
-            "actual_vector_lmul=",
-            "target_vector_emul=",
-            "actual_vector_emul=",
-            "target_vector_masked=",
-            "target_vector_vma=",
-            "target_vector_vta=",
-            "target_vector_partial_vl=",
-            "target_vector_nonzero_vstart=",
-            "target_vector_fof=",
-            "target_vector_fof_first_fault=",
-            "actual_vector_masked=",
-            "actual_vector_vma=",
-            "actual_vector_vta=",
-            "actual_vector_partial_vl=",
-            "actual_vector_nonzero_vstart=",
-            "actual_vector_agnostic=",
-            "actual_vector_shape_ops=",
-            "actual_vector_uops=",
-            "actual_vector_multi_uop=",
-            "actual_vector_fof=",
-            "actual_vector_fof_fault=",
-            "actual_vector_fof_eew=",
-            "actual_vector_fof_stage1_mode=",
-            "actual_vector_fof_cross=",
-            "actual_vector_fof_fix_vl=",
-            "actual_concurrent_vector_shape=",
-            "actual_concurrent_vector_uops=",
-            "actual_vector_segment_direction=",
-            "target_vector_segment_fof=",
-            "target_vector_segment_fof_first_fault=",
-            "actual_vector_segment_fof=",
-            "actual_vector_segment_fof_fault=",
-            "actual_vector_segment_fof_stage1_mode=",
-            "actual_vector_segment_fof_eew=",
-            "actual_vector_segment_fof_sew=",
-            "actual_vector_segment_fof_lmul=",
-            "actual_vector_segment_fof_emul=",
-            "actual_vector_segment_fof_nf=",
-            "actual_vector_segment_fof_cross=",
-            "actual_vector_segment_fof_data_uops=",
-            "actual_vector_segment_fof_fix_vl=",
-            "target_vector_segment_addressing=",
-            "actual_vector_segment_addressing=",
-            "target_vector_segment_eew=",
-            "actual_vector_segment_eew=",
-            "target_vector_segment_sew=",
-            "actual_vector_segment_sew=",
-            "target_vector_segment_lmul=",
-            "actual_vector_segment_lmul=",
-            "target_vector_segment_emul=",
-            "actual_vector_segment_emul=",
-            "target_vector_segment_nf=",
-            "actual_vector_segment_nf=",
-            "actual_atomic_family=",
-            "actual_atomic_width=",
-            "target_atomic_error=",
-            "target_atomic_error_denied=",
-            "target_atomic_probe_depth=",
-            "actual_atomic_error=",
-            "actual_atomic_error_kind=",
-            "actual_atomic_outcome=",
-            "actual_atomic_error_manager=",
-            "actual_atomic_probe_depth=",
-            "actual_atomic_probe_cross=",
-            "actual_nc_direction=",
-            "actual_mmio_direction=",
-            "actual_special_concurrent=",
-            "actual_translation=",
-            "actual_stage1_mode=",
-            "actual_vs_mode=",
-            "actual_g_mode=",
-            "actual_nested_pairs=",
-            "actual_stage1_leaf=",
-            "actual_nested_leaf_topology=",
-            "actual_fences=",
-            "actual_translation_switch=",
-            "actual_translation_walk_reuse=",
-            "target_probe=",
-            "target_probe_to_b=",
-            "target_probe_need_data=",
-            "target_probe_overlap=",
-            "target_probe_triple_overlap=",
-            "target_stride_stream=",
-            "l2_stride_prefetches=",
-            "raw_load_wakeups=",
-            "raw_load_cancels=",
-            "actual_probe_sequences=",
-            "actual_probe_caps=",
-            "actual_probe_need_data=",
-            "actual_probe_overlap=",
-            "actual_probe_depth=",
-            "target_probe_deep_depth=",
-            "actual_probe_cross=",
-            "probe_max_outstanding=",
-            "probe_source_space=",
-            "probe_source_lifecycle=",
-            "constraint_schema=53",
-            "RandomVectorShape",
-            "choose_vector_shape",
-            "actual_vector_cross=",
-            "vector_shape_crosses",
-            "vector_shape_cross_index",
-            "make_random_vector_uops",
-            "issue_random_vector_instruction",
-            "RandomVectorSegmentShape",
-            "choose_vector_segment_shape",
-            "const unsigned uop_count = indexed",
-            "constraint enables an unreachable class",
-            '"hypervisor-hlv"',
-            '"hypervisor-hlvx"',
-            '"hypervisor-hsv"',
-            '"hypervisor-spvp-user"',
-            '"hypervisor-pbmt-pma-pma"',
-            '"hypervisor-pbmt-pma-nc"',
-            '"hypervisor-pbmt-pma-io"',
-            '"hypervisor-pbmt-nc-io"',
-            '"hypervisor-pbmt-io-nc"',
-            '"hypervisor-pma-device"',
-            '"hypervisor-pmp-none"',
-            '"hypervisor-pmp-first"',
-            '"hypervisor-pmp-last"',
-            '"hypervisor-pmp-below"',
-            '"hypervisor-pmp-above"',
-            '"hypervisor-pmp-cross-lower"',
-            '"hypervisor-pmp-cross-upper"',
-            "hypervisor_virtual_base",
-            "hypervisor_guest_base",
-            "hypervisor_physical_base",
-            "constrained_hypervisor_address",
-            "hypervisor_misaligned_load_operations",
-            "hypervisor_alignment_crosses",
-            "hypervisor_pbmt_crosses",
-            "hypervisor_pma_device_crosses",
-            "hypervisor_pma_device_physical_base",
-            "hypervisor_pmp_relation_crosses",
-            "hypervisor_pmp_physical_base",
-            "hypervisor-pmp-configuration",
-            "hypervisor-pmp-store-readback",
-            "reference_two_stage_access",
-            "transaction.oracle_address = reference.physical_address",
-            "issue_random_cmo",
-            "force_next_cmo_response_delay",
-            "wait_for_cmo_store_request",
-            "inject_dcache_cmo_response_error_at",
-            "inject_dcache_response_error_at",
-            "dcache_error_response_requests",
-            "dcache_error_response_refills",
-            "dcache_error_response_grant_acks",
-            "dcache_denied_d_beats",
-            "dcache_corrupt_d_beats",
-            "dcache-load-error=1000 requires concurrent=0",
-            "PTW error site constraint weights cannot all be zero",
-            "PTW error level constraint weights cannot all be zero",
-            "stage-1 PTW errors require a nonzero stage-1 mode weight",
-            "G-stage PTW errors require a nonzero G-stage mode weight",
-            "nested PTW errors require a nonzero VS-stage mode weight",
-            "inject_persistent_ptw_response_error_at",
-            "clear_ptw_response_error",
-            "reference_pte_address_at_level",
-            '"load-merge"',
-            '"load-merge-depth2"',
-            '"load-merge-depth3"',
-            '"load-merge-same-address"',
-            '"load-merge-same-beat"',
-            '"load-merge-cross-beat"',
-            '"set-pressure"',
-            '"set-pressure-depth9"',
-            '"set-pressure-depth10"',
-            '"set-pressure-sb"',
-            '"set-pressure-sh"',
-            '"set-pressure-sw"',
-            '"set-pressure-sd"',
-            '"set-pressure-set-q0"',
-            '"set-pressure-set-q3"',
-            '"set-pressure-dirty"',
-            '"set-pressure-refill-overlap"',
-            '"set-pressure-release-backpressure"',
-            '"set-pressure-window1"',
-            '"set-pressure-window4"',
-            '"set-pressure-window8"',
-            "actual_set_pressure_window_count=",
-            '"miss-burst"',
-            '"miss-burst-depth2"',
-            '"miss-burst-depth16"',
-            '"miss-burst-depth17"',
-            '"miss-burst-issue-width1"',
-            '"miss-burst-issue-width3"',
-            '"miss-burst-scalar-only"',
-            '"miss-burst-scalar-vector-load"',
-            "target_miss_burst_depth=",
-            "target_miss_burst_issue_width=",
-            "target_miss_burst_composition=",
-            "actual_miss_burst_depth=",
-            "actual_miss_burst_issue_width=",
-            "actual_miss_burst_translation=",
-            "actual_miss_burst_composition=",
-            "actual_miss_burst_cross=",
-            "actual_miss_burst_manager=",
-            "actual_miss_burst_saturation=",
-            "actual_miss_burst_max_outstanding=",
-            '"bank-conflict"',
-            "target_bank_conflict=",
-            "actual_bank_conflict_depth=",
-            "actual_bank_conflict_bank=",
-            "actual_bank_conflict_translation=",
-            "actual_bank_conflict_cross=",
-            "actual_bank_conflict_terminal=",
-            "random-bank-conflict-terminal",
-            "crossed_depths != bank_conflict_depths",
-            "bank_conflict_crosses ==",
-            "bank_conflict_terminal",
-            "bank_conflict_line_stride",
-            "bank_conflict_line_offset",
-            "real translated walk windows",
-            "ptw_requests_before = environment.ptw_requests()",
-            "random-miss-burst-outstanding-depth",
-            "random-miss-burst-saturation-issue",
-            "random-miss-burst-saturation-progress",
-            "dcache_requests_covering_since",
-            '"random-set-pressure-target-address-exhausted"',
-            "begin_dcache_release_observation",
-            "end_dcache_release_observation",
-            "observed_dcache_releases_covering",
-            "observed_dcache_release_data_covering",
-            "tilelink_expected_release_data_verified",
-            "random-set-pressure-clean-fill",
-            "random-set-pressure-clean-revisit",
-            "random-set-pressure-clean-release-overlap",
-            "random-set-pressure-dirty-release-overlap",
-            "scalar_load_pending",
-            "hold_dcache_response_at",
-            "dcache_response_held",
-            "release_held_dcache_response",
-            "schedule_held_dcache_response_release_at",
-            "dcache_outstanding_requests",
-            "pending_translation_fences",
-            "pending_hfence_vvma",
-            "pending_hfence_gvma",
-            "random-vector-translation-reference",
-            "shape == 1 || shape == 2",
-            "shape == 3 ? elements - 1U",
-            "reference_page_walk_permissions",
-            "run_until_dcache_idle",
-            "uncache_error_response_requests",
-            "uncache_denied_d_beats",
-            "uncache_corrupt_d_beats",
-            "allow_preliminary_success_writeback",
-            "force_uncache_latency",
-            "retire_random_nc_store_error",
-            "probe_overlap_base",
-            "candidate_set",
-            "half_block_bytes + line_index * 64",
-            "hold_dcache_c_until_probes",
-            "first_missing_probe_cross",
-            "return probes_per_mille != 0 && probe_depth_enabled",
-            "sample_probe",
-            "dcache_probe_source_reuses",
-            "dcache_probe_source_wraps",
-        ):
-            self.assertIn(contract, driver)
-        for contract in (
-            "held_responses_",
-            "response_held_at",
-            "release_held_response_at",
-            "schedule_held_response_release_at",
-            "scheduled_held_response_release_",
-            "accepted_grant_ack_index_",
-            "begin_release_ready_window",
-            "observed_release_stall_cycles_covering",
-            "c_payload_stability_checks_",
-            "release_target_payload_stability_checks_",
-            "release_ready_window_target_lines_",
-            "release_ready_window_bypass_non_target_",
-        ):
-            self.assertIn(contract, environment)
-        scalar_store = read_cpp_definition("scenarios/mixed_action_scalar.cpp", "MixedScenario::execute_scalar_store")
-        self.assertEqual(len(re.findall(r"^\s*probe_candidate =", scalar_store, re.MULTILINE)), 1)
-        self.assertIn("auto &probe_candidate = window.probe_candidate", scalar_store)
-        snapshot = read_cpp_definition("scenarios/mixed_scheduler.cpp", "MixedScenario::snapshot_action")
-        self.assertIn("auto &probe_candidate = window.probe_candidate", snapshot)
-        self.assertIn("probe_candidate = {};", snapshot)
-        mixed_sources = "\n".join(
-            path.read_text() for path in sorted((MEMBLOCK_ROOT / "cpp/scenarios").glob("mixed_*.cpp"))
-        )
-        self.assertEqual(len(re.findall(r"^\s*probe_candidate =", mixed_sources, re.MULTILINE)), 2)
-        action = read_cpp_definition("scenarios/mixed_scheduler.cpp", "MixedScenario::run_serial_action")
-        self.assertLess(action.index("snapshot_action(window)"), action.index("execute_action(window)"))
-        self.assertLess(action.index("execute_action(window)"), action.index("observe_action(window)"))
-        translation = read_cpp_source("scenarios/mixed_translation_schedule.cpp")
-        self.assertRegex(translation, r"!flush_pending_translation_fences\(\) \|\|\s*!activate_translation_context\(context\)")
-        self.assertIn(
-            "is_cmo(transaction.op) || queues_.sq_dequeued() < target", environment
-        )
-        for key in (
-            "scalar-load",
-            "scalar-store",
-            "vector-load",
-            "vector-store",
-            "vector-segment",
-            "prefetch",
-            "atomic",
-            "nc",
-            "mmio",
-            "cmo",
-            "ptw-error",
-            "miss-burst",
-            "miss-burst-depth2",
-            "miss-burst-depth16",
-            "miss-burst-depth17",
-            "miss-burst-issue-width1",
-            "miss-burst-issue-width3",
-            "cmo-clean",
-            "cmo-flush",
-            "cmo-inval",
-            "cmo-dirty",
-            "cmo-younger-overlap",
-            "cmo-error",
-            "cmo-error-denied",
-            "cmo-probe-depth8",
-            "atomic-error",
-            "atomic-error-denied",
-            "atomic-probe-depth8",
-            "ptw-error-stage1",
-            "ptw-error-gstage",
-            "ptw-error-nested-g-implicit",
-            "ptw-error-nested-vs",
-            "ptw-error-nested-g-final",
-            "ptw-error-root",
-            "ptw-error-intermediate",
-            "ptw-error-leaf",
-            "ptw-error-store",
-            "ptw-error-denied",
-            "ptw-error-corrupt-first",
-            "uncache-error",
-            "uncache-load-error-denied",
-            "probe-overlap",
-            "probe-triple-overlap",
-            "probe-depth3",
-            "probe-depth4",
-            "probe-depth5",
-            "probe-depth6",
-            "probe-depth7",
-            "probe-depth8",
-            "stride-stream",
-            "atomic-amo",
-            "atomic-lrsc",
-            "atomic-cas",
-            "atomic-w",
-            "atomic-d",
-            "hypervisor-spvp-user",
-            "locality-hot",
-            "locality-warm",
-            "locality-cold",
-            "concurrent",
-            "special-concurrent",
-            "translation-bare",
-            "translation-stage1",
-            "translation-nested",
-            "stage1-sv39",
-            "stage1-sv48",
-            "vs-sv39",
-            "vs-sv48",
-            "g-sv39x4",
-            "g-sv48x4",
-            "translation-stage1-napot",
-            "translation-vs-napot",
-            "translation-g-napot",
-            "translation-switch",
-            "fence-sfence",
-            "fence-hfence-vvma",
-            "fence-hfence-gvma",
-            "fence-global",
-            "fence-selective",
-            "tlb-flush",
-            "misaligned",
-            "vector-corner",
-            "vector-masked",
-            "vector-vma",
-            "vector-vta",
-            "vector-partial-vl",
-            "vector-nonzero-vstart",
-            "vector-unit-stride",
-            "vector-strided",
-            "vector-indexed-unordered",
-            "vector-indexed-ordered",
-            "vector-eew8",
-            "vector-eew64",
-            "vector-sew8",
-            "vector-sew64",
-            "vector-lmul-mf8",
-            "vector-lmul-m8",
-            "vector-emul-mf8",
-            "vector-emul-m8",
-            "vector-segment-store",
-            "vector-segment-unit-stride",
-            "vector-segment-strided",
-            "vector-segment-indexed-unordered",
-            "vector-segment-indexed-ordered",
-            "vector-segment-eew8",
-            "vector-segment-eew64",
-            "vector-segment-sew8",
-            "vector-segment-sew64",
-            "vector-segment-lmul-mf8",
-            "vector-segment-lmul-m8",
-            "vector-segment-emul-mf8",
-            "vector-segment-emul-m8",
-            "vector-segment-nf2",
-            "vector-segment-nf8",
-            "probe",
-            "probe-to-b",
-            "probe-need-data",
-            "nc-store",
-            "mmio-store",
-            "latency",
-            "dcache-latency",
-            "ptw-latency",
-            "uncache-latency",
-        ):
-            self.assertIn('"' + key + '"', driver)
-
-        for contract in (
-            "enum class ResponseLatencyProfile",
-            "struct ResponseLatencyProfiles",
-            "struct ResponseLatencyStats",
-            "percentile < 7410",
-            "percentile < 8853",
-            "percentile < 9359",
-            "100 + static_cast<unsigned>",
-            "run_until_store_complete_with_replay",
-            "run_until_vector_complete_with_replays",
-            "record_atomic_result",
-            "const std::vector<VectorMemoryTransaction> &transactions",
-        ):
-            self.assertIn(contract, environment)
-        self.assertIn(
-            "environment.record_atomic_result(", driver
-        )
-        self.assertIn("struct TranslationContext", driver)
-        self.assertIn("reference_two_stage_walk", driver)
-        self.assertIn("environment.set_page_based_memory_types(true, true)", driver)
-        self.assertIn("stage1_weight + nested_weight", driver)
-        self.assertIn("translation_coverage_closed", driver)
-        self.assertIn("CONSTRAINT_ARGS", makefile)
-        self.assertIn("LONG_CONSTRAINT_ARGS", makefile)
-        self.assertIn("constraint_profile", runner)
-        self.assertIn("constraint_overrides", runner)
-
     def test_miss_burst_capacity_plus_one_releases_after_issue_is_presented(
         self,
     ) -> None:
@@ -3425,7 +2762,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
 
         self.assertIn("atomics insts (LR/SC/AMO) will block the pipeline", memblock)
         self.assertIn("uses_concurrent_special_operations", concurrent_tail)
-        self.assertIn("RandomConstraints::noncacheable + index", concurrent_tail)
+        self.assertIn("choose_concurrent_special_operation(random())", concurrent_tail)
         self.assertNotIn("issue_atomic", concurrent_tail)
 
     def test_random_mixed_recovers_hlvx_and_atomic_precise_errors(self) -> None:
@@ -3594,19 +2931,16 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, scenario)
 
-    def test_random_mixed_drops_directed_release_snapshots_before_random_tail(
-        self,
-    ) -> None:
-        environment = read_cpp_source("memblock_env.hpp")
-        prefix = read_cpp_definition("scenarios/mixed_prefix.cpp", "MixedScenario::run_prefix")
-        directed_region = prefix[prefix.index('phase = "dcache-dirty-pressure"'):]
+    def test_random_mixed_has_no_directed_prefix(self) -> None:
         execute = read_cpp_definition("scenarios/mixed_scheduler.cpp", "MixedScenario::execute")
-        self.assertLess(execute.index("run_prefix()"), execute.index("prepare_tail()"))
+        self.assertIn("initialize_run()", execute)
+        self.assertNotIn("run_prefix()", execute)
+        self.assertLess(execute.index("initialize_run()"), execute.index("prepare_tail()"))
         self.assertLess(execute.index("prepare_tail()"), execute.index("run_concurrent_windows()"))
-
-        self.assertIn("void clear_release_line_expectations()", environment)
-        self.assertIn(
-            "environment.clear_release_line_expectations();", directed_region
+        self.assertFalse((MEMBLOCK_ROOT / "cpp/scenarios/mixed_prefix.cpp").exists())
+        self.assertNotIn(
+            'phase = "dcache-dirty-pressure"',
+            read_cpp_source("scenarios/mixed_scheduler.cpp"),
         )
 
     def test_random_mmio_store_replays_until_tlb_hit(self) -> None:

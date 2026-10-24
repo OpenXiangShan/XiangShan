@@ -287,11 +287,14 @@ make random-mixed PICKER="$PICKER" SEED=2 TRANSACTIONS=32768 \
   CONSTRAINT='translation-nested=250 translation-switch=750 tlb-flush=200'
 ```
 
-`random-mixed` requires at least 6,144 actions for normal closure. For a
-deterministic minimization after narrowing constraints, pass
-`--allow-short-mixed`; it does not disable online oracles or coverage gates.
-`random-stress` remains available for compatibility with historical artifacts,
-but new directions should normally extend `random-mixed`.
+`random-mixed` has no mandatory action floor and no coverage-completeness PASS
+gate: every run is constrained-random traffic from its first action. Coverage is
+still sampled and printed in the terminal summary, and the regression and
+benchmark drivers write one report per run under `coverage-reports/` next to the
+result file. A sparse report is valid; only functional, protocol, and accounting
+checks determine PASS/FAIL. `random-stress` remains available for compatibility
+with historical artifacts, but new directions should normally extend
+`random-mixed`.
 
 The common multi-seed regression is:
 
@@ -334,17 +337,15 @@ make long-final-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
   DURATION_SECONDS=43200 MIXED_TRANSACTIONS=32768
 ```
 
-> **Measured performance note (2026-10-23):** the full 90-leaf benchmark passes
-> in 3,750.501 s and the final 8-job six-scenario matrix passes 12/12 in
-> 3,287.102 s; the `random-mixed` seed 1/16,384 leaf takes 3,721.673 s under the
-> 8-job benchmark, while the slower 6,144-action seeds 531/532 take
-> 3,287.100/3,273.502 s (~1.9 actions/s). Extrapolating the slow seeds gives
-> ~8,765 s for a 16,384-action seed and ~148.6 h for 1,000,000 actions. Use
-> `TIMEOUT_SECONDS=12000` or higher. The final-acceptance defaults are
-> conservatively calibrated to **48 h / 128 seeds** and
-> **200 h / 8 x 1,000,000 actions** to preserve the original seed/action
-> coverage; the acceptance change is independently reviewed (`pass-with-gaps`)
-> and the required matrix/timeout gates are applied. The optional
+> **Measured performance note (2026-10-24, no coverage prefix):** the full
+> 90-leaf benchmark passes 90/90 in **792.066 s**; `random-mixed` seed 1/16,384
+> takes **764.777 s** (1,840,618 cycles, ~21.4 actions/s, ~2,407 cycles/s), and
+> `vector-segment` is the next longest leaf at 386.057 s. This supersedes the
+> 2026-10-23 gated-generator figures (3,750.501 s / 3,721.673 s). The existing
+> **48 h / 128 seeds** and **200 h / 8 x 1,000,000 actions** acceptance budgets
+> were derived from the old prefix-heavy stimulus and have not been
+> recalibrated; the six-scenario matrix and duration campaigns must be
+> re-measured under the new contract before closure. The optional
 > `extended-regression` and `long-final-regression` historical budgets are not
 > part of final acceptance and must be recalibrated before use.
 
@@ -428,7 +429,7 @@ LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
 For mixed-run diagnostics, set `MEMBLOCK_MIXED_PROGRESS_ACTIONS=64` on the
 simulator or regression controller. It flushes action/cycle/last-phase checkpoints
 to stderr at action boundaries; zero or an unset variable disables it. It changes
-no random stream, DUT cycle, oracle, coverage gate, or acceptance requirement.
+no random stream, DUT cycle, oracle, coverage statistic, or acceptance requirement.
 The controller retains the output tail for a failed/timed-out seed. A live
 checkpoint proves progress only when actions or cycles advance; a final checkpoint
 alone does not prove completion or a design deadlock.

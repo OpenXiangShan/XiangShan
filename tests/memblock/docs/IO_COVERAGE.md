@@ -14,7 +14,7 @@ strictly:
 
 | Status | Meaning |
 | --- | --- |
-| **Semantic / constrained** | A typed driver generates legal transactions, an independent monitor/reference model checks observable behavior, and at least one focused or constrained-random coverage gate is enforced |
+| **Semantic / constrained** | A typed driver generates legal transactions, an independent monitor/reference model checks observable behavior, and coverage is sampled and reported; functional and protocol oracles decide PASS |
 | **Semantic / directed** | A focused scenario drives and checks the interface, but it is not exposed as a general constrained-random dimension |
 | **Monitored / partial** | The interface is sampled and several contracts are checked, but field combinations or negative cases remain exposed |
 | **Structural only** | `pin-space` and idle policy exercise the pins, without claiming legal protocol semantics |

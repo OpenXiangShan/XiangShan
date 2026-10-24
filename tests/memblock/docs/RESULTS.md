@@ -6,6 +6,12 @@ acceptance rules, and verification-point status remain authoritative in
 [`IO_COVERAGE.md`](IO_COVERAGE.md). CPU bug details remain authoritative in the
 individual `CPU_BUG_*.md` documents.
 
+> **Contract change (2026-10-24):** random scenarios no longer require a
+> coverage prefix, a minimum action count, or coverage completeness for PASS.
+> Coverage is sampled and written to per-run reports, but it is observational.
+> Historical rows below were produced under the old coverage-gated contract and
+> are not directly comparable to new runs.
+
 ## Evidence Policy
 
 - Acceptance is based on architectural observations and externally visible
@@ -23,6 +29,23 @@ individual `CPU_BUG_*.md` documents.
   [`VERIFICATION_PLAN.md#regression-acceptance`](VERIFICATION_PLAN.md#regression-acceptance).
 
 ## Current Baseline
+
+### 2026-10-24 Random-Only Rebaseline
+
+- Contract: random scenarios have no mandatory coverage prefix, no minimum
+  action count, and no coverage-completeness PASS gate. Coverage is sampled and
+  written to one report per run by the regression/benchmark drivers.
+- Full 90-leaf benchmark: **90/90 pass in 792.066 s** (previous gated-generator
+  baseline: 3,750.501 s). `random-mixed` seed 1/16,384: **764.777 s**,
+  1,840,618 DUT cycles, ~21.4 actions/s, ~2,407 cycles/s.
+- Frozen runtime binary SHA-256:
+  `d32cc28642f1695e4705bcb0af0fb4b71deaa5c5d3bf465ff0b9ea6d1333fe96`;
+  model SHA-256 unchanged at
+  `d659328ca82904a6ee33d3c5bc4ec32202a81e004c38e8d2fad5b57606b60d3f`.
+- Evidence: `build/memblock/no-prefix-final-20261024/benchmark.json`,
+  `benchmark.md`, and 90 per-run reports under `coverage-reports/`.
+- This is a capability rebaseline, not closure. The six-scenario matrix and the
+  48 h/200 h campaigns were not rerun under the new contract.
 
 Evidence snapshot: 2026-10-23.
 

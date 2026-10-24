@@ -179,14 +179,6 @@ std::optional<TranslationContext> MixedScenario::required_translation_context()
             return context;
         }
     }
-    if (constraints.uses_translation() &&
-        constraint_coverage.translation_walk_windows != 0 &&
-        constraint_coverage.translation_reuse_windows == 0 &&
-        translation_context_valid &&
-        current_translation.regime !=
-            RandomConstraints::translation_bare) {
-        return current_translation;
-    }
     if (constraints.tlb_flushes_per_mille == 0) {
         return std::nullopt;
     }

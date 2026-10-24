@@ -9,6 +9,11 @@ ready-valid protocols. Internal implementation signals may be used to localize
 a historical mutation, but they are not substitutes for an architectural
 oracle.
 
+> **Contract note (2026-10-24):** random scenarios sample and report coverage
+> but do not require coverage completeness for PASS. Historical "closes all
+> bins" statements describe the older coverage-gated generator and are
+> provenance, not current acceptance requirements.
+
 The current generated RTL under test is validated from its complete ordered
 file list and external interface manifest. Historical clean-baseline and mutant
 revisions, including hashes in old reports, are provenance only. Source, binary,
@@ -102,14 +107,15 @@ traceability for the same verification points.
 | Translation fences | `SFENCE.VMA`, `HFENCE.VVMA`, `HFENCE.GVMA`, root/mode/ASID/VMID changes with outstanding requests | Global/selective leaf-update invalidation, same-ID host-ASID/VS-ASID/VMID root reuse with targeted fences, delayed stale responses, and co-issued distinct-page stage-1/nested walks across both stage-1 modes, both G-stage modes, and all four fully nested pairs are implemented at global/selective scope by `translation-fence-all`; `translation-inflight-context-all` separately covers redirected root/ID changes while a PTW response is delayed |
 | DCache | Cold miss, warm hit, pressure beyond the eight-line capacity of two four-way sets, dirty eviction | Refill correctness, no extra miss for mandatory warm control, dirty ReleaseData preservation |
 | Forwarding | Scalar-to-scalar, vector-to-vector, scalar-to-vector, vector-to-scalar; masks and widths | Byte-accurate overlay before store commit |
-| Mixed pressure | Constrained-random windows enqueue scalar load, scalar store, vector load, vector store, and prefetch together; issue order, store address/data order, vector modes, alignment, and manager delays vary before a bounded drain | Every window records at least two unresolved classes (normally all five); all scoreboards drain; per-class coverage gates and exact LQ/SQ accounting |
+| Mixed pressure | Constrained-random windows enqueue scalar load, scalar store, vector load, vector store, and prefetch together; issue order, store address/data order, vector modes, alignment, and manager delays vary before a bounded drain | Every window records at least two unresolved classes (normally all five); all scoreboards drain; per-class coverage is reported and exact LQ/SQ accounting is enforced |
 | Redirect | Younger cold miss redirected while traffic is outstanding | No stale writeback and legal pointer reuse |
 | Queue pressure/wrap | Two 60-entry LQ waves; more than 72 LQ and 160 ROB positions over long runs | Every accepted item retires or is explicitly canceled; flag/value identity remains continuous |
 | Backpressure | Independent deterministic gaps on DCache A/D, PTW A/D, and uncache request/response | Ready-valid stability plus eventual progress |
 
-Every `random-mixed` seed contains mandatory phases before constrained-random traffic. The tail is made of rolling five-class windows, not isolated tests. The
-requested transaction count is the total action budget, including the mandatory
-prefix; only the tail is constrained-random:
+Every `random-mixed` seed is constrained-random traffic from its first action;
+there is no mandatory prefix and no coverage-completeness PASS requirement. The
+requested transaction count is the total action budget, organized as rolling
+five-class windows rather than isolated tests:
 
 - all scalar load and store widths and all scalar issue lanes;
 - LSQ dispatch widths one through six and every physical dispatch lane;
@@ -340,7 +346,7 @@ cacheable tests pass.
 | Vector strided | All 78 legal ELEN=64 EEW/SEW/LMUL/EMUL configurations; positive, zero, and negative legal load strides; non-overlapping positive and negative store strides; element gaps and split windows | Implemented for modeled operations: `vector-addressing` alternates positive/negative strides across the full legal matrix, checks 404 load/readback and 202 store uops with exact data and metadata, streams the largest instructions across conservative queue windows, and drains 2,304 LQ/1,152 SQ entries. Schema-11 `random-mixed` uses the same flow calculation with randomized signs and optional zero-stride loads. Overlapping stores remain excluded because their final memory value is not a single deterministic oracle |
 | Vector indexed unordered | Repeated indices, aliasing, non-monotonic indices, all EEWs, masked elements | Implemented for modeled operations: all 78 legal ELEN=64 EEW/SEW/LMUL/EMUL configurations execute exact load/store/readback with reverse uop issue, including index-register reuse when LMUL exceeds EMUL and 28 `EMUL>LMUL` shared-Vd configurations. Schema-11 `random-mixed` generates complete unique-offset index groups, randomly reverses uop issue, and conserves 1..8-uop shapes. Directed cases retain repeated-load aliases, cache-line/Bare-page crossings, and mask/`vstart` filtering |
 | Vector indexed ordered | Strict element order, repeated/aliasing indices, split beats/pages | Partial only at the system-side ordering boundary: all 78 legal ELEN=64 EEW/SEW/LMUL/EMUL configurations execute exact in-order load/store/readback, including index-register reuse and 28 `EMUL>LMUL` shared-Vd configurations. Schema-11 `random-mixed` adds weighted complete shapes under ordinary mixed traffic. Directed cases retain repeated/non-monotonic indices and split boundaries. Architecturally observable ordering against a side-effecting translated target remains |
-| Vector segmented/whole-register | NF/segment count, multi-uop streams, load/store direction, EEW, mask/`vstart`, fault-only-first, and partial completion | Partial: `vector-segment` checks lane-0 takeover, interleaved load/store data, multi-uop identity, the driver-side no-`enqLsq` input contract, and all addressing modes. Every addressing mode exhausts 338 legal NF 2..8 x EEW/SEW/LMUL/EMUL configurations per mode with exact load/store/readback; strided cases cover positive/negative strides, while indexed cases cover the complete index group and 252 index-only uops required by 32 `EMUL>LMUL*NF` configurations across both modes. `vector-fof` and `vector-segment-fof` cover first/later faults, including exact first-fault VA in an isolated exception epoch; schema 44 brings ordinary VFOF into `random-mixed` and closes first/later fault x Sv39/Sv48 x EEW with identified exception writeback and exact fix-VL conservation. Schema 47 extends common unit-stride segment FOF across all 338 decoder-legal EEW/SEW/LMUL/derived-EMUL/NF shapes and closes all 1,352 first/later fault x Sv39/Sv48 x shape bins with independent mapped-prefix data, identified exception/suppression, final-VL, fix-VL, identity, and terminal-writeback accounting. The decoder has no indexed or strided Segment FOF encoding. Field-level exception choice and faulting/remainder destination elements remain unspecified where required by the vector specification. `trigger-contracts` covers field-1 indexed and strided-store breakpoints; `vector-addressing` exhausts all ordinary addressing matrices plus all 16 whole-register NF/EEW combinations. Schema-9-and-later `random-mixed` exposes addressing, EEW, SEW, LMUL, EMUL, NF, and direction weights through one interface and independently gates every enabled class. Full-core `waitForward`/`blockBackward` serialization makes an active segment plus redirect unreachable, so that combination is an upstream assumption rather than a MemBlock stimulus. Overlapping indexed stores and ordered access to a side-effecting translated target remain |
+| Vector segmented/whole-register | NF/segment count, multi-uop streams, load/store direction, EEW, mask/`vstart`, fault-only-first, and partial completion | Partial: `vector-segment` checks lane-0 takeover, interleaved load/store data, multi-uop identity, the driver-side no-`enqLsq` input contract, and all addressing modes. Every addressing mode exhausts 338 legal NF 2..8 x EEW/SEW/LMUL/EMUL configurations per mode with exact load/store/readback; strided cases cover positive/negative strides, while indexed cases cover the complete index group and 252 index-only uops required by 32 `EMUL>LMUL*NF` configurations across both modes. `vector-fof` and `vector-segment-fof` cover first/later faults, including exact first-fault VA in an isolated exception epoch; schema 44 brings ordinary VFOF into `random-mixed` and closes first/later fault x Sv39/Sv48 x EEW with identified exception writeback and exact fix-VL conservation. Schema 47 extends common unit-stride segment FOF across all 338 decoder-legal EEW/SEW/LMUL/derived-EMUL/NF shapes and closes all 1,352 first/later fault x Sv39/Sv48 x shape bins with independent mapped-prefix data, identified exception/suppression, final-VL, fix-VL, identity, and terminal-writeback accounting. The decoder has no indexed or strided Segment FOF encoding. Field-level exception choice and faulting/remainder destination elements remain unspecified where required by the vector specification. `trigger-contracts` covers field-1 indexed and strided-store breakpoints; `vector-addressing` exhausts all ordinary addressing matrices plus all 16 whole-register NF/EEW combinations. Schema-9-and-later `random-mixed` exposes addressing, EEW, SEW, LMUL, EMUL, NF, and direction weights through one interface and independently reports every enabled class. Full-core `waitForward`/`blockBackward` serialization makes an active segment plus redirect unreachable, so that combination is an upstream assumption rather than a MemBlock stimulus. Overlapping indexed stores and ordered access to a side-effecting translated target remain |
 | Vector segment high-half canonical | Full-XLEN high-half Sv39/Sv48 and all four nested VS/G ordinary segment load/store aliases, aligned, cross-16-byte and cross-page accesses, all enabled addressing modes and legal EEW/SEW/LMUL/EMUL/NF shapes | Partial; `vector-segment-canonical` covers the 12-case shared subset. Schema 51 adds eight stage-1 mode x direction x alignment bins; schema 52 preserves those bins and adds all four nested VS/G pairs x direction x alignment, using an independent per-byte stage-1 or two-stage walk, exact completion/data/uop conservation, and store readback. High-half FOF composition, segment noncanonical faults, and arbitrary partial-fault progress remain |
 | Vector data patterns | all zero/one, ramps, alternating bits, random bytes, same-byte aliases, old-destination merge | Implemented/partial by operation class |
 | Software prefetch | `prefetch.i/r/w`, mapped/unmapped, cacheable/NC/IO, all lanes, signed `src + imm`, duplicate and outstanding requests | Partial: `ifetch-prefetch` checks every class/lane, all signed-12-bit boundary classes through 0/1/2047/-1/-2048, a same-cycle `i/r/w` batch, unmapped cold data-hint drop without PTW/data traffic, warmed Sv39 cacheable data-prefetch hits, individual `r/w` DCache requests, and the intentional PBMT policy: resident-TLB NC `r/w` issue DCache hints without Uncache while IO `r/w` reach neither manager; broader duplicate/same-line contention remains |
@@ -668,32 +674,29 @@ Before a duration run:
 The time-based breadth campaign runs at least 172,800 monotonic seconds (48
 hours) with eight workers and the `random-mixed --constraints spec` scenario.
 
-> **Measured performance basis (2026-10-23):** the full 90-leaf benchmark passes
-> 90/90 in 3,750.501 s; the final 8-job six-scenario matrix passes 12/12 in
-> 3,287.102 s (the earlier 4-job matrix was 3,467.092 s); `random-mixed` seed
-> 1/16,384 takes 3,721.673 s under the 8-job benchmark, while the slower
-> 6,144-action seeds 531/532 take 3,287.100/3,273.502 s (~1.9 actions/s).
-> Extrapolating the slow seeds gives ~8,765 s for a 16,384-action seed and
-> ~148.6 h for 1,000,000 actions. The acceptance budgets are therefore
-> conservatively calibrated to **48 h / 128 seeds** and
-> **200 h / 8 x 1,000,000 actions**, preserving the original seed and action
-> coverage rather than reducing it. This is a material acceptance change and is
-> independently reviewed (`pass-with-gaps`; the
-> required 200 h endurance timeout, matrix gate, timeout/provenance verifier
-> checks, and exact-eight endurance check are applied). Do not claim closure
-> until the duration/endurance campaigns are actually run.
+> **Measured performance basis (2026-10-24, no coverage prefix):** the full
+> 90-leaf benchmark passes 90/90 in **792.066 s**; `random-mixed` seed 1/16,384
+> takes 764.777 s (1,840,618 cycles, ~21.4 actions/s, ~2,407 cycles/s), and
+> `vector-segment` is the next longest leaf at 386.057 s. This supersedes the
+> 2026-10-23 gated-generator figures (3,750.501 s / 3,721.673 s). The current
+> **48 h / 128 seeds** and **200 h / 8 x 1,000,000 actions** budgets were
+> derived from the old prefix-heavy stimulus and have not been recalibrated;
+> the six-scenario matrix and duration campaigns must be re-measured under the
+> new contract before those budgets are used again. Do not claim closure until
+> the duration/endurance campaigns and matrix are re-measured.
 
-Each seed requests 16,384 total actions, including the mandatory coverage prefix and a constrained-random tail
-with five-class overlap windows. Every window
-randomizes producer parameters, legal alignment class, data, masks, vector
-shape, issue order, store half order, and manager delay; mandatory sanity waves
-are kept only where the interface has a proven legal encoding. The artifact
-records the requested command count and completed summary count, and the
-independent verifier checks both. At least 128 complete seeds are required, and
-the final result must complete after the duration deadline. Work already
-submitted at the deadline is allowed to finish. Any nonzero return, timeout, assertion, scoreboard error,
-coverage-gate failure, provenance change, or discontinuous seed range fails
-acceptance.
+Each seed requests 16,384 random actions organized as five-class overlap
+windows. Every window randomizes producer parameters, legal alignment class,
+data, masks, vector shape, issue order, store half order, and manager delay;
+sanity waves are kept only where the interface has a proven legal encoding.
+There is no mandatory coverage prefix and no coverage-completeness gate:
+coverage statistics are written to a per-run report and remain observational.
+The artifact records the requested command count and completed summary count,
+and the independent verifier checks both. At least 128 complete seeds are
+required, and the final result must complete after the duration deadline. Work
+already submitted at the deadline is allowed to finish. Any nonzero return,
+timeout, assertion, scoreboard error, accounting inconsistency, provenance
+change, or discontinuous seed range fails acceptance.
 
 Final acceptance additionally runs a finite within-seed endurance campaign:
 eight independent `spec` seeds, each with exactly 1,000,000 actions and a
@@ -712,7 +715,8 @@ oracle. On the historical clean RTL it must produce at least one mismatch;
 after the fix it must produce an all-pass campaign with the same oracle.
 
 An independent streaming verifier checks the result artifact, duration, scenario
-set, transaction counts, per-seed coverage, aggregate counts, continuous seeds,
+set, transaction counts, per-seed accounting and reported coverage statistics,
+aggregate counts, continuous seeds,
 eight-worker configuration, and frozen-runtime layout. It also requires schema-2
 completion state, a unique run id, finite timing values, strict
 scenario/seed/count terminal summaries, and per-seed submit/complete offsets

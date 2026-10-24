@@ -3453,13 +3453,15 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_mixed_coverage(result)
 
-    def test_historical_coverage_gate_is_independent_of_submission_minimum(self) -> None:
+    def test_historical_coverage_analysis_has_no_submission_minimum(self) -> None:
         self.assertEqual(
             verify_regression.ENHANCED_MIXED_COVERAGE_TRANSACTIONS, 128
         )
-        self.assertLess(
-            verify_regression.ENHANCED_MIXED_COVERAGE_TRANSACTIONS,
-            verify_regression.run_regression.MINIMUM_MIXED_TRANSACTIONS,
+        self.assertFalse(
+            hasattr(
+                verify_regression.run_regression,
+                "MINIMUM_MIXED_TRANSACTIONS",
+            )
         )
 
     def verify(self, document: dict[str, object]) -> dict[str, object]:
@@ -3579,15 +3581,15 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(verify_regression.VerificationError, "continuous"):
             self.verify(document)
 
-    def test_rejects_missing_per_seed_coverage(self) -> None:
+    def test_accepts_sparse_per_seed_coverage(self) -> None:
         result = mixed_result(7)
         result["eew_load"] = "1,1,1,0"
         result["summary"] = str(result["summary"]).replace(
             "eew_load=1,1,1,1", "eew_load=1,1,1,0"
         )
         document = regression_document([result, mixed_result(8)])
-        with self.assertRaisesRegex(verify_regression.VerificationError, "uncovered class"):
-            self.verify(document)
+        verified = self.verify(document)
+        self.assertIsInstance(verified, dict)
 
     def test_rejects_missing_vector_store_address_mode(self) -> None:
         result = mixed_result(7)

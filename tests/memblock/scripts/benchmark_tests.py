@@ -463,6 +463,16 @@ def main() -> int:
                     time.monotonic() - future_started[future],
                     error,
                 )
+            try:
+                result["coverage_report"] = str(
+                    run_regression.write_coverage_report(
+                        result,
+                        args.output.parent / "coverage-reports",
+                        index,
+                    )
+                )
+            except OSError as error:
+                result["coverage_report_error"] = str(error)
             results_by_index[index] = result
             print(
                 f"MEMBLOCK_BENCHMARK scenario={scenario} status={result['status']} "

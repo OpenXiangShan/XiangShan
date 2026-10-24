@@ -22,8 +22,6 @@ Options parse_options(int argc, char **argv)
             options.backpressure = false;
         } else if (argument == "--hunt-boundaries") {
             options.hunt_boundaries = true;
-        } else if (argument == "--allow-short-mixed") {
-            options.allow_short_mixed = true;
         } else if (argument == "--constraints" && index + 1 < argc) {
             options.constraint_profile = argv[++index];
         } else if (argument == "--constraint" && index + 1 < argc) {

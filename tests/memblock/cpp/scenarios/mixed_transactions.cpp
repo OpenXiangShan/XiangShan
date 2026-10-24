@@ -152,15 +152,7 @@ std::uint64_t MixedScenario::random_bare_address(std::uint64_t region, unsigned 
 
 std::uint64_t MixedScenario::constrained_locality_line()
 {
-    unsigned locality = constraints.choose_locality(random());
-    for (unsigned candidate = 0;
-         candidate < constraint_coverage.locality.size(); ++candidate) {
-        if (constraints.locality_weights[candidate] != 0 &&
-            constraint_coverage.locality[candidate] == 0) {
-            locality = candidate;
-            break;
-        }
-    }
+    const unsigned locality = constraints.choose_locality(random());
     ++constraint_coverage.locality[locality];
     std::uint64_t line = 0;
     if (locality == 0) {

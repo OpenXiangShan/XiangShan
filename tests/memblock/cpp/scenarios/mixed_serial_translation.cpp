@@ -4,7 +4,6 @@ namespace memblock::scenarios::mixed {
 
 bool MixedScenario::prepare_action_translation(ActionWindow &window)
 {
-    auto &closing_stride_stream = window.closing_stride_stream;
     auto &kind = window.kind;
     auto &bank_conflict_action = window.bank_conflict_action;
     auto &bank_conflict_forced_regime = window.bank_conflict_forced_regime;
@@ -33,9 +32,7 @@ bool MixedScenario::prepare_action_translation(ActionWindow &window)
     auto &miss_burst_composition = window.miss_burst_composition;
     auto &translation = window.translation;
     auto &leaf = window.leaf;
-    translation = closing_stride_stream
-        ? dominant_translation_context()
-        : choose_translation_context();
+    translation = choose_translation_context();
     if (kind == RandomConstraints::scalar_load &&
         bank_conflict_action && bank_conflict_forced_regime) {
         translation = TranslationContext{};
@@ -471,8 +468,7 @@ bool MixedScenario::prepare_action_translation(ActionWindow &window)
                 ? pending_hfence_gvma
                 : pending_hfence_vvma | pending_hfence_gvma;
     } else if (!enter_translation_context(translation) ||
-        (!closing_stride_stream &&
-            !issue_constrained_fence(kind))) {
+        !issue_constrained_fence(kind)) {
         return false;
     }
 
