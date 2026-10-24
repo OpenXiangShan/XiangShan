@@ -117,8 +117,16 @@ victim release and the `ProbeAckData` overlap. The test requires exactly one
 victim `ReleaseData` with its immutable line image, one dirty ProbeAckData with
 the fifth line image, and five exact readbacks. The scenario passes
 (`probe_overlap_release_data=1 probe_overlap_victim_releases=1
-probe_overlap_probe_data=1 probe_overlap_readbacks=5`). No new CPU bug was
-found; replacement composed with CMO/atomic traffic remains a gap.
+probe_overlap_probe_data=1 probe_overlap_readbacks=5`).
+
+A third phase composes the held victim release with a `CBO.CLEAN` on the same
+just-refilled dirty line. The manager delays `CBOAck` by 1,024 cycles so the
+CMO's dirty ProbeAckData and the older victim ReleaseData complete while the
+CMO is pending. The test requires the CMO request count, `flushPipe`
+completion, the victim image, the CMO probe image, and five readbacks to be
+exact (`cmo_overlap_release_data=1 cmo_overlap_victim_releases=1
+cmo_overlap_probe_data=1 cmo_overlap_requests=1 cmo_overlap_readbacks=5`). No
+new CPU bug was found; atomic replacement composition remains a gap.
 
 ## Current Verification Position
 
@@ -133,8 +141,10 @@ found; replacement composed with CMO/atomic traffic remains a gap.
 
 ## Remaining Gaps
 
-- Malformed or duplicate manager responses, replacement combined with
-  Probe/CMO/atomic traffic, and broader PMP/PMA/hypervisor crosses remain.
+- Malformed or duplicate manager responses, replacement combined with atomic
+  traffic, and broader PMP/PMA/hypervisor crosses remain. Replacement composed
+  with a same-set Probe and with a single CMO is now covered by
+  `dcache-release`.
 - Single-set associativity coverage and some vector-segment fault/progress
   crosses remain.
 - Constrained-random mutation sensitivity is not yet demonstrated.
