@@ -3251,3 +3251,154 @@ int run_reset_tree_contracts(int argc, char **argv)
               << '\n';
     return 0;
 }
+
+int run_cmo_atomic_flush(int argc, char **argv)
+{
+    memblock::Environment overlap(argc, argv);
+            const std::uint64_t cmo_line =
+                memblock::kDefaultMemoryBase + 0x470000;
+            const std::uint64_t atomic_line = cmo_line + 0x20000;
+            constexpr std::uint64_t atomic_operand = 0x1111222233334444ULL;
+            overlap.memory().fill_incrementing(cmo_line, 64, 0x6d);
+            overlap.memory().fill_incrementing(atomic_line, 64, 0x2f);
+            if (!overlap.reset()) {
+                std::cerr << "MEMBLOCK_CMO_ATOMIC_FLUSH_FAIL cycle="
+                          << overlap.cycle()
+                          << " phase=cmo-atomic-rollback-reset reason="
+                          << overlap.error() << '\n';
+                return 1;
+            }
+            const memblock::LoadTransaction warm{
+                .address = cmo_line + 8,
+                .op = memblock::LoadOp::ld,
+                .rob = 0,
+                .lq = 0,
+                .pdest = 250,
+                .lane = 0,
+            };
+            overlap.expect_load(warm);
+            if (!overlap.set_rob_head(warm.rob, warm.rob_flag) ||
+                !overlap.enqueue_load(warm) ||
+                !overlap.issue_load(warm, 2048) ||
+                !overlap.run_until_complete(16384) ||
+                !overlap.run_until_lq_retired(2048)) {
+                std::cerr << "MEMBLOCK_CMO_ATOMIC_FLUSH_FAIL cycle="
+                          << overlap.cycle()
+                          << " phase=cmo-atomic-rollback-warm reason="
+                          << overlap.error() << '\n';
+                return 1;
+            }
+            const memblock::StoreTransaction cmo{
+                .address = cmo_line + 39,
+                .oracle_address = cmo_line,
+                .data = 0,
+                .op = memblock::StoreOp::cbo_flush,
+                .rob = 1,
+                .sq = 0,
+                .address_lane = 1,
+                .data_lane = 0,
+                .expected_address_writeback_lane = 0,
+                .expected_output_flush_pipe = true,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+            };
+            overlap.expect_store(cmo);
+            if (!overlap.enqueue_store(cmo, 0) ||
+                !overlap.issue_store_address(cmo, 2048) ||
+                !overlap.issue_store_data(cmo, 2048)) {
+                std::cerr << "MEMBLOCK_CMO_ATOMIC_FLUSH_FAIL cycle="
+                          << overlap.cycle()
+                          << " phase=cmo-atomic-rollback-cmo issue reason="
+                          << overlap.error() << '\n';
+                return 1;
+            }
+            overlap.force_next_cmo_response_delay(1024);
+            const std::uint64_t probes_before = overlap.dcache_probe_responses();
+            if (!overlap.wait_for_cmo_store_request(cmo, 1, 8192) ||
+                !overlap.request_dcache_probe(cmo_line, 2, false, 2, {}) ||
+                !overlap.run_until_probe_responses(probes_before + 1, 4096)) {
+                std::cerr << "MEMBLOCK_CMO_ATOMIC_FLUSH_FAIL cycle="
+                          << overlap.cycle()
+                          << " phase=cmo-atomic-rollback-probe reason="
+                          << overlap.error() << '\n';
+                return 1;
+            }
+
+            const std::uint64_t atomic_address = atomic_line + 24;
+            const std::uint64_t atomic_old =
+                overlap.memory().expected_load(
+                    atomic_address, memblock::LoadOp::ld);
+            const memblock::AtomicTransaction atomic{
+                .address = atomic_address,
+                .op = memblock::AtomicOp::amoadd_d,
+                .data = atomic_operand,
+                .rob = 2,
+                .pdest = 251,
+                .address_lane = 0,
+                .data_lane = 1,
+            };
+            const memblock::LoadTransaction atomic_old_wb{
+                .address = atomic_address,
+                .op = memblock::LoadOp::ld,
+                .rob = atomic.rob,
+                .pdest = atomic.pdest,
+                .lane = 0,
+                .rf_wen = true,
+            };
+            overlap.expect_load_data(atomic_old_wb, atomic_old);
+            const std::uint64_t atomic_writebacks_before = overlap.writebacks();
+            if (!overlap.issue_atomic(atomic, 2048) ||
+                !overlap.run_cycles(512)) {
+                std::cerr << "MEMBLOCK_CMO_ATOMIC_FLUSH_FAIL cycle="
+                          << overlap.cycle()
+                          << " phase=cmo-atomic-rollback-issue reason="
+                          << overlap.error() << '\n';
+                return 1;
+            }
+            const std::uint64_t atomic_writebacks =
+                overlap.writebacks() - atomic_writebacks_before;
+            if (!overlap.run_until_store_complete(16384) ||
+                !overlap.redirect_after(cmo.rob, cmo.rob_flag, false) ||
+                !overlap.commit_store(cmo, 8192) ||
+                !overlap.run_cycles(4096)) {
+                std::cerr << "MEMBLOCK_CMO_ATOMIC_FLUSH_FAIL cycle="
+                          << overlap.cycle()
+                          << " phase=cmo-atomic-rollback-flush reason="
+                          << overlap.error() << '\n';
+                return 1;
+            }
+            const memblock::LoadTransaction fresh{
+                .address = atomic_address,
+                .op = memblock::LoadOp::ld,
+                .rob = 3,
+                .lq = 2,
+                .pdest = 252,
+                .lane = 1,
+            };
+            overlap.expect_load_data(fresh, atomic_old);
+            if (!overlap.set_rob_head(fresh.rob, fresh.rob_flag) ||
+                !overlap.enqueue_load(fresh) ||
+                !overlap.issue_load(fresh, 2048) ||
+                !overlap.run_until_complete(16384) ||
+                !overlap.run_until_lq_retired(2048)) {
+                std::cerr << "MEMBLOCK_CMO_ATOMIC_FLUSH_FAIL cycle="
+                          << overlap.cycle()
+                          << " phase=cmo-atomic-rollback-fresh reason="
+                          << overlap.error() << " atomic_writebacks="
+                          << atomic_writebacks << '\n';
+                return 1;
+            }
+            if (atomic_writebacks != 0) {
+                // The atomic old-value writeback is optional; the architectural
+                // oracle is the post-flush memory state below.
+            }
+
+    std::cout << "MEMBLOCK_CMO_ATOMIC_FLUSH_PASS"
+              << " cycle=" << overlap.cycle()
+              << " atomic_old=0x" << std::hex
+              << overlap.memory().expected_load(
+                     memblock::kDefaultMemoryBase + 0x490018,
+                     memblock::LoadOp::ld)
+              << std::dec << '\n';
+    return 0;
+}
