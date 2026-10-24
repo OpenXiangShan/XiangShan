@@ -23,11 +23,11 @@ The current harness covers the main MemBlock verification domains:
   MMIO, uncache, atomics, LR/SC, AMOCAS, and manager-side error responses;
 - frontend bridge, PTW, L2 hint, trace, DFT, Top-Down, reset, control, and
   queue-pressure boundaries;
-- focused scenarios plus the canonical `constrained-random` constrained-random
-  generator.
+- `directed-tests` plus the canonical `constrained-random` generator.
 
-The current random schema is 53. Its executable fields, presets, replay rules,
-and accounting contracts are in
+The catalog has exactly two test families: **84 `directed-tests`** and
+**1 `constrained-random`** scenario. The constraint interface version is 53;
+its fields, presets, replay rules, and accounting contracts are in
 [CONSTRAINED_RANDOM.md](docs/CONSTRAINED_RANDOM.md). The schema number itself is
 not a correctness claim.
 
@@ -178,10 +178,9 @@ The safe pattern is:
 For concurrent controllers, override the relevant output variables:
 
 ```text
-REGRESSION_OUTPUT  STRESS_RESULT  EXTENDED_RESULT  FINAL_RESULT
+REGRESSION_OUTPUT  EXTENDED_RESULT  FINAL_RESULT
 LONG_RESULT        ENDURANCE_RESULT
 BENCHMARK_RESULT   BENCHMARK_MARKDOWN  SPEC_COUNTER_JSON
-HUNT_RESULT        BOUNDARY_HUNT_RESULT
 ```
 
 Budget host resources explicitly. `REGRESSION_JOBS=8` means one controller may
@@ -264,7 +263,7 @@ unit, not necessarily one load/store or one bus request.
 ## Constrained Random And Regression
 
 The normal `regression` target runs `constrained-random`. Directed tests are run
-individually or through the all-scenario benchmark. All new workload directions
+individually or through `make benchmark-tests`. All new workload directions
 belong in the common `constrained-random` constraint interface unless a separate
 scenario is needed by contract.
 
@@ -324,7 +323,7 @@ make long-final-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
 ```
 
 > **Measured performance note (2026-10-24, no coverage prefix):** the full
-> all-scenario benchmark passes **85/85 in 781.752 s**;
+> `make benchmark-tests` passes **85/85 in 781.752 s**;
 > `constrained-random` seed 1/16,384 takes **760.884 s** (1,840,675 cycles,
 > ~21.5 actions/s, ~2,419 cycles/s), and `vector-segment` is the next longest
 > scenario at 386.257 s. This supersedes the 2026-10-23 gated-generator figures
@@ -351,7 +350,7 @@ make verify-endurance-results PICKER="$PICKER" REGRESSION_JOBS=8 \
   ENDURANCE_SEEDS=8 ENDURANCE_ACTIONS=1000000
 ```
 
-Final acceptance composes unit tests, the all-scenario benchmark, the
+Final acceptance composes unit tests, `make benchmark-tests`, the
 known-bug sentinel, the 48-hour `constrained-random` campaign, and the
 200-hour endurance campaign:
 

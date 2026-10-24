@@ -168,7 +168,7 @@ claim that every later commit has already been classified.
 | 2026-10-08 | `c098f996b` | Preserve self-flushing replay information when RAW and RAR redirects share a ROB index | Boundary gap | `memory-violation` and `rar-violation` exercise RAW and RAR separately, but no legal load currently raises both at the same ROB index. The missing acceptance is one selected self-flushing redirect followed by a replay with the final store-to-load value. |
 | 2026-09-24 | `49b6a414f` | Preserve a late vector-load DCache exception in the final vector writeback | **Reproduced** | `dcache-errors` primes one line with scalar denied and last-beat-corrupt responses, then requires vector loads to hit the poisoned line with the corresponding terminal exception. An independent mutation restoring `vecldout.hasException := s3_exception` passes the old cold-miss stimulus but fails the poisoned-line case with `exception=0x0`; clean RTL passes both cases. |
 | 2026-09-15 | `872fa9be3` | Pass vector store access size to the TLB | **Reproduced** | The clean 1,798-transaction `translation-faults` control passes. An isolated exact revert of the generated `StoreUnit.sv` TLB-size mux (`alignedType` removed) deterministically fails the first Sv39 strided vector-store crossing: a 2-byte store at `0x3fffffffff` must produce identified `StorePageFault` at `0x4000000000`, but after one replay feedback it remains pending past the 16,384-cycle bounded wait with no terminal vector writeback (`vector_pending=1`, `pending_replays=0`). The frozen mutant replay repeats the same externally visible failure. Stage-2 limit crossings remain a gap. |
-| 2026-09-15 | `39ad0d589` | Validate the full access range against pointer masking and canonical limits | **Reproduced** | `translation-faults` covers both canonical crossings, every 2/4/8-byte distance, scalar loads/stores and strided/indexed vector stores. An isolated final-byte-check mutation deterministically returns normal scalar data instead of a page fault; clean RTL passes all 1,798 transactions. Schema 48 adds scalar mixed bins. Stage-2 and pointer-masking/trigger combinations remain gaps. |
+| 2026-09-15 | `39ad0d589` | Validate the full access range against pointer masking and canonical limits | **Reproduced** | `translation-faults` covers both canonical crossings, every 2/4/8-byte distance, scalar loads/stores and strided/indexed vector stores. An isolated final-byte-check mutation deterministically returns normal scalar data instead of a page fault; clean RTL passes all 1,798 transactions. The constrained-random canonical-boundary capability adds scalar mixed bins. Stage-2 and pointer-masking/trigger combinations remain gaps. |
 | 2026-09-15 | `db2a9c26b` | Avoid vector-state dirtiness for vector-store helper uops | Non-functional/outside MemBlock UT | Rename/commit `mstatus.VS` is not observable at the MemBlock boundary. Memory-effect and writeback checks cannot establish CSR dirtiness. |
 | 2026-09-17 | `f86f50b83` | Initialize SBuffer forward tag state | Boundary gap | The affected X-only state is not observable in the current two-state Verilator configuration; functional first-forward traffic passes. |
 
@@ -259,7 +259,7 @@ to the historical mux revert; it is not a newly discovered CPU RTL bug.
 | 2026-08-04 | `2cac7a0d` | Strict ordering of misaligned vector elements | Boundary gap | Current tests generate vector misaligned replays, but the distinguishing reverse-order sequence is not legal/stable with the current dispatch contract. |
 | 2026-07-30 | `7754c3a8` | Memory-stall top-down attribution | Non-functional/outside MemBlock UT | Performance-counter attribution, not an architectural memory result. |
 | 2026-07-28 | `222f993e` | VLS exception redirect must not flush itself | Covered, not mutated | `vector-fof`, `vector-segment-fof`, and `trigger-contracts` drive a `flush` redirect with `isVlsException=1` for the identified vector uop. They reproduce the distinct stale-address regression from [upstream PR #6548](#upstream-pr-6548-vls-exception-buffer-redirect), caused by applying `flushAfter` globally. They do not yet prove that reverting `222f993e` loses required residual vector-store side effects; a distinguishing legal mutation remains required. |
-| 2026-07-21 | `a4047e5a` | Misaligned vector store progress | Covered, not mutated | `misaligned-stores` and mandatory `random-mixed` vector-store replay/readback phases. |
+| 2026-07-21 | `a4047e5a` | Misaligned vector store progress | Covered, not mutated | `misaligned-stores` and mandatory `constrained-random` vector-store replay/readback phases. |
 | 2026-07-21 | `04c0d157` | SPVP mode for HLV/HLVX/HSV PMP checks | Covered, not mutated | `hypervisor-contracts` implements 18 M-mode HLV/HLVX/HSV cases crossing SPVP=U/S with R/X/RW/RX and locked R/RWX PMP regions, using independent R, R+X, and W permission rules. The 82-case directed run passes; constrained mixed traffic also closes all 42 family x SPVP x PMP-relation bins. An independent SPVP-mode revert and broader PMP size/TOR/permission/edge crosses remain. |
 | 2026-07-21 | `fbb1e349` | Cross-page vector misaligned store `s_block` progress | **Covered, mutation did not fail** | The rebuilt pre-fix mutant still passed the expanded translated cross-page vector-store progress sequence with exact writeback, dequeue, and readback. |
 | 2026-07-10 | `52262f30` | Blocking issue logic for misaligned vector stores | Boundary gap | Needs controlled overlap of scalar-store issue, vector-store dequeue, and misalign-buffer occupancy. |
@@ -349,7 +349,7 @@ LD_LIBRARY_PATH=build/memblock/segment-va-mutation/runtime \
   --test vector-segment-canonical
 ```
 
-The same focused `random-mixed` seed 282 passes 256 actions on clean RTL and
+The same focused `constrained-random` seed 282 passes 256 actions on clean RTL and
 fails the mutant twice with byte-identical output at action 99, cycle 3677:
 VA `0xffffffc080210186` is independently mapped to PA `0x80210186`, but its
 ordinary segment load returns `0x2000` instead of zero exception. The exact
@@ -357,6 +357,6 @@ constraint command is retained in `load-split-mutant-1.json` and
 `segment-high-va-development/refined/load-split.json`. This establishes mixed
 stimulus and external scoreboard sensitivity to the historical bug class;
 it is not a new CPU bug or a claim that the unmodified broad default
-profiles have already completed schema-51 closure stress. Schema 52 composes
+profiles have already completed high-half closure stress. The constrained-random nested-VS/G capability composes
 all four high-half nested VS/G pairs into common traffic; segment noncanonical
 faults, high-half FOF composition and partial-fault progress remain gaps.

@@ -29,7 +29,7 @@ class ScenarioCatalogTest(unittest.TestCase):
         self.document = {
             "schema_version": 1,
             "scenarios": [{
-                "name": "alpha", "kind": "directed", "group": "alpha",
+                "name": "alpha", "kind": "directed-tests", "group": "alpha",
                 "call": "run_alpha(argc, argv)",
                 "make_targets": [{"name": "alpha", "args": ""}],
                 "benchmark_order": 0,
@@ -118,8 +118,8 @@ class ScenarioCatalogTest(unittest.TestCase):
             "{ return static_cast<int>(options.transactions); }\n"
         )
         self.document["scenarios"].extend([
-            {"name": "alpha-selective", "kind": "directed", "group": "alpha", "call": "run_alpha(argc, argv, true)", "make_targets": [], "benchmark_order": 1},
-            {"name": "beta", "kind": "directed", "group": "beta", "call": "run_beta(argc, argv, options)", "make_targets": [], "benchmark_order": 2},
+            {"name": "alpha-selective", "kind": "directed-tests", "group": "alpha", "call": "run_alpha(argc, argv, true)", "make_targets": [], "benchmark_order": 1},
+            {"name": "beta", "kind": "directed-tests", "group": "beta", "call": "run_beta(argc, argv, options)", "make_targets": [], "benchmark_order": 2},
         ])
         entries = self.validate()
         (self.root / "shared.hpp").write_text(

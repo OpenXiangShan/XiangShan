@@ -360,14 +360,14 @@ allocating the remaining targets. Thus all target accesses and required Releases
 load remains pending, without assuming that a completed baseline remains resident. At eight windows, initial LQ
 occupancy is at most 40 and retained tail occupancy at most 56, below the 66-flow dispatch watermark. C backpressure
 is armed before the first target issue. Transaction creation order and metadata RNG assignment differ from earlier
-binaries; replay requires the matching frozen runtime. Schema 53 preserves the 1536 accepted replacement bins and adds ownership/construction accounting.
+binaries; replay requires the matching frozen runtime. The constrained-random generator preserves the 1536 accepted replacement bins and adds ownership/construction accounting.
 Dirty overlap allocates every older overflow store into SQ before dispatching the younger held loads, then issues
 address/data and commits only after all holds are established. Baseline batches use at most 32 SQ entries and
 preallocated overflow at most 16, below the 52-entry watermark. It retains the committed baseline and incremental
-ReleaseData gate. Before the action, schema 53 drains baseline SBuffer/D/E, disables the L1 stride prefetcher through its external
+ReleaseData gate. Before the action, the constrained-random generator drains baseline SBuffer/D/E, disables the L1 stride prefetcher through its external
 CSR, runs 4 + 8 + 4 = 16 DUT cycles and drains DCache idle, establishes every held load, and requires exactly one
 store-class full-line AcquireBlock NtoT per fresh baseline line, unchanged manager error counters, and zero
-completed target Releases of either opcode; the current source drains the release channel before the ownership snapshot and after selected C backpressure, so an in-flight target ReleaseData is counted before qualification (normal seed 531/6,144, post-fix all-scenario benchmark passes; mutation sensitivity still pending, review `independent-review-schema53-20261023`). The prior prefetch enable is restored after the action. No DUT cycle separates qualification from target
+completed target Releases of either opcode; the current source drains the release channel before the ownership snapshot and after selected C backpressure, so an in-flight target ReleaseData is counted before qualification. The prior prefetch enable is restored after the action. No DUT cycle separates qualification from target
 C-stall arming. Coherence responsibility can remain in a writeback queue; array residency is not a prerequisite.
 A rejected attempt releases its held responses, issues each preallocated overflow once, commits in order with
 independent reference updates, and drains exact WB/queues/SBuffer/D/E/C under every functional oracle. The
@@ -531,9 +531,9 @@ checks them from the terminal summary:
 | `target_set_pressure_window` | Requested one-through-eight replacement-window class |
 | `actual_set_pressure_window_count` | Authoritative accepted replacement-window distribution |
 | `actual_set_pressure_dual_window` | Two-field compatibility tuple `[non-dual, dual]`; the fields sum to all set-pressure actions and project exactly from the authoritative window distribution |
-| `actual_set_pressure_ownership` | Schema 53: attempts, qualified, accepted, rejected, cleaned, acquisition-reason, error-reason, Release-reason, in-flight. Reasons may overlap; normal termination requires attempts=accepted+rejected, qualified=accepted, rejected=cleaned, in-flight=0, and accepted equal to dirty-overlap cross actions |
-| `actual_set_pressure_rejected_manager` | Schema 53: rejected attempts, stores, baseline stores, overflow stores, held loads, target A, held A, store WB, SQ dequeues, load WB, LQ dequeues, target C, target ReleaseData, global ReleaseData, verified global ReleaseData, expected target ReleaseData, preserved target stores, all A. Each target needs at least one accepted covering A; extra acquisitions are legal on rejection. Target ReleaseData counts transactions, while expected immutable images/preserved stores count distinct lines; WB/SQ and held-load/WB/LQ remain exact |
-| `actual_set_pressure_rejected_issue_order` | Schema 53: rejected STA-first/SDA-first store totals; sum equals rejected stores |
+| `actual_set_pressure_ownership` | Attempts, qualified, accepted, rejected, cleaned, acquisition-reason, error-reason, Release-reason, in-flight. Reasons may overlap; normal termination requires attempts=accepted+rejected, qualified=accepted, rejected=cleaned, in-flight=0, and accepted equal to dirty-overlap cross actions |
+| `actual_set_pressure_rejected_manager` | Rejected attempts, stores, baseline stores, overflow stores, held loads, target A, held A, store WB, SQ dequeues, load WB, LQ dequeues, target C, target ReleaseData, global ReleaseData, verified global ReleaseData, expected target ReleaseData, preserved target stores, all A. Each target needs at least one accepted covering A; extra acquisitions are legal on rejection. Target ReleaseData counts transactions, while expected immutable images/preserved stores count distinct lines; WB/SQ and held-load/WB/LQ remain exact |
+| `actual_set_pressure_rejected_issue_order` | Rejected STA-first/SDA-first store totals; sum equals rejected stores |
 | `target_bank_conflict` | Requested resident two-/three-way bank-conflict class |
 | `actual_bank_conflict_terminal` | Four-value tuple `actions, accepted loads, writebacks, LQ dequeues`; all members conserve and internal replay/arbitration observations remain diagnostic |
 | `actual_probe_depth` | Authoritative accepted-but-unanswered Probe depth distribution |

@@ -12,7 +12,7 @@
         }
       ],
       "benchmark_order": 0,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "l2-flush-contracts",
@@ -25,7 +25,7 @@
         }
       ],
       "benchmark_order": 1,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "top-control-contracts",
@@ -38,7 +38,7 @@
         }
       ],
       "benchmark_order": 2,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "trace-bridge-contracts",
@@ -51,7 +51,7 @@
         }
       ],
       "benchmark_order": 3,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "dft-bridge-contracts",
@@ -64,7 +64,7 @@
         }
       ],
       "benchmark_order": 4,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "pin-space",
@@ -77,7 +77,7 @@
         }
       ],
       "benchmark_order": 5,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "frontend-bridge",
@@ -90,7 +90,7 @@
         }
       ],
       "benchmark_order": 6,
-      "kind": "directed",
+      "kind": "directed-tests",
       "benchmark_actions": 4096
     },
     {
@@ -104,7 +104,7 @@
         }
       ],
       "benchmark_order": 7,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "single-load",
@@ -117,7 +117,7 @@
         }
       ],
       "benchmark_order": 8,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "load-feedback",
@@ -130,7 +130,7 @@
         }
       ],
       "benchmark_order": 9,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "topdown-contracts",
@@ -143,7 +143,7 @@
         }
       ],
       "benchmark_order": 10,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "memory-violation",
@@ -156,7 +156,7 @@
         }
       ],
       "benchmark_order": 11,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "rar-violation",
@@ -169,7 +169,7 @@
         }
       ],
       "benchmark_order": 12,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "ifetch-prefetch",
@@ -182,7 +182,7 @@
         }
       ],
       "benchmark_order": 13,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "hardware-prefetch",
@@ -195,7 +195,7 @@
         }
       ],
       "benchmark_order": 14,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "fp-loads",
@@ -208,7 +208,7 @@
         }
       ],
       "benchmark_order": 15,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "trigger-contracts",
@@ -221,7 +221,7 @@
         }
       ],
       "benchmark_order": 16,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "metadata-contracts",
@@ -234,7 +234,7 @@
         }
       ],
       "benchmark_order": 17,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "dcache-errors",
@@ -247,7 +247,7 @@
         }
       ],
       "benchmark_order": 18,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "dcache-coherence",
@@ -260,7 +260,7 @@
         }
       ],
       "benchmark_order": 19,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "atomic-contracts",
@@ -273,7 +273,7 @@
         }
       ],
       "benchmark_order": 20,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "atomic-dchannel-errors",
@@ -286,7 +286,7 @@
         }
       ],
       "benchmark_order": 21,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "uncache-errors",
@@ -299,7 +299,7 @@
         }
       ],
       "benchmark_order": 22,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "uncache-widths",
@@ -312,7 +312,7 @@
         }
       ],
       "benchmark_order": 23,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "uncache-outstanding",
@@ -325,7 +325,7 @@
         }
       ],
       "benchmark_order": 24,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "sbuffer-flush",
@@ -338,7 +338,7 @@
         }
       ],
       "benchmark_order": 25,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "sbuffer-timeout",
@@ -351,7 +351,7 @@
         }
       ],
       "benchmark_order": 26,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "mmio-contracts",
@@ -364,7 +364,7 @@
         }
       ],
       "benchmark_order": 27,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "cbo-zero-contracts",
@@ -377,7 +377,7 @@
         }
       ],
       "benchmark_order": 28,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "cmo-contracts",
@@ -390,7 +390,7 @@
         }
       ],
       "benchmark_order": 29,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "wfi-safety",
@@ -403,7 +403,7 @@
         }
       ],
       "benchmark_order": 30,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "reset-recovery",
@@ -416,7 +416,7 @@
         }
       ],
       "benchmark_order": 31,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "reset-partial-load",
@@ -429,7 +429,7 @@
         }
       ],
       "benchmark_order": 32,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "reset-tree-contracts",
@@ -442,7 +442,7 @@
         }
       ],
       "benchmark_order": 33,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-load",
@@ -455,7 +455,7 @@
         }
       ],
       "benchmark_order": 34,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-split-load",
@@ -468,7 +468,7 @@
         }
       ],
       "benchmark_order": 35,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-fof",
@@ -481,7 +481,7 @@
         }
       ],
       "benchmark_order": 36,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-segment",
@@ -494,7 +494,7 @@
         }
       ],
       "benchmark_order": 37,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-segment-canonical",
@@ -507,7 +507,7 @@
         }
       ],
       "benchmark_order": 38,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-segment-fof",
@@ -520,7 +520,7 @@
         }
       ],
       "benchmark_order": 39,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-issue-order",
@@ -533,7 +533,7 @@
         }
       ],
       "benchmark_order": 40,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-store-forwarding",
@@ -546,7 +546,7 @@
         }
       ],
       "benchmark_order": 41,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "store-forwarding",
@@ -559,7 +559,7 @@
         }
       ],
       "benchmark_order": 42,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "dcache-release",
@@ -572,7 +572,7 @@
         }
       ],
       "benchmark_order": 43,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "store-rdata-order",
@@ -585,7 +585,7 @@
         }
       ],
       "benchmark_order": 44,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "store-tlb-miss-preserve",
@@ -598,7 +598,7 @@
         }
       ],
       "benchmark_order": 45,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "iq-slow-feedback",
@@ -611,7 +611,7 @@
         }
       ],
       "benchmark_order": 46,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "redirect",
@@ -624,7 +624,7 @@
         }
       ],
       "benchmark_order": 47,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "queue-pressure",
@@ -637,7 +637,7 @@
         }
       ],
       "benchmark_order": 48,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "scalar-misaligned",
@@ -650,7 +650,7 @@
         }
       ],
       "benchmark_order": 49,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "misaligned-stores",
@@ -663,7 +663,7 @@
         }
       ],
       "benchmark_order": 50,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-addressing",
@@ -676,7 +676,7 @@
         }
       ],
       "benchmark_order": 51,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "exception-contracts",
@@ -689,7 +689,7 @@
         }
       ],
       "benchmark_order": 52,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "pmp-contracts",
@@ -702,7 +702,7 @@
         }
       ],
       "benchmark_order": 53,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "hypervisor-contracts",
@@ -715,7 +715,7 @@
         }
       ],
       "benchmark_order": 54,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "pointer-masking-contracts",
@@ -728,7 +728,7 @@
         }
       ],
       "benchmark_order": 55,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "mbmc-contracts",
@@ -741,7 +741,7 @@
         }
       ],
       "benchmark_order": 56,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "l2-tlb-contracts",
@@ -754,7 +754,7 @@
         }
       ],
       "benchmark_order": 57,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "ifetch-ptw-bridge",
@@ -767,7 +767,7 @@
         }
       ],
       "benchmark_order": 58,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "two-stage-translation",
@@ -780,7 +780,7 @@
         }
       ],
       "benchmark_order": 59,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-matrix",
@@ -793,7 +793,7 @@
         }
       ],
       "benchmark_order": 60,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-fence",
@@ -806,7 +806,7 @@
         }
       ],
       "benchmark_order": 61,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-fence-selective",
@@ -819,7 +819,7 @@
         }
       ],
       "benchmark_order": 62,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-fence-sv48",
@@ -832,7 +832,7 @@
         }
       ],
       "benchmark_order": 63,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-fence-sv48-selective",
@@ -845,7 +845,7 @@
         }
       ],
       "benchmark_order": 64,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-fence-sv39-sv48x4",
@@ -858,7 +858,7 @@
         }
       ],
       "benchmark_order": 65,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-fence-sv39-sv48x4-selective",
@@ -871,7 +871,7 @@
         }
       ],
       "benchmark_order": 66,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-fence-sv48-sv39x4",
@@ -884,7 +884,7 @@
         }
       ],
       "benchmark_order": 67,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-fence-sv48-sv39x4-selective",
@@ -897,7 +897,7 @@
         }
       ],
       "benchmark_order": 68,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-inflight-context",
@@ -910,7 +910,7 @@
         }
       ],
       "benchmark_order": 69,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-inflight-context-sv48",
@@ -923,7 +923,7 @@
         }
       ],
       "benchmark_order": 70,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-inflight-context-sv39-sv48x4",
@@ -936,7 +936,7 @@
         }
       ],
       "benchmark_order": 71,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-inflight-context-sv48-sv39x4",
@@ -949,7 +949,7 @@
         }
       ],
       "benchmark_order": 72,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-context",
@@ -962,7 +962,7 @@
         }
       ],
       "benchmark_order": 73,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-bare",
@@ -975,7 +975,7 @@
         }
       ],
       "benchmark_order": 74,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "ptw-errors",
@@ -988,7 +988,7 @@
         }
       ],
       "benchmark_order": 75,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-faults",
@@ -1001,7 +1001,7 @@
         }
       ],
       "benchmark_order": 76,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-permissions",
@@ -1014,7 +1014,7 @@
         }
       ],
       "benchmark_order": 77,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-pbmt",
@@ -1027,7 +1027,7 @@
         }
       ],
       "benchmark_order": 78,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "translation-superpages",
@@ -1040,7 +1040,7 @@
         }
       ],
       "benchmark_order": 79,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-guest-fault",
@@ -1053,7 +1053,7 @@
         }
       ],
       "benchmark_order": 80,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "vector-guest-fault-split",
@@ -1066,7 +1066,7 @@
         }
       ],
       "benchmark_order": 81,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "scalar-guest-fault",
@@ -1079,7 +1079,7 @@
         }
       ],
       "benchmark_order": 82,
-      "kind": "directed"
+      "kind": "directed-tests"
     },
     {
       "name": "constrained-random",
@@ -1105,7 +1105,7 @@
         }
       ],
       "benchmark_order": 84,
-      "kind": "directed",
+      "kind": "directed-tests",
       "benchmark_actions": 512
     }
   ]

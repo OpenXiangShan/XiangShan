@@ -45,7 +45,7 @@ def validate_catalog(document: Any, source_dir: Path) -> list[dict[str, Any]]:
         if name in names:
             raise CatalogError(f"duplicate scenario: {name}")
         names.add(name)
-        if kind not in {"directed", "constrained-random"}:
+        if kind not in {"directed-tests", "constrained-random"}:
             raise CatalogError(f"invalid scenario kind for {name}: {kind!r}")
         if not isinstance(group, str) or not GROUP.fullmatch(group):
             raise CatalogError(f"invalid scenario group: {group!r}")
