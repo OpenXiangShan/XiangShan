@@ -3514,3 +3514,253 @@ int run_mbmc_contracts(int argc, char **argv)
               << '\n';
     return 0;
 }
+
+int run_tag_ecc_ways(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t way_base =
+        memblock::kDefaultMemoryBase + 0x360000;
+    constexpr std::uint64_t way_stride = 0x4000;
+    constexpr unsigned dcache_ways = 4;
+    constexpr std::uint64_t dcache_ctrl_base = 0x38022000ULL;
+    constexpr std::uint64_t dcache_ctrl_mask_bank0 =
+        dcache_ctrl_base + 0x10;
+    constexpr std::uint64_t tag_error_once = 0x11;
+    environment.memory().fill_incrementing(
+        way_base, dcache_ways * way_stride, 0x3d);
+    if (!environment.reset() ||
+        !environment.configure_stride_prefetch(false) ||
+        !environment.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_TAG_ECC_WAYS_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.configure_cache_error_enable(true);
+    if (!environment.run_cycles(8)) {
+        std::cerr << "MEMBLOCK_TAG_ECC_WAYS_FAIL cycle="
+                  << environment.cycle() << " phase=ecc-enable reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const auto feedback = [&environment]() {
+        const auto &stats = environment.scalar_load_feedback_stats();
+        std::pair<std::uint64_t, std::uint64_t> totals{};
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            totals.first += stats.wakeups[lane];
+            totals.second += stats.ld2_cancels[lane];
+        }
+        return totals;
+    };
+    std::uint8_t next_rob = 0;
+    std::uint8_t next_lq = 0;
+    std::uint8_t next_sq = 0;
+    unsigned tag_cases = 0;
+    unsigned tag_reports = 0;
+    auto write_ctrl = [&](std::uint64_t address, std::uint64_t data,
+                          std::uint8_t rob, std::uint8_t sq,
+                          const char *phase) {
+        const memblock::StoreTransaction store{
+            .address = address,
+            .oracle_address = address,
+            .data = data,
+            .op = memblock::StoreOp::sd,
+            .rob = rob,
+            .sq = sq,
+            .address_lane = static_cast<unsigned>(sq & 1U),
+            .data_lane = static_cast<unsigned>((sq + 1U) & 1U),
+            .expected_address_writeback_lane = 0,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+        };
+        environment.expect_store(store);
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 512) ||
+            !environment.issue_store_data(store, 512) ||
+            !environment.run_until_store_complete_with_replay(
+                store, 8192, true) ||
+            !environment.commit_stores_through(store, 1) ||
+            !environment.run_cycles(16) ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TAG_ECC_WAYS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        environment.record_committed_store(store);
+        return true;
+    };
+    auto fill_store = [&](std::uint64_t address, std::uint64_t data,
+                          std::uint8_t rob, std::uint8_t sq,
+                          const char *phase) {
+        const unsigned address_lane = sq & 1U;
+        const memblock::StoreTransaction store{
+            .address = address,
+            .oracle_address = address,
+            .data = data,
+            .op = memblock::StoreOp::sd,
+            .rob = rob,
+            .sq = sq,
+            .address_lane = address_lane,
+            .data_lane = static_cast<unsigned>((sq + 1U) & 1U),
+            .expected_address_writeback_lane = address_lane,
+            .expected_trigger = memblock::kTriggerNone,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 1024) ||
+            !environment.issue_store_data(store, 1024) ||
+            !environment.pulse_pending_store(store.rob, store.rob_flag) ||
+            !environment.run_until_store_complete(8192) ||
+            !environment.commit_stores_through(store, 1) ||
+            !environment.run_until_sbuffer_empty(8192)) {
+            std::cerr << "MEMBLOCK_TAG_ECC_WAYS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        environment.record_committed_store(store);
+        return true;
+    };
+    auto tag_error = [&](std::uint64_t line, std::uint8_t control_rob,
+                         std::uint8_t control_sq, std::uint8_t load_rob,
+                         std::uint8_t load_lq, std::uint8_t pdest,
+                         unsigned lane, const char *phase) {
+        if (!write_ctrl(dcache_ctrl_base, tag_error_once, control_rob,
+                        control_sq, phase)) {
+            return false;
+        }
+        const auto feedback_before = feedback();
+        const auto errors_before = environment.bus_error_stats();
+        const std::uint64_t requests_before =
+            environment.tilelink_requests();
+        const std::uint64_t writebacks_before = environment.writebacks();
+        const memblock::LoadTransaction load{
+            .address = line,
+            .op = memblock::LoadOp::ld,
+            .rob = load_rob,
+            .lq = load_lq,
+            .pdest = pdest,
+            .lane = lane,
+        };
+        if (!environment.set_rob_head(load.rob, load.rob_flag) ||
+            !environment.enqueue_load(load) ||
+            !environment.issue_load(load, 512)) {
+            std::cerr << "MEMBLOCK_TAG_ECC_WAYS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << "-load reason=" << environment.error() << '\n';
+            return false;
+        }
+        bool observed_cancel = false;
+        for (unsigned cycle = 0; cycle < 128; ++cycle) {
+            const auto current = feedback();
+            if (current.second > feedback_before.second) {
+                observed_cancel = true;
+                break;
+            }
+            if (!environment.run_cycles(1)) {
+                break;
+            }
+        }
+        if (observed_cancel &&
+            (!environment.redirect_after(
+                 load.rob, load.rob_flag, true) ||
+             !environment.run_cycles(96))) {
+            observed_cancel = false;
+        }
+        const auto feedback_after = feedback();
+        const auto errors_after = environment.bus_error_stats();
+        const std::uint64_t wakeups =
+            feedback_after.first - feedback_before.first;
+        const std::uint64_t cancels =
+            feedback_after.second - feedback_before.second;
+        const bool lq_retired =
+            environment.lq_dequeued() + environment.lq_canceled() >=
+                environment.lq_allocated() ||
+            environment.account_lq_cancellation(1);
+        if (!observed_cancel || wakeups == 0 || cancels == 0 ||
+            cancels > wakeups ||
+            errors_after.dcache_reports != errors_before.dcache_reports + 1 ||
+            errors_after.last_dcache_address != line ||
+            environment.tilelink_requests() != requests_before ||
+            environment.writebacks() != writebacks_before ||
+            !lq_retired) {
+            std::cerr << "MEMBLOCK_TAG_ECC_WAYS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " wakeups=" << wakeups << " cancels=" << cancels
+                      << " reports="
+                      << errors_after.dcache_reports -
+                             errors_before.dcache_reports
+                      << " address=0x" << std::hex
+                      << errors_after.last_dcache_address << " line=0x"
+                      << line << std::dec
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        tag_reports += errors_after.dcache_reports -
+            errors_before.dcache_reports;
+        ++tag_cases;
+        return true;
+    };
+
+    if (!write_ctrl(dcache_ctrl_mask_bank0, 1, next_rob++, next_sq++,
+                    "tag-ways-mask")) {
+        return 1;
+    }
+    for (unsigned way = 0; way < dcache_ways; ++way) {
+        const std::uint64_t line = way_base + way * way_stride;
+        const std::uint64_t data = 0x5150a0b0c0d00000ULL | way;
+        const std::string prefix = "tag-ways-" + std::to_string(way);
+        if (!fill_store(line + 8, data, next_rob++, next_sq++,
+                        (prefix + "-fill").c_str()) ||
+            !tag_error(line, next_rob++, next_sq++, next_rob++, next_lq++,
+                       static_cast<std::uint8_t>(200 + way),
+                       way % memblock::kScalarLoadLanes,
+                       (prefix + "-error").c_str()) ||
+            !write_ctrl(dcache_ctrl_base, 0, next_rob++, next_sq++,
+                        (prefix + "-disable").c_str()) ||
+            !fill_store(line + 16, data ^ 0x0101010101010101ULL,
+                        next_rob++, next_sq++,
+                        (prefix + "-hit").c_str())) {
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = line + 8,
+            .op = memblock::LoadOp::ld,
+            .rob = next_rob++,
+            .lq = next_lq++,
+            .pdest = static_cast<std::uint8_t>(220 + way),
+            .lane = way % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load_data(readback, data);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 2048) ||
+            !environment.run_until_complete(8192)) {
+            std::cerr << "MEMBLOCK_TAG_ECC_WAYS_FAIL cycle="
+                      << environment.cycle() << " phase=" << prefix
+                      << "-readback reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (tag_cases != dcache_ways || tag_reports != dcache_ways) {
+        std::cerr << "MEMBLOCK_TAG_ECC_WAYS_FAIL cycle="
+                  << environment.cycle() << " tag_cases=" << tag_cases
+                  << " tag_reports=" << tag_reports << '\n';
+        return 1;
+    }
+    std::cout << "MEMBLOCK_TAG_ECC_WAYS_PASS"
+              << " cycle=" << environment.cycle()
+              << " ways=" << dcache_ways
+              << " tag_cases=" << tag_cases
+              << " tag_reports=" << tag_reports
+              << " readbacks=" << dcache_ways << '\n';
+    return 0;
+}

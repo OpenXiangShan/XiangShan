@@ -283,6 +283,17 @@ scenario passes with `reverse_order=1 reverse_writebacks=2`; D-response
 ordering across distinct sources is therefore matched by identity rather than
 arrival order.
 
+### 2026-10-24 per-way tag ECC matrix
+
+`tag-ecc-ways` adds a dedicated four-way tag-ECC directed test. It fills the
+four ways of one set with distinct store data, injects the one-shot tag error
+on each resident line, verifies the BEU report and load cancel for every way,
+then performs a store hit and an exact data readback on that way. The scenario
+passes with `ways=4 tag_cases=4 tag_reports=4 readbacks=4`, covering tag ECC
+on all four ways rather than only the single resident line used by
+`dcache-errors`. The scenario is excluded from the default benchmark
+(`benchmark_order: null`).
+
 ## Retracted testbench false positive: speculative AMO redirect
 
 The previously reported "CMO/redirect leaves a younger atomic's DCache

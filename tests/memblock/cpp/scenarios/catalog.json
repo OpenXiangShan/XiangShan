@@ -1133,6 +1133,19 @@
       ],
       "benchmark_order": null,
       "kind": "directed-tests"
+    },
+    {
+      "name": "tag-ecc-ways",
+      "group": "manager_errors",
+      "call": "run_tag_ecc_ways(argc, argv)",
+      "make_targets": [
+        {
+          "name": "tag-ecc-ways",
+          "args": ""
+        }
+      ],
+      "benchmark_order": null,
+      "kind": "directed-tests"
     }
   ]
 }
