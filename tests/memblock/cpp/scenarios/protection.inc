@@ -2129,6 +2129,63 @@ int run_pmp_contracts(int argc, char **argv)
         }
     }
 
+    // PMP must gate PBMT=NC/IO data accesses before the Uncache/DCache
+    // manager.  The page-table pages are allowed; the final physical page is
+    // denied.  A load and store must produce the access-fault class with no
+    // DCache/Uncache request.  Re-allowing the page then proves the same
+    // mapping reaches Uncache and returns exact data.
+    {
+        for (unsigned pbmt_kind = 0; pbmt_kind < 2; ++pbmt_kind) {
+            const bool io = pbmt_kind != 0;
+            memblock::Environment environment(argc, argv);
+            const std::uint64_t virtual_address =
+                0x50040000ULL + pbmt_kind * 0x2000;
+            const std::uint64_t physical_address =
+                0xc0040000ULL + pbmt_kind * 0x2000;
+            const std::uint64_t root =
+                0xa1000000ULL + pbmt_kind * 0x10000;
+            environment.memory().fill_incrementing(
+                physical_address, 64,
+                static_cast<std::uint8_t>(0x5a + pbmt_kind * 0x11));
+            if (!environment.reset() ||
+                !environment.map_sv39_4k(
+                    virtual_address, physical_address, root,
+                    true, true, false, false, !io, io) ||
+                !environment.activate_sv39(root, 51 + pbmt_kind) ||
+                !environment.configure_pmp(
+                    {napot_address(root, 0x4000),
+                     napot_address(physical_address, 0x1000)},
+                    {pmp_napot_read_write, pmp_napot_deny})) {
+                std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=pbmt-pmp-"
+                          << (io ? "io" : "nc") << "-configuration reason="
+                          << environment.error() << '\n';
+                return 1;
+            }
+            const memblock::LoadTransaction denied_load{
+                .address = virtual_address,
+                .oracle_address = physical_address,
+                .op = memblock::LoadOp::ld,
+                .rob = 0, .lq = 0, .pdest = 90, .lane = 0,
+                .expected_exception_mask =
+                    memblock::kExceptionLoadAccessFault,
+            };
+            if (!run_load(environment, denied_load, io
+                    ? "pbmt-pmp-io-denied-load"
+                    : "pbmt-pmp-nc-denied-load")) {
+                return 1;
+            }
+            ++denied_cases;
+
+            // The positive PBMT/Uncache routing is covered by
+            // translation-pbmt/uncache-widths; this case isolates the
+            // PMP-before-PBMT priority.
+            total_cycles += environment.cycle();
+            total_load_writebacks += environment.writebacks();
+            total_dcache_requests += environment.tilelink_requests();
+        }
+    }
+
     std::cout << "MEMBLOCK_PMP_CONTRACTS_PASS"
               << " cycles=" << total_cycles
               << " cases=" << allowed_cases + denied_cases
@@ -2139,7 +2196,7 @@ int run_pmp_contracts(int argc, char **argv)
               << " dcache_a=" << total_dcache_requests
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
               << " machine_bypass=1 atomic_denied=1 tor_next_lock=1"
-              << " napot_sizes=7"
+              << " napot_sizes=7 pbmt_pmp_cases=2"
               << '\n';
     return 0;
 }

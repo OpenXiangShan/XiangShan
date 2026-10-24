@@ -155,6 +155,16 @@ exercises NAPOT sizes 4 KiB, 8 KiB, 16 KiB, 64 KiB, 256 KiB, 1 MiB, and 4 MiB
 at allowed first/last and denied immediately-below/above doublewords. The full
 scenario passes 49 cases with `tor_next_lock=1` and `napot_sizes=7`.
 
+### 2026-10-24 PMP-before-PBMT priority
+
+`pmp-contracts` adds two Sv39 cases whose page-table pages are PMP-allowed but
+whose final physical page is PMP-denied, once with PBMT=NC and once with
+PBMT=IO. Each translated load must terminate with `LoadAccessFault` and must
+issue no DCache or Uncache data request; PTW traffic remains allowed. The
+positive PBMT/Uncache routing is covered separately by `translation-pbmt` and
+`uncache-widths`. The scenario passes 51 cases with `pbmt_pmp_cases=2`. The
+store and misalignment priority variants remain gaps.
+
 ### 2026-10-24 replacement composed with an atomic refill
 
 `dcache-release` adds an atomic composition. Five dirty stores occupy one
