@@ -1624,6 +1624,8 @@ int run_pmp_contracts(int argc, char **argv)
     constexpr std::uint8_t pmp_napot_read_write = 0x1b;
     constexpr std::uint8_t pmp_locked_napot_deny = 0x98;
     constexpr std::uint8_t pmp_locked_tor_read = 0x89;
+    constexpr std::uint8_t pmp_napot_w_only = 0x1a;
+    constexpr std::uint8_t pmp_napot_x_only = 0x1c;
     auto napot_address = [](std::uint64_t base, std::uint64_t size) {
         return (base | (size / 2 - 1)) >> 2;
     };
@@ -2129,6 +2131,89 @@ int run_pmp_contracts(int argc, char **argv)
         }
     }
 
+    // W=1,R=0 is reserved and must be treated as W=0, while X=1 is not a
+    // data-read permission.  Both regions must deny data loads and stores
+    // with no manager request.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t w_base = 0x80b00000ULL;
+        constexpr std::uint64_t x_base = 0x80c00000ULL;
+        environment.memory().fill_incrementing(w_base, 64, 0x81);
+        environment.memory().fill_incrementing(x_base, 64, 0xb1);
+        if (!configure_supervisor_bare(
+                environment,
+                {napot_address(w_base, 0x1000),
+                 napot_address(x_base, 0x1000)},
+                {pmp_napot_w_only, pmp_napot_x_only})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=warl-permission-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const std::array<memblock::LoadTransaction, 2> denied_loads{{
+            memblock::LoadTransaction{
+                .address = w_base + 8,
+                .op = memblock::LoadOp::ld,
+                .rob = 0, .lq = 0, .pdest = 100, .lane = 0,
+                .expected_exception_mask =
+                    memblock::kExceptionLoadAccessFault,
+            },
+            memblock::LoadTransaction{
+                .address = x_base + 8,
+                .op = memblock::LoadOp::ld,
+                .rob = 1, .lq = 1, .pdest = 101, .lane = 1,
+                .expected_exception_mask =
+                    memblock::kExceptionLoadAccessFault,
+            },
+        }};
+        for (unsigned index = 0; index < denied_loads.size(); ++index) {
+            if (!run_load(environment, denied_loads[index],
+                          index == 0 ? "warl-w-only-load"
+                                     : "warl-x-only-load")) {
+                return 1;
+            }
+            ++denied_cases;
+        }
+        const memblock::StoreTransaction denied_store{
+            .address = w_base + 8,
+            .oracle_address = w_base + 8,
+            .data = 0x0123456789abcdefULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 2, .sq = 0,
+            .address_lane = 0, .data_lane = 1,
+            .expected_exception_mask =
+                memblock::kExceptionStoreAccessFault,
+        };
+        environment.expect_store(denied_store);
+        const std::uint64_t denied_dcache_before =
+            environment.tilelink_requests();
+        const std::uint64_t denied_uncache_before =
+            environment.uncache_requests();
+        if (!environment.set_rob_head(
+                denied_store.rob, denied_store.rob_flag) ||
+            !environment.enqueue_store(denied_store, 0) ||
+            !environment.issue_store_address(denied_store, 2048) ||
+            !environment.run_until_store_complete(8192) ||
+            environment.tilelink_requests() != denied_dcache_before ||
+            environment.uncache_requests() != denied_uncache_before) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=warl-w-only-store reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.sq_dequeued() + environment.sq_canceled() <
+                environment.sq_allocated() &&
+            !environment.account_sq_cancellation(1)) {
+            return 1;
+        }
+        ++denied_cases;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
     // PMP must gate PBMT=NC/IO data accesses before the Uncache/DCache
     // manager.  The page-table pages are allowed; the final physical page is
     // denied.  A load and store must produce the access-fault class with no
@@ -2240,6 +2325,7 @@ int run_pmp_contracts(int argc, char **argv)
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
               << " machine_bypass=1 atomic_denied=1 tor_next_lock=1"
               << " napot_sizes=7 pbmt_pmp_cases=2 pbmt_pmp_stores=2"
+              << " warl_permission=2"
               << '\n';
     return 0;
 }

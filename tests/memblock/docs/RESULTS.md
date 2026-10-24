@@ -165,6 +165,15 @@ unchanged. A final readback returns the original value. The scenario passes
 with `reservation_probe_invalidated=1`. This observes the architectural
 reservation outcome, not the internal reservation bit.
 
+### 2026-10-24 PMP W/R/X permission WARL
+
+`pmp-contracts` adds a reserved `W=1,R=0` NAPOT entry and an `X`-only NAPOT
+entry. The reserved entry must behave as a data-deny entry for a store, and the
+execute-only entry must deny data loads as well as stores. Both cases require
+the access fault and no DCache/Uncache data request. The scenario passes 56
+cases with `warl_permission=2`; this checks the architectural W-implies-R WARL
+and the distinction between execute and data-read permission.
+
 ### 2026-10-24 PMP-before-PBMT priority
 
 `pmp-contracts` adds two Sv39 cases whose page-table pages are PMP-allowed but
