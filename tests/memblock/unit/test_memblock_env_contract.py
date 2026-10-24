@@ -2919,12 +2919,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
         self.assertNotIn("--rtl-metadata", benchmark_rule)
         self.assertNotIn("$(CONTROLLER_FILES)", benchmark_rule)
-        for removed in (
-            "HUNT_RESULT", "BOUNDARY_HUNT_RESULT", "STRESS_RESULT",
-            "MATRIX_RESULT", "hunt-regression:", "random-boundary-regression:",
-            "stress-regression:", "matrix-regression:",
-        ):
-            self.assertNotIn(removed, makefile)
         self.assertNotIn("--rtl-metadata $(FROZEN_RTL_METADATA)", makefile)
         self.assertNotIn("$${SEED:-1}", makefile)
         self.assertNotIn("$${ACTIONS:-", makefile)

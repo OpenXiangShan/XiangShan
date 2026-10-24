@@ -1,4 +1,4 @@
-"""Schema 53 rejects missing cleanup/traffic and permits legal reacquisition."""
+"""Constrained-random dirty-overlap accounting rejects missing cleanup/traffic and permits legal reacquisition."""
 import sys
 import unittest
 from pathlib import Path

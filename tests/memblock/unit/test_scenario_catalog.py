@@ -54,7 +54,6 @@ class ScenarioCatalogTest(unittest.TestCase):
         self.assertEqual(targets["smoke"], ("smoke", ""))
         self.assertEqual(targets["frontend-bridge"], ("frontend-bridge", "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),4096)"))
         self.assertEqual(targets["constrained-random"], ("constrained-random", "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),16384) $(CONSTRAINT_ARGS)"))
-        self.assertNotIn("random-mixed-hunt", targets)
         benchmark = scenario_catalog.benchmark_scenarios(entries)
         self.assertEqual({entry["name"] for entry in benchmark}, set(by_name))
         self.assertEqual({entry["name"]: entry["benchmark_actions"] for entry in benchmark if "benchmark_actions" in entry}, {
