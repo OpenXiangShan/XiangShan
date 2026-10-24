@@ -165,6 +165,15 @@ unchanged. A final readback returns the original value. The scenario passes
 with `reservation_probe_invalidated=1`. This observes the architectural
 reservation outcome, not the internal reservation bit.
 
+### 2026-10-24 S-mode locked PMP immutability
+
+`pmp-contracts` adds an S-mode lock-immutability case. A NAPOT allow entry is
+locked, then a second PMP write attempts to move the same entry to a different
+address. The old address must remain allowed and the moved address must remain
+denied. The check runs in S mode because M mode's default allow for unmatched
+addresses would otherwise make a rewritten entry indistinguishable from an
+unmapped address. The scenario passes 58 cases with `locked_immutable=1`.
+
 ### 2026-10-24 PMP W/R/X permission WARL
 
 `pmp-contracts` adds a reserved `W=1,R=0` NAPOT entry and an `X`-only NAPOT

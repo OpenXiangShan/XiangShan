@@ -1624,6 +1624,7 @@ int run_pmp_contracts(int argc, char **argv)
     constexpr std::uint8_t pmp_napot_read_write = 0x1b;
     constexpr std::uint8_t pmp_locked_napot_deny = 0x98;
     constexpr std::uint8_t pmp_locked_tor_read = 0x89;
+    constexpr std::uint8_t pmp_locked_napot_rwx = 0x9f;
     constexpr std::uint8_t pmp_napot_w_only = 0x1a;
     constexpr std::uint8_t pmp_napot_x_only = 0x1c;
     auto napot_address = [](std::uint64_t base, std::uint64_t size) {
@@ -1989,6 +1990,53 @@ int run_pmp_contracts(int argc, char **argv)
         total_dcache_requests += locked.tilelink_requests();
     }
 
+    // A locked allow entry must remain immutable in S mode.  M-mode cannot
+    // distinguish a rewritten entry from M-mode's default allow for an
+    // unmapped address, so attempt the rewrite and load the new address with
+    // S-mode permission checks active.  The old address must stay allowed and
+    // the new address must stay denied.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t locked_base = 0x80d00000ULL;
+        constexpr std::uint64_t moved_base = locked_base + 0x2000;
+        environment.memory().fill_incrementing(locked_base, 0x3000, 0x74);
+        if (!environment.reset() ||
+            !environment.activate_bare() ||
+            !environment.configure_pmp(
+                {napot_address(locked_base, 0x1000)},
+                {pmp_locked_napot_rwx}) ||
+            !environment.configure_pmp(
+                {napot_address(moved_base, 0x1000)},
+                {pmp_locked_napot_rwx})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=locked-immutability-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction old_load{
+            .address = locked_base + 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 110, .lane = 0,
+        };
+        const memblock::LoadTransaction moved_load{
+            .address = moved_base + 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = 1, .lq = 1, .pdest = 111, .lane = 1,
+            .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+        };
+        if (!run_load(environment, old_load, "locked-immutability-old") ||
+            !run_load(environment, moved_load,
+                      "locked-immutability-moved-denied")) {
+            return 1;
+        }
+        ++allowed_cases;
+        ++denied_cases;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
     // A TOR entry's upper bound is the following entry's pmpaddr.  When that
     // following entry is locked, the TOR base address is locked too.  Attempt
     // to move the base beyond the upper bound: the original range must remain
@@ -2325,7 +2373,7 @@ int run_pmp_contracts(int argc, char **argv)
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
               << " machine_bypass=1 atomic_denied=1 tor_next_lock=1"
               << " napot_sizes=7 pbmt_pmp_cases=2 pbmt_pmp_stores=2"
-              << " warl_permission=2"
+              << " warl_permission=2 locked_immutable=1"
               << '\n';
     return 0;
 }
