@@ -245,9 +245,10 @@ jobs:
       - name: Build EMU with DRAMsim3
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
-            BUILD_SERVER=node030
-            if [[ "${{ inputs.servers }}" =~ ^node[0-9]+$ ]]; then
-              BUILD_SERVER="${{ inputs.servers }}"
+            BUILD_SERVER="${{ inputs.servers }}"
+            BUILD_SERVER="${BUILD_SERVER%%,*}"
+            if [[ ! "$BUILD_SERVER" =~ ^node[0-9]+$ ]]; then
+              BUILD_SERVER=node030
             fi
             proxychains -q ssh "$BUILD_SERVER" "cd '$GITHUB_WORKSPACE' && PATH='$PATH' NOOP_HOME='$GITHUB_WORKSPACE' proxychains -q python3 scripts/xiangshan.py --build \
               --config '${{ inputs.xs_config }}' \
