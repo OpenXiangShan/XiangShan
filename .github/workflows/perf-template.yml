@@ -253,6 +253,7 @@ jobs:
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             proxychains -q ssh node030 "cd '$GITHUB_WORKSPACE' && PATH='$PATH' NOOP_HOME='$GITHUB_WORKSPACE' proxychains -q python3 scripts/xiangshan.py --build \
               --config '${{ inputs.xs_config }}' \
+              --make-threads 8 \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
               --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
