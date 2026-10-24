@@ -1124,6 +1124,13 @@ def _check_miss_burst_coverage(
     actual_operations: list[int],
     target_translation: list[int],
 ) -> None:
+    acquire_perms = result.get("dcache_acquire_perms", 0)
+    _require(
+        isinstance(acquire_perms, int)
+        and not isinstance(acquire_perms, bool)
+        and acquire_perms >= 0,
+        f"dcache_acquire_perms is not a nonnegative integer: {acquire_perms!r}",
+    )
     miss_depth_count = 16 if schema >= 45 else 15
     target_miss_depth = _csv_counts(
         result, "target_miss_burst_depth", miss_depth_count
@@ -1252,7 +1259,9 @@ def _check_miss_burst_coverage(
             and actual_miss_manager[3] == derived_vector_loads
             and actual_miss_manager[4] >= derived_target_lines
             and actual_miss_manager[5] >= actual_miss_manager[4]
-            and actual_miss_manager[6] == actual_miss_manager[5]
+            and actual_miss_manager[5] <= actual_miss_manager[6]
+            and actual_miss_manager[6]
+            <= actual_miss_manager[5] + acquire_perms
             and actual_miss_manager[7] == derived_scalar_loads
             and actual_miss_manager[8] == derived_vector_loads
             and actual_miss_manager[9]
@@ -1484,6 +1493,13 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         f"unsupported constraint_schema: {schema!r}",
     )
 
+    acquire_perms = result.get("dcache_acquire_perms", 0)
+    _require(
+        isinstance(acquire_perms, int)
+        and not isinstance(acquire_perms, bool)
+        and acquire_perms >= 0,
+        f"dcache_acquire_perms is not a nonnegative integer: {acquire_perms!r}",
+    )
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
     target_stage1 = _csv_counts(result, "target_stage1_mode", 2)
@@ -3285,7 +3301,9 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 actual_merge_loads == derived_loads
                 and actual_merge_manager[0] >= merge_actions
                 and actual_merge_manager[1] >= actual_merge_manager[0]
-                and actual_merge_manager[2] == actual_merge_manager[1]
+                and actual_merge_manager[1] <= actual_merge_manager[2]
+                and actual_merge_manager[2]
+                <= actual_merge_manager[1] + acquire_perms
                 and actual_merge_manager[3] == actual_merge_loads,
                 "load-merge manager accounting is not conserved",
             )

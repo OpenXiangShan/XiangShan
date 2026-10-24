@@ -70,16 +70,21 @@ bool MixedScenario::run_concurrent_windows()
             false, window_base + 32, vector_load_shape, vector_corner);
         const auto scalar_store_op =
             static_cast<memblock::StoreOp>(random() % 4);
+        const unsigned scalar_store_width =
+            1U << (static_cast<unsigned>(scalar_store_op) & 3U);
+        std::uint64_t scalar_store_address = constrained_window_address(
+            window_base, scalar_store_width);
+        if ((scalar_store_address & 0xfffU) + scalar_store_width > 0x1000U) {
+            scalar_store_address =
+                (scalar_store_address & ~std::uint64_t{0xfff}) |
+                (0x1000U - scalar_store_width);
+        }
         auto scalar_store = make_store(
-            constrained_window_address(
-                window_base,
-                1U << static_cast<unsigned>(scalar_store_op)),
-            random(), scalar_store_op, random() % 2, random() % 2);
+            scalar_store_address, random(), scalar_store_op,
+            random() % 2, random() % 2);
         // This window uses legal cacheable stores with hardware
         // misalignment enabled.  A crossing of the 16-byte beat is
         // completed by the shared store misalignment output.
-        const unsigned scalar_store_width =
-            memblock::scalar_store_bytes(scalar_store.op);
         if ((scalar_store.address & 15U) + scalar_store_width > 16U) {
             scalar_store.expected_address_writeback_lane = 0;
         }
@@ -302,6 +307,13 @@ bool MixedScenario::run_concurrent_windows()
         window_vectors.insert(
             window_vectors.end(), vector_store_uops.begin(),
             vector_store_uops.end());
+        // A cross-page split store would need the backend to make it the ROB
+        // head before pulsing a pending-store commit.  That is only legal
+        // after every older instruction has retired, which would serialize
+        // this heterogeneous window.  Page-crossing scalar stores are covered
+        // by the focused `scalar-misaligned`/`misaligned-stores` contracts;
+        // keep the mixed window at line-crossing granularity so a younger
+        // store can never be committed while an older load is pending.
         if ((scalar_store_crosses_page &&
                 !environment.set_rob_head(
                     scalar_store.rob, scalar_store.rob_flag)) ||

@@ -1901,6 +1901,15 @@ class VerifyRegressionTest(unittest.TestCase):
             "load-merge manager accounting",
         ):
             verify_regression._check_mixed_coverage(result)
+        result["actual_load_merge_manager"] = "12,14,15,30"
+        result["dcache_acquire_perms"] = 1
+        verify_regression._check_mixed_coverage(result)
+        result["dcache_acquire_perms"] = 0
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "load-merge manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
         result["actual_load_merge_manager"] = "12,14,14,30"
         result.update(
             {

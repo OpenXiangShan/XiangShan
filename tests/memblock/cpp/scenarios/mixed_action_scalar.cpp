@@ -400,6 +400,8 @@ bool MixedScenario::execute_load_merge(ActionWindow &window)
         environment.dcache_refills();
     const std::uint64_t grant_acks_before =
         environment.dcache_grant_acks();
+    const std::uint64_t acquire_perms_before =
+        environment.dcache_acquire_perms();
     const std::uint64_t writebacks_before =
         environment.writebacks();
     std::vector<unsigned> dispatch_lanes(depth);
@@ -429,7 +431,8 @@ bool MixedScenario::execute_load_merge(ActionWindow &window)
     }};
     if (manager_delta[0] < 1 ||
         manager_delta[1] < manager_delta[0] ||
-        manager_delta[2] != manager_delta[1] ||
+        manager_delta[2] != manager_delta[1] +
+                (environment.dcache_acquire_perms() - acquire_perms_before) ||
         manager_delta[3] != depth) {
         std::ostringstream detail;
         detail << "random-load-merge-manager"
@@ -438,7 +441,10 @@ bool MixedScenario::execute_load_merge(ActionWindow &window)
                << ":critical_beat=" << critical_beat
                << ":manager=" << manager_delta[0] << ','
                << manager_delta[1] << ',' << manager_delta[2]
-               << ',' << manager_delta[3];
+               << ',' << manager_delta[3]
+               << ":perms="
+               << (environment.dcache_acquire_perms() -
+                   acquire_perms_before);
         phase = detail.str();
         return false;
     }

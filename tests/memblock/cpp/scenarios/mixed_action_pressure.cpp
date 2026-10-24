@@ -1361,12 +1361,16 @@ bool MixedScenario::execute_miss_burst(ActionWindow &window)
         environment.dcache_refills();
     const std::uint64_t acks_before_burst =
         environment.dcache_grant_acks();
+    const std::uint64_t perms_before_burst =
+        environment.dcache_acquire_perms();
     const std::uint64_t writebacks_before_burst =
         environment.writebacks();
     const std::uint64_t vector_writebacks_before_burst =
         environment.vector_load_writebacks();
     const std::uint64_t lq_before_burst =
         environment.lq_dequeued();
+    const std::uint64_t lq_cancel_before_burst =
+        environment.lq_redirect_canceled_observed();
     if (!environment.set_rob_head(
             transactions.front().rob,
             transactions.front().rob_flag)) {
@@ -1529,12 +1533,29 @@ bool MixedScenario::execute_miss_burst(ActionWindow &window)
     }};
     if (manager_delta[4] < depth ||
         manager_delta[5] < manager_delta[4] ||
-        manager_delta[6] != manager_delta[5] ||
+        manager_delta[6] != manager_delta[5] +
+                (environment.dcache_acquire_perms() - perms_before_burst) ||
         manager_delta[7] != scalar_load_count ||
         manager_delta[8] != (include_vector_load ? 1U : 0U) ||
         manager_delta[9] != scalar_load_count +
                 (vector_transaction ? vector_transaction->flow_num : 0U)) {
-        phase = "random-miss-burst-manager-accounting";
+        std::ostringstream detail;
+        detail << "random-miss-burst-manager-accounting"
+               << ":depth=" << depth
+               << ":scalar=" << scalar_load_count
+               << ":vector=" << (include_vector_load ? 1U : 0U)
+               << ":targets=" << target_requests
+               << ":refills=" << manager_delta[5]
+               << ":acks=" << manager_delta[6]
+               << ":perms="
+               << (environment.dcache_acquire_perms() - perms_before_burst)
+               << ":wb=" << manager_delta[7]
+               << ":vec_wb=" << manager_delta[8]
+               << ":lq_deq=" << manager_delta[9]
+               << ":lq_cancel="
+               << environment.lq_redirect_canceled_observed() -
+                      lq_cancel_before_burst;
+        phase = detail.str();
         return false;
     }
     constraint_coverage.sample_miss_burst(
