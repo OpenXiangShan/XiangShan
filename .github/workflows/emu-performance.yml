@@ -20,7 +20,7 @@ env:
   # random checkpoints number, per CKPT_JSON
   FUZZ_NUM: 5
   # filtering/sorting checkpoints based on ETA, to avoid long-running jobs
-  PROFILE_PATH: /nfs/share/ci-workloads/env-scripts/perf_trigger/profile
+  PROFILE_PATH: /nfs/share/ci-workloads/env-scripts/perf_trigger/profile/data
   ETA_THRESHOLD: 30000 # do not run checkpoints longer than this, in seconds, see PROFILE_PATH/xxx.json for ETA
 
 jobs:
