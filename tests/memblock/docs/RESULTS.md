@@ -267,19 +267,21 @@ arrival order.
 
 ## Open CPU RTL bug: CMO `flushAfter` leaves a younger atomic's DCache result
 
-`cmo-atomic-flush` is a dedicated, deterministic reproducer for an open RTL
-bug. A `CBO.FLUSH` completes on line A, and a younger `AMOADD.D` to line B is
-in flight. The CMO's `flushAfter` redirect at the CMO's ROB reaches
-`AtomicsUnit`, but the unit only clears `atom_override_xtval`; the DCache
-atomic update proceeds. A fresh load after the redirect returns
-`old + operand` (`0x5f5e6e6d7d7c8c8b`) instead of the old memory value
-(`0x4e4d4c4b4a494847`). The failure is deterministic across repeated runs.
+Two dedicated deterministic reproducers record an open RTL bug:
+`cmo-atomic-flush` (CMO `flushAfter`) and `redirect-atomic-flush` (generic
+older-ROB redirect). In both, a younger `AMOADD.D` is in flight when a redirect
+flushes it. The redirect reaches `AtomicsUnit`, but the unit only clears
+`atom_override_xtval`; the DCache atomic update proceeds. A fresh load after
+the redirect returns `old + operand` (`0x5f5e6e6d7d7c8c8b` for the CMO case,
+`0x5757575757575757` for the generic case) instead of the old memory values.
+The failure is deterministic; the generic case proves the trigger is not
+CMO-specific.
 
 The younger-store control `cmo-store-flush` passes: the SBuffer/SQ flush
 drops the younger store and the fresh load sees the old value, isolating the
 leak to the atomic path. The real `make benchmark-tests` run passes **85/85**
-scenarios (781.966 s, `build/memblock/test-scale.json`) because both dedicated
-scenarios have `benchmark_order: null`; `cmo-contracts` and
+scenarios (781.966 s, `build/memblock/test-scale.json`) because the dedicated
+reproducer/control scenarios have `benchmark_order: null`; `cmo-contracts` and
 `atomic-contracts` pass. See
 [`CPU_BUG_CMO_ATOMIC_FLUSH.md`](CPU_BUG_CMO_ATOMIC_FLUSH.md) for the root
 cause (`AtomicsUnit.scala` redirect handler), impact, proposed fix, and

@@ -1,4 +1,4 @@
-# CPU Bug: CMO `flushAfter` Does Not Cancel a Younger Atomic's DCache Side Effect
+# CPU Bug: Redirect Does Not Cancel a Younger Atomic's DCache Side Effect
 
 ## Status
 
@@ -18,6 +18,12 @@ atomic request/response. The DCache therefore applies the younger atomic's
 result. A later load of line B returns `old + operand` instead of the old
 memory value, so the squashed atomic's memory side effect is architecturally
 visible.
+
+The bug is not CMO-specific. A generic older-ROB redirect reproduces the same
+leak: an older load's refill is held, a younger `AMOADD.D` completes, a redirect
+at the older load's ROB flushes the atomic, and a fresh load after the redirect
+still returns `old + operand`. The trigger is any redirect that flushes an
+in-flight younger atomic; the CMO is only one legal source.
 
 ## Reproduction
 
@@ -46,7 +52,23 @@ operand is `0x1111222233334444`. The observed fresh-load data is exactly
 `old + operand`, proving that the younger atomic updated the DCache line even
 though the CMO `flushAfter` redirect flushed it.
 
-Stimulus sequence:
+Generic reproducer:
+
+```sh
+make redirect-atomic-flush
+```
+
+```text
+MEMBLOCK_REDIRECT_ATOMIC_FLUSH_FAIL cycle=375 phase=fresh
+  data=0x5757575757575757 expected_data=0x565554535251504f
+```
+
+`0x565554535251504f + 0x0102030405060708 = 0x5757575757575757`. The older load
+at `0x804a0008` is held, the younger `AMOADD.D` at `0x804c0018` completes, the
+redirect is applied at the older load's ROB (`rob=0`, `flush_itself=false`),
+and the fresh load still observes the atomic result.
+
+CMO stimulus sequence:
 
 1. warm CMO line `0x80470000` and issue `CBO.FLUSH`;
 2. hold the CMO response for 1024 cycles and satisfy its clean-line Probe;
@@ -61,12 +83,14 @@ line remains old; the manager never writes the atomic line.
 
 ## Oracle and contract
 
-`CBO.FLUSH` is ordered before subsequent memory operations. Its `flushAfter`
-redirect must squash younger uops, including atomics. A younger atomic that is
-flushed must not leave a read/write side effect in the data cache; a later load
-must return the pre-atomic memory value. This is the same ordering contract
-already checked for a younger scalar load by the `flushpipe-overlap` phase in
-`cmo-contracts`.
+Any redirect that flushes a younger atomic must prevent or undo that atomic's
+memory side effect. For the CMO instance, `CBO.FLUSH` is ordered before
+subsequent memory operations and its `flushAfter` redirect must squash younger
+uops, including atomics. A younger atomic that is flushed must not leave a
+read/write side effect in the data cache; a later load must return the
+pre-atomic memory value. The generic redirect case isolates the same contract
+from CMO semantics. The younger-scalar-load contract is already checked by the
+`flushpipe-overlap` phase in `cmo-contracts`.
 
 The atomic's speculative old-value register writeback itself is not the
 oracle; the reproducer checks the post-flush DCache/memory state. The failing
@@ -90,9 +114,11 @@ when (io.redirect.valid) {
 ```
 
 It does not call `resetFSM()`, does not suppress `io.dcache.req`/`resp`, and
-does not invalidate an already accepted DCache atomic. The DCache MainPipe
-performs the atomic line update without a redirect/kill input, so the cache
-side effect is committed before the backend can discard the atomic's result.
+does not invalidate an already accepted DCache atomic. This is independent of
+the redirect source: the CMO `flushAfter` and the generic older-ROB redirect
+both reach the same handler. The DCache MainPipe performs the atomic line
+update without a redirect/kill input, so the cache side effect is committed
+before the backend can discard the atomic's result.
 `MemBlock.scala` connects `atomicsUnit.io.redirect <> redirect` (the raw
 redirect); the CMO's `flushAfter` redirect is visible to the unit, but the unit
 continues the in-flight atomic.
@@ -136,8 +162,9 @@ After an RTL fix:
 ## Provenance
 
 - RTL and UT revision: `43b971f2a` (`XiangShan` checkout).
-- Reproducer source: `tests/memblock/cpp/scenarios/maintenance_reset.inc`,
-  `run_cmo_atomic_flush`; catalog entry `cmo-atomic-flush`.
+- Reproducer sources: `tests/memblock/cpp/scenarios/maintenance_reset.inc`,
+  `run_cmo_atomic_flush` and `run_redirect_atomic_flush`; catalog entries
+  `cmo-atomic-flush` and `redirect-atomic-flush`.
 - Observed failure artifact: `/tmp/run-cmoatomic-new2.log` (local run; the
   deterministic command above is authoritative).
 - The default eight-scenario benchmark remains green because the reproducer is

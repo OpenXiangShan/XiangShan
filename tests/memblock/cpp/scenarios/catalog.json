@@ -1133,6 +1133,19 @@
       ],
       "benchmark_order": null,
       "kind": "directed-tests"
+    },
+    {
+      "name": "redirect-atomic-flush",
+      "group": "maintenance_reset",
+      "call": "run_redirect_atomic_flush(argc, argv)",
+      "make_targets": [
+        {
+          "name": "redirect-atomic-flush",
+          "args": ""
+        }
+      ],
+      "benchmark_order": null,
+      "kind": "directed-tests"
     }
   ]
 }

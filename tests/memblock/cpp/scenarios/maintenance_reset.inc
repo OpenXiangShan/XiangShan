@@ -3540,3 +3540,100 @@ int run_cmo_store_flush(int argc, char **argv)
               << '\n';
     return 0;
 }
+
+int run_redirect_atomic_flush(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    const std::uint64_t load_line =
+        memblock::kDefaultMemoryBase + 0x4a0000;
+    const std::uint64_t atomic_line = load_line + 0x20000;
+    constexpr std::uint64_t atomic_operand = 0x0102030405060708ULL;
+    environment.memory().fill_incrementing(load_line, 64, 0x63);
+    environment.memory().fill_incrementing(atomic_line, 64, 0x37);
+    if (!environment.reset() ||
+        !environment.configure_stride_prefetch(false) ||
+        !environment.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_REDIRECT_ATOMIC_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction older{
+        .address = load_line + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 240,
+        .lane = 0,
+    };
+    environment.expect_load(older);
+    environment.hold_dcache_response_at(load_line);
+    if (!environment.set_rob_head(older.rob, older.rob_flag) ||
+        !environment.enqueue_load(older) ||
+        !environment.issue_load(older, 2048)) {
+        std::cerr << "MEMBLOCK_REDIRECT_ATOMIC_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=older-issue reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t atomic_address = atomic_line + 24;
+    const std::uint64_t atomic_old =
+        environment.memory().expected_load(
+            atomic_address, memblock::LoadOp::ld);
+    const memblock::AtomicTransaction atomic{
+        .address = atomic_address,
+        .op = memblock::AtomicOp::amoadd_d,
+        .data = atomic_operand,
+        .rob = 1,
+        .pdest = 241,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    const memblock::LoadTransaction atomic_old_wb{
+        .address = atomic_address,
+        .op = memblock::LoadOp::ld,
+        .rob = atomic.rob,
+        .pdest = atomic.pdest,
+        .lane = 0,
+        .rf_wen = true,
+    };
+    environment.expect_load_data(atomic_old_wb, atomic_old);
+    if (!environment.issue_atomic(atomic, 2048) ||
+        !environment.run_until_load_writebacks(1, 4096) ||
+        !environment.redirect_after(older.rob, older.rob_flag, false) ||
+        !environment.release_held_dcache_response_at(load_line) ||
+        !environment.run_cycles(64) ||
+        !environment.run_until_load_writebacks(2, 4096)) {
+        std::cerr << "MEMBLOCK_REDIRECT_ATOMIC_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=redirect reason="
+                  << environment.error() << " writebacks="
+                  << environment.writebacks() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction fresh{
+        .address = atomic_address,
+        .op = memblock::LoadOp::ld,
+        .rob = 2,
+        .lq = 1,
+        .pdest = 242,
+        .lane = 1,
+    };
+    environment.expect_load_data(fresh, atomic_old);
+    if (!environment.set_rob_head(fresh.rob, fresh.rob_flag) ||
+        !environment.enqueue_load(fresh) ||
+        !environment.issue_load(fresh, 2048) ||
+        !environment.run_until_load_writebacks(3, 4096) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_REDIRECT_ATOMIC_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=fresh reason="
+                  << environment.error() << " writebacks="
+                  << environment.writebacks() << '\n';
+        return 1;
+    }
+    std::cout << "MEMBLOCK_REDIRECT_ATOMIC_FLUSH_PASS"
+              << " cycle=" << environment.cycle()
+              << " older_load=1 atomic_redirected=1 fresh_readback=1"
+              << " expected=0x" << std::hex << atomic_old << std::dec
+              << '\n';
+    return 0;
+}
