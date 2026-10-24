@@ -3034,7 +3034,7 @@ int run_reset_recovery(int argc, char **argv)
 
 int run_reset_partial_load(int argc, char **argv)
 {
-    // Keep at most twelve sequential DUT contexts in this leaf process.
+    // Keep at most twelve sequential DUT contexts in this scenario process.
     // reset-recovery independently owns its thirteen contexts.
     std::uint64_t cycles = 0;
     std::array<PartialLoadResetCoverage, 2> coverage{};
