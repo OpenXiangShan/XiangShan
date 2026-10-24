@@ -2111,6 +2111,68 @@ int run_vector_segment_noncanonical(int argc, char **argv)
             return 1;
         }
     }
+    // Store-side control: the same truncation must not allow a noncanonical
+    // segment store to write memory.
+    std::uint8_t next_sq = 0;
+    for (unsigned index = 0; index < addresses.size(); ++index) {
+        const std::uint64_t address = addresses[index];
+        memblock::VectorMemoryTransaction store_uop{
+            .store = true,
+            .segment = true,
+            .address = address,
+            .eew = 3,
+            .vl = 2,
+            .rob = static_cast<std::uint8_t>(94 + index),
+            .sq = next_sq++,
+            .pdest = 0,
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask = memblock::kExceptionStorePageFault,
+            .expected_trigger = memblock::kVectorWritebackTriggerNone,
+            .vuop_idx = 0,
+            .last_uop = false,
+            .nf = 1,
+        };
+        for (unsigned byte = 0; byte < store_uop.data.size(); ++byte) {
+            store_uop.data[byte] = static_cast<unsigned char>(0xf0 + byte);
+        }
+        environment.expect_vector(store_uop);
+        if (!environment.set_rob_head(store_uop.rob, store_uop.rob_flag) ||
+            !environment.enqueue_vector(store_uop) ||
+            !environment.issue_vector(store_uop, 2048) ||
+            !environment.run_until_vector_complete_with_replays(
+                store_uop, 16384) ||
+            environment.exception_vaddr() != address ||
+            environment.vector_store_writebacks() != index ||
+            environment.tilelink_requests() != 0 ||
+            !environment.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
+                      << environment.cycle() << " phase=store-first-fault index="
+                      << index << " reason=" << environment.error()
+                      << " fault_vaddr=0x" << std::hex
+                      << environment.exception_vaddr() << std::dec
+                      << " store_writebacks="
+                      << environment.vector_store_writebacks() << '\n';
+            return 1;
+        }
+        auto store_fix = store_uop;
+        store_fix.expected_exception_mask = 0;
+        store_fix.expected_vl = 2;
+        store_fix.vuop_idx = 1;
+        store_fix.last_uop = true;
+        store_fix.vl_wen = true;
+        environment.expect_vector_data(store_fix, {});
+        if (!environment.issue_vector(store_fix, 1024) ||
+            !environment.run_until_vector_complete(4096) ||
+            environment.vector_store_writebacks() != index + 1 ||
+            environment.sq_dequeued() != environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
+                      << environment.cycle() << " phase=store-fix-vl index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+
     std::cout << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_PASS"
               << " cycle=" << environment.cycle()
               << " cases=" << addresses.size()

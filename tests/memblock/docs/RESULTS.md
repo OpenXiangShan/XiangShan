@@ -348,7 +348,8 @@ The root cause is the vaddr truncation at `VSegmentUnit.scala:455`:
 `io.dtlb.req.bits.vaddr := tlbReqVaddr(VAddrBits - 1, 0)`. The noncanonical
 upper bits are dropped before the TLB, and `VSegmentUnit` does not perform the
 scalar canonical check or set the page-fault exception. The store path shares
-the same truncation.
+the same truncation; a noncanonical segment store control is included in the
+same reproducer and is part of the post-fix guard.
 
 See [`CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md`](CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md)
 for the reproducer, impact, proposed fix, and post-fix verification. The

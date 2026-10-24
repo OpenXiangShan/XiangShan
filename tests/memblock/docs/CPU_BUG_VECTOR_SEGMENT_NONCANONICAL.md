@@ -55,7 +55,11 @@ Controls:
 - the ordinary `vector-segment` passes.
 
 The high-half and low-half noncanonical addresses are both exercised by the
-new scenario; the first high-half case already fails.
+new scenario; the first high-half case already fails. The same scenario also
+contains a noncanonical segment **store** control: it must require
+`StorePageFault`, no store writeback, and no SBuffer/memory side effect before
+its fix-VL completion. The load case fails first; the store control is the
+post-fix guard for the shared `VSegmentUnit` truncation.
 
 ## Oracle and contract
 
@@ -108,8 +112,9 @@ After the RTL fix:
 
 - `vector-segment-noncanonical` must pass for high-half and low-half addresses,
   including the fix-VL path;
-- add/keep a noncanonical segment **store** control, requiring
-  `StorePageFault`, no DCache/Uncache write, and unchanged backing memory;
+- the noncanonical segment **store** control already in the reproducer must
+  produce `StorePageFault`, no DCache/Uncache write, no store writeback, and
+  unchanged backing memory;
 - `translation-faults`, `vector-segment-canonical`, `vector-segment`, and
   `vector-fof-high` must still pass;
 - re-run the directed benchmark and a multi-seed regression.
