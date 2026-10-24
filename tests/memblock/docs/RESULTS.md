@@ -272,36 +272,37 @@ scenario passes with `reverse_order=1 reverse_writebacks=2`; D-response
 ordering across distinct sources is therefore matched by identity rather than
 arrival order.
 
-## Open CPU RTL bug: CMO `flushAfter` leaves a younger atomic's DCache result
+## Retracted testbench false positive: speculative AMO redirect
 
-Two dedicated deterministic reproducers record an open RTL bug:
-`cmo-atomic-flush` (CMO commit-time ROB `flushOut`) and
-`redirect-atomic-flush` (generic older-ROB redirect). The CMO store itself
-does not send a redirect: it sets `uop.flushPipe`, and the ROB generates the
-`flushAfter` redirect at commit (`StoreQueue.scala:1074`,
-`CtrlBlock.scala:113/625`). The reproducer applies the redirect after
-`commit_store`, not at the CMO request; the earlier before-commit ordering was
-a testbench timing error and is corrected. The CMO atomic leak still
-reproduces with the correct commit-time model. In both, a younger `AMOADD.D` is in flight when a redirect
-flushes it. The redirect reaches `AtomicsUnit`, but the unit only clears
-`atom_override_xtval`; the DCache atomic update proceeds. A fresh load after
-the redirect returns `old + operand` (`0x5f5e6e6d7d7c8c8b` for the CMO case,
-`0x5757575757575757` for the generic case) instead of the old memory values.
-The failure is deterministic; the generic case proves the trigger is not
-CMO-specific.
+The previously reported "CMO/redirect leaves a younger atomic's DCache
+result" was a **testbench false positive**, not an RTL bug. XiangShan marks
+every AMO `noSpec = T, blockBack = T` at decode
+(`DecodeUnit.scala:238-245`); an AMO does not execute speculatively and no
+redirect can cancel an AMO that is already executing. The two reproducers
+directly issued an `AMOADD.D` while an older CMO or load was still pending,
+then injected a redirect. That combination is not realizable by the real
+backend and therefore is not a legal MemBlock stimulus.
 
-The younger-store controls `cmo-store-flush` and `redirect-store-flush` pass:
-the SBuffer/SQ flush drops the younger store and the fresh load sees the old
-value for both the CMO and generic redirect sources, isolating the leak to the
-atomic path. The real `make benchmark-tests` run passes **85/85**
-scenarios (781.966 s, `build/memblock/test-scale.json`) because the dedicated
-reproducer/control scenarios have `benchmark_order: null`; `cmo-contracts` and
-`atomic-contracts` pass. See
-[`CPU_BUG_CMO_ATOMIC_FLUSH.md`](CPU_BUG_CMO_ATOMIC_FLUSH.md) for the root
-cause (`AtomicsUnit.scala` redirect handler), impact, proposed fix, and
-post-fix verification. This is an open bug, not a closure claim.
+Both invalid scenarios (`cmo-atomic-flush` and `redirect-atomic-flush`) and
+the CPU bug document have been removed. The prior CPU-bug notification was
+sent for this false positive; this entry records the retraction.
 
-## Current Verification Position
+Valid neighboring tests are retained:
+
+- `cmo-contracts` younger **load** overlap: loads are speculative and the
+  commit-time CMO `flushAfter` cancels the LQ entry;
+- `cmo-store-flush` and `redirect-store-flush`: younger **stores** are
+  speculative and the SBuffer/SQ flush drops their data;
+- the CMO timing constraint remains: the CMO store itself only sets
+  `uop.flushPipe`, and the ROB's `flushOut` at the CMO **commit** generates
+  the `flushAfter` redirect; tests apply `redirect_after` after
+  `commit_store`.
+
+Anti-oracle for future UT: do not issue an AMO at the MemBlock boundary while
+an older operation is unresolved, and never inject a redirect to cancel an
+in-flight AMO. `issue_atomic` must only model the non-speculative issue point.
+
+## Current Verification Position## Current Verification Position
 
 - `directed-tests` cover the focused protocol, translation, vector, cache,
   reset, protection, and top-level contracts registered in the catalog.
