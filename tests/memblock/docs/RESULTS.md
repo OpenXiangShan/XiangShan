@@ -294,6 +294,24 @@ on all four ways rather than only the single resident line used by
 `dcache-errors`. The scenario is excluded from the default benchmark
 (`benchmark_order: null`).
 
+### 2026-10-24 constrained-random `cmo-stress` direction
+
+Add a dedicated CMO-heavy constrained-random preset. It sets the CMO
+operation weight to 1000 with a scalar load/store weight of one as the control,
+selects all CLEAN/FLUSH/INVAL operations, sets `cmo-dirty=1000`,
+`cmo-younger-overlap=1000`, disables CMO errors and ordinary Probe/error
+subclasses, and keeps the CMO Probe-depth weights enabled. A 4-seed x
+256-action campaign on the current build passes **4/4** (1,024 actions,
+372.5 s, artifact `build/memblock/regression-cmo-stress-4x256.json`); the
+shared verifier accepts the new profile.
+
+The generator's clean CMO path now commits the CMO **before** applying the
+ROB `flushAfter` redirect, matching the design: the CMO store sets `flushPipe`
+and the ROB's `flushOut` generates the commit-time redirect. The younger load
+is canceled through the LQ and the CMO's dirty line/probe accounting remains
+exact. This is a constrained-random direction, not a closure campaign; the
+CMO-heavy action cost is why the budget is 256 actions rather than 16,384.
+
 ## Retracted testbench false positive: speculative AMO redirect
 
 The previously reported "CMO/redirect leaves a younger atomic's DCache

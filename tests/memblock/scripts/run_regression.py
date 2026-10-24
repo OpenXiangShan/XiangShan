@@ -28,7 +28,7 @@ class RegressionError(RuntimeError):
 
 
 CONSTRAINED_RANDOM_SCENARIO = "constrained-random"
-CONSTRAINT_PROFILES = ("coverage", "spec", "corner")
+CONSTRAINT_PROFILES = ("coverage", "spec", "corner", "cmo-stress")
 DEFAULT_SCENARIOS = (CONSTRAINED_RANDOM_SCENARIO,)
 DEFAULT_JOBS = 8
 DEFAULT_ACTIONS = 16384

@@ -32,6 +32,10 @@ make constrained-random SEED=2 ACTIONS=65536 CONSTRAINTS=spec
 make constrained-random SEED=3 ACTIONS=32768 CONSTRAINTS=spec \
   CONSTRAINT='translation-nested=20 translation-switch=100 tlb-flush=100 mmio=30 nc=20 vector-load=80 vector-store=40'
 
+# CMO-heavy direction: dirty/younger-overlap CMO traffic with a tiny scalar
+# control (the shared verifier requires ordinary operation weights).
+make constrained-random SEED=5 ACTIONS=256 CONSTRAINTS=cmo-stress
+
 # Restrict the same generator to a scalar-load locality experiment.
 make constrained-random SEED=4 ACTIONS=16384 CONSTRAINTS=spec \
   CONSTRAINT='scalar-load=1000 scalar-store=0 vector-load=0 vector-store=0 prefetch=0 atomic=0 nc=0 mmio=0 locality-hot=1000 locality-warm=0 locality-cold=0 concurrent=0 tlb-flush=0 latency=compact'
@@ -254,6 +258,17 @@ constraint sets, but every run uses the same generator and records its resolved
 targets.
 
 ## Calibration Conclusions
+
+The `cmo-stress` preset is a directed constrained-random direction: it sets
+the CMO operation weight to 1000 and leaves a scalar load/store weight of one
+as a control. Inside CMO it selects all CLEAN/FLUSH/INVAL operations, sets
+`cmo-dirty=1000` and `cmo-younger-overlap=1000`, disables CMO errors, and
+keeps the ordinary Probe and error subclasses off. Because each CMO action
+warms a line, drains a dirty store, issues a younger load, and may accept a
+Probe burst, use a smaller action budget (for example 256 actions) and more
+seeds rather than the ordinary 16,384-action budget. The direction targets the
+dirty + younger-overlap + Probe composition and is not a substitute for the
+ordinary mixed profiles.
 
 The `spec` preset is calibrated from generated workload counters, but those
 counters are never correctness oracles. The reproducible analysis entry is:

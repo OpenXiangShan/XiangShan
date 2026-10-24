@@ -265,6 +265,10 @@ bool MixedScenario::issue_random_cmo(
             cmo_completion_timeout)) {
         return fail_cmo_completion("store-writeback");
     }
+    if (!error_denied &&
+        !environment.commit_store(cmo_transaction, 8192)) {
+        return fail_cmo_completion("commit");
+    }
     if (younger_overlap || error_denied.has_value()) {
         if (!environment.redirect_after(
                 cmo_transaction.rob, cmo_transaction.rob_flag,
@@ -274,10 +278,6 @@ bool MixedScenario::issue_random_cmo(
         if (environment.writebacks() != younger_writebacks_before) {
             return fail_cmo_completion("younger-writeback-at-redirect");
         }
-    }
-    if (!error_denied &&
-        !environment.commit_store(cmo_transaction, 8192)) {
-        return fail_cmo_completion("commit");
     }
     if (!environment.run_cycles(
             younger_overlap ? younger_response_delay + 256U
