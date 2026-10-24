@@ -119,7 +119,11 @@ atomic composition.
 
 A 4-seed x 16,384-action `coverage` run on this current frozen runtime passes
 **4/4** (65,536 actions, 949.906 s, artifact
-`build/memblock/regression-20261024-round19-coverage-4.json`). The 16-seed
+`build/memblock/regression-20261024-round19-coverage-4.json`).
+
+A repeat 4-seed x 16,384-action `coverage` run on the restored frozen runtime
+also passes **4/4** (65,536 actions, 1,064.346 s, artifact
+`build/memblock/regression-round28-frozen-coverage-4x16k.json`). The 16-seed
 262,144-action capability run remains evidence on the prior runtime; the
 constrained-random source is unchanged. The open CMO/atomic redirect bug is in
 a directed scenario and does not affect this campaign.
