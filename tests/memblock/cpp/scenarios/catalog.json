@@ -1120,6 +1120,19 @@
       ],
       "benchmark_order": null,
       "kind": "directed-tests"
+    },
+    {
+      "name": "cmo-store-flush",
+      "group": "maintenance_reset",
+      "call": "run_cmo_store_flush(argc, argv)",
+      "make_targets": [
+        {
+          "name": "cmo-store-flush",
+          "args": ""
+        }
+      ],
+      "benchmark_order": null,
+      "kind": "directed-tests"
     }
   ]
 }

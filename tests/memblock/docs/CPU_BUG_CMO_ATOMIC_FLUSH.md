@@ -72,6 +72,12 @@ The atomic's speculative old-value register writeback itself is not the
 oracle; the reproducer checks the post-flush DCache/memory state. The failing
 fresh load is an architectural load issued after the redirect.
 
+A younger **store** control, `cmo-store-flush`, uses the same CMO delay/probe
+and redirect sequence but issues `sd` instead of `AMOADD.D`. It passes: the
+younger store's SQ entry is canceled and its SBuffer data is not visible to
+the fresh load. The store-side flush path is therefore correct; the leak is
+specific to the atomic DCache update.
+
 ## Root cause
 
 `src/main/scala/xiangshan/mem/pipeline/AtomicsUnit.scala` handles a redirect
@@ -120,6 +126,7 @@ After an RTL fix:
 
 - `--test cmo-atomic-flush` must print `MEMBLOCK_CMO_ATOMIC_FLUSH_PASS`; the
   fresh load must return `0x4e4d4c4b4a494847`.
+- `cmo-store-flush` (younger-store control) must keep passing.
 - `cmo-contracts`, `atomic-contracts`, `dcache-coherence`, and the
   `dcache-release` CMO/atomic compositions must still pass.
 - Re-run the directed benchmark (`make benchmark-tests`) and a multi-seed

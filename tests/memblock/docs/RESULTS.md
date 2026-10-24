@@ -275,9 +275,12 @@ atomic update proceeds. A fresh load after the redirect returns
 `old + operand` (`0x5f5e6e6d7d7c8c8b`) instead of the old memory value
 (`0x4e4d4c4b4a494847`). The failure is deterministic across repeated runs.
 
-The real `make benchmark-tests` run passes **85/85** scenarios (781.966 s,
-`build/memblock/test-scale.json`) because the reproducer has
-`benchmark_order: null`; `cmo-contracts` and `atomic-contracts` pass. See
+The younger-store control `cmo-store-flush` passes: the SBuffer/SQ flush
+drops the younger store and the fresh load sees the old value, isolating the
+leak to the atomic path. The real `make benchmark-tests` run passes **85/85**
+scenarios (781.966 s, `build/memblock/test-scale.json`) because both dedicated
+scenarios have `benchmark_order: null`; `cmo-contracts` and
+`atomic-contracts` pass. See
 [`CPU_BUG_CMO_ATOMIC_FLUSH.md`](CPU_BUG_CMO_ATOMIC_FLUSH.md) for the root
 cause (`AtomicsUnit.scala` redirect handler), impact, proposed fix, and
 post-fix verification. This is an open bug, not a closure claim.

@@ -3402,3 +3402,141 @@ int run_cmo_atomic_flush(int argc, char **argv)
               << std::dec << '\n';
     return 0;
 }
+
+int run_cmo_store_flush(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    const std::uint64_t cmo_line =
+        memblock::kDefaultMemoryBase + 0x480000;
+    const std::uint64_t store_line = cmo_line + 0x20000;
+    constexpr std::uint64_t store_value = 0x123456789abcdef0ULL;
+    environment.memory().fill_incrementing(cmo_line, 64, 0x71);
+    environment.memory().fill_incrementing(store_line, 64, 0x2b);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_CMO_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::array<memblock::LoadTransaction, 2> warms{{
+        memblock::LoadTransaction{
+            .address = cmo_line + 8,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 240, .lane = 0,
+        },
+        memblock::LoadTransaction{
+            .address = store_line + 8,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 1, .pdest = 241, .lane = 1,
+        },
+    }};
+    for (const auto &warm : warms) {
+        environment.expect_load(warm);
+        if (!environment.set_rob_head(warm.rob, warm.rob_flag) ||
+            !environment.enqueue_load(warm) ||
+            !environment.issue_load(warm, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_CMO_STORE_FLUSH_FAIL cycle="
+                      << environment.cycle() << " phase=warm reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+    const memblock::StoreTransaction cmo{
+        .address = cmo_line + 39,
+        .oracle_address = cmo_line,
+        .data = 0,
+        .op = memblock::StoreOp::cbo_flush,
+        .rob = 1,
+        .sq = 0,
+        .address_lane = 1,
+        .data_lane = 0,
+        .expected_address_writeback_lane = 0,
+        .expected_output_flush_pipe = true,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(cmo);
+    if (!environment.enqueue_store(cmo, 0) ||
+        !environment.issue_store_address(cmo, 2048) ||
+        !environment.issue_store_data(cmo, 2048)) {
+        std::cerr << "MEMBLOCK_CMO_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=cmo-issue reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.force_next_cmo_response_delay(1024);
+    const std::uint64_t probes_before =
+        environment.dcache_probe_responses();
+    if (!environment.wait_for_cmo_store_request(cmo, 1, 8192) ||
+        !environment.request_dcache_probe(cmo_line, 2, false, 2, {}) ||
+        !environment.run_until_probe_responses(probes_before + 1, 4096)) {
+        std::cerr << "MEMBLOCK_CMO_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=cmo-probe reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::StoreTransaction younger{
+        .address = store_line + 24,
+        .data = store_value,
+        .op = memblock::StoreOp::sd,
+        .rob = 2,
+        .sq = 1,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    environment.expect_store(younger);
+    if (!environment.enqueue_store(younger, 0) ||
+        !environment.issue_store_address(younger, 2048) ||
+        !environment.issue_store_data(younger, 2048) ||
+        !environment.run_cycles(256)) {
+        std::cerr << "MEMBLOCK_CMO_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=younger-issue reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    if (!environment.run_until_store_complete(16384) ||
+        !environment.redirect_after(cmo.rob, cmo.rob_flag, false) ||
+        !environment.commit_store(cmo, 8192) ||
+        !environment.run_cycles(4096) ||
+        !environment.run_until_sbuffer_empty(8192) ||
+        environment.sq_dequeued() + environment.sq_canceled() !=
+            environment.sq_allocated()) {
+        std::cerr << "MEMBLOCK_CMO_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=flush reason="
+                  << environment.error() << " sq="
+                  << environment.sq_dequeued() << '+'
+                  << environment.sq_canceled() << '/'
+                  << environment.sq_allocated() << '\n';
+        return 1;
+    }
+    const std::uint64_t expected =
+        environment.memory().expected_load(
+            store_line + 24, memblock::LoadOp::ld);
+    const memblock::LoadTransaction readback{
+        .address = store_line + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 3,
+        .lq = 2,
+        .pdest = 242,
+        .lane = 0,
+    };
+    environment.expect_load_data(readback, expected);
+    if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+        !environment.enqueue_load(readback) ||
+        !environment.issue_load(readback, 2048) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_CMO_STORE_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=readback reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    std::cout << "MEMBLOCK_CMO_STORE_FLUSH_PASS"
+              << " cycle=" << environment.cycle()
+              << " younger_store_canceled=1 readback=1"
+              << " expected=0x" << std::hex << expected << std::dec
+              << '\n';
+    return 0;
+}
