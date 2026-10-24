@@ -60,6 +60,7 @@ case class SoCParameters
   PmemRanges: Seq[MemoryRange] = Seq(MemoryRange(0x80000000L, 0x80000000000L)),
   PMAConfigs: Seq[PMAConfigEntry] = Seq(
     PMAConfigEntry(0x0L, range = 0x1000000000000L, a = 3),
+    PMAConfigEntry(0x0L, range = 0x80000000L, a = 3, w = true, r = true), // low 2GiB RW uncacheable
     PMAConfigEntry(0x80000000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),
     PMAConfigEntry(0x80000000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x3A000000L, a = 1),

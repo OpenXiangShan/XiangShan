@@ -426,8 +426,24 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val q0_isStore = q0_entry.cmd === MemoryOpConstants.M_XWR
 
+  private def remapMmio(addr: UInt): UInt = {
+    val out = WireDefault(addr)
+    // sg CLINT: 0x1400_0000 -> 0x3800_0000
+    when (addr >= "h1400_0000".U(PAddrBits.W) && addr < "h1401_0000".U(PAddrBits.W)) {
+      out := "h3800_0000".U(PAddrBits.W) + (addr - "h1400_0000".U(PAddrBits.W))
+    // sg UART16550: 0x0007_b000 -> 0x310b_0000
+    }.elsewhen (addr >= "h0007_b000".U(PAddrBits.W) && addr < "h0007_b080".U(PAddrBits.W)) {
+      out := "h310b_0000".U(PAddrBits.W) + (addr - "h0007_b000".U(PAddrBits.W))
+    }
+    // PLIC: both are 0x3c00_0000, identity
+    out
+  }
+
+  val q0_bits = Mux(q0_isStore, q0_store, q0_load)
+
   mem_acquire.valid := q0_canSent && !io.wfi.wfiReq
-  mem_acquire.bits := Mux(q0_isStore, q0_store, q0_load)
+  mem_acquire.bits := q0_bits
+  mem_acquire.bits.address := remapMmio(q0_bits.address)
   mem_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := q0_entry.memBackTypeMM)
   mem_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := q0_entry.nc)
   when(mem_acquire.fire){
