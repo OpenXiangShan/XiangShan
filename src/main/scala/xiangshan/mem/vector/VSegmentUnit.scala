@@ -377,7 +377,18 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val vl                               = instMicroOp.vl
   val vm                               = instMicroOp.uop.vpu.vm
   val vstart                           = instMicroOp.uop.vpu.vstart
-  val srcMask                          = GenFlowMask(Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vstart, vl, true)
+  // The first uop of a segment still has stale instMicroOp fields.  Build the
+  // mask from the incoming uop until the micro-op has been latched.
+  val inVl                             = io.in.bits.src_vl.asTypeOf(VConfig()).vl
+  val inVm                             = io.in.bits.uop.vpu.vm
+  val inVstart                         = io.in.bits.uop.vpu.vstart
+  val firstUopMask                     = GenFlowMask(
+    Mux(inVm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask),
+    inVstart, inVl, true)
+  val srcMask                          = Mux(
+    instMicroOpValid,
+    GenFlowMask(Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vstart, vl, true),
+    firstUopMask)
   // first uop enqueue, we need to latch microOp of segment instruction
   when(io.in.fire && !instMicroOpValid && !isEnqFixVlUop){
     // element number in a vd
@@ -898,7 +909,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(instMicroOp.mask, realEw)
   val maskUsed      = maskDataVec(vdIdxInField)
 
-  when(stateNext === s_idle){
+  when(stateNext === s_idle && !io.in.fire){
     instMicroOpValid := false.B
   }
   // writeback to backend
