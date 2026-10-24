@@ -320,6 +320,10 @@ also passes **4/4** (2,048 actions, 882.6 s, artifact
 `build/memblock/regression-cmo-stress-4x512.json`), confirming the direction
 under twice the CMO action count.
 
+A 4-seed x 1,024-action campaign also passes **4/4** (4,096 actions,
+1,363.248 s, artifact `build/memblock/regression-cmo-stress-4x1024.json`),
+confirming the direction under four times the initial CMO action count.
+
 The generator's clean CMO path now commits the CMO **before** applying the
 ROB `flushAfter` redirect, matching the design: the CMO store sets `flushPipe`
 and the ROB's `flushOut` generates the commit-time redirect. The younger load
