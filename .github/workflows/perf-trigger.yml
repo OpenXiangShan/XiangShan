@@ -1,6 +1,6 @@
 name: Performance Regression Trigger
 
-run-name: "${{ github.event.inputs.note }}"
+run-name: "${{ github.event.inputs.note }} - ${{ github.event.inputs.test_branch }} - ${{ github.event.inputs.benchmark_type }} - ${{ github.event.inputs.xs_config }}"
 
 on:
   workflow_dispatch:
@@ -32,6 +32,10 @@ on:
           - BackendV2Config
           - KunminghuV2Config
         default: DefaultConfig
+      prebuilt_emu:
+        description: Existing emulator built from test_branch (empty to build in CI)
+        required: false
+        type: string
       benchmark_type:
         description: Benchmark type
         required: false
@@ -103,6 +107,7 @@ jobs:
         test_branch: ${{ github.event.inputs.test_branch }}
         emulator: ${{ github.event.inputs.emulator }}
         xs_config: ${{ github.event.inputs.xs_config }}
+        prebuilt_emu: ${{ github.event.inputs.prebuilt_emu }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         cst_file: ${{ github.event.inputs.cst_file }}

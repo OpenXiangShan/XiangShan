@@ -17,6 +17,10 @@ on:
         required: false
         type: string
         default: DefaultConfig
+      prebuilt_emu:
+        description: Existing emulator built from test_branch (empty to build in CI)
+        required: false
+        type: string
       benchmark_type:
         required: false
         type: string
@@ -260,18 +264,23 @@ jobs:
           WITH_TEA: ${{ inputs.enable_tea && '1' || '0' }}
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
-            proxychains -q python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-              --config "${{ inputs.xs_config }}" \
-              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
-              --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
-              --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-              --llvm-profdata llvm-profdata --trace-fst \
-              --emulator ${{ inputs.emulator }} \
-              ${{ (inputs.enable_db || inputs.enable_tea) && '--enable-db' || '' }} \
-              ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
-              $CST_COMPILE_OPT
-            mkdir -p $SPEC_DIR
-            cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
+            if [[ -n "${{ inputs.prebuilt_emu }}" ]]; then
+              mkdir -p "$SPEC_DIR"
+              cp "${{ inputs.prebuilt_emu }}" "$SPEC_DIR/emu-${{ inputs.emulator }}"
+            else
+              proxychains -q python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+                --config "${{ inputs.xs_config }}" \
+                --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
+                --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
+                --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
+                --llvm-profdata llvm-profdata --trace-fst \
+                --emulator ${{ inputs.emulator }} \
+                ${{ (inputs.enable_db || inputs.enable_tea) && '--enable-db' || '' }} \
+                ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
+                $CST_COMPILE_OPT
+              mkdir -p $SPEC_DIR
+              cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
+            fi
           fi
           if [ ! -e "$SPEC_DIR/riscv64-nemu-interpreter-so" ]; then
             cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
