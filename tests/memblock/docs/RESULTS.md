@@ -275,8 +275,14 @@ arrival order.
 ## Open CPU RTL bug: CMO `flushAfter` leaves a younger atomic's DCache result
 
 Two dedicated deterministic reproducers record an open RTL bug:
-`cmo-atomic-flush` (CMO `flushAfter`) and `redirect-atomic-flush` (generic
-older-ROB redirect). In both, a younger `AMOADD.D` is in flight when a redirect
+`cmo-atomic-flush` (CMO commit-time ROB `flushOut`) and
+`redirect-atomic-flush` (generic older-ROB redirect). The CMO store itself
+does not send a redirect: it sets `uop.flushPipe`, and the ROB generates the
+`flushAfter` redirect at commit (`StoreQueue.scala:1074`,
+`CtrlBlock.scala:113/625`). The reproducer applies the redirect after
+`commit_store`, not at the CMO request; the earlier before-commit ordering was
+a testbench timing error and is corrected. The CMO atomic leak still
+reproduces with the correct commit-time model. In both, a younger `AMOADD.D` is in flight when a redirect
 flushes it. The redirect reaches `AtomicsUnit`, but the unit only clears
 `atom_override_xtval`; the DCache atomic update proceeds. A fresh load after
 the redirect returns `old + operand` (`0x5f5e6e6d7d7c8c8b` for the CMO case,

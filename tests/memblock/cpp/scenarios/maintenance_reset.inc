@@ -2027,8 +2027,8 @@ int run_cmo_contracts(int argc, char **argv)
 
         if (!overlap.run_until_store_complete(16384) ||
             overlap.writebacks() != load_writebacks_before ||
-            !overlap.redirect_after(cmo.rob, cmo.rob_flag, false) ||
             !overlap.commit_store(cmo, 8192) ||
+            !overlap.redirect_after(cmo.rob, cmo.rob_flag, false) ||
             !overlap.run_cycles(4096) ||
             overlap.writebacks() != load_writebacks_before ||
             overlap.lq_redirect_canceled_observed() != 1 ||
@@ -3497,8 +3497,8 @@ int run_cmo_store_flush(int argc, char **argv)
         return 1;
     }
     if (!environment.run_until_store_complete(16384) ||
-        !environment.redirect_after(cmo.rob, cmo.rob_flag, false) ||
         !environment.commit_store(cmo, 8192) ||
+        !environment.redirect_after(cmo.rob, cmo.rob_flag, false) ||
         !environment.run_cycles(4096) ||
         !environment.run_until_sbuffer_empty(8192) ||
         environment.sq_dequeued() + environment.sq_canceled() !=

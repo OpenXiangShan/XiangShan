@@ -11,13 +11,25 @@ this scenario (`benchmark_order: null`); the real benchmark passes 85/85 and
 ## Summary
 
 A `CBO.FLUSH` completes on line A while a younger `AMOADD.D` to line B is in
-flight. The CMO's `flushAfter` redirect is applied at the CMO's ROB, which is
-older than the atomic. The redirect reaches `AtomicsUnit`, but only clears
-`atom_override_xtval`; it does not reset the atomic FSM or cancel the DCache
-atomic request/response. The DCache therefore applies the younger atomic's
-result. A later load of line B returns `old + operand` instead of the old
-memory value, so the squashed atomic's memory side effect is architecturally
-visible.
+flight. The CMO's `flushPipe` writeback is committed; the **ROB's `flushOut`
+at that commit** generates the `flushAfter` redirect, which reaches
+`AtomicsUnit`. The unit only clears `atom_override_xtval`; it does not reset
+the atomic FSM or cancel the DCache atomic request/response. The DCache
+therefore applies the younger atomic's result. A later load of line B returns
+`old + operand` instead of the old memory value, so the squashed atomic's
+memory side effect is architecturally visible.
+
+**CMO redirect constraint.** A CMO store does not itself send a redirect.
+`StoreQueue.scala:1074` sets `uop.flushPipe := deqCanDoCbo` when the CMO
+dequeues; the ROB then reports `flushOut` at the CMO's commit
+(`Rob.scala:582`), and `CtrlBlock.scala:113/625` selects that
+`s1_robFlushRedirect` as `s1_s3_redirect`, which drives `MemBlock.io.redirect`.
+The redirect must therefore be modeled at/after `commit_store`, not at the CMO
+store request and not before its commit. The earlier `cmo-atomic-flush` /
+`cmo-store-flush` / `cmo-contracts` younger-overlap sequences applied
+`redirect_after` before `commit_store`; that was a testbench timing error and
+has been corrected. With the correct commit-time model the CMO atomic leak
+still reproduces; the CMO store itself remains redirect-free.
 
 The bug is not CMO-specific. A generic older-ROB redirect reproduces the same
 leak: an older load's refill is held, a younger `AMOADD.D` completes, a redirect
@@ -73,8 +85,9 @@ CMO stimulus sequence:
 1. warm CMO line `0x80470000` and issue `CBO.FLUSH`;
 2. hold the CMO response for 1024 cycles and satisfy its clean-line Probe;
 3. issue a younger `AMOADD.D` at `0x80490018`;
-4. complete the CMO store, then apply the `flushAfter` redirect at the CMO's
-   ROB (`rob=1`, `flush_itself=false`);
+4. complete the CMO store, commit it, then apply the ROB `flushOut`
+   `flushAfter` redirect at the committed CMO's ROB (`rob=1`,
+   `flush_itself=false`);
 5. issue a fresh load at the atomic address (`rob=3`), which must observe the
    old memory.
 
@@ -126,9 +139,10 @@ redirect); the CMO's `flushAfter` redirect is visible to the unit, but the unit
 continues the in-flight atomic.
 
 The missing piece is an atomic kill/rollback path, or a guarantee that an
-atomic cannot issue its DCache request while an older CMO/fence redirect is
-still possible. Resetting only the `AtomicsUnit` FSM after the DCache request
-is insufficient because the line update has already occurred.
+atomic cannot issue its DCache request before the older CMO's commit-time
+`flushOut` has settled. Resetting only the `AtomicsUnit` FSM after the DCache
+request is insufficient because the line update has already occurred. The CMO
+store itself is not the redirect source; the ROB commit path is.
 
 ## Impact
 
@@ -156,6 +170,8 @@ After an RTL fix:
   fresh load must return `0x4e4d4c4b4a494847`.
 - `cmo-store-flush` and `redirect-store-flush` (younger-store controls) must
   keep passing.
+- The CMO tests must keep the ROB-commit redirect ordering: `commit_store`
+  before `redirect_after`; no CMO-request-time redirect.
 - `cmo-contracts`, `atomic-contracts`, `dcache-coherence`, and the
   `dcache-release` CMO/atomic compositions must still pass.
 - Re-run the directed benchmark (`make benchmark-tests`) and a multi-seed
