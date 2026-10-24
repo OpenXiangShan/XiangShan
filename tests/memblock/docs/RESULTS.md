@@ -344,12 +344,13 @@ exception and writes the input vector data; the expected `LoadPageFault` is
 absent. Scalar noncanonical cases in `translation-faults` fault correctly, and
 `vector-segment-canonical`/`vector-segment` remain green.
 
-The root cause is the vaddr truncation at `VSegmentUnit.scala:455`:
-`io.dtlb.req.bits.vaddr := tlbReqVaddr(VAddrBits - 1, 0)`. The noncanonical
-upper bits are dropped before the TLB, and `VSegmentUnit` does not perform the
-scalar canonical check or set the page-fault exception. The store path shares
-the same truncation; a noncanonical segment store control is included in the
-same reproducer and is part of the post-fix guard.
+The `VSegmentUnit` sends the truncated `vaddr` but also the full
+`fullva`/`checkfullva`, and imports DTLB `excp(0).pf` into `exceptionVec`; the
+line-455 truncation alone is therefore not a sufficient root cause. The exact
+root is under focused review: the DTLB `checkfullva`/`pregpf` path for this
+vector request or the `VSegmentUnit` `s_wait_tlb_resp`/`s_pm` exception
+propagation. A noncanonical segment store control is included in the same
+reproducer and is part of the post-fix guard.
 
 See [`CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md`](CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md)
 for the reproducer, impact, proposed fix, and post-fix verification. The

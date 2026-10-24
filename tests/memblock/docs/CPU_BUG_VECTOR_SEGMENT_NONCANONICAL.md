@@ -15,16 +15,24 @@ page fault and writes the input vector data. The matching scalar noncanonical
 cases in `translation-faults` raise the expected page fault. The scalar and
 the vector segment paths therefore disagree on the canonical-address contract.
 
-The vector segment path truncates the vaddr to `VAddrBits` before the TLB
-request (`VSegmentUnit.scala:455`):
+The vector segment request sends both a truncated `vaddr` and the full
+`fullva` with `checkfullva := true`:
 
 ```scala
-io.dtlb.req.bits.vaddr := tlbReqVaddr(VAddrBits - 1, 0)
+io.dtlb.req.bits.vaddr       := tlbReqVaddr(VAddrBits - 1, 0)
+io.dtlb.req.bits.fullva      := tlbReqVaddr
+io.dtlb.req.bits.checkfullva := true.B
 ```
 
-The noncanonical upper bits are dropped and the low 39-bit address is treated
-as a valid translation request. No canonical check or page-fault exception is
-generated in `VSegmentUnit`, so the vector memory operation proceeds.
+The line-455 truncation alone therefore does **not** explain the missing
+fault: the DTLB receives the full address and its canonical check, and
+`VSegmentUnit` imports the DTLB `excp(0).pf` result into
+`exceptionVec(loadPageFault/storePageFault)`. The observed failure means the
+DTLB `checkfullva`/`pregpf` path or the `VSegmentUnit`
+`s_wait_tlb_resp`/`s_pm` exception propagation is not producing the page fault
+for this vector segment request. The exact root remains under focused review;
+the verified facts are the noncanonical vector segment load completing with
+`exception=0x0` while the scalar noncanonical cases fault.
 
 ## Reproduction
 
@@ -98,13 +106,16 @@ unintended valid address, making this a memory-safety and isolation issue.
 
 ## Proposed fix
 
-1. Perform the full-width canonical check in `VSegmentUnit` for each segment
-   element, using the same rule as the scalar LoadUnit before the TLB request.
-2. On a noncanonical address, set the page-fault exception, publish the exact
-   full `exception_vaddr`, suppress the vector data/SBuffer side effect, and
-   preserve `vstart`.
-3. Keep the full vaddr for the TLB request/check rather than truncating at
-   `VAddrBits`, or reject the address before the truncation.
+1. Trace the DTLB `checkfullva`/`pregpf` result for this VSegmentUnit request
+   and confirm whether the TLB raises the page fault for the full noncanonical
+   address.
+2. If the TLB raises it, fix the VSegmentUnit `s_wait_tlb_resp`/`s_pm`
+   exception propagation so `exceptionVec` publishes the page fault with the
+   exact full `exception_vaddr`, suppresses the vector data/SBuffer side
+   effect, and preserves `vstart`.
+3. If the TLB does not raise it, fix the fullva/checkfullva path (including
+   the line-455 truncation) before the TLB. Do not treat the truncation alone
+   as the root cause.
 
 ## Post-fix verification
 
