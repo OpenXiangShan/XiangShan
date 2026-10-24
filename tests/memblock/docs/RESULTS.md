@@ -103,6 +103,23 @@ capability run under the 16,384-action budget, not the 48-hour or 200-hour
 closure campaigns required by
 [`VERIFICATION_PLAN.md#regression-acceptance`](VERIFICATION_PLAN.md#regression-acceptance).
 
+### 2026-10-24 single-set replacement and Probe composition
+
+`dcache-release` was corrected from stale 128-set/8-way constants to the
+generated 256-set/4-way geometry. Its first phase now drives six dirty lines
+through one set, requiring two attributed dirty replacements and exact
+`ReleaseData` images.
+
+A second phase composes replacement with a same-set Probe. Four dirty stores
+fill all four ways; a fifth store forces one dirty victim release. The C channel
+is held until a Probe to the just-refilled fifth line is accepted, so the
+victim release and the `ProbeAckData` overlap. The test requires exactly one
+victim `ReleaseData` with its immutable line image, one dirty ProbeAckData with
+the fifth line image, and five exact readbacks. The scenario passes
+(`probe_overlap_release_data=1 probe_overlap_victim_releases=1
+probe_overlap_probe_data=1 probe_overlap_readbacks=5`). No new CPU bug was
+found; replacement composed with CMO/atomic traffic remains a gap.
+
 ## Current Verification Position
 
 - `directed-tests` cover the focused protocol, translation, vector, cache,

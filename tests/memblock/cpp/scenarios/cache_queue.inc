@@ -4,8 +4,8 @@
 int run_dcache_release(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
-    constexpr unsigned dcache_sets = 128;
-    constexpr unsigned dcache_ways = 8;
+    constexpr unsigned dcache_sets = 256;
+    constexpr unsigned dcache_ways = 4;
     constexpr unsigned line_bytes = 64;
     constexpr unsigned line_count = dcache_ways + 2;
     constexpr std::uint64_t same_set_stride = dcache_sets * line_bytes;
@@ -87,6 +87,227 @@ int run_dcache_release(int argc, char **argv)
         return 1;
     }
 
+    // Compose a dirty replacement release with a same-set Probe.  Four
+    // dirty lines fill one four-way set; the fifth store forces one dirty
+    // victim release.  Hold the C channel until a Probe to the just-refilled
+    // fifth line is accepted, then require the victim ReleaseData and the
+    // ProbeAckData to carry their exact line images.  This targets the
+    // replacement/Probe ordering gap without using internal replacement
+    // state or requiring a particular victim.
+    memblock::Environment overlap(argc, argv);
+    constexpr std::uint64_t overlap_base =
+        memblock::kDefaultMemoryBase + 0x80000;
+    constexpr std::uint64_t overlap_stride =
+        dcache_sets * line_bytes;
+    std::array<memblock::StoreTransaction, dcache_ways + 1> overlap_stores{};
+    std::array<std::vector<unsigned char>, dcache_ways> overlap_lines{};
+    for (unsigned index = 0; index < overlap_stores.size(); ++index) {
+        const std::uint64_t line = overlap_base + index * overlap_stride;
+        overlap.memory().fill_incrementing(
+            line, line_bytes, static_cast<std::uint8_t>(0x41 + index * 0x11));
+        overlap_stores[index] = memblock::StoreTransaction{
+            .address = line + 24,
+            .data = 0xf00dcafe00000000ULL | index,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(index),
+            .rob_flag = memblock::rob_pointer_flag(index),
+            .sq = memblock::sq_pointer_value(index),
+            .sq_flag = memblock::sq_pointer_flag(index),
+            .address_lane = index % memblock::kScalarStoreLanes,
+            .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+        };
+        if (index < dcache_ways) {
+            auto expected_line =
+                overlap.memory().read_beat(line, line_bytes);
+            for (unsigned byte = 0; byte < sizeof(std::uint64_t); ++byte) {
+                expected_line[24 + byte] = static_cast<unsigned char>(
+                    overlap_stores[index].data >> (8 * byte));
+            }
+            overlap_lines[index] = std::move(expected_line);
+            overlap.expect_release_line(line, overlap_lines[index]);
+        }
+    }
+    const auto overlap_probe_line = overlap_stores.back().address & ~std::uint64_t{63};
+    auto overlap_probe_image =
+        overlap.memory().read_beat(overlap_probe_line, line_bytes);
+    for (unsigned byte = 0; byte < sizeof(std::uint64_t); ++byte) {
+        overlap_probe_image[24 + byte] = static_cast<unsigned char>(
+            overlap_stores.back().data >> (8 * byte));
+    }
+
+    if (!overlap.reset() ||
+        !overlap.configure_stride_prefetch(false) ||
+        !overlap.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << overlap.cycle() << " phase=probe-overlap-reset reason="
+                  << overlap.error() << '\n';
+        return 1;
+    }
+    for (unsigned index = 0; index < dcache_ways; ++index) {
+        const auto &store = overlap_stores[index];
+        overlap.expect_store(store);
+        const std::uint64_t refills_before = overlap.dcache_refills();
+        if (!overlap.enqueue_store(store, 0) ||
+            !overlap.issue_store_address(store, 1024) ||
+            !overlap.issue_store_data(store, 1024) ||
+            !overlap.run_until_store_complete(4096) ||
+            !overlap.commit_store(store, 4096) ||
+            !overlap.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << overlap.cycle() << " transaction=" << index
+                      << " phase=probe-overlap-fill reason="
+                      << overlap.error() << '\n';
+            return 1;
+        }
+        for (unsigned cycle = 0;
+             cycle < 4096 && overlap.dcache_refills() == refills_before;
+             ++cycle) {
+            if (!overlap.run_cycles(1)) {
+                std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                          << overlap.cycle() << " transaction=" << index
+                          << " phase=probe-overlap-fill-refill reason="
+                          << overlap.error() << '\n';
+                return 1;
+            }
+        }
+        if (overlap.dcache_refills() != refills_before + 1) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << overlap.cycle() << " transaction=" << index
+                      << " phase=probe-overlap-fill-refill-count refills="
+                      << overlap.dcache_refills() - refills_before << '\n';
+            return 1;
+        }
+    }
+
+    const std::uint64_t overlap_probes_before = overlap.dcache_probes();
+    const std::uint64_t overlap_release_data_before =
+        overlap.tilelink_release_data();
+    if (!overlap.hold_dcache_c_until_probes(
+            overlap_probes_before + 1)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << overlap.cycle() << " phase=probe-overlap-hold reason="
+                  << overlap.error() << '\n';
+        return 1;
+    }
+    overlap.begin_dcache_release_observation();
+    const auto &victim_store = overlap_stores.back();
+    overlap.expect_store(victim_store);
+    const std::uint64_t victim_refills_before = overlap.dcache_refills();
+    if (!overlap.enqueue_store(victim_store, 0) ||
+        !overlap.issue_store_address(victim_store, 1024) ||
+        !overlap.issue_store_data(victim_store, 1024) ||
+        !overlap.run_until_store_complete(4096) ||
+        !overlap.commit_store(victim_store, 4096) ||
+        !overlap.run_until_sbuffer_empty(4096)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << overlap.cycle() << " phase=probe-overlap-victim reason="
+                  << overlap.error() << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 4096 && overlap.dcache_refills() == victim_refills_before;
+         ++cycle) {
+        if (!overlap.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=probe-overlap-victim-refill reason="
+                      << overlap.error() << '\n';
+            return 1;
+        }
+    }
+    if (overlap.dcache_refills() != victim_refills_before + 1 ||
+        overlap.tilelink_release_data() != overlap_release_data_before) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << overlap.cycle()
+                  << " phase=probe-overlap-victim-state refills="
+                  << overlap.dcache_refills() - victim_refills_before
+                  << " release_data="
+                  << overlap.tilelink_release_data() -
+                         overlap_release_data_before << '\n';
+        return 1;
+    }
+    if (!overlap.request_dcache_probe(
+            overlap_probe_line, 1, true, 0, overlap_probe_image) ||
+        !overlap.run_until_probe_responses(
+            overlap_probes_before + 1, 8192) ||
+        !overlap.run_until_dcache_release_idle(4096) ||
+        !overlap.run_cycles(32)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << overlap.cycle() << " phase=probe-overlap-drain reason="
+                  << overlap.error() << " probes="
+                  << overlap.dcache_probes() << " responses="
+                  << overlap.dcache_probe_responses() << " probe_data="
+                  << overlap.dcache_probe_data() << " release_data="
+                  << overlap.tilelink_release_data() << '\n';
+        return 1;
+    }
+
+    std::uint64_t overlap_victim_releases = 0;
+    for (unsigned index = 0; index < dcache_ways; ++index) {
+        const std::uint64_t line = overlap_base + index * overlap_stride;
+        overlap_victim_releases +=
+            overlap.observed_dcache_release_data_covering(line);
+    }
+    const std::uint64_t overlap_release_data_delta =
+        overlap.tilelink_release_data() - overlap_release_data_before;
+    const std::uint64_t overlap_verified =
+        overlap.tilelink_release_data_verified();
+    if (overlap_release_data_delta != 1 ||
+        overlap_victim_releases != 1 ||
+        overlap_verified != overlap.tilelink_release_data() ||
+        overlap.dcache_probes() != overlap_probes_before + 1 ||
+        overlap.dcache_probe_responses() != overlap_probes_before + 1 ||
+        overlap.dcache_probe_data() != 1) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << overlap.cycle()
+                  << " phase=probe-overlap-accounting release_delta="
+                  << overlap_release_data_delta << " victim_releases="
+                  << overlap_victim_releases << " verified="
+                  << overlap_verified << " probes="
+                  << overlap.dcache_probes() << " responses="
+                  << overlap.dcache_probe_responses() << " probe_data="
+                  << overlap.dcache_probe_data() << '\n';
+        return 1;
+    }
+    overlap.end_dcache_release_observation();
+
+    std::uint64_t overlap_readbacks = 0;
+    for (unsigned index = 0; index < overlap_stores.size(); ++index) {
+        const auto &store = overlap_stores[index];
+        const memblock::LoadTransaction readback{
+            .address = store.address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(0x40 + index),
+            .lq = static_cast<std::uint8_t>(index),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(0x60 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        overlap.expect_load_data(readback, store.data);
+        if (!overlap.set_rob_head(readback.rob, readback.rob_flag) ||
+            !overlap.enqueue_load(readback) ||
+            !overlap.issue_load(readback, 2048) ||
+            !overlap.run_until_load_complete(readback, 8192)) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << overlap.cycle() << " transaction=" << index
+                      << " phase=probe-overlap-readback reason="
+                      << overlap.error() << '\n';
+            return 1;
+        }
+        ++overlap_readbacks;
+    }
+    if (!overlap.run_until_queues_retired(4096) ||
+        overlap.sq_dequeued() != overlap.sq_allocated() ||
+        overlap.lq_dequeued() != overlap.lq_allocated()) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << overlap.cycle() << " phase=probe-overlap-queue-conserve sq="
+                  << overlap.sq_dequeued() << '/' << overlap.sq_allocated()
+                  << " lq=" << overlap.lq_dequeued() << '/'
+                  << overlap.lq_allocated() << " reason=" << overlap.error()
+                  << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_DCACHE_RELEASE_PASS"
               << " cycle=" << environment.cycle()
               << " stores=" << stores.size()
@@ -95,6 +316,12 @@ int run_dcache_release(int argc, char **argv)
               << " releases=" << environment.tilelink_releases()
               << " release_data=" << environment.tilelink_release_data()
               << " preserved_stores=" << preserved_stores
+              << " probe_overlap_release_data="
+              << overlap_release_data_delta
+              << " probe_overlap_victim_releases="
+              << overlap_victim_releases
+              << " probe_overlap_probe_data=" << overlap.dcache_probe_data()
+              << " probe_overlap_readbacks=" << overlap_readbacks
               << '\n';
     return 0;
 }
