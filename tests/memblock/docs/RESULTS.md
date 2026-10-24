@@ -213,6 +213,20 @@ complete with the backing image unchanged. The scenario passes with
 `cmo_reset=1 cmo_canceled=1 cmo_fresh=1 cmo_readbacks=1`. This uses a
 store-reset cancellation API; dirty-cache persistence remains unclaimed.
 
+### 2026-10-24 corner-preset campaign
+
+The `corner` preset was exercised on the frozen runtime. A 4-seed x 4,096-action
+run passes **4/4** (16,384 actions, 1,625 s, artifact
+`build/memblock/regression-20261024-corner-smoke-4.json`). An 8-seed x
+16,384-action run passes **6/8**; seeds 2 and 3 hit the ad-hoc 3,600-second
+per-seed runner timeout, while their 4,096-action versions pass in the smoke
+run. The timed-out seeds emitted no `MEMBLOCK_*_FAIL` or terminal summary; the
+corner preset's rare error/retry traffic reduces throughput to roughly 2.5
+actions/s on this host, so 16,384 actions can exceed one hour per seed. This is
+a time-budget/throughput observation, not a functional failure; a future 16k
+corner campaign needs a larger per-seed timeout or more than eight workers. It
+is not closure evidence for the 48-hour or 200-hour campaigns.
+
 ## Current Verification Position
 
 - `directed-tests` cover the focused protocol, translation, vector, cache,
