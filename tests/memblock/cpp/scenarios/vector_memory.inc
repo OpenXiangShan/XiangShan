@@ -1847,3 +1847,180 @@ int run_store_forwarding(int argc, char **argv)
               << '\n';
     return 0;
 }
+
+int run_vector_fof_high_half(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_page = 0xffffffff52000000ULL;
+    constexpr std::uint64_t physical_page =
+        memblock::kDefaultMemoryBase + 0x5c000;
+    constexpr std::uint64_t root = 0x97b00000ULL;
+    constexpr std::uint64_t address = virtual_page + 0xff8;
+    constexpr std::uint64_t physical_address = physical_page + 0xff8;
+    environment.memory().fill_incrementing(physical_address, 8, 0x7d);
+    environment.configure_backpressure(0x2d3e4f5a6b7c8d9eULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(virtual_page, physical_page, root) ||
+        !environment.activate_sv39(root, 39)) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_HIGH_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const auto first = memblock::reference_sv39_walk(
+        environment.memory(), root, address);
+    const auto second = memblock::reference_sv39_walk(
+        environment.memory(), root, address + 8);
+    if (!first.translated || first.physical_address != physical_address ||
+        second.translated) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_HIGH_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=reference reason=expected one mapped and one unmapped element\n";
+        return 1;
+    }
+    memblock::VectorMemoryTransaction data_uop{
+        .address = address,
+        .oracle_address = physical_address,
+        .eew = 3,
+        .vl = 2,
+        .rob = 80,
+        .lq = 0,
+        .pdest = 130,
+        .lane = 0,
+        .flow_num = 2,
+        .expected_trigger = memblock::kVectorWritebackTriggerNone,
+        .vuop_idx = 0,
+        .last_uop = false,
+        .fault_only_first = true,
+        .is_vleff = true,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+        .fof_unspecified_elements = 1U << 1,
+    };
+    for (unsigned byte = 0; byte < data_uop.data.size(); ++byte) {
+        data_uop.data[byte] = static_cast<unsigned char>(0x80 + byte);
+    }
+    auto expected_data = data_uop.data;
+    for (unsigned byte = 0; byte < 8; ++byte) {
+        expected_data[byte] = environment.memory().read_byte(
+            physical_address + byte);
+    }
+    environment.expect_vector_data(data_uop, expected_data);
+    if (!environment.set_rob_head(data_uop.rob, data_uop.rob_flag) ||
+        !environment.enqueue_vector(data_uop) ||
+        !environment.issue_vector(data_uop, 1024) ||
+        !environment.run_until_vector_complete_with_replays(
+            data_uop, 16384) ||
+        !environment.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_HIGH_FAIL cycle="
+                  << environment.cycle() << " phase=data-uop reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    auto fix_vl_uop = data_uop;
+    fix_vl_uop.pdest = 131;
+    fix_vl_uop.expected_vl = 1;
+    fix_vl_uop.vuop_idx = 1;
+    fix_vl_uop.last_uop = true;
+    fix_vl_uop.vl_wen = true;
+    fix_vl_uop.fof_unspecified_elements = 0;
+    fix_vl_uop.expected_debug_is_mmio.reset();
+    fix_vl_uop.expected_debug_is_ncio.reset();
+    fix_vl_uop.expected_debug_is_perf_cnt.reset();
+    environment.expect_vector_data(fix_vl_uop, {});
+    if (!environment.issue_vector(fix_vl_uop, 1024) ||
+        !environment.run_until_vector_complete(4096) ||
+        environment.vector_fof_fix_writebacks() != 1 ||
+        environment.lq_dequeued() != environment.lq_allocated()) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_HIGH_FAIL cycle="
+                  << environment.cycle() << " phase=fix-vl reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    memblock::Environment first_fault(argc, argv);
+    constexpr std::uint64_t fault_virtual = 0xffffffff53000180ULL;
+    constexpr std::uint64_t fault_root = 0x97c00000ULL;
+    first_fault.configure_backpressure(0x6a5b4c3d2e1f0011ULL, true);
+    if (!first_fault.reset() ||
+        !first_fault.activate_sv39(fault_root, 40) ||
+        memblock::reference_sv39_walk(
+            first_fault.memory(), fault_root, fault_virtual).translated) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_HIGH_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-configuration reason="
+                  << first_fault.error() << '\n';
+        return 1;
+    }
+    memblock::VectorMemoryTransaction first_fault_data{
+        .address = fault_virtual,
+        .eew = 3,
+        .vl = 2,
+        .rob = 81,
+        .lq = 0,
+        .pdest = 132,
+        .lane = 0,
+        .flow_num = 2,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        .vuop_idx = 0,
+        .last_uop = false,
+        .fault_only_first = true,
+        .is_vleff = true,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    for (unsigned byte = 0; byte < first_fault_data.data.size(); ++byte) {
+        first_fault_data.data[byte] = static_cast<unsigned char>(0xa0 + byte);
+    }
+    first_fault.expect_vector_data(
+        first_fault_data, first_fault_data.data);
+    if (!first_fault.set_rob_head(
+            first_fault_data.rob, first_fault_data.rob_flag) ||
+        !first_fault.enqueue_vector(first_fault_data) ||
+        !first_fault.issue_vector(first_fault_data, 1024) ||
+        !first_fault.run_until_vector_complete_with_replays(
+            first_fault_data, 16384) ||
+        !first_fault.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_HIGH_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-data reason="
+                  << first_fault.error() << '\n';
+        return 1;
+    }
+    auto first_fault_fix = first_fault_data;
+    first_fault_fix.pdest = 133;
+    first_fault_fix.expected_exception_mask = 0;
+    first_fault_fix.expected_vl = 2;
+    first_fault_fix.vuop_idx = 1;
+    first_fault_fix.last_uop = true;
+    first_fault_fix.vl_wen = true;
+    first_fault_fix.expected_debug_is_mmio.reset();
+    first_fault_fix.expected_debug_is_ncio.reset();
+    first_fault_fix.expected_debug_is_perf_cnt.reset();
+    first_fault.expect_vector_data(first_fault_fix, {});
+    if (!first_fault.issue_vector(first_fault_fix, 1024) ||
+        !first_fault.run_until_vector_complete(4096) ||
+        first_fault.vector_load_writebacks() != 1 ||
+        first_fault.vector_fof_fix_writebacks() != 1 ||
+        first_fault.tilelink_requests() != 0 ||
+        first_fault.exception_vaddr() != fault_virtual ||
+        first_fault.lq_dequeued() != first_fault.lq_allocated()) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_HIGH_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-completion reason="
+                  << first_fault.error() << " fault_vaddr=0x" << std::hex
+                  << first_fault.exception_vaddr() << std::dec
+                  << " dcache=" << first_fault.tilelink_requests()
+                  << " lq=" << first_fault.lq_dequeued() << '/'
+                  << first_fault.lq_allocated() << '\n';
+        return 1;
+    }
+    std::cout << "MEMBLOCK_VECTOR_FOF_HIGH_PASS"
+              << " cycle=" << environment.cycle()
+              << " high_data=1 high_fix_vl=1 high_first_fault=1"
+              << " fault_vaddr=0x" << std::hex << first_fault.exception_vaddr()
+              << std::dec << '\n';
+    return 0;
+}

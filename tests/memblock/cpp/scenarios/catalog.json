@@ -1146,6 +1146,19 @@
       ],
       "benchmark_order": null,
       "kind": "directed-tests"
+    },
+    {
+      "name": "vector-fof-high",
+      "group": "vector_memory",
+      "call": "run_vector_fof_high_half(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-fof-high",
+          "args": ""
+        }
+      ],
+      "benchmark_order": null,
+      "kind": "directed-tests"
     }
   ]
 }

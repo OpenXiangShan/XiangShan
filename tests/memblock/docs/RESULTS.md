@@ -320,6 +320,18 @@ is canceled through the LQ and the CMO's dirty line/probe accounting remains
 exact. This is a constrained-random direction, not a closure campaign; the
 CMO-heavy action cost is why the budget is 256 actions rather than 16,384.
 
+### 2026-10-24 high-half VFOF composition
+
+`vector-fof-high` adds a directed high-half canonical VFOF case. A high-half
+Sv39 VLEFF has element zero mapped and element one on the next unmapped page;
+the FOF result must suppress the later page fault, complete with the exact
+first element data, and write the fix-VL uop with VL=1. A separate high-half
+first-element fault must publish the exact high canonical `exception_vaddr`
+(0xffffffff53000180), suppress the DCache request, and complete the fix-VL
+path. The scenario passes with `high_data=1 high_fix_vl=1
+high_first_fault=1` and the expected fault VA; this closes the high-half FOF
+composition gap.
+
 ## Retracted testbench false positive: speculative AMO redirect
 
 The previously reported "CMO/redirect leaves a younger atomic's DCache
