@@ -245,7 +245,7 @@ jobs:
       - name: Build EMU with DRAMsim3
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
-            proxychains -q ssh node030 "cd '$GITHUB_WORKSPACE' && NOOP_HOME='$GITHUB_WORKSPACE' proxychains -q python3 scripts/xiangshan.py --build \
+            proxychains -q ssh node030 "cd '$GITHUB_WORKSPACE' && PATH='$PATH' NOOP_HOME='$GITHUB_WORKSPACE' proxychains -q python3 scripts/xiangshan.py --build \
               --config '${{ inputs.xs_config }}' \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
               --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
