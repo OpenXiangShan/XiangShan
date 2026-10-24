@@ -2024,3 +2024,96 @@ int run_vector_fof_high_half(int argc, char **argv)
               << std::dec << '\n';
     return 0;
 }
+
+int run_vector_segment_noncanonical(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t root = 0x97e00000ULL;
+    const std::array<std::uint64_t, 2> addresses{{
+        0xffffff8040000000ULL, // high-half noncanonical (bit 38 differs)
+        0x0000004040000000ULL, // low-half noncanonical
+    }};
+    environment.configure_backpressure(0x3141592653589793ULL, true);
+    if (!environment.reset() ||
+        !environment.activate_sv39(root, 41)) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    std::uint8_t next_rob = 90;
+    for (unsigned index = 0; index < addresses.size(); ++index) {
+        const std::uint64_t address = addresses[index];
+        if (memblock::reference_sv39_walk(
+                environment.memory(), root, address).translated) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
+                      << environment.cycle() << " phase=reference index="
+                      << index << " reason=noncanonical VA unexpectedly mapped\n";
+            return 1;
+        }
+        memblock::VectorMemoryTransaction uop{
+            .store = false,
+            .segment = true,
+            .address = address,
+            .eew = 3,
+            .vl = 2,
+            .rob = next_rob++,
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(150 + index),
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+            .expected_trigger = memblock::kVectorWritebackTriggerNone,
+            .vuop_idx = 0,
+            .last_uop = false,
+            .nf = 1,
+        };
+        for (unsigned byte = 0; byte < uop.data.size(); ++byte) {
+            uop.data[byte] = static_cast<unsigned char>(0xe0 + byte);
+        }
+        environment.expect_vector_data(uop, uop.data);
+        if (!environment.set_rob_head(uop.rob, uop.rob_flag) ||
+            !environment.enqueue_vector(uop) ||
+            !environment.issue_vector(uop, 2048) ||
+            !environment.run_until_vector_complete_with_replays(uop, 16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
+                      << environment.cycle() << " phase=first-fault index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.exception_vaddr() != address ||
+            environment.vector_load_writebacks() != index ||
+            environment.tilelink_requests() != 0) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
+                      << environment.cycle() << " phase=fault-metadata index="
+                      << index << " fault_vaddr=0x" << std::hex
+                      << environment.exception_vaddr() << " expected=0x"
+                      << address << std::dec << " dcache="
+                      << environment.tilelink_requests() << '\n';
+            return 1;
+        }
+        auto fix = uop;
+        fix.pdest = static_cast<std::uint8_t>(160 + index);
+        fix.expected_exception_mask = 0;
+        fix.expected_vl = 2;
+        fix.vuop_idx = 1;
+        fix.last_uop = true;
+        fix.vl_wen = true;
+        environment.expect_vector_data(fix, {});
+        if (!environment.issue_vector(fix, 1024) ||
+            !environment.run_until_vector_complete(4096) ||
+            environment.vector_load_writebacks() != index + 1 ||
+            environment.lq_dequeued() != environment.lq_allocated()) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
+                      << environment.cycle() << " phase=fix-vl index=" << index
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    std::cout << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_PASS"
+              << " cycle=" << environment.cycle()
+              << " cases=" << addresses.size()
+              << " high_low=1 vstart0_fault=1 fix_vl=1" << '\n';
+    return 0;
+}

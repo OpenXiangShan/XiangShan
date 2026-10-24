@@ -335,6 +335,26 @@ path. The scenario passes with `high_data=1 high_fix_vl=1
 high_first_fault=1` and the expected fault VA; this closes the high-half FOF
 composition gap.
 
+## Open CPU RTL bug: noncanonical vector segment address does not fault
+
+`vector-segment-noncanonical` is a deterministic reproducer for an open RTL
+bug. A vector segment load with a noncanonical Sv39 VA
+(`0xffffff8040000000`, bit 38 differs from bits 63:39) completes with no
+exception and writes the input vector data; the expected `LoadPageFault` is
+absent. Scalar noncanonical cases in `translation-faults` fault correctly, and
+`vector-segment-canonical`/`vector-segment` remain green.
+
+The root cause is the vaddr truncation at `VSegmentUnit.scala:455`:
+`io.dtlb.req.bits.vaddr := tlbReqVaddr(VAddrBits - 1, 0)`. The noncanonical
+upper bits are dropped before the TLB, and `VSegmentUnit` does not perform the
+scalar canonical check or set the page-fault exception. The store path shares
+the same truncation.
+
+See [`CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md`](CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md)
+for the reproducer, impact, proposed fix, and post-fix verification. The
+reproducer is excluded from the default benchmark; the open bug is not a
+closure claim.
+
 ## Retracted testbench false positive: speculative AMO redirect
 
 The previously reported "CMO/redirect leaves a younger atomic's DCache

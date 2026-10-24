@@ -1159,6 +1159,19 @@
       ],
       "benchmark_order": null,
       "kind": "directed-tests"
+    },
+    {
+      "name": "vector-segment-noncanonical",
+      "group": "vector_memory",
+      "call": "run_vector_segment_noncanonical(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-segment-noncanonical",
+          "args": ""
+        }
+      ],
+      "benchmark_order": null,
+      "kind": "directed-tests"
     }
   ]
 }
