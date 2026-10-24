@@ -165,6 +165,16 @@ unchanged. A final readback returns the original value. The scenario passes
 with `reservation_probe_invalidated=1`. This observes the architectural
 reservation outcome, not the internal reservation bit.
 
+### 2026-10-24 split load across a PMP boundary
+
+`pmp-contracts` adds a misaligned S-mode `ld` starting four bytes inside a
+4-KiB NAPOT allow region and crossing into the denied next page. The load must
+report `LoadAccessFault`, may issue the allowed-prefix line request, and must
+issue no request to or return data from the denied line. The backing bytes
+remain unchanged. The scenario passes 59 cases with `split_pmp_edge=1`; the
+allowed prefix request explains the one-request increase over ordinary denied
+loads.
+
 ### 2026-10-24 S-mode locked PMP immutability
 
 `pmp-contracts` adds an S-mode lock-immutability case. A NAPOT allow entry is

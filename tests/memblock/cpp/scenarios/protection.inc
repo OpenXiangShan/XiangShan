@@ -2037,6 +2037,75 @@ int run_pmp_contracts(int argc, char **argv)
         total_dcache_requests += environment.tilelink_requests();
     }
 
+    // A misaligned load that starts in an allowed NAPOT region but crosses
+    // into the denied next page must fault without requesting or returning
+    // data from the denied line.  The allowed prefix may issue at most its own
+    // line request; the denied line must remain untouched.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t base = 0x80f00000ULL;
+        environment.memory().fill_incrementing(base, 0x2000, 0x5c);
+        if (!configure_supervisor_bare(
+                environment,
+                {napot_address(base, 0x1000)},
+                {pmp_napot_read_write}) ||
+            !environment.enable_misaligned_accesses()) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=split-pmp-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction split{
+            .address = base + 0xffc,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 120, .lane = 0,
+            .expected_exception_mask =
+                memblock::kExceptionLoadAccessFault,
+        };
+        const std::uint64_t denied_line_before = environment.tilelink_requests();
+        const std::uint64_t denied_line_requests_before =
+            environment.dcache_requests_covering_since(
+                base + 0x1000, 0);
+        const std::uint64_t denied_uncache_before =
+            environment.uncache_requests();
+        environment.expect_load(split);
+        if (!environment.set_rob_head(split.rob, split.rob_flag) ||
+            !environment.enqueue_load(split) ||
+            !environment.issue_load(split, 4096) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=split-pmp-load reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.dcache_requests_covering_since(base + 0x1000, 0) !=
+                denied_line_requests_before ||
+            environment.uncache_requests() != denied_uncache_before ||
+            environment.bus_expected_load(
+                base + 0x1000, memblock::LoadOp::ld) !=
+                environment.memory().expected_load(
+                    base + 0x1000, memblock::LoadOp::ld)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=split-pmp-denied-line reason="
+                      << environment.error() << " denied_requests="
+                      << environment.dcache_requests_covering_since(
+                             base + 0x1000, 0) - denied_line_requests_before
+                      << " uncache="
+                      << environment.uncache_requests() -
+                             denied_uncache_before << '\n';
+            return 1;
+        }
+        (void)denied_line_before;
+        ++denied_cases;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
     // A TOR entry's upper bound is the following entry's pmpaddr.  When that
     // following entry is locked, the TOR base address is locked too.  Attempt
     // to move the base beyond the upper bound: the original range must remain
@@ -2373,7 +2442,7 @@ int run_pmp_contracts(int argc, char **argv)
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
               << " machine_bypass=1 atomic_denied=1 tor_next_lock=1"
               << " napot_sizes=7 pbmt_pmp_cases=2 pbmt_pmp_stores=2"
-              << " warl_permission=2 locked_immutable=1"
+              << " warl_permission=2 locked_immutable=1 split_pmp_edge=1"
               << '\n';
     return 0;
 }
