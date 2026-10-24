@@ -344,13 +344,22 @@ exception and writes the input vector data; the expected `LoadPageFault` is
 absent. Scalar noncanonical cases in `translation-faults` fault correctly, and
 `vector-segment-canonical`/`vector-segment` remain green.
 
-The `VSegmentUnit` sends the truncated `vaddr` but also the full
-`fullva`/`checkfullva`, and imports DTLB `excp(0).pf` into `exceptionVec`; the
-line-455 truncation alone is therefore not a sufficient root cause. The exact
-root is under focused review: the DTLB `checkfullva`/`pregpf` path for this
-vector request or the `VSegmentUnit` `s_wait_tlb_resp`/`s_pm` exception
-propagation. A noncanonical segment store control is included in the same
-reproducer and is part of the post-fix guard.
+The root is upstream of the DTLB. For the first/only segment uop,
+`VSegmentUnit` latches `instMicroOp.mask = 0` (`VSegmentUnit.scala:377-380`
+reads the registered `instMicroOp`, not `io.in.bits`), and the
+`instMicroOpValid` clear at `:901-903` overrides the set at `:387` when the
+first fire has `enqPtr == deqPtr`. `segmentActive` is therefore zero
+(`:215`), `io.dtlb.req.valid` is gated off (`:453`), and the FSM takes
+`s_tlb_req -> s_latch_and_merge_data` (`:285`), writing back the old
+destination data with exception 0. A one-uop segment has no second fire to
+repair the mask; `vector-segment-canonical` passes because it issues two uops
+per segment. A `mem_direct` trace in an isolated worktree confirms
+`mask=0x0 req_valid=0 tlbReqVaddr=0xffffff8040000000 pf39=0 pregpf=0
+exc13=0`. The line-455 truncation and the `checkfullva`/`pregpf` path are
+never reached. The fix is to compute the first-uop mask from `io.in.bits` and
+give the `instMicroOpValid` set priority over the `s_idle` clear. A
+noncanonical segment store control is included in the same reproducer and is
+part of the post-fix guard.
 
 See [`CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md`](CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md)
 for the reproducer, impact, proposed fix, and post-fix verification. The

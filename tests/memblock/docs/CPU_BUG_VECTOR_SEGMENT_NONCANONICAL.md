@@ -81,21 +81,42 @@ control is included in the verification plan.
 
 ## Root cause
 
-`VSegmentUnit.scala` computes the segment vaddr and truncates it at the DTLB
-request:
+The failure is upstream of the DTLB canonical check. `VSegmentUnit` latches a
+zero `instMicroOp.mask` for the first (and, for a one-uop segment, only) uop:
 
-```scala
-io.dtlb.req.bits.vaddr := tlbReqVaddr(VAddrBits - 1, 0)
+- `VSegmentUnit.scala:377-380` computes `srcMask` from the registered
+  `instMicroOp.vl/uop.vpu.vm/uop.vpu.vstart`, not from the incoming
+  `io.in.bits`.
+- `:387-394` sets `instMicroOpValid`/`instMicroOp` and also updates
+  `instMicroOp.vl` in the same block.
+- `:901-903` clears `instMicroOpValid` when `stateNext === s_idle`; at the
+  first fire `enqPtr == deqPtr`, so the clear overrides the set. A one-uop
+  segment has no second fire to repair the mask.
+- `:215` computes `segmentActive = (mask & UIntToOH(segmentIdx)).orR`, which is
+  zero.
+- `:453` gates `io.dtlb.req.valid := state === s_tlb_req && segmentActive` to
+  zero, so `fullva/checkfullva` is never sampled and no `pf39`/`pregpf`/`excp(0).pf`
+  exists.
+- `:285` then takes `s_tlb_req -> s_latch_and_merge_data` (or `s_send_data`),
+  skips the cache, and writes back the old destination data with exception 0.
+
+Decisive `mem_direct` trace from the private worktree:
+
+```text
+cycle=35 state=0 next=1 op_vl=2 op_vm=1 op_vstart=0 mask=0x0
+cycle=37 state=3 next=9 op_vl=2 mask=0x0 req_valid=0
+  tlbReqVaddr=0xffffff8040000000 pregpf=0x0 pf39=0x0
+cycle=41 state=12 exc13=0 wb_exc13=0
 ```
 
-`VAddrBits` is narrower than the full 64-bit vaddr, so the noncanonical upper
-bits disappear before the TLB/canonical check. The vector segment unit does not
-perform the scalar LoadUnit's canonical check and does not set the page-fault
-exception itself. The low 39-bit residue is a canonical address, so the TLB
-successfully translates it and the vector load returns data.
+`vector-segment-canonical` passes because it issues two uops per segment; the
+second uop recomputes the mask from the now-latched `vl`/`vm`/`vstart`. The
+noncanonical reproducer issues one uop, so the mask stays zero. This is the
+complete explanation for `exception=0x0`; the line-455 truncation is not the
+root (the fullva/checkfullva path is never reached).
 
-The bug affects both segment loads and stores; the load reproducer is in the
-tree, and the store path uses the same `tlbReqVaddr` truncation.
+The same root can affect any legal one-uop segment access: it bypasses the DTLB,
+returns stale destination data, and suppresses the required page fault.
 
 ## Impact
 
@@ -106,42 +127,49 @@ unintended valid address, making this a memory-safety and isolation issue.
 
 ## Proposed fix
 
-1. Trace the DTLB `checkfullva`/`pregpf` result for this VSegmentUnit request
-   and confirm whether the TLB raises the page fault for the full noncanonical
-   address.
-2. If the TLB raises it, fix the VSegmentUnit `s_wait_tlb_resp`/`s_pm`
-   exception propagation so `exceptionVec` publishes the page fault with the
-   exact full `exception_vaddr`, suppresses the vector data/SBuffer side
-   effect, and preserves `vstart`.
-3. If the TLB does not raise it, fix the fullva/checkfullva path (including
-   the line-455 truncation) before the TLB. Do not treat the truncation alone
-   as the root cause.
+1. In the first-uop path, compute `srcMask` from the incoming
+   `io.in.bits.src_vl.asTypeOf(VConfig()).vl`,
+   `io.in.bits.uop.vpu.vm`, `io.in.bits.uop.vpu.vstart`, and
+   `io.in.bits.src_mask`, rather than from the registered zero
+   `instMicroOp` fields.
+2. Give the `instMicroOpValid := true.B` set at `:387` priority over the
+   `stateNext === s_idle` clear at `:901-903` (move the clear above the set,
+   or qualify it with `!io.in.fire`).
+3. Optionally `RegInit` the `VSegmentBundle`; this alone is not sufficient
+   because a stale zero `vl` still produces a zero mask.
+
+The fix must be followed by a full RTL rebuild/model export because it changes
+the `MemBlock` RTL; this is a legitimate RTL-fix rebuild, not a UT-only rebuild.
 
 ## Post-fix verification
 
 After the RTL fix:
 
-- `vector-segment-noncanonical` must pass for high-half and low-half addresses,
-  including the fix-VL path;
-- the noncanonical segment **store** control already in the reproducer must
-  produce `StorePageFault`, no DCache/Uncache write, no store writeback, and
-  unchanged backing memory;
-- `translation-faults`, `vector-segment-canonical`, `vector-segment`, and
-  `vector-fof-high` must still pass;
-- re-run the directed benchmark and a multi-seed regression.
+- `vector-segment-noncanonical` must issue the DTLB request (`req_valid=1`,
+  `fullva=0xffffff8040000000`, `checkfullva=1`) and raise the expected
+  `LoadPageFault`/`StorePageFault` with no data/SBuffer side effect;
+- `vector-segment-canonical` (12 cases), `vector-segment`, `vector-fof-high`,
+  `translation-faults` (2568 cases), and the directed benchmark must still pass;
+- the one-uop segment path must be covered by a control that checks a normal
+  mapped one-uop segment load/store, not only the fault case;
+- re-run the constrained-random vector/segment directions and a multi-seed
+  regression.
 
 ## Provenance
 
-- RTL revision: the `VSegmentUnit.scala:455` truncation is present at the
-  current XiangShan checkout (`218aa15b4` before this test commit; the RTL
-  source is unchanged).
+- RTL revision: `e3e05a6d6` (main checkout); the relevant
+  `VSegmentUnit.scala` lines are unchanged.
 - Reproducer source:
   `tests/memblock/cpp/scenarios/vector_memory.inc`,
   `run_vector_segment_noncanonical`; catalog entry
   `vector-segment-noncanonical`.
-- Observed logs: `/tmp/repro-vseg-noncanon-1.log` and
-  `/tmp/repro-vseg-noncanon-2.log` (local runs; the deterministic command
-  above is authoritative).
-- The default benchmark excludes the failing scenario; `vector-segment`,
-  `vector-segment-canonical`, `translation-faults`, and `vector-fof-high`
-  remain green.
+- Private debug worktree (no main RTL/Picker/runtime/harness change):
+  `/home/xuyinan/paseo-workspace/kmhv2-ut-memblock-vseg-root`.
+- Root-cause report:
+  `/home/xuyinan/paseo-workspace/kmhv2-ut-memblock-vseg-root/VSEG_ROOT_CAUSE_REPORT.md`.
+- `mem_direct` traces:
+  `full-trace3.log`, `vseg-decisive-trace.txt` in the private worktree.
+- Controls in the private build: `vector-segment-noncanonical` FAIL
+  `exception=0x0`; `vector-segment-canonical` PASS 12 cases;
+  `translation-faults` PASS 2568 cases including scalar noncanonical.
+- The default benchmark excludes the failing scenario until the RTL fix.
