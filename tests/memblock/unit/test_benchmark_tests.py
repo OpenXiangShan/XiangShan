@@ -20,9 +20,9 @@ import benchmark_tests  # noqa: E402
 
 
 class BenchmarkTestsTest(unittest.TestCase):
-    def test_make_target_defaults_to_eight_leaf_workers(self) -> None:
+    def test_make_target_defaults_to_eight_scenario_workers(self) -> None:
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertEqual(benchmark_tests.MAX_PARALLEL_LEAVES, 8)
+        self.assertEqual(benchmark_tests.MAX_PARALLEL_SCENARIOS, 8)
         self.assertRegex(makefile, r"(?m)^JOBS \?= 8$")
         benchmark_rule = makefile[
             makefile.index("benchmark-tests:"):
@@ -76,8 +76,8 @@ class BenchmarkTestsTest(unittest.TestCase):
     def test_rejects_wrong_optional_identity_fields(self) -> None:
         with self.assertRaisesRegex(benchmark_tests.BenchmarkError, "seed is 2"):
             benchmark_tests.parse_terminal(
-                "MEMBLOCK_RANDOM_MIXED_PASS seed=2 transactions=256\n",
-                expected_scenario="random-mixed",
+                "MEMBLOCK_CONSTRAINED_RANDOM_PASS seed=2 transactions=256\n",
+                expected_scenario="constrained-random",
                 expected_seed=1,
                 expected_transactions=256,
             )
@@ -99,7 +99,7 @@ class BenchmarkTestsTest(unittest.TestCase):
                 "probes": 1,
                 "release_data": 4,
             },
-            "random-mixed",
+            "constrained-random",
         )
         self.assertEqual(metrics["scalar_loads"], 26)
         self.assertEqual(metrics["scalar_stores"], 20)
@@ -135,7 +135,7 @@ class BenchmarkTestsTest(unittest.TestCase):
         self.assertIn("using up to 8 processes", markdown)
 
     def test_main_runs_scenarios_concurrently_and_preserves_order(self) -> None:
-        requested = benchmark_tests.SCENARIOS[:benchmark_tests.MAX_PARALLEL_LEAVES]
+        requested = benchmark_tests.SCENARIOS[:benchmark_tests.MAX_PARALLEL_SCENARIOS]
         rendezvous = threading.Barrier(len(requested), timeout=5.0)
         active = 0
         maximum_active = 0
@@ -183,7 +183,7 @@ class BenchmarkTestsTest(unittest.TestCase):
                 str(output),
                 "--scenarios",
                 ",".join(requested),
-                "--transactions",
+                "--actions",
                 "256",
                 "--jobs",
                 str(len(requested)),
@@ -223,7 +223,7 @@ class BenchmarkTestsTest(unittest.TestCase):
                 str(root / "runtime.json"),
                 "--output",
                 str(root / "benchmark.json"),
-                "--transactions",
+                "--actions",
                 "256",
                 "--jobs",
                 "9",
@@ -279,7 +279,7 @@ class BenchmarkTestsTest(unittest.TestCase):
                 str(output),
                 "--scenarios",
                 ",".join(requested),
-                "--transactions",
+                "--actions",
                 "256",
                 "--jobs",
                 "3",
@@ -344,7 +344,7 @@ class BenchmarkTestsTest(unittest.TestCase):
                 str(root / "benchmark.json"),
                 "--scenarios",
                 "smoke,single-load",
-                "--transactions",
+                "--actions",
                 "256",
                 "--jobs",
                 "2",
@@ -405,7 +405,7 @@ class BenchmarkTestsTest(unittest.TestCase):
                 str(output),
                 "--scenarios",
                 "smoke,single-load",
-                "--transactions",
+                "--actions",
                 "256",
                 "--jobs",
                 "2",

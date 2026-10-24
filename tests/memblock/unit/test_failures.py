@@ -108,7 +108,7 @@ class FailureTest(unittest.TestCase):
         report = self.run_case()
         diagnostic = "\nMEMBLOCK_FAILURES " + json.dumps(report)
         for parse, terminal in (
-            (run_regression.parse_summary, "MEMBLOCK_RANDOM_MIXED_FAIL seed=7 transactions=19"),
+            (run_regression.parse_summary, "MEMBLOCK_CONSTRAINED_RANDOM_FAIL seed=7 transactions=19"),
             (benchmark_tests.parse_terminal, "MEMBLOCK_SINGLE_LOAD_FAIL cycle=13"),
         ):
             fields = parse(terminal + diagnostic)

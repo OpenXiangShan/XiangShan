@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run deterministic MemBlock random scenarios in parallel and write JSON results."""
+"""Run deterministic constrained-random scenarios in parallel and write JSON results."""
 
 from __future__ import annotations
 
@@ -20,68 +20,41 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import scenario_catalog
+
 
 class RegressionError(RuntimeError):
     pass
 
 
-FRONTEND_BRIDGE_SCENARIO = "frontend-bridge"
-DEFAULT_SCENARIOS = (
-    "random-loads",
-    "random-forwarding",
-    "random-vector-loads",
-    "random-vector-forwarding",
-    "random-mixed",
-    FRONTEND_BRIDGE_SCENARIO,
-)
-BOUNDARY_HUNT_SCENARIO = "random-boundary-hunt"
-STRESS_SCENARIO = "random-stress"
-CONSTRAINED_SCENARIO = "random-mixed"
+CONSTRAINED_RANDOM_SCENARIO = "constrained-random"
 CONSTRAINT_PROFILES = ("coverage", "spec", "corner")
+DEFAULT_SCENARIOS = (CONSTRAINED_RANDOM_SCENARIO,)
 DEFAULT_JOBS = 8
-DEFAULT_TRANSACTIONS = 16384
-DEFAULT_MIXED_TRANSACTIONS = 16384
+DEFAULT_ACTIONS = 16384
 DEFAULT_TIMEOUT_SECONDS = 1800
 MAX_CAPTURED_OUTPUT_BYTES = 32768
 SUPPORTED_SCENARIOS = frozenset(
-    (*DEFAULT_SCENARIOS, BOUNDARY_HUNT_SCENARIO, STRESS_SCENARIO)
+    entry["name"] for entry in scenario_catalog.load_catalog()
 )
 RUNTIME_ROLES = frozenset({"binary", "model", "rtl_metadata", "xspcomm"})
-FORWARDING_SCENARIOS = frozenset(
-    {"random-forwarding", "random-vector-forwarding"}
-)
 TERMINAL_MARKERS = {
-    "random-loads": "MEMBLOCK_RANDOM",
-    "random-forwarding": "MEMBLOCK_RANDOM_FORWARD",
-    "random-vector-loads": "MEMBLOCK_RANDOM_VECTOR",
-    "random-vector-forwarding": "MEMBLOCK_RANDOM_VECTOR_FORWARD",
-    "random-mixed": "MEMBLOCK_RANDOM_MIXED",
-    FRONTEND_BRIDGE_SCENARIO: "MEMBLOCK_FRONTEND_BRIDGE",
-    STRESS_SCENARIO: "MEMBLOCK_RANDOM_STRESS",
-    BOUNDARY_HUNT_SCENARIO: "MEMBLOCK_RANDOM_BOUNDARY_HUNT",
+    scenario: "MEMBLOCK_" + scenario.upper().replace("-", "_")
+    for scenario in SUPPORTED_SCENARIOS
 }
-COMPLETED_TRANSACTION_CAPS = {
-    "random-forwarding": 48,
-    "random-vector-forwarding": 24,
-}
-
-
-def transaction_count_for_scenario(
-    scenario: str,
-    transactions: int,
-    forwarding_transactions: int,
-    mixed_transactions: int = DEFAULT_MIXED_TRANSACTIONS,
-) -> int:
-    if scenario in ("random-mixed", STRESS_SCENARIO):
-        return mixed_transactions
-    if scenario == BOUNDARY_HUNT_SCENARIO:
-        return transactions
-    return forwarding_transactions if scenario in FORWARDING_SCENARIOS else transactions
-
-
-def completed_transaction_count(scenario: str, requested: int) -> int:
-    cap = COMPLETED_TRANSACTION_CAPS.get(scenario)
-    return requested if cap is None else min(requested, cap)
+TERMINAL_MARKERS.update(
+    {
+        "store-forwarding": "MEMBLOCK_STORE_FORWARD",
+        "two-stage-translation": "MEMBLOCK_TWO_STAGE",
+        "vector-guest-fault-split": "MEMBLOCK_VECTOR_GUEST_FAULT",
+        "vector-store-forwarding": "MEMBLOCK_VECTOR_STORE_FORWARD",
+    }
+)
+for _scenario in SUPPORTED_SCENARIOS:
+    if _scenario.startswith("translation-fence"):
+        TERMINAL_MARKERS[_scenario] = "MEMBLOCK_TRANSLATION_FENCE"
+    elif _scenario.startswith("translation-inflight-context"):
+        TERMINAL_MARKERS[_scenario] = "MEMBLOCK_TRANSLATION_INFLIGHT_CONTEXT"
 
 
 def validate_worker_environment(
@@ -146,7 +119,7 @@ def parse_summary(
     }
     summaries = [line for line in lines if line.split()[0] in valid_tokens]
     if not summaries:
-        raise RegressionError("simulation output has no MEMBLOCK_RANDOM summary")
+        raise RegressionError("simulation output has no MEMBLOCK terminal summary")
     if len(summaries) != 1:
         raise RegressionError(
             f"simulation output has {len(summaries)} terminal summaries, expected one"
@@ -312,13 +285,10 @@ def run_seed(
     binary: Path,
     seed: int,
     scenario: str,
-    transactions: int,
-    forwarding_transactions: int,
-    mixed_transactions: int,
+    actions: int,
     timeout_seconds: float,
     backpressure: bool,
     environment: dict[str, str] | None = None,
-    hunt_boundaries: bool = False,
     constraint_profile: str = "coverage",
     constraint_overrides: tuple[str, ...] = (),
 ) -> dict[str, Any]:
@@ -328,19 +298,15 @@ def run_seed(
         scenario,
         "--seed",
         str(seed),
-        "--transactions",
-        str(transaction_count_for_scenario(
-            scenario, transactions, forwarding_transactions, mixed_transactions
-        )),
+        "--actions",
+        str(actions),
     ]
-    if scenario == CONSTRAINED_SCENARIO:
+    if scenario == CONSTRAINED_RANDOM_SCENARIO:
         command.extend(("--constraints", constraint_profile))
         for constraint in constraint_overrides:
             command.extend(("--constraint", constraint))
     if not backpressure:
         command.append("--no-backpressure")
-    if hunt_boundaries:
-        command.append("--hunt-boundaries")
     started = time.monotonic()
     returncode, output, timed_out = _run_process(
         command, timeout_seconds, environment
@@ -351,14 +317,10 @@ def run_seed(
                 output,
                 expected_scenario=scenario,
                 expected_seed=seed,
-                expected_transactions=completed_transaction_count(
-                    scenario,
-                    transaction_count_for_scenario(
-                        scenario,
-                        transactions,
-                        forwarding_transactions,
-                        mixed_transactions,
-                    ),
+                expected_transactions=(
+                    actions
+                    if scenario == CONSTRAINED_RANDOM_SCENARIO
+                    else None
                 ),
             )
         except RegressionError as error:
@@ -377,6 +339,7 @@ def run_seed(
         {
             "seed": seed,
             "scenario": scenario,
+            "actions": actions,
             "elapsed_seconds": round(time.monotonic() - started, 6),
             "command": command,
             "output": "" if result.get("status") == "pass" else output,
@@ -436,22 +399,18 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=DEFAULT_JOBS)
     parser.add_argument("--start-seed", type=int, default=1)
     parser.add_argument("--seeds", type=int, default=8)
-    parser.add_argument("--transactions", type=int, default=DEFAULT_TRANSACTIONS)
-    parser.add_argument("--forwarding-transactions", type=int, default=48)
-    parser.add_argument(
-        "--mixed-transactions", type=int, default=DEFAULT_MIXED_TRANSACTIONS
-    )
+    parser.add_argument("--actions", type=int, default=DEFAULT_ACTIONS)
     parser.add_argument(
         "--constraints",
         choices=CONSTRAINT_PROFILES,
         default="coverage",
-        help="random-mixed constraint preset",
+        help="constrained-random constraint preset",
     )
     parser.add_argument(
         "--constraint",
         action="append",
         default=[],
-        help="random-mixed key=value override; may be repeated",
+        help="constrained-random key=value override; may be repeated",
     )
     parser.add_argument(
         "--scenarios", default=",".join(DEFAULT_SCENARIOS),
@@ -468,10 +427,6 @@ def main() -> int:
         help="print an aggregate heartbeat instead of every passing seed",
     )
     parser.add_argument("--no-backpressure", action="store_true")
-    parser.add_argument(
-        "--hunt-boundaries", action="store_true",
-        help="enable constrained-random split guest-fault boundary stimuli",
-    )
     parser.add_argument(
         "--continue-on-failure", action="store_true",
         help="continue submitting seeds after a failure for bug hunting",
@@ -532,12 +487,10 @@ def main() -> int:
         args.jobs < 1
         or args.start_seed < 0
         or args.seeds < 1
-        or args.transactions < 1
-        or args.forwarding_transactions < 1
-        or args.mixed_transactions < 1
+        or args.actions < 1
     ):
         print(
-            "run_regression.py: error: jobs and transaction counts must be positive",
+            "run_regression.py: error: jobs and action counts must be positive",
             file=sys.stderr,
         )
         return 2
@@ -574,13 +527,10 @@ def main() -> int:
                 binary,
                 seed,
                 scenario,
-                args.transactions,
-                args.forwarding_transactions,
-                args.mixed_transactions,
+                args.actions,
                 args.timeout_seconds,
                 not args.no_backpressure,
                 execution_environment,
-                args.hunt_boundaries,
                 args.constraints,
                 tuple(args.constraint),
             )
@@ -668,22 +618,19 @@ def main() -> int:
             "start_seed": args.start_seed,
             "requested_seeds": None if deadline is not None else args.seeds,
             "duration_seconds": args.duration_seconds,
-            "transactions_per_seed": args.transactions,
-            "forwarding_transactions_per_seed": args.forwarding_transactions,
-            "mixed_transactions_per_seed": args.mixed_transactions,
+            "actions_per_seed": args.actions,
             "scenarios": scenarios,
             "timeout_seconds": args.timeout_seconds,
             "backpressure": not args.no_backpressure,
             "progress_interval_seconds": args.progress_interval_seconds,
-            "hunt_boundaries": args.hunt_boundaries,
             "constraint_profile": args.constraints,
             "constraint_overrides": args.constraint,
         },
         "summary": {
             "seeds_completed": len(results),
             "statuses": statuses,
-            "transactions_completed": sum(
-                int(result.get("transactions", 0))
+            "actions_completed": sum(
+                int(result.get("actions", 0))
                 for result in results
                 if result["status"] == "pass"
             ),
@@ -692,11 +639,11 @@ def main() -> int:
     }
     write_results(args.output, document)
     print(
-        "MEMBLOCK_REGRESSION_{} seeds={} transactions={} elapsed_seconds={:.3f} output={}".format(
+        "MEMBLOCK_REGRESSION_{} seeds={} actions={} elapsed_seconds={:.3f} output={}".format(
             "PASS"
             if set(statuses) <= {"pass"} else "FAIL",
             len(results),
-            document["summary"]["transactions_completed"],
+            document["summary"]["actions_completed"],
             document["elapsed_seconds"],
             args.output,
         )

@@ -2,7 +2,7 @@
 
 ## One Generator, Multiple Directions
 
-`random-mixed` is the canonical workload generator. A verification direction is a constraint set,
+`constrained-random` is the canonical workload generator. A verification direction is a constraint set,
 not another scenario implementation. The same scheduler, drivers, scoreboards, architectural
 reference memory, translation machinery, and completion checks are used for realistic traffic,
 balanced coverage, and corner-heavy traffic. The current executable contract is `constraint_schema=53`.
@@ -23,17 +23,17 @@ flattened pin is a standalone random variable. Select a preset with
 
 ```sh
 # Balanced, high-overlap coverage.
-make random-mixed SEED=1 TRANSACTIONS=16384 CONSTRAINTS=coverage
+make constrained-random SEED=1 ACTIONS=16384 CONSTRAINTS=coverage
 
 # SPEC-like ordinary traffic and calibrated miss response latency.
-make random-mixed SEED=2 TRANSACTIONS=65536 CONSTRAINTS=spec
+make constrained-random SEED=2 ACTIONS=65536 CONSTRAINTS=spec
 
 # Start from SPEC, but deliberately increase translation and MMIO pressure.
-make random-mixed SEED=3 TRANSACTIONS=32768 CONSTRAINTS=spec \
+make constrained-random SEED=3 ACTIONS=32768 CONSTRAINTS=spec \
   CONSTRAINT='translation-nested=20 translation-switch=100 tlb-flush=100 mmio=30 nc=20 vector-load=80 vector-store=40'
 
 # Restrict the same generator to a scalar-load locality experiment.
-make random-mixed SEED=4 TRANSACTIONS=16384 CONSTRAINTS=spec \
+make constrained-random SEED=4 ACTIONS=16384 CONSTRAINTS=spec \
   CONSTRAINT='scalar-load=1000 scalar-store=0 vector-load=0 vector-store=0 prefetch=0 atomic=0 nc=0 mmio=0 locality-hot=1000 locality-warm=0 locality-cold=0 concurrent=0 tlb-flush=0 latency=compact'
 ```
 
@@ -43,7 +43,7 @@ The regression controller exposes the same interface:
 python3 scripts/run_regression.py \
   --binary build/memblock/picker/UT_MemBlock/build/UTMemBlock_example \
   --output build/memblock/spec-mixed.json \
-  --scenarios random-mixed --seeds 32 --mixed-transactions 65536 \
+  --scenarios constrained-random --seeds 32 --actions 65536 \
   --constraints spec --constraint concurrent=250
 ```
 
@@ -165,7 +165,7 @@ and cannot use a Bare-only context.
   requires `special-concurrent=0`. Endpoint error or vector-policy settings must leave every other
   enabled compatibility class reachable.
 
-`random-mixed` has no minimum action count and no mandatory architectural
+`constrained-random` has no minimum action count and no mandatory architectural
 prefix. Every run is constrained-random traffic from its first action; short
 runs are valid. Coverage is still sampled and summarized, but it is not a PASS
 gate: sparse coverage is reported, not failed. The regression and benchmark
@@ -184,8 +184,7 @@ Every new field must provide:
 - deterministic replay from the seed and complete constraint assignment.
 
 Presets only assign defaults; they must not add hidden phases or select another
-scenario. `random-stress` remains a compatibility scenario for historical
-artifacts and is not the template for new work.
+scenario.
 
 ## Shipped Presets
 
@@ -368,7 +367,7 @@ preallocated overflow at most 16, below the 52-entry watermark. It retains the c
 ReleaseData gate. Before the action, schema 53 drains baseline SBuffer/D/E, disables the L1 stride prefetcher through its external
 CSR, runs 4 + 8 + 4 = 16 DUT cycles and drains DCache idle, establishes every held load, and requires exactly one
 store-class full-line AcquireBlock NtoT per fresh baseline line, unchanged manager error counters, and zero
-completed target Releases of either opcode; the current source drains the release channel before the ownership snapshot and after selected C backpressure, so an in-flight target ReleaseData is counted before qualification (normal seed 531/6,144, post-fix 90-leaf 90/90, and post-fix matrix 12/12 pass; mutation sensitivity still pending, review `independent-review-schema53-20261023`). The prior prefetch enable is restored after the action. No DUT cycle separates qualification from target
+completed target Releases of either opcode; the current source drains the release channel before the ownership snapshot and after selected C backpressure, so an in-flight target ReleaseData is counted before qualification (normal seed 531/6,144, post-fix all-scenario benchmark passes; mutation sensitivity still pending, review `independent-review-schema53-20261023`). The prior prefetch enable is restored after the action. No DUT cycle separates qualification from target
 C-stall arming. Coherence responsibility can remain in a writeback queue; array residency is not a prerequisite.
 A rejected attempt releases its held responses, issues each preallocated overflow once, commits in order with
 independent reference updates, and drains exact WB/queues/SBuffer/D/E/C under every functional oracle. The

@@ -87,7 +87,7 @@ void MixedScenario::report_progress(bool force)
         (!force && actions < next_progress_action)) {
         return;
     }
-    std::cerr << "MEMBLOCK_RANDOM_MIXED_PROGRESS seed=" << options.seed
+    std::cerr << "MEMBLOCK_CONSTRAINED_RANDOM_PROGRESS seed=" << options.seed
               << " actions=" << actions << " cycle=" << environment.cycle()
               << " phase=" << phase << std::endl;
     next_progress_action = progress_interval >
@@ -136,13 +136,20 @@ bool MixedScenario::finish()
     }
     phase = "redirect-recovery";
     const std::uint64_t canceled_rob_offset = rob_offset;
+    const auto canceled_op = static_cast<memblock::LoadOp>(random() % 7);
+    const unsigned canceled_size =
+        1U << (static_cast<unsigned>(canceled_op) & 3U);
+    const std::uint64_t canceled_offset =
+        (random() % ((0x10000U - canceled_size) / canceled_size + 1U)) *
+        canceled_size;
     auto canceled = make_load(
-        cache1_base + 0xf800, memblock::LoadOp::ld, 2);
+        cache1_base + canceled_offset, canceled_op,
+        random() % memblock::kScalarLoadLanes);
     if (!environment.enqueue_load(canceled) || !environment.issue_load(canceled) ||
         !environment.redirect_after(
             memblock::rob_pointer_value(canceled_rob_offset - 1),
             memblock::rob_pointer_flag(canceled_rob_offset - 1), false) ||
-        !environment.run_cycles(96)) {
+        !environment.run_cycles(32U + random() % 129U)) {
         return false;
     }
     coverage.sample(canceled);
@@ -158,8 +165,9 @@ bool MixedScenario::finish()
         .lq_flag = memblock::lq_pointer_flag(survivor_lq),
         .sq = memblock::sq_pointer_value(sq_offset),
         .sq_flag = memblock::sq_pointer_flag(sq_offset),
-        .pdest = static_cast<std::uint8_t>(canceled.pdest + 1),
-        .lane = 1,
+        .pdest = static_cast<std::uint8_t>(1U + random() % 255U),
+        .lane = static_cast<unsigned>(
+            random() % memblock::kScalarLoadLanes),
     };
     if (!issue_load(survivor)) {
         return false;
@@ -222,7 +230,7 @@ int MixedScenario::run()
     const bool completed = execute();
     report_progress(true);
     if (!completed) {
-        std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
+        std::cerr << "MEMBLOCK_CONSTRAINED_RANDOM_FAIL seed=" << options.seed
                   << " transactions=" << actions
                   << " requested=" << options.transactions
                   << " cycle=" << environment.cycle()
@@ -277,7 +285,7 @@ int MixedScenario::run()
         return 1;
     }
 
-    std::cout << "MEMBLOCK_RANDOM_MIXED_PASS"
+    std::cout << "MEMBLOCK_CONSTRAINED_RANDOM_PASS"
               << " seed=" << options.seed
               << " transactions=" << actions
               << " cycle=" << environment.cycle()

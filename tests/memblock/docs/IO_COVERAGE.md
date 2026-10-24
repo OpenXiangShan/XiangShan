@@ -73,7 +73,7 @@ generated table above is the non-overlapping physical inventory.
 | IFU-to-Mem PTW request/response | 64 | Sv39/Sv48 and all four nested pairs, VS/G leaf and non-leaf inputs, PBMT, faults, duplicate same-VPN requests, context changes, fences, response backpressure | `ifetch-ptw-bridge`; exact response fields, walk sharing, stale-response suppression | Semantic / directed |
 | L2 DTLB boundary: `io_l2_tlb_req_*` | 13 | Ordinary/prefetch, kill, `no_translate`, cacheable/NC/IO, hit/miss, stage-1/nested faults, PMP allow/deny, all `sourceId` hint values | `l2-tlb-contracts`; exact registered response fields and PTW request accounting | Semantic / directed |
 | L2 hint, flush, top-down, interrupt and WFI controls | 21 | Hint valid/source/keyword, flush completion, L1/L2/L3 miss and pressure, seven external interrupts, WFI request/safe | `l2-tlb-contracts`, `l2-flush-contracts`, `topdown-contracts`, `top-control-contracts`, `wfi-safety` | Semantic / directed |
-| Software and hardware prefetch outputs | 11 | `prefetch.i/r/w`, three IFU-prefetch lanes, fixed-PC strides, L2/L3 sender addresses and sources; CSR suppression | `ifetch-prefetch`, `hardware-prefetch`, stride traffic in `random-mixed`; IFU output has an architectural oracle, hardware sender selection is characterization only | Monitored / partial |
+| Software and hardware prefetch outputs | 11 | `prefetch.i/r/w`, three IFU-prefetch lanes, fixed-PC strides, L2/L3 sender addresses and sources; CSR suppression | `ifetch-prefetch`, `hardware-prefetch`, stride traffic in `constrained-random`; IFU output has an architectural oracle, hardware sender selection is characterization only | Monitored / partial |
 | Trace bypass | 45 | Group-valid combinations, instruction types, retire counts, privilege, encoder ready/valid, FTQ offset, trap cause/tval | `trace-bridge-contracts`; exact transport transformation | Semantic / directed |
 | DFT bridge | 24 | Seven SRAM broadcast controls and three DFT-reset controls; all 1,024 combinations; functional and scan reset effects | `dft-bridge-contracts`, `reset-tree-contracts`; combinational output and reset routing | Semantic / directed |
 | Performance events and counters | 144 | Clock/reset operation and top-control transport for outer/inner hardware-counter lanes; `top-control-contracts` checks 67 shared lanes | Generated lane adapters and transport checks | Integration-owned |
@@ -81,7 +81,7 @@ generated table above is the non-overlapping physical inventory.
 
 ## Constrained-Random Legal Inputs
 
-The common `random-mixed` generator currently records
+The common `constrained-random` generator currently records
 `constraint_schema=53`. Its canonical legal-input dimensions are documented in
 `CONSTRAINED_RANDOM.md` and include:
 

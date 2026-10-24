@@ -35,17 +35,24 @@ individual `CPU_BUG_*.md` documents.
 - Contract: random scenarios have no mandatory coverage prefix, no minimum
   action count, and no coverage-completeness PASS gate. Coverage is sampled and
   written to one report per run by the regression/benchmark drivers.
-- Full 90-leaf benchmark: **90/90 pass in 792.066 s** (previous gated-generator
-  baseline: 3,750.501 s). `random-mixed` seed 1/16,384: **764.777 s**,
-  1,840,618 DUT cycles, ~21.4 actions/s, ~2,407 cycles/s.
+- Inventory: 85 scenarios (84 directed + 1 constrained-random). Legacy
+  unconstrained random scenarios and the separate stress generator were
+  removed; the VS-non-leaf boundary cases became the directed
+  `vector-guest-fault-boundary` scenario; `random-mixed` was renamed
+  `constrained-random`; `random-mixed-hunt` was removed.
+- Full all-scenario benchmark: **85/85 pass in 781.752 s** (previous
+  gated-generator baseline: 3,750.501 s). `constrained-random` seed 1/16,384:
+  **760.884 s**, 1,840,675 DUT cycles, ~21.5 actions/s, ~2,419 cycles/s.
 - Frozen runtime binary SHA-256:
-  `d32cc28642f1695e4705bcb0af0fb4b71deaa5c5d3bf465ff0b9ea6d1333fe96`;
+  `4185c7ce787c05ac309a05fea58850175689e3a7d603bbd53c4af2a99c9b2404`;
   model SHA-256 unchanged at
   `d659328ca82904a6ee33d3c5bc4ec32202a81e004c38e8d2fad5b57606b60d3f`.
-- Evidence: `build/memblock/no-prefix-final-20261024/benchmark.json`,
-  `benchmark.md`, and 90 per-run reports under `coverage-reports/`.
-- This is a capability rebaseline, not closure. The six-scenario matrix and the
-  48 h/200 h campaigns were not rerun under the new contract.
+- Evidence: `build/memblock/taxonomy-20261024/benchmark.json`,
+  `benchmark.md`, and 85 per-run reports under `coverage-reports/`.
+- Historical rows below use the old `random-mixed`, `90-leaf`, and `matrix`
+  names; they are provenance, not current scenario or campaign names.
+- This is a capability rebaseline, not closure. The 48 h/200 h campaigns were
+  not rerun under the new contract.
 
 Evidence snapshot: 2026-10-23.
 
@@ -111,7 +118,7 @@ libraries. Those values are reproducibility data, not hidden acceptance hashes.
 
 ## Current Capability and Closure Status
 
-The current generator schema is 53. `random-mixed` remains the canonical mixed
+The current generator schema is 53. `constrained-random` remains the canonical mixed
 workload; the schemas below add independent semantic classes and conservation
 checks. Schema 48-50 have three recorded 6,144-action profile runs per schema,
 but each passing set totals less than three simulator hours. They are capability

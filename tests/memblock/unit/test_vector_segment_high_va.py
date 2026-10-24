@@ -570,7 +570,7 @@ class VerifyHighVaTest(unittest.TestCase):
     def test_parser_preserves_exact_large_integer_counters(self) -> None:
         expected = 2**60 + 31
         summary = (
-            "MEMBLOCK_RANDOM_MIXED_PASS constraint_schema=52 "
+            "MEMBLOCK_CONSTRAINED_RANDOM_PASS constraint_schema=52 "
             "target_vector_segment_high_va=100 "
             f"actual_vector_segment_high_va_cross={','.join(['1'] * 24)} "
             f"actual_vector_segment_high_va={expected} "

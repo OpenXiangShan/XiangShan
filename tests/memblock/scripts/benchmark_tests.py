@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure every MemBlock leaf scenario and record its observed traffic."""
+"""Measure every MemBlock scenario and record its observed traffic."""
 
 from __future__ import annotations
 
@@ -23,13 +23,13 @@ _CATALOG = scenario_catalog.load_catalog()
 SCENARIOS = tuple(
     entry["name"] for entry in scenario_catalog.benchmark_scenarios(_CATALOG)
 )
-TRANSACTION_OVERRIDES = {
-    entry["name"]: entry["benchmark_transactions"]
+ACTION_OVERRIDES = {
+    entry["name"]: entry["benchmark_actions"]
     for entry in scenario_catalog.benchmark_scenarios(_CATALOG)
-    if "benchmark_transactions" in entry
+    if "benchmark_actions" in entry
 }
 
-MAX_PARALLEL_LEAVES = 8
+MAX_PARALLEL_SCENARIOS = 8
 
 TERMINAL_RE = re.compile(r"^MEMBLOCK_[A-Z0-9_]+_(PASS|FAIL)(?:\s|$)")
 TERMINAL_MARKERS = {
@@ -38,10 +38,6 @@ TERMINAL_MARKERS = {
 }
 TERMINAL_MARKERS.update(
     {
-        "random-loads": "MEMBLOCK_RANDOM",
-        "random-forwarding": "MEMBLOCK_RANDOM_FORWARD",
-        "random-vector-loads": "MEMBLOCK_RANDOM_VECTOR",
-        "random-vector-forwarding": "MEMBLOCK_RANDOM_VECTOR_FORWARD",
         "store-forwarding": "MEMBLOCK_STORE_FORWARD",
         "two-stage-translation": "MEMBLOCK_TWO_STAGE",
         "vector-guest-fault-split": "MEMBLOCK_VECTOR_GUEST_FAULT",
@@ -158,21 +154,21 @@ def scenario_command(
     constraint_profile: str,
     constraint_overrides: tuple[str, ...],
 ) -> tuple[list[str], int]:
-    scenario_transactions = TRANSACTION_OVERRIDES.get(scenario, transactions)
+    scenario_actions = ACTION_OVERRIDES.get(scenario, transactions)
     command = [
         str(binary),
         "--test",
         scenario,
         "--seed",
         str(seed),
-        "--transactions",
-        str(scenario_transactions),
+        "--actions",
+        str(scenario_actions),
     ]
-    if scenario == run_regression.CONSTRAINED_SCENARIO:
+    if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
         command.extend(("--constraints", constraint_profile))
         for override in constraint_overrides:
             command.extend(("--constraint", override))
-    return command, scenario_transactions
+    return command, scenario_actions
 
 
 def worker_error_result(
@@ -222,7 +218,7 @@ def run_scenario(
     constraint_overrides: tuple[str, ...],
     cancellation_event: threading.Event | None = None,
 ) -> dict[str, Any]:
-    command, scenario_transactions = scenario_command(
+    command, scenario_actions = scenario_command(
         binary,
         scenario,
         seed,
@@ -249,7 +245,7 @@ def run_scenario(
             output,
             expected_scenario=scenario,
             expected_seed=seed,
-            expected_transactions=scenario_transactions,
+            expected_transactions=scenario_actions,
         )
     except BenchmarkError as error:
         result = {"status": "error", "error": str(error), "output": output}
@@ -375,13 +371,13 @@ def main() -> int:
     parser.add_argument("--markdown", type=Path)
     parser.add_argument("--scenarios", default=",".join(SCENARIOS))
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--transactions", type=int, default=16384)
+    parser.add_argument("--actions", type=int, default=16384)
     parser.add_argument("--timeout-seconds", type=float, default=1800)
     parser.add_argument(
         "--jobs",
         type=int,
         default=1,
-        help=f"concurrent leaf processes (maximum {MAX_PARALLEL_LEAVES})",
+        help=f"concurrent scenarios (maximum {MAX_PARALLEL_SCENARIOS})",
     )
     parser.add_argument(
         "--constraints", choices=run_regression.CONSTRAINT_PROFILES, default="spec"
@@ -394,14 +390,14 @@ def main() -> int:
         parser.error("--scenarios contains an unknown or duplicate scenario")
     if (
         args.seed < 0
-        or args.transactions < 256
+        or args.actions < 256
         or args.timeout_seconds <= 0
         or args.jobs <= 0
-        or args.jobs > MAX_PARALLEL_LEAVES
+        or args.jobs > MAX_PARALLEL_SCENARIOS
     ):
         parser.error(
-            "seed, transactions, or timeout is outside the supported range, "
-            f"or jobs is not in 1..{MAX_PARALLEL_LEAVES}"
+            "seed, actions, or timeout is outside the supported range, "
+            f"or jobs is not in 1..{MAX_PARALLEL_SCENARIOS}"
         )
 
     try:
@@ -438,7 +434,7 @@ def main() -> int:
                 runtime["binary"],
                 scenario,
                 args.seed,
-                args.transactions,
+                args.actions,
                 args.timeout_seconds,
                 environment,
                 args.constraints,
@@ -457,7 +453,7 @@ def main() -> int:
                     runtime["binary"],
                     scenario,
                     args.seed,
-                    args.transactions,
+                    args.actions,
                     args.constraints,
                     tuple(args.constraint),
                     time.monotonic() - future_started[future],
@@ -513,7 +509,7 @@ def main() -> int:
         },
         "configuration": {
             "seed": args.seed,
-            "transactions": args.transactions,
+            "actions": args.actions,
             "timeout_seconds": args.timeout_seconds,
             "jobs": args.jobs,
             "effective_jobs": worker_count,
@@ -536,7 +532,7 @@ def main() -> int:
     print(
         f"MEMBLOCK_BENCHMARK_{'PASS' if passed else 'FAIL'} "
         f"scenarios={len(results)}/{len(requested)} "
-        f"leaf_failures={len(failed_scenarios)} "
+        f"scenario_failures={len(failed_scenarios)} "
         f"failed_scenarios={','.join(failed_scenarios) or '-'} "
         f"elapsed_seconds={document['elapsed_seconds']:.3f} output={args.output}"
     )

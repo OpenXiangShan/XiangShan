@@ -67,7 +67,6 @@ class BuildLockTest(unittest.TestCase):
             makefile,
         )
         for target in (
-            "stress-regression",
             "extended-regression",
             "final-regression",
             "long-final-regression",

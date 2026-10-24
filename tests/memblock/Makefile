@@ -11,15 +11,12 @@ PREPARED_DIR := $(REPO_ROOT)/build/memblock
 PREPARED_FILELIST := $(PREPARED_DIR)/rtl.f
 PREPARED_METADATA := $(PREPARED_DIR)/rtl.json
 REGRESSION_OUTPUT ?= $(PREPARED_DIR)/regression.json
-HUNT_RESULT ?= $(PREPARED_DIR)/boundary-hunt.json
-BOUNDARY_HUNT_RESULT ?= $(PREPARED_DIR)/random-boundary-hunt.json
-MATRIX_RESULT ?= $(PREPARED_DIR)/matrix-six-scenario.json
-EXTENDED_RESULT ?= $(PREPARED_DIR)/extended-mixed-frozen-6h-8192.json
-FINAL_RESULT ?= $(PREPARED_DIR)/final-frozen-48h-16384.json
-LONG_RESULT ?= $(PREPARED_DIR)/final-frozen-12h-32768.json
-STRESS_RESULT ?= $(PREPARED_DIR)/stress-frozen-1h-16384.json
-ENDURANCE_RESULT ?= $(PREPARED_DIR)/endurance-spec-8x1000000.json
-ENDURANCE_TRANSACTIONS ?= 1000000
+EXTENDED_RESULT ?= $(PREPARED_DIR)/extended-constrained-random-6h.json
+FINAL_RESULT ?= $(PREPARED_DIR)/final-constrained-random-48h.json
+LONG_RESULT ?= $(PREPARED_DIR)/final-constrained-random-12h.json
+ENDURANCE_RESULT ?= $(PREPARED_DIR)/endurance-constrained-random-8x1000000.json
+ACTIONS ?= 16384
+ENDURANCE_ACTIONS ?= 1000000
 ENDURANCE_SEEDS ?= 8
 ENDURANCE_TIMEOUT_SECONDS ?= 720000
 BENCHMARK_RESULT ?= $(PREPARED_DIR)/test-scale.json
@@ -61,7 +58,7 @@ CPP_SUPPORT := $(CPP_SCENARIOS) $(CPP_ENV_PARTS) $(CPP_RANDOM_PARTS) $(CPP_HEADE
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime translation-fence-all translation-inflight-context-all random-boundary-regression known-bug-sentinel matrix-regression verify-matrix regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
+.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime translation-fence-all translation-inflight-context-all known-bug-sentinel regression extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS) $(CPP_TYPES) $(CPP_ADAPTERS)
 
@@ -185,57 +182,32 @@ known-bug-sentinel: $(PICKER_TEST_BINARY)
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/check_known_bug.py --binary $(PICKER_TEST_BINARY) --timeout-seconds 300 --expect repaired-pass
 
-hunt-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(HUNT_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),16384) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --scenarios random-mixed --hunt-boundaries --continue-on-failure --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))
-
-random-boundary-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(BOUNDARY_HUNT_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --scenarios random-boundary-hunt --hunt-boundaries --continue-on-failure
-
-verify-boundary-hunt:
-	$(PYTHON) scripts/verify_boundary_hunt.py --input $(BOUNDARY_HUNT_RESULT) --min-seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --expect repaired-all-pass
-
-matrix-regression: freeze-runtime
-	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(MATRIX_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --start-seed 531 --seeds 2 --scenarios random-loads,random-vector-loads,random-forwarding,random-vector-forwarding,random-mixed,frontend-bridge --transactions 16384 --forwarding-transactions 48 --mixed-transactions 6144 --timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --constraints spec
-
-verify-matrix:
-	$(MAKE) check-rtl
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(MATRIX_RESULT) --min-duration-seconds 1 --min-results 12 --min-timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --exact-results --allow-finite --scenarios random-loads,random-vector-loads,random-forwarding,random-vector-forwarding,random-mixed,frontend-bridge --transactions 16384 --forwarding-transactions 48 --mixed-transactions 6144 --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA)
-
 regression: $(PICKER_TEST_BINARY)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(REGRESSION_OUTPUT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),8) --transactions $(or $(TRANSACTIONS),16384) --forwarding-transactions $(or $(FORWARD_TRANSACTIONS),48) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) $(CONSTRAINT_ARGS)
-
-stress-regression: freeze-runtime
-	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(STRESS_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),3600) --timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --scenarios random-stress --transactions $(or $(STRESS_TRANSACTIONS),16384) --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --progress-interval-seconds 60
-
-verify-stress-results:
-	$(MAKE) check-rtl
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(STRESS_RESULT) --min-duration-seconds $(or $(MIN_DURATION_SECONDS),3600) --min-results $(or $(MIN_RESULTS),128) --scenario random-stress --transactions $(or $(STRESS_TRANSACTIONS),16384) --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA)
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(REGRESSION_OUTPUT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),8) --actions $(or $(ACTIONS),16384) $(CONSTRAINT_ARGS)
 
 extended-regression: freeze-runtime
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(EXTENDED_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),21600) --timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),8192) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(EXTENDED_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),21600) --timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --scenarios constrained-random --actions $(or $(ACTIONS),8192) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
 final-regression: freeze-runtime
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(FINAL_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),172800) --timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(FINAL_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),172800) --timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --scenarios constrained-random --actions $(or $(ACTIONS),16384) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
 long-final-regression: freeze-runtime
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),32768) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),12000) --scenarios constrained-random --actions $(or $(ACTIONS),32768) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
 endurance-regression: freeze-runtime
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(ENDURANCE_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(ENDURANCE_SEEDS) --timeout-seconds $(ENDURANCE_TIMEOUT_SECONDS) --scenarios random-mixed --mixed-transactions $(ENDURANCE_TRANSACTIONS) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --output $(ENDURANCE_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(ENDURANCE_SEEDS) --timeout-seconds $(ENDURANCE_TIMEOUT_SECONDS) --scenarios constrained-random --actions $(or $(ENDURANCE_ACTIONS),1000000) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
 verify-endurance-results:
 	$(MAKE) check-rtl
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(ENDURANCE_RESULT) --min-duration-seconds 1 --min-results $(ENDURANCE_SEEDS) --min-timeout-seconds 720000 --exact-results --scenario random-mixed --transactions 16384 --mixed-transactions $(ENDURANCE_TRANSACTIONS) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --allow-finite
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(ENDURANCE_RESULT) --min-duration-seconds 1 --min-results $(ENDURANCE_SEEDS) --min-timeout-seconds 720000 --exact-results --scenario constrained-random --actions $(or $(ENDURANCE_ACTIONS),1000000) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --allow-finite
 
 benchmark-tests: freeze-runtime
-	$(PYTHON) scripts/benchmark_tests.py --runtime-metadata $(RUNTIME_METADATA) --output $(BENCHMARK_RESULT) --markdown $(BENCHMARK_MARKDOWN) $(if $(BENCHMARK_SCENARIOS),--scenarios $(BENCHMARK_SCENARIOS)) --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --timeout-seconds $(BENCHMARK_TIMEOUT_SECONDS) --constraints $(or $(CONSTRAINTS),spec) --jobs $(or $(BENCHMARK_JOBS),$(JOBS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
+	$(PYTHON) scripts/benchmark_tests.py --runtime-metadata $(RUNTIME_METADATA) --output $(BENCHMARK_RESULT) --markdown $(BENCHMARK_MARKDOWN) $(if $(BENCHMARK_SCENARIOS),--scenarios $(BENCHMARK_SCENARIOS)) --seed $(or $(SEED),1) --actions $(or $(ACTIONS),16384) --timeout-seconds $(BENCHMARK_TIMEOUT_SECONDS) --constraints $(or $(CONSTRAINTS),spec) --jobs $(or $(BENCHMARK_JOBS),$(JOBS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
 analyze-spec-counters:
 	@test -n "$(SPEC_COUNTER_ROOT)" || (echo "set SPEC_COUNTER_ROOT to a checkpoint directory or simulator_err.txt" >&2; exit 2)
@@ -243,30 +215,24 @@ analyze-spec-counters:
 
 verify-extended-results:
 	$(MAKE) check-rtl
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 21600 --min-results 128 --scenario random-mixed --transactions 4096 --mixed-transactions 8192 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA)
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 21600 --min-results 128 --scenario constrained-random --actions $(or $(ACTIONS),8192) --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA)
 
 verify-final-results:
 	$(MAKE) check-rtl
 	$(MAKE) dcache-release
 	$(MAKE) known-bug-sentinel
-	$(MAKE) verify-boundary-hunt
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(FINAL_RESULT) --min-duration-seconds 172800 --min-results 128 --min-timeout-seconds 12000 --scenarios random-mixed --transactions 16384 --mixed-transactions 16384 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA)
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(FINAL_RESULT) --min-duration-seconds 172800 --min-results 128 --min-timeout-seconds 12000 --scenarios constrained-random --actions $(or $(ACTIONS),16384) --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA)
 
 verify-long-results:
 	$(MAKE) check-rtl
 	$(MAKE) dcache-release
 	$(MAKE) known-bug-sentinel
-	$(MAKE) verify-boundary-hunt
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(LONG_RESULT) --min-duration-seconds 43200 --min-results 128 --scenarios random-mixed --transactions 4096 --mixed-transactions 32768 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA)
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(LONG_RESULT) --min-duration-seconds 43200 --min-results 128 --scenarios constrained-random --actions $(or $(ACTIONS),32768) --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA)
 
 final-acceptance:
 	$(MAKE) unit
 	$(MAKE) benchmark-tests
-	$(MAKE) matrix-regression
-	$(MAKE) verify-matrix
 	$(MAKE) known-bug-sentinel
-	$(MAKE) random-boundary-regression
-	$(MAKE) verify-boundary-hunt
 	$(MAKE) final-regression
 	$(MAKE) verify-final-results
 	$(MAKE) endurance-regression

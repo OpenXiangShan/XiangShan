@@ -11,7 +11,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 0
+      "benchmark_order": 0,
+      "kind": "directed"
     },
     {
       "name": "l2-flush-contracts",
@@ -23,7 +24,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 1
+      "benchmark_order": 1,
+      "kind": "directed"
     },
     {
       "name": "top-control-contracts",
@@ -35,7 +37,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 2
+      "benchmark_order": 2,
+      "kind": "directed"
     },
     {
       "name": "trace-bridge-contracts",
@@ -47,7 +50,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 3
+      "benchmark_order": 3,
+      "kind": "directed"
     },
     {
       "name": "dft-bridge-contracts",
@@ -59,7 +63,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 4
+      "benchmark_order": 4,
+      "kind": "directed"
     },
     {
       "name": "pin-space",
@@ -71,7 +76,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 5
+      "benchmark_order": 5,
+      "kind": "directed"
     },
     {
       "name": "frontend-bridge",
@@ -80,11 +86,12 @@
       "make_targets": [
         {
           "name": "frontend-bridge",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),4096)"
+          "args": "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),4096)"
         }
       ],
       "benchmark_order": 6,
-      "benchmark_transactions": 4096
+      "kind": "directed",
+      "benchmark_actions": 4096
     },
     {
       "name": "frontend-reset-recovery",
@@ -96,7 +103,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 7
+      "benchmark_order": 7,
+      "kind": "directed"
     },
     {
       "name": "single-load",
@@ -108,7 +116,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 8
+      "benchmark_order": 8,
+      "kind": "directed"
     },
     {
       "name": "load-feedback",
@@ -120,7 +129,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 9
+      "benchmark_order": 9,
+      "kind": "directed"
     },
     {
       "name": "topdown-contracts",
@@ -132,7 +142,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 10
+      "benchmark_order": 10,
+      "kind": "directed"
     },
     {
       "name": "memory-violation",
@@ -144,7 +155,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 11
+      "benchmark_order": 11,
+      "kind": "directed"
     },
     {
       "name": "rar-violation",
@@ -156,7 +168,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 12
+      "benchmark_order": 12,
+      "kind": "directed"
     },
     {
       "name": "ifetch-prefetch",
@@ -168,7 +181,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 13
+      "benchmark_order": 13,
+      "kind": "directed"
     },
     {
       "name": "hardware-prefetch",
@@ -180,7 +194,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 14
+      "benchmark_order": 14,
+      "kind": "directed"
     },
     {
       "name": "fp-loads",
@@ -192,7 +207,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 15
+      "benchmark_order": 15,
+      "kind": "directed"
     },
     {
       "name": "trigger-contracts",
@@ -204,7 +220,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 16
+      "benchmark_order": 16,
+      "kind": "directed"
     },
     {
       "name": "metadata-contracts",
@@ -216,7 +233,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 17
+      "benchmark_order": 17,
+      "kind": "directed"
     },
     {
       "name": "dcache-errors",
@@ -228,332 +246,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 18
-    },
-    {
-      "name": "atomic-contracts",
-      "group": "manager_errors",
-      "call": "run_atomic_contracts(argc, argv)",
-      "make_targets": [
-        {
-          "name": "atomic-contracts",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 20
-    },
-    {
-      "name": "uncache-errors",
-      "group": "manager_errors",
-      "call": "run_uncache_errors(argc, argv)",
-      "make_targets": [
-        {
-          "name": "uncache-errors",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 22
-    },
-    {
-      "name": "atomic-dchannel-errors",
-      "group": "manager_errors",
-      "call": "run_atomic_dchannel_errors(argc, argv)",
-      "make_targets": [
-        {
-          "name": "atomic-dchannel-errors",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 21
-    },
-    {
-      "name": "uncache-widths",
-      "group": "manager_errors",
-      "call": "run_uncache_widths(argc, argv)",
-      "make_targets": [
-        {
-          "name": "uncache-widths",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 23
-    },
-    {
-      "name": "uncache-outstanding",
-      "group": "manager_errors",
-      "call": "run_uncache_outstanding(argc, argv)",
-      "make_targets": [
-        {
-          "name": "uncache-outstanding",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 24
-    },
-    {
-      "name": "sbuffer-flush",
-      "group": "manager_errors",
-      "call": "run_sbuffer_flush(argc, argv)",
-      "make_targets": [
-        {
-          "name": "sbuffer-flush",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 25
-    },
-    {
-      "name": "sbuffer-timeout",
-      "group": "manager_errors",
-      "call": "run_sbuffer_timeout(argc, argv)",
-      "make_targets": [
-        {
-          "name": "sbuffer-timeout",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 26
-    },
-    {
-      "name": "mbmc-contracts",
-      "group": "manager_errors",
-      "call": "run_mbmc_contracts(argc, argv)",
-      "make_targets": [
-        {
-          "name": "mbmc-contracts",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 56
-    },
-    {
-      "name": "mmio-contracts",
-      "group": "maintenance_reset",
-      "call": "run_mmio_contracts(argc, argv)",
-      "make_targets": [
-        {
-          "name": "mmio-contracts",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 27
-    },
-    {
-      "name": "cbo-zero-contracts",
-      "group": "maintenance_reset",
-      "call": "run_cbo_zero_contracts(argc, argv)",
-      "make_targets": [
-        {
-          "name": "cbo-zero-contracts",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 28
-    },
-    {
-      "name": "cmo-contracts",
-      "group": "maintenance_reset",
-      "call": "run_cmo_contracts(argc, argv)",
-      "make_targets": [
-        {
-          "name": "cmo-contracts",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 29
-    },
-    {
-      "name": "wfi-safety",
-      "group": "maintenance_reset",
-      "call": "run_wfi_safety(argc, argv)",
-      "make_targets": [
-        {
-          "name": "wfi-safety",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 30
-    },
-    {
-      "name": "reset-partial-load",
-      "group": "maintenance_reset",
-      "call": "run_reset_partial_load(argc, argv)",
-      "make_targets": [
-        {
-          "name": "reset-partial-load",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 32
-    },
-    {
-      "name": "reset-recovery",
-      "group": "maintenance_reset",
-      "call": "run_reset_recovery(argc, argv)",
-      "make_targets": [
-        {
-          "name": "reset-recovery",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 31
-    },
-    {
-      "name": "reset-tree-contracts",
-      "group": "maintenance_reset",
-      "call": "run_reset_tree_contracts(argc, argv)",
-      "make_targets": [
-        {
-          "name": "reset-tree-contracts",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 33
-    },
-    {
-      "name": "vector-load",
-      "group": "vector_memory",
-      "call": "run_vector_load(argc, argv)",
-      "make_targets": [
-        {
-          "name": "vector-load",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 34
-    },
-    {
-      "name": "vector-split-load",
-      "group": "vector_memory",
-      "call": "run_vector_split_load(argc, argv)",
-      "make_targets": [
-        {
-          "name": "vector-split-load",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 35
-    },
-    {
-      "name": "vector-fof",
-      "group": "vector_memory",
-      "call": "run_vector_fault_only_first(argc, argv)",
-      "make_targets": [
-        {
-          "name": "vector-fof",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 36
-    },
-    {
-      "name": "vector-segment-canonical",
-      "group": "vector_memory",
-      "call": "run_vector_segment_canonical(argc, argv)",
-      "make_targets": [
-        {
-          "name": "vector-segment-canonical",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 38
-    },
-    {
-      "name": "vector-segment",
-      "group": "vector_memory",
-      "call": "run_vector_segment(argc, argv)",
-      "make_targets": [
-        {
-          "name": "vector-segment",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 37
-    },
-    {
-      "name": "vector-segment-fof",
-      "group": "vector_memory",
-      "call": "run_vector_segment_fault_only_first(argc, argv)",
-      "make_targets": [
-        {
-          "name": "vector-segment-fof",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 39
-    },
-    {
-      "name": "vector-store-forwarding",
-      "group": "vector_memory",
-      "call": "run_vector_store_forwarding(argc, argv)",
-      "make_targets": [
-        {
-          "name": "vector-store-forwarding",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 41
-    },
-    {
-      "name": "random-loads",
-      "group": "random_legacy",
-      "call": "run_random_loads(argc, argv, options)",
-      "make_targets": [
-        {
-          "name": "random-loads",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)"
-        }
-      ],
-      "benchmark_order": 83
-    },
-    {
-      "name": "random-vector-loads",
-      "group": "random_legacy",
-      "call": "run_random_vector_loads(argc, argv, options)",
-      "make_targets": [
-        {
-          "name": "random-vector-loads",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)"
-        }
-      ],
-      "benchmark_order": 84
-    },
-    {
-      "name": "random-vector-forwarding",
-      "group": "random_legacy",
-      "call": "run_random_vector_forwarding(argc, argv, options)",
-      "make_targets": [
-        {
-          "name": "random-vector-forwarding",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),24)"
-        }
-      ],
-      "benchmark_order": 85,
-      "benchmark_transactions": 24
-    },
-    {
-      "name": "store-forwarding",
-      "group": "vector_memory",
-      "call": "run_store_forwarding(argc, argv)",
-      "make_targets": [
-        {
-          "name": "store-forwarding",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 42
-    },
-    {
-      "name": "dcache-release",
-      "group": "cache_queue",
-      "call": "run_dcache_release(argc, argv)",
-      "make_targets": [
-        {
-          "name": "dcache-release",
-          "args": ""
-        }
-      ],
-      "benchmark_order": 43
+      "benchmark_order": 18,
+      "kind": "directed"
     },
     {
       "name": "dcache-coherence",
@@ -565,103 +259,268 @@
           "args": ""
         }
       ],
-      "benchmark_order": 19
+      "benchmark_order": 19,
+      "kind": "directed"
     },
     {
-      "name": "store-rdata-order",
-      "group": "cache_queue",
-      "call": "run_store_rdata_order(argc, argv)",
+      "name": "atomic-contracts",
+      "group": "manager_errors",
+      "call": "run_atomic_contracts(argc, argv)",
       "make_targets": [
         {
-          "name": "store-rdata-order",
+          "name": "atomic-contracts",
           "args": ""
         }
       ],
-      "benchmark_order": 44
+      "benchmark_order": 20,
+      "kind": "directed"
     },
     {
-      "name": "store-tlb-miss-preserve",
-      "group": "cache_queue",
-      "call": "run_store_tlb_miss_preserve(argc, argv)",
+      "name": "atomic-dchannel-errors",
+      "group": "manager_errors",
+      "call": "run_atomic_dchannel_errors(argc, argv)",
       "make_targets": [
         {
-          "name": "store-tlb-miss-preserve",
+          "name": "atomic-dchannel-errors",
           "args": ""
         }
       ],
-      "benchmark_order": 45
+      "benchmark_order": 21,
+      "kind": "directed"
     },
     {
-      "name": "iq-slow-feedback",
-      "group": "cache_queue",
-      "call": "run_iq_slow_feedback(argc, argv)",
+      "name": "uncache-errors",
+      "group": "manager_errors",
+      "call": "run_uncache_errors(argc, argv)",
       "make_targets": [
         {
-          "name": "iq-slow-feedback",
+          "name": "uncache-errors",
           "args": ""
         }
       ],
-      "benchmark_order": 46
+      "benchmark_order": 22,
+      "kind": "directed"
     },
     {
-      "name": "redirect",
-      "group": "cache_queue",
-      "call": "run_redirect(argc, argv)",
+      "name": "uncache-widths",
+      "group": "manager_errors",
+      "call": "run_uncache_widths(argc, argv)",
       "make_targets": [
         {
-          "name": "redirect",
+          "name": "uncache-widths",
           "args": ""
         }
       ],
-      "benchmark_order": 47
+      "benchmark_order": 23,
+      "kind": "directed"
     },
     {
-      "name": "queue-pressure",
-      "group": "cache_queue",
-      "call": "run_queue_pressure(argc, argv)",
+      "name": "uncache-outstanding",
+      "group": "manager_errors",
+      "call": "run_uncache_outstanding(argc, argv)",
       "make_targets": [
         {
-          "name": "queue-pressure",
+          "name": "uncache-outstanding",
           "args": ""
         }
       ],
-      "benchmark_order": 48
+      "benchmark_order": 24,
+      "kind": "directed"
     },
     {
-      "name": "scalar-misaligned",
-      "group": "cache_queue",
-      "call": "run_scalar_misaligned(argc, argv)",
+      "name": "sbuffer-flush",
+      "group": "manager_errors",
+      "call": "run_sbuffer_flush(argc, argv)",
       "make_targets": [
         {
-          "name": "scalar-misaligned",
+          "name": "sbuffer-flush",
           "args": ""
         }
       ],
-      "benchmark_order": 49
+      "benchmark_order": 25,
+      "kind": "directed"
     },
     {
-      "name": "misaligned-stores",
-      "group": "cache_queue",
-      "call": "run_misaligned_stores(argc, argv)",
+      "name": "sbuffer-timeout",
+      "group": "manager_errors",
+      "call": "run_sbuffer_timeout(argc, argv)",
       "make_targets": [
         {
-          "name": "misaligned-stores",
+          "name": "sbuffer-timeout",
           "args": ""
         }
       ],
-      "benchmark_order": 50
+      "benchmark_order": 26,
+      "kind": "directed"
     },
     {
-      "name": "vector-addressing",
-      "group": "cache_queue",
-      "call": "run_vector_addressing(argc, argv)",
+      "name": "mmio-contracts",
+      "group": "maintenance_reset",
+      "call": "run_mmio_contracts(argc, argv)",
       "make_targets": [
         {
-          "name": "vector-addressing",
+          "name": "mmio-contracts",
           "args": ""
         }
       ],
-      "benchmark_order": 51
+      "benchmark_order": 27,
+      "kind": "directed"
+    },
+    {
+      "name": "cbo-zero-contracts",
+      "group": "maintenance_reset",
+      "call": "run_cbo_zero_contracts(argc, argv)",
+      "make_targets": [
+        {
+          "name": "cbo-zero-contracts",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 28,
+      "kind": "directed"
+    },
+    {
+      "name": "cmo-contracts",
+      "group": "maintenance_reset",
+      "call": "run_cmo_contracts(argc, argv)",
+      "make_targets": [
+        {
+          "name": "cmo-contracts",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 29,
+      "kind": "directed"
+    },
+    {
+      "name": "wfi-safety",
+      "group": "maintenance_reset",
+      "call": "run_wfi_safety(argc, argv)",
+      "make_targets": [
+        {
+          "name": "wfi-safety",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 30,
+      "kind": "directed"
+    },
+    {
+      "name": "reset-recovery",
+      "group": "maintenance_reset",
+      "call": "run_reset_recovery(argc, argv)",
+      "make_targets": [
+        {
+          "name": "reset-recovery",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 31,
+      "kind": "directed"
+    },
+    {
+      "name": "reset-partial-load",
+      "group": "maintenance_reset",
+      "call": "run_reset_partial_load(argc, argv)",
+      "make_targets": [
+        {
+          "name": "reset-partial-load",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 32,
+      "kind": "directed"
+    },
+    {
+      "name": "reset-tree-contracts",
+      "group": "maintenance_reset",
+      "call": "run_reset_tree_contracts(argc, argv)",
+      "make_targets": [
+        {
+          "name": "reset-tree-contracts",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 33,
+      "kind": "directed"
+    },
+    {
+      "name": "vector-load",
+      "group": "vector_memory",
+      "call": "run_vector_load(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-load",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 34,
+      "kind": "directed"
+    },
+    {
+      "name": "vector-split-load",
+      "group": "vector_memory",
+      "call": "run_vector_split_load(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-split-load",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 35,
+      "kind": "directed"
+    },
+    {
+      "name": "vector-fof",
+      "group": "vector_memory",
+      "call": "run_vector_fault_only_first(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-fof",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 36,
+      "kind": "directed"
+    },
+    {
+      "name": "vector-segment",
+      "group": "vector_memory",
+      "call": "run_vector_segment(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-segment",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 37,
+      "kind": "directed"
+    },
+    {
+      "name": "vector-segment-canonical",
+      "group": "vector_memory",
+      "call": "run_vector_segment_canonical(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-segment-canonical",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 38,
+      "kind": "directed"
+    },
+    {
+      "name": "vector-segment-fof",
+      "group": "vector_memory",
+      "call": "run_vector_segment_fault_only_first(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-segment-fof",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 39,
+      "kind": "directed"
     },
     {
       "name": "vector-issue-order",
@@ -673,7 +532,151 @@
           "args": ""
         }
       ],
-      "benchmark_order": 40
+      "benchmark_order": 40,
+      "kind": "directed"
+    },
+    {
+      "name": "vector-store-forwarding",
+      "group": "vector_memory",
+      "call": "run_vector_store_forwarding(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-store-forwarding",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 41,
+      "kind": "directed"
+    },
+    {
+      "name": "store-forwarding",
+      "group": "vector_memory",
+      "call": "run_store_forwarding(argc, argv)",
+      "make_targets": [
+        {
+          "name": "store-forwarding",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 42,
+      "kind": "directed"
+    },
+    {
+      "name": "dcache-release",
+      "group": "cache_queue",
+      "call": "run_dcache_release(argc, argv)",
+      "make_targets": [
+        {
+          "name": "dcache-release",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 43,
+      "kind": "directed"
+    },
+    {
+      "name": "store-rdata-order",
+      "group": "cache_queue",
+      "call": "run_store_rdata_order(argc, argv)",
+      "make_targets": [
+        {
+          "name": "store-rdata-order",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 44,
+      "kind": "directed"
+    },
+    {
+      "name": "store-tlb-miss-preserve",
+      "group": "cache_queue",
+      "call": "run_store_tlb_miss_preserve(argc, argv)",
+      "make_targets": [
+        {
+          "name": "store-tlb-miss-preserve",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 45,
+      "kind": "directed"
+    },
+    {
+      "name": "iq-slow-feedback",
+      "group": "cache_queue",
+      "call": "run_iq_slow_feedback(argc, argv)",
+      "make_targets": [
+        {
+          "name": "iq-slow-feedback",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 46,
+      "kind": "directed"
+    },
+    {
+      "name": "redirect",
+      "group": "cache_queue",
+      "call": "run_redirect(argc, argv)",
+      "make_targets": [
+        {
+          "name": "redirect",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 47,
+      "kind": "directed"
+    },
+    {
+      "name": "queue-pressure",
+      "group": "cache_queue",
+      "call": "run_queue_pressure(argc, argv)",
+      "make_targets": [
+        {
+          "name": "queue-pressure",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 48,
+      "kind": "directed"
+    },
+    {
+      "name": "scalar-misaligned",
+      "group": "cache_queue",
+      "call": "run_scalar_misaligned(argc, argv)",
+      "make_targets": [
+        {
+          "name": "scalar-misaligned",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 49,
+      "kind": "directed"
+    },
+    {
+      "name": "misaligned-stores",
+      "group": "cache_queue",
+      "call": "run_misaligned_stores(argc, argv)",
+      "make_targets": [
+        {
+          "name": "misaligned-stores",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 50,
+      "kind": "directed"
+    },
+    {
+      "name": "vector-addressing",
+      "group": "cache_queue",
+      "call": "run_vector_addressing(argc, argv)",
+      "make_targets": [
+        {
+          "name": "vector-addressing",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 51,
+      "kind": "directed"
     },
     {
       "name": "exception-contracts",
@@ -685,7 +688,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 52
+      "benchmark_order": 52,
+      "kind": "directed"
     },
     {
       "name": "pmp-contracts",
@@ -697,7 +701,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 53
+      "benchmark_order": 53,
+      "kind": "directed"
     },
     {
       "name": "hypervisor-contracts",
@@ -709,7 +714,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 54
+      "benchmark_order": 54,
+      "kind": "directed"
     },
     {
       "name": "pointer-masking-contracts",
@@ -721,7 +727,21 @@
           "args": ""
         }
       ],
-      "benchmark_order": 55
+      "benchmark_order": 55,
+      "kind": "directed"
+    },
+    {
+      "name": "mbmc-contracts",
+      "group": "manager_errors",
+      "call": "run_mbmc_contracts(argc, argv)",
+      "make_targets": [
+        {
+          "name": "mbmc-contracts",
+          "args": ""
+        }
+      ],
+      "benchmark_order": 56,
+      "kind": "directed"
     },
     {
       "name": "l2-tlb-contracts",
@@ -733,7 +753,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 57
+      "benchmark_order": 57,
+      "kind": "directed"
     },
     {
       "name": "ifetch-ptw-bridge",
@@ -745,7 +766,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 58
+      "benchmark_order": 58,
+      "kind": "directed"
     },
     {
       "name": "two-stage-translation",
@@ -757,7 +779,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 59
+      "benchmark_order": 59,
+      "kind": "directed"
     },
     {
       "name": "translation-matrix",
@@ -769,7 +792,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 60
+      "benchmark_order": 60,
+      "kind": "directed"
     },
     {
       "name": "translation-fence",
@@ -781,7 +805,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 61
+      "benchmark_order": 61,
+      "kind": "directed"
     },
     {
       "name": "translation-fence-selective",
@@ -793,7 +818,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 62
+      "benchmark_order": 62,
+      "kind": "directed"
     },
     {
       "name": "translation-fence-sv48",
@@ -805,7 +831,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 63
+      "benchmark_order": 63,
+      "kind": "directed"
     },
     {
       "name": "translation-fence-sv48-selective",
@@ -817,7 +844,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 64
+      "benchmark_order": 64,
+      "kind": "directed"
     },
     {
       "name": "translation-fence-sv39-sv48x4",
@@ -829,7 +857,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 65
+      "benchmark_order": 65,
+      "kind": "directed"
     },
     {
       "name": "translation-fence-sv39-sv48x4-selective",
@@ -841,7 +870,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 66
+      "benchmark_order": 66,
+      "kind": "directed"
     },
     {
       "name": "translation-fence-sv48-sv39x4",
@@ -853,7 +883,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 67
+      "benchmark_order": 67,
+      "kind": "directed"
     },
     {
       "name": "translation-fence-sv48-sv39x4-selective",
@@ -865,7 +896,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 68
+      "benchmark_order": 68,
+      "kind": "directed"
     },
     {
       "name": "translation-inflight-context",
@@ -877,7 +909,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 69
+      "benchmark_order": 69,
+      "kind": "directed"
     },
     {
       "name": "translation-inflight-context-sv48",
@@ -889,7 +922,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 70
+      "benchmark_order": 70,
+      "kind": "directed"
     },
     {
       "name": "translation-inflight-context-sv39-sv48x4",
@@ -901,7 +935,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 71
+      "benchmark_order": 71,
+      "kind": "directed"
     },
     {
       "name": "translation-inflight-context-sv48-sv39x4",
@@ -913,7 +948,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 72
+      "benchmark_order": 72,
+      "kind": "directed"
     },
     {
       "name": "translation-context",
@@ -925,7 +961,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 73
+      "benchmark_order": 73,
+      "kind": "directed"
     },
     {
       "name": "translation-bare",
@@ -937,7 +974,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 74
+      "benchmark_order": 74,
+      "kind": "directed"
     },
     {
       "name": "ptw-errors",
@@ -949,7 +987,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 75
+      "benchmark_order": 75,
+      "kind": "directed"
     },
     {
       "name": "translation-faults",
@@ -961,7 +1000,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 76
+      "benchmark_order": 76,
+      "kind": "directed"
     },
     {
       "name": "translation-permissions",
@@ -973,7 +1013,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 77
+      "benchmark_order": 77,
+      "kind": "directed"
     },
     {
       "name": "translation-pbmt",
@@ -985,7 +1026,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 78
+      "benchmark_order": 78,
+      "kind": "directed"
     },
     {
       "name": "translation-superpages",
@@ -997,7 +1039,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 79
+      "benchmark_order": 79,
+      "kind": "directed"
     },
     {
       "name": "vector-guest-fault",
@@ -1009,7 +1052,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 80
+      "benchmark_order": 80,
+      "kind": "directed"
     },
     {
       "name": "vector-guest-fault-split",
@@ -1021,7 +1065,8 @@
           "args": ""
         }
       ],
-      "benchmark_order": 81
+      "benchmark_order": 81,
+      "kind": "directed"
     },
     {
       "name": "scalar-guest-fault",
@@ -1033,61 +1078,35 @@
           "args": ""
         }
       ],
-      "benchmark_order": 82
+      "benchmark_order": 82,
+      "kind": "directed"
     },
     {
-      "name": "random-forwarding",
-      "group": "random_legacy",
-      "call": "run_random_forwarding(argc, argv, options)",
+      "name": "constrained-random",
+      "group": "constrained_random",
+      "call": "run_constrained_random(argc, argv, options)",
       "make_targets": [
         {
-          "name": "random-forwarding",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),48)"
+          "name": "constrained-random",
+          "args": "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),16384) $(CONSTRAINT_ARGS)"
         }
       ],
-      "benchmark_order": 86,
-      "benchmark_transactions": 48
+      "benchmark_order": 83,
+      "kind": "constrained-random"
     },
     {
-      "name": "random-mixed",
-      "group": "random_mixed",
-      "call": "run_random_mixed(argc, argv, options)",
+      "name": "vector-guest-fault-boundary",
+      "group": "guest_faults",
+      "call": "run_vector_guest_fault_boundary(argc, argv, options)",
       "make_targets": [
         {
-          "name": "random-mixed-hunt",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --hunt-boundaries --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))"
-        },
-        {
-          "name": "random-mixed",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) $(CONSTRAINT_ARGS)"
+          "name": "vector-guest-fault-boundary",
+          "args": "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),512)"
         }
       ],
-      "benchmark_order": 87
-    },
-    {
-      "name": "random-stress",
-      "group": "random_stress",
-      "call": "run_random_stress(argc, argv, options)",
-      "make_targets": [
-        {
-          "name": "random-stress",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)"
-        }
-      ],
-      "benchmark_order": 88
-    },
-    {
-      "name": "random-boundary-hunt",
-      "group": "random_stress",
-      "call": "run_random_boundary_hunt(argc, argv, options)",
-      "make_targets": [
-        {
-          "name": "random-boundary-hunt",
-          "args": "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),512)"
-        }
-      ],
-      "benchmark_order": 89,
-      "benchmark_transactions": 512
+      "benchmark_order": 84,
+      "kind": "directed",
+      "benchmark_actions": 512
     }
   ]
 }

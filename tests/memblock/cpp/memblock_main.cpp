@@ -15,13 +15,12 @@ Options parse_options(int argc, char **argv)
             options.test = argv[++index];
         } else if (argument == "--seed" && index + 1 < argc) {
             options.seed = parse_u64(argv[++index], "--seed");
-        } else if (argument == "--transactions" && index + 1 < argc) {
+        } else if ((argument == "--actions" || argument == "--transactions") &&
+            index + 1 < argc) {
             options.transactions = static_cast<unsigned>(
-                parse_u64(argv[++index], "--transactions"));
+                parse_u64(argv[++index], argument.data()));
         } else if (argument == "--no-backpressure") {
             options.backpressure = false;
-        } else if (argument == "--hunt-boundaries") {
-            options.hunt_boundaries = true;
         } else if (argument == "--constraints" && index + 1 < argc) {
             options.constraint_profile = argv[++index];
         } else if (argument == "--constraint" && index + 1 < argc) {

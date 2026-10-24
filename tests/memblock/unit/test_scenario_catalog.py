@@ -29,7 +29,7 @@ class ScenarioCatalogTest(unittest.TestCase):
         self.document = {
             "schema_version": 1,
             "scenarios": [{
-                "name": "alpha", "group": "alpha",
+                "name": "alpha", "kind": "directed", "group": "alpha",
                 "call": "run_alpha(argc, argv)",
                 "make_targets": [{"name": "alpha", "args": ""}],
                 "benchmark_order": 0,
@@ -43,23 +43,22 @@ class ScenarioCatalogTest(unittest.TestCase):
 
     def test_existing_cli_make_defaults_and_benchmark_inventory_are_preserved(self):
         entries = scenario_catalog.load_catalog()
-        self.assertEqual(len(entries), 90)
+        self.assertEqual(len(entries), 85)
         by_name = {entry["name"]: entry for entry in entries}
         self.assertEqual(by_name["vector-guest-fault"]["call"], "run_vector_guest_fault(argc, argv)")
         self.assertEqual(by_name["vector-guest-fault-split"]["call"], "run_vector_guest_fault(argc, argv, true)")
         self.assertEqual(by_name["translation-fence-sv48-sv39x4-selective"]["call"], "run_translation_fence(argc, argv, true, true, false)")
         self.assertEqual(by_name["translation-inflight-context-sv39-sv48x4"]["call"], "run_translation_inflight_context(argc, argv, false, true)")
         targets = {target["name"]: (entry["name"], target["args"]) for entry in entries for target in entry["make_targets"]}
-        self.assertEqual(len(targets), 91)
+        self.assertEqual(len(targets), 85)
         self.assertEqual(targets["smoke"], ("smoke", ""))
-        self.assertEqual(targets["frontend-bridge"], ("frontend-bridge", "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),4096)"))
-        self.assertEqual(targets["random-mixed"], ("random-mixed", "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) $(CONSTRAINT_ARGS)"))
-        self.assertEqual(targets["random-mixed-hunt"], ("random-mixed", "--seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --hunt-boundaries --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))"))
+        self.assertEqual(targets["frontend-bridge"], ("frontend-bridge", "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),4096)"))
+        self.assertEqual(targets["constrained-random"], ("constrained-random", "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),16384) $(CONSTRAINT_ARGS)"))
+        self.assertNotIn("random-mixed-hunt", targets)
         benchmark = scenario_catalog.benchmark_scenarios(entries)
         self.assertEqual({entry["name"] for entry in benchmark}, set(by_name))
-        self.assertEqual({entry["name"]: entry["benchmark_transactions"] for entry in benchmark if "benchmark_transactions" in entry}, {
-            "frontend-bridge": 4096, "random-forwarding": 48,
-            "random-vector-forwarding": 24, "random-boundary-hunt": 512,
+        self.assertEqual({entry["name"]: entry["benchmark_actions"] for entry in benchmark if "benchmark_actions" in entry}, {
+            "frontend-bridge": 4096, "vector-guest-fault-boundary": 512,
         })
         self.assertEqual(
             (MEMBLOCK_ROOT / "cpp/scenarios/generated_targets.mk").read_text(),
@@ -119,8 +118,8 @@ class ScenarioCatalogTest(unittest.TestCase):
             "{ return static_cast<int>(options.transactions); }\n"
         )
         self.document["scenarios"].extend([
-            {"name": "alpha-selective", "group": "alpha", "call": "run_alpha(argc, argv, true)", "make_targets": [], "benchmark_order": 1},
-            {"name": "beta", "group": "beta", "call": "run_beta(argc, argv, options)", "make_targets": [], "benchmark_order": 2},
+            {"name": "alpha-selective", "kind": "directed", "group": "alpha", "call": "run_alpha(argc, argv, true)", "make_targets": [], "benchmark_order": 1},
+            {"name": "beta", "kind": "directed", "group": "beta", "call": "run_beta(argc, argv, options)", "make_targets": [], "benchmark_order": 2},
         ])
         entries = self.validate()
         (self.root / "shared.hpp").write_text(

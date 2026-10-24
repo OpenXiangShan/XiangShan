@@ -32,17 +32,21 @@ def validate_catalog(document: Any, source_dir: Path) -> list[dict[str, Any]]:
     targets: set[str] = set()
     orders: set[int] = set()
     modules: set[str] = set()
-    allowed = {"name", "group", "call", "make_targets", "benchmark_order", "benchmark_transactions"}
-    required = allowed - {"benchmark_transactions"}
+    allowed = {"name", "kind", "group", "call", "make_targets", "benchmark_order", "benchmark_actions"}
+    required = {"name", "kind", "group", "call", "make_targets", "benchmark_order"}
     for entry in entries:
         if not isinstance(entry, dict) or not required <= set(entry) or set(entry) - allowed:
             raise CatalogError("invalid scenario fields")
-        name, group, call = (entry[field] for field in ("name", "group", "call"))
+        name, kind, group, call = (
+            entry[field] for field in ("name", "kind", "group", "call")
+        )
         if not isinstance(name, str) or not NAME.fullmatch(name):
             raise CatalogError(f"invalid scenario name: {name!r}")
         if name in names:
             raise CatalogError(f"duplicate scenario: {name}")
         names.add(name)
+        if kind not in {"directed", "constrained-random"}:
+            raise CatalogError(f"invalid scenario kind for {name}: {kind!r}")
         if not isinstance(group, str) or not GROUP.fullmatch(group):
             raise CatalogError(f"invalid scenario group: {group!r}")
         source = source_dir / f"{group}.inc"
@@ -59,10 +63,10 @@ def validate_catalog(document: Any, source_dir: Path) -> list[dict[str, Any]]:
             if type(order) is not int or order < 0 or order in orders:
                 raise CatalogError(f"invalid or duplicate benchmark order for {name}")
             orders.add(order)
-        if "benchmark_transactions" in entry:
-            count = entry["benchmark_transactions"]
+        if "benchmark_actions" in entry:
+            count = entry["benchmark_actions"]
             if type(count) is not int or count <= 0 or order is None:
-                raise CatalogError(f"invalid benchmark transactions for {name}")
+                raise CatalogError(f"invalid benchmark actions for {name}")
         if not isinstance(entry["make_targets"], list):
             raise CatalogError(f"invalid make targets for {name}")
         for target in entry["make_targets"]:

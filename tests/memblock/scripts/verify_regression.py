@@ -25,13 +25,6 @@ class VerificationError(RuntimeError):
     pass
 
 
-# The focused forwarding scenarios intentionally stop before LSQ pointer reuse.
-# The command records the requested stress level; the simulator summary records
-# the number of transactions that the bounded scenario can legally complete.
-def completed_transaction_count(scenario: str, requested: int) -> int:
-    return run_regression.completed_transaction_count(scenario, requested)
-
-
 class StreamingJsonReader:
     """Small structured reader for one large top-level JSON document."""
 
@@ -4396,7 +4389,7 @@ def _check_mixed_coverage(
         )
         _require(
             unobserved_cancels == [0, 0],
-            "random-mixed used an unobserved queue cancellation",
+            "constrained-random used an unobserved queue cancellation",
         )
 
 
@@ -4435,77 +4428,7 @@ def _check_mixed_accounting(result: dict[str, Any]) -> None:
         )
         _require(
             unobserved_cancels == [0, 0],
-            "random-mixed used an unobserved queue cancellation",
-        )
-
-
-def _check_stress_coverage(
-    result: dict[str, Any], require_backpressure: bool = False
-) -> None:
-    for name, fields in (
-        ("stress_load_ops", 7),
-        ("stress_store_ops", 4),
-        ("stress_load_lanes", 3),
-        ("stress_address_lanes", 2),
-        ("stress_data_lanes", 2),
-        ("stress_store_order", 2),
-        ("stress_eew_load", 4),
-        ("stress_eew_store", 4),
-        ("stress_vec_load_modes", 3),
-        ("stress_vec_store_modes", 3),
-        ("stress_vec_lanes", 2),
-        ("stress_prefetch", 3),
-        ("stress_vstart", 2),
-        ("stress_vl", 2),
-        ("stress_alignment", 2),
-        ("stress_forwarding", 2),
-        ("stress_dcache", 2),
-        ("stress_combinations", 4),
-    ):
-        if name in ("stress_vec_load_modes", "stress_vec_store_modes"):
-            _positive_csv_prefix(result, name, fields, 4)
-        else:
-            _positive_csv(result, name, fields)
-    for name in (
-        "stress_masked",
-        "stress_unmasked",
-        "stress_misaligned",
-        "stress_waves",
-        "stress_regions",
-    ):
-        value = result.get(name)
-        _require(
-            isinstance(value, int) and not isinstance(value, bool) and value > 0,
-            f"{name} coverage is absent: {value!r}",
-        )
-    _require(
-        isinstance(result.get("stress_waves"), int)
-        and result["stress_waves"] >= 4,
-        "stress campaign has too few bursts",
-    )
-    _require(
-        isinstance(result.get("stress_max_outstanding"), int)
-        and result["stress_max_outstanding"] >= 10,
-        "stress campaign never accumulated enough outstanding work",
-    )
-    _require(
-        result.get("stress_actions") == result.get("transactions"),
-        "stress coverage action count disagrees with transactions",
-    )
-    if require_backpressure:
-        value = result.get("stress_backpressure")
-        _require(isinstance(value, str), "stress_backpressure coverage is not a string")
-        try:
-            dcache_request, dcache_response, *_ = (
-                int(item, 10) for item in value.split(",")
-            )
-        except (ValueError, TypeError) as error:
-            raise VerificationError(
-                f"invalid stress_backpressure coverage: {value!r}"
-            ) from error
-        _require(
-            dcache_request > 0 and dcache_response > 0,
-            f"stress campaign lacks DCache backpressure: {value}",
+            "constrained-random used an unobserved queue cancellation",
         )
 
 
@@ -4601,7 +4524,7 @@ def _check_result(
         scenario,
         "--seed",
         str(seed),
-        "--transactions",
+        "--actions",
         str(requested_count),
     ]
     _require(
@@ -4646,7 +4569,7 @@ def _check_result(
             == result["dcache_refills"] + result["dcache_acquire_perms"],
             f"{prefix} DCache grants and GrantAcks are not conserved",
         )
-    if scenario == "random-mixed":
+    if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
         _check_mixed_accounting(result)
     elif scenario == run_regression.FRONTEND_BRIDGE_SCENARIO:
         _check_frontend_bridge_coverage(result)
@@ -4756,11 +4679,9 @@ def verify_regression(
     min_results: int,
     min_timeout_seconds: float | None = None,
     exact_results: bool = False,
-    expected_transactions: int,
+    expected_actions: int,
     expected_scenario: str | None = None,
     expected_scenarios: tuple[str, ...] | None = None,
-    expected_forwarding_transactions: int | None = None,
-    expected_mixed_transactions: int | None = None,
     expected_jobs: int | None = None,
     require_backpressure: bool = False,
     require_frozen_runtime: bool = False,
@@ -4779,7 +4700,9 @@ def verify_regression(
             "minimum timeout must be finite and positive",
         )
     if expected_scenarios is None:
-        scenarios = (expected_scenario or "random-mixed",)
+        scenarios = (
+            expected_scenario or run_regression.CONSTRAINED_RANDOM_SCENARIO,
+        )
     else:
         _require(
             expected_scenario is None,
@@ -4795,39 +4718,18 @@ def verify_regression(
         set(scenarios) <= run_regression.SUPPORTED_SCENARIOS,
         "expected scenarios contain an unsupported scenario",
     )
-    forwarding_transactions = (
-        expected_transactions
-        if expected_forwarding_transactions is None
-        else expected_forwarding_transactions
-    )
-    mixed_transactions = (
-        expected_transactions
-        if expected_mixed_transactions is None
-        else expected_mixed_transactions
-    )
-    requested_transaction_counts = {
-        scenario: run_regression.transaction_count_for_scenario(
-            scenario,
-            expected_transactions,
-            forwarding_transactions,
-            mixed_transactions,
-        )
-        for scenario in scenarios
+    requested_action_counts = {
+        scenario: expected_actions for scenario in scenarios
     }
-    completed_transaction_counts = {
-        scenario: completed_transaction_count(
-            scenario, requested_transaction_counts[scenario]
-        )
-        for scenario in scenarios
-    }
+    completed_action_counts = dict(requested_action_counts)
 
     path = path.resolve()
     _require(path.is_file(), f"result artifact is not a file: {path}")
     stat_before = path.stat()
     metadata, observed = _read_document(
         path,
-        requested_transaction_counts,
-        completed_transaction_counts,
+        requested_action_counts,
+        completed_action_counts,
         require_backpressure,
         chunk_size,
     )
@@ -4898,37 +4800,19 @@ def verify_regression(
         configuration.get("scenarios") == list(scenarios),
         "configured scenarios differ from verifier expectation",
     )
-    if "random-mixed" in scenarios or run_regression.STRESS_SCENARIO in scenarios:
-        _require(
-            configuration.get("mixed_transactions_per_seed") == mixed_transactions,
-            "configured mixed transaction count differs from verifier expectation",
-        )
-    if any(scenario in run_regression.FORWARDING_SCENARIOS for scenario in scenarios):
-        _require(
-            configuration.get("forwarding_transactions_per_seed")
-            == forwarding_transactions,
-            "configured forwarding transaction count differs from verifier expectation",
-        )
-    if any(
-        scenario not in run_regression.FORWARDING_SCENARIOS
-        and scenario != "random-mixed"
-        for scenario in scenarios
-    ):
-        _require(
-            configuration.get("transactions_per_seed") == expected_transactions,
-            "configured transaction count differs from verifier expectation",
-        )
+    _require(
+        configuration.get("actions_per_seed") == expected_actions,
+        "configured action count differs from verifier expectation",
+    )
     if require_backpressure:
         _require(configuration.get("backpressure") is True, "backpressure was disabled")
 
     backpressure = configuration.get("backpressure")
     _require(isinstance(backpressure, bool), "configuration has no boolean backpressure mode")
-    hunt_boundaries = configuration.get("hunt_boundaries", False)
-    _require(isinstance(hunt_boundaries, bool), "configuration has invalid boundary-hunt mode")
     expected_command_options: set[tuple[str, tuple[str, ...]]] = set()
     for scenario in scenarios:
         options: list[str] = []
-        if scenario == run_regression.CONSTRAINED_SCENARIO:
+        if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
             has_profile = "constraint_profile" in configuration
             has_overrides = "constraint_overrides" in configuration
             _require(
@@ -4952,8 +4836,6 @@ def verify_regression(
                     options.extend(("--constraint", override))
         if not backpressure:
             options.append("--no-backpressure")
-        if hunt_boundaries:
-            options.append("--hunt-boundaries")
         expected_command_options.add((scenario, tuple(options)))
     _require(
         observed["command_options"] == expected_command_options,
@@ -4995,7 +4877,7 @@ def verify_regression(
     expected_summary = {
         "seeds_completed": result_count,
         "statuses": observed["statuses"],
-        "transactions_completed": observed["transactions"],
+        "actions_completed": observed["transactions"],
     }
     for name, value in expected_summary.items():
         _require(summary.get(name) == value, f"aggregate summary disagrees on {name}")
@@ -5035,7 +4917,7 @@ def verify_regression(
     return {
         "elapsed_seconds": float(elapsed),
         "result_count": result_count,
-        "transactions": observed["transactions"],
+        "actions": observed["transactions"],
         "first_seed": min(seed for seed, _ in observed["cases"]),
         "last_seed": max(seed for seed, _ in observed["cases"]),
         "scenario_counts": observed["scenario_counts"],
@@ -5051,9 +4933,7 @@ def main() -> int:
     parser.add_argument("--exact-results", action="store_true")
     parser.add_argument("--scenario")
     parser.add_argument("--scenarios", help="comma-separated ordered test names")
-    parser.add_argument("--transactions", type=int, default=64)
-    parser.add_argument("--forwarding-transactions", type=int)
-    parser.add_argument("--mixed-transactions", type=int)
+    parser.add_argument("--actions", type=int, default=64)
     parser.add_argument("--expected-jobs", type=int)
     parser.add_argument("--require-backpressure", action="store_true")
     parser.add_argument("--require-frozen-runtime", action="store_true")
@@ -5079,13 +4959,11 @@ def main() -> int:
             min_results=args.min_results,
             min_timeout_seconds=args.min_timeout_seconds,
             exact_results=args.exact_results,
-            expected_transactions=args.transactions,
+            expected_actions=args.actions,
             expected_scenario=(
                 None if expected_scenarios is not None else args.scenario
             ),
             expected_scenarios=expected_scenarios,
-            expected_forwarding_transactions=args.forwarding_transactions,
-            expected_mixed_transactions=args.mixed_transactions,
             expected_jobs=args.expected_jobs,
             require_backpressure=args.require_backpressure,
             require_frozen_runtime=args.require_frozen_runtime,
@@ -5099,7 +4977,7 @@ def main() -> int:
     print(
         "MEMBLOCK_REGRESSION_ARTIFACT_PASS "
         f"seeds={result['first_seed']}..{result['last_seed']} "
-        f"results={result['result_count']} transactions={result['transactions']} "
+        f"results={result['result_count']} actions={result['actions']} "
         f"elapsed_seconds={result['elapsed_seconds']:.6f}"
     )
     return 0

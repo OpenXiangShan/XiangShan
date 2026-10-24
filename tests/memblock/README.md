@@ -23,7 +23,7 @@ The current harness covers the main MemBlock verification domains:
   MMIO, uncache, atomics, LR/SC, AMOCAS, and manager-side error responses;
 - frontend bridge, PTW, L2 hint, trace, DFT, Top-Down, reset, control, and
   queue-pressure boundaries;
-- focused scenarios plus the canonical `random-mixed` constrained-random
+- focused scenarios plus the canonical `constrained-random` constrained-random
   generator.
 
 The current random schema is 53. Its executable fields, presets, replay rules,
@@ -168,7 +168,7 @@ The safe pattern is:
 1. One owner runs `verilog`, `bootstrap-picker`, `prepare-rtl`, `ports`, the
    Picker export/model/harness steps, and `freeze-runtime` in a clean tree.
 2. Record the resolved RTL/tool revisions and `build/memblock/runtime/runtime.json`.
-3. Workers run leaf scenarios, regressions, or verifiers against the immutable
+3. Workers run scenario processes, regressions, or verifiers against the immutable
    runtime. Each worker launches the frozen binary directly or invokes
    `scripts/run_regression.py --runtime-metadata ...` with unique result and
    trace paths.
@@ -210,14 +210,14 @@ arbitrary parallel Make commands safe.
 After the shared build is ready, focused targets run the same prepared binary.
 List its registered CLI scenarios with `UTMemBlock_example --list-tests`; validate
 catalog/module coverage and generated Make recipes with `make check-scenarios`.
-Add or change leaf names, defaults, aliases, and benchmark inclusion in
+Add or change scenario names, defaults, aliases, and benchmark inclusion in
 `cpp/scenarios/catalog.json`, then regenerate Make targets with
 `python3 scripts/scenario_catalog.py generate-make --output cpp/scenarios/generated_targets.mk`.
 Focused invocations include:
 
 ```sh
 make smoke PICKER="$PICKER" JOBS=8
-make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=4096
+make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 ACTIONS=4096
 make translation-matrix PICKER="$PICKER" JOBS=8
 make dcache-errors PICKER="$PICKER" JOBS=8
 make vector-segment-canonical PICKER="$PICKER" JOBS=8
@@ -240,7 +240,7 @@ LR/AMOADD/AMOCAS x W/D cold-refill reset cases plus four partial LR refill cases
 that permit legal early completion. `reset-partial-load` adds twelve partial scalar
 LD cases: singleton and same-line opposite-half pairs, each crossing all three
 primary issue lanes and both target halves in a separate process to bound
-dynamic-loader TLS usage per leaf. They check exact post-reset
+dynamic-loader TLS usage per scenario. They check exact post-reset
 results, readback, and stale completion. Its reset domain includes manager links;
 it does not claim dirty-cache persistence or reservation-reset coverage.
 
@@ -248,7 +248,7 @@ The executable scenario inventory is `SCENARIOS` in
 `scripts/benchmark_tests.py`; the Makefile is the source for target names and
 arguments. Use the inventory rather than maintaining another prose list.
 
-To measure every registered leaf scenario and write JSON/Markdown results:
+To measure every registered scenario and write JSON/Markdown results:
 
 ```sh
 make benchmark-tests PICKER="$PICKER" JOBS=8
@@ -257,51 +257,48 @@ make benchmark-tests PICKER="$PICKER" JOBS=8
 Results default to `build/memblock/test-scale.json` and
 `build/memblock/test-scale.md`. Use `BENCHMARK_SCENARIOS` for a comma-separated
 subset, `BENCHMARK_JOBS=1` for serial measurement, and
-`BENCHMARK_TIMEOUT_SECONDS` to override the default per-leaf budget. A direct
-mem trace requires one concurrent leaf. An action is a generator scheduling
+`BENCHMARK_TIMEOUT_SECONDS` to override the default per-scenario budget. A direct
+mem trace requires one concurrent scenario. An action is a generator scheduling
 unit, not necessarily one load/store or one bus request.
 
 ## Constrained Random And Regression
 
-The normal `regression` target runs the focused random scenarios,
-`random-mixed`, and `frontend-bridge`. All new workload directions belong in the
-common `random-mixed` constraint interface unless a separate scenario is needed
-by contract.
+The normal `regression` target runs `constrained-random`. Directed tests are run
+individually or through the all-scenario benchmark. All new workload directions
+belong in the common `constrained-random` constraint interface unless a separate
+scenario is needed by contract.
 
 The three starting presets are:
 
 - `coverage`: balanced classes and high overlap, the default for the ordinary
-  `regression` and direct `random-mixed` targets;
+  `regression` and direct `constrained-random` targets;
 - `spec`: workload-like ordinary traffic and calibrated miss latency, the
   default for duration campaigns;
-- `corner`: error-heavy and boundary-heavy traffic, the default for boundary
-  hunts.
+- `corner`: error-heavy and boundary-heavy traffic, useful for focused corner
+  campaigns.
 
 Individual fields override a preset. Examples:
 
 ```sh
-make random-mixed PICKER="$PICKER" SEED=1 TRANSACTIONS=16384 \
+make constrained-random PICKER="$PICKER" SEED=1 ACTIONS=16384 \
   CONSTRAINTS=spec
-make random-mixed PICKER="$PICKER" SEED=2 TRANSACTIONS=32768 \
+make constrained-random PICKER="$PICKER" SEED=2 ACTIONS=32768 \
   CONSTRAINTS=corner \
   CONSTRAINT='translation-nested=250 translation-switch=750 tlb-flush=200'
 ```
 
-`random-mixed` has no mandatory action floor and no coverage-completeness PASS
+`constrained-random` has no mandatory action floor and no coverage-completeness PASS
 gate: every run is constrained-random traffic from its first action. Coverage is
 still sampled and printed in the terminal summary, and the regression and
 benchmark drivers write one report per run under `coverage-reports/` next to the
 result file. A sparse report is valid; only functional, protocol, and accounting
-checks determine PASS/FAIL. `random-stress` remains available for compatibility
-with historical artifacts, but new directions should normally extend
-`random-mixed`.
+checks determine PASS/FAIL.
 
 The common multi-seed regression is:
 
 ```sh
 make regression PICKER="$PICKER" \
-  REGRESSION_JOBS=8 SEEDS=32 TRANSACTIONS=16384 \
-  FORWARD_TRANSACTIONS=48 MIXED_TRANSACTIONS=16384
+  REGRESSION_JOBS=8 SEEDS=32 ACTIONS=16384
 ```
 
 The JSON output defaults to `build/memblock/regression.json`. It records each
@@ -311,17 +308,6 @@ empty for a passing seed; reproduce a pass from its command rather than treating
 the JSON as a complete log archive. RTL, executable, model, and artifact hashes
 are not acceptance gates.
 
-For a local pressure run and its machine-checked artifact:
-
-```sh
-make random-stress PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=16384
-
-make stress-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  DURATION_SECONDS=3600 STRESS_TRANSACTIONS=16384
-make verify-stress-results PICKER="$PICKER" REGRESSION_JOBS=8 \
-  MIN_DURATION_SECONDS=3600 STRESS_TRANSACTIONS=16384
-```
-
 Duration campaigns freeze the executable, model, shared library, and prepared
 RTL metadata into `build/memblock/runtime`. The runtime is made read-only and
 `runtime.json` records the artifact and system-library paths. The campaign uses
@@ -329,23 +315,23 @@ RTL metadata into `build/memblock/runtime`. The runtime is made read-only and
 
 ```sh
 make extended-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  DURATION_SECONDS=21600 MIXED_TRANSACTIONS=8192
+  DURATION_SECONDS=21600 ACTIONS=8192
 make final-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  DURATION_SECONDS=172800 MIXED_TRANSACTIONS=16384 \
+  DURATION_SECONDS=172800 ACTIONS=16384 \
   TIMEOUT_SECONDS=12000
 make long-final-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  DURATION_SECONDS=43200 MIXED_TRANSACTIONS=32768
+  DURATION_SECONDS=43200 ACTIONS=32768
 ```
 
 > **Measured performance note (2026-10-24, no coverage prefix):** the full
-> 90-leaf benchmark passes 90/90 in **792.066 s**; `random-mixed` seed 1/16,384
-> takes **764.777 s** (1,840,618 cycles, ~21.4 actions/s, ~2,407 cycles/s), and
-> `vector-segment` is the next longest leaf at 386.057 s. This supersedes the
-> 2026-10-23 gated-generator figures (3,750.501 s / 3,721.673 s). The existing
-> **48 h / 128 seeds** and **200 h / 8 x 1,000,000 actions** acceptance budgets
-> were derived from the old prefix-heavy stimulus and have not been
-> recalibrated; the six-scenario matrix and duration campaigns must be
-> re-measured under the new contract before closure. The optional
+> all-scenario benchmark passes **85/85 in 781.752 s**;
+> `constrained-random` seed 1/16,384 takes **760.884 s** (1,840,675 cycles,
+> ~21.5 actions/s, ~2,419 cycles/s), and `vector-segment` is the next longest
+> scenario at 386.257 s. This supersedes the 2026-10-23 gated-generator figures
+> (3,750.501 s / 3,721.673 s). The existing **48 h / 128 seeds** and
+> **200 h / 8 x 1,000,000 actions** acceptance budgets were derived from the old
+> prefix-heavy stimulus and have not been recalibrated; the duration campaigns
+> must be re-measured under the new contract before closure. The optional
 > `extended-regression` and `long-final-regression` historical budgets are not
 > part of final acceptance and must be recalibrated before use.
 
@@ -359,15 +345,15 @@ per seed:
 
 ```sh
 make endurance-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  ENDURANCE_SEEDS=8 ENDURANCE_TRANSACTIONS=1000000 \
+  ENDURANCE_SEEDS=8 ENDURANCE_ACTIONS=1000000 \
   ENDURANCE_TIMEOUT_SECONDS=720000 CONSTRAINTS=spec
 make verify-endurance-results PICKER="$PICKER" REGRESSION_JOBS=8 \
-  ENDURANCE_SEEDS=8 ENDURANCE_TRANSACTIONS=1000000
+  ENDURANCE_SEEDS=8 ENDURANCE_ACTIONS=1000000
 ```
 
-Final acceptance composes unit tests, the full scenario benchmark, the
-six-scenario matrix, known-bug sentinel, boundary hunt, the 48-hour mixed
-campaign, and the 200-hour endurance campaign:
+Final acceptance composes unit tests, the all-scenario benchmark, the
+known-bug sentinel, the 48-hour `constrained-random` campaign, and the
+200-hour endurance campaign:
 
 ```sh
 make final-acceptance PICKER="$PICKER" JOBS=8 REGRESSION_JOBS=8
@@ -403,27 +389,20 @@ LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
 ## Reproduction
 
 Run these commands from `tests/memblock`. Replay the exact scenario, seed,
-transaction count, constraint set, and frozen runtime recorded by the failing
-artifact. The commands below are examples only.
+action count, constraint set, and frozen runtime recorded by the failing
+artifact. The command below is an example only.
 
 ```sh
 build/memblock/picker/UT_MemBlock/build/UTMemBlock_example \
-  --test random-loads --seed 17 --transactions 16384
-
-build/memblock/picker/UT_MemBlock/build/UTMemBlock_example \
-  --test random-forwarding --seed 17 --transactions 48
-
-build/memblock/picker/UT_MemBlock/build/UTMemBlock_example \
-  --test random-mixed --seed 17 --transactions 16384
+  --test constrained-random --seed 17 --actions 16384
 ```
 
-Vector failures use `random-vector-loads` or `random-vector-forwarding`. A
-campaign seed should use its frozen runtime:
+A campaign seed should use its frozen runtime:
 
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 16384
+  --test constrained-random --seed 17 --actions 16384
 ```
 
 For mixed-run diagnostics, set `MEMBLOCK_MIXED_PROGRESS_ACTIONS=64` on the

@@ -2073,7 +2073,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             main,
         )
 
-    def test_random_mixed_vfof_avoids_unqualified_fault_vaddr_oracle(self) -> None:
+    def test_constrained_random_vfof_avoids_unqualified_fault_vaddr_oracle(self) -> None:
         main = read_cpp_definition("scenarios/mixed_action_vector.cpp", "MixedScenario::execute_vector_memory")
         begin = main.index('phase = vector_fof_first_fault')
         end = main.index(
@@ -2626,54 +2626,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, main)
 
-    def test_stress_driver_requires_real_burst_overlap_and_combo_gates(self) -> None:
-        driver = read_cpp_source("memblock_main.cpp")
-        for contract in (
-            "int run_random_stress",
-            "struct StressRandom",
-            "next_shape",
-            "next_payload",
-            "next_schedule",
-            "stress_max_outstanding",
-            "stress_combinations",
-            "issue-dependency-deadlock",
-            "run_until_all_complete(8192)",
-            "random-stress",
-        ):
-            self.assertIn(contract, driver)
-
-    def test_stress_vector_forwarding_excludes_repeated_address_stores(self) -> None:
-        driver = read_cpp_source("memblock_main.cpp")
-        self.assertIn("const std::array<std::int64_t, 5> store_strides", driver)
-        self.assertIn("const std::array<std::int64_t, 6> load_strides", driver)
-        self.assertIn("if (transaction.store)", driver)
-
-    def test_stress_scalar_forwarding_counter_tracks_dependent_load(self) -> None:
-        driver = read_cpp_source("memblock_main.cpp")
-        independent = driver.index("case Kind::scalar_load:")
-        dependent = driver.index("case Kind::extra_load:")
-        self.assertNotIn(
-            "++coverage.scalar_forwarding", driver[independent:dependent]
-        )
-        self.assertIn(
-            "++coverage.scalar_forwarding", driver[dependent:dependent + 500]
-        )
-
-    def test_stress_combinations_are_derived_from_generated_features(self) -> None:
-        driver = read_cpp_source("memblock_main.cpp")
-        for feature in (
-            "masked_vector",
-            "unmasked_vector",
-            "strided_vector",
-            "indexed_vector",
-            "scalar_misaligned",
-            "scalar_forwarding",
-        ):
-            self.assertIn(feature, driver)
-        self.assertIn("group_count == 2 && masked_vector", driver)
-        self.assertIn("scalar_misaligned && strided_vector", driver)
-        self.assertIn("indexed_vector && scalar_forwarding", driver)
-
     def test_miss_burst_capacity_plus_one_releases_after_issue_is_presented(
         self,
     ) -> None:
@@ -2753,7 +2705,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertLess(issue.index(drive), issue.index("tick();"))
             self.assertLess(issue.index("if (ready)"), issue.index(clear))
 
-    def test_random_mixed_preserves_atomic_serialization_contract(self) -> None:
+    def test_constrained_random_preserves_atomic_serialization_contract(self) -> None:
         driver = read_cpp_source("memblock_main.cpp")
         memblock = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
@@ -2765,7 +2717,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("choose_concurrent_special_operation(random())", concurrent_tail)
         self.assertNotIn("issue_atomic", concurrent_tail)
 
-    def test_random_mixed_recovers_hlvx_and_atomic_precise_errors(self) -> None:
+    def test_constrained_random_recovers_hlvx_and_atomic_precise_errors(self) -> None:
         driver = read_cpp_source("scenarios/mixed_action_hypervisor.cpp")
         hypervisor_load = driver[
             driver.index("const bool physical_pma_execute_denied"):
@@ -2796,7 +2748,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn(":trap-recovery", atomic_error)
         self.assertIn("--rob_offset", atomic_error)
 
-    def test_random_mixed_windows_use_full_shape_vector_instructions(self) -> None:
+    def test_constrained_random_windows_use_full_shape_vector_instructions(self) -> None:
         driver = read_cpp_source("memblock_main.cpp")
         concurrent_tail = read_cpp_definition("scenarios/mixed_concurrent.cpp", "MixedScenario::run_concurrent_windows")
 
@@ -2858,7 +2810,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn(".address = base + (index == 3 ? 0x1800 : 0x1803)", driver)
         self.assertIn("loads[index].index[8] = index == 4 ? 0xa0 : 0xa8", driver)
 
-    def test_random_mixed_window_honors_scalar_misalignment_contract(self) -> None:
+    def test_constrained_random_window_honors_scalar_misalignment_contract(self) -> None:
         driver = read_cpp_source("memblock_main.cpp")
         for contract in (
             "constrained_window_address",
@@ -2931,7 +2883,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, scenario)
 
-    def test_random_mixed_has_no_directed_prefix(self) -> None:
+    def test_constrained_random_has_no_directed_prefix(self) -> None:
         execute = read_cpp_definition("scenarios/mixed_scheduler.cpp", "MixedScenario::execute")
         self.assertIn("initialize_run()", execute)
         self.assertNotIn("run_prefix()", execute)
@@ -2953,13 +2905,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "environment.issue_store_address_until_tlb_hit(", driver
         )
 
-    def test_make_targets_forward_make_variable_seed_and_transaction_counts(self) -> None:
+    def test_make_targets_forward_seed_and_action_counts(self) -> None:
         makefile = read_makefile()
         self.assertIn("--seed $(or $(SEED),1)", makefile)
-        self.assertIn("--transactions $(or $(TRANSACTIONS),16384)", makefile)
-        self.assertIn(
-            "--transactions $(or $(STRESS_TRANSACTIONS),16384)", makefile
-        )
+        self.assertIn("--actions $(or $(ACTIONS),16384)", makefile)
+        self.assertIn("ACTIONS ?= 16384", makefile)
         benchmark_rule = makefile[
             makefile.index("benchmark-tests:"):makefile.index("analyze-spec-counters:")
         ]
@@ -2969,43 +2919,28 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
         self.assertNotIn("--rtl-metadata", benchmark_rule)
         self.assertNotIn("$(CONTROLLER_FILES)", benchmark_rule)
-        stress_rule = makefile[
-            makefile.index("stress-regression:"):makefile.index("verify-stress-results:")
-        ]
-        self.assertIn(
-            "--transactions $(or $(STRESS_TRANSACTIONS),16384)", stress_rule
-        )
-        self.assertIn(
-            "--mixed-transactions $(or $(STRESS_TRANSACTIONS),16384)", stress_rule
-        )
-        self.assertIn(
-            "HUNT_RESULT ?= $(PREPARED_DIR)/boundary-hunt.json", makefile
-        )
-        self.assertIn(
-            "BOUNDARY_HUNT_RESULT ?= $(PREPARED_DIR)/random-boundary-hunt.json",
-            makefile,
-        )
-        hunt_rule = makefile[
-            makefile.index("hunt-regression:"):
-            makefile.index("random-boundary-regression:")
-        ]
-        boundary_rule = makefile[
-            makefile.index("random-boundary-regression:"):
-            makefile.index("scalar-guest-fault:")
-        ]
-        self.assertIn("--output $(HUNT_RESULT)", hunt_rule)
-        self.assertIn("--output $(BOUNDARY_HUNT_RESULT)", boundary_rule)
-        self.assertIn("--input $(BOUNDARY_HUNT_RESULT)", boundary_rule)
+        for removed in (
+            "HUNT_RESULT", "BOUNDARY_HUNT_RESULT", "STRESS_RESULT",
+            "MATRIX_RESULT", "hunt-regression:", "random-boundary-regression:",
+            "stress-regression:", "matrix-regression:",
+        ):
+            self.assertNotIn(removed, makefile)
         self.assertNotIn("--rtl-metadata $(FROZEN_RTL_METADATA)", makefile)
         self.assertNotIn("$${SEED:-1}", makefile)
-        self.assertNotIn("$${TRANSACTIONS:-", makefile)
-
+        self.assertNotIn("$${ACTIONS:-", makefile)
         final_acceptance = makefile[
             makefile.index("final-acceptance:"):makefile.index("\nunit:")
         ]
-        self.assertIn("$(MAKE) benchmark-tests", final_acceptance)
-        self.assertIn("$(MAKE) endurance-regression", final_acceptance)
-        self.assertIn("$(MAKE) verify-endurance-results", final_acceptance)
+        for target in (
+            "$(MAKE) unit",
+            "$(MAKE) benchmark-tests",
+            "$(MAKE) known-bug-sentinel",
+            "$(MAKE) final-regression",
+            "$(MAKE) verify-final-results",
+            "$(MAKE) endurance-regression",
+            "$(MAKE) verify-endurance-results",
+        ):
+            self.assertIn(target, final_acceptance)
 
 
 if __name__ == "__main__":

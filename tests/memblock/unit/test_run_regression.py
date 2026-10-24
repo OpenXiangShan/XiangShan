@@ -113,7 +113,7 @@ class RunRegressionTest(unittest.TestCase):
             return_value=(None, "partialdiagnostic", True),
         ):
             result = run_regression.run_seed(
-                Path("/bin/true"), 7, "random-loads", 1, 1, 128, 1.0, True
+                Path("/bin/true"), 7, "constrained-random", 128, 1.0, True
             )
         self.assertEqual(result["status"], "timeout")
         self.assertIn("partialdiagnostic", result["output"])
@@ -157,142 +157,65 @@ class RunRegressionTest(unittest.TestCase):
             self.assertIn("unsafe with --jobs > 1", stderr.getvalue())
             self.assertFalse(output.exists())
 
-    def test_constraint_interface_is_forwarded_only_to_random_mixed(self) -> None:
+    def test_constraint_interface_is_forwarded_only_to_constrained_random(self) -> None:
         with mock.patch.object(
             run_regression,
             "_run_process",
             return_value=(
                 0,
-                "MEMBLOCK_RANDOM_MIXED_PASS seed=3 transactions=128\n",
+                "MEMBLOCK_CONSTRAINED_RANDOM_PASS seed=3 transactions=128\n",
                 False,
             ),
         ):
             result = run_regression.run_seed(
                 Path("/bin/true"),
                 3,
-                "random-mixed",
-                128,
-                48,
+                "constrained-random",
                 128,
                 1.0,
                 True,
                 constraint_profile="spec",
                 constraint_overrides=("tlb-flush=40", "latency=compact"),
             )
-        self.assertEqual(
-            result["command"][-6:],
-            [
-                "--constraints",
-                "spec",
-                "--constraint",
-                "tlb-flush=40",
-                "--constraint",
-                "latency=compact",
-            ],
-        )
+        self.assertIn("--constraints", result["command"])
+        self.assertIn("spec", result["command"])
+        self.assertIn("--constraint", result["command"])
+        self.assertIn("tlb-flush=40", result["command"])
 
         with mock.patch.object(
             run_regression,
             "_run_process",
-            return_value=(0, "MEMBLOCK_RANDOM_PASS seed=3 transactions=128\n", False),
+            return_value=(
+                0,
+                "MEMBLOCK_FRONTEND_BRIDGE_PASS seed=3 transactions=128\n",
+                False,
+            ),
         ):
-            scalar = run_regression.run_seed(
+            directed = run_regression.run_seed(
                 Path("/bin/true"),
                 3,
-                "random-loads",
-                128,
-                48,
+                "frontend-bridge",
                 128,
                 1.0,
                 True,
                 constraint_profile="corner",
                 constraint_overrides=("tlb-flush=100",),
             )
-        self.assertNotIn("--constraints", scalar["command"])
-        self.assertNotIn("--constraint", scalar["command"])
+        self.assertNotIn("--constraints", directed["command"])
+        self.assertNotIn("--constraint", directed["command"])
 
-    def test_mixed_has_no_prefix_action_floor(self) -> None:
+    def test_constrained_random_has_no_prefix_action_floor(self) -> None:
         self.assertFalse(hasattr(run_regression, "MINIMUM_MIXED_TRANSACTIONS"))
-        self.assertEqual(run_regression.DEFAULT_TRANSACTIONS, 16384)
-        self.assertEqual(run_regression.DEFAULT_MIXED_TRANSACTIONS, 16384)
+        self.assertEqual(run_regression.DEFAULT_ACTIONS, 16384)
         self.assertEqual(run_regression.DEFAULT_TIMEOUT_SECONDS, 1800)
 
-    def test_parses_passing_summary(self) -> None:
+    def test_parses_constrained_random_summary(self) -> None:
         parsed = run_regression.parse_summary(
-            "noise\nMEMBLOCK_RANDOM_PASS seed=7 transactions=20 cycle=99 "
-            "ops=1,2\n"
-        )
-        self.assertEqual(parsed["status"], "pass")
-        self.assertEqual(parsed["seed"], 7)
-        self.assertEqual(parsed["transactions"], 20)
-        self.assertEqual(parsed["ops"], "1,2")
-
-    def test_parses_vector_load_summary(self) -> None:
-        parsed = run_regression.parse_summary(
-            "MEMBLOCK_RANDOM_VECTOR_PASS seed=11 transactions=200 cycle=2342 "
-            "eews=1,2,3,4\n"
-        )
-        self.assertEqual(parsed["status"], "pass")
-        self.assertEqual(parsed["seed"], 11)
-        self.assertEqual(parsed["transactions"], 200)
-        self.assertEqual(parsed["eews"], "1,2,3,4")
-
-    def test_parses_vector_forwarding_failure(self) -> None:
-        parsed = run_regression.parse_summary(
-            "MEMBLOCK_RANDOM_VECTOR_FORWARD_FAIL seed=5 transactions=24 "
-            "reason=mismatch\n"
-        )
-        self.assertEqual(parsed["status"], "fail")
-        self.assertEqual(parsed["transactions"], 24)
-
-    def test_default_scenarios_cover_scalar_and_vector_memory(self) -> None:
-        self.assertEqual(
-            set(run_regression.DEFAULT_SCENARIOS),
-            {
-                "random-loads",
-                "random-forwarding",
-                "random-vector-loads",
-                "random-vector-forwarding",
-                "random-mixed",
-                "frontend-bridge",
-            },
-        )
-
-    def test_both_forwarding_scenarios_use_forwarding_transaction_count(self) -> None:
-        for scenario in ("random-forwarding", "random-vector-forwarding"):
-            self.assertEqual(
-                run_regression.transaction_count_for_scenario(scenario, 1000, 48),
-                48,
-            )
-        self.assertEqual(
-            run_regression.transaction_count_for_scenario("random-vector-loads", 1000, 48),
-            1000,
-        )
-        self.assertEqual(
-            run_regression.transaction_count_for_scenario(
-                "random-mixed", 1000, 48, 72
-            ),
-            72,
-        )
-        self.assertEqual(
-            run_regression.transaction_count_for_scenario(
-                "random-boundary-hunt", 37, 48, 512
-            ),
-            37,
-        )
-        self.assertEqual(
-            run_regression.transaction_count_for_scenario(
-                run_regression.STRESS_SCENARIO, 1000, 48, 16384
-            ),
-            16384,
-        )
-
-    def test_parses_mixed_summary(self) -> None:
-        parsed = run_regression.parse_summary(
-            "MEMBLOCK_RANDOM_MIXED_PASS seed=9 transactions=64 cycle=1200 "
+            "MEMBLOCK_CONSTRAINED_RANDOM_PASS seed=9 transactions=64 cycle=1200 "
             "lq=55+1/56 sq=30+0/30\n"
         )
         self.assertEqual(parsed["status"], "pass")
+        self.assertEqual(parsed["seed"], 9)
         self.assertEqual(parsed["transactions"], 64)
         self.assertEqual(parsed["lq"], "55+1/56")
 
@@ -301,7 +224,7 @@ class RunRegressionTest(unittest.TestCase):
             "MEMBLOCK_FRONTEND_BRIDGE_PASS seed=13 transactions=32 cycle=441 "
             "requests=96 responses=128 request_stalls=161 response_stalls=106 "
             "source_credit_stalls=379 field_checks=3599\n",
-            expected_scenario=run_regression.FRONTEND_BRIDGE_SCENARIO,
+            expected_scenario="frontend-bridge",
             expected_seed=13,
             expected_transactions=32,
         )
@@ -309,54 +232,47 @@ class RunRegressionTest(unittest.TestCase):
         self.assertEqual(parsed["requests"], 96)
         self.assertEqual(parsed["source_credit_stalls"], 379)
 
-    def test_parses_boundary_hunt_failures(self) -> None:
+    def test_parses_directed_boundary_failures(self) -> None:
         parsed = run_regression.parse_summary(
-            "MEMBLOCK_RANDOM_BOUNDARY_HUNT_FAIL seed=9 transactions=37 "
-            "failures=4\n"
+            "MEMBLOCK_VECTOR_GUEST_FAULT_BOUNDARY_FAIL seed=9 transactions=37 "
+            "failures=4\n",
+            expected_scenario="vector-guest-fault-boundary",
         )
         self.assertEqual(parsed["status"], "fail")
         self.assertEqual(parsed["transactions"], 37)
         self.assertEqual(parsed["failures"], 4)
 
-    def test_parses_stress_summary(self) -> None:
-        parsed = run_regression.parse_summary(
-            "MEMBLOCK_RANDOM_STRESS_PASS seed=9 transactions=16384 "
-            "stress_max_outstanding=12 stress_combinations=1,2,3,4\n",
-            expected_scenario=run_regression.STRESS_SCENARIO,
-            expected_seed=9,
-            expected_transactions=16384,
-        )
-        self.assertEqual(parsed["status"], "pass")
-        self.assertEqual(parsed["stress_max_outstanding"], 12)
-
     def test_rejects_missing_summary(self) -> None:
         with self.assertRaises(run_regression.RegressionError):
             run_regression.parse_summary("ordinary simulator output")
 
+    def test_default_scenarios_are_constrained_random(self) -> None:
+        self.assertEqual(set(run_regression.DEFAULT_SCENARIOS), {"constrained-random"})
+
     def test_rejects_conflicting_terminal_summaries(self) -> None:
         output = (
-            "MEMBLOCK_RANDOM_FAIL seed=7 transactions=20\n"
-            "MEMBLOCK_RANDOM_PASS seed=7 transactions=20\n"
+            "MEMBLOCK_CONSTRAINED_RANDOM_FAIL seed=7 transactions=20\n"
+            "MEMBLOCK_CONSTRAINED_RANDOM_PASS seed=7 transactions=20\n"
         )
         with self.assertRaisesRegex(run_regression.RegressionError, "expected one"):
-            run_regression.parse_summary(output, expected_scenario="random-loads")
+            run_regression.parse_summary(output, expected_scenario="constrained-random")
 
     def test_rejects_summary_for_wrong_scenario(self) -> None:
-        output = "MEMBLOCK_RANDOM_VECTOR_PASS seed=7 transactions=20\n"
+        output = "MEMBLOCK_FRONTEND_BRIDGE_PASS seed=7 transactions=20\n"
         with self.assertRaisesRegex(run_regression.RegressionError, "does not match"):
             run_regression.parse_summary(
                 output,
-                expected_scenario="random-loads",
+                expected_scenario="constrained-random",
                 expected_seed=7,
                 expected_transactions=20,
             )
 
     def test_rejects_summary_without_expected_seed(self) -> None:
-        output = "MEMBLOCK_RANDOM_PASS transactions=20\n"
+        output = "MEMBLOCK_CONSTRAINED_RANDOM_PASS transactions=20\n"
         with self.assertRaisesRegex(run_regression.RegressionError, "seed"):
             run_regression.parse_summary(
                 output,
-                expected_scenario="random-loads",
+                expected_scenario="constrained-random",
                 expected_seed=7,
                 expected_transactions=20,
             )

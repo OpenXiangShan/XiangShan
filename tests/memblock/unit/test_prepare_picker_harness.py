@@ -69,14 +69,14 @@ class PreparePickerHarnessTest(unittest.TestCase):
             (sources / "generated_interface_types.hpp").write_text("types")
             removed_header = sources / "removed_public.hpp"
             removed_header.write_text("old interface")
-            (scenarios / "random_mixed.inc").write_text(
-                "int run_random_mixed(int argc, char **argv) { return 0; }"
+            (scenarios / "constrained_random.inc").write_text(
+                "int run_constrained_random(int argc, char **argv) { return 0; }"
             )
             (scenarios / "catalog.json").write_text(json.dumps({
                 "schema_version": 1,
                 "scenarios": [{
-                    "name": "random-mixed", "group": "random_mixed",
-                    "call": "run_random_mixed(argc, argv)",
+                    "name": "constrained-random", "kind": "constrained-random", "group": "constrained_random",
+                    "call": "run_constrained_random(argc, argv)",
                     "make_targets": [], "benchmark_order": 0,
                 }],
             }))
@@ -96,8 +96,8 @@ class PreparePickerHarnessTest(unittest.TestCase):
                 (target / "generated_port_defaults.hpp").read_text(), "defaults"
             )
             self.assertEqual(
-                (target / "scenarios/random_mixed.inc").read_text(),
-                "int run_random_mixed(int argc, char **argv) { return 0; }",
+                (target / "scenarios/constrained_random.inc").read_text(),
+                "int run_constrained_random(int argc, char **argv) { return 0; }",
             )
             self.assertEqual(
                 (target / "generated_interface_types.hpp").read_text(), "types"
@@ -107,12 +107,12 @@ class PreparePickerHarnessTest(unittest.TestCase):
             )
             cmake = (target / "CMakeLists.txt").read_text()
             self.assertIn("environment/environment.cpp", cmake)
-            self.assertIn("scenarios/module_random_mixed.cpp", cmake)
+            self.assertIn("scenarios/module_constrained_random.cpp", cmake)
             self.assertIn("scenarios/registry.cpp", cmake)
             self.assertNotIn("environment/model.inc", cmake)
             self.assertIn(
-                '#include "random_mixed.inc"',
-                (target / "scenarios/module_random_mixed.cpp").read_text(),
+                '#include "constrained_random.inc"',
+                (target / "scenarios/module_constrained_random.cpp").read_text(),
             )
             self.assertEqual(
                 (target / "environment/model.inc").read_text(), "model"
@@ -131,7 +131,7 @@ class PreparePickerHarnessTest(unittest.TestCase):
             object_file = build / "cached.o"
             object_file.write_bytes(b"object")
             unchanged = [target / "example.cpp", target / "CMakeLists.txt",
-                         target / "scenarios/module_random_mixed.cpp"]
+                         target / "scenarios/module_constrained_random.cpp"]
             mtimes = [path.stat().st_mtime_ns for path in unchanged]
             (target / "environment/obsolete.cpp").write_text("stale")
             removed_header.unlink()

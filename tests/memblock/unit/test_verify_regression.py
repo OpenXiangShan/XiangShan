@@ -69,13 +69,13 @@ def mixed_result(seed: int) -> dict[str, object]:
         "concurrent": "4,20,4,5,3",
         "backpressure": "1,1,1,1,1,1",
     }
-    summary = "MEMBLOCK_RANDOM_MIXED_PASS " + " ".join(
+    summary = "MEMBLOCK_CONSTRAINED_RANDOM_PASS " + " ".join(
         f"{name}={value}" for name, value in fields.items()
     )
     return {
         **fields,
         "status": "pass",
-        "scenario": "random-mixed",
+        "scenario": "constrained-random",
         "returncode": 0,
         "output": "",
         "elapsed_seconds": 0.1,
@@ -84,10 +84,10 @@ def mixed_result(seed: int) -> dict[str, object]:
         "command": [
             "/frozen/memblock_sim",
             "--test",
-            "random-mixed",
+            "constrained-random",
             "--seed",
             str(seed),
-            "--transactions",
+            "--actions",
             "64",
         ],
         "summary": summary,
@@ -107,8 +107,8 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
             "backpressure": True,
             "duration_seconds": 4.0,
             "jobs": 8,
-            "mixed_transactions_per_seed": 64,
-            "scenarios": ["random-mixed"],
+            "actions_per_seed": 64,
+            "scenarios": ["constrained-random"],
             "start_seed": 7,
         },
         "runtime": {
@@ -125,7 +125,7 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
         "summary": {
             "seeds_completed": len(results),
             "statuses": {"pass": len(results)},
-            "transactions_completed": 64 * len(results),
+            "actions_completed": 64 * len(results),
         },
         "results": results,
     }
@@ -185,8 +185,8 @@ class VerifyRegressionTest(unittest.TestCase):
         verify_regression._check_result(
             result,
             0,
-            {"random-mixed": 64},
-            {"random-mixed": 64},
+            {"constrained-random": 64},
+            {"constrained-random": 64},
         )
 
         result["grant_acks"] = 3
@@ -199,8 +199,8 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression._check_result(
                 result,
                 0,
-                {"random-mixed": 64},
-                {"random-mixed": 64},
+                {"constrained-random": 64},
+                {"constrained-random": 64},
             )
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
@@ -3472,8 +3472,8 @@ class VerifyRegressionTest(unittest.TestCase):
                 path,
                 min_duration_seconds=4,
                 min_results=2,
-                expected_scenario="random-mixed",
-                expected_transactions=64,
+                expected_scenario="constrained-random",
+                expected_actions=64,
                 require_backpressure=True,
                 require_frozen_runtime=True,
                 expected_jobs=8,
@@ -3483,7 +3483,7 @@ class VerifyRegressionTest(unittest.TestCase):
     def test_streams_and_verifies_complete_artifact(self) -> None:
         verified = self.verify(regression_document([mixed_result(7), mixed_result(8)]))
         self.assertEqual(verified["result_count"], 2)
-        self.assertEqual(verified["transactions"], 128)
+        self.assertEqual(verified["actions"], 128)
         self.assertEqual(verified["first_seed"], 7)
         self.assertEqual(verified["last_seed"], 8)
 
@@ -3513,8 +3513,8 @@ class VerifyRegressionTest(unittest.TestCase):
                 path,
                 min_duration_seconds=4,
                 min_results=2,
-                expected_scenario="random-mixed",
-                expected_transactions=64,
+                expected_scenario="constrained-random",
+                expected_actions=64,
                 require_backpressure=True,
                 require_frozen_runtime=True,
                 expected_jobs=8,
@@ -3534,8 +3534,8 @@ class VerifyRegressionTest(unittest.TestCase):
                     path,
                     min_duration_seconds=4,
                     min_results=2,
-                    expected_scenario="random-mixed",
-                    expected_transactions=64,
+                    expected_scenario="constrained-random",
+                    expected_actions=64,
                     expected_jobs=8,
                     require_backpressure=True,
                     require_frozen_runtime=True,
@@ -3605,43 +3605,6 @@ class VerifyRegressionTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(verify_regression.VerificationError, "vec_store_modes"):
             verify_regression._check_mixed_coverage(result)
-
-    def test_stress_coverage_requires_combinations_and_outstanding_depth(self) -> None:
-        result: dict[str, object] = {
-            "stress_load_ops": "1,1,1,1,1,1,1",
-            "stress_store_ops": "1,1,1,1",
-            "stress_load_lanes": "1,1,1",
-            "stress_address_lanes": "1,1",
-            "stress_data_lanes": "1,1",
-            "stress_store_order": "1,1",
-            "stress_eew_load": "1,1,1,1",
-            "stress_eew_store": "1,1,1,1",
-            "stress_vec_load_modes": "1,1,1,0",
-            "stress_vec_store_modes": "1,1,1,0",
-            "stress_vec_lanes": "1,1",
-            "stress_prefetch": "1,1,1",
-            "stress_vstart": "1,1",
-            "stress_vl": "1,1",
-            "stress_alignment": "1,1",
-            "stress_forwarding": "1,1",
-            "stress_dcache": "1,1",
-            "stress_combinations": "1,1,1,1",
-            "stress_masked": 1,
-            "stress_unmasked": 1,
-            "stress_misaligned": 1,
-            "stress_waves": 4,
-            "stress_regions": 2,
-            "stress_max_outstanding": 10,
-            "stress_actions": 96,
-            "transactions": 96,
-            "stress_backpressure": "1,1,0,0,0,0",
-        }
-        verify_regression._check_stress_coverage(result, require_backpressure=True)
-        result["stress_combinations"] = "1,1,1,0"
-        with self.assertRaisesRegex(
-            verify_regression.VerificationError, "stress_combinations"
-        ):
-            verify_regression._check_stress_coverage(result)
 
     def test_frontend_bridge_coverage_checks_counts_stalls_and_fields(self) -> None:
         result: dict[str, object] = {
@@ -3752,70 +3715,6 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_rejects_aggregate_count_mismatch(self) -> None:
         document = regression_document([mixed_result(7), mixed_result(8)])
-        document["summary"]["transactions_completed"] = 64
-        with self.assertRaisesRegex(verify_regression.VerificationError, "transactions_completed"):
+        document["summary"]["actions_completed"] = 64
+        with self.assertRaisesRegex(verify_regression.VerificationError, "actions_completed"):
             self.verify(document)
-
-    def test_forwarding_command_request_and_bounded_result_are_distinct(self) -> None:
-        result = {
-            "seed": 7,
-            "scenario": "random-forwarding",
-            "transactions": 48,
-            "status": "pass",
-            "returncode": 0,
-            "output": "",
-            "elapsed_seconds": 0.1,
-            "submitted_offset_seconds": 0.0,
-            "completed_offset_seconds": 5.0,
-            "command": [
-                "/frozen/memblock_sim",
-                "--test",
-                "random-forwarding",
-                "--seed",
-                "7",
-                "--transactions",
-                "64",
-            ],
-            "summary": (
-                "MEMBLOCK_RANDOM_FORWARD_PASS seed=7 transactions=48"
-            ),
-        }
-        checked = verify_regression._check_result(
-            result,
-            0,
-            {"random-forwarding": 64},
-            {"random-forwarding": 48},
-        )
-        self.assertEqual(checked[3], 48)
-
-        result["transactions"] = 47
-        result["summary"] = str(result["summary"]).replace(
-            "transactions=48", "transactions=47"
-        )
-        with self.assertRaisesRegex(verify_regression.VerificationError, "expected 48"):
-            verify_regression._check_result(
-                result,
-                0,
-                {"random-forwarding": 64},
-                {"random-forwarding": 48},
-            )
-
-    def test_forwarding_result_caps(self) -> None:
-        self.assertEqual(
-            verify_regression.completed_transaction_count("random-forwarding", 64),
-            48,
-        )
-        self.assertEqual(
-            verify_regression.completed_transaction_count(
-                "random-vector-forwarding", 64
-            ),
-            24,
-        )
-        self.assertEqual(
-            verify_regression.completed_transaction_count("random-loads", 1000),
-            1000,
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()

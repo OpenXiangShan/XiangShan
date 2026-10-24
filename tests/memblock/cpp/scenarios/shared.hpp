@@ -29,7 +29,6 @@ struct Options {
     std::uint64_t seed = 1;
     unsigned transactions = 200;
     bool backpressure = true;
-    bool hunt_boundaries = false;
     std::string constraint_profile = "coverage";
     std::vector<std::string> constraint_overrides;
 };
