@@ -438,6 +438,84 @@ int run_single_load(int argc, char **argv)
         return 1;
     }
 
+    // TileLink D responses for distinct sources are not required to return in
+    // request order.  Hold two cold-load refills, release the younger load's
+    // response first, and require each scoreboard identity to receive its own
+    // line data; the older load must remain pending until its own response.
+    memblock::Environment reverse(argc, argv);
+    constexpr std::uint64_t reverse_line_a = base + 0x900;
+    constexpr std::uint64_t reverse_line_b = base + 0x980;
+    reverse.memory().fill_incrementing(reverse_line_a, 64, 0x17);
+    reverse.memory().fill_incrementing(reverse_line_b, 64, 0xb9);
+    if (!reverse.reset() ||
+        !reverse.configure_stride_prefetch(false) ||
+        !reverse.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL phase=reverse-reset"
+                  << " reason=" << reverse.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction reverse_older{
+        .address = reverse_line_a + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 50,
+        .lane = 0,
+    };
+    const memblock::LoadTransaction reverse_younger{
+        .address = reverse_line_b + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        .lq = 1,
+        .pdest = 51,
+        .lane = 1,
+    };
+    reverse.expect_load(reverse_older);
+    reverse.expect_load(reverse_younger);
+    reverse.hold_dcache_response_at(reverse_line_a);
+    reverse.hold_dcache_response_at(reverse_line_b);
+    if (!reverse.set_rob_head(
+            reverse_older.rob, reverse_older.rob_flag) ||
+        !reverse.enqueue_load(reverse_older) ||
+        !reverse.enqueue_load(reverse_younger) ||
+        !reverse.issue_load(reverse_older, 1024) ||
+        !reverse.issue_load(reverse_younger, 1024)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle=" << reverse.cycle()
+                  << " phase=reverse-issue reason=" << reverse.error()
+                  << '\n';
+        return 1;
+    }
+    bool reverse_held = false;
+    for (unsigned cycle = 0; cycle < 2048; ++cycle) {
+        if (reverse.dcache_held_response_count() == 2 &&
+            reverse.dcache_requests_covering_since(reverse_line_a, 0) == 1 &&
+            reverse.dcache_requests_covering_since(reverse_line_b, 0) == 1) {
+            reverse_held = true;
+            break;
+        }
+        if (!reverse.run_cycles(1)) {
+            break;
+        }
+    }
+    if (!reverse_held ||
+        !reverse.release_held_dcache_response_at(reverse_line_b) ||
+        !reverse.run_until_load_writebacks(1, 4096) ||
+        reverse.scalar_load_pending(reverse_older) != true ||
+        reverse.scalar_load_pending(reverse_younger) != false ||
+        !reverse.release_held_dcache_response_at(reverse_line_a) ||
+        !reverse.run_until_load_writebacks(2, 4096) ||
+        !reverse.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle=" << reverse.cycle()
+                  << " phase=reverse-completion reason=" << reverse.error()
+                  << " held=" << reverse.dcache_held_response_count()
+                  << " writebacks=" << reverse.writebacks()
+                  << " older_pending="
+                  << reverse.scalar_load_pending(reverse_older)
+                  << " younger_pending="
+                  << reverse.scalar_load_pending(reverse_younger) << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_SINGLE_LOAD_PASS"
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
@@ -455,6 +533,7 @@ int run_single_load(int argc, char **argv)
               << " partial_cycles=" << partial.cycle()
               << " immediate_loads=" << immediates.size()
               << " immediate_min=-2048 immediate_max=2047"
+              << " reverse_order=1 reverse_writebacks=2"
               << '\n';
     return 0;
 }

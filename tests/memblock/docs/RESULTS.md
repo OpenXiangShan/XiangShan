@@ -227,6 +227,16 @@ a time-budget/throughput observation, not a functional failure; a future 16k
 corner campaign needs a larger per-seed timeout or more than eight workers. It
 is not closure evidence for the 48-hour or 200-hour campaigns.
 
+### 2026-10-24 out-of-order load D responses
+
+`single-load` now holds two cold-load refills for distinct sources, releases
+the younger load's response first, and requires the younger identity to
+complete with its own line data while the older load remains pending. Releasing
+the older response then produces both exact writebacks and LQ retirement. The
+scenario passes with `reverse_order=1 reverse_writebacks=2`; D-response
+ordering across distinct sources is therefore matched by identity rather than
+arrival order.
+
 ## Current Verification Position
 
 - `directed-tests` cover the focused protocol, translation, vector, cache,
