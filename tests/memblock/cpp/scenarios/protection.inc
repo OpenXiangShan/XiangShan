@@ -2106,6 +2106,90 @@ int run_pmp_contracts(int argc, char **argv)
         total_dcache_requests += environment.tilelink_requests();
     }
 
+    // Store-side split PMP edge: an 8-byte store starts four bytes inside
+    // an allowed 4-KiB NAPOT region and crosses into the denied next page.
+    // The store must fault and must not partially update either the allowed
+    // line or the denied line.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t base = 0x81000000ULL;
+        constexpr std::uint64_t store_value = 0x0123456789abcdefULL;
+        environment.memory().fill_incrementing(base, 0x2000, 0x5a);
+        if (!configure_supervisor_bare(
+                environment,
+                {napot_address(base, 0x1000)},
+                {pmp_napot_read_write}) ||
+            !environment.enable_misaligned_accesses()) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=split-pmp-store-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::StoreTransaction store{
+            .address = base + 0xffc,
+            .oracle_address = base + 0xffc,
+            .data = store_value,
+            .op = memblock::StoreOp::sd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+            .expected_address_writeback_lane = 0,
+            .expected_exception_mask =
+                memblock::kExceptionStoreAccessFault,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 2048) ||
+            !environment.issue_store_data(store, 2048) ||
+            !environment.pulse_pending_store(store.rob, store.rob_flag) ||
+            !environment.run_until_store_complete(16384)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=split-pmp-store execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.sq_dequeued() + environment.sq_canceled() <
+                environment.sq_allocated() &&
+            !environment.account_sq_cancellation(1)) {
+            return 1;
+        }
+        const std::uint64_t allowed_old =
+            environment.memory().expected_load(
+                base + 0xff8, memblock::LoadOp::ld);
+        const memblock::LoadTransaction readback{
+            .address = base + 0xff8,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 0,
+            .pdest = 120,
+            .lane = 0,
+        };
+        environment.expect_load_data(readback, allowed_old);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(2048) ||
+            environment.bus_expected_load(
+                base + 0x1000, memblock::LoadOp::ld) !=
+                environment.memory().expected_load(
+                    base + 0x1000, memblock::LoadOp::ld)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=split-pmp-store-partial reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++denied_cases;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
     // A TOR entry's upper bound is the following entry's pmpaddr.  When that
     // following entry is locked, the TOR base address is locked too.  Attempt
     // to move the base beyond the upper bound: the original range must remain

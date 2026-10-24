@@ -182,6 +182,17 @@ remain unchanged. The scenario passes 59 cases with `split_pmp_edge=1`; the
 allowed prefix request explains the one-request increase over ordinary denied
 loads.
 
+### 2026-10-24 split store across a PMP boundary
+
+`pmp-contracts` adds the store-side counterpart of the split-load PMP edge. An
+S-mode `sd` starts four bytes inside an allowed 4-KiB NAPOT region and crosses
+into the denied next page. It must report `StoreAccessFault` and must not
+partially update the allowed line or write the denied line. A readback of the
+allowed line at `base+0xff8` returns the old value, and the denied line's
+backing bytes stay unchanged. The scenario passes 60 cases with
+`split_pmp_store=1`; the allowed-prefix request explains the one-request
+increase.
+
 ### 2026-10-24 S-mode locked PMP immutability
 
 `pmp-contracts` adds an S-mode lock-immutability case. A NAPOT allow entry is
