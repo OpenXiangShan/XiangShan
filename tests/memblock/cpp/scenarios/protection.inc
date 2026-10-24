@@ -1623,6 +1623,7 @@ int run_pmp_contracts(int argc, char **argv)
     constexpr std::uint8_t pmp_napot_deny = 0x18;
     constexpr std::uint8_t pmp_napot_read_write = 0x1b;
     constexpr std::uint8_t pmp_locked_napot_deny = 0x98;
+    constexpr std::uint8_t pmp_locked_tor_read = 0x89;
     auto napot_address = [](std::uint64_t base, std::uint64_t size) {
         return (base | (size / 2 - 1)) >> 2;
     };
@@ -1986,6 +1987,148 @@ int run_pmp_contracts(int argc, char **argv)
         total_dcache_requests += locked.tilelink_requests();
     }
 
+    // A TOR entry's upper bound is the following entry's pmpaddr.  When that
+    // following entry is locked, the TOR base address is locked too.  Attempt
+    // to move the base beyond the upper bound: the original range must remain
+    // readable.  A write that incorrectly takes effect makes the TOR range
+    // empty and denies the old range.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t lower = 0x80a00000ULL;
+        constexpr std::uint64_t upper = lower + 0x2000;
+        constexpr std::uint64_t moved_lower = upper + 0x1000;
+        environment.memory().fill_incrementing(lower, 0x4000, 0x66);
+        if (!configure_supervisor_bare(
+                environment, {lower >> 2, upper >> 2},
+                {0, pmp_locked_tor_read})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=tor-next-lock-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction first{
+            .address = lower,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 60, .lane = 0,
+        };
+        const memblock::LoadTransaction last{
+            .address = upper - 8,
+            .op = memblock::LoadOp::ld,
+            .rob = 1, .lq = 1, .pdest = 61, .lane = 1,
+        };
+        if (!run_load(environment, first, "tor-next-lock-lower") ||
+            !run_load(environment, last, "tor-next-lock-upper")) {
+            return 1;
+        }
+        allowed_cases += 2;
+
+        // The first write targets the locked TOR base through the following
+        // locked entry.  It must be ignored.
+        if (!environment.configure_pmp(
+                {moved_lower >> 2, upper >> 2},
+                {0, pmp_locked_tor_read})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=tor-next-lock-rewrite-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction retained_lower{
+            .address = lower,
+            .op = memblock::LoadOp::ld,
+            .rob = 2, .lq = 2, .pdest = 62, .lane = 2,
+        };
+        const memblock::LoadTransaction retained_upper{
+            .address = upper - 8,
+            .op = memblock::LoadOp::ld,
+            .rob = 3, .lq = 3, .pdest = 63, .lane = 0,
+        };
+        if (!run_load(
+                environment, retained_lower,
+                "tor-next-lock-rewrite-rejected-lower") ||
+            !run_load(
+                environment, retained_upper,
+                "tor-next-lock-rewrite-rejected-upper")) {
+            return 1;
+        }
+        allowed_cases += 2;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
+    // Exercise NAPOT interval matching at every supported power-of-two size
+    // from the 4-KiB platform grain through 4 MiB.  The address is aligned to
+    // the region and the entries are freshly programmed per size.  Allowed
+    // first/last doublewords and denied immediately-below/above doublewords
+    // are exact architectural checks; denied loads must not reach a manager.
+    {
+        constexpr std::array<unsigned, 7> napot_size_log2{
+            12, 13, 14, 16, 18, 20, 22};
+        constexpr std::uint64_t napot_base = 0xb0000000ULL;
+        for (const unsigned size_log2 : napot_size_log2) {
+            memblock::Environment environment(argc, argv);
+            const std::uint64_t size = std::uint64_t{1} << size_log2;
+            environment.memory().fill_incrementing(
+                napot_base, 8, static_cast<std::uint8_t>(0x31 + size_log2));
+            environment.memory().fill_incrementing(
+                napot_base + size - 8, 8,
+                static_cast<std::uint8_t>(0x71 + size_log2));
+            if (!configure_supervisor_bare(
+                    environment, {napot_address(napot_base, size)},
+                    {pmp_napot_read_write})) {
+                std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=napot-size-"
+                          << size_log2 << "-configuration reason="
+                          << environment.error() << '\n';
+                return 1;
+            }
+            const std::array<memblock::LoadTransaction, 4> loads{{
+                memblock::LoadTransaction{
+                    .address = napot_base,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 0, .lq = 0, .pdest = 70, .lane = 0,
+                },
+                memblock::LoadTransaction{
+                    .address = napot_base + size - 8,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 1, .lq = 1, .pdest = 71, .lane = 1,
+                },
+                memblock::LoadTransaction{
+                    .address = napot_base - 8,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 2, .lq = 2, .pdest = 72, .lane = 2,
+                    .expected_exception_mask =
+                        memblock::kExceptionLoadAccessFault,
+                },
+                memblock::LoadTransaction{
+                    .address = napot_base + size,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 3, .lq = 3, .pdest = 73, .lane = 0,
+                    .expected_exception_mask =
+                        memblock::kExceptionLoadAccessFault,
+                },
+            }};
+            for (unsigned index = 0; index < loads.size(); ++index) {
+                std::ostringstream phase;
+                phase << "napot-size-" << size_log2 << '-' << index;
+                if (!run_load(environment, loads[index],
+                              phase.str().c_str())) {
+                    return 1;
+                }
+                if (loads[index].expected_exception_mask == 0) {
+                    ++allowed_cases;
+                } else {
+                    ++denied_cases;
+                }
+            }
+            total_cycles += environment.cycle();
+            total_load_writebacks += environment.writebacks();
+            total_dcache_requests += environment.tilelink_requests();
+        }
+    }
+
     std::cout << "MEMBLOCK_PMP_CONTRACTS_PASS"
               << " cycles=" << total_cycles
               << " cases=" << allowed_cases + denied_cases
@@ -1995,7 +2138,8 @@ int run_pmp_contracts(int argc, char **argv)
               << " store_writebacks=" << total_store_writebacks
               << " dcache_a=" << total_dcache_requests
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
-              << " machine_bypass=1 atomic_denied=1"
+              << " machine_bypass=1 atomic_denied=1 tor_next_lock=1"
+              << " napot_sizes=7"
               << '\n';
     return 0;
 }

@@ -128,6 +128,19 @@ exact (`cmo_overlap_release_data=1 cmo_overlap_victim_releases=1
 cmo_overlap_probe_data=1 cmo_overlap_requests=1 cmo_overlap_readbacks=5`). No
 new CPU bug was found; atomic replacement composition remains a gap.
 
+### 2026-10-24 PMP TOR lock and NAPOT size matrix
+
+`pmp-contracts` now covers the architectural rule that a TOR entry's base
+address is locked when the following entry is a locked TOR entry. After
+installing `[lower, upper)` through entry 1 with entry 1 locked, the test
+attempts to move `pmpaddr0` beyond `upper`; the write must be ignored and the
+original range must remain readable. A write that incorrectly took effect
+would make the TOR range empty and deny the old range; the independent load
+oracle detects that without reading DUT state. The same scenario then
+exercises NAPOT sizes 4 KiB, 8 KiB, 16 KiB, 64 KiB, 256 KiB, 1 MiB, and 4 MiB
+at allowed first/last and denied immediately-below/above doublewords. The full
+scenario passes 49 cases with `tor_next_lock=1` and `napot_sizes=7`.
+
 ## Current Verification Position
 
 - `directed-tests` cover the focused protocol, translation, vector, cache,
