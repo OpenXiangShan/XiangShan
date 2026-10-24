@@ -155,6 +155,16 @@ exercises NAPOT sizes 4 KiB, 8 KiB, 16 KiB, 64 KiB, 256 KiB, 1 MiB, and 4 MiB
 at allowed first/last and denied immediately-below/above doublewords. The full
 scenario passes 49 cases with `tor_next_lock=1` and `napot_sizes=7`.
 
+### 2026-10-24 LR reservation invalidation by Probe
+
+`atomic-contracts` now checks that a manager Probe to the LR line invalidates
+the LR/SC reservation. After a warmed `LR.D`, a toN dirty ProbeAckData returns
+the exact line image and invalidates the line; the following `SC.D` must fail
+with result `1`, issue no new DCache request, and leave the backing memory
+unchanged. A final readback returns the original value. The scenario passes
+with `reservation_probe_invalidated=1`. This observes the architectural
+reservation outcome, not the internal reservation bit.
+
 ### 2026-10-24 PMP-before-PBMT priority
 
 `pmp-contracts` adds two Sv39 cases whose page-table pages are PMP-allowed but

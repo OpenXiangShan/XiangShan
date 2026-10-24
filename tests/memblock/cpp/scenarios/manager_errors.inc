@@ -1948,6 +1948,149 @@ int run_atomic_contracts(int argc, char **argv)
         return 1;
     }
 
+    // A manager Probe to the LR line must invalidate the LR/SC
+    // reservation.  The following SC must fail without a new data request,
+    // and the line must refill from unchanged memory.
+    memblock::Environment reservation_probe(argc, argv);
+    constexpr std::uint64_t reservation_line =
+        memblock::kDefaultMemoryBase + 0x360000;
+    constexpr std::uint64_t reservation_address = reservation_line + 24;
+    reservation_probe.memory().fill_incrementing(
+        reservation_line, 64, 0x3b);
+    const std::uint64_t reservation_old =
+        reservation_probe.memory().expected_load(
+            reservation_address, memblock::LoadOp::ld);
+    if (!reservation_probe.reset()) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << reservation_probe.cycle()
+                  << " phase=reservation-probe-reset reason="
+                  << reservation_probe.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction reservation_warm{
+        .address = reservation_address,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 160,
+        .lane = 0,
+    };
+    reservation_probe.expect_load(reservation_warm);
+    if (!reservation_probe.set_rob_head(
+            reservation_warm.rob, reservation_warm.rob_flag) ||
+        !reservation_probe.enqueue_load(reservation_warm) ||
+        !reservation_probe.issue_load(reservation_warm, 2048) ||
+        !reservation_probe.run_until_complete(8192) ||
+        !reservation_probe.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << reservation_probe.cycle()
+                  << " phase=reservation-probe-warm reason="
+                  << reservation_probe.error() << '\n';
+        return 1;
+    }
+    const memblock::AtomicTransaction reservation_lr{
+        .address = reservation_address,
+        .op = memblock::AtomicOp::lr_d,
+        .rob = 1,
+        .pdest = 161,
+        .address_lane = 0,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction reservation_lr_wb{
+        .address = reservation_address,
+        .op = memblock::LoadOp::ld,
+        .rob = reservation_lr.rob,
+        .pdest = reservation_lr.pdest,
+        .lane = 0,
+        .rf_wen = true,
+    };
+    reservation_probe.expect_load_data(reservation_lr_wb, reservation_old);
+    if (!reservation_probe.set_rob_head(
+            reservation_lr.rob, reservation_lr.rob_flag) ||
+        !reservation_probe.issue_atomic(reservation_lr, 2048) ||
+        !reservation_probe.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << reservation_probe.cycle()
+                  << " phase=reservation-probe-lr reason="
+                  << reservation_probe.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t reservation_probes_before =
+        reservation_probe.dcache_probes();
+    const auto reservation_image =
+        reservation_probe.memory().read_beat(reservation_line, 64);
+    if (!reservation_probe.request_dcache_probe(
+            reservation_line, 2, true, 1, reservation_image) ||
+        !reservation_probe.run_until_probe_responses(
+            reservation_probes_before + 1, 4096) ||
+        reservation_probe.dcache_probe_data() != 1) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << reservation_probe.cycle()
+                  << " phase=reservation-probe-probe reason="
+                  << reservation_probe.error() << ' probes='
+                  << reservation_probe.dcache_probes() << " responses="
+                  << reservation_probe.dcache_probe_responses() << " data="
+                  << reservation_probe.dcache_probe_data() << '\n';
+        return 1;
+    }
+    const std::uint64_t reservation_requests_before =
+        reservation_probe.tilelink_requests();
+    const memblock::AtomicTransaction reservation_sc{
+        .address = reservation_address,
+        .op = memblock::AtomicOp::sc_d,
+        .data = 0xaabbccddeeff0011ULL,
+        .rob = 2,
+        .pdest = 162,
+        .address_lane = 1,
+        .data_lane = 1,
+    };
+    const memblock::LoadTransaction reservation_sc_wb{
+        .address = reservation_address,
+        .op = memblock::LoadOp::ld,
+        .rob = reservation_sc.rob,
+        .pdest = reservation_sc.pdest,
+        .lane = 0,
+        .rf_wen = true,
+    };
+    reservation_probe.expect_load_data(reservation_sc_wb, 1);
+    if (!reservation_probe.set_rob_head(
+            reservation_sc.rob, reservation_sc.rob_flag) ||
+        !reservation_probe.issue_atomic(reservation_sc, 2048) ||
+        !reservation_probe.run_until_complete(8192) ||
+        reservation_probe.tilelink_requests() !=
+            reservation_requests_before ||
+        reservation_probe.bus_expected_load(
+            reservation_address, memblock::LoadOp::ld) != reservation_old) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << reservation_probe.cycle()
+                  << " phase=reservation-probe-sc reason="
+                  << reservation_probe.error() << " requests="
+                  << reservation_probe.tilelink_requests() -
+                         reservation_requests_before << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction reservation_probe_readback{
+        .address = reservation_address,
+        .op = memblock::LoadOp::ld,
+        .rob = 3,
+        .lq = 1,
+        .pdest = 163,
+        .lane = 1,
+    };
+    reservation_probe.expect_load_data(reservation_probe_readback, reservation_old);
+    if (!reservation_probe.set_rob_head(
+            reservation_probe_readback.rob, reservation_probe_readback.rob_flag) ||
+        !reservation_probe.enqueue_load(reservation_probe_readback) ||
+        !reservation_probe.issue_load(reservation_probe_readback, 4096) ||
+        !reservation_probe.run_until_complete(8192) ||
+        !reservation_probe.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << reservation_probe.cycle()
+                  << " phase=reservation-probe-readback reason="
+                  << reservation_probe.error() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_ATOMIC_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " amo_d_variants=" << operations.size()
@@ -1959,6 +2102,7 @@ int run_atomic_contracts(int argc, char **argv)
               << " misaligned_w_cases=" << misaligned_w_cases
               << " misaligned=" << misaligned_d_cases + misaligned_w_cases
               << " misaligned_rob_wraps=" << misaligned_rob_wraps
+              << " reservation_probe_invalidated=1"
               << " pma_atomic_denied=1"
               << " pma_atomic_cycles=" << pma_atomic.cycle()
               << " final=0x" << std::hex << model_value << std::dec
