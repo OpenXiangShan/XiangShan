@@ -61,6 +61,11 @@ on:
         required: false
         type: boolean
         default: false
+      enable_tea:
+        description: Enable TEA collection (Verilator and a TEA Constantin file required)
+        required: false
+        type: boolean
+        default: false
       enable_rolling:
         description: Enable rolling DB dump, which implies enable_db (High disk usage, 4~16G/ckpt, use with caution!)
         required: false
@@ -102,6 +107,7 @@ jobs:
         benchmarks: ${{ github.event.inputs.benchmarks }}
         cst_file: ${{ github.event.inputs.cst_file }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
+        enable_tea: ${{ fromJSON(github.event.inputs.enable_tea) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
         servers: ${{ github.event.inputs.servers }}
         checkpoint_path: ${{ github.event.inputs.checkpoint_path }}
