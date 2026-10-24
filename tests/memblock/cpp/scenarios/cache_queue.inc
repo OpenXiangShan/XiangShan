@@ -908,6 +908,253 @@ int run_dcache_release(int argc, char **argv)
         return 1;
     }
 
+    // Replacement composed with an atomic.  Five dirty stores occupy one
+    // four-way set; the fifth forces a held victim release.  A cold AMOADD.D
+    // to a different set is delayed while the C channel is held, and a Probe
+    // to the just-refilled fifth line releases C.  The atomic's old-value
+    // writeback and final memory, plus the victim/probe C payloads, must all
+    // remain exact.
+    memblock::Environment atomic_env(argc, argv);
+    constexpr std::uint64_t atomic_store_base =
+        memblock::kDefaultMemoryBase + 0xb0000;
+    constexpr std::uint64_t atomic_store_stride = dcache_sets * line_bytes;
+    std::array<memblock::StoreTransaction, dcache_ways + 1> atomic_stores{};
+    for (unsigned index = 0; index < atomic_stores.size(); ++index) {
+        const std::uint64_t line =
+            atomic_store_base + index * atomic_store_stride;
+        atomic_env.memory().fill_incrementing(
+            line, line_bytes, static_cast<std::uint8_t>(0x35 + index * 0x13));
+        atomic_stores[index] = memblock::StoreTransaction{
+            .address = line + 24,
+            .data = 0x5566778800000000ULL | index,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(index),
+            .rob_flag = memblock::rob_pointer_flag(index),
+            .sq = memblock::sq_pointer_value(index),
+            .sq_flag = memblock::sq_pointer_flag(index),
+            .address_lane = index % memblock::kScalarStoreLanes,
+            .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+        };
+        if (index < dcache_ways) {
+            auto expected_line =
+                atomic_env.memory().read_beat(line, line_bytes);
+            for (unsigned byte = 0; byte < sizeof(std::uint64_t); ++byte) {
+                expected_line[24 + byte] = static_cast<unsigned char>(
+                    atomic_stores[index].data >> (8 * byte));
+            }
+            atomic_env.expect_release_line(line, expected_line);
+        }
+    }
+    const std::uint64_t atomic_probe_line =
+        atomic_stores.back().address & ~std::uint64_t{63};
+    auto atomic_probe_image =
+        atomic_env.memory().read_beat(atomic_probe_line, line_bytes);
+    for (unsigned byte = 0; byte < sizeof(std::uint64_t); ++byte) {
+        atomic_probe_image[24 + byte] = static_cast<unsigned char>(
+            atomic_stores.back().data >> (8 * byte));
+    }
+    constexpr std::uint64_t atomic_line =
+        memblock::kDefaultMemoryBase + 0xb8000 + line_bytes;
+    constexpr std::uint64_t atomic_address = atomic_line + 24;
+    constexpr std::uint64_t atomic_operand = 0x0102030405060708ULL;
+    atomic_env.memory().fill_incrementing(atomic_line, line_bytes, 0x91);
+    const std::uint64_t atomic_old = atomic_env.memory().expected_load(
+        atomic_address, memblock::LoadOp::ld);
+    if (!atomic_env.reset() ||
+        !atomic_env.configure_stride_prefetch(false) ||
+        !atomic_env.configure_sms_pht_prefetch(false)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << atomic_env.cycle() << " phase=atomic-overlap-reset reason="
+                  << atomic_env.error() << '\n';
+        return 1;
+    }
+    for (unsigned index = 0; index < dcache_ways; ++index) {
+        const auto &store = atomic_stores[index];
+        atomic_env.expect_store(store);
+        const std::uint64_t refills_before = atomic_env.dcache_refills();
+        if (!atomic_env.enqueue_store(store, 0) ||
+            !atomic_env.issue_store_address(store, 1024) ||
+            !atomic_env.issue_store_data(store, 1024) ||
+            !atomic_env.run_until_store_complete(4096) ||
+            !atomic_env.commit_store(store, 4096) ||
+            !atomic_env.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << atomic_env.cycle() << " transaction=" << index
+                      << " phase=atomic-overlap-fill reason="
+                      << atomic_env.error() << '\n';
+            return 1;
+        }
+        for (unsigned cycle = 0;
+             cycle < 4096 && atomic_env.dcache_refills() == refills_before;
+             ++cycle) {
+            if (!atomic_env.run_cycles(1)) {
+                return 1;
+            }
+        }
+        if (atomic_env.dcache_refills() != refills_before + 1) {
+            std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                      << atomic_env.cycle() << " transaction=" << index
+                      << " phase=atomic-overlap-fill-refill refills="
+                      << atomic_env.dcache_refills() - refills_before << '\n';
+            return 1;
+        }
+    }
+
+    const std::uint64_t atomic_probes_before = atomic_env.dcache_probes();
+    const std::uint64_t atomic_release_before =
+        atomic_env.tilelink_release_data();
+    if (!atomic_env.hold_dcache_c_until_probes(
+            atomic_probes_before + 1)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << atomic_env.cycle() << " phase=atomic-overlap-hold reason="
+                  << atomic_env.error() << '\n';
+        return 1;
+    }
+    atomic_env.begin_dcache_release_observation();
+    const auto &atomic_victim = atomic_stores.back();
+    atomic_env.expect_store(atomic_victim);
+    const std::uint64_t atomic_victim_refills_before =
+        atomic_env.dcache_refills();
+    if (!atomic_env.enqueue_store(atomic_victim, 0) ||
+        !atomic_env.issue_store_address(atomic_victim, 1024) ||
+        !atomic_env.issue_store_data(atomic_victim, 1024) ||
+        !atomic_env.run_until_store_complete(4096) ||
+        !atomic_env.commit_store(atomic_victim, 4096) ||
+        !atomic_env.run_until_sbuffer_empty(4096)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << atomic_env.cycle()
+                  << " phase=atomic-overlap-victim reason="
+                  << atomic_env.error() << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 4096 && atomic_env.dcache_refills() ==
+                            atomic_victim_refills_before;
+         ++cycle) {
+        if (!atomic_env.run_cycles(1)) {
+            return 1;
+        }
+    }
+    if (atomic_env.dcache_refills() != atomic_victim_refills_before + 1 ||
+        atomic_env.tilelink_release_data() != atomic_release_before) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << atomic_env.cycle()
+                  << " phase=atomic-overlap-victim-state refills="
+                  << atomic_env.dcache_refills() -
+                         atomic_victim_refills_before
+                  << " release_data="
+                  << atomic_env.tilelink_release_data() -
+                         atomic_release_before << '\n';
+        return 1;
+    }
+
+    const memblock::AtomicTransaction atomic{
+        .address = atomic_address,
+        .op = memblock::AtomicOp::amoadd_d,
+        .data = atomic_operand,
+        .rob = 6,
+        .sq = 5,
+        .pdest = 200,
+        .address_lane = 1,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction atomic_old_wb{
+        .address = atomic_address,
+        .op = memblock::LoadOp::ld,
+        .rob = atomic.rob,
+        .pdest = atomic.pdest,
+        .lane = 0,
+        .rf_wen = true,
+    };
+    const std::uint64_t atomic_requests_before =
+        atomic_env.tilelink_requests();
+    atomic_env.expect_load_data(atomic_old_wb, atomic_old);
+    atomic_env.force_next_dcache_response_delay(512);
+    if (!atomic_env.issue_atomic(atomic, 2048) ||
+        !atomic_env.run_until_dcache_requests(
+            atomic_requests_before + 1, 8192) ||
+        atomic_env.writebacks() != 0) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << atomic_env.cycle() << " phase=atomic-overlap-issue reason="
+                  << atomic_env.error() << " writebacks="
+                  << atomic_env.writebacks() << '\n';
+        return 1;
+    }
+    if (!atomic_env.request_dcache_probe(
+            atomic_probe_line, 1, true, 0, atomic_probe_image) ||
+        !atomic_env.run_until_probe_responses(
+            atomic_probes_before + 1, 8192) ||
+        !atomic_env.run_cycles(32) ||
+        !atomic_env.run_until_complete(16384) ||
+        !atomic_env.run_until_dcache_release_idle(4096)) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << atomic_env.cycle() << " phase=atomic-overlap-completion"
+                  << " reason=" << atomic_env.error() << " probes="
+                  << atomic_env.dcache_probes() << " responses="
+                  << atomic_env.dcache_probe_responses() << " probe_data="
+                  << atomic_env.dcache_probe_data() << " release_data="
+                  << atomic_env.tilelink_release_data() << '\n';
+        return 1;
+    }
+    std::uint64_t atomic_victim_releases = 0;
+    for (unsigned index = 0; index < dcache_ways; ++index) {
+        const std::uint64_t line =
+            atomic_store_base + index * atomic_store_stride;
+        atomic_victim_releases +=
+            atomic_env.observed_dcache_release_data_covering(line);
+    }
+    const std::uint64_t atomic_release_delta =
+        atomic_env.tilelink_release_data() - atomic_release_before;
+    if (atomic_release_delta != 1 ||
+        atomic_victim_releases != 1 ||
+        atomic_env.tilelink_release_data_verified() !=
+            atomic_env.tilelink_release_data() ||
+        atomic_env.dcache_probes() != atomic_probes_before + 1 ||
+        atomic_env.dcache_probe_responses() != atomic_probes_before + 1 ||
+        atomic_env.dcache_probe_data() != 1 ||
+        atomic_env.bus_expected_load(
+            atomic_address, memblock::LoadOp::ld) != atomic_old) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << atomic_env.cycle() << " phase=atomic-overlap-accounting"
+                  << " release_delta=" << atomic_release_delta
+                  << " victim_releases=" << atomic_victim_releases
+                  << " probes=" << atomic_env.dcache_probes()
+                  << " responses=" << atomic_env.dcache_probe_responses()
+                  << " probe_data=" << atomic_env.dcache_probe_data()
+                  << '\n';
+        return 1;
+    }
+    atomic_env.end_dcache_release_observation();
+
+    const memblock::LoadTransaction atomic_readback{
+        .address = atomic_address,
+        .op = memblock::LoadOp::ld,
+        .rob = 7,
+        .lq = 0,
+        .pdest = 201,
+        .lane = 1,
+    };
+    atomic_env.expect_load_data(
+        atomic_readback, atomic_old + atomic_operand);
+    if (!atomic_env.set_rob_head(
+            atomic_readback.rob, atomic_readback.rob_flag) ||
+        !atomic_env.enqueue_load(atomic_readback) ||
+        !atomic_env.issue_load(atomic_readback, 4096) ||
+        !atomic_env.run_until_complete(8192) ||
+        !atomic_env.run_until_lq_retired(2048) ||
+        atomic_env.sq_dequeued() + atomic_env.sq_canceled() !=
+            atomic_env.sq_allocated()) {
+        std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle="
+                  << atomic_env.cycle() << " phase=atomic-overlap-readback"
+                  << " reason=" << atomic_env.error() << " sq="
+                  << atomic_env.sq_dequeued() << '+'
+                  << atomic_env.sq_canceled() << '/'
+                  << atomic_env.sq_allocated() << '\n';
+        return 1;
+    }
+    const std::uint64_t atomic_readbacks = 1;
+    (void)atomic_readbacks;
+
     std::cout << "MEMBLOCK_DCACHE_RELEASE_PASS"
               << " cycle=" << environment.cycle()
               << " stores=" << stores.size()
@@ -939,6 +1186,12 @@ int run_dcache_release(int argc, char **argv)
               << cmo_error.dcache_cmo_requests(cmo_error_tx.op)
               << " cmo_error_readbacks=" << error_readbacks
               << " cmo_error_lq_pending=" << error_lq_pending
+              << " atomic_overlap_release_data=" << atomic_release_delta
+              << " atomic_overlap_victim_releases="
+              << atomic_victim_releases
+              << " atomic_overlap_probe_data="
+              << atomic_env.dcache_probe_data()
+              << " atomic_overlap_readbacks=" << atomic_readbacks
               << '\n';
     return 0;
 }

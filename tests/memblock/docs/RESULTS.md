@@ -111,7 +111,11 @@ updates as binary SHA-256
 4,096-action `coverage` smoke run passes 4/4 (16,384 actions, 685 s,
 `build/memblock/regression-20261024-round5-smoke.json`). The larger 16-seed
 artifact remains prior-runtime evidence; the constrained-random code path is
-unchanged.
+unchanged. The later replacement+atomic scenario addition re-froze the runtime
+as binary SHA-256
+`e4ffdd74675f0ed8fea2e790d86bbc3a527b9a5c9d9742beb80c4f7f0389a1b9`; the same
+`constrained-random` source is unchanged and the frozen binary includes the
+atomic composition.
 
 ### 2026-10-24 single-set replacement and Probe composition
 
@@ -151,6 +155,18 @@ exercises NAPOT sizes 4 KiB, 8 KiB, 16 KiB, 64 KiB, 256 KiB, 1 MiB, and 4 MiB
 at allowed first/last and denied immediately-below/above doublewords. The full
 scenario passes 49 cases with `tor_next_lock=1` and `napot_sizes=7`.
 
+### 2026-10-24 replacement composed with an atomic refill
+
+`dcache-release` adds an atomic composition. Five dirty stores occupy one
+four-way set and the fifth forces a held dirty victim release. A cold
+`AMOADD.D` in a different set is issued while C is held; its refill response is
+delayed, and a Probe to the just-refilled fifth line releases C. The test
+requires the atomic's exact old-value writeback, no early writeback while the
+refill is held, the exact final memory/readback, and the victim/probe C
+payloads. The scenario passes with `atomic_overlap_release_data=1
+atomic_overlap_victim_releases=1 atomic_overlap_probe_data=1
+atomic_overlap_readbacks=1`. No new CPU bug was found.
+
 ### 2026-10-24 replacement composed with a denied CMO response
 
 `dcache-release` adds a denied-CBOAck composition. Four dirty ways and a held
@@ -189,9 +205,9 @@ store-reset cancellation API; dirty-cache persistence remains unclaimed.
 
 ## Remaining Gaps
 
-- Malformed or duplicate manager responses, replacement combined with atomic
-  traffic, and broader PMP/PMA/hypervisor crosses remain. Replacement composed
-  with a same-set Probe and with a single CMO is now covered by
+- Malformed or duplicate manager responses and broader PMP/PMA/hypervisor
+  crosses remain. Replacement composed with a same-set Probe, a single CMO, a
+  denied CMO response, and a cold atomic refill is covered by
   `dcache-release`.
 - Single-set associativity coverage and some vector-segment fault/progress
   crosses remain.
