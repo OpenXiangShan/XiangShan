@@ -697,6 +697,13 @@ per-seed submit/complete offsets spanning the requested duration.
 
 ## Failure Triage
 
+Do not add temporary RTL `printf`/debug logic to diagnose a UT failure. Keep
+the RTL unchanged and use Picker `mem_direct` from the C++ harness or an FST
+waveform analyzed with `pywellen`; see
+[`TOOLCHAIN.md#debug-instrumentation-and-rebuild-policy`](TOOLCHAIN.md#debug-instrumentation-and-rebuild-policy). UT-only changes rebuild
+only the C++ harness and reuse the model; RTL regeneration/export is only for
+a real RTL fix.
+
 1. Replay the exact scenario, seed, action count, and frozen runtime.
 2. Reduce the action count while preserving memory and backpressure RNG
    streams.

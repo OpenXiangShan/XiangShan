@@ -419,6 +419,11 @@ itself so the retry follows the normal accepted path. This is harness-only
 fault injection, not natural ownership loss and not a CPU-bug oracle; it is used
 only for focused cleanup/accounting evidence.
 
+For internal-signal debug, do not add RTL `printf`/debug logic; use Picker
+`mem_direct` from C++ or an FST waveform analyzed with `pywellen`, as described
+in
+[`docs/TOOLCHAIN.md#debug-instrumentation-and-rebuild-policy`](docs/TOOLCHAIN.md#debug-instrumentation-and-rebuild-policy).
+
 The Picker export enables read-only `mem_direct` observation and does not enable
 VPI. Internal signals are for localization only; they never determine an
 architectural PASS/FAIL. For a focused replay, set:

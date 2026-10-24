@@ -30,6 +30,26 @@ either Picker or xcomm changes.
   clients, so Picker, xcomm, the generated model, and the harness must be
   rebuilt together.
 
+## Debug Instrumentation and Rebuild Policy
+
+- Do **not** add temporary RTL `printf` or debug logic to diagnose a UT
+  failure. Keep the RTL source unchanged while validating UT behavior.
+- UT-only changes rebuild only the C++ harness (`make picker-harness`); the
+  generated Picker model/runtime is reused. `make verilog` and
+  `export-picker` are reserved for real RTL changes (and must then be followed
+  by `prepare-rtl` and the Picker model/harness rebuild).
+- For internal-signal diagnosis, use Picker's generated `mem_direct` read
+  access from the C++ harness (the generated `mem_direct` offsets and the
+  `dut_adapter`/`Environment` raw access). Architectural PASS/FAIL still comes
+  from top-level observations; `mem_direct` values are diagnostics only.
+- If C++ internal access is insufficient, emit an FST waveform from the
+  Picker/xcomm simulation and inspect it with `pywellen`. Keep waveform and
+  analysis artifacts in a private output path; do not add them to the tracked
+  tree.
+- Debug work that needs a build must use a separate worktree/private output and
+  must not replace the shared main build, model, runtime, `build/rtl`, or
+  Picker output while another task depends on them.
+
 ## Updating
 
 Update `toolchain.lock.json` only after rebuilding and qualifying the generated
