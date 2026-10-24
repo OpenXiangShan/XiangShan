@@ -245,8 +245,8 @@ jobs:
       - name: Build EMU with DRAMsim3
         run: |
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
-            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-              --config "${{ inputs.xs_config }}" \
+            proxychains -q ssh node030 "cd '$GITHUB_WORKSPACE' && NOOP_HOME='$GITHUB_WORKSPACE' proxychains -q python3 scripts/xiangshan.py --build \
+              --config '${{ inputs.xs_config }}' \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
               --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
@@ -254,7 +254,7 @@ jobs:
               --emulator ${{ inputs.emulator }} \
               ${{ inputs.enable_db && '--enable-db' || '' }} \
               ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
-              $CST_COMPILE_OPT
+              $CST_COMPILE_OPT"
             mkdir -p $SPEC_DIR
             cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
           fi
