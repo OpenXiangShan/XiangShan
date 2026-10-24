@@ -2803,6 +2803,152 @@ bool check_partial_load_reset_recovery(
     return true;
 }
 
+bool check_cmo_reset_recovery(int argc, char **argv,
+                              std::uint64_t &total_cycles)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t line =
+        memblock::kDefaultMemoryBase + 0x460000;
+    environment.memory().fill_incrementing(line, 64, 0xd7);
+    const auto image = environment.memory().read_beat(line, 64);
+    const auto fail = [&](const char *phase) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=cmo-" << phase
+                  << " cycle=" << environment.cycle()
+                  << " sq=" << environment.sq_dequeued() << '+'
+                  << environment.sq_canceled() << '/'
+                  << environment.sq_allocated()
+                  << " pending_stores=" << environment.pending_scalar_stores()
+                  << " reason=" << environment.error() << '\n';
+        return false;
+    };
+    environment.configure_backpressure(0x6a09e667f3bcc909ULL, true);
+    if (!environment.reset() || !environment.activate_bare(41)) {
+        return fail("configuration");
+    }
+    const memblock::LoadTransaction warm{
+        .address = line + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 148,
+        .lane = 0,
+    };
+    environment.expect_load(warm);
+    if (!environment.set_rob_head(warm.rob, warm.rob_flag) ||
+        !environment.enqueue_load(warm) ||
+        !environment.issue_load(warm, 2048) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(2048)) {
+        return fail("warm");
+    }
+
+    const memblock::StoreTransaction canceled{
+        .address = line + 37,
+        .oracle_address = line,
+        .data = 0x55aa55aa33cc33ccULL,
+        .op = memblock::StoreOp::cbo_clean,
+        .rob = 0,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+        .expected_address_writeback_lane = 0,
+        .expected_output_flush_pipe = true,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(canceled);
+    environment.force_next_cmo_response_delay(1024);
+    if (!environment.enqueue_store(canceled, 0) ||
+        !environment.issue_store_address(canceled, 2048) ||
+        !environment.issue_store_data(canceled, 2048) ||
+        !environment.wait_for_cmo_store_request(canceled, 1, 8192) ||
+        environment.dcache_cmo_requests(canceled.op) != 1 ||
+        environment.dcache_last_cmo_address() != line ||
+        environment.dcache_last_cmo_source() !=
+            memblock::kDcacheCmoSource ||
+        environment.store_writebacks() != 0 ||
+        environment.pending_scalar_stores() != 1) {
+        return fail("request");
+    }
+    if (!environment.reset()) {
+        return fail("reset");
+    }
+    if (!environment.cancel_scalar_store_for_reset(canceled) ||
+        environment.scalar_store_reset_canceled() != 1 ||
+        environment.pending_scalar_stores() != 0 ||
+        !environment.account_sq_cancellation(1) ||
+        environment.sq_dequeued() + environment.sq_canceled() !=
+            environment.sq_allocated()) {
+        return fail("cancel");
+    }
+    // A stale CMO completion or an error from the canceled CBOAck must not
+    // appear after reset.
+    if (!environment.run_cycles(64) || !environment.error().empty()) {
+        return fail("stale-completion");
+    }
+    if (!environment.activate_bare(42)) {
+        return fail("reactivate");
+    }
+
+    const memblock::StoreTransaction fresh{
+        .address = line + 37,
+        .oracle_address = line,
+        .data = 0x123456789abcdef0ULL,
+        .op = memblock::StoreOp::cbo_clean,
+        .rob = 1,
+        .sq = 0,
+        .address_lane = 1,
+        .data_lane = 0,
+        .expected_address_writeback_lane = 0,
+        .expected_output_flush_pipe = true,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(fresh);
+    const std::uint64_t cmo_before =
+        environment.dcache_cmo_requests(fresh.op);
+    if (!environment.enqueue_store(fresh, 0) ||
+        !environment.issue_store_address(fresh, 2048) ||
+        !environment.issue_store_data(fresh, 2048) ||
+        !environment.wait_for_cmo_store_request(
+            fresh, cmo_before + 1, 8192) ||
+        !environment.run_until_store_complete(8192) ||
+        !environment.commit_store(fresh, 8192) ||
+        !environment.run_cycles(32) ||
+        environment.pending_scalar_stores() != 0 ||
+        !environment.run_until_queues_retired(4096) ||
+        environment.sq_dequeued() + environment.sq_canceled() !=
+            environment.sq_allocated()) {
+        return fail("fresh");
+    }
+    const memblock::LoadTransaction readback{
+        .address = line + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 2,
+        .lq = 0,
+        .pdest = 149,
+        .lane = 1,
+    };
+    environment.expect_load_data(
+        readback, environment.memory().expected_load(line + 8, readback.op));
+    if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+        !environment.enqueue_load(readback) ||
+        !environment.issue_load(readback, 4096) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(2048) ||
+        !environment.run_cycles(32)) {
+        return fail("readback");
+    }
+    for (unsigned byte = 0; byte < image.size(); ++byte) {
+        if (environment.bus_expected_load(
+                line + byte, memblock::LoadOp::lbu) != image[byte]) {
+            return fail("memory");
+        }
+    }
+    total_cycles += environment.cycle();
+    return true;
+}
+
 int run_reset_recovery(int argc, char **argv)
 {
     constexpr unsigned response_delay = 256;
@@ -3034,17 +3180,24 @@ int run_reset_recovery(int argc, char **argv)
 
 int run_reset_partial_load(int argc, char **argv)
 {
-    // Keep at most twelve sequential DUT contexts in this scenario process.
+    // Keep sequential DUT contexts in separate reset scenario processes.
+    // This process owns twelve partial-load cases plus one clean CMO case;
     // reset-recovery independently owns its thirteen contexts.
     std::uint64_t cycles = 0;
     std::array<PartialLoadResetCoverage, 2> coverage{};
     if (!check_partial_load_reset_recovery(argc, argv, cycles, coverage)) {
         return 1;
     }
+    std::uint64_t cmo_cycles = 0;
+    if (!check_cmo_reset_recovery(argc, argv, cmo_cycles)) {
+        return 1;
+    }
+    cycles += cmo_cycles;
     const auto &single = coverage[0];
     const auto &merged = coverage[1];
     std::cout << "MEMBLOCK_RESET_PARTIAL_LOAD_PASS cycle=" << cycles
-              << " outstanding_resets=12 survivor_writebacks=12 readbacks=30"
+              << " outstanding_resets=13 partial_survivor_writebacks=12"
+              << " readbacks=30"
               << " disposition=" << single.completed + merged.completed << ','
               << single.canceled + merged.canceled
               << " beat_orders=" << single.beat_orders[0] + merged.beat_orders[0] << ','
@@ -3058,6 +3211,7 @@ int run_reset_partial_load(int argc, char **argv)
               << " single_lq_disposition=" << single.old_lq_dispositions[0] << ',' << single.old_lq_dispositions[1]
               << " merged_lq_disposition=" << merged.old_lq_dispositions[0] << ',' << merged.old_lq_dispositions[1]
               << " mixed_disposition_cases=" << merged.mixed_disposition_cases
+              << " cmo_reset=1 cmo_canceled=1 cmo_fresh=1 cmo_readbacks=1"
               << " interbeat_delay=1024" << '\n';
     return 0;
 }

@@ -553,6 +553,23 @@ auto Environment::Impl::scalar_load_reset_canceled() const -> std::uint64_t
     return scoreboard_.reset_canceled();
 }
 
+auto Environment::Impl::cancel_scalar_store_for_reset(const StoreTransaction &transaction)  -> bool
+{
+    // Cancel only at the completed reset boundary. A normal functional tick
+    // or a failed reset cannot justify dropping an outstanding store.
+    if (!last_reset_completed_cycle_ ||
+        *last_reset_completed_cycle_ != cycle()) {
+        error_.record("scalar store reset cancellation requires a just-completed reset");
+        return false;
+    }
+    return store_scoreboard_.cancel_for_reset(transaction) && check_components();
+}
+
+auto Environment::Impl::scalar_store_reset_canceled() const -> std::uint64_t
+{
+    return store_scoreboard_.reset_canceled();
+}
+
 auto Environment::Impl::pending_prefetches() const -> std::size_t
 { return scoreboard_.pending_prefetch(); }
 

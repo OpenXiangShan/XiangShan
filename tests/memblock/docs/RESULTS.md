@@ -141,6 +141,16 @@ exercises NAPOT sizes 4 KiB, 8 KiB, 16 KiB, 64 KiB, 256 KiB, 1 MiB, and 4 MiB
 at allowed first/last and denied immediately-below/above doublewords. The full
 scenario passes 49 cases with `tor_next_lock=1` and `napot_sizes=7`.
 
+### 2026-10-24 clean CMO reset cancellation
+
+`reset-partial-load` now also resets while a clean `CBO.CLEAN` has an accepted
+manager request and a delayed `CBOAck`. The test cancels only that CMO store
+identity at the completed reset boundary, rejects any stale address/data
+writeback, and requires a fresh CMO on the same line plus a readback to
+complete with the backing image unchanged. The scenario passes with
+`cmo_reset=1 cmo_canceled=1 cmo_fresh=1 cmo_readbacks=1`. This uses a
+store-reset cancellation API; dirty-cache persistence remains unclaimed.
+
 ## Current Verification Position
 
 - `directed-tests` cover the focused protocol, translation, vector, cache,

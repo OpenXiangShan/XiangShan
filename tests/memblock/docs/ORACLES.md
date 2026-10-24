@@ -418,8 +418,14 @@ LQ entries' observed-dequeue/reset-cancellation counts. Singleton and pair
 outcomes are reported separately, including pair cases with both a completed and
 a pending identity at reset. No branch coverage is inferred from address alone.
 
-Partial AMOADD/AMOCAS side effects, CMO reset, dirty-cache persistence,
-reservation loss across reset, and denied/corrupt partial refills remain gaps.
+`reset-partial-load` also cancels a clean CMO with a delayed CBOAck. The
+canceled CMO identity must produce no stale address/data writeback, and a fresh
+CMO on the same line plus a readback must complete after reset with the backing
+image unchanged. The store scoreboard removes only the just-reset identity at
+the completed reset boundary.
+
+Partial AMOADD/AMOCAS side effects, dirty-cache persistence, reservation loss
+across reset, and denied/corrupt partial refills remain gaps.
 
 ## Planned Oracles for Current Boundary Gaps
 

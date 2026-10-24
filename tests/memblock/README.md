@@ -237,7 +237,7 @@ Representative target groups are:
 `reset-recovery` includes outstanding DCache/PTW/Uncache cancellation and six
 LR/AMOADD/AMOCAS x W/D cold-refill reset cases plus four partial LR refill cases
 that permit legal early completion. `reset-partial-load` adds twelve partial scalar
-LD cases: singleton and same-line opposite-half pairs, each crossing all three
+LD cases plus one clean CMO reset case: singleton and same-line opposite-half pairs, each crossing all three
 primary issue lanes and both target halves in a separate process to bound
 dynamic-loader TLS usage per scenario. They check exact post-reset
 results, readback, and stale completion. Its reset domain includes manager links;

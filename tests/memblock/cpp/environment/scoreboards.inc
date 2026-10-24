@@ -316,6 +316,28 @@ public:
         }
     }
 
+    bool cancel_for_reset(const StoreTransaction &transaction)
+    {
+        if (!error_.empty()) {
+            return false;
+        }
+        const auto it = expected_.find(
+            rob_identity(transaction.rob, transaction.rob_flag));
+        if (it == expected_.end() ||
+            it->second.issue_address_lane != transaction.address_lane ||
+            it->second.issue_data_lane != transaction.data_lane ||
+            !it->second.address_issued) {
+            error_.record(
+                "reset cancellation does not match a pending scalar store");
+            return false;
+        }
+        expected_.erase(it);
+        ++reset_canceled_;
+        return true;
+    }
+
+    std::uint64_t reset_canceled() const { return reset_canceled_; }
+
     void observe_address(
         unsigned lane, const generated::ScalarStoreWriteback &writeback,
         std::uint64_t sample_cycle)
@@ -589,6 +611,7 @@ private:
 
     std::unordered_map<RobIdentity, Expected, RobIdentityHash> expected_;
     std::uint64_t observed_ = 0;
+    std::uint64_t reset_canceled_ = 0;
     FailureState error_{"scalar-store", "completion-contract"};
 };
 

@@ -642,6 +642,8 @@ public:
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);
 
     std::uint64_t scalar_load_reset_canceled() const;
+    bool cancel_scalar_store_for_reset(const StoreTransaction &transaction);
+    std::uint64_t scalar_store_reset_canceled() const;
 
     std::size_t pending_prefetches() const;
 

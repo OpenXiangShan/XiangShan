@@ -855,6 +855,16 @@ auto Environment::scalar_load_reset_canceled() const -> std::uint64_t
     return impl_->scalar_load_reset_canceled();
 }
 
+auto Environment::cancel_scalar_store_for_reset(const StoreTransaction &transaction)  -> bool
+{
+    return impl_->cancel_scalar_store_for_reset(transaction);
+}
+
+auto Environment::scalar_store_reset_canceled() const -> std::uint64_t
+{
+    return impl_->scalar_store_reset_canceled();
+}
+
 auto Environment::pending_prefetches() const -> std::size_t
 {
     return impl_->pending_prefetches();
