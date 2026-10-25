@@ -628,6 +628,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 
 SSH_OPTS=(-o BatchMode=yes -o ControlMaster=no -o ConnectTimeout=10)
+RC_RECOVERY_READ_TIMEOUT=5
 FINAL_REMOTE_HOST=""
 resolve_remote_host() {
     FINAL_REMOTE_HOST="$REMOTE_HOST"
@@ -647,6 +648,14 @@ ssh_once() {
     (
         close_inherited_lock_fd
         exec ssh "${SSH_OPTS[@]}" "$host" "$remote_cmd"
+    )
+}
+ssh_once_bounded() {
+    local timeout_sec="$1" remote_cmd="$2" host="${3:-$FINAL_REMOTE_HOST}"
+    (
+        close_inherited_lock_fd
+        exec timeout --signal=TERM --kill-after=1 "$timeout_sec" \
+            ssh "${SSH_OPTS[@]}" "$host" "$remote_cmd"
     )
 }
 ssh_retry() {
@@ -679,7 +688,7 @@ validate_shared_output_dir || { log_error "output directory is not proven shared
 SHARED_PATH_VALIDATION="PASS"
 write_config || exit 3
 
-REMOTE_BOOTSTRAP="$(make -s -C "$SIM_DIR" eda_print_bootstrap)"
+REMOTE_BOOTSTRAP="${EDA_REGRESSION_REMOTE_BOOTSTRAP:-$(make -s -C "$SIM_DIR" eda_print_bootstrap)}"
 [[ -n "$REMOTE_BOOTSTRAP" ]] || { log_error "Makefile returned empty REMOTE_BOOTSTRAP"; exit 3; }
 
 LOCK_ROOT="$SIM_DIR/.eda_regression/locks"
@@ -1156,23 +1165,81 @@ recover_file_over_ssh() {
     rm -f "$tmp"; return 1
 }
 
+validate_matching_rc_file() {
+    local job="$1" file="$2" protocol job_id token pgid rc ended_epoch_ns end
+    [[ -f "$file" && -r "$file" ]] || return 1
+    protocol="$(read_key "$file" protocol)"; job_id="$(read_key "$file" job_id)"; token="$(read_key "$file" token)"
+    pgid="$(read_key "$file" pgid)"; rc="$(read_key "$file" rc)"
+    ended_epoch_ns="$(read_key "$file" ended_epoch_ns)"; end="$(read_key "$file" end)"
+    [[ "$protocol" == "$JOB_PROTOCOL" && "$job_id" == "$job" && "$token" == "${TOKEN[$job]}" \
+        && "$pgid" == "${PGID[$job]}" && "$rc" =~ ^[0-9]+$ \
+        && "$ended_epoch_ns" =~ ^[0-9]+$ && "$end" == "RC_END" ]]
+}
+
+consume_matching_rc_file() {
+    local job="$1" file="$2" rc ended_epoch_ns
+    validate_matching_rc_file "$job" "$file" || return 1
+    rc="$(read_key "$file" rc)"; ended_epoch_ns="$(read_key "$file" ended_epoch_ns)"
+    RC[$job]="$rc"; END_EPOCH_NS[$job]="$ended_epoch_ns"
+    if [[ "${REMOTE_PHASE[$job]}" == "OWNED" ]]; then
+        REMOTE_PHASE[$job]="RC_SEEN"
+    fi
+}
+
+recover_matching_rc_with_retry() {
+    local job="$1" attempts="${2:-$SSH_RETRIES}" context="${3:-terminal}" file tmp cmd attempt
+    local before_phase ssh_ok
+    file="${RC_FILE[$job]}"
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        handle_monitor_triggers || true
+        before_phase="${REMOTE_PHASE[$job]}"
+        if consume_matching_rc_file "$job" "$file"; then
+            recompute_peak_live_from_intervals
+            if [[ "$before_phase" == OWNED ]]; then write_owner_manifest || RECORD_INFRA_FAILURE=1; fi
+            log_info "$job recovered matching RC context=$context attempt=$attempt source=shared"
+            return 0
+        fi
+        tmp="$file.recovered.$$.$RANDOM"
+        cmd="$(quote_cmd cat "$file")"
+        ssh_ok=0
+        if ssh_once_bounded "$RC_RECOVERY_READ_TIMEOUT" "$cmd" "${JOB_HOST[$job]:-$FINAL_REMOTE_HOST}" \
+            >"$tmp" 2>/dev/null; then
+            ssh_ok=1
+        fi
+        handle_monitor_triggers || true
+        before_phase="${REMOTE_PHASE[$job]}"
+        if [[ "$ssh_ok" -eq 1 ]]; then
+            if validate_matching_rc_file "$job" "$tmp"; then
+                if mv -fT "$tmp" "$file" && consume_matching_rc_file "$job" "$file"; then
+                    recompute_peak_live_from_intervals
+                    if [[ "$before_phase" == OWNED ]]; then write_owner_manifest || RECORD_INFRA_FAILURE=1; fi
+                    log_info "$job recovered matching RC context=$context attempt=$attempt source=ssh"
+                    return 0
+                fi
+            else
+                log_warn "$job rejected non-matching RC candidate context=$context attempt=$attempt phase=${REMOTE_PHASE[$job]}"
+            fi
+        fi
+        rm -f "$tmp"
+        handle_monitor_triggers || true
+        if (( attempt < attempts )); then sleep 1; fi
+    done
+    return 1
+}
+
 observe_rc() {
-    local job file protocol job_id token pgid rc ended_epoch_ns end changed=0
+    local job file before_phase old_end interval_changed=0 phase_changed=0
     for job in "${JOB_ORDER[@]}"; do
         case "${REMOTE_PHASE[$job]:-}" in OWNED|RC_SEEN|EXIT_CONFIRMED) ;; *) continue ;; esac
         file="${RC_FILE[$job]:-}"; [[ -n "$file" ]] || continue
-        [[ -f "$file" ]] || continue
-        protocol="$(read_key "$file" protocol)"; job_id="$(read_key "$file" job_id)"; token="$(read_key "$file" token)"
-        pgid="$(read_key "$file" pgid)"; rc="$(read_key "$file" rc)"
-        ended_epoch_ns="$(read_key "$file" ended_epoch_ns)"; end="$(read_key "$file" end)"
-        [[ "$protocol" == "$JOB_PROTOCOL" && "$job_id" == "$job" && "$token" == "${TOKEN[$job]}" \
-            && "$pgid" == "${PGID[$job]}" && "$rc" =~ ^[0-9]+$ \
-            && "$ended_epoch_ns" =~ ^[0-9]+$ && "$end" == "RC_END" ]] || continue
-        RC[$job]="$rc"; END_EPOCH_NS[$job]="$ended_epoch_ns"
-        if [[ "${REMOTE_PHASE[$job]}" == "OWNED" ]]; then REMOTE_PHASE[$job]="RC_SEEN"; changed=1; fi
+        before_phase="${REMOTE_PHASE[$job]}"; old_end="${END_EPOCH_NS[$job]:-}"
+        if consume_matching_rc_file "$job" "$file"; then
+            [[ "${END_EPOCH_NS[$job]}" == "$old_end" ]] || interval_changed=1
+            [[ "$before_phase" != OWNED ]] || phase_changed=1
+        fi
     done
-    recompute_peak_live_from_intervals
-    [[ "$changed" -eq 0 ]] || write_owner_manifest || RECORD_INFRA_FAILURE=1
+    [[ "$interval_changed" -eq 0 ]] || recompute_peak_live_from_intervals
+    [[ "$phase_changed" -eq 0 ]] || write_owner_manifest || RECORD_INFRA_FAILURE=1
 }
 
 create_managed_job() {
@@ -1264,10 +1331,10 @@ classify_seed_job() {
         set_seed_state "$job" INFRA "simulation infrastructure error"
     elif (( actual > 0 || error_summary > 0 || fatal_summary > 0 )); then
         set_seed_state "$job" FAIL "UVM errors/fatals in final log"
-    elif [[ "${SIGNAL_DISPOSITION[$job]}" != "NEVER" ]]; then
-        if [[ "$complete_pass" -eq 1 ]]; then set_seed_state "$job" PASS "complete PASS log after signal"; else set_seed_state "$job" ABORTED "$STOP_REASON"; fi
     elif [[ -z "$rc" ]]; then
         set_seed_state "$job" INFRA "remote process exited without recoverable RC"
+    elif [[ "${SIGNAL_DISPOSITION[$job]}" != "NEVER" ]]; then
+        if [[ "$complete_pass" -eq 1 ]]; then set_seed_state "$job" PASS "complete PASS log after signal"; else set_seed_state "$job" ABORTED "$STOP_REASON"; fi
     elif [[ "$rc" -eq 0 && "$complete_pass" -eq 1 ]]; then
         set_seed_state "$job" PASS "worker rc=0"
     elif [[ "$rc" -ne 0 ]]; then
@@ -1289,12 +1356,10 @@ maybe_publish_final_trigger() {
 }
 
 finalize_exited_job() {
-    local job="$1" file persist_failed=0 marker
-    file="${RC_FILE[$job]}"
+    local job="$1" persist_failed=0 marker
     [[ "${REMOTE_PHASE[$job]}" == "EXIT_CONFIRMED" ]] || return 1
     stop_watcher "$job"
-    if [[ ! -f "$file" ]]; then recover_file_over_ssh "$file" || true; fi
-    observe_rc
+    if [[ -z "${RC[$job]:-}" ]]; then recover_matching_rc_with_retry "$job" 1 finalization || true; fi
     if ! fetch_stable_remote_log "$job"; then
         if [[ "$job" == seed:* && "${RESULT_STATE[$job]}" != "FAIL" ]]; then
             set_seed_state "$job" INFRA "stable remote log snapshot failed" || persist_failed=1
@@ -1306,7 +1371,14 @@ finalize_exited_job() {
         classify_seed_job "$job" || persist_failed=1
         maybe_publish_final_trigger "$job" || persist_failed=1
     elif [[ "$job" == compile ]]; then
-        if [[ "${RC[$job]:-125}" -eq 0 ]]; then RESULT_STATE[$job]="PASS"; else RESULT_STATE[$job]="FAIL"; fi
+        if [[ -z "${RC[$job]:-}" ]]; then
+            RESULT_STATE[$job]="INFRA"
+            FAILURE_REASON[$job]="remote process exited without recoverable RC"
+        elif [[ "${RC[$job]}" -eq 0 ]]; then
+            RESULT_STATE[$job]="PASS"
+        else
+            RESULT_STATE[$job]="FAIL"
+        fi
     fi
     if [[ "$job" == compile ]]; then
         log_info "finalized $job result=${RESULT_STATE[$job]:-compile} rc=${RC[$job]:-unknown}; awaiting fingerprint commit"
@@ -1331,6 +1403,23 @@ finalize_exited_job() {
     log_info "finalized $job result=${RESULT_STATE[$job]} rc=${RC[$job]:-unknown}"
 }
 
+settle_terminal_rpc_status() {
+    local job="$1" status="$2" source="$3"
+    case "$status" in EXITED|IDENTITY_MISMATCH) ;; *) return 2 ;; esac
+    if [[ -z "${RC[$job]:-}" ]]; then
+        log_info "$job terminal status=$status source=$source has no matching RC; entering bounded recovery"
+        recover_matching_rc_with_retry "$job" "$SSH_RETRIES" "$source:$status" || true
+    fi
+    if [[ -n "${RC[$job]:-}" || "$status" == "EXITED" ]]; then
+        REMOTE_PHASE[$job]="EXIT_CONFIRMED"
+        write_owner_manifest || RECORD_INFRA_FAILURE=1
+        finalize_exited_job "$job" || true
+        return 0
+    fi
+    mark_remote_unknown "$job" "$source returned IDENTITY_MISMATCH without a matching RC after bounded recovery"
+    return 1
+}
+
 probe_active_jobs() {
     local -a jobs=() job
     for job in "${JOB_ORDER[@]}"; do
@@ -1345,16 +1434,7 @@ probe_active_jobs() {
     for job in "${jobs[@]}"; do
         case "${RPC_STATUS[$job]}" in
             ALIVE) : ;;
-            EXITED) REMOTE_PHASE[$job]="EXIT_CONFIRMED"; write_owner_manifest || RECORD_INFRA_FAILURE=1; finalize_exited_job "$job" || true ;;
-            IDENTITY_MISMATCH)
-                if [[ -n "${RC[$job]:-}" ]]; then
-                    REMOTE_PHASE[$job]="EXIT_CONFIRMED"
-                    write_owner_manifest || RECORD_INFRA_FAILURE=1
-                    finalize_exited_job "$job" || true
-                else
-                    mark_remote_unknown "$job" "remote probe returned IDENTITY_MISMATCH without a matching RC"
-                fi
-                ;;
+            EXITED|IDENTITY_MISMATCH) settle_terminal_rpc_status "$job" "${RPC_STATUS[$job]}" "remote probe" || true ;;
             *) mark_remote_unknown "$job" "remote probe returned ${RPC_STATUS[$job]}" ;;
         esac
     done
@@ -1377,16 +1457,7 @@ signal_active_jobs() {
     for job in "${jobs[@]}"; do
         case "${RPC_STATUS[$job]}" in
             SIGNALED) SIGNAL_DISPOSITION[$job]="$disposition" ;;
-            EXITED) REMOTE_PHASE[$job]="EXIT_CONFIRMED"; write_owner_manifest || RECORD_INFRA_FAILURE=1; finalize_exited_job "$job" || true ;;
-            IDENTITY_MISMATCH)
-                if [[ -n "${RC[$job]:-}" ]]; then
-                    REMOTE_PHASE[$job]="EXIT_CONFIRMED"
-                    write_owner_manifest || RECORD_INFRA_FAILURE=1
-                    finalize_exited_job "$job" || true
-                else
-                    mark_remote_unknown "$job" "$op returned IDENTITY_MISMATCH without a matching RC"
-                fi
-                ;;
+            EXITED|IDENTITY_MISMATCH) settle_terminal_rpc_status "$job" "${RPC_STATUS[$job]}" "$op" || true ;;
             *) mark_remote_unknown "$job" "$op returned ${RPC_STATUS[$job]}" ;;
         esac
     done

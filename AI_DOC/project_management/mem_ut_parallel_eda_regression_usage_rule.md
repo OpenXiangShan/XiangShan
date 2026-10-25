@@ -446,6 +446,27 @@ mem_ut/ver/ut/memblock/sim/.eda_regression/<run_id>/
 
 只有全部 seed 最终为 `PASS`，且没有 active/unknown owner、quarantine、记录故障或 `simv` 变化时，整批 `result` 才为 `PASS`。
 
+### 8.1 远端终态、RC 恢复和 quarantine 语义
+
+worker 退出、共享文件系统看到 RC 文件和远端 probe 看到进程组终态不是一个原子事件。controller 收到
+`EXITED` 或 `IDENTITY_MISMATCH` 且本轮尚未消费 RC 时，会进入有限稳定窗口：按 `--ssh-retries`
+次数先检查共享路径，再通过带命令级 timeout 的 SSH 读取远端 RC。只有 protocol、job、token、PGID、
+返回码、结束时间和 `RC_END` 全部匹配当前 owner 的 RC 才会被原子发布和消费；错误 token/job/PGID、
+截断文件和单次 SSH 失败不会推进状态。
+
+终态处理规则：
+
+- `EXITED` 且恢复到 matching RC：`EXIT_CONFIRMED` 后正常 finalization。
+- `EXITED` 且 matching RC 永不到：远端退出已经由 framed RPC 证明，compile/seed 记为 `INFRA`，不写
+  quarantine。
+- `IDENTITY_MISMATCH` 且恢复到 matching RC：原 worker 退出已由匹配 RC 证明，转
+  `EXIT_CONFIRMED`，不写 quarantine。
+- `IDENTITY_MISMATCH` 且 matching RC 永不到：仍为真实身份风险，转 `REMOTE_UNKNOWN` 并 quarantine。
+
+PROBE、SIGNAL_TERM 和 SIGNAL_KILL 对 `EXITED`/`IDENTITY_MISMATCH` 使用同一规则；只有 RPC 明确返回
+`SIGNALED` 时才更新 signal disposition。stale owner 启动前审计仍保持原有保守策略，不应用当前
+controller 的 RC 稳定窗口放宽。
+
 ## 9. 常用结果检查命令
 
 查看整批结论：
