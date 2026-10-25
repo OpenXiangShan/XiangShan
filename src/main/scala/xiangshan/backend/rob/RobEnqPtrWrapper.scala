@@ -32,16 +32,24 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
+class RobEnqPtrWrapperIO(implicit p: Parameters) extends XSBundle {
+  // Entry requests.
+  val enq = Vec(RenameWidth, Input(Bool()))
+  // Enqueue permission.
+  val allowEnqueue = Input(Bool())
+
+  // Candidate entry pointers.
+  val out = Output(Vec(RenameWidth, new RobPtr))
+
+  // Recovery boundary.
+  val redirect = Input(Valid(new Redirect))
+
+  // Serialization barrier.
+  val hasBlockBackward = Input(Bool())
+}
+
 class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
-  val io = IO(new Bundle {
-    // for input redirect
-    val redirect = Input(Valid(new Redirect))
-    // for enqueue
-    val allowEnqueue = Input(Bool())
-    val hasBlockBackward = Input(Bool())
-    val enq = Vec(RenameWidth, Input(Bool()))
-    val out = Output(Vec(RenameWidth, new RobPtr))
-  })
+  val io = IO(new RobEnqPtrWrapperIO)
 
   val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(i => RobPtr(false.B, i.U)))
 

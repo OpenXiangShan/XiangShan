@@ -10,59 +10,6 @@ import xiangshan.backend.rename.SnapshotGenerator
 import xiangshan._
 import xiangshan.backend.decode.opcode.Opcode.VSetOpcodes
 
-class VTypeBufferPtr(size: Int) extends CircularQueuePtr[VTypeBufferPtr](size) {
-  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).VTypeBufferSize)
-}
-
-object VTypeBufferPtr {
-  def apply(flag: Boolean = false, v: Int = 0)(implicit p: Parameters): VTypeBufferPtr = {
-    val ptr = Wire(new VTypeBufferPtr(p(XSCoreParamsKey).VTypeBufferSize))
-    ptr.flag := flag.B
-    ptr.value := v.U
-    ptr
-  }
-}
-
-class VTypeBufferEntry(implicit p: Parameters) extends XSBundle {
-  val vtype = new VType()
-  val isVsetvl = Bool()
-  val vlWen = Bool()
-  val pdestVl = UInt(VlPhyRegIdxWidth.W)
-}
-
-class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
-  val redirect = Input(ValidIO(new Bundle{}))
-
-  val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
-
-  val fromRob = new Bundle {
-    val walkSize = Input(UInt(log2Up(size).W))
-    val walkEnd = Input(Bool())
-    val commitSize = Input(UInt(log2Up(size).W))
-  }
-
-  val snpt = Input(new SnapshotPort)
-
-  val canEnq = Output(Bool())
-  val canEnqForDispatch = Output(Bool())
-
-  val commits = Output(new VlCommitBundle(RabCommitWidth))
-  val diffCommits = Option.when(backendParams.basicDebugEn)(Output(new DiffVlCommitBundle(CommitWidth)))
-
-  val toDecode = Output(new Bundle {
-    val isResumeVType = Bool()
-    val walkToArchVType = Bool()
-    val walkVType = ValidIO(VType())
-    val commitVType = new Bundle {
-      val vtype = ValidIO(VType())
-      val hasVsetvl = Bool()
-    }
-  })
-
-  val status = Output(new Bundle {
-    val walkEnd = Bool()
-  })
-}
 
 class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new VTypeBufferIO(size))
@@ -421,9 +368,86 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   dontTouch(infoVec)
 }
 
+class VTypeBufferEntry(implicit p: Parameters) extends XSBundle {
+  val vtype = new VType()
+  val isVsetvl = Bool()
+  val vlWen = Bool()
+  val pdestVl = UInt(VlPhyRegIdxWidth.W)
+}
 
+class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
+  // Recovery redirect.
+  val redirect = Input(ValidIO(new Bundle{}))
 
+  // Recovery snapshots.
+  val snpt = Input(new SnapshotPort)
 
+  // Enqueue uops.
+  val req = Vec(RenameWidth, Flipped(ValidIO(new EnqRobUop)))
 
+  // Enqueue permissions.
+  val canEnq = Output(Bool())
+  val canEnqForDispatch = Output(Bool())
 
+  // ROB control.
+  val fromRob = new VTypeBufferFromRobIO(size)
 
+  // Buffer completion.
+  val status = Output(new VTypeBufferStatus)
+
+  // VL mapping notifications.
+  val commits = Output(new VlCommitBundle(RabCommitWidth))
+
+  // Difftest VL mappings.
+  val diffCommits = Option.when(backendParams.basicDebugEn)(Output(new DiffVlCommitBundle(CommitWidth)))
+
+  // Decode VTYPE interface.
+  val toDecode = Output(new VTypeBufferToDecodeIO)
+}
+
+class VTypeBufferFromRobIO(size: Int)(implicit p: Parameters) extends XSBundle {
+  // ROB walk quota.
+  val walkSize = Input(UInt(log2Up(size).W))
+
+  // ROB walk completion.
+  val walkEnd = Input(Bool())
+
+  // ROB commit quota.
+  val commitSize = Input(UInt(log2Up(size).W))
+}
+
+class VTypeBufferCommitVType(implicit p: Parameters) extends XSBundle {
+  // Committed VTYPE.
+  val vtype = ValidIO(VType())
+
+  // Committed vsetvl indication.
+  val hasVsetvl = Bool()
+}
+
+class VTypeBufferToDecodeIO(implicit p: Parameters) extends XSBundle {
+  // VTYPE recovery.
+  val isResumeVType = Bool()
+  val walkToArchVType = Bool()
+  val walkVType = ValidIO(VType())
+
+  // Committed VTYPE.
+  val commitVType = new VTypeBufferCommitVType
+}
+
+class VTypeBufferStatus extends Bundle {
+  // Walk completion.
+  val walkEnd = Bool()
+}
+
+class VTypeBufferPtr(size: Int) extends CircularQueuePtr[VTypeBufferPtr](size) {
+  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).VTypeBufferSize)
+}
+
+object VTypeBufferPtr {
+  def apply(flag: Boolean = false, v: Int = 0)(implicit p: Parameters): VTypeBufferPtr = {
+    val ptr = Wire(new VTypeBufferPtr(p(XSCoreParamsKey).VTypeBufferSize))
+    ptr.flag := flag.B
+    ptr.value := v.U
+    ptr
+  }
+}

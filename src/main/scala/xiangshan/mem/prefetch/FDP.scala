@@ -31,14 +31,13 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-import xiangshan.backend.rob.RobDebugRollingIO
 import utils._
 import utility._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import utility.CircularQueuePtr
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey, XSBundle, XSModule}
+import xiangshan.backend.rob.Rob.RobDebugRollingIO
 import xiangshan.mem.HasL1PrefetchSourceParameter
-import utility.{CircularQueuePtr}
 import xiangshan.cache._
-import xiangshan.{XSBundle, XSModule}
 
 //----------------------------------------
 // Feedback Direct Prefetching

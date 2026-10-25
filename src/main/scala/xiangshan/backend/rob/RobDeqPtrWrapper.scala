@@ -33,28 +33,44 @@ import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
+class RobDeqPtrWrapperIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
+  // ROB controller mode.
+  val state = Input(UInt(2.W))
+
+  // Commit window eligibility.
+  val deq_v = Vec(CommitWidth, Input(Bool()))
+  val deq_w = Vec(CommitWidth, Input(Bool()))
+
+  // Commit window progress.
+  val hasCommitted = Vec(CommitWidth, Input(Bool()))
+  val allCommitted = Input(Bool())
+  // Retirement count.
+  val commitCnt = Output(UInt(log2Up(CommitWidth+1).W))
+  // Retirement prefix selection.
+  val canCommitPriorityCond = Output(Vec(CommitWidth+1,Bool()))
+  // Retirement enable.
+  val commitEn = Output(Bool())
+
+  // Serialization state.
+  val hasNoSpecExec = Input(Bool())
+  // Single-entry commit restriction.
+  val allowOnlyOneCommit = Input(Bool())
+  // Commit inhibition.
+  val blockCommit = Input(Bool())
+
+  // Oldest retained exception.
+  val exception_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params))))
+  // Interrupt qualification.
+  val intrBitSetReg = Input(Bool())
+  val interruptSafe = Input(Bool())
+
+  // Dequeue pointer state.
+  val out = Vec(CommitWidth, Output(new RobPtr))
+  val next_out = Vec(CommitWidth, Output(new RobPtr))
+}
+
 class NewRobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends XSModule with HasCircularQueuePtrHelper {
-  val io = IO(new Bundle {
-    // for commits/flush
-    val state = Input(UInt(2.W))
-    val deq_v = Vec(CommitWidth, Input(Bool()))
-    val deq_w = Vec(CommitWidth, Input(Bool()))
-    val hasCommitted = Vec(CommitWidth, Input(Bool()))
-    val allCommitted = Input(Bool())
-    val exception_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params))))
-    // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
-    val intrBitSetReg = Input(Bool())
-    val allowOnlyOneCommit = Input(Bool())
-    val hasNoSpecExec = Input(Bool())
-    val interruptSafe = Input(Bool())
-    val blockCommit = Input(Bool())
-    // output: the CommitWidth deqPtr
-    val out = Vec(CommitWidth, Output(new RobPtr))
-    val next_out = Vec(CommitWidth, Output(new RobPtr))
-    val commitCnt = Output(UInt(log2Up(CommitWidth+1).W))
-    val canCommitPriorityCond = Output(Vec(CommitWidth+1,Bool()))
-    val commitEn = Output(Bool())
-  })
+  val io = IO(new RobDeqPtrWrapperIO)
 
   val bankAddrWidth = log2Up(CommitWidth)
   val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(i => RobPtr(false.B, i.U))))

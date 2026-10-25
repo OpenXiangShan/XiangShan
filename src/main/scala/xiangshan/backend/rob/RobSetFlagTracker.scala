@@ -29,6 +29,20 @@ class RobSetFlagUpdateReq(val flagWidth: Int)(implicit p: Parameters) extends XS
   val setMask = UInt(flagWidth.W)
 }
 
+class RobSetFlagTrackerIO(width: Int, numUpdatePorts: Int, numCommitPorts: Int)(implicit p: Parameters) extends XSBundle {
+  // Speculative flag setters.
+  val update = Input(Vec(numUpdatePorts, Valid(new RobSetFlagUpdateReq(width))))
+
+  // Architectural flag updates.
+  val commitSetMask = Output(UInt(width.W))
+
+  // Retired setter identities.
+  val commit = Input(Vec(numCommitPorts, Valid(new RobPtr)))
+
+  // Recovery boundary.
+  val redirect = Input(Valid(new Redirect))
+}
+
 /** Tracks the oldest in-flight setter for each bit of a sticky ROB flag. */
 class RobSetFlagTracker(
   val width: Int,
@@ -61,12 +75,7 @@ class RobSetFlagTracker(
     candidateIndices
   }
 
-  val io = IO(new Bundle {
-    val update = Input(Vec(numUpdatePorts, Valid(new RobSetFlagUpdateReq(width))))
-    val commit = Input(Vec(numCommitPorts, Valid(new RobPtr)))
-    val redirect = Input(Valid(new Redirect))
-    val commitSetMask = Output(UInt(width.W))
-  })
+  val io = IO(new RobSetFlagTrackerIO(width, numUpdatePorts, numCommitPorts))
 
   private def selectOldest(candidates: Seq[(Bool, RobPtr)]): (Bool, RobPtr) = {
     ParallelOperation(candidates, (left: (Bool, RobPtr), right: (Bool, RobPtr)) => {

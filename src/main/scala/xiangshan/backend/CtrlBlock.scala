@@ -31,7 +31,8 @@ import xiangshan.backend.dispatch._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
-import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.{Rob, RobPtr}
+import xiangshan.backend.rob.Rob.{RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}

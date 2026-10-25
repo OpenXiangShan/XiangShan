@@ -28,7 +28,8 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.Rob.RobDebugRollingIO
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
 import xiangshan.mem.Bundles.SbufferForwardReq
