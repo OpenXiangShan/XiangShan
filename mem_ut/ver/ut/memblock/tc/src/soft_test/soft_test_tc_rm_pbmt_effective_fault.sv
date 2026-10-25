@@ -44,6 +44,11 @@ class soft_test_tc_rm_pbmt_effective_fault extends soft_test_tc_dispatch_smoke;
         input bit [63:0] vaddr,
         output memblock_rm_readonly_api::main_transaction_view_t main_view,
         output memblock_rm_readonly_api::status_view_t status_view);
+    extern function void init_store_views(
+        input memblock_uid_t uid,
+        input bit [63:0] vaddr,
+        output memblock_rm_readonly_api::main_transaction_view_t main_view,
+        output memblock_rm_readonly_api::status_view_t status_view);
     extern function memblock_uid_tlb_record make_uid_tlb_record(
         input memblock_uid_t uid,
         input bit [63:0] vaddr,
@@ -51,6 +56,10 @@ class soft_test_tc_rm_pbmt_effective_fault extends soft_test_tc_dispatch_smoke;
         input bit [1:0] effective_pbmt,
         input bit permission_read,
         input bit completed);
+    extern function void publish_secondary_tlb_entry(
+        input memblock_uid_tlb_record record,
+        input bit [63:0] vaddr,
+        input bit [1:0] effective_pbmt);
     extern task check_rm_production_commit_path();
 
     virtual task run_dispatch_smoke_sequence();
@@ -128,6 +137,19 @@ function void soft_test_tc_rm_pbmt_effective_fault::init_load_views(
     status_view.lq_idx_value = main_view.lq_idx_value;
     status_view.dynamic_epoch = 1;
 endfunction:init_load_views
+
+function void soft_test_tc_rm_pbmt_effective_fault::init_store_views(
+    input memblock_uid_t uid,
+    input bit [63:0] vaddr,
+    output memblock_rm_readonly_api::main_transaction_view_t main_view,
+    output memblock_rm_readonly_api::status_view_t status_view);
+    init_load_views(uid, vaddr, main_view, status_view);
+    main_view.op_class = MEMBLOCK_OP_CLASS_STORE;
+    main_view.fu_type = MEMBLOCK_FUTYPE_STU;
+    main_view.fu_op_type = MEMBLOCK_LSUOP_SD;
+    main_view.sq_idx_value = uid[MEMBLOCK_SQ_VALUE_W-1:0];
+    status_view.sq_idx_value = main_view.sq_idx_value;
+endfunction:init_store_views
 
 function memblock_uid_tlb_record
     soft_test_tc_rm_pbmt_effective_fault::make_uid_tlb_record(
@@ -219,6 +241,38 @@ function memblock_uid_tlb_record
     return record;
 endfunction:make_uid_tlb_record
 
+function void soft_test_tc_rm_pbmt_effective_fault::publish_secondary_tlb_entry(
+    input memblock_uid_tlb_record record,
+    input bit [63:0] vaddr,
+    input bit [1:0] effective_pbmt);
+    common_data_transaction data;
+    memblock_tlb_lookup_key_t key;
+    memblock_tlb_entry entry;
+
+    if (record == null || record.csr_snapshot == null || record.s2xlate != 2'd0) begin
+        `uvm_fatal(get_type_name(), "secondary PBMT helper requires an S1 record")
+    end
+    data = common_data_transaction::get();
+    key = record.csr_snapshot.make_lookup_key({14'b0, vaddr[49:12]}, 2'd0);
+    entry = data.build_tlb_entry_for_key_with_csr(key, record.csr_snapshot);
+    entry.fault_raw_s1_pf = 1'b0;
+    entry.fault_raw_s1_af = 1'b0;
+    entry.fault_effective_s1_pf = 1'b0;
+    entry.fault_effective_s1_af = 1'b0;
+    entry.fault_stage_selected = memblock_tlb_entry::MEMBLOCK_TLB_FAULT_STAGE_NONE;
+    entry.pmaAF = 1'b0;
+    entry.s1_pte_mode_at_build = memblock_tlb_entry::MEMBLOCK_TLB_PTE_MODE_LEGAL;
+    entry.s1_pte_v = 1'b1;
+    entry.s1_pte_r = 1'b1;
+    entry.s1_pte_w = 1'b1;
+    entry.s1_pte_x = 1'b0;
+    entry.s1_pte_u = 1'b0;
+    entry.s1_pte_a = 1'b1;
+    entry.s1_pte_d = 1'b1;
+    entry.s1_entry_pbmt = effective_pbmt;
+    data.publish_live_tlb_entry(key, entry, record.csr_snapshot);
+endfunction:publish_secondary_tlb_entry
+
 task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
     common_data_transaction data;
     memblock_rm_readonly_api::main_transaction_view_t main_view;
@@ -237,7 +291,7 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
     data = common_data_transaction::get();
     saved_pma_pmp_model_en = seq_csr_common::pma_pmp_model_en;
     seq_csr_common::pma_pmp_model_en = 1'b0;
-    for (int unsigned uid = 0; uid < 7; uid++) begin
+    for (int unsigned uid = 0; uid < 40; uid++) begin
         data.uid_tlb_record_by_uid.delete(uid);
         env.rm.observer_trace_translation_emitted.delete(uid);
         env.rm.observer_trace_translation_path_emitted.delete(uid);
@@ -317,20 +371,150 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
         `uvm_fatal(get_type_name(), "ordinary RM query miss was not observable")
     end
 
-    // PBMT-NC and PBMT-IO both stop a cross-page misaligned access after byte 0.
-    for (int unsigned pbmt = 1; pbmt <= 2; pbmt++) begin
+    // First-byte PBMT-NC/IO stop immediately but select different causes.
+    for (int unsigned store = 0; store <= 1; store++) begin
+        for (int unsigned pbmt = 1; pbmt <= 2; pbmt++) begin
         memblock_uid_t uid;
+        bit expected_misaligned;
+        bit expected_access_fault;
 
-        uid = 2 + pbmt;
-        init_load_views(uid, 64'h0000_0000_8126_6ffd + (pbmt << 13),
-                        main_view, status_view);
+        uid = 2 + pbmt + (store * 4);
+        if (store) begin
+            init_store_views(uid, 64'h0000_0000_8126_6ffd + (uid << 13),
+                             main_view, status_view);
+        end else begin
+            init_load_views(uid, 64'h0000_0000_8126_6ffd + (uid << 13),
+                            main_view, status_view);
+        end
         void'(make_uid_tlb_record(uid, main_view.vaddr, 2'd0, pbmt[1:0],
                                   1'b1, 1'b1));
+        expected_misaligned = pbmt == 1;
+        expected_access_fault = pbmt == 2;
         if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
-            !item.expected_exception[4] ||
+            item.expected_exception[store ? 6 : 4] != expected_misaligned ||
+            item.expected_exception[store ? 7 : 5] != expected_access_fault ||
+            item.expected_exception !=
+                (24'h000010 << (store * 2 + (pbmt == 2))) ||
             item.pa_valid_mask != 8'h01 || !item.uncache_path) begin
             `uvm_fatal(get_type_name(),
-                       $sformatf("cross-page PBMT=%0d did not stop after the first byte", pbmt))
+                       $sformatf("first-byte store=%0d PBMT=%0d cause/stop mismatch exception=0x%0h mask=0x%0h",
+                                 store, pbmt, item.expected_exception,
+                                 item.pa_valid_mask))
+        end
+        end
+    end
+
+    // A PMA first page continues into the second page. NC or IO on a later
+    // split page is delegated by the DUT misalign buffer as address-misaligned.
+    for (int unsigned store = 0; store <= 1; store++) begin
+        for (int unsigned pbmt = 1; pbmt <= 2; pbmt++) begin
+            memblock_uid_t uid;
+            bit [63:0] vaddr;
+            bit [63:0] secondary_vaddr;
+            memblock_tlb_lookup_key_t secondary_key;
+
+            uid = 12 + pbmt + (store * 4);
+            vaddr = 64'h0000_0000_8180_0ffd + (uid << 13);
+            secondary_vaddr = vaddr + 8;
+            if (store) init_store_views(uid, vaddr, main_view, status_view);
+            else init_load_views(uid, vaddr, main_view, status_view);
+            record = make_uid_tlb_record(uid, vaddr, 2'd0, 2'd0, 1'b1, 1'b1);
+            publish_secondary_tlb_entry(record, secondary_vaddr, pbmt[1:0]);
+            if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
+                !item.expected_exception[store ? 6 : 4] ||
+                item.expected_exception[store ? 7 : 5] ||
+                item.pa_valid_mask != 8'hff || !item.uncache_path) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("later split store=%0d PBMT=%0d did not remain address-misaligned exception=0x%0h mask=0x%0h",
+                                     store, pbmt, item.expected_exception,
+                                     item.pa_valid_mask))
+            end
+            secondary_key = record.csr_snapshot.make_lookup_key(
+                {14'b0, secondary_vaddr[49:12]}, 2'd0);
+            data.delete_live_tlb_entry_by_anchor_key(
+                secondary_key,
+                "RM mixed PBMT directed cleanup");
+        end
+    end
+
+    // Every translation fault retains priority over both NC and IO first-byte
+    // misalign semantics. Exercise the effective S1/S2 fault fields directly;
+    // the legacy pmaAF sideband below is only an additional compatibility case.
+    for (int unsigned store = 0; store <= 1; store++) begin
+        for (int unsigned pbmt = 1; pbmt <= 2; pbmt++) begin
+            for (int unsigned fault_kind = 0; fault_kind < 4; fault_kind++) begin
+                memblock_uid_t uid;
+                bit [1:0] s2xlate;
+                bit [23:0] expected_exception;
+
+                uid = 20 + (store * 8) + ((pbmt - 1) * 4) + fault_kind;
+                s2xlate = fault_kind >= 2 ? 2'd2 : 2'd0;
+                if (store) begin
+                    init_store_views(uid,
+                                     64'h0000_0000_81c0_0001 + (uid << 13),
+                                     main_view, status_view);
+                end else begin
+                    init_load_views(uid,
+                                    64'h0000_0000_81c0_0001 + (uid << 13),
+                                    main_view, status_view);
+                end
+                record = make_uid_tlb_record(uid, main_view.vaddr, s2xlate,
+                                             pbmt[1:0], 1'b1, 1'b1);
+                case (fault_kind)
+                    0: begin
+                        record.payload.fault_effective_s1_af = 1'b1;
+                        record.payload.fault_stage_selected =
+                            memblock_tlb_entry::MEMBLOCK_TLB_FAULT_STAGE_S1;
+                        expected_exception = 24'h000020 << (store * 2);
+                    end
+                    1: begin
+                        record.payload.fault_effective_s1_pf = 1'b1;
+                        record.payload.fault_stage_selected =
+                            memblock_tlb_entry::MEMBLOCK_TLB_FAULT_STAGE_S1;
+                        expected_exception = 24'h002000 << (store * 2);
+                    end
+                    2: begin
+                        record.payload.fault_effective_s2_gaf = 1'b1;
+                        record.payload.fault_stage_selected =
+                            memblock_tlb_entry::MEMBLOCK_TLB_FAULT_STAGE_S2;
+                        expected_exception = 24'h000020 << (store * 2);
+                    end
+                    default: begin
+                        record.payload.fault_effective_s2_gpf = 1'b1;
+                        record.payload.fault_stage_selected =
+                            memblock_tlb_entry::MEMBLOCK_TLB_FAULT_STAGE_S2;
+                        expected_exception = 24'h200000 << (store * 2);
+                    end
+                endcase
+                if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
+                    item.expected_exception !== expected_exception) begin
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("translation priority store=%0d PBMT=%0d fault_kind=%0d mismatch exception=0x%0h expected=0x%0h",
+                                         store, pbmt, fault_kind,
+                                         item.expected_exception,
+                                         expected_exception))
+                end
+            end
+        end
+    end
+
+    for (int unsigned store = 0; store <= 1; store++) begin
+        memblock_uid_t uid;
+        bit [23:0] expected_exception;
+
+        uid = 36 + store;
+        if (store) init_store_views(uid, 64'h0000_0000_8200_0001 + (uid << 13),
+                                    main_view, status_view);
+        else init_load_views(uid, 64'h0000_0000_8200_0001 + (uid << 13),
+                             main_view, status_view);
+        record = make_uid_tlb_record(uid, main_view.vaddr, 2'd0, 2'd2, 1'b1, 1'b1);
+        record.payload.pmaAF = 1'b1;
+        expected_exception = 24'h000020 << (store * 2);
+        if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
+            item.expected_exception !== expected_exception) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("PBMT-IO store=%0d did not preserve legacy pmaAF exception=0x%0h",
+                                 store, item.expected_exception))
         end
     end
 
@@ -379,9 +563,109 @@ task soft_test_tc_rm_pbmt_effective_fault::check_rm_production_commit_path();
                    "S2 permission GPF was not preserved exclusively over PMA MMIO")
     end
 
+    // Load PBMT-NC misalignment is generated independently from the S2
+    // PMA/PMP access fault. StoreUnit instead suppresses storeAddrMisaligned
+    // when the S2 PMA/PMP access fault is present.
+    for (int unsigned store = 0; store <= 1; store++) begin
+        memblock_uid_t uid;
+        bit [47:0] fault_pa;
+        bit [23:0] expected_exception;
+
+        uid = 28 + store;
+        // V2 PMA TOR entry covering [0x39002000, 0x3a000000) denies R/W.
+        fault_pa = 48'h0000_3900_3001;
+        if (store) init_store_views(uid, 64'h0000_0000_81e0_0001 + (uid << 13),
+                                    main_view, status_view);
+        else init_load_views(uid, 64'h0000_0000_81e0_0001 + (uid << 13),
+                             main_view, status_view);
+        record = make_uid_tlb_record(uid, main_view.vaddr, 2'd0, 2'd1, 1'b1, 1'b1);
+        record.request_s1_resolved_ppn = fault_pa[47:12];
+        if (!data.pma_pmp_model.capture_uid_context(
+                uid, status_view.dynamic_epoch, 2'd3, 1'b0, 1'b0, 1'b0, '0,
+                record.csr_snapshot.update_seq, 600 + uid) ||
+            !data.pma_pmp_model.evaluate_for_uid_epoch(
+                uid, status_view.dynamic_epoch, 1'b1, fault_pa,
+                1, store ? PMA_PMP_CMD_WRITE : PMA_PMP_CMD_READ, pma_eval) ||
+            !pma_eval.valid || !pma_eval.translation_eligible ||
+            !(store ? pma_eval.st_fault : pma_eval.ld_fault)) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("PBMT-NC store=%0d PMA/PMP AF precondition failed", store))
+        end
+        expected_exception = store ? 24'h000080 : 24'h000030;
+        if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
+            item.expected_exception !== expected_exception) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("PBMT-NC store=%0d did not preserve misaligned+PMA/PMP AF exception=0x%0h",
+                                 store, item.expected_exception))
+        end
+    end
+
+    // A real PMA/PMP access fault suppresses Load Address Misaligned for
+    // ordinary PBMT-PMA and PBMT-IO paths.  Only PBMT-NC Load may retain the
+    // misaligned bit beside the access fault.  Exercise both hardware
+    // misalign-enable values so that the AF gate, rather than the helper's
+    // normal PMA behavior, determines the result.
+    for (int unsigned hd_misalign = 0; hd_misalign <= 1; hd_misalign++) begin
+        memblock_uid_t uid;
+        bit [47:0] fault_pa;
+
+        uid = 30 + hd_misalign;
+        fault_pa = 48'h0000_3900_3001;
+        init_load_views(uid, 64'h0000_0000_8200_0001 + (uid << 13),
+                        main_view, status_view);
+        record = make_uid_tlb_record(uid, main_view.vaddr, 2'd0, 2'd0, 1'b1, 1'b1);
+        record.csr_snapshot.hd_misalign_ld_enable = hd_misalign;
+        record.request_s1_resolved_ppn = fault_pa[47:12];
+        if (!data.pma_pmp_model.capture_uid_context(
+                uid, status_view.dynamic_epoch, 2'd3, 1'b0, 1'b0, 1'b0, '0,
+                record.csr_snapshot.update_seq, 700 + uid) ||
+            !data.pma_pmp_model.evaluate_for_uid_epoch(
+                uid, status_view.dynamic_epoch, 1'b1, fault_pa,
+                1, PMA_PMP_CMD_READ, pma_eval) ||
+            !pma_eval.valid || !pma_eval.translation_eligible ||
+            !pma_eval.ld_fault) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("PBMT-PMA hd_misalign=%0d PMA/PMP AF precondition failed",
+                                 hd_misalign))
+        end
+        if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
+            item.expected_exception !== 24'h000020) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("PBMT-PMA hd_misalign=%0d incorrectly retained Load Address Misaligned exception=0x%0h",
+                                 hd_misalign, item.expected_exception))
+        end
+    end
+
+    begin
+        memblock_uid_t uid;
+        bit [47:0] fault_pa;
+
+        uid = 32;
+        fault_pa = 48'h0000_3900_3001;
+        init_load_views(uid, 64'h0000_0000_8240_0001, main_view, status_view);
+        record = make_uid_tlb_record(uid, main_view.vaddr, 2'd0, 2'd2, 1'b1, 1'b1);
+        record.request_s1_resolved_ppn = fault_pa[47:12];
+        if (!data.pma_pmp_model.capture_uid_context(
+                uid, status_view.dynamic_epoch, 2'd3, 1'b0, 1'b0, 1'b0, '0,
+                record.csr_snapshot.update_seq, 700 + uid) ||
+            !data.pma_pmp_model.evaluate_for_uid_epoch(
+                uid, status_view.dynamic_epoch, 1'b1, fault_pa,
+                1, PMA_PMP_CMD_READ, pma_eval) ||
+            !pma_eval.valid || !pma_eval.translation_eligible ||
+            !pma_eval.ld_fault) begin
+            `uvm_fatal(get_type_name(), "PBMT-IO PMA/PMP AF precondition failed")
+        end
+        if (!env.rm.observer_build_commit_item(main_view, status_view, item) ||
+            item.expected_exception !== 24'h000020) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("PBMT-IO incorrectly retained Load Address Misaligned exception=0x%0h",
+                                 item.expected_exception))
+        end
+    end
+
     env.rm.observer_mismatch_reported = 1'b0;
     seq_csr_common::pma_pmp_model_en = saved_pma_pmp_model_en;
-    for (int unsigned uid = 0; uid < 7; uid++) begin
+    for (int unsigned uid = 0; uid < 40; uid++) begin
         data.uid_tlb_record_by_uid.delete(uid);
     end
 endtask:check_rm_production_commit_path

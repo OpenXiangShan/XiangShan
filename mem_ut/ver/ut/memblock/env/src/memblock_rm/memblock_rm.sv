@@ -369,7 +369,8 @@ function bit memblock_rm::observer_build_commit_item(
     memblock_rm_readonly_api::tlb_entry_view_t entry;
     memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t pma_pmp_view;
     pma_pmp_cmd_e pma_pmp_cmd;
-    bit access_fault;
+    bit translation_access_fault;
+    bit pma_pmp_access_fault;
     bit stage_one_fault;
     bit stage_two_fault;
     bit entry_stage_one_fault;
@@ -382,7 +383,10 @@ function bit memblock_rm::observer_build_commit_item(
     bit pbmt_force_s1_pf;
     bit pbmt_force_s2_gpf;
     bit [1:0] effective_pbmt;
+    bit [1:0] first_effective_pbmt;
+    bit first_effective_pbmt_valid;
     bit misaligned;
+    bit misaligned_maps_to_access_fault;
     bit all_bytes_pma_pbmt;
     bit all_bytes_pma_mmio;
     bit all_bytes_normal_cacheable;
@@ -504,12 +508,16 @@ function bit memblock_rm::observer_build_commit_item(
     first_byte_is_pma_mmio = 1'b0;
     first_byte_pma_known = 1'b0;
     first_byte_pma_fault = 1'b0;
+    first_effective_pbmt = 2'd0;
+    first_effective_pbmt_valid = 1'b0;
+    misaligned_maps_to_access_fault = 1'b0;
     all_bytes_pma_pbmt = 1'b1;
     all_bytes_pma_mmio = 1'b0;
     all_bytes_normal_cacheable = 1'b0;
     // 中文注释：以下三类异常只来自冻结 TLB context/entry；main_view 的
     // tlb_af/tlb_pf/tlb_gpf/pma_af/denied/corrupt 均禁止作为 RM 真源。
-    access_fault = 1'b0;
+    translation_access_fault = 1'b0;
+    pma_pmp_access_fault = 1'b0;
     stage_one_fault = 1'b0;
     stage_two_fault = 1'b0;
     if (bare_identity) begin
@@ -569,8 +577,13 @@ function bit memblock_rm::observer_build_commit_item(
             end
             all_bytes_pma_pbmt &= effective_pbmt == 2'd0;
             if (byte_index == 0) begin
-                // The first translated byte establishes whether the access
-                // is PMA/PBMT-normal or PBMT-NC/IO for the DUT misalign path.
+                // Preserve the exact first-byte type for the pipeline's
+                // immediate NC/IO misalign cause. The whole-access boolean is
+                // still needed when a later split page becomes NC/IO.
+                first_effective_pbmt = effective_pbmt;
+                first_effective_pbmt_valid = 1'b1;
+                misaligned_maps_to_access_fault =
+                    misaligned && effective_pbmt == 2'd2;
                 dut_stops_after_first_page =
                     observer_should_expect_addr_misaligned(
                         misaligned, store_access, tlb_context,
@@ -579,8 +592,9 @@ function bit memblock_rm::observer_build_commit_item(
             item.expected_pbmt_forced_s1_pf |= pbmt_force_s1_pf;
             item.expected_pbmt_forced_s2_gpf |= pbmt_force_s2_gpf;
             if (byte_index == 0) item.translation_key = tlb_context.entry_key;
-            access_fault |= entry.pma_af || entry.fault_effective_s1_af ||
-                            entry.fault_effective_s2_gaf;
+            translation_access_fault |= entry.pma_af ||
+                                        entry.fault_effective_s1_af ||
+                                        entry.fault_effective_s2_gaf;
             entry_stage_one_fault = entry.fault_effective_s1_pf ||
                                     ((!entry.fault_effective_s1_pf &&
                                       !entry.fault_effective_s1_af) &&
@@ -612,9 +626,9 @@ function bit memblock_rm::observer_build_commit_item(
             if (byte_index == 0 && misaligned &&
                 seq_csr_common::get_pma_pmp_model_en() &&
                 !stage_one_fault && !stage_two_fault &&
-                !access_fault && item.pa_valid_mask[0]) begin
+                !translation_access_fault && item.pa_valid_mask[0]) begin
                 byte_pma_pmp_view = '{default:'0};
-                if (ro.read_pma_pmp_af_for_rm(
+                if (!ro.read_pma_pmp_af_for_rm(
                         item.uid,
                         item.dynamic_epoch,
                         1'b1,
@@ -622,20 +636,28 @@ function bit memblock_rm::observer_build_commit_item(
                         1,
                         pma_pmp_cmd,
                         byte_pma_pmp_view)) begin
-                    first_byte_pma_known = byte_pma_pmp_view.valid &&
-                                           byte_pma_pmp_view.translation_eligible &&
-                                           byte_pma_pmp_view.af_decided;
-                    first_byte_pma_fault = first_byte_pma_known &&
-                        (store_access ? byte_pma_pmp_view.st_access_fault :
-                                        byte_pma_pmp_view.ld_access_fault);
-                    first_byte_is_pma_mmio = first_byte_pma_known &&
-                        effective_pbmt == 2'd0 &&
-                        !byte_pma_pmp_view.normal_cacheable &&
-                        !first_byte_pma_fault &&
-                        !byte_pma_pmp_view.st_access_fault;
-                    if (first_byte_pma_fault || first_byte_is_pma_mmio) begin
-                        access_fault = 1'b1;
-                    end
+                    ls_model.set_error(
+                        RM_LS_ERR_TRANSLATION_NOT_READY,
+                        $sformatf("uid %0d first-byte PMA/PMP view unavailable PA=0x%0h epoch=%0d",
+                                  item.uid, item.pa_by_byte[0], item.dynamic_epoch));
+                    return 1'b0;
+                end
+                first_byte_pma_known = byte_pma_pmp_view.valid &&
+                                       byte_pma_pmp_view.translation_eligible &&
+                                       byte_pma_pmp_view.af_decided;
+                first_byte_pma_fault = first_byte_pma_known &&
+                    (store_access ? byte_pma_pmp_view.st_access_fault :
+                                    byte_pma_pmp_view.ld_access_fault);
+                first_byte_is_pma_mmio = first_byte_pma_known &&
+                    effective_pbmt == 2'd0 &&
+                    !byte_pma_pmp_view.normal_cacheable &&
+                    !first_byte_pma_fault &&
+                    !byte_pma_pmp_view.st_access_fault;
+                if (first_byte_pma_fault) begin
+                    pma_pmp_access_fault = 1'b1;
+                end
+                if (first_byte_is_pma_mmio) begin
+                    misaligned_maps_to_access_fault = 1'b1;
                 end
             end
             // A translation fault terminates the architectural access.  The DUT
@@ -662,7 +684,7 @@ function bit memblock_rm::observer_build_commit_item(
     required_pa_mask = 8'hff >> (8 - item.size_bytes);
     // 中文注释：PMA/PMP 只在翻译成功且所有访问字节都有 PA 时查询。翻译
     // fault 后 DUT 的后续 PMP/PMA response 不具备架构确定性，不能从模型补写 AF。
-    if (!access_fault && !stage_one_fault && !stage_two_fault &&
+    if (!translation_access_fault && !stage_one_fault && !stage_two_fault &&
         item.pa_valid_mask == required_pa_mask &&
         seq_csr_common::get_pma_pmp_model_en()) begin
         if (!ro.read_pma_pmp_af_for_rm(
@@ -686,8 +708,8 @@ function bit memblock_rm::observer_build_commit_item(
         item.expected_keyid_fault = pma_pmp_view.keyid_fault;
         item.expected_pma_atomic_fault = pma_pmp_view.pma_atomic_fault;
         item.expected_pma_cache_path_fault = pma_pmp_view.pma_cache_path_fault;
-        access_fault = store_access ? pma_pmp_view.st_access_fault :
-                                       pma_pmp_view.ld_access_fault;
+        pma_pmp_access_fault = store_access ? pma_pmp_view.st_access_fault :
+                                               pma_pmp_view.ld_access_fault;
         // 只有 model 开启、完整尺寸 view 已决且当前 command 无基础 AF 时，
         // 才允许逐 byte 证明整笔 PMA MMIO。READ command 下 st_access_fault
         // 固定为 0，不代表额外要求 Load 具备写权限。
@@ -737,25 +759,35 @@ function bit memblock_rm::observer_build_commit_item(
                 all_bytes_pma_mmio = 1'b0;
             end
         end
+        if (misaligned && all_bytes_pma_pbmt && all_bytes_pma_mmio) begin
+            misaligned_maps_to_access_fault = 1'b1;
+        end
         // 当前 V2 smoke 的 U 态默认 PMP 会在基础权限阶段结束；若未来 profile
         // 允许访问且 PMA C=0，需要独立 cache observer 提供 fact 后再补 cache-path AF。
         // 此处不把 C=0/MMIO 分类或未知 fact 猜测成异常，保留模型诊断字段即可。
     end
-    // 中文注释：DUT exceptionVec 保留可同时成立的 access/page/guest-page fault，
-    // 不能按软件优先级折叠成单一 bit。LoadUnit 在 TLB fault 到达时会清掉
-    // address-misaligned，因此只有完全没有翻译异常时才把 misaligned 写入期望。
-    if (access_fault) item.expected_exception[store_access ? 7 : 5] = 1'b1;
+    // 中文注释：TLB translation AF/PF/GPF 会使 PMA/PMP response 不可信，并
+    // 抑制 address-misaligned；S2 PMA/PMP AF 则是翻译成功后的独立异常。
+    // LoadUnit 允许它与 PBMT-NC misaligned 共存，StoreUnit 用 AF 抑制
+    // storeAddrMisaligned。两类 AF 不能共用一个互斥门控。
+    if (translation_access_fault)
+        item.expected_exception[store_access ? 7 : 5] = 1'b1;
     if (stage_one_fault) item.expected_exception[store_access ? 15 : 13] = 1'b1;
     if (stage_two_fault) item.expected_exception[store_access ? 23 : 21] = 1'b1;
-    if (item.expected_exception == '0 &&
-        seq_csr_common::get_pma_pmp_model_en() &&
-        misaligned && all_bytes_pma_pbmt && all_bytes_pma_mmio)
-        item.expected_exception[store_access ? 7 : 5] = 1'b1;
-    if (item.expected_exception == '0 &&
-        observer_should_expect_addr_misaligned(
-            misaligned, store_access, tlb_context,
-            all_bytes_pma_pbmt))
-        item.expected_exception[store_access ? 6 : 4] = 1'b1;
+    if (!translation_access_fault && !stage_one_fault && !stage_two_fault) begin
+        if (pma_pmp_access_fault || misaligned_maps_to_access_fault) begin
+            item.expected_exception[store_access ? 7 : 5] = 1'b1;
+        end
+        if (!misaligned_maps_to_access_fault &&
+            (!pma_pmp_access_fault ||
+             (!store_access && first_effective_pbmt_valid &&
+              first_effective_pbmt == 2'd1)) &&
+            observer_should_expect_addr_misaligned(
+                misaligned, store_access, tlb_context,
+                all_bytes_pma_pbmt)) begin
+            item.expected_exception[store_access ? 6 : 4] = 1'b1;
+        end
+    end
     if (item.expected_exception == '0 &&
         item.pa_valid_mask != required_pa_mask) begin
         ls_model.set_error(RM_LS_ERR_TRANSLATION_NOT_READY,
