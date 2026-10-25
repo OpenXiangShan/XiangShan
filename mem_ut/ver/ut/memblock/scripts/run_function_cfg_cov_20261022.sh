@@ -81,11 +81,6 @@ for item in "${CASES[@]}"; do
         --plusarg '+MEMBLOCK_CHECK_TRIGGER_EN=0'
         --output-dir "$out"
     )
-    if [[ "$cfg" == "default" &&
-          "$tc" == "tc_dispatch_real_smoke" &&
-          "$ts" == "virtual_base_sequence" ]]; then
-        args+=(--plusarg '+MEMBLOCK_DISPATCH_ISSUE_SEQ_EN=1')
-    fi
     if (( compile )); then
         args+=(--compile)
         compile=0
