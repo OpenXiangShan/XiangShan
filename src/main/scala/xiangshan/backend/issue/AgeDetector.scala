@@ -23,6 +23,18 @@ import xiangshan._
 import utils._
 import utility._
 
+/** Tracks pairwise arrival order and returns the oldest issuable entry per port.
+  * Age is preserved across dequeue; stale invalid entries cannot win because
+  * the comparison is masked by `canIssue`.
+  *
+  * {{{
+  * enq destination one-hots + enqueue-port order -> [pairwise age matrix]
+  * [age] + each port's canIssue mask -> older than every rival -> winner one-hot
+  * }}}
+  *
+  * Enqueues update age at the edge; selection reads the stored matrix. Among
+  * simultaneous arrivals, the earlier enqueue port is older. Validity is external.
+  */
 class AgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     // NOTE: now we do not consider deq.
@@ -33,6 +45,7 @@ class AgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Paramet
     val out = Vec(numDeq, Output(UInt(numEntries.W)))
   })
 
+  // Only upper-triangle age state is needed; lower-triangle comparisons use its inverse.
   // age(i)(j): entry i enters queue before entry j
   val age = Seq.fill(numEntries)(Seq.fill(numEntries)(RegInit(false.B)))
   val nextAge = Seq.fill(numEntries)(Seq.fill(numEntries)(Wire(Bool())))
@@ -89,6 +102,7 @@ class AgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Paramet
     }
   }
 
+  // An eligible entry wins only if it is older than every other eligible entry.
   def getOldestCanIssue(get: (Int, Int) => Bool, canIssue: UInt): UInt = {
     VecInit((0 until numEntries).map(i => {
       (VecInit((0 until numEntries).map(j => get(i, j))).asUInt | ~canIssue).andR & canIssue(i)
@@ -105,6 +119,7 @@ class AgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Paramet
 }
 
 object AgeDetector {
+  /** Add explicit winner validity and assert a unique winner for each nonempty request set. */
   def apply(numEntries: Int, enq: Vec[UInt], canIssue: Vec[UInt])(implicit p: Parameters): Vec[Valid[UInt]] = {
     val age = Module(new AgeDetector(numEntries, enq.length, canIssue.length))
     age.io.enq := enq

@@ -11,6 +11,10 @@ class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
   val waitAllStore = Bool()
 }
 
+/** Per-instruction load/store observations accumulated across retries.
+  * Stage helpers set sticky event bits; S3 replay also increments the count and
+  * unions causes. Callers provide defaults or registers for fields not updated.
+  */
 class DebugLsInfo(implicit p: Parameters) extends XSBundle{
   val s1_isTlbFirstMiss = Bool() // in s1
   val s1_isLoadToLoadForward = Bool()
@@ -66,6 +70,9 @@ object DebugLsInfo {
   }
 }
 
+/** Carries a separate ROB index for each observed pipeline stage so events
+  * from different in-flight memory operations are attributed independently.
+  */
 class DebugLsInfoBundle(implicit p: Parameters) extends DebugLsInfo {
   // unified processing at the end stage of load/store  ==> s2  ==> bug that will write error robIdx data
   val s1_robIdx = UInt(log2Ceil(RobSize).W)

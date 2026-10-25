@@ -6,6 +6,7 @@ import chisel3.util._
 import xiangshan.backend.fu.vector.Bundles.VSew
 
 object Utils {
+  /** Split packed element masks into eight VD groups, padding each slice to byte count. */
   def VecDataToMaskDataVec(vecData: UInt, vsew: UInt): Vec[UInt] = {
     val maskWidth = vecData.getWidth / 8
     val maskDataVec = Wire(Vec(8, UInt(maskWidth.W)))
@@ -25,6 +26,7 @@ object Utils {
 
   def NZeros(n: Int): UInt = bitPatToUInt(BitPat.N(n))
 
+  /** Extract each 64-bit data lane's element-mask bits into a zero-padded byte. */
   def SplitMask(maskIn: UInt, vsew: UInt): Vec[UInt] = {
     val maskWidth = maskIn.getWidth
     val maskDataVec = Wire(Vec(maskWidth / 8, UInt(8.W)))

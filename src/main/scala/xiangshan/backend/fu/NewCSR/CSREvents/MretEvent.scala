@@ -26,6 +26,10 @@ class MretEventInput extends Bundle {
   val hgatp    = Input(new HgatpBundle)
 }
 
+/** Combinational MRET updates: restore privilege/interrupt enable from MPP/MPV/MPIE,
+  * clear the consumed save state, and check MEPC under the destination translation mode.
+  * valid qualifies update pulses; CSR storage and event arbitration remain in NewCSR.
+  */
 class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   val in = IO(new MretEventInput)
   val out = IO(new MretEventOutput)

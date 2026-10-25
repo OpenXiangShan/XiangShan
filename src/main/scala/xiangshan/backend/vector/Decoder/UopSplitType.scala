@@ -9,6 +9,7 @@ import xiangshan.backend.vector.Decoder.Uop.UopTrait.UopBase
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 
+/** Placeholder for an earlier split-decoder interface; it emits no hardware. */
 class InstDecodeSplitTypeModule
 
 object UopNumMapType extends Enumeration {
@@ -17,6 +18,7 @@ object UopNumMapType extends Enumeration {
   val indexls = Value
 }
 
+/** Legacy split-policy abstraction; concrete examples below are commented out. */
 object UopSplitType extends HasVectorSettings {
 
   sealed abstract class UopSplitBase(
@@ -33,6 +35,7 @@ object UopSplitType extends HasVectorSettings {
   ) {
     protected var uops: Seq[UopBase] = Seq()
 
+    /** Bind one opcode template during elaboration and return the configured policy. */
     def bindUops(uops: UopBase*): this.type = {
       require(uops.length == 1)
       this.uops = uops

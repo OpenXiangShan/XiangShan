@@ -12,7 +12,10 @@ import xiangshan.backend.vector.fu.VecFuConfig.VecVectorV2Config
 
 import scala.beans.BeanProperty
 
-/**
+/** Capabilities shared by legacy FU wrappers and the dedicated Func interface.
+  * srcData lists alternative operand layouts; port counts use the maximum over
+  * alternatives, while V0/VL are separate side operands. latency bounds the
+  * context/result-slot interface and need not be an iterative FU's actual duration.
   *
   * @param name [[String]] name of fuConfig
   * @param fuType [[Int]] type of func, select from [[xiangshan.backend.fu.FuType]]
@@ -102,8 +105,8 @@ case class VecFuConfig (
   def readFp: Boolean = numFpSrc > 0
 
   def fuSel(uop: ExuInput): Bool = {
-    // Don't add more shit here!!!
-    // Todo: add new FuType to distinguish f2i, f2f
+    // Legacy input selection compares a complete type; the dedicated path below
+    // accepts overlap with this FU's one-hot scheduling class.
     uop.fuType === this.fuType.U
   }
 
@@ -111,10 +114,7 @@ case class VecFuConfig (
     (uop.ctrl.fuType & this.fuType.U).orR
   }
 
-  /**
-    * params(i): data type set of the ith src port
-    * @return
-    */
+  /** Union the register classes at each operand position across alternative layouts. */
   def getRfReadDataCfgSet: Seq[Set[DataConfig]] = {
     val numSrcMax = srcData.map(_.length).fold(0)(_ max _)
     // make srcData is uniform sized to avoid exception when transpose
@@ -122,6 +122,7 @@ case class VecFuConfig (
     alignedSrcData.transpose.map(_.toSet.intersect(RegSrcDataSet))
   }
 
+  /** Return every configured data kind at this source position, ignoring shorter layouts. */
   def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
     srcData
       .map((x: Seq[DataConfig]) => if(x.isDefinedAt(srcIdx)) Some(x(srcIdx)) else None)
@@ -228,6 +229,9 @@ case class VecFuConfig (
 }
 
 object VecFuConfig {
+  /** Preserve legacy capabilities and install the dedicated generator/latency override.
+    * The original FuConfig remains attached for adapters back to legacy interfaces.
+    */
   def fromFuConfig(cfg: FuConfig, fuGen2: (Parameters, VecFuConfig) => Func = null, _latency: Option[Int] = None): VecFuConfig = {
     val newCfg = VecFuConfig(
       name = cfg.name,

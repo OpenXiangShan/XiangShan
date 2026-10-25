@@ -16,6 +16,11 @@ import xiangshan.backend.decode.Imm
 import xiangshan.backend.issue.EntryBundles.IssueQueueRespBundle
 import xiangshan.backend.fu.FuConfig._
 
+/** Elaboration-time contract shared by an issue queue and its execution ports.
+  * Source widths, feedback stages, wakeup routes, and optional bundles are
+  * derived from the real execution units. Bind backendParam before querying
+  * physical-register widths or global execution-unit indices.
+  */
 case class IssueBlockParams(
   // top down
   val exuParams: Seq[ExeUnitParams],
@@ -164,6 +169,8 @@ case class IssueBlockParams(
 
   def numDeq: Int = numDeqOutside + exuBlockParams.length
 
+  // Flattened entry order is enqueue, simple, then complex. Enqueue slots are
+  // always complex; numComp counts only resident complex slots.
   def numSimp: Int = numEntries - numEnq - numComp
 
   def isAllComp: Boolean = numComp == (numEntries - numEnq)
@@ -247,6 +254,8 @@ case class IssueBlockParams(
   def needSnResp = this.isLdAddrIQ
 
   // TODO needOg0Resp needOg1Resp
+  // Timer 0/1 select OG0/OG1; optional response stages extend Entries.allResps.
+  // A fake S1 response keeps store-address timing aligned with its later S2.
   def issueTimerMaxValue: Int = 1 + Seq(needOg2Resp, needS0Resp, (needFakeS1Resp || needS1Resp), needS2Resp, needSnResp).count(_ == true)
 
   def issueTimerWidth = issueTimerMaxValue.U.getWidth
@@ -270,12 +279,12 @@ case class IssueBlockParams(
     }.reduce(_ || _)
   }
   /**
-    * Get the regfile type that this issue queue need to read
+    * Register-file classes read by at least one execution port.
     */
   def pregReadSet: Set[DataConfig] = exuBlockParams.map(_.pregRdDataCfgSet).fold(Set())(_ union _)
 
   /**
-    * Get the regfile type that this issue queue need to read
+    * Register-file classes written by at least one execution port.
     */
   def pregWriteSet: Set[DataConfig] = exuBlockParams.map(_.pregWbDataCfgSet).fold(Set())(_ union _)
 
@@ -298,6 +307,8 @@ case class IssueBlockParams(
   /**
     * Get exu source wake up
     */
+  // Deduplicate producers across the queue's sink ports while retaining order;
+  // entry wakeup vectors and producer-index vectors must use the same ordering.
   def wakeUpInExuSources: Seq[WakeUpSource] = {
     exuBlockParams
       .flatMap(_.iqWakeUpSinkPairs)
@@ -349,6 +360,8 @@ case class IssueBlockParams(
 
   def deqFuInterSect: Seq[FuConfig] = if (numDeq == 2) deqFuCfgs(0).intersect(deqFuCfgs(1)) else Seq()
 
+  // The selector supports two identical FU sets or two disjoint sets; partial
+  // overlap would require additional arbitration to prevent duplicate issue.
   def deqFuSame: Boolean = (numDeq == 2) && deqFuInterSect.length == deqFuCfgs(0).length && deqFuCfgs(0).length == deqFuCfgs(1).length
 
   def deqFuDiff: Boolean = (numDeq == 2) && deqFuInterSect.length == 0
@@ -476,6 +489,8 @@ case class IssueBlockParams(
     }))
   }
 
+  // Group writeback producers by shared port and register-file class. Producers
+  // already covered by IQ wakeup are excluded by the needWakeupFrom* helpers.
   def genWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
     val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
       case IntScheduler() => needWakeupFromIntWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, IntData()))).toSeq

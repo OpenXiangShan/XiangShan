@@ -10,6 +10,9 @@ import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{HgatpMode, SatpMode}
 import xiangshan.backend.fu.NewCSR._
 
+/** Instantiate trap/return update generators. NewCSR arbitrates event validity and
+  * routes each typed update to the architectural bank; generators do not own that bank.
+  */
 trait CSREvents { self: NewCSR =>
   val trapEntryDEvent = Module(new TrapEntryDEventModule)
 
@@ -68,11 +71,15 @@ trait EventOutputBase {
   }
 }
 
+/** Common event qualifier and trap-address formatting, with no local state by default. */
 trait CSREventBase {
   val valid = IO(Input(Bool()))
   val in: Bundle
   val out: Bundle
 
+  /** Format the trap address for the effective translation regime. Sv39/Sv48 retain
+    * an extra high address bit in the supplied trap representation; x4 paths zero-extend.
+    */
   def genTrapVA(
     transMode: PrivState,
     satp: SatpBundle,
@@ -116,6 +123,9 @@ trait CSREventBase {
   }
 }
 
+/** Trap snapshot: iMode describes fetch privilege, dMode includes MPRV/HLS effects,
+  * and oldSatp/oldVsatp preserve the regime needed after a translation-control flush.
+  */
 class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val causeNO = Input(new CauseBundle)
   val trapPc = Input(UInt((VaddrMaxWidth+1).W))
@@ -159,6 +169,9 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val hvictlIID = Input(UInt(HIIDWidth.W))
 }
 
+/** Register only fields marked by addInEvent; unlisted DontCare payloads never update
+  * the bank. Field order must match between the CSR layout and the event layout.
+  */
 trait EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   protected def addUpdateBundleInCSREnumType(updateBundle: ValidIO[CSRBundle]): Unit = {
     (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>

@@ -31,6 +31,19 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
+/**
+  * Keeps the oldest pending exception while ROB waits for precise retirement.
+  *
+  * {{{
+  * writebacks --> per-FU-group oldest --> [S0] --> group oldest --> [S1] --+
+  * decode enqueue exceptions --------> priority selection --> [enq S1] -+--> current
+  * redirect / flush -----------------> filter candidates and invalidate current
+  * }}}
+  *
+  * Age compares ROB slots, then vector-uop indices for a shared slot. Repeated
+  * reports for the current slot merge state and retain the earliest relevant
+  * vector start. out reports new candidates; state is the retained exception.
+  */
 class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val allExceptions = ExceptionNO.exceptionGenSet(params)
 
@@ -50,6 +63,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
 
   val wbExuParams = params.getWrite2RobParams().filter(_.needExceptionGen)
 
+  // Balanced pairwise selection; callers separately derive the winner's validity.
   def getOldest(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): RobExceptionInfo = {
     def getOldest_recursion(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
       assert(valid.length == bits.length)

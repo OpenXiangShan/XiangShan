@@ -9,6 +9,9 @@ import xiangshan.backend.vector.VecBundle
 import xiangshan.backend.vector.VecModule
 import xiangshan.backend.vector.util.BString._
 
+/** Legacy split-module scaffold: control tables exist, but io.o is tied to zero.
+  * The integrated decoder expands instructions through SplitTable and per-slot fields.
+  */
 class VecUopSplitModule(implicit val p: P) extends VecModule {
   val io = IO(new Bundle {
     val i = Input(new Bundle {
@@ -110,6 +113,7 @@ class VecUopSplitModule(implicit val p: P) extends VecModule {
   ) {
     checkWidthMeetLmul
 
+    /** Reject control masks whose bit count differs from the selected LMUL class. */
     def checkWidthMeetLmul: Unit = {
       Seq(vdAlloc, uopDep, widenSew)
         .ensuring(_.forall(_.getWidth == width))
@@ -157,6 +161,7 @@ class VecUopSplitModule(implicit val p: P) extends VecModule {
   // idx  -/
 }
 
+/** Legacy pre/post-split metadata, separate from the integrated DecodeChannelOutput. */
 trait VecDecodedCommonBundle extends VecBundle {
   //////////////////////// dest ////////////////////////
   val wVr = Bool()

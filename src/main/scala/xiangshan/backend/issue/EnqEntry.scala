@@ -27,6 +27,10 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
   def wakeup              = commonIn.wakeUpFromWB ++ commonIn.wakeUpFromIQ
 }
 
+/**
+  * Dispatch landing slot that can issue directly or transfer to resident storage.
+  * Delayed wakeup matching repairs readiness captured at the enqueue edge.
+  */
 class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   val io = IO(new EnqEntryIO)
 
@@ -43,6 +47,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   val enqDelayUseRegCache         = OptionWrapper(params.needReadRegCache, Wire(Vec(params.numRegSrc, Bool())))
   val enqDelayRegCacheIdx         = OptionWrapper(params.needReadRegCache, Wire(Vec(params.numRegSrc, UInt(RegCacheIdxWidth.W))))
 
+  // Capture the accepted uop or the computed next state on each clock edge.
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)
   val entryReg = RegNext(Mux(
@@ -70,7 +75,9 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
     CommonIQWakeupConnect(common, hasWakeupIQ.get, validReg, currentStatus, io.commonIn, true)
   }
 
-  // enq delay wakeup
+  // Compare one- and two-cycle histories against the registered uop. The first
+  // cycle after enqueue uses these matches; vector bypass routing also needs
+  // the two-cycle producer history.
   val enqDelayOut1         = Wire(new EnqDelayOutBundle)
   val enqDelayOut2         = Wire(new EnqDelayOutBundle)
   EnqDelayWakeupConnect(io.enqDelayIn1, enqDelayOut1, entryReg.status, delay = 1)
@@ -119,6 +126,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
     }
   }
 
+  // Delayed hits affect the visible source state before this slot transfers.
   // current status
   currentStatus                             := entryReg.status
   when (enqDelayValidReg) {

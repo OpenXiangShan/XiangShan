@@ -20,6 +20,16 @@ import system.HasSoCParameter
 import utility.ZeroExt
 import scala.collection.immutable.SeqMap
 
+/** Machine CSR storage and lower-level alias endpoints. Interrupt read views combine
+  * saved software bits with platform/guest sources; alias writes carry per-field valid
+  * intents back to the owning bank rather than duplicating architectural state.
+  *
+  * {{{
+  * legal CSR writes ----+-> [machine registers] -> filtered/combined read views
+  * S/VS alias intents --+          ^                         |
+  * trap/return/retire ---+          +-- platform / AIA / counter events
+  * }}}
+  */
 trait MachineLevel { self: NewCSR =>
   // Machine level Custom Read/Write
   val mbmc = if (HasBitmapCheck) Some(Module(new CSRModule("Mbmc", new MbmcBundle) {
@@ -133,7 +143,7 @@ trait MachineLevel { self: NewCSR =>
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
     .setAddr(CSRs.mtvec)
 
-  // Todo: support "Stimecmp/Vstimecmp" Extension, Version 1.0.0
+  // Counter visibility is independent of the timer compare registers in S/VS banks.
   // Todo: support Sscounterenw Extension
   val mcounteren = Module(new CSRModule("Mcounteren", new Counteren))
     .setAddr(CSRs.mcounteren)
@@ -350,6 +360,7 @@ trait MachineLevel { self: NewCSR =>
     val MML   = RO( 0).withDescription("Machine-mode lock-down control from the Smepmp extension.")
   })).setAddr(CSRs.mseccfg)
 
+  // Counter priority is direct write, delegated SIREG write, then enabled hardware add.
   val mcycle = Module(new CSRModule("Mcycle", new CounterValueBundle("Machine cycle counter value.")) with HasMachineCounterControlBundle with SmcntrpmfBundle with HasSiregCounterBundle {
     toSireg := regOut.asUInt
     when(w.wen) {
@@ -391,8 +402,8 @@ trait MachineLevel { self: NewCSR =>
       }.otherwise {
         reg := reg
       }
-      // Count overflow never results from writes to the mhpmcountern or mhpmeventn registers, only from
-      // hardware increments of counter registers.
+      // Report the enabled increment candidate's carry. Counter storage follows the
+      // write priorities above; this combinational carry expression has no write gate.
       toMhpmeventOF := !countingInhibit & counterAdd.head(1)
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
@@ -583,6 +594,10 @@ class MstatusBundle extends CSRBundle {
   ).withDescription("Dirty summary bit for the floating-point or vector context.")
 }
 
+/** One MSTATUS bank also backs SSTATUS. Event/alias updates are connected first;
+  * retirement dirtying and explicit MDT/SDT interrupt-disable effects are applied later.
+  * Read filtering derives SD and masks the supervisor SDT view with MENVCFG.DTE.
+  */
 class MstatusModule(implicit override val p: Parameters) extends CSRModule("MStatus", new MstatusBundle)
   with TrapEntryMEventSinkBundle
   with TrapEntryHSEventSinkBundle
@@ -720,8 +735,8 @@ class MipBundle extends InterruptPendingBundle {
   // Ref: riscv privileged spec - 18.4.3. Machine Interrupt (mip and mie) Registers
   // Bits SGEIP, VSEIP, VSTIP, and VSSIP in mip are aliases for the same bits in hypervisor CSR hip
   //
-  // We implement SGEIP, VSEIP, VSTIP, and VSSIP in mip are registers,
-  // while these bits in hip are aliases for the same bits in mip.
+  // MIP's view combines HVIP storage, guest external pending bits, and platform inputs;
+  // HIP reads the corresponding combined fields, with VSSIP writes routed to HVIP.
   //
   // Ref: riscv interrupt spec - 2.1 Machine-level CSRs
   // Existing CSRs mie, mip, and mideleg are widended to 64 bits to support a total of 64 interrupt causes.
@@ -747,6 +762,7 @@ class MvipBundle extends InterruptPendingBundle {
   this.LCOFIP.setRW().withReset(0.U)
 }
 
+/** EPC stores bits 63:1; sparse packing supplies the required zero halfword-alignment bit. */
 class Epc extends CSRBundle {
   val epc = RW(63, 1).withReset(0.U).withDescription("Exception program counter.")
 }

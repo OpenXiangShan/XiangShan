@@ -27,6 +27,23 @@ import xiangshan.{HasXSParameter, LoadCancelIO, Redirect, XSBundle}
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 
+/**
+  * Fixed-stage FP issue pipeline with per-source replay feedback.
+  *
+  * {{{
+  * IQ is0Next --> [IS0] --> [IS1] --> ex0Next --> FltExu --> RF/ROB writeback
+  *                 |         |          |
+  *             RF address   RF data     bypass / dynamic rounding mode
+  *                 +---------+----------+--> IS0/IS1/EX0/EX1 responses to IQ
+  * load cancel / producer failure ------+--> cancel dependent source
+  * stage + result latency -----------------> M2 wakeup / early M4 prediction
+  * }}}
+  *
+  * Valid requests advance or become bubbles; IQ retains retry state. FMA source
+  * 3 can skip an early RF read while awaiting M4-to-M2 confirmation. Tagged
+  * load predictions remain cancelable after entering execution, extending final
+  * success feedback into EX1 when required.
+  */
 class FltIssuePipe(
   override val wrapper: FltIssuePipe.LazyMod
 )(implicit val param: ExuParam, p: Parameters) extends LazyModuleImp(wrapper) with HasXSParameter {
@@ -307,6 +324,8 @@ class FltIssuePipe(
       nonFixedLatWakeUp.loadDependency := 0.U.asTypeOf(nonFixedLatWakeUp.loadDependency)
     }
   }
+  // Select the stage whose remaining latency reaches the shared M2 wakeup
+  // point; uncertain completion instead waits for the writeback busy table.
   private val fixedLatWakeupValid = Seq(
     is0WakeupValid,
     is1WakeupValid,

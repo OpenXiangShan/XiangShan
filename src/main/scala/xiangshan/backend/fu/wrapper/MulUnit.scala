@@ -7,6 +7,9 @@ import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
 import yunsuan.scalar.Mul
 import yunsuan.MULOpType
 
+/** Adapt the two-stage scalar multiplier and qualify control through HasPipelineReg.
+  * The mulw7 variant restricts source zero to its low seven bits before multiplication.
+  */
 class MulUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasPipelineReg {
   override def latency: Int = 2
 

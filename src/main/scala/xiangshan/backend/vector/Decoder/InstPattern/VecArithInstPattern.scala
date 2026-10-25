@@ -3,6 +3,11 @@ package xiangshan.backend.vector.Decoder.InstPattern
 import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern.Category._
 
+/** Classify literal instruction patterns and attach operand/legality traits on the host.
+  * V1/V2/V3 traits describe EEW and group usage; SL traits constrain SEW/LMUL,
+  * and OverlapStrict forbids overlapping source/destination groups. Unsupported
+  * encodings return null for the enclosing Option-based classifier to discard.
+  */
 object VecArithInstPattern extends VecInstFieldDefination {
   def apply()(implicit rawInst: BitPat): VecArithInstPattern = {
     val f6=func6.rawString; val f3=category.rawString
@@ -991,6 +996,8 @@ case class VecFpS1VPattern()(implicit rawInst: BitPat) extends VecFpArithInstPat
 
 case class VecCryptoVVVVPattern()(implicit rawInst: BitPat) extends VecCryptoInstPattern
 
+// Operand traits drive VRegTypesField; scalar/mask operands use one-register groups
+// while widening/narrowing traits scale EMUL relative to the instruction LMUL.
 sealed trait Vs2Type extends VecArithInstPattern
 sealed trait V2_SpcMV1 extends Vs2Type
 sealed trait V2_SpcMV2 extends Vs2Type
@@ -1049,6 +1056,7 @@ sealed trait V3_CryptW256E64_DestOnly extends Vs3Type
 sealed trait V3_CryptBoth_SrcDest extends Vs3Type
 sealed trait V3_CryptW128E32_SrcDest extends Vs3Type
 
+// Range traits are interpreted by SewLmulRangeField before constructing decode rows.
 sealed trait SewLmulType extends VecArithInstPattern
 sealed trait SL_BF16Widen extends SewLmulType
 sealed trait SL_CLMUL extends SewLmulType

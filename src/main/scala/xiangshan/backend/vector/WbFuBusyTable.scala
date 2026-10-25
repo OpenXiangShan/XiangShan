@@ -5,6 +5,21 @@ import chisel3.util._
 import xiangshan.backend.decode.opcode.Latency
 import xiangshan.backend.fu.FuType
 
+/** Per-port future writeback reservations for vector issue.
+  * Fixed-latency slots count down every cycle. Non-fixed operations separately
+  * announce completion distance and hold launch-control flags while their
+  * result timing is unresolved, then share the same port reservation mask.
+  *
+  * {{{
+  * fixed issue + slot -> one-hot ----> [fixed mask, shift right each edge] --+
+  * FU remaining time -> one-hot ----> [non-fixed mask, shift right] -------+-> OR -> IQ
+  * non-fixed launch -> [normalFuBlock] <- clear on time announcement
+  * block + next non-fixed mask's distant slots -> [nonFixedLatFuBlock] ---> IQ
+  * }}}
+  *
+  * Callers encode a new slot for the cycle after the insertion edge. This block
+  * has no redirect/retry-clear input; canceled reservations simply count down.
+  */
 class WbFuBusyTable(
   numWritePorts: Int,
   nonFixedLatFuPortIndices: Seq[Int],
@@ -123,6 +138,7 @@ object WbFuBusyTable {
     nonFixedLatFuLatency: UInt,
   )
 
+  /** Collect connected IQ sources with their global RF port IDs, omitting absent paths. */
   def issueQueueSources(
     issueQueues: Seq[VecIssueQueue],
     sinkSel: VecIssueQueue => Option[WbFuBusyTable.In],
@@ -147,6 +163,7 @@ object WbFuBusyTable {
   def writebackSlotWidth(exLatency: Int = DefaultExLatency): Int =
     log2Up(fixedLatBusyTableEntries(exLatency))
 
+  // Express a pipeline-relative result time as a bit in the shared WB timeline.
   def writebackSlot(latency: UInt, latencyOffset: Int, exLatency: Int = DefaultExLatency): UInt = {
     require(latencyOffset >= 0, s"latencyOffset must be non-negative, got $latencyOffset")
     val width = writebackSlotWidth(exLatency)
@@ -164,6 +181,9 @@ object WbFuBusyTable {
     val fromIssueQueueNonFixedLatFu = Vec(numWritePorts, Bool())
     val fromNonFixedLatFu = Vec(numWritePorts, ValidIO(UInt(NonFixedLatencyWidth.W)))
 
+    /** Match global port IDs to dense table positions, merging fixed and FU events.
+      * Each event kind requires one-hot source validity for a given physical port.
+      */
     def =#>(connectInfo: ConnectInfo): Unit = {
       require(
         connectInfo.regfileWbPortIds.size == numWritePorts,
@@ -235,6 +255,9 @@ object WbFuBusyTable {
     val ctrlBlock = Vec(numWritePorts, new CtrlBlockEntry)
   }
 
+  /** Qualify a port's conflict by destination wen after global-to-local ID translation.
+    * Iterative vector dividers use their launch block; other FUs also test the slot bit.
+    */
   private def wbBusyTableHit(
     busyTables: Vec[UInt],
     ctrlBlocks: Option[Vec[CtrlBlockEntry]],
@@ -263,6 +286,9 @@ object WbFuBusyTable {
     }
   }
 
+  /** Combine conflicts only for register classes actually written by this entry/lane.
+    * The caller has already converted result latency to the shared writeback slot.
+    */
   def entryWbConflict(
     in: VecIssueQueue.WbFuBusyTableReadBundle,
     param: IssueParam,

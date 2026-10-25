@@ -6,6 +6,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.{VecInstPattern, VecMemInstP
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, DecodePatternComb4, LmulPattern, NfPattern, SewPattern}
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
+/** Mark indexed memory with nf+1 > 1 for destination/index overlap checking. */
 object IsSegmentField extends DecodeField[
   DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   Bool,

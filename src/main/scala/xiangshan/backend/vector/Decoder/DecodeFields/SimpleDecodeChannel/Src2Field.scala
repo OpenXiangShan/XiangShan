@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.Types.DecodeSrcType.{FP, GP}
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt._
 
+/** Classify scalar source two, including FP store data; immediates need no RF read. */
 object Src2Field extends DecodeField[InstPattern, SrcRenType] {
   override def name: String = "src2"
 

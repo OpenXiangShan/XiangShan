@@ -12,6 +12,9 @@ import xiangshan.{HasPMParameters, PMParameKey}
 
 import scala.collection.immutable.SeqMap
 
+/** Expose packed PMA config words and handler-supplied address views. Eight individual
+  * config bytes form one RV64 word; C/ATOMIC extend the common PMP byte layout.
+  */
 trait CSRPMA { self: NewCSR =>
   val pmacfg: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMAReal/4-1, 2).map(num =>
     Module(new CSRModule(s"Pmacfg$num") with HasPMACfgRSink {
@@ -78,6 +81,7 @@ trait HasPMAAddrSink { self: CSRModule[_] =>
   val addrRData = IO(Input(Vec(p(PMParameKey).NumPMAReal, UInt(64.W))))
 }
 
+/** Pad platform regions and reverse the entire list consistently with address/mask init. */
 trait PMAInit extends HasPMParameters with PMAReadWrite {
   def pmaInit: Seq[PMAConfigEntry] = (PMAConfigs ++ Seq.fill(NumPMAReal-PMAConfigs.length)(PMAConfigEntry(0))).reverse
 }

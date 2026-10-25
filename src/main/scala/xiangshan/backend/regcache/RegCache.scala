@@ -25,6 +25,22 @@ import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
 
+/**
+  * Operand-data cache split into integer-result and memory-result banks.
+  *
+  * {{{
+  * read(addr, ren) --> [address + bank enable] --> bank data --> read.data
+  * bank valid / age --> [replacement ranking] --> toWakeupQueueRCIdx
+  *                                                  |
+  *                                               [3 cycles]
+  *                                                  v
+  * execution write data ------------------------> chosen bank slot
+  * }}}
+  *
+  * The address MSB chooses the bank. Replacement destinations are advertised
+  * before data arrives; dispatch's separate tag table tracks which physical
+  * register owns each advertised slot.
+  */
 class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule {
 
   val io = IO(new RegCacheIO())
@@ -113,6 +129,8 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
     }
   }
 
+  // Keep the early wakeup destination aligned with the later result write;
+  // the incoming write-port address is replaced by this delayed prediction.
   val delayToWakeupQueueRCIdx = RegNextN(io.toWakeupQueueRCIdx, 3)
   writePorts := io.writePorts
   writePorts.zip(delayToWakeupQueueRCIdx).foreach{ case (w, rcIdx) => 

@@ -38,6 +38,11 @@ class RCTagTableWritePort(addrWidth: Int, tagWidth: Int)(implicit p: Parameters)
   val loadDependency = Vec(LoadPipelineWidth, Input(UInt(LoadDependencyWidth.W)))
 }
 
+/** Associative physical-register tags for one register-cache bank.
+  * Reads return a unique valid tag's slot. Writes replace ownership and take
+  * priority over cancellation; otherwise speculative load dependencies age
+  * each cycle and may invalidate an existing tag through cancelVec.
+  */
 class RegCacheTagModule
 (
   name: String,

@@ -24,6 +24,7 @@ import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.util.Verilog
 import xiangshan.macros.InstanceNameMacro.getVariableName
 
+/** Elaboration-time pattern adapters; the active channel is VectorDecodeChannel. */
 object SplitCtlDecoderUtil {
   case class SplitTypeOHPattern(splitTypeOH: BitPat) extends DecodePattern {
     override def bitPat: BitPat = splitTypeOH
@@ -78,6 +79,7 @@ object SplitCtlDecoderUtil {
   }
 }
 
+/** Logical source/destination indices for one expanded uop, before physical rename. */
 class UopSrcBundle extends Bundle {
   val src1 = UInt(5.W)
   val src2 = UInt(5.W)

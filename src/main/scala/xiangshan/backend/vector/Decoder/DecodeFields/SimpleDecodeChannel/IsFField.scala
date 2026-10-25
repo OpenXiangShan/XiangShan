@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern.{FpInstPattern, InstPattern, IntInstPattern, VecArithInstPattern, VecConfigInstPattern, VecInstPattern, VecMemInstPattern}
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Scalar FP classifier; the vector case is unimplemented and must not be elaborated. */
 object IsFField extends BoolDecodeField[InstPattern] {
   override def name: String = "isF"
 

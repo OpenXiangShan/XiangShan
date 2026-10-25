@@ -21,6 +21,26 @@ import xiangshan.backend.vector.VecIssueQueue._
 import xiangshan.mem.SqPtr
 
 
+/**
+  * Vector issue queue with wakeup-aware source selection and WB reservations.
+  *
+  * {{{
+  * in.enq --> [enqueue entries] -- transfer with updated state --> [fast entries]
+  * GP / FP / VP / V0 / VL wakeups --> readiness + bypass age/source     |
+  *                       +----------------------+---------------------+
+  *                                              |
+  *                     assigned port + future WB availability + age selection
+  *                                              |
+  *                                   out.deq (Valid attempt)
+  *                                              |
+  *                         IS0 / IS1 feedback --> issued state / retry / free
+  * redirect ---------------------------------> squash affected ROB slots
+  * }}}
+  *
+  * Sources can become ready from current broadcasts before state is written.
+  * Delayed FP/VP histories repair wakeups at enqueue. Each selected request
+  * carries updated bypass provenance; successful feedback releases storage.
+  */
 class VecIssueQueue(
   override val wrapper: VecIssueQueue.LazyMod
 )(implicit p: Parameters, val param: IssueParam) extends LazyModuleImp(wrapper) with HasXSParameter {
@@ -523,6 +543,8 @@ class VecIssueQueue(
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
 
+  // Update source readiness with its bypass producer and age. The keep path
+  // ages retained sources; the enqueue path can use delayed wakeup history.
   private def handleSrcWakeUp(
     isKeep: Boolean,
   )(
@@ -702,6 +724,8 @@ class VecIssueQueue(
     }
   }
 
+  // Include current wakeups for ordinary operands and optional V0/VL sources
+  // so issue does not wait for another state-register edge after a match.
   private def entryCanIssueWithWakeUp(
     status            : Status,
     entryValid        : Bool,
@@ -825,6 +849,8 @@ object VecIssueQueue {
     val validNum: UInt = UInt(log2Ceil(param.numEntry + 1).W)
   }
 
+  // Reserve the future WB slot for fixed-latency issues, grouped by physical
+  // write port. Uncertain-latency dividers use their completion-side control.
   def connectWbFuBusyTableIn(
     sink: Option[WbFuBusyTable.In],
     wbPortIds: Seq[Int],
@@ -939,6 +965,9 @@ object VecIssueQueue {
 
     val debug     = Option.when(backendParams.debugEn)(new IssueQueueInDebug)
 
+    /** Adapt dispatch metadata without storage. V0/VL read flags are forced on and
+      * flushPipe is cleared here; the caller owns queue acceptance and valid gating.
+      */
     def fromDispatchOutUop(source: DispatchOutUop): Unit = {
       this.fuType := source.fuType
       this.opcode := source.fuOpType
@@ -985,6 +1014,9 @@ object VecIssueQueue {
       this.debug.foreach(_ := source.debug.get)
     }
 
+    /** Adapt the region's optional fields with local defaults. This is a partial
+      * projection: src12Rev/flushPipe are cleared and load dependencies are not copied.
+      */
     def fromRegionInUop(source: RegionInUop): Unit = {
       this.fuType := source.fuType
       this.opcode := source.fuOpType
@@ -1086,6 +1118,9 @@ object VecIssueQueue {
 
     val debug        = Option.when(backendParams.debugEn)(new VecRegionModule.DebugBundle)
 
+    /** Assemble an issue payload from stored controls and current source/bypass state.
+      * This neither selects an entry nor marks it issued; the caller supplies valid.
+      */
     def fromEntry(entry: Entry): Unit = {
       this.fuType := entry.payload.fuType
       this.opcode := entry.payload.opcode
@@ -1194,6 +1229,10 @@ object VecIssueQueue {
 
     def canIssue: Bool = this.srcReady && !this.issued && !this.blocked
 
+    /** Seed a fresh attempt's readiness, bypass provenance and retry/timer state.
+      * Optional load-dependency bits also seed the FP load-bypass age/source fields.
+      * Enclosing entry logic supplies validity and subsequent same-cycle wakeup repair.
+      */
     def fromEnq(enq: Enq): Unit = {
       this.robIdx := enq.robIdx
       this.chanelIdx := enq.chanelIdx
@@ -1277,6 +1316,7 @@ object VecIssueQueue {
     val flushPipe = Option.when(param.needFlushPipe)(Bool())
     val debug     = Option.when(backendParams.debugEn)(new IssueQueueInDebug)
 
+    /** Copy instruction controls only; mutable readiness and replay state are separate. */
     def fromEnq(enq: Enq): Unit = {
       this.fuType := enq.fuType
       this.opcode := enq.opcode

@@ -4,6 +4,10 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
 
+/** Combinational five-bit FLI index lookup with a 16-bit table payload.
+  * H stores the full encoding; S/D store the high 16 bits, with low zeros
+  * reconstructed by the consuming adapter before NaN boxing.
+  */
 class FliTable(table: Seq[Int]) extends Module {
   val src = IO(Input(UInt(5.W)))
   val out = IO(Output(UInt(16.W)))

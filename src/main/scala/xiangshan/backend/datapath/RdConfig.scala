@@ -2,6 +2,9 @@ package xiangshan.backend.datapath
 
 import xiangshan.backend.datapath.DataConfig._
 
+/** Static RF read-port assignments and arbitration ranks, scoped by register class.
+  * port=-1 is an unassigned/absent descriptor, not a legal hardware port index.
+  */
 object RdConfig {
   sealed abstract class RdConfig() {
     val port: Int

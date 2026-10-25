@@ -14,6 +14,9 @@ import yunsuan.vector.VectorMove.VectorMove
 import xiangshan.backend.vector.fu._
 import yunsuan.vector.Common._
 
+/** Slot-zero vector/scalar move adapter; scalar FP results are boxed to opcode EEW.
+  * Mask selection and operand interpretation are delegated to VectorMove.
+  */
 class VMove(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
   // XSError(io.in.valid && !VMoveOpcode.isLegal(io.in.bits.ctrl.fuOpType), "VMove OpType not supported")
  

@@ -11,6 +11,10 @@ import xiangshan.backend.vector.util.Verilog
 
 import scala.collection.mutable.ArrayBuffer
 
+/** Generate combinational channel/uop selection vectors from per-instruction counts.
+  * This variant packs only new channels; the integrated packer uses the helpers
+  * below that also account for an existing uop-buffer prefix.
+  */
 class ChannelUopSelectVectorModule(
   mopWidth: Int,
   uopWidth: Int,
@@ -124,6 +128,7 @@ class ChannelUopSelectVectorModule(
   }
 }
 
+/** Select flattened channel payloads with elaboration-pruned one-hot mux inputs. */
 class ChannelUopSelectModule[T <: Data](
   gen: => T,
   mopWidth: Int,
@@ -217,6 +222,7 @@ object ChannelUopSelectUtil extends HasVectorSettings {
     }
   }
 
+  /** Enumerate channel-count prefixes needed to locate each output position. */
   def genUopNumPatterns(numChannel: Int, numM2M4M8Channel: (Int, Int, Int)): ArrayBuffer[ArrayBuffer[ArrayBuffer[Int]]] = {
     val MaxM2UopIdx = numM2M4M8Channel._1
     val MaxM4UopIdx = numM2M4M8Channel._2
@@ -254,6 +260,10 @@ object ChannelUopSelectUtil extends HasVectorSettings {
     alluops
   }
 
+  /** Enumerate prefixes with buffer occupancy as the first element.
+    * Stop extending once a zero terminates the stream or the prefix already
+    * covers the output position; later channel counts cannot affect its source.
+    */
   def genUopNumPatterns2(numChannel: Int, numM2M4M8Channel: (Int, Int, Int)): ArrayBuffer[ArrayBuffer[ArrayBuffer[Int]]] = {
     val MaxM2UopIdx = numM2M4M8Channel._1
     val MaxM4UopIdx = numM2M4M8Channel._2
@@ -297,13 +307,9 @@ object ChannelUopSelectUtil extends HasVectorSettings {
     alluops
   }
 
-  /**
-   *
-   * @param uopBufferCount
-   * @param pattern
-   * @param uopIdx
-   * @return (uopFromUopBuffer: Boolean, Some((channelIdx, portIdx)))
-   */
+  /** Locate an output in a prefix ending at its contributing channel.
+    * None selects the fixed buffer slot; callers qualify unused positions by valid.
+    */
   def genDecodeOutPort2(
     uopBufferCount: Int,
     pattern: Seq[Int],
@@ -325,6 +331,7 @@ object ChannelUopSelectUtil extends HasVectorSettings {
     pattern = pattern, uopIdx = uopIdx
   )
 
+  /** Locate an output in a channel-only prefix ending at its contributing channel. */
   def genDecodeOutPortImpl1(
     pattern: Seq[Int],
     uopIdx: Int,
@@ -352,6 +359,9 @@ object ChannelUopSelectUtil extends HasVectorSettings {
     portRes
   }
 
+  /** Locate a new-channel tail uop after accounting for the existing buffer prefix.
+    * None means an old buffer source or an invalid tail slot; validity is separate.
+    */
   def genUopBufferPort2(
     uopBufferCount: Int,
     pattern       : Seq[Int],
@@ -374,6 +384,7 @@ object ChannelUopSelectUtil extends HasVectorSettings {
     }
   }
 
+  /** Locate a tail uop in the channel-only stream; None means no uop at this position. */
   def genUopBufferPort(
     pattern     : Seq[Int],
     uopWidth    : Int,
@@ -390,6 +401,7 @@ object ChannelUopSelectUtil extends HasVectorSettings {
     }
   }
 
+  /** Retain reachable ports in original channel/slot order, matching selector flattening. */
   def filterBundleByPorts[T](
     origin: Seq[Seq[T]],
     ports: Seq[(Int, Int)],

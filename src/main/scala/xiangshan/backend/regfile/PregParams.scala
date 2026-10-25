@@ -5,6 +5,10 @@ import chisel3.util._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig._
 
+/** Physical RF shape and interleaved-bank address decomposition.
+  * Low address bits select a power-of-two bank; remaining high bits address its
+  * row. Optional port counts are overrides consumed by backend datapath builders.
+  */
 abstract class PregParams {
   val numEntries: Int
   val numBank   : Int
@@ -19,16 +23,19 @@ abstract class PregParams {
   // addr for read each bank
   def arbiterAddrWidth = addrWidth - bankRaddrWidth
 
+  /** Select low bank bits; a single-bank RF uses constant bank zero. */
   def bankIndex(addr: UInt): UInt = {
     require(numBank > 0 && isPow2(numBank), s"numBank must be a positive power of two, but got $numBank")
     if (numBank == 1) 0.U else addr(bankRaddrWidth - 1, 0)
   }
 
+  /** Remove bank-select bits while retaining the row's original high bits. */
   def bankAddr(addr: UInt): UInt = {
     require(numBank > 0 && isPow2(numBank), s"numBank must be a positive power of two, but got $numBank")
     addr(addrWidth - 1, bankRaddrWidth)
   }
 
+  /** Query the assembled backend's write count; fake/absent RF descriptors are unsupported. */
   def getNumWrite(backendParams: BackendParams): Int = {
     this match {
       case _: FpPregParams => backendParams.getFpRfWriteSize

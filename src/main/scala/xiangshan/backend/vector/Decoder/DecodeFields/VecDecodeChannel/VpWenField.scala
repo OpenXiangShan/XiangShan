@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Classify vector-register results while excluding scalar-returning vector operations. */
 object VpWenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "vpWen"
 

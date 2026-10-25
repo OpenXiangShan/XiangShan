@@ -22,6 +22,11 @@ import xiangshan.backend.decode.opcode.Opcode._
 import xiangshan.backend.decode.opcode.OpcodeTraits._
 
 
+/** Host-side scalar ISA-to-uop expansions grouped by enabled extension.
+  * Most entries produce one opcode. Link-producing jumps and AMOCAS use ordered
+  * sequences whose operand/writeback traits feed the channel's per-slot fields.
+  * Immediate variants remove register-source traits while retaining the base ALU opcode.
+  */
 object ScalaUopTable {
   val tableI = {
     import xiangshan.backend.decode.isa.Instructions.{I64Type, IType}
@@ -441,6 +446,7 @@ object ScalaUopTable {
     )
   }
 
+  // AMOCAS.Q carries two register halves across four slots; narrower forms use two.
   val tableZacas = {
     import xiangshan.backend.decode.isa.Instructions.{ZACAS64Type,ZACASType}
 
@@ -581,6 +587,7 @@ object ScalaUopTable {
     )
   }
 
+  /** Unimplemented extension table; selecting it fails elaboration. */
   def tableZicfi = ???
 
   val tableZicbo = {

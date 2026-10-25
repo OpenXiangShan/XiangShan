@@ -9,6 +9,11 @@ import xiangshan.mem.mdp.{DispatchLFSTIO, LFST, SSIT, SSITEntry, WaitTable}
 import xiangshan.backend.Bundles._
 import xiangshan.mem.SqPtr
 
+/** Connects memory-dependence predictors to rename and dispatch.
+  * SSIT maps folded PCs to store sets; LFST tracks the latest store per set.
+  * Predictor updates, store issue, and CSR controls are delayed one cycle;
+  * the legacy wait-table output is currently left unspecified.
+  */
 class MemCtrl(params: BackendParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new MemCtrlIO(params))
 

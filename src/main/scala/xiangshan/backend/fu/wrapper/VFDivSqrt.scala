@@ -12,6 +12,11 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.ExceptionNO
 import yunsuan.vector.VectorFloatDivider
 
+/** Legacy vector FP divide/sqrt over parallel 64-bit arithmetic lanes.
+  * Group ready/completion are AND-reduced across lanes. Active mask/VL elements
+  * alone contribute fflags; Mgu preserves or fills inactive destination elements.
+  * Saved operation identity selects redirect cancellation while the group is busy.
+  */
 class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(cfg) {
 
   // params alias
@@ -93,6 +98,7 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
 
   private val needNoMask = false.B
   val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
+  // Expand mask/VL activity into each lane's f16/f32/f64 flag layout before OR reduction.
   val allFFlagsEn = Wire(Vec(4 * numVecModule, Bool()))
   val outSrcMaskRShift = Wire(UInt((4 * numVecModule).W))
   outSrcMaskRShift := (maskToMgu >> (outUopIdx(2, 0) * vlMax))(4 * numVecModule - 1, 0)

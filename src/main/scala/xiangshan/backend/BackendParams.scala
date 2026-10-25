@@ -34,6 +34,11 @@ import xiangshan.backend.vector.{Exu, RegionParam}
 import scala.collection.mutable
 import scala.reflect.{ClassTag, classTag}
 
+/** Backend elaboration graph: scheduler/IQ/EXU ordering, register-file ports, and
+  * wakeup connectivity. Global EXU IDs and mutable owner links are installed by backend
+  * setup before hardware bundle generation. Fake EXUs remain in topology queries but
+  * are excluded by allRealExuParams where a physical producer/port is required.
+  */
 case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
   pregParams : Seq[PregParams],
@@ -49,6 +54,8 @@ case class BackendParams(
 
   def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 
+  // Elaboration-only fanout bookkeeping: (copyDistance, last connected sink index).
+  // Connection order determines copy groups; these counters are not hardware state.
   val copyPdestInfo = mutable.HashMap[Int, (Int, Int)]()
 
   def updateCopyPdestInfo: Unit = allExuParams.filter(_.copyWakeupOut).map(x => getExuIdx(x.name) -> (x.copyDistance, -1)).foreach { x =>
@@ -227,6 +234,8 @@ case class BackendParams(
     * @param dataCfg [[IntData]] or [[VecData]]
     * @return Seq[port->Seq[(exuIdx, priority)]
     */
+  // Ordinary-port members below are ordered by EXU index; dedicated V0/VL helpers
+  // explicitly sort their members by priority. The tuple payload is (exuIdx, priority).
   def getRdPortParams(dataCfg: DataConfig) = {
     // port -> Seq[exuIdx, priority]
     val cfgs: Seq[(Int, Seq[(Int, Int)])] = allRealExuParams
@@ -342,6 +351,9 @@ case class BackendParams(
     }
   }
 
+  /** Preserve [IQ][EXU][operand] shape, inserting NoRD when that operand lacks type T.
+    * Dedicated V0/VL queries below return their separate, optional port lists.
+    */
   def getRdCfgs[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
     val rdCfgs: Seq[Seq[Seq[RdConfig]]] = allIssueParams.map(
       _.exuBlockParams.map(
@@ -480,6 +492,9 @@ case class BackendParams(
     this.vlPregParams.numRead.getOrElse(this.getRdPortIndices(VlData()).size)
   }
 
+  /** An explicit numRead overrides inferred distinct port IDs; continuity checks
+    * validate zero-based dense IDs only when the size is inferred.
+    */
   def getRfReadSize(dataCfg: DataConfig) = {
     dataCfg match{
       case IntData() | FpData() | VecData() | V0Data() | VlData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
@@ -518,6 +533,7 @@ case class BackendParams(
 
   def getExuRCWriteSize = getIntExuRCWriteSize + getMemExuRCWriteSize
 
+  /** Resolve a configured physical producer; WB is a synthetic source with ID -1. */
   def getExuIdx(name: String): Int = {
     val exuParams = allRealExuParams
     if (name != "WB") {
@@ -552,6 +568,7 @@ case class BackendParams(
     exuParams.find(_.name == name).get
   }
 
+  /** Dense load-pipeline index, distinct from global EXU ID; absent entries return -1. */
   def getLdExuIdx(exu: ExeUnitParams): Int = {
     val ldExuParams = allRealExuParams.filter(x => x.hasHyldaFu || x.hasLoadFu)
     ldExuParams.indexOf(exu)
@@ -571,6 +588,9 @@ case class BackendParams(
     portIndicesSet.min == 0 && portIndicesSet.max == portIndicesSet.size - 1
   }
 
+  /** Elaboration assertions on inferred port numbering, fan-in, and shared read/write
+    * priority consistency. This does not simulate arbitration or prove forward progress.
+    */
   def configChecks = {
     checkReadPortContinuous
     checkWritePortContinuous
@@ -601,6 +621,9 @@ case class BackendParams(
     }
   }
 
+  /** Check bounded WB fan-in and consistent read/write priority among shared-port EXUs.
+    * This elaboration helper is separate from configChecks' port-continuity checks.
+    */
   def configCheck = {
     // check 0
     val maxPortSource = 4
@@ -656,6 +679,7 @@ case class BackendParams(
   }
 }
 
+/** Region-oriented view of the same topology; generated nesting is [region][IQ][EXU]. */
 sealed trait NewParam { self: BackendParams =>
   def getIntRegionParam: RegionParam = RegionParam(intSchdParams.get, this)
   def getFltRegionParam: RegionParam = RegionParam(fpSchdParams.get, this)
@@ -678,6 +702,9 @@ sealed trait NewParam { self: BackendParams =>
   )
 }
 
+/** Explicit alternative topology builders. Definitions construct fresh parameter
+  * graphs; they are not a reflective view of whichever core configuration is active.
+  */
 object BackendV2SchdParams {
 
   def intSchdVlWbPort = 0

@@ -20,9 +20,13 @@ class ImmExtractorIO(dataBits: Int) extends Bundle {
   })
 }
 
+/** Selects an ISA immediate format and sign-extends its decoded value to the
+  * operand width expected by this execution path.
+  */
 class ImmExtractor(dataBits: Int, immTypeSet: Set[Imm]) extends Module {
   val io = IO(new ImmExtractorIO(dataBits))
 
+  // An empty format set denotes a path that never consumes an immediate.
   if (immTypeSet.nonEmpty) {
     io.out.imm := LookupTree(
       io.in.immType,

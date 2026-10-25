@@ -9,6 +9,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.InstPattern
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField}
 
+/** Encode a scalar expansion slot; its UopInfoField valid bit qualifies this value. */
 class OpcodeField(uopIdx: Int, extensions: Seq[ExtBase]) extends DecodeField[InstPattern, UInt] {
 
   override def name: String = s"opcode$uopIdx"

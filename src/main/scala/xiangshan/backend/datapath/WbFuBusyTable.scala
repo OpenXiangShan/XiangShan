@@ -13,6 +13,20 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.implicitCast._
 
+/** Aggregates fixed-latency reservations for execution units sharing a WB port.
+  * ORed per-port busy masks return to the corresponding IQs. Simultaneous new
+  * reservations for the same future slot generate registered conflict flags
+  * for the datapath. Optional tables exist only for certain-latency groups.
+  *
+  * {{{
+  * per-EXU masks -> group by RF class + physical port -> OR ------------> IQ masks
+  * new selection masks -> per-slot population >= 2 -> [conflict flag] -> datapath
+  * EXU port config -------------------------------------> route each consumer
+  * }}}
+  *
+  * Aggregated masks are combinational; only collision flags gain a local edge.
+  * Reservation storage/countdown remains in each IQ's FuBusyTableWrite.
+  */
 class WbFuBusyTable(implicit  p: Parameters, params: BackendParams) extends XSModule {
   val io = IO(new WbFuBusyTableIO)
 
@@ -88,6 +102,7 @@ class WbFuBusyTable(implicit  p: Parameters, params: BackendParams) extends XSMo
     }
   }
 
+  /** OR reservations from all enabled producers of one physical RF write port. */
   def writeBusyTable(wtBusyTable: Map[Int, Option[UInt]], busyTableWithParams: Seq[(Option[UInt], ExeUnitParams)], wbType: PregWB) = {
     wtBusyTable.foreach { case (portId, busyTable) =>
       if (busyTable.nonEmpty) {
@@ -96,6 +111,8 @@ class WbFuBusyTable(implicit  p: Parameters, params: BackendParams) extends XSMo
     }
   }
 
+  // Detect two new selections with the same latency, even when the old busy
+  // table was clear and each IQ independently chose an apparently free slot.
   def writeConflict(wtConflict: Map[Int, Option[Bool]], deqRespSetWithParams: Seq[(Option[UInt], ExeUnitParams)], wbType: PregWB) = {
     wtConflict.foreach { case (portId, conflict) =>
       if (conflict.nonEmpty) {
@@ -109,6 +126,7 @@ class WbFuBusyTable(implicit  p: Parameters, params: BackendParams) extends XSMo
     }
   }
 
+  /** Route each EXU's configured port back to its optional reservation/conflict view. */
   def readRes[T <: Data](sink: IndexedSeq[Option[T]], source: Map[Int, Option[T]], wbType: PregWB) = {
     for (i <- 0 until sink.size) {
       if (sink(i).nonEmpty) {

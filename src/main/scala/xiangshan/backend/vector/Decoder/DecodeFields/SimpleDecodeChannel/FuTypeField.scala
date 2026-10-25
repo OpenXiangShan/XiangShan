@@ -12,6 +12,7 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import scala.language.implicitConversions
 
 
+/** Map each scalar uop's opcode factory to its scheduling FU type at elaboration. */
 class FuTypeField(uopIdx: Int, extensions: Seq[ExtBase]) extends DecodeField[InstPattern, UInt]{
   override def name: String = s"fuType$uopIdx"
 

@@ -13,6 +13,10 @@ trait PMAConst extends PMPConst
 abstract class PMABundle(implicit val p: Parameters) extends Bundle with PMAConst
 abstract class PMAModule(implicit val p: Parameters) extends Module with PMAConst
 
+/** PMA counterpart of PMPEntryHandleModule. Platform regions initialize address/mask
+  * registers; config bytes remain in the external CSR bank. Writes preserve locked
+  * addresses and return a legalized config word without a local handshake pipeline.
+  */
 class PMAEntryHandleModule(implicit p: Parameters) extends PMAModule with PMAInit with PMAReadWrite {
   val io = IO(new PMAEntryHandleIOBundle)
 
@@ -109,6 +113,9 @@ class PMAEntryHandleIOBundle(implicit p: Parameters) extends PMABundle {
   })
 }
 
+/** Platform-region encoding and runtime read shaping. genAddr/genMask run at
+  * elaboration; matchMask/readAddr build hardware for CSR writes and reads.
+  */
 trait PMAReadWrite extends PMAConst with PMPReadWrite {
   def shift_addr(addr: BigInt): BigInt = {
     addr >> 2
@@ -160,6 +167,7 @@ trait PMAReadWrite extends PMAConst with PMPReadWrite {
   }
 }
 
+/** Config, encoded address, and cached byte mask for one physical-memory region. */
 class PMAEntry(implicit p: Parameters) extends PMABundle with PMAReadWrite {
   val cfg  = new PMACfgBundle
   val addr = UInt((PMPAddrWidth-PMPOffBits).W)

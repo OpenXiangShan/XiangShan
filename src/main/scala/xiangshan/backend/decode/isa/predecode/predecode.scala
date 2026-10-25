@@ -19,6 +19,10 @@ package xiangshan.backend.decode.isa.predecode
 import chisel3.util._
 import xiangshan.frontend.bpu.BranchAttribute
 
+/** Coarse branch patterns for predecode, including compressed instructions in a 32-bit
+  * container. Overlapping C.EBREAK/C.JR patterns require the table's stated precedence;
+  * these classifications are not a full instruction legality decoder.
+  */
 object PreDecodeInst {
   // def C_JAL     = BitPat("b????????????????_?01_?_??_???_??_???_01") // RV32C
   def C_J       = BitPat("b????????????????_101_?_??_???_??_???_01")

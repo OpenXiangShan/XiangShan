@@ -13,6 +13,7 @@ import xiangshan.backend.vector.util.ChiselTypeExt.BitPatToExt
 
 import scala.language.implicitConversions
 
+/** Emit the scheduling FU type for one expansion slot, qualified by UopInfoField.valid. */
 class FuTypeField(uopIdx: Int) extends DecodeField[InstSewLmulNfPattern, UInt] {
 
   override def name: String = s"fuType$uopIdx"
@@ -53,6 +54,7 @@ class FuTypeField(uopIdx: Int) extends DecodeField[InstSewLmulNfPattern, UInt] {
 }
 
 object FuTypeField {
+  /** Map opcode factories to scheduling classes; execution implementations may be shared. */
   def genFuType(opcodes: Opcodes): FuType.OHType = {
     opcodes match {
       case _: Opcode.AluOpcodes.type => FuType.alu

@@ -29,6 +29,13 @@ import scala.collection.mutable.ArrayBuffer
 import scala.language.implicitConversions
 import scala.reflect.runtime.universe._
 
+/** Elaboration-time instruction -> SEW/LMUL -> ordered opcode expansion.
+  *
+  * Helpers specialize operand/mask/allocation traits before decode tables are
+  * emitted. These sequences describe uops, not clock cycles. Empty sequences
+  * reject unsupported configurations; null placeholders represent unavailable
+  * width-specific opcodes and are handled by the consuming per-slot fields.
+  */
 object SplitTable {
   def main(args: Array[String]): Unit = {
     val hashMap = collection.mutable.HashMap[String, String]()
@@ -68,6 +75,7 @@ object SplitTable {
   import SewPattern.{e8, e16, e32, e64}
   import SewLmulPattern._
 
+  /** Associate the same expansion with each supplied configuration key. */
   private def SeqEachMap(elems: (Seq[SewLmulPattern], Seq[Opcode])*): SeqMap[SewLmulPattern, Seq[Opcode]] = {
     SeqMap.from(elems.flatMap {
       case (patterns, uops) =>
@@ -75,17 +83,9 @@ object SplitTable {
     })
   }
 
-  /**
-   * Generate a SeqMap[SewLmulPattern, Seq[Opcode]] by duplicating the given uop according to the sew and lmul pattern.
-   *
-   * @param sewFunc A function that takes a SewPattern.type and returns a SewPattern. This is used to specify the sew
-   *                pattern for which the uop should be duplicated.
-   * @param _uop The uop to be duplicated. This is a by-name parameter, so it will be evaluated each time it is used.
-   * @param func A function that takes an Opcode and returns an Opcode. This is used to modify the uop before
-   *             duplication, for example by setting certain flags.
-   * @return A SeqMap[SewLmulPattern, Seq[Opcode]] where each key is a combination of sew and lmul pattern, and the
-   *         value is a sequence of duplicated uops according to that pattern.
-   */
+  /** Copy/specialize one opcode, then repeat it max(1, LMUL) times for this SEW.
+    * Fractional configurations below the supported element-width limit are empty.
+    */
   private def dup(
     sewFunc: SewPattern.type => SewPattern,
   )(
@@ -117,6 +117,7 @@ object SplitTable {
       })
   }
 
+  /** Combine the per-SEW duplication maps without adding runtime selection state. */
   private def dup(
     e8uop : => Opcode,
     e16uop: => Opcode,
@@ -133,6 +134,7 @@ object SplitTable {
     e8SeqMap ++ e16SeqMap ++ e32SeqMap ++ e64SeqMap
   }
 
+  /** Split mask results across uops while allocating the shared destination only once. */
   private def dupM(
     sewFunc: SewPattern.type => SewPattern,
   )(
@@ -165,6 +167,7 @@ object SplitTable {
       })
   }
 
+  /** Apply mask-result duplication independently to each source element width. */
   private def dupM(
     e8uop : => Opcode,
     e16uop: => Opcode,
@@ -181,6 +184,7 @@ object SplitTable {
     e8SeqMap ++ e16SeqMap ++ e32SeqMap ++ e64SeqMap
   }
 
+  /** Widen to twice the register footprint; LMUL=8 has no representable expansion. */
   private def dupF2W(
     sewFunc: SewPattern.type => SewPattern,
   )(
@@ -211,6 +215,7 @@ object SplitTable {
       })
   }
 
+  /** Combine widening maps for source widths that can widen within ELEN. */
   private def dupF2W(
     e8uop : => Opcode,
     e16uop: => Opcode,
@@ -225,6 +230,7 @@ object SplitTable {
     e8SeqMap ++ e16SeqMap ++ e32SeqMap
   }
 
+  /** Alternate destination-allocation traits across paired narrowing uops. */
   private def dupF2N(
     sewFunc: SewPattern.type => SewPattern,
   )(
@@ -256,6 +262,7 @@ object SplitTable {
       })
   }
 
+  /** Narrow conversions read both source halves for integer LMUL, one for fractional LMUL. */
   private def dupF2Ncvt(
     sewFunc: SewPattern.type => SewPattern,
   )(
@@ -287,6 +294,7 @@ object SplitTable {
       })
   }
 
+  /** Combine paired narrowing maps for each destination element width. */
   private def dupF2N(
     e8uop : => Opcode,
     e16uop: => Opcode,
@@ -301,6 +309,7 @@ object SplitTable {
     e8SeqMap ++ e16SeqMap ++ e32SeqMap
   }
 
+  /** Combine the width-specific narrowing-conversion maps. */
   private def dupF2Ncvt(
     e8uop : => Opcode,
     e16uop: => Opcode,
@@ -315,12 +324,14 @@ object SplitTable {
     e8SeqMap ++ e16SeqMap ++ e32SeqMap
   }
 
+  /** Use one expansion for every supported SEW/LMUL key. */
   private def same(
     uops: => Seq[Opcode]
   ): SeqMap[SewLmulPattern, Seq[Opcode]] = {
     SeqEachMap(SewLmulPattern.all -> uops)
   }
 
+  /** Wrap optional single opcodes as width-specific expansions shared across LMUL. */
   private def sewSame(
     _e8uop : => Opcode,
     _e16uop: => Opcode,
@@ -337,6 +348,7 @@ object SplitTable {
     )(func)
   }
 
+  /** Copy/specialize each width's expansion, then share it across that width's LMUL keys. */
   private def sewSame(
     _e8uop : => Seq[Opcode],
     _e16uop: => Seq[Opcode],
@@ -356,6 +368,9 @@ object SplitTable {
       SeqEachMap(SewLmulPattern.e64All -> e64uop)
   }
 
+  /** Build masked partial combines followed by an unmasked final reduction.
+    * LMUL <= 1 uses a single masked reduction instead.
+    */
   private def redu(
     sewFunc: SewPattern.type => SewPattern
   )(
@@ -395,6 +410,7 @@ object SplitTable {
     )
   }
 
+  /** Combine the per-width reduction expansions. */
   private def redu(
     e8reduop : => Opcode,
     e8uop : => Opcode,
@@ -425,6 +441,7 @@ object SplitTable {
     e8SeqMap ++ e16SeqMap ++ e32SeqMap ++ e64SeqMap
   }
 
+  /** Widen initial pairs, combine their partial sums, then reduce with the scalar seed. */
   private def wredu(
     sewFunc: SewPattern.type => SewPattern
   )(
@@ -468,6 +485,7 @@ object SplitTable {
     )
   }
 
+  /** Pair each source width with its wider intermediate/reduction opcodes. */
   private def wredu(
     wadd4e8uop : => Opcode,
     wrede8uop : => Opcode,
@@ -489,6 +507,7 @@ object SplitTable {
     e8SeqMap ++ e16SeqMap ++ e32SeqMap
   }
 
+  /** Build unordered widening-FP partial sums with mask traits on source elements. */
   private def fwredu(
     sewFunc: SewPattern.type => SewPattern
   )(
@@ -519,6 +538,7 @@ object SplitTable {
       })
   }
 
+  /** Preserve ordered widening-FP accumulation by repeating the masked reduction opcode. */
   private def fwredosum(
     sewFunc: SewPattern.type => SewPattern
   )(
@@ -543,6 +563,8 @@ object SplitTable {
       })
   }
 
+  // Instruction families select a helper; the helper determines expansion shape
+  // while each entry's trait transform selects operand classes and special policy.
   val table: SeqMap[BitPat, SeqMap[SewLmulPattern, Seq[Opcode]]] = {
 
     val opi00Table = SeqMap[BitPat, SeqMap[SewLmulPattern, Seq[Opcode]]](

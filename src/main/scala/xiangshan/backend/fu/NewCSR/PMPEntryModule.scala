@@ -15,6 +15,16 @@ trait PMPConst extends HasPMParameters {
 abstract class PMPBundle(implicit val p: Parameters) extends Bundle with PMPConst
 abstract class PMPModule(implicit val p: Parameters) extends Module with PMPConst
 
+/** Address/mask state and packed-config legalization for NewCSR. Config storage is
+  * external: pmpCfg is the current bank, and pmpCfgWData feeds its selected write port.
+  * Locked TOR entries also protect the preceding address. ren only changes read shaping.
+  *
+  * {{{
+  * CSR addr,wdata,wen + external config -> lock/grain checks -> config write data
+  *                                                +-------> [address, NAPOT mask]
+  * CSR addr,ren + config + [address] -> grain-dependent address readback
+  * }}}
+  */
 class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
   val io = IO(new PMPEntryHandleIOBundle)
 
@@ -99,6 +109,7 @@ class PMPEntryHandleIOBundle(implicit p: Parameters) extends PMPBundle {
   })
 }
 
+/** Encoding helpers use addresses with the two byte-offset bits removed. */
 trait PMPReadWrite extends PMPConst {
   def matchMask(cfg: PMPCfgBundle, paddr: UInt): UInt = {
     val matchMaskCAddr = Cat(paddr, cfg.A.asUInt(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
@@ -107,7 +118,7 @@ trait PMPReadWrite extends PMPConst {
 
   /**
    * In general, the PMP grain is 2**{G+2} bytes. when G >= 1, na4 is not selectable.
-   * When G >= 2 and cfg.A(1) is set(then the mode is napot), the bits addr(G-2, 0) read as zeros.
+   * When G >= 2 and cfg.A(1) is set (NAPOT), addr(G-2, 0) reads as ones.
    * When G >= 1 and cfg.A(1) is clear(the mode is off or tor), the addr(G-1, 0) read as zeros.
    * The low Offbits is dropped
    * @param cfg
@@ -150,8 +161,7 @@ trait PMPReadWrite extends PMPConst {
 }
 
 /**
- * PMPEntry for outside pmp copies with one more elements mask to help napot match
- * TODO: make mask an element, not an method, for timing opt
+ * Decoded entry with a cached NAPOT mask, maintained alongside the address register.
  */
 class PMPEntry(implicit p: Parameters) extends PMPBundle with PMPReadWrite {
   val cfg  = new PMPCfgBundle

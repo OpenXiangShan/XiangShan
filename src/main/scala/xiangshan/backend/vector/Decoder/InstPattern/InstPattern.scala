@@ -12,6 +12,10 @@ import xiangshan.backend.vector.Decoder.util._
 import scala.beans.BeanProperty
 import scala.collection.mutable.ArrayBuffer
 
+/** Host-side instruction classification used to construct decode-table fields.
+  * rawInst may contain wildcards; this hierarchy describes encoding families,
+  * while extension tables and runtime CSR checks determine full legality.
+  */
 sealed trait InstPattern extends DecodePattern {
   implicit val rawInst: BitPat
 
@@ -30,6 +34,7 @@ sealed trait InstPattern extends DecodePattern {
 
   def opcode7: BitPat = this.rawInst(6, 0)
 
+  /** Classify whether the supported format carries a destination, not whether rd is writable. */
   def hasRd: Boolean = {
     this match {
       case int: IntInstPattern => int match {
@@ -195,6 +200,7 @@ case class FpR4TypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
 case class FpSTypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
+/** Scalar expansions such as AMOCAS reuse the vector channel's larger uop capacity. */
 sealed abstract class ScaMultUopInstPattern()(implicit rawInst: BitPat) extends VecInstPattern()
 
 sealed abstract class VecJumpInstPattern()(implicit rawInst: BitPat) extends ScaMultUopInstPattern()
@@ -279,6 +285,7 @@ case class VecConfigInstPattern()(
 }
 
 object VecLoadInstPattern {
+  /** Classify memory addressing from mew/mop/lumop; unsupported forms return null. */
   def apply()(implicit rawInst: BitPat): VecMemInstPattern = {
     val mew = rawInst(28)
     val mop = rawInst(27, 26)
@@ -306,6 +313,7 @@ object VecLoadInstPattern {
 }
 
 object VecStoreInstPattern {
+  /** Classify store addressing from mew/mop/sumop; unsupported forms return null. */
   def apply()(implicit rawInst: BitPat): VecMemInstPattern = {
     val mew = rawInst(28)
     val mop = rawInst(27, 26)
@@ -334,11 +342,13 @@ object VecStoreInstPattern {
 object InstPattern {
   import Opcode5._
 
+  /** Match a host-side bit string with '?' wildcards only on the pattern side. */
   private def rawStringMatches(value: String, pattern: String): Boolean = {
     require(value.length == pattern.length)
     value.zip(pattern).forall { case (v, p) => p == '?' || p == v }
   }
 
+  /** Classify a 32-bit encoding pattern; compressed and unsupported forms return None. */
   def apply(implicit rawInst: BitPat): Option[InstPattern] = {
     val opcode2 = rawInst(1, 0)
     val opcode5 = rawInst(6, 2)
@@ -486,6 +496,7 @@ object InstPattern {
     Option(res)
   }
 
+  // Reflection supplies diagnostic instruction names at elaboration time.
   lazy val all: Seq[InstPattern] = {
     import scala.reflect.runtime.currentMirror
     import scala.reflect.runtime.universe._
@@ -509,11 +520,7 @@ object InstPattern {
     }.filter(_.nonEmpty).map(_.get).toSeq
   }
 
-  /**
-   * Get the instruction patterns of given extensions.
-   * @param exts the extensions to get instruction patterns from
-   * @return the instruction patterns of given extensions
-   */
+  /** Classify enabled-extension encodings, attach names, and deduplicate by BitPat. */
   def extensionInsts(exts: ExtBase*): Seq[InstPattern] = {
     val extTypes: Seq[Instructions.InstType] = exts.flatMap(_.types)
 
@@ -627,6 +634,9 @@ object VecInstPattern {
     this.all.collect { case x: VecConfigInstPattern => x }
   }
 
+  /** Expand only SEW-dependent register-selection policies; other SEW bits are don't-care.
+    * The supplied set must contain both dependent and independent instruction groups.
+    */
   def withSew(insts: Seq[VecInstPattern]): Seq[DecodePatternComb2[VecInstPattern, SewPattern]] = {
     require(insts.nonEmpty)
     val sewDependentInsts: Map[Boolean, Seq[VecInstPattern]] = insts.groupBy {

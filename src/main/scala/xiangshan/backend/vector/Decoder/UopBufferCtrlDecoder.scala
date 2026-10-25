@@ -13,6 +13,22 @@ import xiangshan.backend.vector.Decoder.util._
 import scala.collection.mutable.ArrayBuffer
 import scala.language.implicitConversions
 
+/** Combinational packing control for buffered uops followed by new instructions.
+  *
+  * {{{
+  * buffer count + per-channel one-hot uop counts
+  *                    |
+  *             generated decode tables
+  *                    |
+  *       +------------+---------------+
+  *       v            v               v
+  * output selectors  tail selectors  accept/valid masks + next count
+  * }}}
+  *
+  * No state or handshake is updated here. DecodeChannels gates these prospective
+  * selections with rename readiness and owns the payload/count registers.
+  * Port sets are also exported at elaboration time to prune impossible mux inputs.
+  */
 class UopBufferCtrlDecoder(
   mopWidth        : Int,
   uopWidth        : Int,
@@ -159,6 +175,7 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
       Some(arg.p1.num, arg.p2.uopNumSeq)
     }
 
+    /** Collapse complete trailing-count alternatives into a wildcard at elaboration. */
     def simplify(patterns: Seq[UopNumWithChannelUopNum], uopIdx: Int): Seq[UopNumWithChannelUopNum] = {
       println(s"uop$uopIdx before simplify")
       patterns.foreach(x => println(x.p1.num, x.p2.uopNumSeq))
@@ -193,6 +210,7 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
     }
   }
 
+  /** Count the tail of the first instruction that reaches the output-width boundary. */
   class UopBufferNumField(uopWidth: Int) extends DecodeField[UopNumWithChannelUopNum, UInt] {
 
     override def name: String = "uopBufferNum"
@@ -210,6 +228,7 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
     }
   }
 
+  /** Accept a prefix whose cumulative uop count fits outputs plus tail storage. */
   class AcceptVecField(mopWidth: Int, uopWidth: Int, uopBufferSize: Int) extends DecodeField[UopNumWithChannelUopNum, Vec[Bool]] {
 
     override def name: String = "acceptVec"
@@ -228,11 +247,13 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
     }
   }
 
+  /** One-hot source choice: a fixed buffer slot or a channel/uop pair. */
   class UopSelectBundle(mopWidth: Int) extends Bundle {
     val uopBufferSel = Bool()
     val channelSel = Vec(mopWidth, Vec(maxSplitUopNum, Bool()))
   }
 
+  /** Locate one output in the ordered stream of buffered and newly decoded uops. */
   class UopSelectField(mopWidth: Int, uopIdx: Int, uopBufferSize: Int) extends DecodeField[UopNumWithChannelUopNum, UopSelectBundle] {
 
     override def name: String = "uopSelect"
@@ -258,6 +279,7 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
     }
   }
 
+  /** Mark output positions covered by the available uop stream. */
   class UopValidsField(uopWidth: Int) extends DecodeField[UopNumWithChannelUopNum, Vec[Bool]] {
 
     override def name: String = "uopValids"
@@ -276,6 +298,7 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
     }
   }
 
+  /** Mark positions beyond this cycle's output width that need tail storage. */
   class BufferValidsField(uopWidth: Int, uopBufferLength: Int) extends DecodeField[UopNumWithChannelUopNum, Vec[Bool]] {
 
     override def name: String = "bufferValids"
@@ -291,6 +314,7 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
     }
   }
 
+  /** Locate each retained tail uop after removing the prospective output group. */
   class UopSelectForBufferField(mopWidth: Int, uopWidth: Int, uopBufferIdx: Int, uopBufferLen: Int) extends DecodeField[UopNumWithChannelUopNum, UopSelectBundle] {
 
     override def name: String = "uopSelectForBuffer"

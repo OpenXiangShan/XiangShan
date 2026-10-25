@@ -64,6 +64,23 @@ class RfWritePortBundle(val pregParams: PregParams) extends Bundle {
   val vlWen = Bool()
 }
 
+/** Multiport physical-register storage with one-cycle functional read paths.
+  * Banked mode registers selected bank data and its selector; single-bank mode
+  * registers the read address. Debug reads are combinational. Write collisions
+  * are asserted, and hasZero forces physical register zero to constant zero.
+  *
+  * {{{
+  * single bank: read.addr -> [address] -> storage mux -------------> read.data
+  * banked:      read.addr -> bank/row -> [selected bank data] --+--> read.data
+  *                        -> [bank selector] -----------------+
+  * write(wen,addr,data) -> one-hot write select -> [storage]
+  * debug.addr ---------------------------------> storage mux ----> debug.data
+  * }}}
+  *
+  * No explicit same-address write bypass is provided. Banked reads capture data
+  * at the edge, while address-registered reads observe storage after the edge;
+  * operand forwarding must account for this read/write timing difference.
+  */
 class Regfile
 (
   name: String,
@@ -142,6 +159,18 @@ class Regfile
   }
 }
 
+/** Explicit-bank variant: each read port supplies one row address per bank and
+  * receives all bank results after registered addresses. A caller selects the
+  * needed bank. Writes still address the complete physical-register namespace.
+  *
+  * {{{
+  * read.addr(b) -> [row address(b)] -> bank(b) mux -> read.data(b)
+  * write.addr  -> bank/row decode -> [interleaved register storage]
+  * }}}
+  *
+  * Every bank returns one cycle after its address. Functional reads have neither
+  * enable nor response-valid; the caller carries request validity alongside data.
+  */
 class RegfileBank
 (
   name: String,
@@ -215,7 +244,10 @@ class RegfileBank
 }
 
 object Regfile {
-  // non-return version
+  /** Instantiate storage and wire functional/debug ports without returning the module.
+    * withReset temporarily overrides write enables/addresses for an initialization
+    * sweep, but writes the caller's wdata; it does not generate zero reset data.
+    */
   def apply(
     name         : String,
     numEntries   : Int,
@@ -288,7 +320,9 @@ object Regfile {
 }
 
 object RegfileBank {
-  // non-return version
+  /** Wire explicit bank-row read ports. The optional initialization sweep uses the
+    * caller's write data just as Regfile.apply does; normal read latency is unchanged.
+    */
   def apply(
              name         : String,
              numEntries   : Int,
@@ -382,6 +416,9 @@ object IntRegFile {
   }
 }
 
+/** Split the data width across parallel files sharing addresses/enables; part zero
+  * stores the low bits. This is width partitioning, independent of RF address banks.
+  */
 object IntRegFileSplit {
   // non-return version
   def apply(
@@ -478,6 +515,7 @@ object FpRegFile {
   }
 }
 
+/** Width-partitioned FP storage with shared addressing and writable register zero. */
 object FpRegFileSplit {
   // non-return version
   def apply(
@@ -527,6 +565,9 @@ object FpRegFileSplit {
   }
 }
 
+/** Width slices with independent write enables, allowing partial vector updates.
+  * Reads concatenate all slices in place, with part zero in the least-significant bits.
+  */
 object VfRegFile {
   // non-return version
   def apply(

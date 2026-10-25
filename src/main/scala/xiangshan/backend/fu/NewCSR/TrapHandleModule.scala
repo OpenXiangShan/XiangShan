@@ -8,6 +8,17 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.XtvecMode
 import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
 
 
+/** Combinational trap destination/cause selection. Exceptions are reduced by the
+  * configured exception priority; intrVec already carries an encoded interrupt ID.
+  * Delegation and double-trap state choose M/HS/VS, then xtvec supplies the handler PC.
+  * The caller qualifies all outputs with trapInfo.valid.
+  *
+  * {{{
+  * exception bits -> priority -> delegation ---+-> entry privilege / cause
+  * encoded interrupt + irToHS/VS -------------+-> double-trap override
+  * mtvec/stvec/vstvec -> selected base + interrupt offset -> pcFromXtvec
+  * }}}
+  */
 class TrapHandleModule extends Module {
   val io = IO(new TrapHandleIO)
 
@@ -47,6 +58,7 @@ class TrapHandleModule extends Module {
       excp := false.B
   }
 
+  // Unlike highestPrioEX, this is an encoded number and must not pass through OHToUInt.
   private val highestPrioIR  = hasIRVec.asUInt
   private val highestPrioEX  = highestPrioEXVec.asUInt
 

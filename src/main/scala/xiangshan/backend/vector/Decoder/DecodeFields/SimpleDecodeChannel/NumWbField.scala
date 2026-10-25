@@ -11,6 +11,9 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
+/** Encode expected completion events minus one, independently of decoded uop count.
+  * Stores/CBO and link-producing jumps require two completion events here.
+  */
 object NumWbField extends DecodeField[InstPattern, UInt] {
 
   override def name: String = "numWb"

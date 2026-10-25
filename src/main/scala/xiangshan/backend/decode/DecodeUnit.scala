@@ -22,6 +22,10 @@ import utility._
 import xiangshan._
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
 
+/** Immediate codec: retain only instruction payload bits through decode/rename, then
+  * reconstruct a 32-bit value at use. Branch/jump encodings omit the constant low bit;
+  * U-immediates omit twelve low zeros. extract is only implemented by selected codecs.
+  */
 abstract class Imm(val len: Int, val typEncode: UInt) {
   def toImm32(minBits: UInt): UInt = do_toImm32(minBits(len - 1, 0))
   def extract(width: Int)(minBits: UInt): UInt = ???
@@ -66,6 +70,9 @@ case class Imm_J() extends Imm(20, SelImm.IMM_UJ) {
   }
 }
 
+/** CSR payload [rd, rs1/zimm, csrAddr], retaining fields needed to reconstruct a faulting
+  * CSR instruction and suppress read/write side effects for encoded zero operands.
+  */
 case class Imm_Z() extends Imm(12 + 5 + 5, SelImm.IMM_Z) {
   override def do_toImm32(minBits: UInt): UInt = minBits
 
@@ -193,6 +200,7 @@ case class Imm_VRORVI() extends Imm(6, SelImm.IMM_VRORVI) {
   }
 }
 
+/** Shared codec catalog keyed by SelImm; LUI32 is a fusion-only full-width payload. */
 object ImmUnion {
   val I = Imm_I()
   val S = Imm_S()
@@ -208,7 +216,7 @@ object ImmUnion {
   val LUI32 = Imm_LUI32()
   val VRORVI = Imm_VRORVI()
 
-  // do not add special type lui32 to this, keep ImmUnion max len being 20.
+  // Exclude fusion-only LUI32 from the ordinary union; CSR's packed Z payload is 22 bits.
   val imms = Seq(I, S, B, U, J, Z, OPIVIS, OPIVIU, FI, VSETVLI, VSETIVLI, VRORVI)
   val immSelMap = Seq(
     SelImm.IMM_I,

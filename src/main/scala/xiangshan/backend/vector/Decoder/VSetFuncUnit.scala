@@ -9,6 +9,12 @@ import xiangshan.backend.vector.Decoder.util.{BoolDecodeField, DecodeField, Deco
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 import xiangshan.backend.vector.util.Verilog
 
+/** Combinational VL/vtype calculation shared by vset decoding and execution.
+  *
+  * Exactly one vset form and AVL source should be selected. Legal strip-mining
+  * chooses min(AVL, VLMAX); rs1/rd zero select VLMAX or preserve VL. A valid
+  * readVl overrides the computed VL. Illegal vtype clears its payload fields.
+  */
 class VSetFuncUnit(
   vlen: Int,
   elen: Int,
@@ -41,6 +47,8 @@ class VSetFuncUnit(
     vsetivli -> vsetivliRsvdIll ## in.vsetivliVType.bits.take(vtypeImmWidth),
   )).asTypeOf(VType())
 
+  // Preserve whether AVL exceeds the representable VL range without retaining
+  // all XLEN bits, so large unsigned AVLs still compare above any legal VLMAX.
   private val avl = Mux1H(Seq(
     in.vlFromImm.valid -> in.vlFromImm.bits.pad(VlWidth),
     // if vlReg is more than VLEN - 1, make it be (VLEN + vlReg % VLEN) which is no less than VLEN
@@ -121,6 +129,7 @@ object VSetFuncUnit {
     sewP ## lmulP
   }
 
+  /** Reject reserved widths/LMUL and combinations that exceed the ELEN limit. */
   class VillField(elen: Int) extends BoolDecodeField[
     DecodePatternComb2[SewPattern, LmulPattern],
   ] {
@@ -140,6 +149,7 @@ object VSetFuncUnit {
     }
   }
 
+  /** Compute VLEN*LMUL/SEW; legal entries are powers of two, enabling overlap tests. */
   class VlmaxField(vlen: Int, elen: Int) extends DecodeField[
     DecodePatternComb2[SewPattern, LmulPattern],
     UInt,

@@ -28,6 +28,9 @@ class MNretEventInput extends Bundle {
   val vsstatus = Input(new SstatusBundle)
 }
 
+/** Combinational resumable-NMI return. Restore MNPP/MNPV, set NMIE, and clear
+  * privilege-dependent override/double-trap state before checking the MNEPC target.
+  */
 class MNretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   val in = IO(new MNretEventInput)
   val out = IO(new MNretEventOutput)

@@ -12,6 +12,10 @@ import CSRConfig._
 
 import scala.collection.immutable.SeqMap
 
+/** Build the architectural packed config/address views and the per-entry config bank.
+  * The entry handler supplies address readback and locked-write legalization. Reserved
+  * entries remain addressable as read-only zero; RV64 config words use even CSR numbers.
+  */
 trait CSRPMP { self: NewCSR =>
   val pmpcfg: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMP/4-1, 2).map(num =>
     if (num < (p(PMParameKey).NumPMPReal/4-1)) {

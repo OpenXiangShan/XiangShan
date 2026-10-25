@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Select vector FP arithmetic for FS/frm legality checks; config/scalar cases are don't-care. */
 object IsVecFPField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "isVecFPInst"
 

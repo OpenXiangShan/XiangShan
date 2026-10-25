@@ -9,6 +9,11 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.regfile.PregParams
 
+/** Shape a writeback arbiter for one nonempty, homogeneous RF class.
+  * Inputs preserve producer order and use Decoupled grants. Outputs are Valid
+  * physical-port writes with dense indices; width/count may be overridden by
+  * PregParams instead of inferred from configured backend port IDs.
+  */
 case class WbArbiterParams(
   wbCfgs    : Seq[PregWB],
   pregParams: PregParams,

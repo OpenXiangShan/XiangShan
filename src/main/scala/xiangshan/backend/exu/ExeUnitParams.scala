@@ -18,6 +18,11 @@ import scala.collection.mutable
 import xiangshan.backend.Bundles.NewExuOutput
 import xiangshan.backend.Bundles.WriteBackRobBundle
 
+/** Elaboration description of one execution slot and its FU alternatives. Port and
+  * payload requirements union those alternatives; each accepted operation selects one FU.
+  * Backend binding installs global indices, wakeup links, and owner references before
+  * helpers that depend on them are used. Dedicated V0/VL ports are configured separately.
+  */
 case class ExeUnitParams(
   name          : String,
   fuConfigs     : Seq[FuConfig],
@@ -133,7 +138,8 @@ case class ExeUnitParams(
     fuConfigs.take(idx + 1).map(x => if(x.srcNeedCopy) 1 else 0).reduce(_ + _) - 1
   }
 
-  // exu writeback: 0 normalout; 1 intout; 2 fpout; 3 vecout
+  // Output 0 is the common completion path; only enabled RF destinations receive
+  // additional dense indices. An absent destination maps back to 0, not a fixed RF slot.
   val wbNeedIntWen : Boolean = writeIntRf && !isMemExeUnit
   val wbNeedFpWen  : Boolean = writeFpRf  && !isMemExeUnit
   val wbNeedVecWen : Boolean = writeVecRf && !isMemExeUnit
@@ -162,6 +168,9 @@ case class ExeUnitParams(
     else 0
   }
 
+  /** Count distinct sink IQs and allocate one extra wakeup copy per copyDistance sinks;
+    * copyDistance must be positive. This is elaboration-time fanout partitioning.
+    */
   def copyNum: Int = {
     val setIQ = mutable.Set[IssueBlockParams]()
     iqWakeUpSourcePairs.map(_.sink).foreach{ wakeupSink =>
@@ -202,8 +211,8 @@ case class ExeUnitParams(
   def hasUncertainLatencyVal: Boolean = fuConfigs.map(x => x.latency.uncertainLatencyVal.nonEmpty).reduce(_ || _)
 
   /**
-    * Get mapping from FuType to Latency value.
-    * If both [[latencyCertain]] and [[hasUncertainLatencyVal]] are false, get empty [[Map]]
+    * Map FU types to scheduling latency. Fully certain sets include OG2 when needed;
+    * otherwise use configured uncertain values, or retain the known-latency subset.
     *
     * @return Map[ [[BigInt]], Latency]
     */
@@ -217,6 +226,9 @@ case class ExeUnitParams(
       latencyCertainFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     }
   }
+  /** Wakeup timing excludes no-data completions and the extra OG2 adjustment used
+    * by fuLatencyMap. The uncertain-value branch requires values on its selected FUs.
+    */
   def wakeUpFuLatencyMap: Map[FuType.OHType, Int] = {
     if (latencyCertain)
       fuConfigs.filterNot(_.hasNoDataWB).map(x => (x.fuType, x.latency.latencyVal.get)).toMap
@@ -227,8 +239,7 @@ case class ExeUnitParams(
   }
 
   /**
-    * Get set of latency of function units.
-    * If both [[latencyCertain]] and [[hasUncertainLatencyVal]] are false, get empty [[Set]]
+    * Distinct scheduling latencies from the available FU latency map.
     *
     * @return Set[Latency]
     */
@@ -381,6 +392,9 @@ case class ExeUnitParams(
     issueBlockParam = param
   }
 
+  /** Bind name-based wakeup edges and detect dependence on load-origin wakeups.
+    * backendParam must already be set because edges resolve to global EXU parameters.
+    */
   def updateIQWakeUpConfigs(cfgs: Seq[WakeUpConfig]) = {
     this.iqWakeUpSourcePairs = cfgs.filter(_.source.name == this.name)
     this.iqWakeUpSinkPairs = cfgs.filter(_.sink.name == this.name)
@@ -455,9 +469,9 @@ case class ExeUnitParams(
     *
     * @example
     * {{{
-    *   fuCfg.srcData = Seq(VecData(), VecData(), VecData(), V0Data())
+    *   fuCfg.srcData = Seq(Seq(VecData(), VecData(), VecData()))
     *   getRfReadSrcIdx(VecData()) = Seq(0, 1, 2)
-    *   getRfReadSrcIdx(V0Data()) = Seq(3)
+    *   Dedicated V0/VL operands are described by their separate port configurations.
     * }}}
     * @return Map[DataConfig -> Seq[indices] ]
     */

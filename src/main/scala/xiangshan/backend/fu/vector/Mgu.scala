@@ -31,6 +31,19 @@ import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import yunsuan.vector.Common.SewOH
 import yunsuan.vector._
 
+/** Combinational destination merge for byte data and packed mask results.
+  *
+  * {{{
+  * vstart/VL/EEW/mask --> ByteMaskTailGen --> active / agnostic bytes
+  * new VD + old VD -----------------------> new / ones / old byte mux
+  * mask + EEW + vdIdx --> packed mask merge --> insert slice into old VD
+  *                                   dstMask selects the final result
+  * }}}
+  *
+  * Prestart bytes are preserved, and begin>=end preserves all byte data. Narrow
+  * operations share a destination index across two uops. Packed-mask layout uses
+  * fixed 128-bit-vector slice sizes below; illegal is currently tied false.
+  */
 class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val numBytes = vlen / 8
   private val byteWidth = log2Up(numBytes)
@@ -136,16 +149,19 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   io.debugOnly.end := maskTailGen.io.in.end
   io.debugOnly.activeEn := activeEn
   io.debugOnly.agnosticEn := agnosticEn
+  /** Select the vector-register index containing an element at the current EEW. */
   def elemIdxMapVdIdx(elemIdx: UInt) = {
     require(elemIdx.getWidth >= log2Up(vlen))
     // 3 = log2(8)
     Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => elemIdx(byteWidth - x + 3, byteWidth - x)))
   }
 
+  /** Return the element offset within one vector register. */
   def elemIdxMapUElemIdx(elemIdx: UInt) = {
     Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => elemIdx(byteWidth - x - 1, 0)))
   }
 
+  /** Extract per-register packed-mask slices, zero-padding unused high output bits. */
   def splitVdMask(maskIn: UInt, sew: SewOH): Vec[UInt] = {
     val maskWidth = maskIn.getWidth
     val result = Wire(Vec(maskWidth / numBytes, UInt(numBytes.W)))
@@ -161,6 +177,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   }
 }
 
+/** Load merge variant receiving an already-selected low 16-bit mask slice. */
 class VldMgu(vlen: Int)(implicit p: Parameters) extends Mgu(vlen) {
   override lazy val maskUsed = in.mask(15, 0)
 }

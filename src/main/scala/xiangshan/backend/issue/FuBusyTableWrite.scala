@@ -9,6 +9,10 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Utils
 import xiangshan.backend.issue.EntryBundles.IssueQueueRespBundle
 
+/** Reserves future result slots indexed by fixed FU latency.
+  * Dequeue adds a reservation; OG0/OG1 failure removes the reservation after
+  * accounting for elapsed cycles. The same logic also tracks writeback slots.
+  */
 class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Parameters, iqParams: IssueBlockParams) extends XSModule {
   private val latencyValMax: Int = fuLatencyMap.values.fold(0)(_ max _)
   private val tableSize = latencyValMax + 1
@@ -38,6 +42,7 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
   private val og0RespMatchVec = getMatchVecFromResp(og0Resp)
   private val og1RespMatchVec = getMatchVecFromResp(og1Resp)
 
+  // Encode the response's FU types as latency buckets shared by this table.
   def getMatchVecFromResp(resp: IssueQueueRespBundle) : Vec[Bool] = {
     VecInit((0 until tableSize).map {
       lat =>
@@ -49,6 +54,8 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
     })
   }
 
+  // Right shifts count down to the result slot. Next-state masks use latency
+  // offsets 1/2/3 for new selection, OG0 failure and OG1 failure respectively.
   private val fuBusyTableShift = (fuBusyTable >> 1).asUInt
   private val deqRespSetShift = Mux(deqRespSuccess, deqRespMatchVec.asUInt >> 1, Utils.NZeros(tableSize))
   private val og0RespClearShift = Mux(og0RespFail, og0RespMatchVec.asUInt >> 2, Utils.NZeros(tableSize))

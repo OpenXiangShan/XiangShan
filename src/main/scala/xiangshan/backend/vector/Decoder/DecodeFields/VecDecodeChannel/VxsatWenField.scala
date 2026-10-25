@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.StringToExt
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
+/** Mark saturating arithmetic families that can update the accrued vxsat flag. */
 object VxsatWenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "vxsatWen"
 

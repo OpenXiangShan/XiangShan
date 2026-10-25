@@ -23,6 +23,17 @@ import xiangshan._
 import utils._
 import utility._
 
+/** Age tracker for transient enqueue slots, whose valid signals represent
+  * same-cycle acceptance rather than destination one-hot masks.
+  *
+  * {{{
+  * enq(i)/enq(j) -> refresh arrival order -> [upper-triangle age]
+  * [age] + canIssue(port) -> oldest among eligible slots -> out(port) one-hot
+  * }}}
+  *
+  * Simultaneous arrivals use slot order. Selection sees stored age, and callers
+  * exclude invalid slots through canIssue rather than clearing age on dequeue.
+  */
 class NewAgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val enq = Vec(numEnq, Input(Bool()))
@@ -30,6 +41,7 @@ class NewAgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Para
     val out = Vec(numDeq, Output(UInt(numEntries.W)))
   })
 
+  // Only upper-triangle age state is needed; lower-triangle comparisons use its inverse.
   // age(i)(j): entry i enters queue before entry j
   val age = Seq.fill(numEntries)(Seq.fill(numEntries)(RegInit(false.B)))
   val nextAge = Seq.fill(numEntries)(Seq.fill(numEntries)(Wire(Bool())))
@@ -73,6 +85,7 @@ class NewAgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Para
     }
   }
 
+  // Masked pairwise comparison selects the oldest entry among current requests.
   def getOldestCanIssue(get: (Int, Int) => Bool, canIssue: UInt): UInt = {
     VecInit((0 until numEntries).map(i => {
       (VecInit((0 until numEntries).map(j => get(i, j))).asUInt | ~canIssue).andR & canIssue(i)

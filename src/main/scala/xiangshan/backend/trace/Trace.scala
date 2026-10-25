@@ -25,6 +25,19 @@ class TraceIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
   }
 }
 
+/**
+  * Stages ROB retirement metadata for trace compression and PC reconstruction.
+  *
+  * {{{
+  * ROB commit --> [S1] --> TraceBuffer --> FTQ PC request
+  *                              |               |
+  *                         blockRobCommit     [S3 metadata] --> encoder
+  * encoder enable/stall --------+
+  * }}}
+  *
+  * The final metadata register aligns compressed groups with the PC read in
+  * the surrounding control block. TraceBuffer backpressure gates new ROB groups.
+  */
 class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new TraceIO)
   val (fromEncoder, fromRob, toPcMem, toEncoder) = (io.in.fromEncoder, io.in.fromRob, io.out.toPcMem, io.out.toEncoder)

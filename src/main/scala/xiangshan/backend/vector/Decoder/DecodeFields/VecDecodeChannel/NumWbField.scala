@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.Types.NumWB
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
+/** Encode expected completion events minus one; vector stores count two per uop. */
 object NumWbField extends DecodeField[
   DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   UInt,

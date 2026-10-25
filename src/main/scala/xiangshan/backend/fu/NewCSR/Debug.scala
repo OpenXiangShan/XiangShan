@@ -10,6 +10,17 @@ import utils._
 import xiangshan._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 
+/** Classify debug-entry causes and distribute selected trigger settings. Entry decisions
+  * and privilege/context enables are combinational. Trigger update valid is delayed two
+  * cycles, but its address/data come from the current selected bank: serialized CSR
+  * sequencing must keep that selection aligned until distribution.
+  *
+  * {{{
+  * trap + DCSR + privilege -> debug-entry cause qualifiers
+  * TDATA banks + context   -> trigger enable vectors
+  * TDATA write -> [valid delay 2] + current selected payload -> frontend / memory
+  * }}}
+  */
 class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new DebugIO)
 
@@ -42,7 +53,7 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   private val hgatpVmid = io.in.hgatpVmid
 
   /**
-   * ways to entry Dmode：
+   * Ways to enter debug mode:
    *    1. debug intr(from external debug module)
    *    2. ebreak inst in nonDmode
    *    3. trigger fire in nonDmode
@@ -238,6 +249,10 @@ class BaseTriggerIO(implicit p: Parameters) extends XSBundle{
 }
 
 
+/** Combinational memory-trigger reduction. Cache-block matching takes precedence over
+  * vector byte-mask matching, then scalar matching. Chain-ending hits select debug before
+  * breakpoint; the lowest firing index supplies the reported address and byte mask.
+  */
 abstract class BaseTrigger()(implicit val p: Parameters) extends Module with HasXSParameter with SdtrigExt with HasDCacheParameters {
   lazy val io = IO(new BaseTriggerIO)
 
@@ -298,6 +313,9 @@ abstract class BaseTrigger()(implicit val p: Parameters) extends Module with Has
 }
 
 
+/** Load/store specialization: scalar loads exclude prefetches, vector unit-stride uses
+  * byte coverage, and store CBOs compare cache-line addresses. No local valid register.
+  */
 class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Parameters) extends BaseTrigger {
 
   class MemTriggerIO extends BaseTriggerIO{
@@ -342,6 +360,7 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Param
 
 }
 
+/** Segment-access trigger with runtime load/store selection and no CBO path. */
 class VSegmentTrigger(override implicit val p: Parameters) extends BaseTrigger {
 
   class VSegmentTriggerIO extends BaseTriggerIO{

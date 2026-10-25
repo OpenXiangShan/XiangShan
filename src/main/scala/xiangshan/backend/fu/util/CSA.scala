@@ -19,6 +19,10 @@ package xiangshan.backend.fu.util
 import chisel3._
 import chisel3.util._
 
+/** Bitwise compressors with unshifted carry outputs. For the implementations below,
+  * the input sum equals out(0) + 2*out(1) (+ 2*out(2) for 5:3), before truncation.
+  * Callers place carry bits in the next weight column; there is no carry propagation.
+  */
 abstract class CarrySaveAdderMToN(m: Int, n: Int)(len: Int) extends Module{
   val io = IO(new Bundle() {
     val in = Input(Vec(m, UInt(len.W)))

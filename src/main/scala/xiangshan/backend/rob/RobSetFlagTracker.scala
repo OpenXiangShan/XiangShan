@@ -29,7 +29,21 @@ class RobSetFlagUpdateReq(val flagWidth: Int)(implicit p: Parameters) extends XS
   val setMask = UInt(flagWidth.W)
 }
 
-/** Tracks the oldest in-flight setter for each bit of a sticky ROB flag. */
+/** Track the oldest in-flight setter for each sticky flag bit.
+  *
+  * {{{
+  * update candidates -- flush/commit filtering --+
+  *                                              v
+  * [pending setter per bit] ----------------> oldest selection --> [next pending]
+  *          |
+  *          +-- matching commit, no redirect --> commitSetMask
+  * }}}
+  *
+  * One setter suffices: an older surviving setter makes the sticky bit true
+  * before younger ones, and a redirect removing it also removes younger setters.
+  * Selection compares ROB slots; commit matching uses the containing ROB entry.
+  * orderedUpdatePorts also requires each candidate subset to retain port age order.
+  */
 class RobSetFlagTracker(
   val width: Int,
   val numUpdatePorts: Int,
@@ -68,6 +82,7 @@ class RobSetFlagTracker(
     val commitSetMask = Output(UInt(width.W))
   })
 
+  /** Balanced valid/age reduction over a nonempty candidate sequence. */
   private def selectOldest(candidates: Seq[(Bool, RobPtr)]): (Bool, RobPtr) = {
     ParallelOperation(candidates, (left: (Bool, RobPtr), right: (Bool, RobPtr)) => {
       val selectLeft = left._1 && (!right._1 || left._2.isBeforeSlot(right._2))
@@ -90,6 +105,8 @@ class RobSetFlagTracker(
   private val updateCommits = io.update.map { update =>
     io.commit.map(commit => commit.valid && commit.bits.isSameEntry(update.bits.robIdx)).reduce(_ || _)
   }
+  // Same-cycle commits are excluded from new pending state when no redirect is
+  // active; commitSetMask below is generated from the previously stored setter.
   private val commonUpdateValid = io.update.zipWithIndex.map { case (update, index) =>
     update.valid && !updateNeedsFlush(index) &&
       !(!io.redirect.valid && updateCommits(index))

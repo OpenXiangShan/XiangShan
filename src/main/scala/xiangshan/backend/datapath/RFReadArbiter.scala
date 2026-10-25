@@ -45,7 +45,19 @@ class OldestArbiterIO(pregWidth: Int, n: Int)(implicit p: Parameters) extends Bu
   val in  = Flipped(Vec(n, Decoupled(new RFArbiterBundle(pregWidth))))
   val out = Valid(new RFArbiterBundle(pregWidth))
 }
-// use robIdx to check age in T0, and adjustment priority in T2
+/** Selects current requests using a registered priority permutation.
+  * ROB slot and channel ages are sampled, then update priorities two edges
+  * later. Current grants use that stored ordering, keeping comparisons off
+  * the same-cycle RF read-selection path.
+  *
+  * {{{
+  * cycle N request age -> [valid/ROB/channel] -> rank -> [priority] (N+2)
+  * current valid --------- AND stored priority -> first rank -> current data/ready
+  * }}}
+  *
+  * Only priorities are retained; request payloads are not buffered. A new request
+  * may initially use a rank derived from an older request on that input port.
+  */
 class OldestArbiter(pregWidth: Int, n: Int)(implicit p: Parameters) extends Module {
   val io = IO(new OldestArbiterIO(pregWidth, n))
   if (n == 1) {
@@ -112,6 +124,9 @@ class RFBankReadArbiterIO(params: RFRdArbParams)(implicit p: Parameters) extends
   val out = Vec(params.portMax + 1, Vec(params.pregParams.numBank, Valid(new RFArbiterBundle(params.pregParams.arbiterAddrWidth))))
 }
 
+/** Groups operand requests by configured RF port and arbitrates each group.
+  * NoRD inputs need no resource; unconfigured output ports emit invalid data.
+  */
 abstract class RFReadArbiterBase(val params: RFRdArbParams)(implicit p: Parameters) extends Module {
   protected def portRange: Range
 
@@ -188,6 +203,21 @@ class IntRFReadArbiter(
   override protected def portRange: Range = 0 to backendParams.getRdPortIndices(IntData()).max
 }
 
+/** Independent read arbitration per physical bank and configured port.
+  * Bank enables determine which requests compete; bankAddr removes the bank
+  * index from the RF address. A request is ready when all bank arbiters agree.
+  * For multiple banks, bankValidVec is the arbiter valid input: callers must
+  * already qualify it with request validity. The outer valid is not ANDed again.
+  *
+  * {{{
+  * IQ/EXU/source -> group by RF port -> bankValidVec(b) -> OldestArbiter(port,b)
+  * physical addr -> bankAddr -----------------------------------> row address
+  * per-bank grants -> AND for each requester -------------------> input ready
+  * per-bank winner --------------------------------------------> RF port/bank
+  * }}}
+  *
+  * Grants and row addresses are combinational; the RF supplies the data stage.
+  */
 abstract class RFBankReadArbiterBase(val params: RFRdArbParams)(implicit p: Parameters) extends Module {
   protected def portRange: Range
 

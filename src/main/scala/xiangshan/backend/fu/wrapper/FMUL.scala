@@ -9,6 +9,10 @@ import xiangshan.backend.vector.fu.{VecFuConfig, FltFixLatFunc}
 import yunsuan.fpu.fmul._
 import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 
+/** Dedicated FP multiply with a separate unrounded handoff for fused operations.
+  * The ex(1) opcode qualifies the handoff; saved src2/sign controls follow the
+  * multiply input. FltExu may replace src2 with a later third-source bypass.
+  */
 class FMulFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltFixLatFunc(cfg) {
 
   // io alias
@@ -36,7 +40,7 @@ class FMulFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltFixLatFunc(cf
 
   // fma results to falu
   val outToFaluFromFmul = out.FmulToFadd.get
-  //dirty code fuOpType, in valid next cycle outToFaluFromFmul valid
+  // Use the handoff-stage opcode, paired with the intermediate rather than a new input.
   outToFaluFromFmul.valid := in.ex(1).valid && FMacOpcode.isOP3(in.ex(1).bits.ctrl.opcode)
   outToFaluFromFmul.bits.FMULToFALUCtrl := fmul.io.outToFADD.FMULToFADDCtrl
   outToFaluFromFmul.bits.fpAAppend := fmul.io.outToFADD.fpAAppend

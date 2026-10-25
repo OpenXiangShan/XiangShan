@@ -11,6 +11,7 @@ import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
 
 import scala.language.experimental.macros
 
+/** Mutable host-side template field used while constructing decode tables. */
 class MutableRef[A](var value: A) {
   def update(newVaue: A): Unit = value = newVaue
 
@@ -83,6 +84,10 @@ object FlushPipe extends UopTrait
 
 object CannotRobCompress extends UopTrait
 
+/** Elaboration-time uop template; trait mutations do not represent hardware state.
+  * Effective traits are (base + additions) - removals, so removal wins when a
+  * trait occurs in both mutable sets. Callers must keep operand traits consistent.
+  */
 abstract class UopBase(baseTraits: UopTrait*) {
 
   var opcode: Opcode = null
@@ -99,6 +104,7 @@ abstract class UopBase(baseTraits: UopTrait*) {
     this
   }
 
+  /** Project effective traits into the packed rename/dependency table format. */
   def genUopInfoRenameBitPat: BitPat = {
     UopInfoRename.genBitPat(
       src1Type = this.getSrc1Type.map(_.srcType.operand),
@@ -168,6 +174,8 @@ abstract class UopBase(baseTraits: UopTrait*) {
     }
   }
 
+  // Operand convenience methods enforce one source-one class; generic +/- below
+  // only update the trait sets and do not run these consistency checks.
   def s1v: this.type = {
     require(this.allowedTraits.contains(Src1Vp), s"${allowedTraits.mkString("allowedTraits: (", ",", ")")}")
     require(!this.getTraits.exists(_.isInstanceOf[Src1Trait]), s"all traits: ${this.getTraits.collect { case x: Src1Trait => x} }")
@@ -206,6 +214,7 @@ abstract class UopBase(baseTraits: UopTrait*) {
     this
   }
 
+  /** Validate constructor-supplied traits against this template's allowed set. */
   def allowedAndAdded(ts: Seq[UopTrait]): Unit = {
     ts.map(t => t.ensuring(this.allowedTraits.contains(t), s"$t is not in ${this.allowedTraits}"))
 
@@ -217,6 +226,7 @@ abstract class UopBase(baseTraits: UopTrait*) {
 
 case class ScalaUop(baseTrais: UopTrait*) extends UopBase(baseTrais: _*)
 
+/** Vector template adds mask interpretation and shared-destination allocation policy. */
 abstract class VecUop(baseTraits: UopTrait*) extends UopBase(baseTraits: _*) {
   var maskType: MutableRef[MaskType] = new MutableRef(DestMask)
 
@@ -291,6 +301,8 @@ case object Vws extends Vec(Operand.VP)
 
 case object NeedVecEnable extends UopTrait
 
+// The following families seed common operand traits; concrete templates specialize
+// register width/class and side effects before the decode BitPats are generated.
 class VecIntUopOp2(ts: UopTrait*) extends VecIntUop(VlRen +: V0RenAsMask +: ts: _*) {
   override def allowedTraits: Set[UopTrait] = Set(
     Src1Vp, Src1Gp, Src1Imm,

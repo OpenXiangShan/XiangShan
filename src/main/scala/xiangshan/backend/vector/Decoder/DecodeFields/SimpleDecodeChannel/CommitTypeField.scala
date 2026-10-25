@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
+/** Classify retirement accounting independently of the uop's execution opcode. */
 object CommitTypeField extends DecodeField[InstPattern, UInt] {
   override def name: String = "commitType"
 

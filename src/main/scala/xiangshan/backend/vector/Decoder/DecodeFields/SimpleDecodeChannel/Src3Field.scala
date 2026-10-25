@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.Types.DecodeSrcType.FP
 import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
+/** Enable the third FP source only for scalar four-register fused instructions. */
 object Src3Field extends DecodeField[InstPattern, SrcRenType] {
   override def name: String = "src3"
 

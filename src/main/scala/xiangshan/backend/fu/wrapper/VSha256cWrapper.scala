@@ -9,6 +9,10 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{NewMgu, VecPipedFuncUnit}
 import yunsuan.vector.v2.Crypto.{CryptoIteration, VSha256c, VSha256ms}
 
+/** SHA-256 compression adapter with the active-byte mask delayed by two edges.
+  * CryptoIteration pipe zero is used exclusively. Inactive output bytes retain
+  * the saved old VD; the matching activity mask follows the arithmetic result.
+  */
 class VSha256cWrapper(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
   private implicit val opcode = fuOpType
   private val valid = io.in.valid

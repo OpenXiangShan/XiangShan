@@ -26,6 +26,27 @@ import xiangshan.mem.SqPtr
 import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 
 
+/**
+  * Floating-point issue storage with delayed operand wakeup and replay tracking.
+  *
+  * {{{
+  * in.enq --> [enqueue entries] -- updated-state transfer --> [fast entries]
+  *                       |                                      |
+  * FP M2/M2D1/M4 wakeups + load/EXU cancels --> source state / bypass provenance
+  *                       +------------------+-------------------+
+  *                                          |
+  *                 assigned dequeue port + WB reservation check + age selection
+  *                                          |
+  *                              out.deq (Valid issue attempt)
+  *                                          |
+  *                     IS0 / IS1 / EX0 / EX1 responses --> retry or free
+  * }}}
+  *
+  * Resident age winners precede enqueue-slot winners. Issued state and its
+  * response timer survive entry transfers. FMA source 3 may issue from an M4
+  * prediction; a bounded load-cancel window retains its producer provenance
+  * until the normal wakeup or a replay resolves the dependency.
+  */
 class FltIssueQueue(
   override val wrapper: FltIssueQueue.LazyMod
 )(implicit p: Parameters, val param: IssueParam) extends LazyModuleImp(wrapper) with HasXSParameter {
@@ -536,6 +557,8 @@ class FltIssueQueue(
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
 
+  // Update readiness and bypass age together; retain enough producer identity
+  // to revoke an early FMA/load wakeup when the matching stage later fails.
   private def handleSrcWakeUp(
     isKeep: Boolean,
   )(
@@ -632,6 +655,8 @@ class FltIssueQueue(
     }
   }
 
+  // Advance a retained or transferring entry, including source repair and the
+  // response-stage timer. Selection starts an attempt; cancellation permits retry.
   private def keepNextUpdate(
     entryIdx              : Int,
     statusSink            : Status,
@@ -812,6 +837,10 @@ object FltIssueQueue {
     val validNum: UInt = UInt(log2Ceil(param.numEntry + 1).W)
   }
 
+  /** Group selected attempts by global WB port and emit one prospective reservation.
+    * Fixed slots exclude fDivSqrt; the non-fixed launch pulse uses the explicit vidiv
+    * predicate below. FU completion announcements are supplied separately by the region.
+    */
   def connectWbFuBusyTableIn(
     sink: Option[WbFuBusyTable.In],
     wbPortIds: Seq[Int],
@@ -923,6 +952,7 @@ object FltIssueQueue {
     val flushPipe = Option.when(param.needFlushPipe)(Bool())
     val debug     = Option.when(backendParams.debugEn)(new IssueQueueInDebug)
 
+    /** Project stored instruction controls; source readiness and replay state live in Status. */
     def fromEnq(enq: Enq): Unit = {
       this.fuType := enq.fuType
       this.opcode := enq.opcode
@@ -985,6 +1015,8 @@ object FltIssueQueue {
     def maxValue(implicit param: IssueParam): UInt = 3.U(width.W)
   }
 
+  // Dispatch assigns a dequeue port; only that port checks the operation's
+  // future WB slot and may request this entry from the age detector.
   def entryCanIssueOnDeq(
     fromWbFuBusyTable: WbFuBusyTableReadBundle,
     param: IssueParam,

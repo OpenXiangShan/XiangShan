@@ -7,6 +7,7 @@ import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Classify a general-register destination; suppression of writes to x0 is separate. */
 object GpWenField extends BoolDecodeField[InstPattern] {
   override def name: String = "gpWen"
 

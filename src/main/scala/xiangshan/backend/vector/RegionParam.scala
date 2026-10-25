@@ -26,6 +26,10 @@ case object IntRegion extends RegionType
 case object FltRegion extends RegionType
 case object VecRegion extends RegionType
 
+/** Elaboration hierarchy for region -> IQ -> execution pipe.
+  * Nested bundle builders retain that ordering, including empty optional groups;
+  * read/write capability queries aggregate the attached IssueParam descriptions.
+  */
 class RegionParam(
   val issueParams: Seq[IssueParam],
 )(
@@ -116,6 +120,7 @@ class RegionParam(
 }
 
 object RegionParam {
+  /** Adapt scheduler parameters and initialize backend/parent links throughout the tree. */
   def apply(
     schdBlockParams: SchdBlockParams,
     backendParams: BackendParams,

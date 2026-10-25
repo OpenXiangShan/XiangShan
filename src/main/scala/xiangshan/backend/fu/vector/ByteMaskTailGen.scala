@@ -43,6 +43,13 @@ class ByteMaskTailGenIO(vlen: Int)(implicit p: Parameters) extends Bundle {
   })
 }
 
+/** Combinational byte enables for one VD slice of the global [begin, end) body.
+  *
+  * Element indices are converted to byte positions, then vdIdx selects this
+  * register's portion. Masked body bytes use vma, tail bytes use vta, and prestart
+  * bytes remain unchanged. begin>=end suppresses both output masks. The global
+  * span is currently fixed at 8*16 bytes despite the vlen parameter.
+  */
 class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module {
   require(isPow2(vlen))
 

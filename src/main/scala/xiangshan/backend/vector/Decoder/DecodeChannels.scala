@@ -33,6 +33,22 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import scala.language.implicitConversions
 
+/** Decode instructions in parallel, then pack their uops in program order.
+  *
+  * {{{
+  * mops --> vector / simple / vset / pseudo channels --> per-mop uops
+  *                        | uop counts                     |
+  * [buffer count] --> UopBufferCtrlDecoder --> UopSelectModule --> out.uops
+  *                               |                         ^
+  *                               v                         |
+  *                       BufferSelectModule --> [uop tail + mop metadata]
+  * }}}
+  *
+  * Buffered uops precede new instructions. The selectors are combinational;
+  * buffer registers update only when rename accepts the group. A redirect clears
+  * buffer occupancy; it need not clear the stored payload. Input ready means the
+  * instruction is accepted, including any tail retained for the next cycle.
+  */
 class DecodeChannels(
   mopWidth: Int,
   uopWidth: Int,
@@ -136,6 +152,8 @@ class DecodeChannels(
   val psdChannelOut: Seq[ValidIO[DecodeChannelOutput]] =
     psdUopOuts.map(x => makeValid(x.valid, DecodeChannelOutput.fromPseudoChannelUop(x.bits, VLEN)))
 
+  // An unrecognized valid instruction still contributes one faulting uop, so it
+  // can reach precise exception handling instead of silently disappearing.
   val illegalChannelOut: Seq[ValidIO[DecodeChannelOutput]] = (0 until mopWidth).map { i =>
     val hasDecodedUop = vecChannelOut(i).head.valid ||
                         vsetChannelOut(i).valid ||
@@ -155,6 +173,8 @@ class DecodeChannels(
       RegEnable(next, update)
   }
 
+  // Only the final accepted instruction can leave a split tail. Its frontend
+  // metadata is shared by all buffered uops rather than replicated per slot.
   val bufferedMopCtrlNext = Wire(new MopCtrlBundle)
   val bufferedMopCtrl = RegEnable(bufferedMopCtrlNext, uopBufferUpdate)
 
@@ -242,6 +262,8 @@ class DecodeChannels(
     }
   }
 
+  // Control is computed for a prospective transfer; renameCanAccept commits
+  // payload updates and the buffer-count enable above commits occupancy.
   uopBufferNumNext := Mux(in.redirect, 0.U, uopBufferCtrlDecoder.out.uopBufferNum)
   uopBufferUpdateVec := uopBufferCtrlDecoder.out.bufferValids.map(_ && in.renameCanAccept)
   uopBufferValid := uopBufferCtrlDecoder.out.bufferValids
@@ -307,6 +329,7 @@ class DecodeChannels(
   }
 }
 
+/** Instruction bits and architectural context sampled by each combinational decoder. */
 class DecodeChannelInput(implicit p: Parameters) extends Bundle {
   val rawInst = UInt(32.W)
   val vtype = VType()
@@ -318,6 +341,7 @@ class DecodeChannelInput(implicit p: Parameters) extends Bundle {
   def ta: Bool = vtype.vta
 }
 
+/** Common uop format after channel-specific expansion; numWb encodes count minus one. */
 class DecodeChannelOutput extends Bundle {
   val fuType: UInt = FuType()
   val opcode: UInt = Opcode()
@@ -379,6 +403,7 @@ class DecodeChannelOutput extends Bundle {
 }
 
 object DecodeChannelOutput {
+  /** Produce one side-effect-free uop carrying an illegal-instruction exception. */
   def illegalUop(): DecodeChannelOutput = {
     val uop = WireInit(0.U.asTypeOf(new DecodeChannelOutput))
 
@@ -390,6 +415,7 @@ object DecodeChannelOutput {
     uop
   }
 
+  /** Preserve vector split indices and old-VD dependencies in the common format. */
   def fromVecChannelUop(vuop: VecDecodeChannelOutputUop): DecodeChannelOutput = {
     val uop = Wire(new DecodeChannelOutput)
 
@@ -455,6 +481,7 @@ object DecodeChannelOutput {
     uop
   }
 
+  /** Normalize a single vset uop, including VL dependencies and vtype legality. */
   def fromVSetChannelUop(vuop: VsetDecoder.Out): DecodeChannelOutput = {
     val uop = Wire(new DecodeChannelOutput)
 
@@ -521,6 +548,7 @@ object DecodeChannelOutput {
     uop
   }
 
+  /** Normalize scalar uops while retaining channel exception and serialization controls. */
   def fromSimpleChannelUop(suop: SimpleDecodeChannelOutputUop): DecodeChannelOutput = {
     val uop = Wire(new DecodeChannelOutput)
     uop.fuType := suop.fuType
@@ -585,6 +613,7 @@ object DecodeChannelOutput {
     uop
   }
 
+  /** Normalize pseudo-instruction expansion as one common-format uop. */
   def fromPseudoChannelUop(puop: PseudoDecodeChannel.Out, VLEN: Int): DecodeChannelOutput = {
     val uop = Wire(new DecodeChannelOutput)
 
@@ -650,6 +679,7 @@ object DecodeChannelOutput {
   }
 }
 
+/** Frontend identity and exception context shared by every uop of one instruction. */
 class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val foldpc           = UInt(MemPredPCWidth.W)
   val exceptionVec     = ExceptSparseVec(ExceptionNO.fromFrontendSet)
@@ -679,6 +709,7 @@ class SrcRenType extends Bundle {
 }
 
 object SrcRenType {
+  /** Encode operand presence and register class for a decode-table entry. */
   def genBitPat(
     typ: Option[OperandType],
   ): BitPat = {

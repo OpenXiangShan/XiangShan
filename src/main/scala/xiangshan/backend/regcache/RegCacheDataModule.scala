@@ -36,6 +36,11 @@ class RCWritePort(dataWidth: Int, addrWidth: Int, tagWidth: Int, debugEn: Boolea
   val tag  = OptionWrapper(debugEn, Input(UInt(tagWidth.W)))
 }
 
+/** Combinational reads and edge-triggered writes for one cache bank.
+  * Valid bits indicate initialized data slots; physical-register ownership and
+  * replay invalidation live in the separate tag table. Write ports must not
+  * target the same slot in one cycle.
+  */
 class RegCacheDataModule
 (
   name: String,

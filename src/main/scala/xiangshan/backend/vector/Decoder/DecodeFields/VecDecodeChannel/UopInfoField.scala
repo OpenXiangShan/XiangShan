@@ -53,6 +53,9 @@ class UopInfoField(uopIdx: Int) extends DecodeField[
   }
 }
 
+/** Shared elaboration-time expansion rules and an alternative packed-table field.
+  * The integrated VectorDecodeChannel uses the per-slot UopInfoField above.
+  */
 object UopInfoFieldVec extends DecodeField[
   DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   Vec[ValidIO[UopInfoRename]]
@@ -72,18 +75,17 @@ object UopInfoFieldVec extends DecodeField[
     }.padTo(8, emptyUopBitPat).reverse.reduce(_ ## _)
   }
 
+  // This packed form pads with valid=1; it is not the per-slot invalid default.
   val emptyUopBitPat: BitPat = BitPat.Y() ## BitPat.dontCare(UopInfoRename.width)
 
   def genUopSeq(op: Pattern): Seq[Opcode] = {
     this.genUopSeqImpl(op)
   }
 
-  /**
-   * Generate the sequence of micro-ops for a given instruction pattern, sew, lmul, and nf. The generation logic is
-   * based on the instruction type and the vector configuration.
-   * @param op
-   * @return
-   */
+  /** Expand arithmetic via SplitTable and memory via EEW/EMUL/segment counts.
+    * Unsupported memory combinations return an empty sequence; vset has its own
+    * decoder. These are Scala opcode objects used to build hardware decode tables.
+    */
   def genUopSeqImpl(op: Pattern): Seq[Opcode] = {
     val DecodePatternComb(instP, sewP, lmulP, nfP) = op
 
@@ -204,6 +206,7 @@ object UopInfoFieldVec extends DecodeField[
     Seq(vsoxei64e8, vsoxei64e16, vsoxei64e32, vsoxei64e64),
   )
 
+  /** Select one entry of a two-dimensional width table at elaboration time. */
   def getIndexMemUop(uops: Seq[Seq[Opcode]], eew: Int, sew: Int) = {
     val i = getI(eew)
     val j = getI(sew)
@@ -211,6 +214,7 @@ object UopInfoFieldVec extends DecodeField[
     uops(i)(j)
   }
 
+  /** Select the e8/e16/e32/e64 opcode from a memory-operation family. */
   def getIndexMemUop(uops: Seq[Opcode], eew: Int) = {
     val i = getI(eew)
 

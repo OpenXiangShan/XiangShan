@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.{InstPattern, VecInstPattern
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
+/** Admit scalar instructions to ROB compression unless listed as separate completions. */
 object CanRobCompressField extends BoolDecodeField[InstPattern] {
   override def name: String = "canRobCompress"
 

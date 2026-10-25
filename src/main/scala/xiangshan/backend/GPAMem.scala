@@ -16,6 +16,10 @@ class GPAMem(implicit p: Parameters) extends LazyModule {
   lazy val module = new GPAMemImp(this)
 }
 
+/** Synchronous FTQ-indexed guest-physical metadata for precise fetch exceptions.
+  * Exception read offset and instruction length are registered with the memory
+  * request, then applied to the returned base to reconstruct the fault address.
+  */
 class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends LazyModuleImp(wrapper) with HasXSParameter {
   val io = IO(new GPAMemIO)
 
@@ -41,6 +45,7 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
   io.exceptionReadData.gpaddr := gpa
   io.exceptionReadData.isForVSnonLeafPTE := mem.io.rdata.head.isForVSnonLeafPTE
 
+  // Drop the page offset when a caller needs the guest-physical page number.
   def getGPAPage(vaddr: UInt): UInt = {
     require(vaddr.getWidth == GPAddrBits, s"The width of gpa should be $GPAddrBits")
     vaddr(GPAddrBits - 1, PageOffsetWidth)

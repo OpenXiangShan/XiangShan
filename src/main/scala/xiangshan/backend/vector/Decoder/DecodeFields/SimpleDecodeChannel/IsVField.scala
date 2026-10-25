@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern.{InstPattern, VecInstPattern}
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Classify the instruction-pattern family; runtime VS enable is checked separately. */
 object IsVField extends BoolDecodeField[InstPattern] {
   override def name: String = "isV"
 

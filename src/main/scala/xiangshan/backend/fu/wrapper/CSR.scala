@@ -19,6 +19,21 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
 import CSRConst._
 
+/** CSR execution adapter and architectural sideband integration. Register source/IMM_Z
+  * fields form read/write intents; SET/CLEAR use NewCSR's raw view, avoiding read-only
+  * overlays in the read-modify-write value. Writes capture wdata on input fire.
+  * Normal completions receive a fixed three-cycle delay; xRET redirects use the direct
+  * completion path. The delay registers are not an elastic output queue, so scheduling
+  * must honor the advance notification and the resulting writeback cycle.
+  *
+  * {{{
+  * in -> IMM_Z / write intent -> NewCSR <-> IMSIC
+  *             raw regOut -> RMW -> [wdata] --^
+  * NewCSR completion -> [delay 3, normal] ---> out + writeback
+  *                   +-> direct xRET ------> redirect + out
+  * ROB/decode faults -> TrapInst/TrapTval; SATP writes -> saved old translation mode
+  * }}}
+  */
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCircularQueuePtrHelper with HasCriticalErrors with HasSoCParameter
 {
@@ -81,6 +96,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   ).map { case (k, v) => k.encode -> v })
 
   private val csrAccess = valid && CSROpType.isCsrAccess(func)
+  // CSRRW always writes; CSRRS/CSRRC suppress writes when the encoded source is zero.
+  // Conversely, CSRRW with rd=x0 suppresses the architectural read side effect.
   private val csrWen = valid && (
     CSROpType.isCSRRW(func) ||
     CSROpType.isCSRRSorRC(func) && rs1 =/= 0.U
@@ -322,7 +339,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // pointer masking extension
   tlb.pmm := csrMod.io.tlb.pmm
 
-  /** Since some CSR read instructions are allowed to be pipelined, ready/valid signals should be modified */
+  // NewCSR serializes its own request/response. The wrapper adds fixed writeback timing
+  // without feeding downstream stalls back through those three delay stages.
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.outValidAhead3Cycle.get := csrModOutValid
   val isXRetReg = RegEnable(isXRet, false.B, io.in.fire)
@@ -447,6 +465,9 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   })
 }
 
+/** Decode-side legality and policy snapshot; the wrapper registers this bundle once.
+  * Flags classify an operation before dispatch and are distinct from CSR access checks.
+  */
 class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val illegalInst = new Bundle {
 
@@ -576,7 +597,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
 
     /**
      * illegal CBO.CLEAN/FLUSH
-     * raise [[EX_VI]] when MEnvCfg.CBZE && (isModeVS && !HEnvCfg.CBCFE || isModeVU && (!HEnvCfg.CBCFE || !SEnvCfg.CBCFE))
+     * raise [[EX_VI]] when MEnvCfg.CBCFE && (isModeVS && !HEnvCfg.CBCFE || isModeVU && (!HEnvCfg.CBCFE || !SEnvCfg.CBCFE))
      */
     val cboCF = Bool()
 

@@ -8,6 +8,12 @@ import xiangshan.DIVOpType
 import xiangshan.backend.fu.{FuncUnit, MulDivCtrl, SRT16DividerDataModule}
 import xiangshan.backend.fu.FuConfig
 
+/** Single-in-flight scalar divide/remainder adapter with redirect cancellation.
+  * Word operands are extended according to signedness before entering SRT16.
+  * kill_w rejects a flushed incoming operation; kill_r cancels the saved busy
+  * operation. The divider owns input readiness and the early-wakeup pulse; its finish
+  * state emits completion without waiting for out.ready.
+  */
 class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val xlen = cfg.destDataBits
@@ -45,7 +51,7 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   divDataModule.io.isW := ctrlReg.isW
   divDataModule.io.out_ready := io.out.ready
 
-  val validNext = divDataModule.io.out_validNext // if high, io.valid will assert next cycle
+  val validNext = divDataModule.io.out_validNext // post_1 marker; special results add a finish cycle
 
   io.in.ready := divDataModule.io.in_ready
   io.out.valid := divDataModule.io.out_valid

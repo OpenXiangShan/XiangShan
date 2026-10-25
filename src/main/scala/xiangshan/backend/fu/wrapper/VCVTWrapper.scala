@@ -10,6 +10,11 @@ import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
 import yunsuan.vector.Common._
 import yunsuan.vector.VectorConvert.VectorCvt
 
+/** Vector conversion adapter exposing result slots one/two with matching byte flags.
+  * Widening selects a source half by uopIdx(0); narrowing joins chunks from VS2
+  * and VS1. Narrow conversions still use the normal result path and hold isNarrow
+  * false here. Func selects the valid slot, and Exu handles destination merging.
+  */
 class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
   private val ex0 = ex(0)
   private val ex0opcode: UInt = fuOpType

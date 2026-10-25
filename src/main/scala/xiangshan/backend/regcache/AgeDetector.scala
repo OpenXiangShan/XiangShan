@@ -23,6 +23,10 @@ import xiangshan._
 import utils._
 import utility._
 
+/** Registers replacement comparisons, then selects distinct oldest ranks.
+  * The oldest row wins against all entries (including itself); subsequent
+  * outputs select the next lower row population counts.
+  */
 class RegCacheAgeDetector(numEntries: Int, numReplace: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val ageInfo = Vec(numEntries, Vec(numEntries, Input(Bool())))

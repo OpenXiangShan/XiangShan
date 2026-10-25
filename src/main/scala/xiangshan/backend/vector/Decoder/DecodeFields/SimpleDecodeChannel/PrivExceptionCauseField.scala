@@ -9,6 +9,7 @@ object PrivExceptionCause extends ChiselEnum {
   val none, sfenceVMA, sfencePart, hfenceGVMA, hfenceVVMA, mfence, hlsv, wfi, wrsNto, cboZ, cboCF, cboI = Value
 }
 
+/** Select the CSR permission check; the channel later resolves illegal versus virtual. */
 object PrivExceptionCauseField extends DecodeField[InstPattern, PrivExceptionCause.Type] {
   override def name: String = "privExceptionCause"
 

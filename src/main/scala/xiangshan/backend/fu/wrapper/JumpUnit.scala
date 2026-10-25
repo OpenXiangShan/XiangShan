@@ -9,6 +9,10 @@ import xiangshan.frontend.{PcInit, PrunedAddrInit}
 import xiangshan.frontend.bpu.BranchAttribute.BranchType
 import xiangshan.{JumpOpType, Redirect, RedirectLevel}
 
+/** Resolve direct/indirect jumps combinationally and return frontend training metadata.
+  * A direction/target mismatch or backend address fault raises flushAfter redirect;
+  * the integer link value is produced by the separate LinkUnit uop.
+  */
 class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   // associated with AddrData's position of NJmpCfg.srcData
   private val src = io.in.bits.data.src(0)

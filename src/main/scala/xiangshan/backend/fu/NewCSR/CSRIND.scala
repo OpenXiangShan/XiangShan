@@ -13,6 +13,10 @@ import xiangshan.XSBundle
 
 import scala.collection.immutable.SeqMap
 
+/** Indirect CSR windows. Selectors choose local priority banks, delegated counters,
+  * or external IMSIC access in NewCSR. Reserved data windows read zero; permission
+  * rejection is handled separately, so a zero view does not imply a legal access.
+  */
 trait CSRIND { self: NewCSR with HypervisorLevel =>
   val miselect = Module(new CSRModule("Miselect", new MISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
@@ -200,6 +204,7 @@ trait CSRIND { self: NewCSR with HypervisorLevel =>
   }
 }
 
+/** Selector-space classification, distinct from the direct CSR address space below. */
 object Iselect {
   def isInAIA(iselect: UInt): Bool = iselect >= 0x30.U && iselect <= 0x3f.U
   def isInSmcdeleg(iselect: UInt): Bool = iselect >= 0x40.U && iselect <= 0x5f.U
@@ -209,12 +214,14 @@ object Iselect {
   def isOdd(iselect: UInt): Bool = iselect(0) === 1.U
 }
 
+/** Implemented delegated-counter slots exclude time (0x41); config writes preserve MINH. */
 object SmcdelegIreg {
   val selects: Seq[Int] = Seq(0x40, 0x42) ++ (0x43 to 0x5f)
   val mInhIdx = 62
   def cfgMask = ~(BigInt(1) << mInhIdx).U(XLEN.W)
 }
 
+/** Direct CSR window predicates exclude the interrupt-high-word holes inside each range. */
 object Ireg {
   def isInMCsrInd(ireg: UInt): Bool = ireg >= CSRs.miselect.U && ireg <= CSRs.mireg6.U && ireg =/= CSRs.miph.U
   def isInSCsrInd(ireg: UInt): Bool = ireg >= CSRs.siselect.U && ireg <= CSRs.sireg6.U && ireg =/= CSRs.siph.U

@@ -4,6 +4,9 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 
+/** Shared indirect-window decoding. Guest sireg accesses use vsiselect; direct
+  * privilege checks and access-valid gating belong to the enclosing CSRPermitModule.
+  */
 abstract class IndirectCSRWindowPermitModule extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
@@ -55,6 +58,9 @@ abstract class IndirectCSRWindowPermitModule extends Module {
   protected final val effectiveSiregSelect = Mux(isVirtual, vsiselect, siselect)
 }
 
+/** Counter-delegation window: allow only implemented supervisor counter/config views,
+  * with CDE and per-counter delegation; the time slot and guest banks remain restricted.
+  */
 class IndirectSmcdelegPermitModule extends IndirectCSRWindowPermitModule {
   private val menvcfgCDE = io.in.xenvcfg.menvcfg(60)
   // Counter delegation is defined only for the supervisor-level siselect window.
@@ -86,6 +92,7 @@ class IndirectSmcdelegPermitModule extends IndirectCSRWindowPermitModule {
   io.out.indirectCSR_EX_VI := rwSiregX_EX_VI
 }
 
+/** AIA priority-array restrictions, including RV64 odd selectors and unused data windows. */
 class IndirectAIAPermitModule extends IndirectCSRWindowPermitModule {
   private val mstateen0 = io.in.xstateen.mstateen0
 
@@ -119,6 +126,7 @@ class IndirectAIAPermitModule extends IndirectCSRWindowPermitModule {
   io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
 }
 
+/** IMSIC window restrictions from state enables and virtualized supervisor routing. */
 class IndirectIMSICPermitModule extends IndirectCSRWindowPermitModule {
   private val mstateen0 = io.in.xstateen.mstateen0
   private val hstateen0 = io.in.xstateen.hstateen0
@@ -154,6 +162,7 @@ class IndirectIMSICPermitModule extends IndirectCSRWindowPermitModule {
   io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
 }
 
+/** Unimplemented selector ranges reject data-window access as illegal instruction. */
 class IndirectOtherPermitModule extends IndirectCSRWindowPermitModule {
   private val miregInOther = Iselect.isInOthers(miselect)
   private val siregInOther = Iselect.isInOthers(effectiveSiregSelect)
@@ -170,6 +179,7 @@ class IndirectOtherPermitModule extends IndirectCSRWindowPermitModule {
   io.out.indirectCSR_EX_VI := false.B
 }
 
+/** Combine disjoint selector-range checks; II/VI precedence is applied by the caller. */
 class IndirectCSRPermitModule extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {

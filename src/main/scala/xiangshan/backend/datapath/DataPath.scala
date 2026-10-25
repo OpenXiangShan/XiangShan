@@ -23,6 +23,25 @@ import xiangshan.backend.fu.FuType.is0latency
 import xiangshan.backend.fu.FuType.isUncertain
 import xiangshan.mem.{LqPtr, SqPtr}
 
+/**
+  * Gathers operands between issue selection and execution for one scheduler.
+  *
+  * {{{
+  * IQ OG0 requests --> RF read arbiters + WB conflict arbiters --> ready / OG0 fail
+  *                            |
+  *                    register-file addresses --> RF data
+  *                            |                     |
+  *                     [OG1 control/payload] <-------+
+  *                            |
+  *              redirect / load cancel / EXU ready --> OG1 fail or execution input
+  * reg-cache / PC reads ------+
+  * OG0/OG1 failure -----------> IQ retry + dependent-producer cancellation
+  * }}}
+  *
+  * Operand sources that need no RF read bypass read-port contention. Stage
+  * registers advance as attempts rather than holding a denied instruction;
+  * response signals preserve the uop in its IQ for retry when resources fail.
+  */
 class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockParams)
   extends XSModule with HasXSParameter {
 
@@ -597,6 +616,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   val exuParamsNoLoad = fromIQ.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu)
   val is_0latency = Wire(Vec(og0_cancel_no_load.size, Bool()))
   is_0latency := exuParamsNoLoad.map(x => is0latency(x._1.bits.fuType) || x._2.issueBlockParam.inFpSchd.B)
+  // A dependent selected from a predicted forward must be canceled when its
+  // producer failed OG0. Delay producer failures to match the consumer request.
   val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.zip(is_0latency).map(x => x._1 && x._2)))
   val flushReg = RegNextWithEnable(io.flush)
   for (i <- fromIQ.indices) {
@@ -649,6 +670,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   private val toExuFire = toExu.map(_.map(_.fire))
   private val allIssueParams = backendParams.allIssueParams
   private val intIssueParamsNum = backendParams.intSchdParams.get.issueBlockParams.size
+  // OG0 reports resource denial; OG1 reports execution-input failure. Memory
+  // and vector queues wait for their later pipeline responses for final success.
   toIQs.zipWithIndex.foreach {
     case(toIQ, iqIdx) =>
       toIQ.zipWithIndex.foreach {

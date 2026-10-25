@@ -11,6 +11,9 @@ import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 import yunsuan.VfmaType
 import yunsuan.fpu.FloatFMA
 
+/** Legacy fused multiply-add adapter with per-operand narrow NaN-box checks.
+  * Pure multiply does not require a valid boxed third operand.
+  */
 class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfmaType.dummy, "fma OpType not supported")
 

@@ -8,6 +8,10 @@ import xiangshan.ExceptionNO
 import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
 
+/** Retain vector context for one iterative operation until the next input fire.
+  * outCtrl/outData bypass the accepted input in its first cycle; completion
+  * metadata uses the registered helper. Concrete units align result validity.
+  */
 class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with VecFuncUnitAlias
 {

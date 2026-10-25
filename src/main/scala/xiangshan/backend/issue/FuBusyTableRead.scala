@@ -5,6 +5,9 @@ import chisel3.util._
 import utils.MapUtils
 import xiangshan.backend.fu.FuType
 
+/** Maps active latency buckets to the queue entries that use those FU types.
+  * The queue rejects selections whose configured latency hits a reserved slot.
+  */
 class FuBusyTableRead(fuLatencyMap: Map[FuType.OHType, Int])(implicit iqParams: IssueBlockParams) extends Module {
   private val numEntries = iqParams.numEntries
   private val latMax = fuLatencyMap.values.fold(0)(_ max _)
@@ -19,6 +22,7 @@ class FuBusyTableRead(fuLatencyMap: Map[FuType.OHType, Int])(implicit iqParams: 
     */
   private val latMappedFuTypeSet: Map[Int, Set[FuType.OHType]] = MapUtils.groupByValueUnique(fuLatencyMap)
 
+  // A set bucket blocks only entries whose FU latency maps to that bucket.
   val readMaskVec = fuBusyVec.zipWithIndex.map { case (busy, lat) =>
     val latencyHitVec = WireInit(0.U(numEntries.W))
     when(busy) {

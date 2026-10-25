@@ -9,6 +9,7 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
+/** Legacy per-slot destination-allocation mask; validity is supplied separately. */
 @deprecated
 object VdAllocFieldDeprecated extends DecodeField[
   DecodePatternComb3[LmulPattern, NfPattern, SplitTypeOHPattern],

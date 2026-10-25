@@ -5,6 +5,7 @@ import chisel3.util._
 import utils.EnumUtils.OHEnumeration
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
 
+/** Legacy split-policy IDs; numeric values also define positions in SplitTypeOH. */
 object SplitType extends ChiselEnum {
   val NONE   = Value(b"00000")
   val VVV    = Value(b"00001")
@@ -43,6 +44,7 @@ object SplitType extends ChiselEnum {
   }
 }
 
+/** Elaboration-time one-hot split IDs, including gaps in the binary enumeration. */
 object SplitTypeOH extends OHEnumeration {
   type Type = UInt
 
@@ -69,5 +71,6 @@ object SplitTypeOH extends OHEnumeration {
   }
 
   lazy val all: Seq[Type] = SplitType.all.map(x => this.apply(x))
+  // Only the asserted policy bit is constrained; callers must enforce one-hot input.
   lazy val allBitPat: Seq[BitPat] = all.map(x => BitPat("b" + BitPat(x).rawString.replace('0', '?')))
 }

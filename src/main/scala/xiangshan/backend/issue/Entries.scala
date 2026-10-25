@@ -18,6 +18,27 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 
+/**
+  * Holds transient enqueue slots and resident simple/complex entries. It applies
+  * wakeups and stage feedback, then returns candidates and transfer destinations
+  * to `IssueQueueImp`.
+  *
+  * {{{
+  * flattened entry index: [ enq | simple | complex ]
+  *
+  * io.enq --> [EnqEntry] -- transfer --> [OthersEntry(simple)]
+  *                 |                           |
+  *                 +-- direct transfer --+      +-- oldest transfer --+
+  *                                       v                          v
+  *                                  [OthersEntry(complex)] <---------+
+  * Each class --> current/delayed one-hot payload mux --> deqEntry/deqOg1Payload
+  * Each entry --> issueTimer + deqPortIdx --> matching response --> next state
+  * }}}
+  *
+  * Simple entries wait for stored readiness; complex entries also support
+  * same-cycle IQ wakeup selection. Transfers write updated state on the next
+  * edge. Issued entries stay in place until feedback completes or retries them.
+  */
 class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   override def desiredName: String = params.getEntryName
 
@@ -39,9 +60,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     io.snResp
   ).filter(_.nonEmpty).map(_.get)
   assert(allResps.length == params.issueTimerMaxValue + 1, "allResps.length == params.issueTimerMaxValue + 1")
+  // Issued entries index this response sequence with their issue timer and
+  // dequeue port, so retries observe the matching pipeline stage.
   val resps = Wire(Vec(allResps.length, chiselTypeOf(io.og0Resp)))
   resps := allResps
 
+  // Enqueue slots accept new uops; resident slots are split by issue complexity.
   //Module
   val enqEntries          = Seq.fill(EnqEntryNum)(Module(EnqEntry(isComp = true)(p, params)))
   val othersEntriesSimp   = Seq.fill(SimpEntryNum)(Module(OthersEntry(isComp = false)(p, params)))
@@ -52,6 +76,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val compTransPolicy     = OptionWrapper(params.hasCompAndSimp, Module(new EnqPolicy))
 
   //Wire
+  // Flatten per-module outputs into queue-indexed vectors used by arbitration.
   //entries status
   val entries             = Wire(Vec(params.numEntries, ValidIO(new EntryBundle(isDeq = true))))
   val robIdxVec           = Wire(Vec(params.numEntries, new RobPtr))
@@ -112,6 +137,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
 
 
+  // Enqueue slots can issue directly or transfer into resident storage.
+  // Delayed inputs repair wakeups that coincide with dispatch acceptance.
   //enqEntries
   enqEntries.zipWithIndex.foreach { case (enqEntry, entryIdx) =>
     enqEntry.io.commonIn.enq                  := io.enq(entryIdx)
@@ -131,6 +158,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.enqDelayIn2.ldCancel          := DelayN(io.ldCancel, 2)
     enqEntryTransVec(entryIdx)                := enqEntry.io.commonOut.transEntry
   }
+  // Resident entries own transferred uops until completion, redirect, or transfer.
   //othersEntries
   othersEntries.zipWithIndex.foreach { case (othersEntry, entryIdx) =>
     othersEntry.io.commonIn.enq               := othersEntryEnqVec(entryIdx)
@@ -152,6 +180,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   }
 
 
+  // Check capacity for the occupied enqueue group before transferring eligible
+  // unissued slots. An issued slot remains in place for its response routing.
   if (params.isAllComp || params.isAllSimp) {
     //transPolicy
     othersTransPolicy.get.io.canEnq := VecInit(validVec.takeRight(OthersEntryNum).map(!_)).asUInt
@@ -222,7 +252,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     //othersEntryEnq
     simpEntryEnqVec.zipWithIndex.foreach { case (simpEntryEnq, simpIdx) =>
       val simpEnqOH = finalSimpTransSelVec.get.map(_(simpIdx))
-      // shit Mux1H directly returns in(0) if the seq has only 1 elements
+      // A single-input Mux1H ignores its select, so explicitly zero an unselected transfer.
       if (simpEnqOH.size == 1)
         simpEntryEnq := Mux(simpEnqOH.head, enqEntryTransVec.head, 0.U.asTypeOf(enqEntryTransVec.head))
       else
@@ -234,7 +264,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
     compEntryEnqVec.zipWithIndex.foreach { case (compEntryEnq, compIdx) =>
       val compEnqOH = finalCompTransSelVec.get.map(_(compIdx))
-      // shit Mux1H directly returns in(0) if the seq has only 1 elements
+      // A single-input Mux1H ignores its select, so explicitly zero an unselected transfer.
       if (compEnqOH.size == 1)
         compEntryEnq := Mux(compEnqOH.head, compEnqVec.get.head, 0.U.asTypeOf(compEnqVec.get.head))
       else
@@ -254,6 +284,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       issueResp := Resp
     }
 
+  // Select payloads for the oldest-ready masks. Delayed copies preserve OG1
+  // memory metadata while live entry state may be updated.
   //deq
   val enqEntryOldest          = Wire(Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true))))
   val simpEntryOldest         = OptionWrapper(params.hasCompAndSimp, Wire(Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true)))))
@@ -302,6 +334,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
   }
 
+  // For identical-FU ports, keep payload selection consistent with the distinct
+  // one-hot masks chosen by the queue-level dequeue policy.
   if (params.deqFuSame) {
     val subDeqPolicyEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
     val subDeqPolicyValidVec = Wire(Vec(params.numDeq, Bool()))
@@ -396,6 +430,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
 
 
+  // Connect one entry's control inputs and scatter its status into flat vectors.
   def EntriesConnect(in: CommonInBundle, out: CommonOutBundle, entryIdx: Int) = {
     in.flush                    := io.flush
     in.wakeUpFromWB             := io.wakeUpFromWB
@@ -508,6 +543,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   }
 }
 
+/** Storage-array interface: queue control chooses entries, while this block
+  * updates registered readiness, issue, replay, and transfer state.
+  */
 class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   val flush               = Flipped(ValidIO(new Redirect))
   //enq

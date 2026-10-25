@@ -15,6 +15,10 @@ import xiangshan.backend.decode.isa.CSRs
 
 import scala.collection.immutable.SeqMap
 
+/** Guest supervisor state plus S-to-VS address remapping. Interrupt views select
+  * M/HS aliases or HVIP/local state according to delegation, and shift VS interrupt
+  * numbers 2/6/10 into guest-visible supervisor positions 1/5/9.
+  */
 trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with HypervisorLevel =>
 
   val vsstatus = Module(
@@ -72,7 +76,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
       (shiftedUsingReg & reg)
 
     bundle.getVS.map(_.lsb).foreach { vsNum =>
-      // vsie.SSIE(1) map mie.VSSIE(1)
+      // Guest supervisor bit sNum maps to the host VS interrupt bit vsNum (2/6/10).
       val sNum = vsNum - 1
       val wtMie = toMie.getByNum(vsNum)
       val wtSie = toSie.getByNum(vsNum)
@@ -210,8 +214,8 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
     // However, when V=1, a write to satp with an unsupported MODE value is ignored and no write to vsatp is effected.
     // if satp is written with an unsupported MODE, the entire write has no effect; no fields in satp are modified.
     //
-    // We treat all circumstances as if V=1. That is if vsatp is written with an unsupported MODE,
-    // the entire write has no effect; no fields in satp are modified.
+    // An unsupported guest write changes nothing. A host write keeps MODE but can
+    // still update ASID/PPN; the implemented PPN mask follows the current G-stage mode.
     when(wen && wdata.MODE.isLegal) {
       reg := wdata
       reg.PPN := wdata.PPN & effectivePPNMask
@@ -249,6 +253,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
 
   
 
+  // Architectural address remapping; this does not copy or synchronize register data.
   val sMapVS = SeqMap(
     CSRs.sstatus  -> CSRs.vsstatus,
     CSRs.sie      -> CSRs.vsie,

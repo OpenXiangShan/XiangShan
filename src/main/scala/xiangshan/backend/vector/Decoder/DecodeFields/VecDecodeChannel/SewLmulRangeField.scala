@@ -4,6 +4,7 @@ import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb2, SewPattern}
 import xiangshan.backend.vector.Decoder.DecodePatterns.SewLmulPattern
 
+/** Elaboration-time arithmetic width/group constraints derived from instruction traits. */
 object SewLmulRangeField {
 
   private type SewLmul = (Int, Double)
@@ -12,6 +13,7 @@ object SewLmulRangeField {
     (sl.p1.sewValue, sl.p2.lmulValue)
   }
 
+  /** Filter supported SEW/LMUL pairs before constructing the runtime decode table. */
   def validPairs(op: VecInstPattern): Set[SewLmul] = op match {
     case _: VecArithInstPattern => allPairs.toSet.filter(sewlmulFilter(op))
     case _ => throw new IllegalArgumentException(s"$op is not vai!")

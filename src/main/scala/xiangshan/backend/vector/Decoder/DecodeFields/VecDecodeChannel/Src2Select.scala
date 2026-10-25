@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, Decode
 import xiangshan.backend.vector.Decoder.Sews
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
+/** Source-two progression policies; reduction policies substitute VS1 on the last uop. */
 object Src2SelectEnum extends Enumeration {
   import scala.language.implicitConversions
 
@@ -38,6 +39,7 @@ object Src2SelectEnum extends Enumeration {
   val INC2       = Src2Val("1000") // vs2|0,2,4,6
 }
 
+/** Choose source-two progression, including data/index EEW ratios and AMOCAS pairs. */
 object Src2SelectField extends DecodeField[
   DecodePatternComb2[VecInstPattern, SewPattern],
   UInt

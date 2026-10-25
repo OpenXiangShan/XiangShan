@@ -12,7 +12,10 @@ import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.vector.Exu
 import xiangshan.mem.Std
 
-/**
+/** Elaboration contract for FU ports, side effects, scheduling, and construction.
+  * Each srcData row is an alternative operand layout; source counts take the maximum
+  * over alternatives, while per-port helpers union the register types at that index.
+  * V0/VL operands use dedicated flags rather than ordinary srcData entries.
   *
   * @param name [[String]] name of fuConfig
   * @param fuType [[Int]] type of func, select from [[xiangshan.backend.fu.FuType]]
@@ -105,12 +108,13 @@ case class FuConfig (
 
   def readFp: Boolean = numFpSrc > 0
 
+  /** Scalar routing expects a single exact one-hot type. */
   def fuSel(uop: NewExuInput): Bool = {
-    // Don't add more shit here!!!
     // Todo: add new FuType to distinguish f2i, f2f
     uop.ctrl.fuType === this.fuType.U
   }
 
+  /** Dedicated vector routing accepts any intersecting type bit. */
   def fuSel2(uop: Exu.InUop): Bool = {
     (uop.ctrl.fuType & this.fuType.U).orR
   }
@@ -126,6 +130,7 @@ case class FuConfig (
     alignedSrcData.transpose.map(_.toSet.intersect(RegSrcDataSet))
   }
 
+  /** Operand alternatives present at this index; shorter rows contribute nothing. */
   def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
     srcData
       .map((x: Seq[DataConfig]) => if(x.isDefinedAt(srcIdx)) Some(x(srcIdx)) else None)
@@ -231,6 +236,9 @@ case class FuConfig (
   }
 }
 
+/** FU catalog shared by scheduling and interface generation. Some dedicated FP/vector
+  * entries use a separate constructor path and intentionally have no scalar fuGen.
+  */
 object FuConfig {
   val NJmpCfg: FuConfig = FuConfig (
     name = "njmp",
@@ -838,6 +846,7 @@ object FuConfig {
     destDataBits = 128,
   )
 
+  // Explicit scheduling catalog; it is not a reflective enumeration of every val above.
   def allConfigs = Seq(
     NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,

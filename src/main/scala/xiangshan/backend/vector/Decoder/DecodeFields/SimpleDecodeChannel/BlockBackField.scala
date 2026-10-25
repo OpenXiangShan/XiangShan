@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Mark instructions that require younger dispatch to be blocked for serialization. */
 object BlockBackField extends BoolDecodeField[InstPattern] {
 
   override def name: String = "blockBack"

@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.macros.InstanceNameMacro.{getVariableName, getVariableNameSeq}
 
+/** Select signed OPIVI immediates except the explicitly unsigned instruction set. */
 object ImmIsSign5b extends BoolDecodeField[VecInstPattern] {
   override def name: String = "immIsSign5b"
 

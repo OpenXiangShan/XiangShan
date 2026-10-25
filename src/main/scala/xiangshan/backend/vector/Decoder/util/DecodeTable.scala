@@ -7,8 +7,8 @@ import chisel3.{Data, UInt}
 /**
  * A structured way of generating large decode tables, often found in CPU instruction decoders
  *
- * Each field is a `DecoderPattern`, its genTable method will be called for each possible pattern and gives expected
- * output for this field as a `BitPat`.
+ * Each DecodeField maps every DecodePattern to an output BitPat. Scala pattern
+ * expansion and minimization happen at elaboration; decode emits combinational logic.
  *
  * @param patterns all possible input patterns, should implement trait DecoderPattern
  * @param fields   all fields as decoded output
@@ -37,6 +37,7 @@ class DecodeTable[I <: DecodePattern](patterns: Seq[I], fields: Seq[DecodeField[
     fields.reverse.map(_.default).reduce(_ ## _)
   )
 
+  /** Minimize fields independently, then restore their declared Record layout. */
   def decode(input: UInt): DecodeBundle = {
     Cat(decoder(input, tables).reverse).asTypeOf(bundle)
   }

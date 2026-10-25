@@ -56,6 +56,21 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val instrAddrTransType = Option.when(params.hasJmpFu || params.hasLinkFu || params.hasBrhFu)(Input(new AddrTransType))
 }
 
+/**
+  * Wraps the configured function units behind one issue/result interface.
+  *
+  * {{{
+  * NewExuInput --> one-hot FU dispatch --> selected function unit --> result mux
+  *      |                                                        --> RF / ROB data
+  *      +--> fixed-latency control pipeline ----------------------+
+  * redirect --> per-stage kill + FU flush
+  * cross-region conversion data ---------------------------> destination result
+  * }}}
+  *
+  * Fixed-latency metadata advances separately from FU arithmetic. Output
+  * selection gives fixed-latency results priority over uncertain completions;
+  * those completions provide their own wakeup handshake when configured.
+  */
 class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends XSModule with HasXSParameter with HasCriticalErrors {
   private val fuCfgs = exuParams.fuConfigs
 
@@ -153,6 +168,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   in1ToN.io.in.bits := io.in.bits
   io.in.ready := in1ToN.io.in.ready
 
+  // Free-running metadata delay for fixed-latency FUs. A redirected predecessor
+  // becomes a bubble at the next edge; each FU uses the tap matching its latency.
   def pipelineReg(init: NewExuInput, valid: Bool, latency: Int, flush: ValidIO[Redirect]): (Seq[NewExuInput], Seq[Bool]) = {
     val validVec = valid +: Seq.fill(latency)(RegInit(false.B))
     val inVec = init +: Seq.fill(latency)(Reg(new NewExuInput(exuParams)))
@@ -465,6 +482,10 @@ class DispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {
   val out = Vec(n, DecoupledIO(gen))
 }
 
+/** Routes a valid input to exactly one FU. Aggregate ready is the AND of all
+  * FU ready signals, so every output must obey the caller's ready convention
+  * even when it is not selected.
+  */
 class Dispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Bool])
   (implicit p: Parameters)
   extends Module {

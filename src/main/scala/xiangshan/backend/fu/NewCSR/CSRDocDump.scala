@@ -27,6 +27,10 @@ import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 
+/** Elaboration-time CSV export of implemented CSR fields, aliases, and packed banks.
+  * This reads Scala metadata, not simulated state. dumpCSRDoc writes build/csr.csv
+  * beneath NOOP_HOME (or the current directory when that variable is absent).
+  */
 trait CSRDocDump { self: NewCSR =>
   import CSRConfig._
 
@@ -63,6 +67,7 @@ trait CSRDocDump { self: NewCSR =>
     writer.println(values.map(csvEscape).mkString(","))
   }
 
+  /** Export an explicit reset, the bank's implicit zero reset, or a blank for unreset state. */
   private def fieldResetValueString(bundle: CSRBundle, field: CSREnumType): String = {
     val resetValue =
       if (field.init != null) Some(field.init.litValue)
@@ -108,6 +113,7 @@ trait CSRDocDump { self: NewCSR =>
     ))
   }
 
+  /** Emit one row per typed field using architectural bit positions, including alias metadata. */
   private def dumpBundleCSV(
     writer: PrintWriter,
     group: String,
@@ -135,6 +141,7 @@ trait CSRDocDump { self: NewCSR =>
     }
   }
 
+  /** Export only an alias's visible fields while retaining the owning bank's field metadata. */
   private def dumpSelectedBundleCSV(
     writer: PrintWriter,
     group: String,
@@ -168,6 +175,7 @@ trait CSRDocDump { self: NewCSR =>
     dumpBundleCSV(writer, group, mod.modName, mod.addr, mod.bundle.asInstanceOf[CSRBundle], mod.modName)
   }
 
+  /** Name each physical trigger slot separately although slots share TSELECT-window addresses. */
   private def dumpTriggerCSVs(writer: PrintWriter): Unit = {
     tdata1RegVec.zip(tdata2RegVec).zipWithIndex.foreach { case ((tdata1Mod, tdata2Mod), idx) =>
       dumpBundleCSV(
@@ -214,6 +222,9 @@ trait CSRDocDump { self: NewCSR =>
     }
   }
 
+  /** Translate byte-bank fields into packed RV64 CSR bit positions and export the
+    * handler-owned address reset encodings from platform configuration.
+    */
   private def dumpPMACSV(writer: PrintWriter): Unit = {
     pmacfgs.zipWithIndex.foreach { case (mod, idx) =>
       val csrIndex = idx / 8
@@ -260,6 +271,7 @@ trait CSRDocDump { self: NewCSR =>
     }
   }
 
+  /** Export packed real-entry config bytes, reserved config words and address views. */
   private def dumpPMPCSV(writer: PrintWriter): Unit = {
     pmpcfgs.zipWithIndex.foreach { case (mod, idx) =>
       val csrIndex = idx / 8
@@ -295,6 +307,9 @@ trait CSRDocDump { self: NewCSR =>
     pmpaddr.foreach(mod => dumpModuleCSV(writer, "PMP", mod))
   }
 
+  /** Overwrite the metadata CSV at elaboration, including explicit architectural aliases.
+    * Parent directories are created here and the writer closes even if a bank export fails.
+    */
   protected def dumpCSRDoc(): Unit = {
     val output = csrCsvPath
     Files.createDirectories(output.getParent)

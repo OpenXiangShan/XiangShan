@@ -74,6 +74,21 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     Flipped(new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)))
 }
 
+/**
+  * Resolves each execution operand from the source selected by the issue entry.
+  *
+  * {{{
+  * EXU result --------------------------> forward data -------------------+
+  *              +--> [valid-gated data] --> bypass ----------------------+--> operand mux
+  *                                  +--> [extra vector stage] --> bypass2+
+  * datapath RF / reg-cache / immediate / zero ---------------------------+
+  * producer identity + DataSource --------------------------------------+
+  * }}}
+  *
+  * The producer one-hot chooses a lane; DataSource chooses its data age.
+  * Selected operands and optional copies feed execution. Registered integer
+  * results also populate the register-cache write interface.
+  */
 class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSModule {
   val io: BypassNetworkIO = IO(new BypassNetworkIO)
 
@@ -103,6 +118,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     fromExus.map(x => ZeroExt(x.bits.data, RegDataMaxWidth))
   )
 
+  // Cross-scheduler conversion lanes sample every cycle because their valid
+  // timing differs; other lanes retain the latest valid producer result.
   private val bypassDataVec = VecInit(
     // remove fp exu which need i2f data's clock gate
     // remove int exu which need f2i data's clock gate
@@ -202,6 +219,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       println(s"[BypassNetWork] ${exuParm.name}")
       println(s"[BypassNetWork] exuIdx = ${exuIdx}")
       println(s"[BypassNetWork] srcIdx = ${srcIdx}")
+      // Issue state must select exactly one source class; producer identity is
+      // interpreted only within the chosen forwarding/bypass lane set.
       val originSrc = Mux1H(
         Seq(
           readForward    -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), forwardDataVec),

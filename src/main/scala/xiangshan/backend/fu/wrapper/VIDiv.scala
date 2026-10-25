@@ -8,6 +8,11 @@ import xiangshan.backend.vector.fu.Func.makePipeReg
 import yunsuan.encoding.Opcode.Opcodes.VIDivOpcode
 import yunsuan.vector.VectorIdiv
 
+/** Iterative vector integer divide/remainder with one saved completion context.
+  * Decode controls are prepared from ex0Next and captured with ex(0) acceptance.
+  * Reported remaining latency drives both WB reservation and bounded-delay IQ
+  * wakeup; the result port is always accepted and released through slot zero.
+  */
 class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixedLatFunc(cfg) {
   private val vidiv = Module(new VectorIdiv)
 

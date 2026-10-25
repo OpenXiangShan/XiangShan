@@ -8,6 +8,7 @@ import scala.util.Try
 
 import scala.language.implicitConversions
 
+/** Elaboration metadata for access policy, filters, and optional alias references. */
 abstract class CSRRWType {
   val wfn: CSRWfnType
   var rfn: CSRRfnType
@@ -93,6 +94,9 @@ case class RefRWType(
   override final var rfn: CSRRfnType = null
 }
 
+/** Read/write transformation callbacks. null read filtering means direct forwarding;
+  * registering a callback here does not itself create a hardware update connection.
+  */
 object CSRFunc {
   type CSRWfnType = (UInt, UInt, Seq[Data]) => UInt
 
@@ -119,6 +123,10 @@ object CSRFunc {
   }
 }
 
+/** A hardware enum field plus architectural position, reset, policy, and documentation.
+  * Width-padding literals need not be legal write values; the factory's isLegal rule
+  * remains authoritative. otherUpdateSeq is elaboration metadata consumed by CSRModule.
+  */
 class CSREnumType(
   val msb: Int,
   val lsb: Int,
@@ -372,6 +380,7 @@ class CSREnumType(
     this.asUInt | Fill(this.getWidth, that)
   }
 
+  /** Append a next-state candidate; CSRModule uses Mux1H, so this adds no priority. */
   def addOtherUpdate(cond: Bool, value: CSREnumType): this.type = {
     this.otherUpdateSeq :+= (cond, value)
     this
@@ -392,6 +401,7 @@ class CSREnumType(
   }
 }
 
+/** Enum factory shared by hardware legality checks and exported constraint text. */
 class CSREnum extends ChiselEnum {
   /**
    * Internal pair used to render a legal enum value and its display label in WARL text.
@@ -550,15 +560,13 @@ class CSREnum extends ChiselEnum {
   }
 
   /**
-   * Converts an arbitrary enum value into a legal one.
-   *
-   * Subclasses should override this when illegal writes are sanitized to a supported value.
+   * Hook for explicit legalization. The base implementation only constructs a type;
+   * subclasses must provide the hardware expression that maps an input to a legal value.
    */
   def legalize(enumeration: CSREnumType): CSREnumType = makeType
 
   /**
-   * Context-sensitive variant of [[legalize]] for enums whose legality depends on debug mode or
-   * similar external state.
+   * Context-sensitive legalization hook; the base implementation also only constructs a type.
    */
   def legalize(enumeration: CSREnumType, dmode: Bool): CSREnumType = makeType
 }

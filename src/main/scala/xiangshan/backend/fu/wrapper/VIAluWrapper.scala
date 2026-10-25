@@ -10,7 +10,18 @@ import xiangshan.backend.vector.fu.{VecFixLatFunc, VecFuConfig}
 import yunsuan.vector.Common.VSew
 import yunsuan.vector.VectorALU.VIAlu
 
-// Todo: support double narrow
+/** Dedicated vector integer ALU adapter with opcode-selected result slots zero/one.
+  *
+  * {{{
+  * ex0Next opcode --> [decoded controls] --> ex(0)/ex(1) lane controls
+  * ex(0) operands --> 64-bit VIAlu lanes --> out.ex(0) data/mask/flags
+  * ex(1) operands -----------------------> out.ex(1) data/mask/flags
+  * }}}
+  *
+  * Widening selects a 32-bit source half by uopIdx(0). Arithmetic lane masks
+  * are tied high here; Exu applies destination mask/tail preservation. Func's
+  * latency field qualifies the actual result slot. Double narrowing is unsupported.
+  */
 class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
 
   private val ex0opcode: UInt = fuOpType

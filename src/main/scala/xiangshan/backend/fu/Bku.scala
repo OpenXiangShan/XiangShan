@@ -24,6 +24,9 @@ import utility.{XSDebug, XSError}
 import xiangshan._
 import xiangshan.backend.fu.util._
 
+/** CLZ/CTZ and population count share one enabled register boundary. Reversing the
+  * input reuses the leading-zero tree for CTZ; word selection uses the saved opcode.
+  */
 class CountModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Input(UInt(XLEN.W))
@@ -32,6 +35,7 @@ class CountModule(implicit p: Parameters) extends XSModule {
     val out = Output(UInt(XLEN.W))
   })
 
+  // The high encoded bit marks an all-zero group so the merge can extend the count.
   def encode(bits: UInt): UInt = {
     LookupTreeDefault(bits, 0.U, List(0.U -> 2.U(2.W), 1.U -> 1.U(2.W)))
   }
@@ -80,6 +84,9 @@ class CountModule(implicit p: Parameters) extends XSModule {
   io.out := Mux(funcReg(2), Mux(funcReg(0), cpopWRes, cpopRes), Mux(funcReg(0), zeroWRes, zeroRes))
 }
 
+/** Carry-less multiplication: XOR partial products, register the reduction midway,
+  * then select the low, high, or reversed-alignment slice of the 128-bit polynomial.
+  */
 class ClmulModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -122,6 +129,7 @@ class ClmulModule(implicit p: Parameters) extends XSModule {
   ))
 }
 
+/** Register one XPERM nibble/byte permutation; out-of-range byte indices produce zero. */
 class MiscModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -148,6 +156,7 @@ class MiscModule(implicit p: Parameters) extends XSModule {
   io.out := RegEnable(Mux(io.func(0), xpermb, xpermn), io.regEnable)
 }
 
+/** SHA/SM3 rotate-XOR candidates followed by one enabled result register. */
 class HashModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Input(UInt(XLEN.W))
@@ -185,6 +194,9 @@ class HashModule(implicit p: Parameters) extends XSModule {
   io.out := RegEnable(Mux(io.func(3), sm3, sha), io.regEnable)
 }
 
+/** AES/SM4 datapaths with one common capture enable. S-box stages place their register
+  * at different internal cuts; saved opcodes and auxiliary operands align the outputs.
+  */
 class BlockCipherModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -293,6 +305,7 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
   io.out := Mux(funcReg(3), sm4Result, aesResult)
 }
 
+/** Select hash versus block-cipher output using the opcode captured with both paths. */
 class CryptoModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -318,6 +331,15 @@ class CryptoModule(implicit p: Parameters) extends XSModule {
   io.out := Mux(funcReg(4), hashModule.io.out, blockCipherModule.io.out)
 }
 
+/** Two-stage bit-manipulation/crypto unit. HasPipelineReg combines local and EXU
+  * stage validity; the EXU supplies redirect filtering. These internal data registers
+  * carry no independent valid state.
+  *
+  * {{{
+  * in -> count / CLMUL / XPERM / crypto -> [regEnable(1)]
+  *    -> saved-opcode result mux -> [regEnable(2)] -> out
+  * }}}
+  */
 class Bku(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasPipelineReg {
 
   override def latency = 2

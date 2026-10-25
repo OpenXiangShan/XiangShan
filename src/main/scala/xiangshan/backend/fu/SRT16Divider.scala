@@ -36,6 +36,20 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.util.CSA3_2
 
+/** One-request iterative divider with two radix-4 steps per full iteration (radix 16).
+  * kill_w prevents a new request from starting; kill_r returns a busy machine to idle.
+  * isHi/isW are supplied from the wrapper's saved control throughout completion.
+  * out_ready does not gate the FSM: the consumer must accept the completion pulse.
+  *
+  * {{{
+  * idle -> pre_0: normalize -> pre_1: seed / special-case selection
+  *                              |                 |
+  *                              v                 +----------+
+  * iter: [sum,carry,Q,Q-1] <-> select/speculate                 |
+  *          | last iteration                                 v
+  *          +-> post_0: correct sign -> post_1: unshift -> finish -> idle
+  * }}}
+  */
 class SRT16DividerDataModule(len: Int) extends Module {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(len.W)))
@@ -278,6 +292,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val rudPmNegReg = RegEnable(rudPmNeg, state(s_pre_1))
   val r2udPmNegReg = RegEnable(r2udPmNeg, state(s_pre_1))
 
+  /** Convert threshold comparison signs to a one-hot digit in {-2,-1,0,+1,+2}. */
   def DetectSign(signs: UInt, name: String): UInt = {
     val qVec = Wire(Vec(5, Bool())).suggestName(name)
     qVec(quot_neg_2) := signs(0) && signs(1) && signs(2)
@@ -334,6 +349,9 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val quotM1HalfIter = Wire(UInt(64.W))
   val quotIterNext = Wire(UInt(64.W))
   val quotM1IterNext = Wire(UInt(64.W))
+  /** Append one signed radix-4 digit while maintaining binary Q and Q-1 in parallel;
+    * the latter avoids a subtract chain when the final remainder needs correction.
+    */
   def OTFC(q: UInt, quot: UInt, quotM1: UInt): (UInt, UInt) = {
     val quotNext = Mux1H(Seq(
     q(quot_pos_2) -> (quot << 2 | "b10".U),
@@ -399,13 +417,15 @@ class SRT16DividerDataModule(len: Int) extends Module {
     res
   )
   io.in_ready := state(s_idle)
-  // when special is true, out valid delay 1 cycle
+  // Special results spend an extra finish cycle clearing specialReg before valid.
   io.out_valid := state(s_finish) && !specialReg
   // when flush finalIter maybe always true
   io.outValidAhead3Cycle := finalIter && state(s_iter) || special && state(s_pre_1)
+  // This marks post_1, not a universal next-cycle-valid promise for special results.
   io.out_validNext := state(s_post_1)
 }
 
+/** Quotient-selection thresholds indexed by the normalized divisor's leading bits. */
 object mLookUpTable2 {
   // Usage :
   // result := decoder(QMCMinimizer, index, mLookupTable.xxx)
@@ -452,6 +472,7 @@ object mLookUpTable2 {
     ))
 }
 
+/** Fixed-width barrel right shifter with an explicit fill bit for remainder recovery. */
 class RightShifter(len: Int, lzc_width: Int) extends Module {
   val io = IO(new Bundle() {
     val shiftNum = Input(UInt(lzc_width.W))

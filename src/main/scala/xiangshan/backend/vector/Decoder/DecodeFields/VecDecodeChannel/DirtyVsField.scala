@@ -5,6 +5,7 @@ import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 
+/** Mark vector-state updates, excluding scalar-result and scalar multi-uop instructions. */
 object DirtyVsField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "dirtyVs"
 

@@ -6,6 +6,11 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.{XSBundle, XSModule}
 import xiangshan.backend.regfile.PregParams
 
+/** Physical-register busy bits for the vector-style dispatch interface.
+  * Allocation sets busy, wakeup clears it, and alwaysReadyFunc masks constants.
+  * Reads bypass current allocations as busy; the caller must keep allocation
+  * and wakeup masks disjoint. This table stores no speculative load provenance.
+  */
 class BusyTable(
   numRead: Int,
   numWrite: Int,

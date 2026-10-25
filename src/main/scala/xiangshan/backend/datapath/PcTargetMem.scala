@@ -62,6 +62,7 @@ import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
 //  io.toDataPath.toDataPathPC := pcVec
 //}
 
+/** Legacy FTQ-indexed PC/target interface; the memory implementation above is disabled. */
 class PcToDataPathIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
   //Ftq
   val fromDataPathValid = Input(Vec(params.numPcMemReadPort, Bool()))
@@ -73,6 +74,7 @@ class PcToDataPathIO(params: BackendParams)(implicit p: Parameters) extends XSBu
   val toDataPathPC = Output(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
 }
 
+/** Bundle definition retained independently of the commented-out PcTargetMem module. */
 class PcTargetMemIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
   //from frontend
   val fromFrontendFtq = Flipped(new FtqToCtrlIO)

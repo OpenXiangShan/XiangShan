@@ -14,6 +14,17 @@ import xiangshan.backend.vector.Decoder.util.DecodeTable
 import xiangshan.backend.vector.util.Verilog
 
 
+/** Track speculative and committed VTYPE across a decode group. Immediate VSET
+  * candidates decode in parallel; short mux chains forward VLMAX/VTYPE between slots.
+  * Register-source VSETVL is resolved at commit and restarts speculative state.
+  *
+  * {{{
+  * [vtypeSpec] + insts -> parallel VSET candidates -> ordered mux chain -> slot VTYPE
+  *                    -> pre-slot VLMAX checks -----------------------^
+  * commit VSETVL / walk / architectural restore / accepted group -> [vtypeSpec]
+  * committed VTYPE ----------------------------------------------> [vtypeArch]
+  * }}}
+  */
 class VTypeGen(implicit p: Parameters) extends XSModule {
   import VTypeGen._
 
@@ -101,8 +112,8 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
 
   // Patch vill for keepVl slots where vlmax actually changed compared to prevVlmax.
   // Since oldVType.valid=0, VSetFuncUnit's vill = vill_imm only (no vlmaxChange).
-  // We compute vlmaxChange against the nearest preceding vset via the cumVlmax chain,
-  // and OR it with vill_imm — this yields the exact correct vill value.
+  // Compare against the nearest preceding VSET's VLMAX via cumVlmax and set vill
+  // on the slots selected by keepVlMask when that value changes.
   private val correctedVtype = Wire(Vec(DecodeWidth, new VType))
   for (i <- 0 until DecodeWidth) {
     correctedVtype(i) := vtypeNewVec(i)

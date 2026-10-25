@@ -14,21 +14,29 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import utility.PerfCCT
 import xiangshan.backend.rob.RobPtr
 
+/**
+  * Issue-queue boundary. Enqueue and execution feedback are indexed per port;
+  * wakeups and cancellation signals update source readiness before selection.
+  */
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
+  // Dispatch supplies decoded uops; flush suppresses entry writes even if enq fires.
   val flush = Flipped(ValidIO(new Redirect))
   val enq = Vec(params.numEnq, Flipped(DecoupledIO(new RegionInUop(params))))
 
+  // Stage responses advance issued entries or make them eligible for replay.
   val og0Resp = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))
   val og1Resp = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))
   val og2Resp = Option.when(params.needOg2Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s0Resp = Option.when(params.needS0Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s1Resp = Option.when(params.needS1Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s2Resp = Option.when(params.needS2Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
-  // Vec Mem Resp, uncertain
+  // Later-stage responses are present only when this queue's pipeline needs them.
   val snResp = Option.when(params.needSnResp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
+  // Future resource reservations from this port and other ports sharing writeback.
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle)
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle)
+  // Broadcast wakeups match physical-register indices and source register types.
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val wakeupFromExu: Option[MixedVec[DecoupledIO[IssueQueueIQWakeUpBundle]]] = Option.when(params.needUncertainWakeupFromExu)(Flipped(params.genExuWakeUpOutValidBundle))
@@ -36,9 +44,10 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupFromF2I: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromF2I)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val busyTableF2I = Option.when(params.needWakeupFromF2I)(Input(UInt(3.W)))
   val busyTableI2F = Option.when(params.getFuCfgs.contains(I2fCfg))(Output(UInt(3.W)))
+  // Delayed wakeups repair matches for uops accepted before their entry became visible.
   val wakeupFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  //to Mem, wake up LoadQueueReplay
+  // Store address/data issue wakes LoadQueueReplay; matching cancel events retract it.
   val wakeupToLRQ = Option.when(params.isStAddrIQ || params.isStdIQ)(params.genIOWakeUpLRQValidBundle)
   val wakeupToLRQCancel = Option.when(params.isStAddrIQ || params.isStdIQ)(params.genIOWakeUpCancelBundle)
   val vlFromIntIsZero = Input(Bool())
@@ -51,6 +60,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val memIO = Option.when(params.isMemAddrIQ)(new IssueQueueMemBundle)
 
   // Outputs
+  // Producer wakeups are separate from the registered issue requests below.
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
   val validCntDeqVec = Output(Vec(params.numDeq,UInt(params.numEntries.U.getWidth.W)))
   // perf counter
@@ -62,11 +72,45 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, ValidIO(new TopdownIQInfo()))))
   val debugRobIdxVec =  Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, new RobPtr())))
 
+  // Selection in cycle N appears at OG0 in N+1; this register does not hold on !ready.
   val deqDelay: MixedVec[DecoupledIO[Og0InUop]] = params.genIssueDecoupledBundle// = deq.cloneType
   val deqOg1Payload: MixedVec[IssueQueueDeqOg1Payload] = params.genIssueDeqOg1PayloadBundle
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
 
+/**
+  * Selects ready uops for the execution ports configured by `params`. Each cycle
+  * combines entry readiness, FU compatibility, latency-busy masks, and age;
+  * redirects and replay feedback update or invalidate the selected entries.
+  *
+  * {{{
+  *                              Entries (registered state)
+  * enq.fire && !flush --> [enq slots] --> [simple slots] --> [complex slots]
+  *                             |               |                 |
+  * WB / IQ wakeups ----------> source readiness + load dependencies
+  * flush / stage responses --> valid / issued / retry state
+  *                             |               |                 |
+  *                             +---------------+-----------------+
+  *                                             |
+  *                          ready candidates + FU/writeback masks
+  *                                             |
+  *                             age / distinct-port selection  (N)
+  *                                             |
+  *                              load-cancel check + deqBeforeDly
+  *                                      |               |
+  *                           latency wakeup pipes    [deqDelay]
+  *                                      |               |
+  *                                 wakeupToIQ       OG0 request (N+1)
+  *                                                      |
+  *                             OG0/OG1/... responses ----+
+  * }}}
+  *
+  * Transfers depend on configured storage classes; enq slots can also issue
+  * directly. Selection marks an entry issued, but keeps it until final success,
+  * redirect, or transfer. Failed responses clear issued state for retry.
+  * Identical-FU ports reserve one resident age winner and choose other requests
+  * separately; other configurations prefer complex, then simple, then enq slots.
+  */
 class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XSModule with HasXSParameter {
 
   override def desiredName: String = s"${params.getIQName}"
@@ -121,6 +165,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     val og1Fail = Output(Bool())
   }
 
+  // Remove scheduled wakeups when their uop is redirected, replayed, or failed
+  // in the execution stage that corresponds to this latency lane.
   private def flushFunc(exuInput: ExuInput, flush: WakeupQueueFlush, stage: Int): Bool = {
     val redirectFlush = exuInput.robIdx.needFlush(flush.redirect)
     val loadDependencyFlush = LoadShouldCancel(exuInput.loadDependency, flush.ldCancel)
@@ -132,6 +178,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     redirectFlush || loadDependencyFlush || ogFailFlush
   }
 
+  // Advance load-dependency bits as a delayed wakeup moves toward its consumer.
   private def modificationFunc(exuInput: ExuInput): ExuInput = {
     val newExuInput = WireDefault(exuInput)
     newExuInput.loadDependency match {
@@ -141,6 +188,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     newExuInput
   }
 
+  // Copy the current wakeup into the output shape, replicating destination,
+  // write-enable, and dependency fields when only the output has copy fields.
   private def lastConnectFunc(exuInput: ExuInput, newInput: ExuInput): ExuInput = {
     val lastExuInput = WireDefault(exuInput)
     val newExuInput = WireDefault(newInput)
@@ -173,6 +222,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     newExuInput
   }
 
+  // One latency lane per possible result time creates execution-unit wakeups
+  // without adding a variable-latency path to the issue-selection logic.
   val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x => Option.when(x.isIQWakeUpSource && !x.hasLoadExu)(Module(
     new MultiWakeupQueue(x, new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.wakeUpFuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
   ))}
@@ -203,6 +254,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val v0WbBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val vlWbBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
 
+  // Enqueue uses a ready/valid handshake; a redirect masks transfers even if
+  // dispatch presented a valid uop in the same cycle.
   val s0_enqValidVec = io.enq.map(_.valid)
   val s0_enqSelValidVec = Wire(Vec(params.numEnq, Bool()))
   val s0_enqNotFlush = !io.flush.valid
@@ -214,6 +267,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   dontTouch(finalDeqSelValidVec)
   val finalDeqSelOHVec    = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
 
+  // Entry status is shared by age selection, FU filtering, performance counters,
+  // and the debug interface. `requestForTrans` excludes entries already issued.
   val validVec = VecInit(entries.io.valid.asBools)
   val issuedVec = VecInit(entries.io.issued.asBools)
   val requestForTrans = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
@@ -280,8 +335,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val simpAgeDetectRequest = Option.when(params.hasCompAndSimp)(Wire(Vec(params.numDeq + params.numEnq, UInt(params.numSimp.W))))
   simpAgeDetectRequest.foreach(_ := 0.U.asTypeOf(simpAgeDetectRequest.get))
 
-  // when vf exu (with og2) wake up int/mem iq (without og2), the wakeup signals should delay 1 cycle
-  // as vf exu's min latency is 1, we do not need consider og0cancel
+  // Align vector producers with an extra OG2 stage to integer/memory consumers:
+  // register their wakeup once, reject load cancels, and advance dependencies.
+  // These producers have no zero-latency wakeup requiring an OG0 cancel here.
   val wakeupFromIQ = Wire(chiselTypeOf(io.wakeupFromIQ))
   wakeupFromIQ.zip(io.wakeupFromIQ).foreach { case (w, w_src) =>
     if (!params.inVfSchd && params.readVfRf && params.hasWakeupFromVf && w_src.bits.params.isVfExeUnit) {
@@ -304,7 +360,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
 
   /**
-    * Connection of [[entries]]
+    * Connects dispatch uops, wakeups, stage feedback, and age-selected entry
+    * transfers to the storage entries. Enqueue metadata is normalized here;
+    * `Entries` owns the registered source-state and payload updates.
     */
   entries.io match { case entriesIO: EntriesIO =>
     entriesIO.flush                                             := io.flush
@@ -422,12 +480,15 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   //   ).reverse)
   // }
 
+  // A candidate must target an execution unit that implements its FU type.
   protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs =>
     fuTypeVec.map { fuType =>
       FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
     }
   }
 
+  // Remove entries whose FU or destination writeback pipeline is still busy.
+  // The resulting per-port request also filters by the port's supported FU set.
   canIssueMergeAllBusy.zipWithIndex.foreach { case (merge, i) =>
     val mergeFuBusy = {
       if (fuBusyTableWrite(i).nonEmpty) canIssueVec.asUInt & (~fuBusyTableMask(i)).asUInt
@@ -467,6 +528,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     require(params.deqFuSame || params.deqFuDiff, "The 2 deq ports need to be identical or completely different")
   }
 
+  // Reserve the resident age winner for port 0, remove it from the remaining
+  // requests, and select distinct fallback candidates. Apply busy masks after
+  // selection; a masked candidate is not replaced by another entry this cycle.
   if (params.numDeq == 2 && params.deqFuSame) {
     val subDeqPolicy = Module(new DeqPolicy())
 
@@ -529,6 +593,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
   else {
+    // A single port or disjoint-FU ports arbitrate independently within each
+    // storage class. Fixed enqueue slots track acceptance age separately from
+    // the one-hot destinations used when entries transfer into resident slots.
     enqEntryOldestSel := NewAgeDetector(numEntries = params.numEnq,
       enq = VecInit(s0_doEnqSelValidVec),
       canIssue = VecInit(deqCanIssue.map(_(params.numEnq - 1, 0)))
@@ -603,7 +670,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deqResp.bits.isFmac := false.B
   }
 
-  //fuBusyTable
+  // Reserve future result slots by FU latency; OG0/OG1 failure retracts the
+  // corresponding reservation after accounting for elapsed pipeline cycles.
   fuBusyTableWrite.zip(fuBusyTableRead).zipWithIndex.foreach { case ((busyTableWrite: Option[FuBusyTableWrite], busyTableRead: Option[FuBusyTableRead]), i) =>
     if(busyTableWrite.nonEmpty) {
       val btwr = busyTableWrite.get
@@ -620,7 +688,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
-  //wbfuBusyTable write
+  // Publish separate reservations for integer, FP, vector, V0, and VL writes.
+  // Only an operation that writes a given register file reserves its slot.
   intWbBusyTableWrite.zip(intWbBusyTableOut).zip(intDeqRespSetOut).zipWithIndex.foreach { case (((busyTableWrite: Option[FuBusyTableWrite], busyTable: Option[UInt]), deqResp), i) =>
     if(busyTableWrite.nonEmpty) {
       val btwr = busyTableWrite.get
@@ -691,7 +760,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
-  //wbfuBusyTable read
+  // Expand latency buckets into entry masks, allowing selection to skip only
+  // uops that use a currently busy FU or writeback resource.
   intWbBusyTableRead.zip(intWbBusyTableIn).zipWithIndex.foreach { case ((busyTableRead: Option[FuBusyTableRead], busyTable: Option[UInt]), i) =>
     if(busyTableRead.nonEmpty) {
       val btrd = busyTableRead.get
@@ -754,6 +824,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
+  // Predict fixed-latency wakeups from selection. Integer uncertain completion
+  // takes priority at the main input; FP uncertain and cross-scheduler results
+  // use the append input. Load wakeups come from memory instead.
   io.wakeupFromExu.foreach(x => x.map(_.ready := true.B))
   wakeUpQueues.zipWithIndex.foreach { case (wakeUpQueueOption, i) =>
     wakeUpQueueOption.foreach {
@@ -848,6 +921,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
+  // Build the issue request from the selected entry and suppress load-canceled
+  // candidates. Entries owns the corresponding issued-state update.
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.valid                := finalDeqSelValidVec(i) && !cancelDeqVec(i)
     deq.bits.isFirstIssue := deqFirstIssueVec(i)
@@ -907,9 +982,10 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deqDly.bits.vecRen.foreach(_ := deq.bits.vecRen.get)
     deqDly.bits.v0Ren .foreach(_ := deq.bits.v0Ren .get)
     deqDly.bits.vlRen .foreach(_ := deq.bits.vlRen .get)
-    // deqBeforeDly.ready is always true
+    // The request advances every cycle, except for the integer completion
+    // priority below; downstream OG0/OG1 feedback handles failed attempts.
     deq.ready := true.B
-    // for int scheduler fdiv has high priority than alu
+    // An uncertain completion shares this port's wakeup path with new issues.
     if (params.inIntSchd && (deqFuCfgs(i).contains(DivCfg) || deqFuCfgs(i).contains(CsrCfg))) {
       // div and csr need wakeupFromExu
       io.wakeupFromExu.foreach(x => {
@@ -928,7 +1004,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     dontTouch(io.deqDelay)
     dontTouch(deqBeforeDly)
   }
-  // sta wake up LRQ in og1, std wake up LRQ in og0.
+  // Store-address issue is visible to LRQ in OG1; store-data issue is visible
+  // in OG0. Align the wakeup and its cancellation with the receiving stage.
   io.wakeupToLRQ.foreach { case wakeupOption =>
     wakeupOption.zipWithIndex.foreach { case (wakeup, i) =>
       if (param.isStAddrIQ) { // sta iq
@@ -963,6 +1040,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
+  // Publish fixed-latency execution wakeups, or the load unit's registered
+  // completion wakeups, back to dependent issue queues.
   io.wakeupToIQ.zipWithIndex.foreach { case (wakeup, i) =>
     if (wakeUpQueues(i).nonEmpty) {
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
@@ -1055,9 +1134,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     val simpCanotIn = simpLeftOne || validVecRegNext.drop(params.numEnq).take(params.numSimp).reduce(_ & _)
     othersCanotIn := simpCanotIn
   }
+  // Register a shared ready for all dispatch ports using next-cycle occupancy.
+  // An issued enqueue slot must stay resident until feedback resolves it.
   val enqReady = GatedValidRegNext((!othersCanotIn || !enqHasValidRegNext) && !enqHasIssuedRegNext, false.B)
   io.enq.foreach(_.ready := enqReady)
 
+  // This is the wakeup-pipe latency, before MultiWakeupQueue's final register.
+  // Uncertain operations wake dependents from completion rather than this estimate.
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     Mux(FuType.isUncertain(fuType),
       1.U,

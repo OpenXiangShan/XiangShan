@@ -16,6 +16,12 @@ import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import yunsuan.vector.Common.Fflags
 
 
+/** Common result-slot interface for dedicated vector and FP functional units.
+  * Exu owns the context registers: ex0Next is before ex(0), and ctrl.latency
+  * selects the matching registered result slot. Subclasses provide result data
+  * and may override validity for variable-latency operations. There is no ready
+  * handshake here; scheduling must prevent simultaneous result slots.
+  */
 class Func(val cfg: VecFuConfig)(implicit p: Parameters) extends XSModule {
   implicit val _cfg: VecFuConfig = cfg
 
@@ -147,6 +153,7 @@ object Func {
     val vstd = Option.when(cfg.isVStd)(new StoreQueueDataWrite)
   }
 
+  /** Unmerged vector result forms and byte-granular flags for active-byte filtering. */
   class VecSpecialData(cfg: VecFuConfig, vlen: Int) extends Bundle {
     val vlenb = vlen / 8
 
@@ -183,6 +190,9 @@ object Func {
     def ex3: T = ex(3)
   }
 
+  /** Build one RegEnable per supplied stage enable; validVec must be nonempty.
+    * The enables qualify payload capture, not elastic-pipeline backpressure.
+    */
   def makePipeRegImpl[T <: Data](signal: T, validVec: Iterable[Bool]): Seq[T] = {
     val seq: T = RegEnable(signal, validVec.head)
 
@@ -193,6 +203,7 @@ object Func {
     }
   }
 
+  /** Expose the enabled payload-register chain through named ex-stage accessors. */
   def makePipeReg[T <: Data](signal: T, validVec: Iterable[Bool]): PipeReg[T] = {
     val pipe = Wire(new PipeReg(chiselTypeOf(signal), validVec.size))
     val regs = makePipeRegImpl(signal, validVec)

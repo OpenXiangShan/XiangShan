@@ -31,6 +31,10 @@ class TrapEntryDEventInput(implicit override val p: Parameters) extends TrapEntr
   val holdDpc                      = Input(Bool())
 }
 
+/** Debug-entry state updates are combinational, while the debug-ROM target is delayed
+  * one cycle. A trap already in debug mode selects the exception entry except for EBREAK;
+  * holdDpc preserves the saved return PC during repeated entry conditions.
+  */
 class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSREventBase with DebugMMIO {
   val in = IO(new TrapEntryDEventInput)
   val out = IO(new TrapEntryDEventOutput)

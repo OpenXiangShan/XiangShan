@@ -6,6 +6,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.{VecArithInstPattern, VecCon
 import xiangshan.backend.vector.Decoder.util.{BoolDecodeField, DecodeField}
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 
+/** Select memory forms whose decoded uops use VLENB*i immediate address offsets. */
 object IsVecMemContinousField extends BoolDecodeField[VecInstPattern] {
 
   override def name: String = "isVecMemContinous"

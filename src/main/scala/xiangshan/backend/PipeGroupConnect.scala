@@ -4,6 +4,10 @@ import chisel3._
 import chisel3.util._
 import xiangshan.TopDownCounters._
 
+/** Retains a bubble reason until consumed, with fall-through when empty.
+  * Redirect clears stored attribution; a consumed reason can be replaced in
+  * the same cycle without creating an extra gap.
+  */
 class StoreBubbleReason(reasonW: Int) extends Module {
   val io = IO(new Bundle{
     val bubbleValid = Input(Bool())
@@ -46,6 +50,10 @@ class StoreBubbleReason(reasonW: Int) extends Module {
   io.outReasonValid := bubbleValidReg || io.bubbleValid
 }
 
+/** Aligns stall/bubble attribution with a pipeline boundary. Redirect reasons
+  * span the current and previous cycle; transfer clears the reason before
+  * delayed stalls and bubbles are considered in priority order.
+  */
 class PipelineStallReason(reasonW: Int) extends Module {
   val io = IO(new Bundle{
     val rightFire = Input(Bool())
@@ -107,6 +115,21 @@ class PipelineStallReason(reasonW: Int) extends Module {
   io.outReason := reasonNext
 }
 
+/** Registered lane group that permits partial downstream consumption.
+  * Consumed lanes clear independently, but a new group enters only when the
+  * current group is empty or outAllFire is asserted. All upstream lanes share
+  * that acceptance signal; flush has priority over refill and lane clearing.
+  *
+  * {{{
+  * empty or outAllFire -> canAcc ---------------------> all input ready
+  * in(i).valid && canAcc -> [data(i), valid(i)] ------> out(i)
+  * out(i).ready -------------------------------------> clear valid(i)
+  * flush --------------------------------------------> clear all valid
+  * }}}
+  *
+  * The caller owns the group-consumed decision outAllFire; it is not derived
+  * from output fires here. Refill can replace a consumed group at the same edge.
+  */
 class PipeGroupConnect[T <: Data](n: Int, gen: => T) extends Module {
   val io = IO(new Bundle {
     val in = Vec(n, Flipped(DecoupledIO(gen)))
@@ -161,6 +184,7 @@ class PipeGroupConnect[T <: Data](n: Int, gen: => T) extends Module {
 }
 
 object PipeGroupConnect {
+  /** Insert a group register with shared acceptance and per-lane output handshakes. */
   def apply[T <: Data](
     // Left can be not Vec, but right must be Vec
     left: Seq[DecoupledIO[T]],

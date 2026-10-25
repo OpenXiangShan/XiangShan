@@ -15,6 +15,9 @@ class TrapEntryMNEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val mncause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
 }
 
+/** Combinational resumable-NMI save: record privilege, cause, and EPC, then clear NMIE.
+  * Handler target selection is external; this event only supplies architectural updates.
+  */
 class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSREventBase {
   val in = IO(new TrapEntryEventInput)
   val out = IO(new TrapEntryMNEventOutput)

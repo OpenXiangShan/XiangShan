@@ -8,9 +8,11 @@ import xiangshan.backend.exu.ExeUnitParams
 
 import scala.language.higherKinds
 
+/** Named endpoint of the elaboration-time producer/consumer wakeup graph. */
 trait WakeUpPoint {
   val name: String
 
+  /** Resolve exactly one EXU; duplicate or missing names are configuration errors. */
   def getExuParam(exus: Seq[ExeUnitParams]) : ExeUnitParams = {
     val filteredExus = exus.filter(_.name == this.name)
     require(filteredExus.nonEmpty, s"No exu named $name")
@@ -42,6 +44,7 @@ class WakeUpConfig (val source: WakeUpSource, val sink: WakeUpSink) {
 }
 
 object WakeUpConfig {
+  /** Expand producer and consumer groups into every directed source/sink pair. */
   def apply(pair: (Seq[String], Seq[String])): Seq[WakeUpConfig] = for {
     source <- pair._1
     sink <- pair._2

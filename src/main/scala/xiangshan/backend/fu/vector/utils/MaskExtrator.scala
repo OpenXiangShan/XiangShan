@@ -16,6 +16,7 @@ class MaskExtractorIO(vlen: Int) extends Bundle {
   })
 }
 
+/** Expand one element-mask bit to 1/2/4/8 byte enables, keeping the low vlen/8 bits. */
 class MaskExtractor(vlen: Int) extends Module {
   private val numBytes = vlen / 8
 

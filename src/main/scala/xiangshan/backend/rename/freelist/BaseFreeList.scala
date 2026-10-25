@@ -25,6 +25,10 @@ import utils._
 import utility._
 
 
+/** Shared allocation interface and recovery state for physical-register free lists.
+  * The speculative head is checkpointed separately from the committed head;
+  * delayed redirect control selects the recovery base before walk advances it.
+  */
 abstract class BaseFreeList(
   size             : Int,
   commitWidth      : Int,
@@ -61,6 +65,8 @@ abstract class BaseFreeList(
     }
   }
 
+  // Recovery consumes the redirect and snapshot selection two cycles later,
+  // aligned with the rename-table/RAB walk path.
   val lastCycleRedirect = RegNext(RegNext(io.redirect))
   val lastCycleSnpt = RegNext(RegNext(io.snpt, 0.U.asTypeOf(io.snpt)))
 
@@ -74,6 +80,7 @@ abstract class BaseFreeList(
 
   val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect, io.snpt.flushVec)
 
+  // Walked allocations are already consumed relative to the selected base.
   val redirectedHeadPtr = Mux(
     lastCycleSnpt.useSnpt,
     snapshots(lastCycleSnpt.snptSelect) + PopCount(io.walkReq),

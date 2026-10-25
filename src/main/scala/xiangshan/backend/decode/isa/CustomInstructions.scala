@@ -4,6 +4,9 @@ import chisel3.util.BitPat
 import xiangshan.backend.decode.isa.Instructions.InstType
 import xiangshan.macros.InstanceNameMacro.withNameSeq
 
+/** Nonstandard trap and simulation hint patterns. XSTrapType explicitly lists the
+  * pattern exported to the extension catalog; defining a pattern alone does not enable it.
+  */
 object CustomInstructions {
   outer =>
 

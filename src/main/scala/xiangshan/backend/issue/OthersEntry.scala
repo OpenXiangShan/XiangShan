@@ -24,6 +24,9 @@ class OthersEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   def wakeup          = commonIn.wakeUpFromWB ++ commonIn.wakeUpFromIQ
 }
 
+/** Resident issue slot shared by the simple and complex storage classes.
+  * Common entry logic handles wakeup, cancellation, completion, and transfer.
+  */
 class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   val io = IO(new OthersEntryIO)
 
@@ -31,6 +34,7 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
   val entryUpdate     = Wire(new EntryBundle)
   val hasWakeupIQ     = OptionWrapper(params.hasIQWakeUp, Wire(new CommonIQWakeupBundle))
 
+  // State advances every cycle from the accepted enqueue or computed update.
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)
   val entryReg = RegNext(Mux(

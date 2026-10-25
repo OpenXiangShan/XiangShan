@@ -34,6 +34,7 @@ case class MMPMAConfig
   num: Int
 )
 
+/** Half-open physical address interval [lower, upper), in bytes. */
 case class MemoryRange(lower: BigInt, upper: BigInt) {
   def cover(addr: BigInt): Boolean = addr >= lower && addr < upper
   def cover(addr: UInt): Bool = addr >= lower.U && addr < upper.U
@@ -53,7 +54,20 @@ case class PMAConfigEntry(
 
 trait PMAConst extends PMPConst
 
+/** Build memory-mapped PMA registers and their decoded entries. Config reads use a
+  * held response-valid handshake; writes update config/address/mask state together.
+  *
+  * {{{
+  * config read accept -> [pending valid] -- response ready -> clear pending
+  * config/address write -> lock/filter + mask update -> [config, address, mask]
+  * stored state -----------------------------------> read view + decoded entries
+  * }}}
+  *
+  * Only the config response-valid is held; its data reads the live config bank.
+  * The generated address read fields use the regmapper's direct read interface.
+  */
 trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
+  /** Build regmapper fields and state at elaboration; RV64 odd config slots read zero. */
   def gen_mmpma_mapping(num: Int) = {
     val pmaCfgPerCSR = PMXLEN / new PMPConfig().getWidth
     def pmaCfgLogicIndex(i: Int) = (PMXLEN / 32) * (i / pmaCfgPerCSR)
@@ -144,6 +158,9 @@ trait PMAMethod extends PMAConst {
     )
    */
 
+  /** Convert platform regions into packed config words, address encodings, and cached
+    * NAPOT masks. Lists are reversed together to preserve their entry-index association.
+    */
   def pma_init() : (Vec[UInt], Vec[UInt], Vec[UInt]) = {
     def genAddr(init_addr: BigInt) = {
       init_addr.U((PMPAddrBits - PMPOffBits).W)
@@ -184,6 +201,7 @@ trait PMAMethod extends PMAConst {
     (VecInit(cfgInitMerge), VecInit(addr.toSeq), VecInit(mask.toSeq))
   }
 
+  /** Encode a platform-aligned NAPOT region; the caller supplies a valid region size. */
   def get_napot(base: BigInt, range: BigInt): BigInt = {
     val PlatformGrainBytes = (1 << PlatformGrain)
     if ((base % PlatformGrainBytes) != 0) {
@@ -208,6 +226,7 @@ trait PMAMethod extends PMAConst {
   }
 }
 
+/** PMA attributes are checked at every privilege level, independently of PMP bypass. */
 trait PMACheckMethod extends PMPConst {
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
@@ -219,6 +238,10 @@ trait PMACheckMethod extends PMPConst {
     resp
   }
 
+  /** Select the first matching entry; partial coverage clears permissions and attributes.
+    * No match selects an all-zero entry. leaveHitMux registers hits and candidates before
+    * selection on valid, so its result belongs to the preceding accepted request.
+    */
   def pma_match_res(leaveHitMux: Boolean = false, valid: Bool = true.B)(
     addr: UInt,
     size: UInt,

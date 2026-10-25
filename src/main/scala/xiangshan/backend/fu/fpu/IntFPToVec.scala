@@ -27,6 +27,10 @@ import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit}
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.IF2VectorType
 
+/** Format scalar/immediate/FLI data for a vector destination or boxed scalar move.
+  * Broadcast repeats the selected SEW-sized element. FP broadcast replaces malformed
+  * narrow NaN boxes with canonical NaNs; integer broadcast uses the low source bits.
+  */
 class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   protected val in = io.in.bits
   protected val out = io.out.bits

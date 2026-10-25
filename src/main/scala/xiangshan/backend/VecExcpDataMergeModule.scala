@@ -7,6 +7,20 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles._
 
+/** Repair partially completed vector-load destinations after an exception. RAB supplies
+  * new mappings and RAT supplies old mappings; bytes before VSTART retain new data,
+  * while the remaining bytes/registers are restored from old physical destinations.
+  * Requests/responses are Valid pulses with no retry/ready protocol. The caller issues
+  * one exception in noExcp and supplies aligned old/new RF responses for each batch.
+  *
+  * {{{
+  * exception -> [saved layout, VSTART] -> waitRab <- RAB new maps + RAT old maps
+  *                                    -> [regMaps] -> mergeVd: paired old/new reads
+  *                                                -> mvOldVd: old-only reads
+  * RF responses -> byte selection -> [mergedVd] -> VPRF writes -> advance currentIdx
+  * all destinations handled -> finish: clear collection state -> noExcp
+  * }}}
+  */
 class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
   private val MaxLMUL = 8
   private val VdIdxInGroupWidth = log2Ceil(MaxLMUL) // hold 0~7
@@ -126,9 +140,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
 
   private val sWaitRab_vecExcpInfo     = RegNextWithEnable(sNoExcp_vecExcpInfo)
 
-  // At the beginning of waitRab,
-  // when not offset not aligned, currentIdx = useNewVdUntil <= needMergeUntil <= handleUntil
-  // otherwise, currentIdx = needMergeUntil <= handleUntil
+  // The merge phase starts at useNewVdUntil. An aligned boundary has byte offset zero,
+  // so the boundary register is restored entirely from old data by the same byte mux.
   private val sWaitRab_useNewVdUntil   = RegEnable(sNoExcp_useNewVdUntil, sNoExcp_vecExcpInfo.valid)
   private val sWaitRab_needMergeUntil  = RegEnable(sNoExcp_needMergeUntil, sNoExcp_vecExcpInfo.valid)
   private val sWaitRab_e8offset        = RegEnable(
@@ -146,7 +159,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
   private val sWaitRab_rabWriteOffset = Reg(UInt(4.W)) // [1,10]
   private val sWaitRab_ratWriteOffset = Reg(UInt(4.W)) // [1,10]
 
-  // segShuffledRegIdxTable(nf)(dvemul)(vdIdx)
+  // Translate field-interleaved recovery order into field-major architectural mapping
+  // order: table(nf)(log2(data EMUL))(destination index), for at most eight registers.
   private val segShuffledRegIdxTable: Seq[Seq[Seq[Int]]] = Seq.tabulate(8, 4) {
     case (nf, dvemul) =>
       val nField = nf + 1     // 1~8
@@ -240,6 +254,7 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
 
   // 1. no need commit
   // 2. need commit and both rab and rat committed
+  // Old and new maps can arrive independently; never read RF until both are collected.
   collectedAllRegMap := ((~commitNeeded.asUInt).asUInt | (commitNeeded.asUInt & filteredRabCommited.asUInt & filteredRatCommited.asUInt)).andR
 
   switch(state) {
@@ -296,6 +311,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
     }
   }
 
+  // Mapping batches are packed from lane zero. Offset logic supports two batches and
+  // skips the leading temporary destinations (two for strided loads, one otherwise).
   private val hasRabWrite = regWriteFromRabVec.head.valid
   private val hasRatWrite = regWriteFromRatVec.head.valid
   require(
@@ -467,6 +484,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
     o.toVPRF.r := 0.U.asTypeOf(chiselTypeOf(o.toVPRF.r))
   }
 
+  // First-half response validity qualifies both old/new merge data. Register the data
+  // and delay that validity once; currentIdx remains on the batch until its writes pulse.
   o.toVPRF.w.zipWithIndex.foreach { case (w, idx) =>
     val vdIdx = currentIdxVec(idx)
     // when nonSegIndexed load, iemul/demul = 1 << 2, vdLoc will be mapped as (0, 1, 2, 3, ...) -> (0, 4, ...)
@@ -498,6 +517,7 @@ class RabToVecExcpMod(implicit p: Parameters) extends XSBundle {
   val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
 }
 
+/** Recovery layout; NF is field count minus one and VSTART is an element index. */
 class VecExcpInfo(implicit p: Parameters) extends XSBundle {
   val vstart = Vstart()
   val vsew = VSew()
@@ -518,6 +538,9 @@ class VprfToExcpMod(numPort: Int)(implicit p: Parameters) extends XSBundle {
   val rdata = Vec(numPort, ValidIO(UInt(VLEN.W)))
 }
 
+/** Unbackpressured RF access intents. Paired merge reads put old ports in the first
+  * half and new ports in the second; writes target the saved new physical mapping.
+  */
 class ExcpModToVprf(numReadPort: Int, numWritePort: Int)(implicit p: Parameters) extends XSBundle {
   val r = Vec(numReadPort, ValidIO(new Bundle {
     val isV0 = Bool()
@@ -530,6 +553,9 @@ class ExcpModToVprf(numReadPort: Int, numWritePort: Int)(implicit p: Parameters)
   }))
 }
 
+/** Combinational half-open element ranges for field-interleaved destination registers.
+  * NF selects the number of fields; one-hot EEW scales the byte-based range by 1/2/4/8.
+  */
 class NfMappedElemIdx(vlen: Int) extends Module {
   require(isPow2(vlen))
   // vlen = 128, idxWidth = 8, hold 0~128
@@ -572,6 +598,9 @@ class NfMappedElemIdx(vlen: Int) extends Module {
   }
 }
 
+/** Byte offset of an element within one vector register: (idx << log2(EEW/8)) modulo
+  * bytes per register. Truncation to tailZeroBit implements the modulo operation.
+  */
 class GetE8OffsetInVreg(vlen: Int) extends Module {
   require(isPow2(vlen))
   private val minElemLen = 8
@@ -633,6 +662,7 @@ class VecE64Vec(vlen: Int) extends Bundle {
   def apply(idx: Int): UInt = this.data(idx)
 }
 
+/** Unsigned half-open interval [from, until); the upper endpoint needs its own count bit. */
 class HWRange(w: Int) extends Bundle {
   val from  = UInt(w.W)
   val until = UInt(w.W)

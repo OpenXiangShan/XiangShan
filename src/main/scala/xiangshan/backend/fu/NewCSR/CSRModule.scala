@@ -7,6 +7,15 @@ import xiangshan.backend.fu.NewCSR.CSRBundles._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import org.chipsalliance.cde.config.Parameters
 
+/** Register bank for one typed CSR. regOut exposes stored fields; rdata applies each
+  * field's read filter and packs fields at architectural bit positions.
+  * Subclasses add explicit update connections for aliases and context-dependent rules.
+  *
+  * {{{
+  * w.wdata -> typed fields -> legality / update enables -> [reg] -> regOut
+  * event updates ----------------------^                    +-> read filters -> rdata
+  * }}}
+  */
 class CSRModule[T <: CSRBundle](
   val modName: String,
   val bundle: T = new OneFieldBundle,
@@ -48,6 +57,8 @@ class CSRModule[T <: CSRBundle](
   rdata := rdataFields.asUInt
   regOut := reg
 
+  // Mux1H combines update candidates rather than assigning priority. Software and
+  // event enables must be disjoint unless simultaneously selected data is identical.
   private def wfnField(field: CSREnumType, str: String): Unit = {
     val wfield: CSREnumType = wdata.elements(str).asInstanceOf[CSREnumType]
 
@@ -70,6 +81,7 @@ class CSRModule[T <: CSRBundle](
     }
   }
 
+  /** Rebuild field next-state connections after a mixin adds event update candidates. */
   protected def reconnectReg(): Unit = {
     this.wfn(this.reg)
   }
@@ -80,6 +92,7 @@ class CSRModule[T <: CSRBundle](
 
   var addr = 0
 
+  /** Attach an elaboration-time map key; address decoding is performed by NewCSR. */
   def setAddr(addr_ : Int): this.type = {
     this.addr = addr_
     this

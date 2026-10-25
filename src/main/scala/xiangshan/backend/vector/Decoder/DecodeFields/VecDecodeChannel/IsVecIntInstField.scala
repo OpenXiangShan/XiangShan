@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Identify scalar multi-uop patterns carried by this channel, not vector integer ALU ops. */
 object IsVecIntInstField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "isVecIntInst"
 

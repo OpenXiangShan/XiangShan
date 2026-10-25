@@ -3,6 +3,10 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 
+/** Registered supervisor timer-pending levels. Recompare on time samples, compare
+  * writes, and relevant environment/delta writes; otherwise retain the previous level.
+  * Time payloads must remain usable on write-triggered updates even when valid is low.
+  */
 class SstcInterruptGen extends Module {
   val i = IO(Input(new Bundle {
     val stime      = ValidIO(UInt(64.W))

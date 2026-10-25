@@ -28,6 +28,10 @@ class DretEventInput extends Bundle {
   val hgatp = Input(new HgatpBundle)
 }
 
+/** Combinational debug return: recover DCSR privilege, leave debug mode, re-enable
+  * debug interrupts, and validate DPC using the restored translation regime.
+  * Only addInEvent-marked CSR fields are consumed by sinks.
+  */
 class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   val in = IO(new DretEventInput)
   val out = IO(new DretEventOutput)

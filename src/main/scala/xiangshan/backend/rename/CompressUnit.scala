@@ -65,6 +65,22 @@ object NoCompressReason {
   def apply() = UInt(2.W)
 }
 
+/**
+  * Combinationally groups a rename bundle into physical ROB entries.
+  *
+  * {{{
+  * architectural valid lanes --> simple runs / complex / non-compressible tokens
+  *                                      |
+  *                         prefix pair state --> former/latter token pairs
+  *                                      |
+  * actual emitted lanes -----------> entry head/tail + slot masks + pair type
+  * }}}
+  *
+  * Adjacent simple instructions share a token; eligible neighboring tokens
+  * share an entry. Non-compressible tokens terminate pairing. Architectural
+  * masks retain fusion members even when actualValid omits their emitted uop,
+  * keeping retirement counts separate from physical-entry allocation counts.
+  */
 class CompressUnit(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
     val in = Vec(RenameWidth, Flipped(Valid(new DecodeOutUop)))
@@ -153,6 +169,8 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val tokenMaskFromStart = Wire(Vec(RenameWidth, UInt(RenameWidth.W)))
   val hasDestFromStart = VecInit(io.in.map(x => x.valid && (x.bits.rfWen || x.bits.fpWen)))
 
+  // Start one token for a contiguous simple run, or one for each other valid
+  // instruction. Prefix counts map every architectural lane to its token.
   for (i <- 0 until RenameWidth) {
     val prevSimple = if (i == 0) false.B else simpleVec(i - 1)
     simpleStart(i) := simpleVec(i) && !prevSimple
@@ -317,6 +335,8 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     )
   }
 
+  // Replicate entry metadata onto emitted lanes, then mark the first/last
+  // emitted lane so fusion-cleared lanes never allocate an extra ROB entry.
   for (i <- 0 until RenameWidth) {
     when(actualValidVec(i)) {
       val tokenId = tokenIdOfInstr(i)

@@ -50,7 +50,20 @@ private object ArbiterCtrl {
   }
 }
 
-// when io.in.valid is false.B, io.in.ready is true.B
+/** Request arbiter with a saturating retry score per input.
+  * Denial adds two and success removes one; idle cycles retain the score.
+  * Requesting inputs near saturation form the preferred priority set, helping
+  * stalled issue attempts make progress despite delayed cancellation feedback.
+  *
+  * {{{
+  * valid + ready -> saturating score update -> [cancelCounter] -> [isFull]
+  * valid + [isFull] -> prefer pressured requesters -> fixed priority -> out
+  * out.ready + grant -------------------------------------------> in.ready
+  * }}}
+  *
+  * isFull tests the stored score, so preference trails a score change by one
+  * edge. This arbiter retains arbitration state, not a denied request's payload.
+  */
 class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   val io = IO(new ArbiterIO(gen, n))
 
@@ -59,9 +72,8 @@ class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   private val CounterThreshold = 7
 
   /* To avoid some weird deadlock caused by delay of og0Cancel */
-  // Use a saturation counter to record the number of consecutive failed requests for each input port
-  // When a counter reaches the threshold, mark it as full
-  // Port marked as full will be prioritized the next time it sends a request
+  // Accumulate retry pressure rather than requiring consecutive failures.
+  // Near-saturated ports are preferred when at least one such port requests.
 
   val cancelCounter      = RegInit(VecInit(Seq.fill(n)(0.U(CounterWidth.W))))
   val isFull             = RegInit(VecInit(Seq.fill(n)(false.B)))
@@ -110,7 +122,9 @@ class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   io.out.valid := !grant.last || finalValid.last
 }
 
-// used in WbDataPath
+/** Fixed-priority arbiter for actual writeback data, ordered by configured
+  * priority. The chosen producer sees ready only when the output can accept it.
+  */
 class RealWBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   val io = IO(new ArbiterIO(gen, n))
 
@@ -129,6 +143,10 @@ class RealWBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   io.out.valid := !grant.last || io.in.last.valid
 }
 
+/** Groups predicted writes by physical port and checks concurrent IQ attempts.
+  * Grants feed issue readiness; these bundles reserve ports without carrying
+  * the eventual register data handled by RealWBArbiter.
+  */
 abstract class RFWBCollideCheckerBase(params: RFWBCollideCheckerParams)(implicit p: Parameters) extends Module {
   protected def portRange: Range
 

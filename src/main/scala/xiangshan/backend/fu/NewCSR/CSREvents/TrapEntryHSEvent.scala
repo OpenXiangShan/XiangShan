@@ -24,6 +24,10 @@ class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val htinst  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
 }
 
+/** Combinational host-supervisor trap save. Supervisor status lives in the MSTATUS
+  * alias, while HSTATUS preserves guest context. HTVAL stores guest address >> 2 and
+  * HTINST identifies implicit non-leaf VS page-table accesses when applicable.
+  */
 class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSREventBase {
   val in = IO(new TrapEntryEventInput)
   val out = IO(new TrapEntryHSEventOutput)

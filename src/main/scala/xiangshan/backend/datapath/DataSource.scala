@@ -2,6 +2,10 @@ package xiangshan.backend.datapath
 
 import chisel3._
 
+/** Operand location selected by issue-entry state. The high bit requests a
+  * physical-register read; exact encodings select zero, immediate, reg-cache,
+  * current forwarding, or one/two-cycle registered producer data.
+  */
 class DataSource extends Bundle {
   val value = UInt(4.W)
 

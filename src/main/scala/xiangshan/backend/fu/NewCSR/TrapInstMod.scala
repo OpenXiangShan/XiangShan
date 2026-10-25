@@ -15,6 +15,17 @@ class FtqInfo(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 }
 
+/** Retain one trap instruction, ordered by FTQ pointer and halfword offset. CSR faults
+  * reconstruct the original instruction and can replace a younger saved fault; decode
+  * fills only an empty slot. Flush is delayed one cycle to align ROB trap information.
+  * readClear is handled in the valid delayed-flush branch, not as an independent reset.
+  *
+  * {{{
+  * decode trap ---------+-> oldest surviving candidate -> [valid, instruction, FTQ info]
+  * faultCsrUop -> rebuild instruction --------^                      -> currentTrapInst
+  * ROB flush -> [one-cycle delay] -> discard/replace/consume --------^
+  * }}}
+  */
 class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val fromDecode = Input(new Bundle {

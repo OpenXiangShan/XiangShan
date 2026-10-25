@@ -20,6 +20,10 @@ class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val vstval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
 }
 
+/** Combinational guest-supervisor trap save, valid only from virtualized privilege.
+  * Standard VS interrupt IDs are remapped to supervisor IDs; HVICTL injection supplies
+  * its own IID. VSTVAL uses fetch/memory/instruction context without a host HTVAL update.
+  */
 class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSREventBase {
   val in = IO(new TrapEntryEventInput)
   val out = IO(new TrapEntryVSEventOutput)

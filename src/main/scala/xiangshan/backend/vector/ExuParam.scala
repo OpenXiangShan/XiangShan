@@ -19,6 +19,12 @@ import xiangshan.backend.fu.FuType
 
 import scala.beans.BeanProperty
 
+/** Elaboration contract for one dedicated execution pipe and its supported FUs.
+  * Capability fields union the FU requirements; source counts/widths take maxima.
+  * readPortCfgs is indexed by source position, with alternative register classes
+  * per source. V0/VL use separate side ports. RegionParam initializes the parent
+  * and backend references before hardware bundle generation.
+  */
 class ExuParam(
   val name         : String,
   val fuConfigs    : Seq[VecFuConfig],
@@ -99,6 +105,8 @@ class ExuParam(
   def writeV0FuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeV0Rf)
   def writeVlFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeVlRf)
 
+  // Main register classes use the first matching configured write port; V0/VL
+  // use their separate optional descriptors rather than writePortCfgs.
   def getGpWriteCfg: Option[IntWB] = {
     writePortCfgs.collectFirst {
       case x: IntWB => x
@@ -139,6 +147,7 @@ class ExuParam(
     this.writePortCfgs.map(_.dataCfg).toSet
   }
 
+  /** Union FU register classes per source, padding shorter layouts with empty sets. */
   def getRfReadDataCfgSet: Seq[Set[DataConfig]] = {
     val fuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuConfigs.map(_.getRfReadDataCfgSet)
     val alignedFuSrcsCfgSet: Seq[Seq[Set[DataConfig]]] = fuSrcsCfgSet.map(x => x ++ Seq.fill(numRegSrc - x.length)(Set[DataConfig]()))
@@ -201,6 +210,7 @@ class ExuParam(
     }
   }
 
+  /** Pair each matching main-operand read port with its original source index. */
   def getRdConfigWithSrcIdx(dataConfig: DataConfig): Seq[(RdConfig, Int)] = {
     readPortCfgs.zipWithIndex.filter {
       case (rdCfgs, srcIdx) => rdCfgs.exists(_.getDataConfig == dataConfig)
@@ -227,6 +237,7 @@ class ExuParam(
 
   def hasVfmac: Boolean = fuConfigs.contains(VecFuConfig.VfmacCfg)
 
+  /** Omit unsupported optional hardware at elaboration rather than tie off a full bundle. */
   def genBundle[T <: Bundle](
     cond: ExuParam => Boolean,
     gen: => T,
@@ -234,6 +245,9 @@ class ExuParam(
     Option.when(cond(this))(gen)
   }
 
+  /** Generate reads in source order, retaining srcIdx after filtering by register class.
+    * V0/VL side ports use source index zero in their separate namespace.
+    */
   def genRfRdAddrBundle(pregParams: PregParams)(implicit p: Parameters): MixedVec[RfReadAddrBundle] = MixedVec(
     pregParams match {
       case IntPregParams(_, _, _, _) |
@@ -252,6 +266,7 @@ class ExuParam(
     }
   )
 
+  /** Generate the payload shape paired with genRfRdAddrBundle's filtered sources. */
   def genRfRdDataBundle(pregParams: PregParams): MixedVec[RfReadDataBundle] = MixedVec(
     pregParams match {
       case IntPregParams(_, _, _, _) |
@@ -289,6 +304,7 @@ class ExuParam(
     wrapper(new Exu.ToRob(this))
   }
 
+  /** Generate a result only when this pipe has a write port for the requested RF. */
   def genExuToRfBundle(
     pregParams: PregParams,
   ): Option[Exu.ToRf] = {
@@ -316,6 +332,7 @@ class ExuParam(
 }
 
 object ExuParam {
+  /** Adapt a legacy execution description and retain it for legacy interface bridges. */
   def apply(exeUnitParams: ExeUnitParams): ExuParam = {
     val instance = new ExuParam(
       name = exeUnitParams.name,

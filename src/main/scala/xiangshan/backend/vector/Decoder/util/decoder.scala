@@ -20,6 +20,8 @@ object decoder {
   def apply(input: UInt, truthTables: Seq[TruthTable]): Seq[UInt] = {
     import scala.concurrent.ExecutionContext.Implicits.global
 
+    // These Futures parallelize host-side elaboration, not hardware execution.
+    // The emitted PLA outputs have no clocked state or variable runtime latency.
     val futures = truthTables.map {
       table =>
         Future {

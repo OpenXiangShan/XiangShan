@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.{FpInstPattern, InstPattern,
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
+/** Internal FP rounding modes; ROD=6 is a vector conversion mode, DYN reads CSR frm. */
 object Frm extends NamedUInt(3) {
   val RNE = 0.U(width.W)
   val RTZ = 1.U(width.W)

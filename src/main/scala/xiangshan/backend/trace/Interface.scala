@@ -21,6 +21,10 @@ class TracePipe(iretireWidth: Int)(implicit val p: Parameters) extends Bundle wi
   val ilastsize = Ilastsize()
 }
 
+/** One retirement block with either a resolved PC or FTQ coordinates.
+  * iretireWidth distinguishes the pipeline encoding from the later compressed
+  * group count; callers must use the matching representation at each boundary.
+  */
 class TraceBlock(hasIaddr: Boolean, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val iaddr     = if (hasIaddr)   Some(UInt(IaddrWidth.W))                else None
   val ftqIdx    = if (!hasIaddr)  Some(new FtqPtr)                        else None
@@ -77,6 +81,8 @@ object Itype extends NamedUInt(4) {
   def OtherUninferableJump = 14.U   //rename
   def OtherInferableJump   = 15.U   //rename
 
+  // Classify calls, returns, and coroutine swaps using RISC-V link-register
+  // conventions. Branches start as non-taken and are corrected after resolution.
   def jumpTypeGen(isJ: Bool, isJr: Bool, isBranch: Bool, rd: OpRegType, rs: OpRegType): UInt = {
 
     val isEqualRdRs = rd === rs

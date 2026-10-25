@@ -31,6 +31,10 @@ class NewPipelineConnectPipe[T <: Data](gen: T) extends Module {
   NewPipelineConnect.connect(io.in, io.out, io.rightOutFire, io.isFlush, io.isOlder)
 }
 
+/** One-entry pipeline connection with explicit retirement and age replacement.
+  * Callers supply rightOutFire independently of ready and may replace a held
+  * entry when isOlder is asserted. Flush has priority over consume and refill.
+  */
 object NewPipelineConnect {
   def connect[T <: Data](
                           left: DecoupledIO[T],
@@ -54,6 +58,8 @@ object NewPipelineConnect {
     data
   }
 
+  // A named wrapper exposes a module boundary; the inline form returns the
+  // payload register to callers and leaves dead-code elimination unrestricted.
   def apply[T <: Data](
                         left: DecoupledIO[T],
                         right: DecoupledIO[T],

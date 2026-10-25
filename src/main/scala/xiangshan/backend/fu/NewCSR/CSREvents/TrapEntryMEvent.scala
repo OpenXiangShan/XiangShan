@@ -21,6 +21,10 @@ class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with 
   val mtinst    = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
 }
 
+/** Combinational machine-trap save. Cause class selects PC, PC+2 for a cross-page
+  * fetch, memory VA, or instruction bits for MTVAL. Guest addresses are stored shifted
+  * by two in MTVAL2; a double trap instead records the original cause there.
+  */
 class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSREventBase {
   val in = IO(new TrapEntryEventInput)
   val out = IO(new TrapEntryMEventOutput)

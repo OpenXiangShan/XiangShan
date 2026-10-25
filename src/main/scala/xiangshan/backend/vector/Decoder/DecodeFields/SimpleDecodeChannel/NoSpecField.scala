@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Mark scalar operations that must wait for older instructions before dispatch. */
 object NoSpecField extends BoolDecodeField[InstPattern] {
 
   override def name: String = "noSpec"

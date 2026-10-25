@@ -38,6 +38,7 @@ import freechips.rocketchip.rocket.CSRs
 import system.HasSoCParameter
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 
+/** Execution/retirement-side FP events toward CSR, with rounding mode returned by CSR. */
 class FpuCsrIO extends Bundle {
   val fflags = Output(Vec(5, Bool()))
   val isIllegal = Output(Bool())
@@ -45,6 +46,7 @@ class FpuCsrIO extends Bundle {
   val frm = Input(UInt(3.W))
 }
 
+/** Vector state updates toward CSR; vstart/vxrm are architectural read sidebands. */
 class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(Vstart())
   val vxrm = Input(UInt(2.W))
@@ -59,6 +61,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
 }
 
 
+/** Selected event counts and retired architectural-instruction count for the CSR bank. */
 class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
   val perfEventsBackend   = Vec(numCSRPCntCtrl, new PerfEvent)
@@ -78,6 +81,10 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   }
 }
 
+/** Architectural CSR sidebands shared by execution, ROB, memory, and top-level devices.
+  * Directions here are from the CSR functional unit's perspective; trap notification
+  * and retirement updates are separate from the functional-unit request handshake.
+  */
 class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val hartId = Input(UInt(hartIdLen.W))
   // output (for func === CSROpType.jmp)
@@ -128,6 +135,8 @@ class VtypeStruct(implicit p: Parameters) extends XSBundle {
   val vsew = UInt(3.W)
   val vlmul = UInt(3.W)
 }
+// Historical monolithic implementation retained as inactive reference. The active
+// execution path is fu.wrapper.CSR with fu.NewCSR.NewCSR; interfaces above remain shared.
 /*
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCSRConst
@@ -1642,6 +1651,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     difftest.vlenb := vlenb
   }
 }
+/** Legacy distributed performance-selector copy, updated by matching broadcast writes.
+  * The modular CSR implementation has its own PFEvent class in the NewCSR package.
+  */
 class PFEvent(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())

@@ -9,6 +9,18 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, XtvecMode}
 import xiangshan.backend.fu.NewCSR.InterruptNO
 
 
+/** Select AIA top interrupts and eligible trap requests. Each priority tree first
+  * registers eight group winners, then applies global priority and live privilege/IE
+  * gating before a second register. Debug/NMI use separate one-register paths, so these
+  * outputs are continuously recomputed levels, not a common-latency request handshake.
+  * interruptVec.bits is an encoded interrupt ID despite its name; debug has its own flag.
+  *
+  * {{{
+  * pending & enables & delegation -> group priority -> [8 winners] -> xTOPI
+  * xTOPI + privilege/global IE -> [eligible M/HS/VS IDs] -> M > HS > VS
+  * NMI/debug -> [separate registers] -------------------> overrides / valid
+  * }}}
+  */
 class InterruptFilter extends Module {
   val io = IO(new InterruptFilterIO)
 
@@ -140,6 +152,7 @@ class InterruptFilter extends Module {
     }
   }
 
+  /** Translate default-priority array index back to architectural interrupt number. */
   def findNum(input: UInt): UInt = {
     val select = Mux1H(UIntToOH(input), InterruptNO.interruptDefaultPrio.map(_.U))
     select
@@ -155,7 +168,8 @@ class InterruptFilter extends Module {
     select
   }
 
-  // value lower, priority higher
+  // Pairwise tournament: enabled beats disabled, numeric ties favor the left entry.
+  // Zero priority uses default ordering relative to xEI; external priorities may exceed 255.
   def minSelect(iprios: Vec[IpriosSort], xei: UInt): Vec[IpriosSort] = {
     iprios.size match {
       case 1 =>
@@ -190,6 +204,7 @@ class InterruptFilter extends Module {
     result(0)
   }
 
+  /** Pad to eight groups of eight; disabled padding never creates an interrupt. */
   def sliceIpriosSort(ipriosSort: Vec[IpriosSort]): Vec[Vec[IpriosSort]] = {
     val ipriosSortTmp = Wire(Vec(8, Vec(8, new IpriosSort)))
     for (i <- 0 until 8) {
@@ -277,7 +292,8 @@ class InterruptFilter extends Module {
     0.U
   )
 
-  // refactor this code & has some problem
+  // VS arbitration separates three SEI sources (IMSIC, injected SEI, default SEI)
+  // from local pending interrupts and non-SEI HVICTL injection (candidates 4/5).
   val Candidate1: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
   val Candidate2: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
   val Candidate3: Bool = vsip.SEIP && vsie.SEIE && !Candidate1 && !Candidate2
@@ -537,6 +553,7 @@ class InterruptFilter extends Module {
   val nmiReg = RegNext(io.in.nmi, false.B)
   val nmiVecReg = RegNext(nmiVec, 0.U.asTypeOf(nmiVec))
 
+  // These are encoded IDs; destination arbitration above makes at most one nonzero.
   val normalIntrVecReg = mIRVec | hsIRVec | vsMapHostIRVec
   val intrVecReg = Mux(disableAllIntrReg, 0.U, Mux(nmiReg, nmiVecReg, normalIntrVecReg))
 
@@ -623,6 +640,7 @@ class InterruptFilterIO extends Bundle {
 }
 
 
+/** A tournament candidate retains the default-priority index alongside numeric priority. */
 class IpriosSort extends Bundle {
   val idx = UInt(6.W)
   val enable = Bool()

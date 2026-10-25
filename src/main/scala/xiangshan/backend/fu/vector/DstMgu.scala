@@ -6,6 +6,11 @@ import chisel3.util._
 import xiangshan.backend.fu.vector.Bundles.VSew
 import yunsuan.vector.Common.SewOH
 
+/** One-stage mask-destination merge with caller-supplied S1 result/context.
+  * valid captures mask and old/agnostic replacement bits. The caller must align
+  * toS1.vd/oldVd/EEW/index with those registers; no output-valid or ready is added.
+  * The packed-mask slice layout below assumes 128-bit vectors.
+  */
 class DstMgu(vlen: Int)(implicit p: Parameters) extends Module {
   val io = IO(new DstMguIO(vlen))
 
@@ -64,6 +69,7 @@ class DstMgu(vlen: Int)(implicit p: Parameters) extends Module {
 
   io.out.vd := resVecBit.asUInt
 
+  /** Extract per-register packed-mask slices, zero-padding unused high output bits. */
   def splitVdMask(maskIn: UInt, sew: SewOH): Vec[UInt] = {
     val maskWidth = maskIn.getWidth
     val result = Wire(Vec(maskWidth / numBytes, UInt(numBytes.W)))

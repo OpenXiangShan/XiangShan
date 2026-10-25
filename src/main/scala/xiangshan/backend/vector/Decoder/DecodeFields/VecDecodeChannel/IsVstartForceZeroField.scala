@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Require vstart=0 for vector arithmetic in this implementation's legality checks. */
 object IsVstartForceZeroField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "isVstartForceZero"
 

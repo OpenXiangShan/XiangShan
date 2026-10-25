@@ -15,6 +15,10 @@ import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.XSModule
 
+/** Instantiates a region's non-memory execution units in configured port order.
+  * Wires shared CSR/fence controls, redirects, conversion data, branch resolves,
+  * and uncertain-completion wakeups; memory execution is connected separately.
+  */
 class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule with HasCriticalErrors {
   val io = IO(new ExuBlockIO)
 

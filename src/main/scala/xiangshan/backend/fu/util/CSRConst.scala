@@ -19,6 +19,7 @@ package xiangshan.backend.fu.util
 import chisel3._
 import chisel3.util._
 
+/** Shared legacy CSR addresses, privilege encodings, and access-check helpers. */
 trait HasCSRConst {
   // Supervisor Custom Read/Write
   val Sbpctl        = 0x5C0
@@ -88,6 +89,9 @@ trait HasCSRConst {
     IRQ_VSEIP, IRQ_VSSIP, IRQ_VSTIP, IRQ_SGEIP
   )
 
+  /** Address-encoded privilege/read-only check. The local result is Bool, so the
+    * virtual-instruction literal 2 below is truncated; this is not a two-bit cause API.
+    */
   def csrAccessPermissionCheck(addr: UInt, wen: Bool, mode: UInt, virt: Bool, hasH: Bool): UInt = {
     val readOnly = addr(11, 10) === "b11".U
     val lowestAccessPrivilegeLevel = addr(9,8)
@@ -109,6 +113,7 @@ trait HasCSRConst {
     ret
   }
 
+  /** Counter access needs each less-privileged level's enable bit; M bypasses masks. */
   def perfcntPermissionCheck(addr: UInt, mode: UInt, mmask: UInt, smask: UInt): Bool = {
     val index = UIntToOH(addr & 31.U)
     Mux(mode === ModeM, true.B, Mux(mode === ModeS, (index & mmask) =/= 0.U, (index & mmask & smask) =/= 0.U))

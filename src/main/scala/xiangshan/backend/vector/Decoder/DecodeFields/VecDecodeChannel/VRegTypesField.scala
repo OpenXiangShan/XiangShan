@@ -7,6 +7,9 @@ import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, DecodePatternComb4, LmulPattern, NfPattern, SewPattern}
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
+/** Register-group and relative-EEW facts consumed by vector legality checks.
+  * VS3 and VD share their base/EMUL but have independent source/destination usage.
+  */
 class VRegTypes extends Bundle {
   val useVs1 = Bool()     // vs1 is used
   val useVs2 = Bool()     // vs2 is used
@@ -22,6 +25,7 @@ class VRegTypes extends Bundle {
   val eewVs2LtVs3 = Bool()// vs2 EEW < vs3 EEW
 }
 
+/** Derive group metadata at elaboration; unused-operand comparison bits are don't-care. */
 object VRegTypesField extends DecodeField[
   DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   VRegTypes,
@@ -48,6 +52,7 @@ object VRegTypesField extends DecodeField[
   //  Memory
   // ============================================================
 
+  /** Distinguish index, data, mask, and whole-register groups for memory operations. */
   private def genMem(
     vmi: VecMemInstPattern,
     op: DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
@@ -119,6 +124,7 @@ object VRegTypesField extends DecodeField[
   //  Arithmetic — derive EMUL from Vs*Type traits
   // ============================================================
 
+  /** Compare trait-derived EEW ratios only when both relevant operands are used. */
   private def genArith(
     instP: VecInstPattern,
     sewP: SewPattern,
@@ -147,6 +153,7 @@ object VRegTypesField extends DecodeField[
   //            1 = sew, 2 = sew*2, 0.5 = sew/2, 0.25 = sew/4, 0.125 = sew/8
   // ============================================================
 
+  /** Return (used, encoded EMUL, EEW/SEW ratio) for the first operand. */
   private def vs1Info(instP: VecInstPattern, sewP: SewPattern, lmulP: LmulPattern): (BitPat, BitPat, Double) = {
     val lmul = lmulP.lmulValue
     val sew = sewP.sewValue
@@ -169,6 +176,7 @@ object VRegTypesField extends DecodeField[
     }
   }
 
+  /** Return group facts for source two, including widening/narrowing/whole moves. */
   private def vs2Info(instP: VecInstPattern, sewP: SewPattern, lmulP: LmulPattern): (BitPat, BitPat, Double) = {
     val lmul = lmulP.lmulValue
     val sew = sewP.sewValue
@@ -201,6 +209,7 @@ object VRegTypesField extends DecodeField[
     }
   }
 
+  /** Return (source used, EMUL, EEW/SEW ratio, destination used) for the VD field. */
   private def vs3Info(instP: VecInstPattern, sewP: SewPattern, lmulP: LmulPattern): (BitPat, BitPat, Double, BitPat) = {
     val lmul = lmulP.lmulValue
     val sew = sewP.sewValue
@@ -249,6 +258,7 @@ object VRegTypesField extends DecodeField[
   private def R4 = BitPat("b010")
   private def R8 = BitPat("b011")
 
+  /** Encode only representable EMUL values; fail elaboration with operand context otherwise. */
   private def emulToBits(emul: Double)(implicit ctx: String = ""): BitPat = emul match {
     case 0.125 => BitPat("b101")
     case 0.25  => BitPat("b110")
@@ -260,6 +270,7 @@ object VRegTypesField extends DecodeField[
     case _     => throw new IllegalArgumentException(s"Invalid EMUL($emul): $ctx")
   }
 
+  /** Pack fields in Bundle order and reject width mismatches before table generation. */
   private def combine(
     useVs1: BitPat, useVs2: BitPat, useVs3: BitPat, useVd: BitPat,
   )(

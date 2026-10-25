@@ -12,6 +12,10 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.fu.{FltFixLatFunc, FltNonFixedLatFunc, VecFuConfig}
 import yunsuan.fpu.FloatDivider
 
+/** Legacy single-in-flight FP divide/sqrt with saved format and redirect identity.
+  * Incoming context is checked when ready; saved context is checked while busy.
+  * The arithmetic unit owns completion backpressure and three-cycle-early wakeup.
+  */
 class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit(cfg) {
 
   // io alias
@@ -66,6 +70,11 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
 }
 
 
+/** Dedicated iterative FP divide/sqrt, completing through result slot zero.
+  * Acceptance captures metadata/format and exports busy until the divider can
+  * accept again. The early-wakeup destination follows the accepted/saved context;
+  * shared write-port availability is consulted at the ahead-three-cycle event.
+  */
 class FDivSqrtFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltNonFixedLatFunc(cfg) {
 
   // io alias

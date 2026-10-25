@@ -33,12 +33,22 @@ import utils._
 import xiangshan._
 import xiangshan.backend.fu.util.{C22, C32, C53}
 
+/** Interpretation of extended multiply/divide operands and the selected result half. */
 class MulDivCtrl extends Bundle{
   val sign = Bool()
   val isW = Bool()
   val isHi = Bool() // return hi bits of result ?
 }
 
+/** Signed radix-4 Booth array with a column compressor tree and a final carry-propagate add.
+  * The caller extends unsigned operands as needed and aligns control with regEnables.
+  * This datapath has no valid/ready or flush state of its own.
+  *
+  * {{{
+  * a,b -> Booth partial products -> [regEnables(0)] -> column compression
+  *     -> [regEnables(1), only if compression reaches depth 4] -> sum + carry -> result
+  * }}}
+  */
 class ArrayMulDataModule(len: Int) extends Module {
   val io = IO(new Bundle() {
     val a, b = Input(UInt(len.W))
@@ -88,6 +98,9 @@ class ArrayMulDataModule(len: Int) extends Module {
     }
   }
 
+  /** Return same-weight sums and two next-weight carry lists. cout1 feeds the next
+    * column's compressor in this layer; cout2 joins that column in the next layer.
+    */
   def addOneColumn(col: Seq[Bool], cin: Seq[Bool]): (Seq[Bool], Seq[Bool], Seq[Bool]) = {
     var sum = Seq[Bool]()
     var cout1 = Seq[Bool]()
@@ -127,6 +140,9 @@ class ArrayMulDataModule(len: Int) extends Module {
   }
 
   def max(in: Iterable[Int]): Int = in.reduce((a, b) => if(a>b) a else b)
+  /** Elaborate compression until at most two bits remain per weight. The optional
+    * depth-4 register is a physical tree boundary, not an iteration counter at run time.
+    */
   def addAll(cols: Seq[Seq[Bool]], depth: Int): (UInt, UInt) = {
     if(max(cols.map(_.size)) <= 2){
       val sum = Cat(cols.map(_(0)).reverse)

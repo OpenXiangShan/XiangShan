@@ -11,6 +11,7 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.BitPatToExt
 
 
+/** Emit one scalar expansion slot; absent slots have valid=0 and don't-care payload. */
 class UopInfoField(uopIdx: Int, extensions: Seq[ExtBase]) extends DecodeField[InstPattern, ValidIO[UopInfoRenameSimple]] {
 
   override def name: String = s"uopInfo$uopIdx"
@@ -44,6 +45,7 @@ object UopInfoFieldSimple {
     this.genUopSeqImpl(op, extensions)
   }
 
+  /** Resolve expansion from enabled extension tables; missing entries fail elaboration. */
   def genUopSeqImpl(instP: InstPattern, extensions: Seq[ExtBase]): Seq[Opcode] = {
     extensions.map(_.table).reduce(_ ++ _)(instP.bitPat)
   }

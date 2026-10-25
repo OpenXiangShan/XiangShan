@@ -7,6 +7,9 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import xiangshan.backend.fu.vector.Utils.{NOnes, NZeros}
 
+/** Recursive combinational thermometer mask: bit i is one when i < dataIn.
+  * The full output has 2^uintWidth-1 bits; input zero clears every bit.
+  */
 class UIntToContLow1s(uintWidth: Int) extends Module {
   private val outWidth = (1 << uintWidth) - 1 // 2^n - 1
 
@@ -28,8 +31,10 @@ class UIntToContLow1s(uintWidth: Int) extends Module {
 }
 
 object UIntToContLow1s {
+  /** Default helper width is the input bit width, not the class's full mask width. */
   def apply(uint: UInt): UInt = apply(uint, uint.getWidth)
 
+  /** Truncate the low mask bits or zero-extend to the explicitly requested width. */
   def apply(uint: UInt, width: Int): UInt = {
     val uintToContTail1sMod = Module(new UIntToContLow1s(uint.getWidth)).suggestName(s"uintToContTail1sMod${width}Bits")
     uintToContTail1sMod.io.dataIn := uint

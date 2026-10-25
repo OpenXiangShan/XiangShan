@@ -13,6 +13,10 @@ import xiangshan.backend.vector.util.BString.BinaryStringHelper
 import scala.language.implicitConversions
 
 
+/** Internal operation encodings and semantic traits, distinct from ISA instruction
+  * bits. Shared FP/vector encodings come from Yunsuan; local scalar operations and
+  * conversion helpers supply the decoder's operand, writeback, and scheduling metadata.
+  */
 object Opcode {
   def main(args: Array[String]): Unit = {
     val opcodes = Seq(
@@ -1055,6 +1059,9 @@ object Opcode {
   val LSUOpType = LsuOpcodes
   val BKUOpType = BkuOpcodes
 
+  /** Elaboration adapters from opcode traits to rename metadata. Each source/mask
+    * role must have at most one trait; absent roles remain absent (mask defaults to none).
+    */
   class OpcodeUtil(opcode: Opcode) {
     def traits: Set[OpcodeTrait] = opcode.getTraits
 

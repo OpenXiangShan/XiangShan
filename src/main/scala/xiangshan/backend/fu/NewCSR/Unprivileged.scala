@@ -13,6 +13,10 @@ import xiangshan.backend.decode.isa.CSRs
 
 import scala.collection.immutable.SeqMap
 
+/** FP/vector architectural state and user counter views. FFLAGS/FRM and VXSAT/VXRM
+  * alias their containing banks; retirement accrues flags and updates vector state.
+  * Counter read views normally follow machine counters, with saved snapshots for debug.
+  */
 trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val fcsr = Module(new CSRModule("Fcsr", new CSRBundle {
@@ -42,6 +46,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     // write connection
     reconnectReg()
 
+    // A retiring exception flag sets its bit after software/alias connections above.
     for (i <- 0 until 5) {
       when (robCommit.fflags(i)) {
         reg(i) := true.B
@@ -64,6 +69,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }) with HasRobCommitBundle {
     // Todo make The use of vstart values greater than the largest element index for the current SEW setting is reserved.
     // Not trap
+    // Explicit VSTART writes win; normal vector completion clears it, traps supply an index.
     when (wen) {
       reg.vstart := this.w.wdata(VlWidth - 2, 0)
     }.elsewhen (robCommit.vsDirty && !robCommit.vstart.valid) {
@@ -152,6 +158,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     // Update when rtc clock tick and not dcsr.STOPTIME
     // or virtual mode changed
     // Note: we delay a cycle and use `v` for better timing
+    // A virtualization transition refreshes the visible time even without a new RTC tick.
     val virtModeChanged = RegNext(nextV =/= v, false.B)
     when(mHPM.time.valid && !debugModeStopTime || virtModeChanged) {
       reg.time := Mux(v, vstimeTmp, stimeTmp)

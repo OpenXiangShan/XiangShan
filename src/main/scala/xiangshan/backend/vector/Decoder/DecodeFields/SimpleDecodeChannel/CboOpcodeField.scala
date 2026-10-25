@@ -13,6 +13,7 @@ import xiangshan.backend.vector.util.ChiselTypeExt.BitPatToExt
 import xiangshan.macros.InstanceNameMacro.getVariableName
 
 
+/** Apply CBO.INVAL-to-FLUSH policy; unmatched rows are zero for opcode OR composition. */
 object CboOpcodeField extends DecodeField[DecodePatternComb2[InstPattern, BoolPattern], UInt] {
 
   override def name: String = "cboOpcode"

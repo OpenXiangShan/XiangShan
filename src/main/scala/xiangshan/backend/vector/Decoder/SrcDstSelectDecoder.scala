@@ -12,6 +12,9 @@ import xiangshan.backend.vector.Decoder.util.{DecodeBundle, DecodeTable}
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.Verilog
 
+/** Combinational instruction-table decode of source/destination selection policies.
+  * These policy codes feed register-index selection; they are not register indices.
+  */
 @instantiable
 class SrcDstSelectDecoder(
   instSeq: Seq[DecodePatternComb2[VecInstPattern, SewPattern]],

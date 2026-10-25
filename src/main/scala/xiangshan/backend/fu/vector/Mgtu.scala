@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{Vl}
 import yunsuan.vector._
 
+/** Fill packed mask-destination bits at indices >= VL with ones, independently of vta. */
 class Mgtu(vlen: Int)(implicit p: Parameters) extends  Module {
   val io = IO(new MgtuIO(vlen))
 

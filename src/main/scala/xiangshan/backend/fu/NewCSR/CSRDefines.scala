@@ -6,6 +6,10 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import scala.language.experimental.macros
 import scala.reflect.runtime.{universe => ru}
 
+/** Width-specific field factories and architectural enums. The 1..64 factories exist
+  * so reflection can select a Chisel enum with the requested field width at elaboration.
+  * Enumerated legalValues constrain writes independently of the enum's width padding.
+  */
 object CSRDefines {
   object CSRField1Bits extends CSREnum with CSRMacroApply
 
@@ -208,6 +212,7 @@ object CSRDefines {
     override protected def legalValues: Seq[EnumType] = Seq(Disable, PMLEN7, PMLEN16)
   }
 
+  /** Resolve a field factory by bit width and access type; this creates no runtime mux. */
   object ReflectHelper {
     val mirror: ru.Mirror = ru.runtimeMirror(getClass.getClassLoader)
 

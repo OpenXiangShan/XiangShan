@@ -17,6 +17,10 @@ case class FpScheduler() extends SchedulerType
 case class VecScheduler() extends SchedulerType
 case class NoScheduler() extends SchedulerType
 
+/** Elaboration-time scheduler aggregate. Bundle factories preserve the nested
+  * issue-queue/execution-port order used by region wiring; filtered factories
+  * omit queues or ports that do not belong to that interface.
+  */
 case class SchdBlockParams(
   issueBlockParams: Seq[IssueBlockParams],
   numPregs        : Int,
@@ -265,6 +269,8 @@ case class SchdBlockParams(
       .distinctBy(_.name)
   }
 
+  // One outgoing broadcast per distinct producer; optional copies reflect that
+  // producer's fanout configuration rather than the number of consumers.
   def genIQWakeUpOutValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
     MixedVec(this.wakeUpOutExuSources.map(x => {
       val param = x.getExuParam(backendParam.allExuParams)

@@ -19,6 +19,9 @@ class WbArbiterDispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundl
   val out = Vec(n, DecoupledIO(gen))
 }
 
+/** Routes one input to at most one accepting destination. The second condition
+  * permits a no-destination transaction to complete without an output grant.
+  */
 class WbArbiterDispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => (Seq[Bool], Bool))
                            (implicit p: Parameters)
   extends Module {
@@ -45,6 +48,11 @@ class WbArbiterIO()(implicit p: Parameters, params: WbArbiterParams) extends XSB
   def inGroup: Map[Int, Seq[DecoupledIO[WriteBackRFBundle]]] = in.groupBy(_.bits.params.port).map(x => (x._1, x._2.sortBy(_.bits.params.priority).toSeq))
 }
 
+/** Shares actual result data among physical WB ports with fixed priority.
+  * Output ports accept every cycle; denied inputs see ready deasserted. Producers
+  * must retain such results or guarantee a grant for a pulsed completion. This
+  * block adds no result storage. Port groups use configured producer priority.
+  */
 class RealWBCollideChecker(params: WbArbiterParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new WbArbiterIO()(p, params))
 
@@ -118,6 +126,23 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
   }
 }
 
+/** Splits execution results by destination register class, arbitrates shared
+  * physical write ports, and assembles per-execution-unit ROB sideband data.
+  * Fixed-latency producers rely on issue-time reservations. Arbiter readiness is
+  * returned to uncertain-latency EXUs, with overrides for no-data/highest-priority
+  * paths. Result retention belongs to each producer; this block provides no buffer.
+  *
+  * {{{
+  * grouped EXU result -> RF-type split -> per-physical-port fixed priority -> RF wen/data
+  *                    <---------------- ready grants / configured overrides
+  * EXU toRob.valid + completion metadata -------------------------------> ROB
+  * vector-to-integer RF path -> [extra result register] -> integer arbiter
+  * }}}
+  *
+  * Most routing is combinational. ROB notification uses the inner toRob.valid,
+  * independently of RF arbitration; only the vector-to-integer data path shown
+  * above adds a local result register.
+  */
 class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new WbDataPathIO()(p, params, schdParams))
 
@@ -220,8 +245,8 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
 
       println(s"[WbDataPath] exu: ${exuOut.bits.params.exuIdx}, uncertain: ${exuOut.bits.params.hasUncertainLatency}, certain: ${exuOut.bits.params.latencyCertain}")
 
-      // only EXUs with uncertain latency need result of arbiter
-      // the result data can be maintained until getting success in arbiter
+      // Return grants to uncertain-latency EXUs. Each producer must either retain
+      // a denied result or arrange a guaranteed grant for its completion pulse.
       if (exuOut.bits.params.hasUncertainLatency) {
         exuOut.ready := intArbiterInput.ready && intWrite || fpArbiterInput.ready && fpWrite || vfArbiterInput.ready && vfWrite || v0ArbiterInput.ready && v0Write || vlArbiterInput.ready && vlWrite || notWrite
       } else {
@@ -351,7 +376,8 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   private val vfExuInputs = io.fromVfExu.flatten.toSeq
   private val vfExuWBs = WireInit(MixedVecInit(vfExuInputs))
 
-  // only fired port can write back to ctrl block
+  // These compatibility copies track outer input.fire. Final ROB notification
+  // below instead uses the inner toRob.valid carried in each copied payload.
   (intExuWBs zip intExuInputs).foreach { case (wb, input) => wb.valid := input.fire }
   (fpExuWBs zip fpExuInputs).foreach { case (wb, input) => wb.valid := input.fire }
   (vfExuWBs zip vfExuInputs).foreach { case (wb, input) => wb.valid := input.fire }

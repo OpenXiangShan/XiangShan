@@ -17,6 +17,7 @@ import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
 import xiangshan.backend.fu.fpu.Bundles._
 import yunsuan.fpu.fmul.utils.FMULToFADDCtrlBundle
 
+/** Elaboration-time latency metadata: fixed totals or a variable-latency scheduling hint. */
 trait HasFuLatency {
   val latencyVal: Option[Int]
   val extraLatencyVal: Option[Int]
@@ -113,6 +114,9 @@ class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val redirect  = OptionWrapper(cfg.hasRedirect, ValidIO(new Redirect))
 }
 
+/** Legacy FU payload plus EXU-provided context/valid vectors for fixed-latency units.
+  * The vector fields carry stage-aligned control independently of local datapath registers.
+  */
 class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val needCtrlPipe = cfg.latency.latencyVal.nonEmpty && (!cfg.isStd)
   val ctrl = new FuncUnitCtrlInput(cfg)
@@ -169,13 +173,20 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val instrAddrTransType = Option.when(cfg.isJmp || cfg.isLink || cfg.isBrh)(Input(new AddrTransType))
 }
 
+/** Legacy FU interface and shared completion-metadata wiring.
+  * Concrete units define acceptance, result validity, redirect handling, and data
+  * retention. The helper methods below connect metadata only; they do not create
+  * a result queue or choose when the output becomes valid.
+  */
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
   val io = IO(new FuncUnitIO(cfg))
   io.in.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset))
   io.out.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, io.out.valid, clock, reset))
   val criticalErrors = Seq(("none", false.B))
 
-  // should only be used in non-piped fu
+  /** Capture one operation's identity on input fire for a single-in-flight FU.
+    * Unit-specific completion/exception fields, including flushPipe, remain local.
+    */
   def connectNonPipedCtrlSingal: Unit = {
     io.out.bits.ctrl.robIdx := RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest  := RegEnable(io.in.bits.ctrl.pdest, io.in.fire)
@@ -196,6 +207,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.debug_seqNum.foreach(_ := RegEnable(io.in.bits.debug_seqNum.get, io.in.fire))
   }
 
+  /** Bypass accepted metadata in its input cycle, then retain it until the next fire. */
   def connectNonPipedCtrlDataHoldBypass: Unit = {
     io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
@@ -216,6 +228,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.debug_seqNum.foreach(_ := DataHoldBypass(io.in.bits.debug_seqNum.get, io.in.fire))
   }
 
+  /** Forward supported metadata combinationally for a zero-register result path. */
   def connect0LatencyCtrlSingal: Unit = {
     io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
     io.out.bits.ctrl.pdest := io.in.bits.ctrl.pdest
@@ -241,7 +254,18 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
   }
 }
 
-/**
+/** Stage metadata and datapath register enables for legacy fixed-latency FUs.
+  *
+  * {{{
+  * io.in --> local preLat valid shift --> extra-latency valid shift --> io.out.valid
+  * EXU ctrlPipe/dataPipe -------------> selected completion context
+  * EXU validPipe & local valid ------> qualified arithmetic register enables
+  * }}}
+  *
+  * Valid bits in pipelineReg advance every edge; payload capture is ready-gated.
+  * Its computed flushVec is not applied locally, so cancellation depends on the
+  * supplied valid qualification. This helper does not retain a stalled valid token.
+  *
   * @author LinJiaWei, Yinan Xu
   */
 trait HasPipelineReg { this: FuncUnit =>
@@ -251,6 +275,7 @@ trait HasPipelineReg { this: FuncUnit =>
   val preLat :Int = latency - latdiff
   require(latency >= 0 && latdiff >=0)
 
+  /** Build the local payload/valid chain, including the combinational input at index zero. */
   def pipelineReg(init: FuncUnitInput , valid:Bool, ready: Bool,latency: Int, flush:ValidIO[Redirect]): (Seq[FuncUnitInput],Seq[Bool],Seq[Bool])={
     val rdyVec = Seq.fill(latency)(Wire(Bool())) :+ ready
     val validVec = valid +: Seq.fill(latency)(RegInit(false.B))
@@ -334,6 +359,7 @@ trait HasPipelineReg { this: FuncUnit =>
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1)
 
+  /** Capture one arithmetic intermediate at the selected qualified stage enable. */
   def PipelineReg[TT <: Data](i: Int)(next: TT) = {
     val lat = preLat min i
     RegEnable(
@@ -342,6 +368,7 @@ trait HasPipelineReg { this: FuncUnit =>
     )
   }
 
+  /** Cascade at most preLat payload registers; each uses its own stage enable. */
   def SNReg[TT <: Data](in: TT, n: Int): TT ={
     val lat = preLat min n
     var next = in

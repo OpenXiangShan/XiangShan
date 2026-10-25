@@ -33,6 +33,11 @@ import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
+/** Computes the next in-order physical ROB retirement window.
+  * Already committed banks count as complete when locating the next boundary;
+  * missing completion, a head redirect, walk state, or blockCommit holds it.
+  * The single-commit path restricts advance to the selected head position.
+  */
 class NewRobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush

@@ -37,6 +37,20 @@ import xiangshan.backend.issue._
 import difftest.plugin.topdown.TopdownIQInfoCollect
 
 
+/**
+  * Configurable issue/execute region used by the integer backend path.
+  *
+  * {{{
+  * dispatch --> IssueQueueImp --> DataPath (OG0/OG1) --> BypassNetwork --> ExuBlock
+  *                   ^                |                                  |
+  *                   +--- retry ------+                    WbDataPath <--+
+  *                   +--- wakeups / memory responses / shared WB busy ----+
+  * }}}
+  *
+  * Wakeup routes are keyed by global execution-unit identity. Per-consumer
+  * copies and delayed broadcasts reduce fanout while preserving entry timing;
+  * registered redirect copies align squash control across the region.
+  */
 class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
   val io = IO(new RegionIO(params))
   val issueQueues = params.issueBlockParams.map { case iqParam =>
@@ -200,6 +214,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   }
 
   // other wakeup, int vec need WB wakeup
+  // Reconstruct the register-class enables and destination identity for a
+  // writeback broadcast; the payload data travels on the operand datapath.
   def connectWakeupWB(sink: ValidIO[IssueQueueWBWakeUpBundle], source: RfWritePortBundle): Unit = {
     sink.valid := source.wen
     sink.bits.rfWen := source.rfWen
@@ -924,6 +940,9 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       FUConfig(FuType.isBJU, "BJU", _.BrhCnt > 0),
       FUConfig(FuType.isLoad, "LDU", _.LduCnt > 0)
     )
+    /** Count pairwise IQ imbalance for one FU class; this observes selection state
+      * and does not rebalance dispatch or change the issue policy.
+      */
     def generatePerfCounters(fuConfig: FUConfig, checkSrcReady: Boolean): Unit = {
       for (i <- 0 until iqNum) {
         for (j <- 0 until iqNum) {

@@ -29,7 +29,30 @@ import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 
+/** Shared backend payloads and combinational adapters.
+  *
+  * Payload flow (registers and handshakes belong to the containing modules):
+  *
+  * {{{
+  *   DecodeInUop -> DecodeOutUop -> RenameOutUop -> DispatchOutUop
+  *                                      |               |
+  *                                  EnqRobUop       RegionInUop
+  *                                                      |
+  *                                IssueQueuePayload + entry status
+  *                                                      |
+  *                              Og0InUop + OG1 payload + RF/bypass data
+  *                                                      |
+  *                                            ExuInput / NewExuInput
+  *                                                      |
+  *                                          EXU result -> ROB and RFs
+  * }}}
+  *
+  * Option fields are selected at elaboration by the queue/EXU configuration;
+  * an absent field is not a runtime-invalid transaction. Bundles without a valid
+  * member rely on the enclosing Valid/Decoupled interface or the caller's enable.
+  */
 object Bundles {
+  // Completion counts can include multiple micro-operations per instruction.
   def NormalUopNumWidth(implicit p: Parameters): Int =
     log2Up(2 * p(XSCoreParamsKey).MaxUopSize + 1)
 
@@ -39,7 +62,9 @@ object Bundles {
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
    *
-   * There is no limit to the number of ports on both sides.
+   * There is no limit to the number of ports on both sides. Missing source names
+   * are skipped; width mismatches only print an elaboration warning and leave the
+   * sink field unconnected. This helper neither defaults fields nor adds registers.
    *
    * Don't forget to connect the remaining ports!
    */
@@ -60,6 +85,9 @@ object Bundles {
     }
   }
 
+  /** Split the flat payload into control/data/destination groups without buffering.
+    * Only matching fields are connected; callers must supply any remaining fields.
+    */
   def connectNewExuInput(sink: DecoupledIO[NewExuInput], source: DecoupledIO[ExuInput]) = {
     sink.valid := source.valid
     source.ready := sink.ready
@@ -70,6 +98,9 @@ object Bundles {
     sink.bits.robIdx     := source.bits.robIdx
   }
 
+  /** Flatten the grouped payload with combinational ready/valid forwarding.
+    * The grouped interface has no selImm field, so this adapter explicitly clears it.
+    */
   def connectExuInput(sink: DecoupledIO[ExuInput], source: DecoupledIO[NewExuInput]) = {
     sink.valid := source.valid
     source.ready := sink.ready
@@ -82,6 +113,10 @@ object Bundles {
     sink.bits.selImm := 0.U
   }
 
+  /** Adapt the common legacy memory result path (data(0)) to separate ROB/RF channels.
+    * RF valid bits copy the type enables; the enclosing transaction valid must still
+    * qualify their use. This wiring does not add a storage or arbitration stage.
+    */
   def connectMemNewExuOutput(sink: DecoupledIO[NewExuOutput], source: DecoupledIO[ExuOutput]) = {
     sink.valid := source.valid
     source.ready := sink.ready
@@ -100,6 +135,9 @@ object Bundles {
     sink.bits.toVlRf. foreach(_.bits  := source.bits.data(0))
   }
 
+  /** Extract a ROB payload; the caller separately qualifies source.toRob.valid.
+    * The diagnostic data field uses the integer RF channel, or zero if absent.
+    */
   def connectWriteBackRob(sink: WriteBackRobBundle, source: NewExuOutput) = {
     connectSamePort(sink, source.toRob.bits)
     connectSamePort(sink, source)
@@ -109,6 +147,10 @@ object Bundles {
   }
 
   // Frontend --[CtrlBlock]--> DecodeInUop
+  /** Frontend identity, fetch exceptions and speculative VTYPE entering decode.
+    * FTQ coordinates remain attached so later redirects and traps can locate the
+    * instruction even when a full debug PC is not carried through the pipeline.
+    */
   class DecodeInUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
@@ -142,6 +184,10 @@ object Bundles {
   }
 
   // DecodeInUop --[Decode]--> DecodeOutUop
+  /** Decoded logical-register controls before physical register allocation.
+    * The instruction word is retained for fusion; numWB describes completion events,
+    * while firstUop/lastUop and uopIdx identify pieces of a split instruction.
+    */
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
@@ -215,11 +261,13 @@ object Bundles {
     val debug_seqNum = InstSeqNum()
   }
 
+  /** Instruction bits and FTQ identity retained for reporting trap instruction data. */
   class TrapInstInfo(implicit p: Parameters) extends XSBundle {
     val instr = UInt(32.W)
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 
+    // Remove only younger instructions; the instruction at the supplied position survives.
     def needFlush(ftqPtr: FtqPtr, ftqOffset: UInt): Bool = {
       val sameFlush = this.ftqPtr === ftqPtr && this.ftqOffset > ftqOffset
       sameFlush || isAfter(this.ftqPtr, ftqPtr)
@@ -235,6 +283,12 @@ object Bundles {
     }
   }
 
+  /** Rename result with physical sources/destinations and ROB compression metadata.
+    * robIdx addresses a physical ROB entry; former/latter metadata distinguishes its
+    * instruction slots. formerNumWB/latterNumWB count expected completion events,
+    * whereas trace retirement counts describe architectural instructions.
+    * V0/VL use dedicated physical register namespaces alongside the common pdest.
+    */
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
@@ -333,6 +387,7 @@ object Bundles {
     val debug_sim_trig = Bool()
   }
 
+  /** ROB allocation view of rename, including store-data completion and trap controls. */
   class EnqRobUop(implicit p: Parameters) extends RenameOutUop {
     val stdwriteNeed      = Bool()
     val isXSTrap          = Bool()
@@ -344,6 +399,7 @@ object Bundles {
       fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
     }
 
+    // Single-step is handled as an exception without waiting for either slot's writebacks.
     def connectEnqRobUop(source: RenameOutUop): Unit = {
       connectSamePort(this, source)
       this.hasException := source.hasException || source.singleStep
@@ -355,6 +411,7 @@ object Bundles {
     }
   }
 
+  /** Diagnostic classification of the stage that rejected an issue attempt. */
   object IQCancelSource {
     def apply() = UInt(3.W)
 
@@ -385,6 +442,10 @@ object Bundles {
     val idealIssueTime = Bool()
   }
 
+  /** Dispatch payload after busy-table and LSQ information has been attached.
+    * srcState is a readiness snapshot, not operand data. Load dependencies qualify
+    * speculative readiness, and useRegCache/regCacheIdx select cached integer operands.
+    */
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
@@ -454,6 +515,9 @@ object Bundles {
     // dispatch ctrl for debug module
     val singleStep = Bool()
   }
+  /** Queue-specific dispatch view, retaining only fields required by this region.
+    * Source readiness/dependency state is carried separately from the eventual RF data.
+    */
   class RegionInUop(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
     // from frontend
@@ -511,6 +575,9 @@ object Bundles {
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
 
+  /** Less timing-critical entry controls read for OG1, separate from OG0 selection state.
+    * Immediate storage uses the maximum encoded length required by this queue.
+    */
   class EntryOg1Payload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
 
@@ -541,6 +608,7 @@ object Bundles {
     val sqIdx = Option.when(params.needSqIdx)(new SqPtr) // load unit need sqIdx
   }
 
+  /** EXU-specific OG1 controls plus physical source addresses for RF bank selection. */
   class IssueQueueDeqOg1Payload(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
     // from frontend
@@ -573,6 +641,9 @@ object Bundles {
     val sqIdx = Option.when(params.issueBlockParam.needSqIdx)(new SqPtr) // load unit need sqIdx
   }
 
+  /** Stored instruction payload; entry validity, issued state and age live in IQ status.
+    * og1Payload holds the controls supplied after the early selection path.
+    */
   class IssueQueuePayload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
     val og1Payload = new EntryOg1Payload(params)
@@ -596,6 +667,7 @@ object Bundles {
     val debug             = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
     val debugLastIssueCancelSource = OptionWrapper(backendParams.debugEn, IQCancelSource())
   }
+  /** Completion metadata sent to the ROB independently of register-file operand data. */
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
     val fflagsWen = OptionWrapper(params.writeFflags, Bool())
@@ -611,6 +683,10 @@ object Bundles {
     val debug_seqNum = InstSeqNum()
   }
   // DecodeOutUop --[Rename]--> DynInst
+  /** Broad legacy micro-operation view used by memory and compatibility interfaces.
+    * It combines decode, rename, readiness and debug fields; narrower adapters below
+    * intentionally preserve only a subset, so conversions are not lossless round trips.
+    */
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
     // passed from StaticInst
@@ -730,6 +806,7 @@ object Bundles {
 
     def isAMOCAS: Bool = FuType.isAMO(fuType) && LSUOpType.isAMOCAS(fuOpType)
 
+    // Immediate/PC/non-register sources are ready without a physical-register wakeup.
     def srcIsReady: Vec[Bool] = {
       VecInit(this.srcType.zip(this.srcState).map {
         case (t, s) => SrcType.isNotReg(t) || SrcState.isReady(s)
@@ -738,6 +815,7 @@ object Bundles {
 
     def needEnqRab: Bool = rfWen || fpWen || vecWen || v0Wen
 
+    /** Start from zero, copy matching rename fields, then unpack optional debug metadata. */
     def connectRenameOutUop(source: RenameOutUop): Unit = {
       this := 0.U.asTypeOf(this)
       connectSamePort(this, source)
@@ -752,17 +830,20 @@ object Bundles {
     }
   }
 
+  /** Elaboration-time labels used when reporting wakeup connectivity. */
   trait BundleSource {
     var wakeupSource = "undefined"
     var idx = 0
   }
 
+  /** Store-set update identifying the newly tracked store's queue entry. */
   class StoreUnitToLFST(implicit p: Parameters) extends XSBundle {
     val sqIdx = new SqPtr
     val ssid = UInt(SSIDWidth.W)
     val storeSetHit = Bool() // inst has been allocated an store set
   }
 
+  /** Memory destination/type notification; transaction validity is supplied externally. */
   class MemWakeUpBundle(implicit p: Parameters) extends XSBundle {
     val rfWen = Bool()
     val fpWen = Bool()
@@ -772,6 +853,10 @@ object Bundles {
     val pdest = UInt(backendParams.pregIdxWidth.W)
   }
   /**
+    * Destination matching shared by writeback and predictive IQ wakeups.
+    * Common, V0 and VL destinations are separate physical-register namespaces.
+    * wakeUp* methods include the supplied valid; *FromIQ methods only compare fields
+    * and require the caller to qualify the prediction's validity and cancellation.
     *
     * @param pregIdxWidth index width of preg
     * @param exuIndices exu indices of wakeup bundle
@@ -807,6 +892,7 @@ object Bundles {
         SrcType.isV0(srcType) && this.v0Wen
       ) && valid
     }
+    // VL sources use the vector source-type test in this interface's current encoding.
     def wakeUpVl(successor: (UInt, UInt), valid: Bool): Bool = {
       val (thatPsrc, srcType) = successor
       val pdestMatch = pdestVl === thatPsrc
@@ -847,12 +933,14 @@ object Bundles {
 
     def isIQWakeUp = this.isInstanceOf[IssueQueueIQWakeUpBundle]
 
+    // A shared WB port can have several producers; only a single-source bundle has one ID.
     def exuIdx: Int = {
       require(hasOnlyOneSource)
       this.exuIndices.head
     }
   }
 
+  /** Wakeup from a writeback port, potentially shared by several execution units. */
   class IssueQueueWBWakeUpBundle(
     exuIndices: Seq[Int],
     backendParams: BackendParams,
@@ -861,6 +949,10 @@ object Bundles {
 
   }
 
+  /** Predictive wakeup from one execution unit with load-cancellation provenance.
+    * Optional register-cache destinations and replicated controls support the configured
+    * consumers; this payload itself does not schedule the wakeup's delivery cycle.
+    */
   class IssueQueueIQWakeUpBundle(
     exuIdx: Int,
     backendParams: BackendParams,
@@ -879,6 +971,7 @@ object Bundles {
     val vlWenCopy = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
 
+    // Copy available issue controls and default absent enables/dependencies to inactive.
     def fromExuInput(exuInput: ExuInput): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
@@ -904,6 +997,10 @@ object Bundles {
   }
 
   // [IssueQueue]--> DataPath
+  /** Early issue selection: entry identity, RF read enables and operand source choices.
+    * iqIdx/isFirstIssue identify this attempt for later success or retry feedback;
+    * dataSources/exuSources select RF, cache or forwarding paths rather than data values.
+    */
   class Og0InUop(
                                   val iqParams: IssueBlockParams,
                                   val exuParams: ExeUnitParams,
@@ -939,6 +1036,9 @@ object Bundles {
     val debug_seqNum  = OptionWrapper(backendParams.debugEn, InstSeqNum())
   }
 
+  /** Operand-gather view assembled from OG0 selection, the delayed IQ payload and data.
+    * These helper methods only wire fields; the containing datapath owns stage registers.
+    */
   class Og1InUop(
                   val iqParams: IssueBlockParams,
                   val exuParams: ExeUnitParams,
@@ -996,6 +1096,10 @@ object Bundles {
     val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
     val debug_seqNum  = OptionWrapper(backendParams.debugEn, InstSeqNum())
 
+    /** Copy early controls and clear the fields listed below.
+      * This is partial initialization: OG1 controls and RF/bypass operands still need
+      * their own connections, including fields not present in Og0InUop.
+      */
     def fromIssueBundle(source: Og0InUop): Unit = {
       // common fields from s0.bits
       this.fuType       := source.fuType
@@ -1057,6 +1161,7 @@ object Bundles {
       this.predTarget.foreach(_ := 0.U)
     }
 
+    /** Overlay delayed instruction controls; this method does not supply operand data. */
     def fromIssueDeqOg1PayloadBundle(source: IssueQueueDeqOg1Payload): Unit = {
       this.isRVC.foreach(_ := source.isRVC.get)
       this.predTaken.foreach(_ := source.predTaken.get)
@@ -1085,12 +1190,17 @@ object Bundles {
     }
   }
 
+  /** Separate responses for early and late operand-gather attempts. */
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
     val issueQueueParams = this.params
     val og0resp = new IssueQueueRespBundle
     val og1resp = new IssueQueueRespBundle
   }
 
+  /** Per-register-file reservation masks for predictable writeback latency.
+    * Masks include offsets zero through the configured maximum latency; DeqRespSet
+    * carries the issue-response reservation contribution. Uncertain paths omit them.
+    */
   class WbFuBusyTableWriteBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     private val intCertainLat = params.intLatencyCertain
     private val fpCertainLat = params.fpLatencyCertain
@@ -1115,6 +1225,7 @@ object Bundles {
     val vlDeqRespSet = OptionWrapper(vlCertainLat, UInt((vlLat + 1).W))
   }
 
+  /** Reservation masks read by issue-side writeback conflict prediction. */
   class WbFuBusyTableReadBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     private val intCertainLat = params.intLatencyCertain
     private val fpCertainLat = params.fpLatencyCertain
@@ -1134,6 +1245,7 @@ object Bundles {
     val vlWbBusyTable = OptionWrapper(vlCertainLat, UInt((vlLat + 1).W))
   }
 
+  /** Conflict results only for the configured predictable-latency RF paths. */
   class WbConflictBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     private val intCertainLat = params.intLatencyCertain
     private val fpCertainLat = params.fpLatencyCertain
@@ -1154,6 +1266,10 @@ object Bundles {
   }
 
   // DataPath --[ExuInput]--> Exu
+  /** Flat EXU request after operand selection, with optional controls selected per EXU.
+    * A request also carries load-dependency provenance and destination metadata for
+    * predictive wakeup. The enclosing Decoupled interface provides acceptance/validity.
+    */
   class ExuInput(val params: ExeUnitParams, copyWakeupOut:Boolean = false, copyNum:Int = 0, hasCopySrc: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val fuType        = FuType()
     val fuOpType      = Opcode()
@@ -1214,6 +1330,10 @@ object Bundles {
 
     def exuIdx = this.params.exuIdx
 
+    /** Recover the instruction's byte offset from its last-halfword FTQ position.
+      * A 32-bit instruction starts two bytes before that position; sign extension
+      * preserves a negative offset when it straddles a fetch-block boundary.
+      */
     def getPcOffset() = {
       val ftqOffset = (this.ftqOffset.get << instOffsetBits).asUInt
       val rvcOffset = Mux(this.isRVC.get, 0.U, 2.U)
@@ -1221,12 +1341,14 @@ object Bundles {
       thisPcOffset
     }
 
+    // The next instruction begins two bytes after this instruction's last halfword.
     def getNextPcOffset() = {
       val ftqOffset = (this.ftqOffset.get << instOffsetBits).asUInt
       val nextPcOffset = ftqOffset +& 2.U
       nextPcOffset
     }
 
+    /** Connect stored OG1 controls only; operand values and early issue fields are separate. */
     def fromIssueOg1PayloadBundle(source: EntryOg1Payload): Unit = {
       this.isRVC         .foreach(_ := source.isRVC.get)
       this.predictInfo.foreach(_.predTaken  := source.predTaken.get)
@@ -1249,6 +1371,9 @@ object Bundles {
       this.sqIdx         .foreach(_ := source.sqIdx.get)
     }
 
+    /** Build a zero-defaulted legacy view from the available request metadata.
+      * Decode-only fields and source-register state cannot be reconstructed here.
+      */
     def toDynInst(): DynInst = {
       val uop = Wire(new DynInst)
       uop := 0.U.asTypeOf(uop)
@@ -1291,6 +1416,7 @@ object Bundles {
     val predTaken = Bool()
   }
 
+  /** Operation selection, side effects and forwarding provenance for a grouped request. */
   class ExuInputCtrlBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val fuType         = FuType()
     val fuOpType       = FuOpType()
@@ -1318,6 +1444,7 @@ object Bundles {
     val loadDependency = Option.when(params.needLoadDependency)(Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   }
 
+  /** Operand values and address/immediate data, separate from operation controls. */
   class ExuInputDataBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val src = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
     val v0  = Option.when(params.readV0Rf)(V0())
@@ -1327,12 +1454,14 @@ object Bundles {
     val nextPcOffset = Option.when(params.hasBrhFu || params.hasLinkFu)(UInt((FetchBlockInstOffsetWidth + 2).W))
   }
 
+  /** Physical destination tags; write enables remain in ExuInputCtrlBundle. */
   class ExuInputToRegFileBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val pdest   = UInt(params.wbPregIdxWidth.W)
     val pdestV0 = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val pdestVl = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
   }
 
+  /** Optional replicas for operand/control fanout, with elaboration-selected copy counts. */
   class ExuCopyBundle(val params: ExeUnitParams, copyWakeupOut: Boolean, copyNum: Int, hasCopySrc: Boolean)(implicit p: Parameters) extends XSBundle {
     val copySrc    = Option.when(hasCopySrc)(Vec(params.numCopySrc, Vec(if(params.numRegSrc < 2) 1 else 2, UInt(params.srcDataBitsMax.W))))
     val pdestCopy  = Option.when(copyWakeupOut)(Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
@@ -1344,6 +1473,9 @@ object Bundles {
     val loadDependencyCopy = Option.when(copyWakeupOut && params.isIQWakeUpSink)(Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
   }
 
+  /** Grouped EXU request with one ROB identity and separate ctrl/data/toRF payloads.
+    * Memory scheduling and issue-attempt metadata remain at the top level.
+    */
   class NewExuInput(val params: ExeUnitParams, copyWakeupOut: Boolean = false, copyNum: Int = 0, hasCopySrc: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val ctrl           = new ExuInputCtrlBundle(params)
     val data           = new ExuInputDataBundle(params)
@@ -1363,6 +1495,9 @@ object Bundles {
   }
 
 
+  /** Integer/FP conversion data and wakeup links, plus shared writeback reservations.
+    * These are valid-only notifications; there is no ready signal or buffering here.
+    */
   class ExuCrossRegion(val params: SchdBlockParams)(implicit p: Parameters) extends XSBundle {
     val I2FWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
     val I2FDataOut   = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
@@ -1378,6 +1513,10 @@ object Bundles {
   }
 
   // ExuInput --[FuncUnit]--> ExuOutput
+  /** Legacy EXU result with densely numbered, configuration-dependent data paths.
+    * data(0) is the common path; params.wbIndex maps each RF type to its actual path.
+    * Type enables and dedicated V0/VL tags accompany the enclosing result validity.
+    */
   class ExuOutput(
     val params: ExeUnitParams,
     val wbDataConfigs: Seq[DataConfig] = Seq(IntData(), FpData(), VecData(), V0Data(), VlData())
@@ -1418,6 +1557,7 @@ object Bundles {
     val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
   }
 
+  /** ROB completion and exception metadata, independent of the RF result channels. */
   class ExuOutputToRob(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
     val robIdx       = new RobPtr
     val fflags       = Option.when(params.writeFflags)(UInt(5.W))
@@ -1432,6 +1572,10 @@ object Bundles {
     val lqIdx        = Option.when(params.hasLoadFu)(new LqPtr())
     val sqIdx        = Option.when(params.hasStoreAddrFu || params.hasStdFu || params.hasVStdFu)(new SqPtr())
   }
+  /** Grouped result with independent ROB, RF and redirect valid bits.
+    * toRob.valid is not a register-file write enable. Optional RF channels carry their
+    * own data/valid while sharing common and dedicated physical destination tags.
+    */
   class NewExuOutput(
     val params: ExeUnitParams,
   )(implicit
@@ -1453,6 +1597,7 @@ object Bundles {
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
 
+  /** Optional memory diagnostics; isSkipDiff requires basicDebugEn fields to exist. */
   class MemDebugBundle(implicit p: Parameters) extends XSBundle {
     val isMMIO = Option.when(backendParams.basicDebugEn)(Bool())
     val isNCIO = Option.when(backendParams.basicDebugEn)(Bool())
@@ -1480,6 +1625,7 @@ object Bundles {
     val pdest = UInt(params.wbPregIdxWidth.W)
     val data = UInt(params.destDataBitsMax.W)
   }
+  /** Memory completion with separate ROB and integer/FP RF notification payloads. */
   class MemWriteBack(
     val params: ExeUnitParams,
   )(implicit
@@ -1489,6 +1635,10 @@ object Bundles {
     val toIntRf = Option.when(params.writeIntRf)(ValidIO(new MemToIntRf(params)))
     val toFpRf = Option.when(params.writeFpRf)(ValidIO(new MemToFpRf(params)))
 
+    /** Adapt the supported channels, leaving unrelated fields at DontCare.
+      * When both RF channels exist, the integer valid selects the shared destination;
+      * callers must respect that one destination tag serves both result channels.
+      */
     def toNewExuOutputBundle(): NewExuOutput = {
       val res = Wire(new NewExuOutput(params))
       res := DontCare
@@ -1527,6 +1677,10 @@ object Bundles {
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
+  /** Legacy writeback-port payload selected by the port's RF type and data-path map.
+    * The as*RfWriteBundle helpers AND the corresponding type enable with the caller's
+    * fire to form the actual RF write strobe; carrying a payload alone does not write.
+    */
   class WriteBackBundle(val params: PregWB, backendParams: BackendParams)(implicit p: Parameters) extends Bundle with BundleSource {
     val rfWen = Bool()
     val fpWen = Bool()
@@ -1548,6 +1702,7 @@ object Bundles {
 
     this.wakeupSource = s"WB(${params.toString})"
 
+    // V0/VL use their dedicated tags; RF type maps through wbIndex to a dense data path.
     def fromExuOutput(source: ExuOutput, wbType: String) = {
       val typeMap = Map("int" -> 0, "fp" -> 1, "vf" -> 2, "v0" -> 3, "vl" -> 4)
       this.rfWen  := source.intWen.getOrElse(false.B)
@@ -1625,6 +1780,9 @@ object Bundles {
     }
   }
 
+  /** RF-only writeback view extracted from the grouped result.
+    * As in WriteBackBundle, the caller's fire qualifies the actual RF write strobe.
+    */
   class WriteBackRFBundle(val params: PregWB, backendParams: BackendParams)(implicit val p: Parameters) extends Bundle with BundleSource with HasXSParameter {
     val rfWen  = Bool()
     val fpWen  = Bool()
@@ -1636,6 +1794,7 @@ object Bundles {
 
     this.wakeupSource = s"WB(${params.toString()})"
 
+    // This adapter selects a dedicated tag only for VL; all other types use common pdest.
     def fromExuOutput(source: NewExuOutput, wbType: String) = {
       this.rfWen  := source.toIntRf.map(_.valid).getOrElse(false.B)
       this.fpWen  := source.toFpRf.map(_.valid).getOrElse(false.B)
@@ -1701,6 +1860,9 @@ object Bundles {
     }
   }
 
+  /** ROB-facing writeback payload with only the side-effect fields supported by its EXU.
+    * Transaction validity is external; data/pdest also support diagnostics and tracking.
+    */
   class WriteBackRobBundle(val params: ExeUnitParams, backendParams: BackendParams)(implicit p: Parameters) extends Bundle with BundleSource {
     val robIdx        = new RobPtr()(p)
     val flushPipe     = Option.when(params.flushPipe)(Bool())
@@ -1734,6 +1896,9 @@ object Bundles {
     val pdest  = UInt(params.wbPregIdxWidth.W)
   }
 
+  /** Commit-time trap context, including guest address and compressed-slot identity.
+    * isFormer selects the faulting instruction when a physical ROB entry holds two slots.
+    */
   class ExceptionInfo(implicit p: Parameters) extends XSBundle {
     val pc = UInt((VAddrData().dataWidth + 1).W)
     val instr = UInt(32.W)
@@ -1757,6 +1922,7 @@ object Bundles {
 
   object UopIdx extends NamedUInt(3)
 
+  /** Number of completion events expected by the ROB, not architectural retirements. */
   object NumWB extends {
     def apply()(implicit p: Parameters): UInt = {
       UInt(width.W)
@@ -1773,11 +1939,17 @@ object Bundles {
     def width = 4 // 0~15 // Todo: assosiate it with FuConfig
   }
 
+  /** Compact producer selector: zero means no producer, local source index + 1 otherwise.
+    * UIntCompressor/UIntExtractor order the filtered global EXU IDs by ascending index;
+    * the stored value is therefore not a global EXU ID. Conversion back to a global
+    * one-hot vector uses the same filter. Producers must supply a one-hot source choice.
+    */
   class ExuSource(exuNum: Int)(implicit p: Parameters) extends XSBundle {
     val value = UInt(log2Ceil(exuNum + 1).W)
 
     val allExuNum = p(XSCoreParamsKey).backendParams.numExu
 
+    // Drop the reserved zero position before expanding into the global EXU namespace.
     def toExuOH(num: Int, filter: Seq[Int]): Vec[Bool] = {
       require(num == filter.size)
       val encodedExuOH = UIntToOH(this.value)(num, 1)
@@ -1820,6 +1992,7 @@ object Bundles {
     def width(implicit p: Parameters): Int = p(XSCoreParamsKey).backendParams.numExu
   }
 
+  /** Type-qualified destination invalidation; validity and delivery timing are external. */
   class CancelSignal(implicit p: Parameters) extends XSBundle {
     val rfWen = Bool()
     val fpWen = Bool()
@@ -1829,6 +2002,7 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
   }
 
+  /** Legacy memory result, optionally carrying vector mask and destination-piece data. */
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
     val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
@@ -1840,6 +2014,8 @@ object Bundles {
     val vecDebug = if (isVector) Some(new VecMissalignedDebugBundle) else None
 
     // TODO: delete this after MemExuOutput is thoroughly removed
+    // Replicate memory data to each configured legacy path and copy supported metadata.
+    // Unrelated optional EXU fields are not initialized by this compatibility adapter.
     def toExuOutput(param: ExeUnitParams): ExuOutput = {
       val output = Wire(new ExuOutput(param))
       output.data   := VecInit(Seq.fill(param.wbPathNum)(this.data))
@@ -1866,6 +2042,10 @@ object Bundles {
     }
   }
 
+  /** Match each load pipeline's dependency age with its cancellation stage.
+    * Bit 0 pairs with ld1Cancel and bit 1 with ld2Cancel; missing dependency tracking
+    * returns false. A present sequence must be nonempty and aligned with ldCancel.
+    */
   object LoadShouldCancel {
     def apply(loadDependency: Option[Seq[UInt]], ldCancel: Seq[LoadCancelIO]): Bool = {
       val ld1Cancel = loadDependency.map(_.zip(ldCancel.map(_.ld1Cancel)).map { case (dep, cancel) => cancel && dep(0)}.reduce(_ || _))

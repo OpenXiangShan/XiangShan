@@ -57,6 +57,25 @@ class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with
   lazy val module = new RobImp(this)(p, params)
 }
 
+/**
+  * Retires completed physical ROB entries in order and coordinates recovery.
+  *
+  * {{{
+  * dispatch --> allocate entries --> [robEntries: valid + packed WB counters]
+  * execution writebacks -----------------------> |             |
+  * decode / execution exceptions --> ExceptionGen             banked head read
+  *                                             |             |
+  *                                      head flush/exception  v
+  *                                     commit eligibility --> commits / CSR / LSQ
+  * ROB destination counts --> RenameBuffer + VTypeBuffer --> RAT commit / walk
+  * redirect --> trim younger slots --> snapshot/commit-base walk --> idle
+  * }}}
+  *
+  * A compressed entry may contain former and latter slots with separate
+  * completion counts. Slot-aware redirects can preserve the former slot while
+  * removing the latter. Banked head state is refreshed with writeback updates;
+  * recovery resumes commit only after ROB, RAB, and VTypeBuffer walks finish.
+  */
 class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendParams) extends LazyModuleImp(wrapper)
   with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents with HasCriticalErrors {
 
@@ -215,6 +234,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val traceDecodeTable = traceEncodeTable.map { case (instrNum, nonRVCNum) =>
     (instrNum, instrNum + nonRVCNum)
   }
+  // Trace encoding jointly represents architectural instruction count and
+  // halfword length; these decoders recover each quantity for retirement.
   private def decodeTraceInstrCount(traceIretire: UInt): UInt = {
     chisel3.util.experimental.decode.decoder(
       traceIretire,
@@ -280,6 +301,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
   }
+  // Bank by physical-entry index modulo bankNum. Current/next-line reads serve
+  // a partially retired line and prefetch the following line across wraparound.
   // robBanks0 include robidx : 0 8 16 24 32 ...
   val robBanks = VecInit((0 until bankNum).map(i => VecInit(robEntries.zipWithIndex.filter(_._2 % bankNum == i).map(_._1))))
   // each Bank has 20 Entries, read addr is one hot
@@ -1023,6 +1046,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   enqPtrCmp := enqPtr
   deqPtrCmp.isFormer := true.B
   enqPtrCmp.isFormer := true.B
+  // A redirect can downgrade a pair to former-only before a late latter result
+  // returns. Reject that result even though its physical entry remains valid.
   private def wbSlotStillValid(robIdx: RobPtr): Bool = {
     val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
     wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.entryPairType))
@@ -1268,6 +1293,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * (1) redirect: switch to s_walk
    * (2) walk: when walking comes to the end, switch to s_idle
    */
+  // Redirect restarts the read/walk pipeline. All recovery consumers must drain
+  // their destination records before retirement can return to idle.
   state_next := Mux(
     io.redirect.valid || RegNext(io.redirect.valid), s_walk,
     Mux(
@@ -1436,6 +1463,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqFormerWBNumVec = VecInit(io.enq.req.map(req => req.bits.formerNumWB))
   val enqLatterWBNumVec = VecInit(io.enq.req.map(req => req.bits.latterNumWB))
 
+  // Multiple writeback ports may complete one slot in a cycle; clamp the count
+  // at zero so a surplus completion cannot wrap into an apparently busy state.
   private def saturatingDecPacked(value: UInt, decRaw: UInt): UInt = {
     val compareWidth = math.max(value.getWidth, decRaw.getWidth)
     val valueExt = value.pad(compareWidth)
@@ -1444,6 +1473,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     (valueExt - clippedDec)(value.getWidth - 1, 0)
   }
 
+  /** Update former/latter completion counters without borrowing across fields.
+    * A partial redirect converts the surviving former count to NORMAL encoding;
+    * enqueue initializes only a previously invalid entry.
+    */
   private def calcNextPackedUopState(
     entryValid: Bool,
     entryUopState: UInt,

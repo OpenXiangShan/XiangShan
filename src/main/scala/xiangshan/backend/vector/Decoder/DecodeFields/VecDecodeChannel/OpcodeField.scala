@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.DecodePatterns.InstSewLmulNfPattern
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField}
 
+/** Encode one expansion slot; absent/null slots use the field's don't-care default. */
 class OpcodeField(uopIdx: Int) extends DecodeField[InstSewLmulNfPattern, UInt] {
 
   override def name: String = s"opcode$uopIdx"

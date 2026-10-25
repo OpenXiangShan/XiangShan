@@ -40,6 +40,26 @@ import xiangshan.backend.fu.NewCSR.CSROoORead
 import yunsuan.{VipuType, VMoveOpcode}
 import xiangshan.backend.RatToVecExcpMod
 
+/**
+  * Assigns physical operands and speculative ROB/LSQ positions to a decode group.
+  *
+  * {{{
+  * decode uops + RAT read results --> compression / destination requirements
+  *                                                  |
+  * free-list candidates ----------------> new pdest + intra-group forwarding
+  *                                                  |
+  * ROB head / LSQ preallocation ----------> RenameOutUop --> dispatch
+  *                                                  |
+  *                                       speculative RAT writes
+  * RAB commit --> architectural RAT --> old pdest --> free-list returns
+  * redirect + snapshot + walk --> restore RAT / free-list / ROB position
+  * }}}
+  *
+  * Allocation is coordinated across all register classes and downstream space.
+  * Same-group RAW dependencies select the youngest preceding writer, including
+  * move-eliminated aliases. Recovery walks advance restored allocation state
+  * while normal decode output is stalled.
+  */
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
   // params alias
@@ -111,6 +131,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // io alias
   private val dispatchCanAcc = io.out.head.ready
 
+  // ROB compression changes entry accounting, while each emitted uop retains
+  // its operand dependencies and its own execution metadata.
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
   val intFreeList = Module(new StdFreeList(IntPhyRegs - 1, 1, Reg_I, RabCommitWidth, IntLogicRegs, false))
@@ -178,6 +200,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val vecReadPorts = rat.io.vecReadPorts
   val vlReadPorts  = rat.io.vlReadPorts
 
+  // RAT reads provide the prior-group base mappings. Forwarding below overrides
+  // them for dependencies created by earlier lanes in this rename group.
   val intReadPortsData = VecInit(intReadPorts.map(x => VecInit(x.map(_.data))))
   val fpReadPortsData  = VecInit(fpReadPorts.map(x => VecInit(x.map(_.data))))
   val vecReadPortsData = VecInit(vecReadPorts.map(x => VecInit(x.map(_.data))))
@@ -417,6 +441,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   val dropMask = Cat(isMove.reverse) | Cat(fusionValidVec.reverse)
   val numWBIs2Mask = Cat(io.in.map(_.bits.numWB === 2.U).reverse)
+  // Count completion tokens for a compressed slot, removing eliminated moves
+  // and fusion tokens while retaining the extra token of two-writeback uops.
   def compactSlotNumWB(mask: UInt): UInt = {
     PopCount(mask & ~dropMask) +& PopCount(mask & numWBIs2Mask)
   }
@@ -826,6 +852,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     linkPsrc0Valid := false.B
   }
 
+  // Space snapshots by ROB distance and avoid creating one in adjacent cycles;
+  // the snapshot must begin at a complete instruction's first uop.
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
   val lastCycleCreateSnpt = RegInit(false.B)
   lastCycleCreateSnpt := genSnapshot && !io.snptIsFull

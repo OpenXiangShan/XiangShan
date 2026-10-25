@@ -25,6 +25,19 @@ import utils._
 import utility._
 
 
+/**
+  * Circular pool of reusable physical-register indices.
+  *
+  * {{{
+  * commit old_pdest --> freeList[tail + free prefix] --> tail advances
+  * allocateReq -----> freeList[head + alloc prefix] --> allocatePhyReg
+  * doAllocate -----> speculative head advances; commit advances archHead
+  * redirect/walk --> snapshot or archHead base --> recovered speculative head
+  * }}}
+  *
+  * Registered canAllocate reserves capacity for a full rename group, avoiding
+  * a combinational path from current frees to rename acceptance.
+  */
 class StdFreeList(
   freeListSize     : Int,
   initFreePhyReg  : Int,
@@ -79,6 +92,8 @@ class StdFreeList(
     }
   }
 
+  // Prefix counts compact valid requests, so lanes without a destination do
+  // not consume a register. The one-hot head selects a consecutive candidate window.
   val phyRegCandidates = Mux1H(headPtrOHVec(0), freeListVec)
 
   for(i <- 0 until RenameWidth) {
@@ -92,6 +107,8 @@ class StdFreeList(
   val archHeadPtrNext = Mux(doCommit, archHeadPtrNew, archHeadPtr)
   archHeadPtr := archHeadPtrNext
 
+  // Recovery walk consumes the known allocation count without requiring normal
+  // capacity gating. A delayed redirect replaces the base on the first advance.
   val isWalkAlloc = io.walk && io.doAllocate
   val isNormalAlloc = io.canAllocate && io.doAllocate
   val isAllocate = isWalkAlloc || isNormalAlloc

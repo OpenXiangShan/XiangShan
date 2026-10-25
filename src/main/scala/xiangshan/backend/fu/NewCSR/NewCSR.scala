@@ -24,6 +24,9 @@ import xiangshan.backend.decode.isa.CSRs
 
 import scala.collection.immutable.SeqMap
 
+/** Literal widths required by CSR field factories. Several values are fixed to the
+  * current RV64/128-bit-vector implementation rather than derived from XSCoreParams.
+  */
 object CSRConfig {
   final val ASIDLEN = 16 // the length of ASID of XS implementation
 
@@ -74,6 +77,9 @@ object CSRConfig {
 
 }
 
+/** CSR transaction plus decoded return controls. The wrapper provides registered
+  * read-modify-write data in the following write phase; address/control remain live.
+  */
 class NewCSRInput(implicit p: Parameters) extends Bundle {
   val wen = Bool()
   val ren = Bool()
@@ -98,6 +104,21 @@ class NewCSROutput(implicit p: Parameters) extends Bundle {
   val isPerfCnt = Bool()
 }
 
+/** Architectural CSR integration: register banks, access checks, trap/return events,
+  * interrupt selection, and asynchronous IMSIC transactions. One transaction occupies
+  * the FSM at a time. Lookup/permission uses the input cycle; bank writes use delayed
+  * wenLegalReg and the wrapper's saved wdata. Integration must keep address/control
+  * aligned through that write phase; this module does not snapshot every input field.
+  *
+  * {{{
+  * in -> read mux / permission -> [legal write enable] -> typed CSR banks
+  *              |                           wrapper saved wdata --^
+  *              +-> held read/exception data -> finish -- out.ready --> idle
+  *              +-> IMSIC request -> waitIMSIC -- response --> finish / idle
+  * ROB trap/commit -> event generators / accrued updates --------> banks
+  * banks + interrupts -> InterruptFilter -> ROB request; events -> target PCs
+  * }}}
+  */
 class NewCSR(implicit val p: Parameters) extends Module
   with HasXSParameter
   with MachineLevel
@@ -343,6 +364,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val legalMNret = permitMod.io.out.hasLegalMNret
   val legalDret  = permitMod.io.out.hasLegalDret
 
+  // This is a delayed permission pulse, not a snapshot of addr or wdata.
   private val wenLegalReg = GatedValidRegNext(wenLegal)
 
   var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] =
@@ -427,6 +449,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.mvienSEIE := mvien.regOut.SEIE.asBool
   intrMod.io.in.mvipSEIP := mvip.regOut.SEIP.asBool
 
+  // Save the selected encoded cause/destination for the ROB's later trap notification.
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
   val nmi = intrMod.io.out.nmi
@@ -479,7 +502,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   pmaEntryMod.io.in.addr  := addr
   pmaEntryMod.io.in.wdata := wdata
 
-  // Todo: all wen and wdata of CSRModule assigned in this for loop
+  // Default bank write routing; special alias/packed-bank wiring below overrides its ports.
+  // VS accesses to supervisor addresses select the corresponding VS bank, not the host bank.
   for ((id, (wBundle, _)) <- csrRwMap) {
     if (vsMapS.contains(id)) {
       // VS access CSR by S: privState.isModeVS && addrMappedToVS === sMapVS(id).U
@@ -651,7 +675,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
     mod match {
       case m: HasRobCommitBundle =>
-        // Todo: move RegNext from ROB to CSR
+        // Accrued flags and vector commit payloads gain one local cycle; instNum is direct.
         m.robCommit.instNum := io.fromRob.commit.instNum
         for (i <- 0 until 5) {
           m.robCommit.fflags(i)  := RegNext(io.fromRob.commit.fflags(i), false.B)
@@ -952,6 +976,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.hgatp := hgatp.regOut
   }
 
+  // Privilege uses ordered event selection; per-CSR field updates use their sink logic.
   PRVM := MuxCase(
     PRVM,
     events.filter(_.out.isInstanceOf[EventUpdatePrivStateOutput]).map {
@@ -1037,7 +1062,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     vstart.w.wdata =/= 0.U && vstart.regOut.vstart.asUInt === 0.U
   )
 
-  // flush pipe when write frm and data > 4 or write fcsr and data[7:5] > 4 or write frm/fcsr and frm is reserved
+  // Flush when a write crosses the legal/reserved FRM boundary; legal-to-legal changes
+  // are carried as rounding-mode data and need no decode-legality restart here.
   val frmIsReserved = fcsr.frm(2) && fcsr.frm(1, 0).orR
   val frmWdataReserved = fcsr.wAliasFfm.wdata(2) && fcsr.wAliasFfm.wdata(1, 0).orR
   val fcsrWdataReserved = fcsr.w.wdata(7) && fcsr.w.wdata(6, 5).orR
@@ -1089,7 +1115,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val s_idle :: s_waitIMSIC :: s_finish :: Nil = Enum(3)
 
-  /** the state machine of newCSR module */
+  /** Own one normal or asynchronous request until completion is accepted or redirected. */
   private val state = RegInit(s_idle)
   /** the next state of newCSR */
   private val stateNext = WireInit(state)
@@ -1143,13 +1169,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   /** Set io.in.ready when state machine is ready to receive a new request synchronously */
   io.in.ready := (state === s_idle)
 
-  /**
-   * Valid signal of newCSR output.
-   * When in IDLE state, when input_valid is high, we set it.
-   * When in waitIMSIC state, and the next state is IDLE, we set it.
-   **/
-
-  /** Data that have been read before,and should be stored because output not fired */
+  // Normal reads are captured in idle and complete in finish. IMSIC may complete in
+  // its response cycle; finish retains read/exception payload if the consumer stalls.
   val normalCSRValid = state === s_idle && valid && !asyncAccess
   val waitIMSICValid = state === s_waitIMSIC && fromAIA.rdata.valid
   val claimAIA = mtopei.w.wen | stopei.w.wen | vstopei.w.wen
@@ -1197,6 +1218,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.vsatp.valid := vsatp.w.wen
   io.status.vsatp.bits  := vsatp.regOut.MODE.asUInt
 
+  // Trap targets cross one register boundary; return targets are produced with the
+  // return event and then held. Critical-error re-entry overrides the return target.
   private val nonDebugTrapEventValid = Cat(Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent).map(_.valid)).asUInt.orR
   private val delayedPcFromXtvec = RegEnable(trapHandleMod.io.out.pcFromXtvec, nonDebugTrapEventValid)
   private val nonDebugTrapTargetPc = Wire(new TargetPCBundle)
@@ -1381,6 +1404,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     io.perf.perfEventsLsu ++
     hpmHc.getPerf
 
+  // HPM privilege enables are registered; cycle/instret privilege gating below is direct.
   val countingEn        = RegInit(0.U.asTypeOf(Vec(perfCntNum, Bool())))
   val ofFromPerfCntVec  = Wire(Vec(perfCntNum, Bool()))
   val lcofiReqVec       = Wire(Vec(perfCntNum, Bool()))
@@ -1505,6 +1529,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.instrAddrTransType.sv48x4 := privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv48x4
   assert(PopCount(io.status.instrAddrTransType.asUInt) === 1.U, "Exactly one inst trans type should be asserted")
 
+  // IMSIC access pulses follow the local decode cycle. Selector/privilege fields still
+  // use the aligned live address, while op/src are delayed for the external write port.
   private val csrAccess = wenLegalReg || RegNext(ren)
 
   private val imsicAddrValid =
@@ -1853,6 +1879,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 }
 
+/** Connect per-field alias write intents to the bank that owns each interrupt bit. */
 trait IpIeAliasConnect {
   self: NewCSR with MachineLevel with SupervisorLevel with VirtualSupervisorLevel with HypervisorLevel =>
 

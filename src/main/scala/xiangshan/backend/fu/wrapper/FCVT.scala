@@ -17,6 +17,10 @@ import yunsuan.vector.Common._
 import yunsuan.VfmaType
 
 
+/** Legacy FP conversion/move adapter with width decode and result boxing.
+  * FP-to-integer word results are sign-extended; narrow FP results are NaN-boxed.
+  * Moves use a parallel delayed bit-copy path and do not raise conversion flags.
+  */
 class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfmaType.dummy, "Vfcvt OpType not supported")
 
@@ -104,6 +108,11 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   )
 }
 
+/** Dedicated conversion adapter aligning data/flags with ex(3).
+  * Width/opcode controls follow the conversion for two edges, then the formatted
+  * result is registered once more. Integer and FP ports share the value; write
+  * enables in the saved uop choose the architectural destination.
+  */
 class FCVTFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltFixLatFunc(cfg) {
 
   // io alias

@@ -5,6 +5,7 @@ import chisel3.util.{BitPat, MixedVec}
 
 import scala.language.implicitConversions
 
+/** Host-side name matching, pattern construction, and collection adapters for decode tables. */
 object ScalaTypeExt {
   class StringExt(val str: String) {
     def endsWithThese(suffixes: Iterable[String]): Boolean = {
@@ -33,6 +34,7 @@ object ScalaTypeExt {
   implicit def BooleanToExt(boolean: Boolean): BooleanExt = new BooleanExt(boolean)
 
   class SeqExt[T](val seq: Seq[T]) {
+    /** Form pairs; an empty left side seeds singleton rows instead of returning no rows. */
     def product[T2](that: Seq[T2]): Seq[Seq[Any]] = {
       if (this.seq.isEmpty)
         return that.map(x => Seq(x))

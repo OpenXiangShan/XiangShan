@@ -4,6 +4,9 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
   CSRRWField => RW,
 }
 
+/** Exception delegation layout indexed by cause number. Group helpers classify fault
+  * fields for wiring; getALL order is not an exception-priority encoder.
+  */
 class ExceptionBundle extends CSRBundle {
   val EX_IAM    = RW(0).withDescription("Instruction address misaligned exception delegation bit.")
   val EX_IAF    = RW(1).withDescription("Instruction access fault exception delegation bit.")

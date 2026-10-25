@@ -9,6 +9,10 @@ import xiangshan.{HasXSParameter, XSBundle}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.vector.VecRegionModule.RfWriteBundle
 
+/** One-hot result merge per RF write port followed by WB0/WB1/WB2 registers.
+  * Callers reserve ports before results arrive. Enables advance each cycle;
+  * payloads hold when disabled so bypass consumers can select older data ages.
+  */
 class WbDataPath(pregParams: PregParams)(implicit val p: Parameters) extends Module with HasXSParameter {
   val in = IO(Input(new WbDataPath.In(pregParams)))
   val out = IO(Output(new WbDataPath.Out(pregParams)))

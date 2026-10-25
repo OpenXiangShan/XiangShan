@@ -33,6 +33,7 @@ case object Reg_F extends RegType
 case object Reg_V extends RegType
 case object Reg_Vl extends RegType
 
+/** Logical-register lookup; hold retains the previous cycle's read address. */
 class RatReadPort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val hold = Input(Bool())
   val addr = Input(UInt(ratAddrWidth.W))
@@ -45,6 +46,20 @@ class RatWritePort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val data = UInt(PhyRegIdxWidth.W)
 }
 
+/**
+  * Speculative and architectural logical-to-physical mappings for one register class.
+  *
+  * {{{
+  * specWritePorts --> [t1_wSpec] ------> speculative table --> read address lookup
+  *                          +---------------- bypass -----------------> read data
+  * archWritePorts -------------------> architectural table --> old_pdest
+  * snapshot restore / arch restore --> speculative table
+  * }}}
+  *
+  * Read addresses and speculative writes are registered. The youngest matching
+  * registered write bypasses the table read; redirect suppresses pending writes
+  * and later restores the selected snapshot or architectural mappings.
+  */
 class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
 
   // params alias
@@ -145,6 +160,8 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     r.data := Mux(t1_bypass.asUInt.orR, bypass_data, t1_rdata_use_t1_raddr(i))
   }
 
+  // Return the displaced mapping for each commit lane. Earlier writes to the
+  // same logical register bypass the old table value, preserving commit order.
   for ((w, i) <- io.archWritePorts.zipWithIndex) {
     when (w.wen) {
       arch_table_next(w.addr) := w.data
@@ -156,6 +173,8 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
   }
   arch_table := arch_table_next
 
+  // Aliased integer mappings from move elimination remain live until no
+  // architectural register references them; duplicate frees are suppressed.
   for (((old, free), i) <- (old_pdest zip need_free).zipWithIndex) {
     val hasDuplicate = old_pdest.take(i).map(_ === old)
     val blockedByDup = if (i == 0) false.B else VecInit(hasDuplicate).asUInt.orR
@@ -175,6 +194,10 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
   }
 }
 
+/** Connects integer, FP, vector, and VL RATs to rename, RAB commit, and recovery.
+  * RAB walk rebuilds speculative mappings; fresh rename writes override walk
+  * defaults when enabled. Architectural updates come only from commit.
+  */
 class RenameTableWrapper(implicit p: Parameters) extends XSModule {
 
   // params alias

@@ -21,6 +21,8 @@ import chisel3.util._
 import xiangshan._
 import org.chipsalliance.cde.config.Parameters
 
+// Combinational crypto primitives. The 32-bit shift/rotate helpers zero-extend to 64 bits;
+// the caller applies architectural sign extension where required.
 // 32bits shift right
 object SHR32 {
   def apply(bits: UInt, shamt: Int) = {
@@ -34,6 +36,7 @@ object SHR32 {
 object SHR64 {
   def apply(bits: UInt, shamt: Int) = {
     require(shamt>0 && shamt<64)
+    // The current 63-bit special branch wraps bits as a rotate; preserve this distinction.
     if(shamt == 63) Cat(bits(62,0), bits(63))
     else            Cat(0.U(shamt.W), bits(63,shamt))
   }
@@ -183,7 +186,8 @@ object SboxSm4Top {
   }
 }
 
-// Sbox middle part for AES, AES^-1, SM4
+// Shared S-box middle: 21 transformed input bits -> 18 nonlinear intermediate bits.
+// The matching algorithm-specific output transform reconstructs an 8-bit byte.
 object SboxInv {
   def apply(i: Seq[Bool]): Seq[Bool] = {
     val t = Wire(Vec(46, Bool()))
@@ -415,7 +419,8 @@ object SboxSm4 {
   }
 }
 
-// Mix Column
+// MixColumns arithmetic in GF(2^8), reduced by x^8+x^4+x^3+x+1 (0x11b).
+// XtN uses the low four coefficient bits; ByteEnc/ByteDec build one row of the matrix.
 object XtN {
   def Xt2(byte: UInt): UInt = ((byte << 1) ^ Mux(byte(7), "h1b".U, 0.U))(7,0)
 

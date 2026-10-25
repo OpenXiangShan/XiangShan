@@ -11,6 +11,10 @@ import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import scala.collection.mutable.ArrayBuffer
 import scala.language.implicitConversions
 
+/** Host-side decode-pattern construction and hardware selector layouts.
+  * Pattern concatenation places p1 in the high bits, matching runtime decode
+  * input concatenation. Numeric accessors require concrete, non-wildcard fields.
+  */
 object RVVDecodeUtil {
   class DecodePatternUtil[T <: DecodePattern](dp: T) {
     def ##[T2 <: DecodePattern](that: T2): DecodePatternComb2[T, T2] = {
@@ -175,6 +179,7 @@ object RVVDecodeUtil {
     val mf8 = LmulPattern(0.125)
   }
 
+  /** NF stores segment count minus one; wildcard/unknown patterns report segNum=0. */
   case class NfPattern(bitpat: BitPat) extends DecodePattern {
     override def bitPat: BitPat = bitpat
 
@@ -281,6 +286,9 @@ object RVVDecodeUtil {
     )
   }
 
+  /** Pack channel count classes with channel zero in the low bits.
+    * Missing trailing channels and the internal 0b1111 sentinel are don't-cares.
+    */
   case class UopNumOHsPattern(
     uopNumSeq: Seq[Int],
     mopWidth : Int,
@@ -302,6 +310,7 @@ object RVVDecodeUtil {
   }
 
   object UopNumOHsPatterns {
+    /** Merge ordered trailing 0/1/2/4/8 alternatives into an unconstrained count field. */
     def simplify(patterns: Seq[UopNumOHsPattern]): Seq[UopNumOHsPattern] = {
       val res = ArrayBuffer.empty[UopNumOHsPattern]
       val tail0Indices: Seq[Int] = patterns.zipWithIndex.collect { case (x: UopNumOHsPattern, idx: Int) if x.uopNumSeq.last == 0 => idx }
@@ -353,6 +362,7 @@ object RVVDecodeUtil {
     override def bitPat: BitPat = lmul ## nf ## splitType
   }
 
+  /** One-hot logical-register base selection plus a three-bit register offset. */
   class SrcNumSelect extends Bundle {
     // useVs1/Vs2/Vd should be OH or all 0s
     val useVs2  = Bool()
@@ -362,6 +372,7 @@ object RVVDecodeUtil {
   }
 
   object SrcNumSelect {
+    /** Encode a base selector and offset for legacy split-register tables. */
     def genBitPat(select: this.type => RegSelect, bias: Int): BitPat = {
       (select(this) match {
         case VS1 => BitPat("b010")

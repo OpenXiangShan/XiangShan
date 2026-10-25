@@ -32,6 +32,10 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
+/** Maintains consecutive physical ROB allocation candidates. Accepted entry
+  * count advances all pointers; redirect has priority and selects the first
+  * reusable entry after accounting for a surviving former slot.
+  */
 class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for input redirect

@@ -2,6 +2,7 @@ package xiangshan.backend.vector.Decoder.Uop
 
 import chisel3._
 
+/** Operand interpretation hints for execution, separate from logical rename dependencies. */
 class UopInfoIssue extends Bundle {
   // exu used
   val src1Sign = Bool()

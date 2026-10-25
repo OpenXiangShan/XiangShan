@@ -8,6 +8,10 @@ import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable._
 import xiangshan.XSCoreParamsKey
 
+/** Elaboration catalog linking ISA pattern groups to internal micro-op tables.
+  * extensions selects implemented groups; declarations outside that sequence do not
+  * automatically enable an extension, and some groups intentionally use separate paths.
+  */
 object Extensions {
   sealed trait ExtBase {
     val types: Seq[InstType]

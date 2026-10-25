@@ -4,6 +4,9 @@ import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.vector.fu.{Func, VecFuConfig}
 
+/** Package vector store data and SQ identity at each Func result slot.
+  * This unit supplies data only; the integer/memory path handles the store address.
+  */
 class VStdWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) {
   require(cfg.name == "vstd")
 

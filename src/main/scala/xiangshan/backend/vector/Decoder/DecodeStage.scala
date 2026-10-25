@@ -16,6 +16,22 @@ import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
 import xiangshan.backend.vector.LatDecoder
 import xiangshan.ExceptionNO._
 
+/** Adapt frontend instructions to the shared scalar/vector decode channels.
+  *
+  * {{{
+  * frontend mops + CSR/vtype --> DecodeChannels --> rename uops
+  *                                  ^                 |
+  *                          rename head.ready    RAT read addresses
+  *                                                    |
+  *                                       [fire/exception/payload]
+  *                                                    v
+  *                                     oldest illegal/virtual --> CSR
+  * }}}
+  *
+  * Rename readiness is a group contract represented by the first output lane.
+  * RAT addresses follow the selected uops and hold when their lanes are stalled.
+  * Trap-instruction metadata is registered once and suppressed by a delayed redirect.
+  */
 class DecodeStage()(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
 
@@ -69,6 +85,7 @@ class DecodeStageImp(
     case ((fire, excII), excVI) => fire && (excII || excVI)
   })
   val hasIllegalInst = isIllegalInstVec.reduce(_ || _)
+  // Report the first transferred faulting lane, preserving frontend program order.
   val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(uopBits_reg), 0.U.asTypeOf(new DecodeOutUop))
 
   val illegalTrapInstInfo = Wire(chiselTypeOf(out.toCSR.trapInstInfo.bits))
@@ -187,6 +204,7 @@ class DecodeStageImp(
         bits.lastUop := uopInfo.isLastUop
         bits.isJ := uopInfo.isJ
         bits.isJr := uopInfo.isJr
+        // The channel encoding stores count minus one; ROB expects the actual count.
         bits.numWB := uopInfo.numWb +& 1.U
         bits.latency := LatDecoder(bits.fuType, bits.fuOpType)
         bits.debug.foreach{ x =>

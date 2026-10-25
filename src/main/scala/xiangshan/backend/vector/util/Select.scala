@@ -5,6 +5,9 @@ import chisel3.experimental.noPrefix
 import chisel3.util._
 
 package object Select {
+  /** One-hot mux with a default only when no condition matches.
+    * Multiple matches are OR-combined, so callers must ensure exclusivity.
+    */
   object Mux1HOrElse {
     def apply[T <: Data](in: Iterable[(Bool, T)], _else: T): T = {
       val otherwiseCond = Cat(in.map(!_._1).toSeq).andR
@@ -12,6 +15,7 @@ package object Select {
     }
   }
 
+  /** Equality-based one-hot lookup; overlapping BitPats are not priority ordered. */
   object Mux1HLookUp {
     def apply[T <: Data](key: UInt, mapping: Seq[(UInt, T)]): T = {
       Mux1H(mapping.map { case (k, v) => (key === k) -> v})

@@ -8,6 +8,10 @@ import chisel3.experimental.BundleLiterals._
 import scala.language.experimental.macros
 
 
+/** Sparse architectural CSR layout. Packing uses each field's msb/lsb metadata,
+  * inserts zeroes into gaps, and does not depend on Bundle declaration order.
+  * Fields must occupy non-overlapping positions inside len.
+  */
 abstract class CSRBundle extends Bundle {
   val len: Int = 64
 
@@ -34,6 +38,7 @@ abstract class CSRBundle extends Bundle {
     Cat(paddedFields.map(x => x.asUInt))
   }
 
+  /** Slice a raw CSR word into typed fields without applying write legality or filters. */
   def := (that: UInt): Unit = {
     val fields = this.getFields
 
@@ -45,6 +50,7 @@ abstract class CSRBundle extends Bundle {
   }
 
   @inline
+  /** Build reset data: fields lacking an explicit reset value receive zero here. */
   def init: this.type = {
     val init = Wire(this)
     suppressEnumCastWarning {
@@ -85,6 +91,7 @@ abstract class CSRBundle extends Bundle {
     this
   }
 
+  // Event membership refers to field objects, so translate it to the clone's fields.
   override def cloneType: CSRBundle.this.type = {
     val ret = super.cloneType
     //
@@ -128,6 +135,7 @@ abstract class CSRBundle extends Bundle {
   }
 }
 
+/** Whole-word bit operations; &>/|> broadcast a Bool across the operand width. */
 object CSRBundleImplicitCast {
   class UIntField(val value: UInt) {
     def &[T <: CSRBundle] (field: T): UInt = {

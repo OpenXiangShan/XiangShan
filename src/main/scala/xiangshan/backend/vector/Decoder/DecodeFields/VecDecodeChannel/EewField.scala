@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.{VecInstPattern, VecMemInstP
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
+/** Decode memory EEW for mew=0 patterns only; other pattern kinds are unsupported. */
 object EewField extends DecodeField[VecInstPattern, UInt] {
 
   override def name: String = "eew"

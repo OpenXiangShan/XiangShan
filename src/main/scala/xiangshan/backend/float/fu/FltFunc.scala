@@ -11,6 +11,7 @@ import xiangshan.backend.vector.WbFuBusyTable
 import xiangshan.backend.vector.fu.VecFuConfig.VialuCfg
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 
+/** Aliases for scalar FP operands in the registered ex(0) context. */
 trait FltFuncAlias { this: Func =>
   protected def ex0ctrl = in.ex.head.bits.ctrl
   protected def ex0data = in.ex.head.bits.data
@@ -21,10 +22,15 @@ trait FltFuncAlias { this: Func =>
 }
 
 
+/** Scalar FP base using Func's fixed result-slot control propagation. */
 class FltFixLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) with FltFuncAlias {
 }
 
 
+/** Shared control storage for iterative scalar FP execution.
+  * Concrete FUs own capture, result release, busy, and FP wakeup timing; this
+  * base prepares the metadata that must outlive the advancing Exu context pipe.
+  */
 class FltNonFixedLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) with FltFuncAlias {
   val outFuWakeUp = IO(Output(new FltWakeUpBundle(backendParams.fpPregParams)))
   val outFuBusy = IO(Output(Bool()))

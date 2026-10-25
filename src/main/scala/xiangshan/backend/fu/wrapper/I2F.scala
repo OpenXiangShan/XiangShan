@@ -12,6 +12,10 @@ import yunsuan.scalar.FPCVT
 import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
 import yunsuan.vector.Common._
 
+/** Scalar integer-to-FP, bit-move, and FLI-constant adapter.
+  * Move/constant paths follow the conversion's two enabled registers, force
+  * fflags to zero, and share final narrow-result NaN boxing.
+  */
 class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
 
   // io alias

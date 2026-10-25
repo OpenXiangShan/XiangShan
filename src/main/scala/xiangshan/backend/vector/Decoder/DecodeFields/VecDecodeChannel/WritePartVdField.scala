@@ -5,9 +5,10 @@ import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, DecodePatternComb3, DecodePatternComb4, LmulPattern, NfPattern, SewPattern}
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
-/**
- * This field is used to specify if an instruction write part vd.
- */
+/** Identify destinations that cover only part of a physical vector register.
+  * Includes mask/scalar/reduction outputs and fractional LMUL/EMUL writes; actual
+  * preserved bytes are resolved later using VL, mask, and tail policy.
+  */
 object WritePartVdField extends BoolDecodeField[
   DecodePatternComb4[
     VecInstPattern,

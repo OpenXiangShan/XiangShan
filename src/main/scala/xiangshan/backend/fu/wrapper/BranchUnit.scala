@@ -12,6 +12,7 @@ import xiangshan.{RedirectLevel, SelImm, XSModule}
 import xiangshan.frontend.PcInit
 import xiangshan.frontend.bpu.BranchAttribute
 
+/** Select taken branch displacement or frontend fall-through offset before XLEN extension. */
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val pcExtend = Input(UInt((VAddrBits + 2).W))
@@ -29,6 +30,11 @@ class AddrAddModule(implicit p: Parameters) extends XSModule {
   ), XLEN)
 }
 
+/** Combinational conditional-branch compare, target calculation, and prediction check.
+  * Target mismatch matters only when both prediction and outcome are taken;
+  * direction mismatch is supplied by BranchModule. Every valid result trains
+  * the frontend, while only mispredictions request a flushAfter redirect.
+  */
 class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val dataModule = Module(new BranchModule)
   val addModule = Module(new AddrAddModule)

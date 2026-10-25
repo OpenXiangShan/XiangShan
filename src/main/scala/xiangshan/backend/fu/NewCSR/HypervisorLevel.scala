@@ -16,6 +16,10 @@ import system.HasSoCParameter
 
 import scala.collection.immutable.SeqMap
 
+/** Hypervisor state and guest interrupt injection. HIE/HIP expose machine-backed
+  * aliases, HVIP owns software-injected pending bits, and environment/state-enable
+  * read views are constrained by their machine counterparts.
+  */
 trait HypervisorLevel { self: NewCSR =>
 
   val hstatus = Module(new HstatusModule)
@@ -337,7 +341,7 @@ class HvictlBundle extends CSRBundle {
   // 0 = interrupt has higher default priority than an SEI
   // 1 = interrupt has lower default priority than an SEI
   // When hvictl.IID = 9, DPR is ignored.
-  // Todo: sort the interrupt specified by hvictl with DPR
+  // InterruptFilter applies this relation when comparing injected and pending sources.
   val DPR = RW(9).withReset(0.U).withDescription("Default-priority relation relative to supervisor external interrupt.")
   val IPRIOM = RW(8).withReset(0.U).withDescription("Interpret IPRIO as machine-defined priority when set.")
   val IPRIO = RW(7, 0).withReset(0.U).withDescription("Priority value for the injected virtual interrupt.")

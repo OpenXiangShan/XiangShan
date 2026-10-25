@@ -27,6 +27,11 @@ import xiangshan.backend.vector.util.Verilog
 import xiangshan.backend.vector.HasSimpleSettings
 import xiangshan._
 
+/** Combinational scalar expansion into at most maxSimpleSplitUopNum slots.
+  * Instruction tables provide opcode/rename policy; runtime CSR context supplies
+  * privilege, FS, rounding-mode, and CBO controls. Slot valid reports a decode
+  * match, while the enclosing packer owns instruction acceptance and buffering.
+  */
 @instantiable
 class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(implicit val p: Parameters) extends Module with HasSimpleSettings with HasXSParameter {
   import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
@@ -117,6 +122,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
 
   val fsOffExceptionII = in.fromCSR.illegalInst.fsIsOff && needFs
 
+  // Keep decode cause selection separate from current CSR permission checks;
+  // illegal and virtual-instruction outcomes are distinct architectural exceptions.
   val privExceptionSources = Seq(
     (PrivExceptionCause.sfenceVMA,  in.fromCSR.illegalInst.sfenceVMA,              in.fromCSR.virtualInst.sfenceVMA),
     (PrivExceptionCause.sfencePart, in.fromCSR.illegalInst.sfencePart,             in.fromCSR.virtualInst.sfencePart),

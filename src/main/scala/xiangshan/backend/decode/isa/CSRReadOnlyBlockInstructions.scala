@@ -3,6 +3,10 @@ package xiangshan.backend.decode.isa
 import chisel3.util._
 
 
+/** CSRRS/CSRRC read-only access forms (including immediate variants) with rs1/zimm=0.
+  * "Read only" describes the instruction's effect, not the CSR's access policy; decode
+  * can use these patterns to impose ordering on state updated by older instructions.
+  */
 object CSRReadOnlyBlockInstructions {
   def hexToPaddedBinary(hex: Int): String = {
     "b" + String.format("%12s", hex.toBinaryString).replace(' ', '0')

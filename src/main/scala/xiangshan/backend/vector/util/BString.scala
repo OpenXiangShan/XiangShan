@@ -3,6 +3,7 @@ package xiangshan.backend.vector.util
 import chisel3._
 import chisel3.util.BitPat
 
+/** Fixed-width binary literals: whitespace/underscores are ignored, bb also permits '?'. */
 object BString {
   implicit class BinaryStringHelper(private val sc: StringContext) extends AnyVal {
     def b(args: Any*): UInt = {

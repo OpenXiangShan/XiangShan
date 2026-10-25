@@ -6,6 +6,9 @@ import xiangshan.{XSBundle, HasXSParameter}
 import org.chipsalliance.cde.config.Parameters
 import utils.ConsecutiveOnes
 
+/** Legacy Sdtrig layouts and combinational legalization/matching helpers. Supported
+  * match modes are EQ/GE/LT; unsupported encodings are legalized before distribution.
+  */
 trait SdtrigExt extends HasXSParameter{
   implicit val p: Parameters
   class TDataRegs extends XSBundle {
@@ -192,12 +195,8 @@ trait SdtrigExt extends HasXSParameter{
   }
 
   /**
-   * Check if triggers can fire
-   * @param triggerNum
-   * @param canFireVec
-   * @param hitVec
-   * @param timingVec
-   * @param chainVec
+   * Drive canFireVec for chain-ending hits. A chained predecessor must hit and have
+   * matching timing; this local check examines the immediately preceding trigger.
    */
   def TriggerCheckCanFire(triggerNum: Int, canFireVec: Vec[Bool], hitVec: Vec[Bool], timingVec: Vec[Bool], chainVec: Vec[Bool]): Unit = {
     val trigger2ChainVec = WireInit(VecInit(Seq.fill(triggerNum)(false.B)))
@@ -249,8 +248,9 @@ trait SdtrigExt extends HasXSParameter{
   }
 
   /**
-   * author @Guokai Chen
-   * compare between Consecutive pc and tdada2
+   * Compare consecutive halfword PCs by sharing two high-part comparisons. All entries
+   * must lie in the base high region or the immediately following region; arbitrary
+   * unrelated PCs cannot use the single carry-bit selection implemented here.
    */
   def TriggerCmpConsecutive(pcVec: Vec[UInt], tdata: UInt, matchType: UInt, enable: Bool) : Vec[Bool] = {
     // opt: only compare two possible high bits: orig and orig+1

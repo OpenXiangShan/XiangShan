@@ -6,6 +6,9 @@ import xiangshan.backend.fu.{AluDataModule, PipedFuncUnit}
 import xiangshan.backend.fu.FuConfig
 import utility.{SignExt, ZeroExt}
 
+/** Combinational scalar ALU adapter with direct valid/ready propagation.
+  * Redirect cancellation is supplied by the surrounding execution pipeline.
+  */
 class Alu(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   private val aluModule = Module(new AluDataModule)
 

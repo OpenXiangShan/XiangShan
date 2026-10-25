@@ -6,6 +6,9 @@ import xiangshan.backend.vector.HasVectorSettings
 
 import scala.collection.mutable.ArrayBuffer
 
+/** Incomplete selection scaffold: generates Scala patterns but drives no outputs.
+  * The integrated decode path uses UopBufferCtrlDecoder for acceptance and packing.
+  */
 class MopSelectDecoder(
   mopWidth: Int,
   uopWidth: Int,

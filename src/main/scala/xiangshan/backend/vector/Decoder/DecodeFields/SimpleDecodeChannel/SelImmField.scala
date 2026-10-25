@@ -12,6 +12,7 @@ import xiangshan.macros.InstanceNameMacro.{getVariableName, getVariableNameSeq}
 
 import scala.language.implicitConversions
 
+/** Select the packed immediate format; selector bits are don't-care when valid is false. */
 object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
 
   override def name: String = "selImm"

@@ -5,6 +5,9 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => R
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 
 
+/** Hierarchical state-enable layouts. Higher levels add controls for access to lower
+  * banks; these field declarations alone do not gate accesses (CSRPermitModule does).
+  */
 class Sstateen0Bundle extends CSRBundle {
   override val len: Int = 32
   val JVT  = RO(2).withReset(0.U).withDescription("Enable jump-vector-table state from the Zcmt extension.")
@@ -16,8 +19,8 @@ class Hstateen0Bundle extends Sstateen0Bundle {
   override val len: Int = 64
   val SE0     = RW(63).withDescription("Enable access to lower-privilege state-enable CSRs, namely hstateen and sstateen from M-mode or sstateen from HS-mode.")
   val ENVCFG  = RW(62).withDescription("Enable access to lower-privilege envcfg CSRs, namely henvcfg and senvcfg from M-mode or senvcfg from HS-mode.")
-  // Bits in any stateen CSR that are defined to control state that a hart doesn’t implement are read-only
-  // zeros for that hart. Smcsrind/Sscsrind is not implemented.
+  // CSRIND is writable here; access permission and implemented indirect windows are
+  // resolved separately by CSRPermitModule and IndirectCSRPermitModule.
   val CSRIND  = RW(60).withDescription("Enable indirect CSR access state, including [vs|s]iselect and [vs|s]ireg* from M-mode or siselect and sireg* from HS-mode.")
   val AIA     = RW(59).withDescription("Enable AIA state not covered by CSRIND or IMSIC.")
   val IMSIC   = RW(58).withDescription("Enable IMSIC state and top-of-interrupt CSRs, including [vs|s]topei from M-mode or stopei from HS-mode.")
@@ -27,8 +30,7 @@ class Hstateen0Bundle extends Sstateen0Bundle {
 class Mstateen0Bundle extends Hstateen0Bundle {
   override val SE0     = RW(63).withReset(0.U).withDescription("Enable access to lower-privilege state-enable CSRs, namely hstateen and sstateen from M-mode or sstateen from HS-mode.")
   override val ENVCFG  = RW(62).withReset(0.U).withDescription("Enable access to lower-privilege envcfg CSRs, namely henvcfg and senvcfg from M-mode or senvcfg from HS-mode.")
-  // Bits in any stateen CSR that are defined to control state that a hart doesn’t implement are read-only
-  // zeros for that hart. Smcsrind/Sscsrind is not implemented.
+  // Reset blocks lower-level indirect state until machine software enables it.
   override val CSRIND  = RW(60).withReset(0.U).withDescription("Enable indirect CSR access state, including [vs|s]iselect and [vs|s]ireg* from M-mode or siselect and sireg* from HS-mode.")
   override val AIA     = RW(59).withReset(0.U).withDescription("Enable AIA state not covered by CSRIND or IMSIC.")
   override val IMSIC   = RW(58).withReset(0.U).withDescription("Enable IMSIC state and top-of-interrupt CSRs, including [vs|s]topei from M-mode or stopei from HS-mode.")

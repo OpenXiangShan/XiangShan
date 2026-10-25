@@ -8,6 +8,9 @@ import xiangshan.XSCoreParamsKey
 
 import scala.language.implicitConversions
 
+/** One-hot functional-unit classes used for decode and routing. Group predicates test
+  * membership in masks; a FuConfig's scalar fuSel additionally requires exact equality.
+  */
 object FuType extends ChiselOHEnum {
   type OHType = super.OHType
   val FuTypeOrR: IsOneOf.type = IsOneOf
@@ -56,8 +59,8 @@ object FuType extends ChiselOHEnum {
   val vsha256c = addType(name = "vsha256c")
 
   val intArithAll = Seq(jmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
-  // dq0 includes int's iq0 and iq1
-  // dq1 includes int's iq2 and iq3
+  // Split the configured integer IQ list in half. Dequeue-specific helpers below
+  // assume the current two-IQ/two-EXU ordering within each dispatch group.
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
     val intIQParams = p(XSCoreParamsKey).backendParams.intSchdParams.get.issueBlockParams
     val dq0IQNums = intIQParams.size / 2
@@ -102,6 +105,7 @@ object FuType extends ChiselOHEnum {
     val fuTypes = dq0OHTypeSeq(p)(1).intersect(dq0OHTypeSeq(p)(3)).intersect(dq1OHTypeSeq(p)(1)).intersect(dq1OHTypeSeq(p)(3))
     fuTypes.distinct
   }
+  /** Derive the zero-latency mask from allConfigs, which is an explicit catalog. */
   def is0latency(fuType: UInt): Bool = {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)

@@ -15,6 +15,7 @@ import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
 
 object UopNumUtil {
+  /** Instantiate segment scaling and return the rounded 1/2/4/8 count class. */
   def uopNumTimesSeg(numUopOH: UInt, nf: UInt): UInt = {
     val mod = Module(new UopNumSegDecoder)
     mod.in.nf := nf
@@ -22,6 +23,7 @@ object UopNumUtil {
     mod.out.numUopOH
   }
 
+  /** Return the segment decoder's cumulative count-threshold mask. */
   def realValidForUopNumTimesSeg(numUopOH: UInt, nf: UInt): UInt = {
     val mod = Module(new UopNumSegDecoder)
     mod.in.nf := nf
@@ -30,6 +32,10 @@ object UopNumUtil {
   }
 }
 
+/** Multiply the base count by nf+1, then round up to a 1/2/4/8 count class.
+  * Products above eight have no encoded count. validOH is built from cumulative
+  * thresholds (count <= position+1), rather than a low-bit prefix of active uops.
+  */
 class UopNumSegDecoder extends Module with HasVectorSettings {
   val in = IO(Input(new Bundle {
     // b000: seg = 1
@@ -103,9 +109,9 @@ class NewUopNumNoSegDecoderOutput extends Bundle {
   val uopNumOH = NumUopOH()
 }
 
-/**
- * input sew, eew, lmul
- */
+/** Elaborate a combinational count table for max(1, LMUL, LMUL*EEW/SEW).
+  * Unsupported non-power-of-two counts map to zero.
+  */
 class UopNumNoSegDecoder extends DecoderModule (
   inB = new NewUopNumNoSegDecoderInput,
   outB = new NewUopNumNoSegDecoderOutput,
@@ -133,6 +139,10 @@ class UopNumNoSegDecoder extends DecoderModule (
   inLegalSeq = Seq(Sews.all, Sews.all, Lmuls.all),
 )
 
+/** Choose the uop count class from the split policy and vector width context.
+  * Widening uses twice LMUL; indexed memory uses EEW/SEW and segment scaling.
+  * The one-hot variant expects its listed split groups to be mutually exclusive.
+  */
 class UopNumDecoder(val splitTypeOneHot: Boolean = false) extends Module with HasVectorSettings {
   override def desiredName: String = s"UopNumDecoder_${if (splitTypeOneHot) "SplitTypeOH" else "SplitTypeNonOH"}"
 
@@ -211,6 +221,7 @@ class UopNumDecoder(val splitTypeOneHot: Boolean = false) extends Module with Ha
 
 }
 
+/** Elaboration-time conversion of literal SEW encodings to widths in bits. */
 object Sews {
   import VSew._
   val all: Seq[UInt] = Seq(e8, e16, e32, e64).map(_.pad(3))
@@ -241,6 +252,7 @@ object SewOHs {
   val all: Seq[UInt] = Seq(e8, e16, e32, e64)
 }
 
+/** Elaboration-time LMUL values, including fractions and the reserved zero case. */
 object Lmuls {
   import xiangshan.backend.fu.vector.Bundles.VLmul._
   val all: Seq[UInt] = Seq(m1, m2, m4, m8, mf8, mf4, mf2)
@@ -271,6 +283,7 @@ object Lmuls {
   }
 }
 
+/** One-hot count classes; zero denotes no uops or an unsupported combination. */
 object NumUopOH extends NamedUInt(4) {
   type Type = UInt
 

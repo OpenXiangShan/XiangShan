@@ -4,6 +4,11 @@ import chisel3.util.log2Up
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 
+/** Register/operand namespaces and payload widths used during backend elaboration.
+  * Main operands use Int/FP/Vec; V0 and VL are separate side operands. Several
+  * widths below are fixed descriptors, while VAddrBits derives an address mode
+  * from core parameters and is distinct from the fixed VAddrData placeholder.
+  */
 object DataConfig {
   sealed abstract class DataConfig (
     val name: String,
@@ -32,6 +37,7 @@ object DataConfig {
 
   def RegDataMaxWidth : Int = RegSrcDataSet.map(_.dataWidth).max
 
+  /** Select the widest required virtual/guest-physical address width for the enabled mode. */
   def VAddrBits(implicit p: Parameters): Int = {
     def coreParams = p(XSCoreParamsKey)
     if (coreParams.HasHExtension) {

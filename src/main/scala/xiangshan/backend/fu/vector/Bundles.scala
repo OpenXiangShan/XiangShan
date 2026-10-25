@@ -23,11 +23,8 @@ object Bundles {
     val vlmul   = VLmul()
   }
 
-  /**
-    * vset module's vtype bundle, use 3 bits vsew to check if it is illegal
-    *
-    * we need to get 3 bits vsew in Vtype struct, then vset module can check if it is reserved.
-    * and we use 2 bits to store vsew in other places to save space
+  /** Vset input preserving reserved bits and full VSEW for legality checking.
+    * The compact VType above omits reserved payload bits; both retain VSew.width.
     */
   class VsetVType(implicit p: Parameters) extends XSBundle {
     val illegal  = Bool()
@@ -43,6 +40,7 @@ object Bundles {
       new VType
     }
 
+    /** Copy immediate fields without reserved-bit validation; legality remains a caller check. */
     def fromInstVType(instVType: InstVType)(implicit p: Parameters) : VType = {
       val res = Wire(VType())
       res.vma   := instVType.vma
@@ -63,6 +61,7 @@ object Bundles {
       res
     }
 
+    /** Expand the compact type to CSR layout with reserved bits cleared. */
     def toVtypeStruct(vtype: VType)(implicit p: Parameters) : VtypeStruct = {
       val res = WireInit(0.U.asTypeOf(new VtypeStruct))
       res.vill := vtype.illegal
@@ -73,6 +72,7 @@ object Bundles {
       res
     }
 
+    /** Reset representation: vill set and all payload fields zero. */
     def init() : VType = {
       val res = Wire(VType())
       res.illegal := true.B
@@ -180,6 +180,7 @@ object Bundles {
       vlmul === reserved
     }
 
+    /** Clamp fractional/reserved encodings to one register for group-index checks. */
     def makeNoLessThanM1(uint: UInt): UInt = {
       checkInputWidth(uint)
       Mux(uint(2), m1, uint)
@@ -227,6 +228,7 @@ object Bundles {
   }
 
   object Vlmax extends NamedUInt(3) {
+    /** Return SEW-LMUL encoding with the ValidIO high bit carrying illegality. */
     def apply(vsew: UInt, vlmul: UInt, elen: Int): ValidIO[UInt] = {
       val vsewMinusVlmul = (vsew -& vlmul).asSInt
       val illegal = vsewMinusVlmul > (log2Ceil(elen) - log2Ceil(64) + 3).S
@@ -234,6 +236,7 @@ object Bundles {
       Cat(illegal, encode).asTypeOf(ValidIO(UInt(3.W)))
     }
 
+    /** Placeholder conversion entry point; no hardware is currently produced. */
     def asVl(vlen: Int): Unit = {
 
     }

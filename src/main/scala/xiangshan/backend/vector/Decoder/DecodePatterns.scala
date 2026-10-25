@@ -4,6 +4,7 @@ import xiangshan.backend.vector.Decoder.DecodeChannel.VsetDecoderUtil.BoolPatter
 import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb2, DecodePatternComb4, LmulPattern, NfPattern, SewPattern}
 
+/** Shared elaboration keys; optional zero-register predicates can be left unconstrained. */
 object DecodePatterns {
   case class RdZeroPattern(
     rdZero: Option[Boolean]
@@ -15,6 +16,7 @@ object DecodePatterns {
 
   type SewLmulPattern = DecodePatternComb2[SewPattern, LmulPattern]
 
+  /** Supported SEW/LMUL pairs, excluding fractional groups below the ELEN=64 limit. */
   object SewLmulPattern {
     import SewPattern._
     import LmulPattern._

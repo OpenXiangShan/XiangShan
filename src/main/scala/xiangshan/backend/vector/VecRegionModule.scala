@@ -37,6 +37,25 @@ import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
 import xiangshan.mem.StoreQueueDataWrite
 
+/** Integrate dedicated vector queues, execution pipes, and vector/VL register files.
+  *
+  * {{{
+  * dispatch / int-region VSTD --> VecIssueQueue --> IssuePipe --> Exu
+  *                                    ^              ^          |
+  *                   wakeups/responses|    RF/bypass |          +--> ROB / SQ
+  *                                    +--------------+          |
+  * vector load S3 --> [S4] --> [S5] --> [S6] ----+                |
+  *                                            v                v
+  *                                      vector WbDataPath <-- vpWbNext
+  *                                            | wb0 / [wb1]
+  *                                            +--> vector RF / bypass
+  * int-region VL write --------------------------> VL RF
+  * }}}
+  *
+  * Scalar operands are read through the integer/FP regions. Vector and VL read
+  * ports are assigned statically here; each configured port must have one owner.
+  * V0 and VL also have separate writeback paths and wakeup namespaces.
+  */
 class VecRegionModule(val regionParam: RegionParam)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
 
@@ -203,6 +222,7 @@ class VecRegionImp(
       iq.in.enq := in.fromDispatch.uops(i)
   }
 
+  // Store-data uops arrive from the integer region rather than ordinary dispatch.
   issueQueues.filter(_.param.hasVStd).zipWithIndex.foreach {
     case (iq, i) =>
       iq.in.flush := in.flush
@@ -268,6 +288,8 @@ class VecRegionImp(
     }
   }
 
+  // Delay vector load data and ROB completion by three edges from S3. These
+  // registers advance without backpressure; upstream wen/valid qualifies payloads.
   private val vldS3VpWb = in.fromMem.vldS3VpWbNext
   private val vldS4VpWb = Reg(chiselTypeOf(vldS3VpWb))
   private val vldS5VpWb = Reg(chiselTypeOf(vldS3VpWb))
@@ -344,6 +366,8 @@ class VecRegionImp(
     .sortBy { case (port, raddr) => port }
     .map { case (port, raddrSeq) => raddrSeq.ensuring(_.size == 1).head.addr }
 
+  // The physical VL RF is written directly by integer-region VL results. Its
+  // WbDataPath below supplies the exported VL writeback/wakeup view separately.
   vlWen := in.fromIntRegion.vlWb0Next.map(_.wen)
   vlWaddr := in.fromIntRegion.vlWb0Next.map(_.pdest)
   vlWdata := in.fromIntRegion.vlWb0Next.map(_.data)
@@ -406,6 +430,8 @@ class VecRegionImp(
       wakeup.delay := BypassDelay.delay0
   }
 
+  // Recovery RF responses are currently tied off here. VecExcpDataMergeModule's
+  // read/merge/write protocol is not serviced by this region implementation yet.
   out.toVecExcpMod := 0.U.asTypeOf(out.toVecExcpMod)
 
   out.diff.foreach(_.diffVl := vlDiffReadData.get.head)
@@ -428,12 +454,14 @@ class VecRegionImp(
     difftest.value := vecDiffReadData.get
   }
 
+  /** Associate each IQ reservation with its configured global write-port ID. */
   private def issueQueueWbSources(
     sinkSel: VecIssueQueue => Option[WbFuBusyTable.In],
     wbPortIdsSel: IssueParam => Seq[Int],
   ): Seq[WbFuBusyTable.Source] =
     WbFuBusyTable.issueQueueSources(issueQueues, sinkSel, wbPortIdsSel)
 
+  /** Include a variable-latency FU only for register classes that it writes. */
   private def nonFixedLatFuWbSources(
     wbPortSel: ExuParam => Option[Int],
     writeSel: VecFuConfig => Boolean,
@@ -448,12 +476,14 @@ class VecRegionImp(
       }
     }
 
+  /** Translate configured port IDs to dense busy-table indices, removing duplicates. */
   private def nonFixedLatFuPortIndices(
     wbPortIdsSel: IssueParam => Seq[Int],
     wbPortIdxMap: Map[Int, Int],
   ): Seq[Int] =
     param.issueParams.flatMap(wbPortIdsSel).distinct.flatMap(wbPortIdxMap.get)
 
+  /** Omit the table entirely when this register class has no write ports. */
   private def buildWbFuBusyTable(
     regfileWbPortIds: Seq[Int],
     nonFixedLatFuPortIndices: Seq[Int],
@@ -462,6 +492,7 @@ class VecRegionImp(
       Module(new WbFuBusyTable(regfileWbPortIds.size, nonFixedLatFuPortIndices))
     )
 
+  /** Merge IQ/FU reservations and expose reads keyed by dense table index. */
   private def connectWbFuBusyTable(
     table: Option[WbFuBusyTable],
     wbType: String,
@@ -474,9 +505,11 @@ class VecRegionImp(
       t.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
     }.getOrElse(Map.empty)
 
+  /** Expose variable-latency blocking metadata in the same index space as reservations. */
   private def ctrlBlockRead(table: Option[WbFuBusyTable]): Map[Int, WbFuBusyTable.CtrlBlockEntry] =
     table.map(_.out.ctrlBlock.zipWithIndex.map(_.swap).toMap).getOrElse(Map.empty)
 
+  /** Route each optional IQ read through the global-ID to dense-index mapping. */
   private def connectBusyTableRead[T <: Data](
     sink: Option[Vec[T]],
     wbPortIds: Seq[Int],

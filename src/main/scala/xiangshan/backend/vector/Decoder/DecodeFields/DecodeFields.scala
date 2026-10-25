@@ -20,6 +20,9 @@ import xiangshan.macros.InstanceNameMacro.{getVariableName, getVariableNameSeq}
 
 import scala.collection.mutable.ArrayBuffer
 
+/** Legacy source-kind decode from instruction-name conventions.
+  * Active per-uop rename fields derive operand classes from opcode traits.
+  */
 @deprecated
 object Src1TypeField extends DecodeField[VecInstPattern, UInt] {
   override def name: String = "src1Type"
@@ -34,6 +37,7 @@ object Src1TypeField extends DecodeField[VecInstPattern, UInt] {
     }
   }
 
+  /** Require exactly one suffix/prefix family to identify the first operand kind. */
   def genTable(op: VecArithInstPattern): BitPat = {
     var isImm = false
     var isGp = false
@@ -135,6 +139,7 @@ object Src1TypeField extends DecodeField[VecInstPattern, UInt] {
   )
 }
 
+/** Legacy source-two classifier: listed move/index-only forms omit the vector read. */
 @deprecated
 object Src2TypeField extends DecodeField[VecInstPattern, UInt] {
   override def name: String = "src2Type"
@@ -156,6 +161,7 @@ object Src2TypeField extends DecodeField[VecInstPattern, UInt] {
   )
 }
 
+/** Legacy accumulator detection; mask/tail preservation can add other old-VD dependencies. */
 @deprecated
 object AlwaysReadVdField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "alwaysReadVd"
@@ -180,6 +186,7 @@ object AlwaysReadVdField extends BoolDecodeField[VecInstPattern] {
   ).map(_.split('_').head)
 }
 
+/** Legacy widening-destination classification from instruction prefixes. */
 @deprecated
 object VdWidenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "vdWiden"
@@ -192,6 +199,7 @@ object VdWidenField extends BoolDecodeField[VecInstPattern] {
   }
 }
 
+/** Legacy widening-source-two classification from operand-width suffixes. */
 @deprecated
 object Vs2WidenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "vs2Widen"
@@ -205,6 +213,7 @@ object Vs2WidenField extends BoolDecodeField[VecInstPattern] {
   }
 }
 
+/** Legacy binary split policy selected from name families and data/index EEW ratios. */
 @deprecated
 object SplitTypeField extends DecodeField[RVVInstWithConfigPattern, SplitType.Type] {
   override def name: String = "splitType"
@@ -385,6 +394,7 @@ object SplitTypeField extends DecodeField[RVVInstWithConfigPattern, SplitType.Ty
   )
 }
 
+/** Legacy one-hot policy; its shuffle choices differ from the binary classifier above. */
 @deprecated
 object SplitTypeOHField extends DecodeField[RVVInstWithConfigPattern, SplitTypeOH.Type] {
   override def name: String = "splitTypeOH"
@@ -565,6 +575,9 @@ object SplitTypeOHField extends DecodeField[RVVInstWithConfigPattern, SplitTypeO
   )
 }
 
+/** Legacy eight-slot base/offset table for split operands.
+  * Unused slots remain don't-care; consumers must provide uop validity separately.
+  */
 @deprecated
 object SrcSplitSelectField extends DecodeField[UopLmulNfSplitOHPattern, Vec[SrcDestSelect]] {
   override def name: String = "srcSplitSelect"
@@ -776,6 +789,7 @@ object SrcSplitSelectField extends DecodeField[UopLmulNfSplitOHPattern, Vec[SrcD
         case _ =>
           uops(0) = genBitPat(_.VS2, 0) ## genBitPat(_.VS1, 0) ## genBitPat(_.VD, 0)
       }
+      // These assignments replace the explicit gather layouts above in this branch.
       for (i <- 0 until (1.0 max lmulValue).toInt) {
         uops(i) = genBitPat(_.VS2, i) ## genBitPat(_.NO, 0) ## genBitPat(_.VD, i)
       }
@@ -852,6 +866,7 @@ object SrcSplitSelectField extends DecodeField[UopLmulNfSplitOHPattern, Vec[SrcD
       }
     }
 
+    /** Compute per-uop index/data progression for the data-EEW/index-EEW ratio. */
     def getVs2VdStep(diRatio: Double): (Double, Double) = {
       val seg = nfP.segNum
       val vs2Step: Double = if (diRatio < 1) 1.0 else 1.0 / (seg * diRatio)
@@ -859,6 +874,7 @@ object SrcSplitSelectField extends DecodeField[UopLmulNfSplitOHPattern, Vec[SrcD
       (vs2Step, vdStep)
     }
 
+    /** Count segment fields times the larger data/index register footprint. */
     def getNumUop(diRatio: Double): Int = {
       val seg = nfP.segNum
       val dlmul = lmulP.lmulValue
@@ -872,6 +888,7 @@ object SrcSplitSelectField extends DecodeField[UopLmulNfSplitOHPattern, Vec[SrcD
   }
 }
 
+/** Legacy inter-uop dependency mask; bits outside actual expansion length are ignored. */
 object UopDependField extends DecodeField[UopLmulNfSplitOHPattern, UInt] {
   override def name: String = "uopDepend"
 

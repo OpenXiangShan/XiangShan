@@ -12,6 +12,7 @@ import xiangshan.frontend.bpu.BpuCtrl
 import xiangshan.mem.prefetch.PrefetchCtrl
 import chisel3.experimental.noPrefix
 
+/** Reusable architectural layouts and sideband contracts for the modular CSR bank. */
 object CSRBundles {
   class XtvecBundle extends CSRBundle {
     val mode = XtvecMode(1, 0, wNoFilter).withReset(0.U)
@@ -80,6 +81,9 @@ object CSRBundles {
     val FIOM  =      RO(     0)           .withReset(0.U).withDescription("Fence of I/O implies memory ordering.")
   }
 
+  /** Privilege plus virtualization state. Comparisons encode the implemented partial
+    * ordering (VU < VS < HS < M and HU < HS < M), not a single numeric mode code.
+    */
   class PrivState extends Bundle { self =>
     val PRVM = PrivMode(0)
     val V    = VirtMode(0)
@@ -180,6 +184,9 @@ object CSRBundles {
     ))
   }
 
+  /** Retirement-qualified CSR updates. Accrued flags/dirty bits are event pulses;
+    * instNum, vtype, and vstart carry their own validity qualifiers.
+    */
   class RobCommitCSR(implicit p: Parameters) extends Bundle {
     // need contain 8x8
     val instNum = ValidIO(UInt(7.W))

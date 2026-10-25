@@ -22,6 +22,10 @@ import xiangshan.TriggerAction
 import scala.collection.immutable.SeqMap
 
 
+/** Architectural debug views plus TriggerNum physical trigger slots. TSELECT chooses
+  * the visible TDATA words; NewCSR supplies write eligibility, chain limits, and debug
+  * ownership. DCSR/DPC also receive explicit trap/return event updates.
+  */
 trait DebugLevel { self: NewCSR =>
   val tselect = Module(new CSRModule("Tselect", new TselectBundle(TriggerNum)) {
     when (this.w.wen && this.w.wdata < TriggerNum.U) {
@@ -148,6 +152,9 @@ class Tdata1Bundle extends CSRBundle{
     res.ACTION
   }
 
+  /** Legalize type, debug ownership, and chaining into the next slot; unsupported
+    * trigger types become disabled with zero payload rather than retaining stale DATA.
+    */
   def writeTdata1(canWriteDmode: Bool, chainable: Bool, dmodeNextTrigger: Bool): Tdata1Bundle = {
     val res = Wire(new Tdata1Bundle)
     res := this.asUInt
@@ -204,6 +211,7 @@ class Mcontrol6 extends CSRBundle{
   val LOAD        = RW(0).withReset(0.U)
     .withDescription("Match load addresses.")
 
+  /** Clear unsupported controls and restrict action/match/chain to implemented forms. */
   def writeData(dmode: Bool, chainable: Bool): Mcontrol6 = {
     val res = Wire(new Mcontrol6)
     res := this.asUInt
@@ -464,6 +472,7 @@ object TriggerUtil {
     ))
   }
 
+  /** A set SBYTEMASK bit ignores that byte; ASID matching uses only implemented bits. */
   def textraSMatch(sselect: UInt, svalue: UInt, sbytemask: UInt, scontext: UInt, asid: UInt): Bool = {
     val scontextWire = WireInit(0.U.asTypeOf(Vec(4, UInt(8.W))))
     val scontextEq = (scontext.asTypeOf(scontextWire)).zip(svalue.asTypeOf(scontextWire)).zip(sbytemask.asBools).map{
@@ -477,6 +486,7 @@ object TriggerUtil {
     ))
   }
 
+  /** Context/VMID select variants append selector bit 2 as the low comparison bit. */
   def textraMhMatch(mhselect: UInt, mhvalue: UInt, mhcontext: UInt, vmid: UInt): Bool = {
     val highSelValue = Cat(mhvalue, mhselect(2))
     MuxLookup(mhselect, false.B)(Seq(

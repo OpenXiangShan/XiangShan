@@ -30,6 +30,11 @@ import xiangshan.backend.decode.ImmUnion
 import scala.collection.SeqMap
 import scala.language.implicitConversions
 
+/** Recognize specialized scalar encodings and map each to one internal uop.
+  * Includes VL/VLENB reads, prefetch hints, and jumps with rd=x0. The table
+  * supplies execution traits; runtime VS state qualifies vector-dependent reads.
+  * This module is combinational and does not consume a frontend instruction itself.
+  */
 @instantiable
 class PseudoDecodeChannel(
   instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq
@@ -163,6 +168,7 @@ object PseudoDecodeChannel {
     val JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
   }
 
+  /** Build a typed field from an opcode projection and an optional explicit default. */
   class DecodeFieldGen[-T <: InstPattern, +D <: Data](
     gen: => D,
     tableFunc: T => BitPat,
@@ -185,6 +191,7 @@ object PseudoDecodeChannel {
     }
   }
 
+  // Trait overrides tailor shared opcodes to these exact instruction encodings.
   val uopTable: SeqMap[InstPattern, Opcode] = SeqMap(
     CSRRVL        -> (VSetOpcodes.readvl + NeedVecEnable),
     CSRRVLENB     -> (AluOpcodes.add.copy() - Src1Gp - Src2En - Src2Gp + Src2Imm(DecodeSelImm.CSRRVLENB) + NeedVecEnable),

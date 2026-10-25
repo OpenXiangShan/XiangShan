@@ -12,6 +12,7 @@ import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit, VsetModule, Vtyp
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.vector.Decoder.VSetFuncUnit
 
+/** Legacy combinational vset adapter decoding immediate/register AVL and vtype sources. */
 class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   val debugIO = IO(new Bundle() {
     val vconfig = Output(VConfig())
@@ -123,6 +124,11 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   debugIO.vconfig := vsetModule.io.out.vconfig
 }
 
+/** Unified combinational vset/read-VL adapter for the newer opcode space.
+  * Opcode predicates select AVL/vtype sources and zero-register cases. Register
+  * vtype changes publish a qualified update, while VL zero/VLMAX hints accompany
+  * each valid result for dependent vector operations.
+  */
 class VSetUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) with HasXSParameter {
   private val in = io.in.bits
   private val out = io.out.bits

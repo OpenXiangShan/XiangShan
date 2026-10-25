@@ -10,6 +10,10 @@ import xiangshan.backend.vector.ExuParam
 import xiangshan.{HasXSParameter, XSBundle}
 import yunsuan.vector.Common.SewOH
 
+/** Combinational FP operand selection indexed by producer port and bypass age.
+  * Delay 0 uses the upcoming WB0 data, delay 1 uses registered WB0, and older
+  * operands use RF read data. Non-FP sources retain the prepared operand value.
+  */
 class FltBypassNetwork(implicit val param: ExuParam, val p: Parameters) extends Module with HasXSParameter {
   val in = IO(Input(new FltBypassNetwork.In))
   val out = IO(Output(new FltBypassNetwork.Out))

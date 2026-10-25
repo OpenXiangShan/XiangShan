@@ -24,6 +24,20 @@ class MultiWakeupQueueIO[T <: Bundle, TFlush <: Data](
   val deq = Output(Valid(lastGen))
 }
 
+/**
+  * Schedules wakeups through one flushable pipe per configured latency.
+  *
+  * {{{
+  * enq(uop, lat) --> [pipe selected by lat] --+--> Mux1H --> [lastConnect] --> deq
+  * flush ----------> discard at each stage   |
+  * enqAppend -------------------------------+   (only if no pipe output is valid)
+  * }}}
+  *
+  * A latency L produces deq after L+1 edges, including lastConnect. Append goes
+  * directly to lastConnect and has a one-cycle delay. Append producers must
+  * supply already-filtered results; append is not checked by flushFunc here.
+  * Pipes cannot stall, so the caller must prevent coincident pipe completions.
+  */
 class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
   val exuParam  : ExeUnitParams,
   val gen       : ExuInput,
@@ -41,6 +55,8 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
 
   val io = IO(new MultiWakeupQueueIO(gen, lastGen, flushGen, log2Up(latencySet.max) + 1))
 
+  // Separate pipes keep each fixed latency simple and let stage-specific flush
+  // logic discard only the affected result.
   val pipes = latencySet.map(x => Module(new PipeWithFlush[T, TFlush](gen, flushGen, x, flushFunc, modificationFunc))).toSeq
 
   val pipesOut = Wire(Valid(gen))
@@ -53,6 +69,8 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
       pipe.io.enq.bits := io.enq.bits.uop
   }
 
+  // Zero-latency results bypass stage flushing; delayed lanes check their
+  // current stage before competing with appended cross-scheduler wakeups.
   private val pipesValidVec = VecInit(pipes.map(_.io.deq).zip(latencySet).map(_ match {
     case (deq, 0) => deq.valid
     case (deq, i) => deq.valid && !flushFunc(deq.bits, io.flush, i)
@@ -61,7 +79,8 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
     case (deq, 0) => deq
     case (deq, i) => modificationFunc(deq)
   }))
-  // for i2f in fp iq, donot need && !pipesValidVec.asUInt.orR, for fdiv, need !pipesValidVec.asUInt.orR
+  // Pipe completions take priority; an append producer must retain valid/bits
+  // until ready if its completion can collide with a scheduled pipe output.
   val allValidVec = VecInit(pipesValidVec :+ (io.enqAppend.valid && !pipesValidVec.asUInt.orR))
   val allBitsVec = VecInit(pipesBitsVec :+ io.enqAppend.bits.uop)
   io.enqAppend.ready := Mux(io.enqAppend.valid, !pipesValidVec.asUInt.orR, true.B)

@@ -3,6 +3,9 @@ package xiangshan.backend.decode.isa.bitfield
 import chisel3._
 import chisel3.util.BitPat
 
+/** Typed views over raw instruction bits. Field accessors and family predicates do
+  * not validate the complete encoding; decode tables perform instruction legality checks.
+  */
 abstract class RiscvInst(bitWidth: Int) extends Bundle {
   val inst: UInt = UInt(bitWidth.W)
 }
@@ -146,6 +149,7 @@ class XSInstBitFields extends Riscv32BitInst
   with BitFieldsVec
   with BitFieldsRVK
 
+/** Immediate VTYPE layout, including reserved bits needed by legality checks. */
 class InstVType extends Bundle {
   val reserved = UInt(3.W)
   val vma = Bool()

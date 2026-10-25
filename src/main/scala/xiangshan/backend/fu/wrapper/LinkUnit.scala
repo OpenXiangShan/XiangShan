@@ -7,6 +7,9 @@ import utility.{SignExt, ZeroExt}
 import xiangshan.{LinkOpType}
 import xiangshan.backend.fu.{FuConfig, PipedFuncUnit}
 
+/** Combinational link/AUIPC result, separate from jump resolution and redirect generation.
+  * The frontend-supplied nextPcOffset accounts for the instruction's fall-through PC.
+  */
 class LinkUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
 
   // link:  next pc -> GPR[rd]

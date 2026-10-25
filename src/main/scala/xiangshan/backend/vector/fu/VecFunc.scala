@@ -11,6 +11,7 @@ import xiangshan.backend.vector.WbFuBusyTable
 import xiangshan.backend.vector.fu.VecFuConfig.VialuCfg
 
 
+/** Stage-qualified operand aliases; vstart is fixed to zero on this arithmetic path. */
 trait VecFuncAlias { this: Func =>
   protected def ex0ctrl = in.ex.head.bits.ctrl
   protected def ex0data = in.ex.head.bits.data
@@ -44,6 +45,7 @@ trait VecFuncAlias { this: Func =>
   protected def oldVdEx: Seq[UInt] = in.ex.map(_.bits.data.src(2))
 }
 
+/** Fixed-slot vector base with source-mask defaults; subclasses can request mask clearing. */
 class VecFixLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) with VecFuncAlias {
   protected val needClearMask: Bool = false.B
   protected val srcMask: UInt =
@@ -54,6 +56,18 @@ class VecFixLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) 
 }
 
 
+/** Retain completion identity while an iterative FU runs, then predict vector wakeup.
+  *
+  * {{{
+  * accepted ex(0) -- latchNonFixedLatOutCtrl --> [completion context] --> out.ex(0)
+  * remaining latency <= 3 --------------------> direct wakeup + bypass delay
+  * remaining latency > 3 --> [countdown] -----> wakeup when countdown == 4
+  * flush / resultValid ----------------------> clear pending countdown
+  * }}}
+  *
+  * One pending prediction is stored. The concrete FU owns acceptance, result
+  * validity, and flush detection; a new prediction replaces the pending one.
+  */
 class VecNonFixedLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg)
   with VecFuncAlias {val outFuLat = IO(Output(Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
   val outFuWakeUp = IO(Output(new WakeUpBundle(backendParams.vpPregParams)))
@@ -86,6 +100,7 @@ class VecNonFixedLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(
     sink := source
   }
 
+  /** Capture context only when the concrete iterative FU accepts the operation. */
   protected def latchNonFixedLatOutCtrl(fire: Bool): Unit = {
     when(fire) {
       nonFixedLatOutCtrl := nonFixedLatOutCtrlNext
@@ -95,6 +110,9 @@ class VecNonFixedLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(
     }
   }
 
+  /** Convert a remaining-latency report into the IQ's bounded bypass-delay encoding.
+    * Flush or result completion clears stored prediction state before new capture.
+    */
   protected def connectNonFixedLatWakeUp(latency: Valid[UInt], flush: Bool, resultValid: Bool): Unit = {
     val wakeUpCountdown = RegInit(0.U(WbFuBusyTable.NonFixedLatencyWidth.W))
     val wakeUpPending = RegInit(false.B)

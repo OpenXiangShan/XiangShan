@@ -27,6 +27,19 @@ import xiangshan.backend.BackendParams
 import xiangshan.backend.issue.SchdBlockParams
 import freechips.rocketchip.util.SeqToAugmentedSeq
 
+/**
+  * Dispatch lookup for speculative register-cache locations.
+  *
+  * {{{
+  * IQ wakeups --> filter OG0/load cancels --> [int / memory tags + dependencies]
+  * allocation / duplicate tag / load cancel ---------> invalidate old ownership
+  * physical source tag --> both bank CAMs --> valid + {bank, slot} --> dispatch
+  * }}}
+  *
+  * Same-cycle allocation suppresses lookup hits for a reused physical register.
+  * A new wakeup replaces any prior same-tag mapping within its bank, while the
+  * tag module's write priority retains the newly written destination.
+  */
 class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters) extends XSModule {
 
   val io = IO(new RegCacheTagTableIO(numReadPorts))
@@ -84,6 +97,8 @@ class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters) extends XSModu
     w.loadDependency := ldDp
   }
 
+  // Remove ownership when the preg is reused, its value is superseded in this
+  // bank, or its speculative load producer is canceled.
   // cancel
   val allocVec = (IntRCTagTable.io.tagVec ++ MemRCTagTable.io.tagVec).map{ t => 
     io.allocPregs.map(a => a.valid && a.bits === t).asUInt.orR

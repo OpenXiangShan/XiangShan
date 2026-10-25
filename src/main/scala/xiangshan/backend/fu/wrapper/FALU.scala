@@ -9,6 +9,7 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import yunsuan.fpu.FloatAdder
 
+/** Legacy scalar FP adder adapter; malformed narrow NaN boxes request canonical NaN inputs. */
 class FAlu(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
 
   // io alias

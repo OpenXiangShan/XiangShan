@@ -7,6 +7,11 @@ import xiangshan.backend.vector.HasVectorSettings
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
 
+/** Expand logical register indices according to each operand's split policy.
+  * uopNum is the one-hot 1/2/4/8 class used by first/last-uop special cases.
+  * Group-end OR operations assume aligned register bases; legality is checked
+  * separately. All slots are computed combinationally and have no local valid.
+  */
 class SrcSelectModule extends Module with HasVectorSettings {
   val in = IO(Input(new Bundle {
     // 1,2,4,8,

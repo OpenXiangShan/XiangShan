@@ -7,6 +7,7 @@ import chisel3.util.experimental.decode._
 
 import scala.language.implicitConversions
 
+/** Bit-pattern slicing/padding and literal-only arithmetic used during table construction. */
 object ChiselTypeExt {
   class BitPatExt(val bitPat: BitPat) {
     def U: UInt = bitPatToUInt(bitPat)
@@ -19,6 +20,7 @@ object ChiselTypeExt {
       this.bitPat.apply(this.bitPat.width - 1, this.bitPat.width - n)
     }
 
+    /** Preserve the existing inclusive slice [width-n:0]; this differs from UInt.tail. */
     def tail(n: Int): BitPat = {
       require(n > 0, s"The arg should be greater than 0, but get $n")
       require(n < this.bitPat.width, "The width of result should be greater than 0")
@@ -33,6 +35,7 @@ object ChiselTypeExt {
 
     def msb(n: Int): BitPat = this.head(n)
 
+    /** Drop n low bits, retaining the high slice and its don't-care mask. */
     def drop(n: Int): BitPat = {
       require(n > 0, s"The arg should be greater than 0, but get $n")
       require(n < this.bitPat.width, "The width of result should be greater than 0")
@@ -41,6 +44,7 @@ object ChiselTypeExt {
 
     def take(n: Int): BitPat = this.lsb(n)
 
+    /** Extend on the high side without truncating an already wider pattern. */
     def pad0To(n: Int): BitPat = {
       if (bitPat.width >= n)
         this.bitPat
@@ -48,6 +52,7 @@ object ChiselTypeExt {
         BitPat.N(n - bitPat.width) ## this.bitPat
     }
 
+    /** Extend with unconstrained high bits without truncation. */
     def padDcTo(n: Int): BitPat = {
       if (bitPat.width >= n)
         this.bitPat
@@ -118,6 +123,7 @@ object ChiselTypeExt {
   implicit def BitPatToExt(bitPat: BitPat): BitPatExt = new BitPatExt(bitPat)
   implicit def EnumTypeToExt(enum: EnumType): EnumTypeExt = new EnumTypeExt(enum)
 
+  /** Select a host-side minimizer while preserving the decode table's output layout. */
   class DecodeTableExt[I <: DecodePattern](val decodeTable: DecodeTable[I]) {
     def decode(minimizer: Minimizer, input: UInt): DecodeBundle =
       chisel3.util.experimental.decode.decoder(minimizer, input, decodeTable.table).asTypeOf(decodeTable.bundle)

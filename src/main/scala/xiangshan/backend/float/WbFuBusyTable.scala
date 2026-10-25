@@ -7,6 +7,23 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.vector.IssueParam
 import xiangshan.backend.vector.VecIssueQueue
 
+/** Per-port future writeback reservations for the FP issue pipeline.
+  * Fixed issue and announced non-fixed completions set independently shifting
+  * masks. A non-fixed issue blocks normal launches until its completion slot
+  * is announced; the control flags also prevent another conflicting non-fixed
+  * launch while its completion remains in the relevant pipeline window.
+  *
+  * {{{
+  * fixed issue + slot -> one-hot ----> [fixed mask, shift right each edge] --+
+  * FU remaining time -> one-hot ----> [non-fixed mask, shift right] -------+-> OR -> IQ
+  * non-fixed launch -> [normalFuBlock] <- clear on time announcement
+  * block + next non-fixed mask's distant slots -> [nonFixedLatFuBlock] ---> IQ
+  * }}}
+  *
+  * A newly supplied slot becomes visible after one edge; callers provide the
+  * distance for that observation cycle. There is no redirect/retry-clear port;
+  * reservations age out even when the operation producing them is canceled.
+  */
 class WbFuBusyTable(
   numWritePorts: Int,
   nonFixedLatFuPortIndices: Seq[Int],
@@ -125,6 +142,7 @@ object WbFuBusyTable {
     nonFixedLatFuLatency: UInt,
   )
 
+  /** Collect connected IQ sources with their global RF port IDs, omitting absent paths. */
   def issueQueueSources(
     issueQueues: Seq[FltIssueQueue],
     sinkSel: FltIssueQueue => Option[WbFuBusyTable.In],
@@ -149,6 +167,7 @@ object WbFuBusyTable {
   def writebackSlotWidth(exLatency: Int = DefaultExLatency): Int =
     log2Up(fixedLatBusyTableEntries(exLatency))
 
+  // Convert the caller's pipeline-relative latency into this table's bit index.
   def writebackSlot(latency: UInt, latencyOffset: Int, exLatency: Int = DefaultExLatency): UInt = {
     require(latencyOffset >= 0, s"latencyOffset must be non-negative, got $latencyOffset")
     val width = writebackSlotWidth(exLatency)
@@ -166,6 +185,9 @@ object WbFuBusyTable {
     val fromIssueQueueNonFixedLatFu = Vec(numWritePorts, Bool())
     val fromNonFixedLatFu = Vec(numWritePorts, ValidIO(UInt(NonFixedLatencyWidth.W)))
 
+    /** Match global port IDs to this table's dense positions and merge each event kind.
+      * At most one source per kind may assert per port; assertions guard Mux1H inputs.
+      */
     def =#>(connectInfo: ConnectInfo): Unit = {
       require(
         connectInfo.regfileWbPortIds.size == numWritePorts,
@@ -237,6 +259,9 @@ object WbFuBusyTable {
     val ctrlBlock = Vec(numWritePorts, new CtrlBlockEntry)
   }
 
+  /** Translate a global port ID to its local table index and qualify the conflict by wen.
+    * The explicit FU mask selects the launch-block policy; other FUs also test the slot.
+    */
   private def wbBusyTableHit(
     busyTables: Vec[UInt],
     ctrlBlocks: Option[Vec[CtrlBlockEntry]],
@@ -265,6 +290,9 @@ object WbFuBusyTable {
     }
   }
 
+  /** OR conflicts for this dequeue lane's supported integer/FP destinations.
+    * writebackSlot is already aligned by the caller to the busy-table timeline.
+    */
   def entryWbConflict(
     in: FltIssueQueue.WbFuBusyTableReadBundle,
     param: IssueParam,

@@ -12,6 +12,11 @@ import xiangshan.backend.issue._
 import xiangshan.mem.{SqPtr, LqPtr}
 
 
+/** Extra registered operand-gather stage for vector arithmetic.
+  * OG1 always advances; redirect/load-canceled inputs become bubbles, while
+  * accepted dependencies shift one cycle. An unready execution unit generates
+  * failed OG2 feedback so the IQ retries instead of holding this stage.
+  */
 class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new Og2ForVectorIO(params))
 

@@ -6,6 +6,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Swap the first two execution operands for reverse subtract/divide encodings. */
 object Src12RevField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "src12Rev"
 

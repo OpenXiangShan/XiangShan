@@ -6,6 +6,21 @@ import org.chipsalliance.cde.config.Parameters
 import utility.{CircularQueuePtr, HasCircularQueuePtrHelper}
 import xiangshan.{HasXSParameter, XSCoreParamsKey}
 
+/** Compresses retirement blocks into PC-bearing trace groups.
+  * Non-control-flow blocks accumulate retirement count until a control-flow
+  * boundary or the last valid input. Prefix counts pack these groups into a
+  * circular buffer. A registered blockCommit throttles ROB when groups remain
+  * after the next dequeue or the enabled encoder reports a stall.
+  *
+  * {{{
+  * ROB blocks -> accumulate count to boundary -> prefix compaction -> [traceEntries]
+  * new group count -> [enqPtr]                  [deqPtr] -> [deqPtrPre] -> out.groups
+  * next occupancy + encoder stall/enable -> [blockCommit] -> gate new boundary writes
+  * }}}
+  *
+  * Output groups are read using the previous dequeue pointer. There is no ready
+  * input on this buffer; the surrounding pipeline must honor blockCommit timing.
+  */
 class TraceBuffer(implicit val p: Parameters) extends Module
   with HasXSParameter
   with HasCircularQueuePtrHelper {

@@ -10,6 +10,10 @@ import xiangshan.backend.vector.Decoder.Sews
 import xiangshan.backend.vector.datapath.VecImmExtractor._
 import xiangshan.backend.vector.util.Verilog
 
+/** Extract an immediate at SEW width and broadcast it across the vector operand.
+  * Only configured immediate formats participate in the combinational lookup;
+  * an empty format set produces zero without instantiating lookup logic.
+  */
 class VecImmExtractor(vlen: Int, immTypeSeq: Set[Imm]) extends Module {
   val in = IO(Input(new In))
   val out = IO(Output(new Out(vlen)))

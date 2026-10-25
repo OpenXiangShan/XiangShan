@@ -35,6 +35,10 @@ class SretEventInput extends Bundle {
   val hgatp     = Input(new HgatpBundle)
 }
 
+/** Combinational SRET for host or guest supervisor state. Current privilege selects
+  * SEPC versus VSEPC and the corresponding interrupt stack; outSDT updates guest SDT
+  * separately so a host return to VU can clear it without replacing other VS fields.
+  */
 class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   val in = IO(new SretEventInput)
   val out = IO(new SretEventOutput)

@@ -27,7 +27,9 @@ object FPU {
     Cat(0.U(1.W), Fill(expWidth + 1, 1.U(1.W)), 0.U((pc - 2).W))
   }
 
-  // Produce zero-extended FPXX data
+  /** Validate narrow NaN boxing and return zero-extended payload or canonical NaN.
+    * Type tags use the local ftypes ordering rather than instruction fmt bits.
+    */
   def unbox(x: UInt, typeTag: UInt): UInt = {
     require(x.getWidth == 64)
     require(typeTag.getWidth == ftypeWidth)
@@ -38,6 +40,7 @@ object FPU {
     ))
   }
 
+  /** Fill unused high bits with ones for a runtime-selected narrow FP format. */
   def box(x: UInt, typeTag: UInt): UInt = {
     require(x.getWidth == 64)
     Mux1H(Seq(
@@ -47,6 +50,7 @@ object FPU {
     ))
   }
 
+  /** Apply the same boxing rule for a statically known supported FP format. */
   def box(x: UInt, t: FType): UInt = {
     if      (t == f64) x(63, 0)
     else if (t == f32) Cat(Fill(32, 1.U(1.W)), x(31, 0))

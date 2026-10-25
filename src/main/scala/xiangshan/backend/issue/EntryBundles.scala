@@ -16,6 +16,9 @@ import xiangshan.mem.{LqPtr, SqPtr}
 
 object EntryBundles extends HasCircularQueuePtrHelper {
 
+  /** Per-uop state held by an issue entry; source readiness and replay state
+    * evolve until the uop issues successfully or is flushed.
+    */
   class Status(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     //basic status
     val robIdx                = new RobPtr
@@ -32,12 +35,14 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val issueTimer            = UInt(params.issueTimerWidth.W)
     val deqPortIdx            = UInt(1.W)
 
+    // All tracked source states must be ready, including optional VL/V0 operands.
     def srcReady: Bool        = {
       VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR &&
         srcStatusVl.map(_.srcState).map(SrcState.isReady).getOrElse(true.B) &&
         srcStatusV0.map(_.srcState).map(SrcState.isReady).getOrElse(true.B)
     }
 
+    // Issued uops remain resident while awaiting completion, but cannot issue again.
     def canIssue: Bool        = {
       srcReady && !issued && !blocked
     }
@@ -104,6 +109,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val success = "b11".U
   }
 
+  /** Stored status and payload, with register-file read enables added for issue selection. */
   class EntryBundle(isDeq: Boolean = false)(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
     val payload               = new IssueQueuePayload(params)
@@ -122,6 +128,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       deqOg1Payload.psrcV0.foreach{_ := status.srcStatusV0.get.psrc}
       deqOg1Payload
     }
+    // Generate banked read enables from source type, selected data source, and physical index.
     def genXrfRen(entry: EntryBundle): Unit = {
       this.rfBankRen.foreach{x => x.zipWithIndex.map{case(xx, idx) => xx.zipWithIndex.map{case(xxx, bank) => xxx :=
         SrcType.isXp(entry.payload.srcType(idx)) &&
@@ -135,6 +142,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
   }
 
+  /** Shared control and feedback inputs used by both transient and resident entries. */
   class CommonInBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val flush                 = Flipped(ValidIO(new Redirect))
     val enq                   = Flipped(ValidIO(new EntryBundle))
@@ -156,6 +164,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val transSel              = Input(Bool())
   }
 
+  /** Computed entry state consumed by queue selection, transfer, and perf logic. */
   class CommonOutBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     //status
     val valid                 = Output(Bool())
@@ -207,6 +216,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcLoadDependencyNext = Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   }
 
+  /**
+    * Derive combinational state from registered state and current flush, wakeup,
+    * replay, and stage-response inputs. `validRegNext` feeds the entry state
+    * register and the queue's ready timing.
+    */
   def CommonWireConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, og1Payload: EntryOg1Payload, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet        = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     common.flushed            := status.robIdx.needFlush(commonIn.flush)
@@ -274,6 +288,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val canIssueBypass                            = Bool()
   }
 
+  /** Match IQ broadcasts to each source and retain producer identity and load
+    * dependency so downstream bypass and replay cancellation stay aligned.
+    */
   def CommonIQWakeupConnect(common: CommonWireBundle, hasIQWakeupGet: CommonIQWakeupBundle, validReg: Bool, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val wakeupVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map{(bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
@@ -315,6 +332,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   }
 
 
+  // Start a new dependency at bit 0 for a load producer's own pipeline;
+  // advance inherited dependencies by one cycle for all other pipelines.
   def ShiftLoadDependency(hasIQWakeupGet: CommonIQWakeupBundle)(implicit p: Parameters, params: IssueBlockParams) = {
     hasIQWakeupGet.shiftedWakeupLoadDependencyByIQVec
       .zip(hasIQWakeupGet.wakeupLoadDependencyByIQVec)
@@ -329,6 +348,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
   }
 
+  /** Expand the compact source selector before testing the global vector-EXU subset. */
   def wakeUpByVf(exuSource: ExuSource)(implicit p: Parameters, params: IssueBlockParams): Bool = {
     val allExuParams = p(XSCoreParamsKey).backendParams.allExuParams
     exuSource.toExuOH(params).zip(allExuParams).map{case (oh,e) =>
@@ -336,6 +356,21 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }.reduce(_ || _)
   }
 
+  /**
+    * Build source, data-routing, and issued state for the next edge. Failure
+    * or load cancellation allows retry; payload stays unchanged. Slot validity
+    * and clearing are computed separately by CommonWireConnect.
+    *
+    * {{{
+    * [source state] + WB/IQ match + load cancel -> next source/routing state
+    * uncanceled deqSel -> issued=1; failed response/load cancel -> retry
+    * [issued, timer, port] -> stage-matched feedback -> next issued/timer/port
+    * entryUpdate --------------------------> caller's entry register / transfer
+    * }}}
+    *
+    * All paths here are combinational; EnqEntry/OthersEntry own the edge and the
+    * priority between a new enqueue and an update of the resident instruction.
+    */
   def EntryRegCommonConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     val cancelBypassVec                                = Wire(Vec(params.numRegSrc, Bool()))
@@ -468,6 +503,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     )))
   }
 
+  /** Present current state, issue eligibility, and the possible transfer payload.
+    * Read enables use the combinationally selected operand source.
+    */
   def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     val entryWireGenRen                                = WireInit(0.U.asTypeOf(entryReg))
@@ -608,6 +646,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val shiftedWakeupLoadDependencyByIQVec: Vec[Vec[UInt]]  = Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   }
 
+  /** Match historical broadcasts to a newly registered enqueue slot.
+    * A load producer starts its dependency at bit delay-1; other dependency
+    * masks advance by delay cycles. Cancellation uses the same history.
+    */
   def EnqDelayWakeupConnect(enqDelayIn: EnqDelayInBundle, enqDelayOut: EnqDelayOutBundle, status: Status, delay: Int)(implicit p: Parameters, params: IssueBlockParams) = {
     enqDelayOut.srcWakeUpByWB.zipWithIndex.foreach { case (wakeup, i) =>
       wakeup := enqDelayIn.wakeUpFromWB.map{ x =>

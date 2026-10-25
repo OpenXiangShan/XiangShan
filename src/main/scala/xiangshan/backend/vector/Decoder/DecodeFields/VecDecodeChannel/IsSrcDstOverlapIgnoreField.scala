@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Relax unequal-EEW overlap rules for mask-producing operations and reductions. */
 object IsSrcDstOverlapIgnoreField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "isSrcDstOverlapIgnore"
 

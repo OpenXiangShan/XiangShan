@@ -6,6 +6,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.macros.InstanceNameMacro.getVariableName
 
+/** Identify vector instructions that return a scalar FP register rather than VD. */
 object FpWenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "fpWen"
 

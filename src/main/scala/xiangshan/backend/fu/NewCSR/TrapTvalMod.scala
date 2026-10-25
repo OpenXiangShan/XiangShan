@@ -8,6 +8,11 @@ import xiangshan._
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.rob.RobPtr
 
+/** Save the target address for a backend fetch fault. A return-target fault has first
+  * priority; otherwise an older redirect fault replaces the saved ROB slot. Older
+  * non-fault redirects or explicit consumption clear validity. tval has no valid output
+  * and may retain stale data after clearing, so the caller qualifies its use.
+  */
 class TrapTvalMod(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Input(new Bundle {

@@ -7,6 +7,9 @@ import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, Decode
 import xiangshan.backend.vector.Decoder.Sews
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
+/** Source-one progression policies consumed by SrcSelectModule.
+  * Group-end selections use the decoded count class; 7/3 below illustrate M8.
+  */
 object Src1SelectEnum extends Enumeration {
   import scala.language.implicitConversions
 
@@ -38,6 +41,7 @@ object Src1SelectEnum extends Enumeration {
   val S2INC2P1         = Src1Val("1000") // vs2|1,3,5,7
 }
 
+/** Select scalar reuse, vector stepping, or reduction feedback for source one. */
 object Src1SelectField extends DecodeField[
   DecodePatternComb2[VecInstPattern, SewPattern],
   UInt

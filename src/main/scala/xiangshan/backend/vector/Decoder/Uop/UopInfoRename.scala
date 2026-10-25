@@ -11,6 +11,7 @@ class UopInfoRenameWithIllegal extends Bundle {
   val uop = new UopInfoRename()
 }
 
+/** Scalar operand classes and serialization policy encoded in each decode-table slot. */
 class UopInfoRenameSimple extends Bundle {
   // rename used
   val src1Ren = Bool()
@@ -32,6 +33,7 @@ class UopInfoRenameSimple extends Bundle {
 object UopInfoRenameSimple extends InfoToString {
   lazy val width = (new UopInfoRenameSimple).getWidth
 
+  /** Serialize scalar traits in Bundle field order and check the total packed width. */
   def genBitPat(
                  src1Type   : Option[OperandType],
                  src2Type   : Option[OperandType],
@@ -60,6 +62,7 @@ object UopInfoRenameSimple extends InfoToString {
   }
 }
 
+/** Vector dependency/allocation policy; vdAlloc is independent of result write enable. */
 class UopInfoRename extends Bundle {
   // rename used
   val src1Ren = Bool()
@@ -89,6 +92,7 @@ class UopInfoRename extends Bundle {
 object UopInfoRename extends InfoToString {
   lazy val width = (new UopInfoRename).getWidth
 
+  /** Serialize vector traits in Bundle field order and check the total packed width. */
   def genBitPat(
     src1Type   : Option[OperandType],
     src2Type   : Option[OperandType],
@@ -130,6 +134,7 @@ object UopInfoRename extends InfoToString {
 }
 
 trait InfoToString {
+  /** Pack presence plus compact class; absent operands use an explicit zero encoding. */
   def operandTypeToString(s: Option[OperandType]): String = {
     s match {
       case Some(value) => "1" + (value match {

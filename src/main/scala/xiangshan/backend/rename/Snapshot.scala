@@ -23,6 +23,12 @@ object SnapshotGenerator extends HasCircularQueuePtrHelper {
   }
 }
 
+/**
+  * Circular storage for recovery snapshots. Enqueue saves the caller's current
+  * state; dequeue retires the oldest snapshot. Redirect blocks both operations,
+  * while flushVec invalidates selected snapshots and rolls back the enqueue end.
+  * Snapshot data is meaningful only where the corresponding valid bit is set.
+  */
 class SnapshotGenerator[T <: Data](dataType: T)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
 
@@ -64,6 +70,8 @@ class SnapshotGenerator[T <: Data](dataType: T)(implicit p: Parameters) extends 
   snptValids.zip(io.flushVec).foreach { case (valid, flush) =>
     when(flush) { valid := false.B }
   }
+  // Scan from the oldest snapshot for the first flushed/invalid boundary.
+  // Reuse that position so future enqueues replace discarded younger snapshots.
   when((Cat(io.flushVec) & Cat(snptValids)).orR) {
     val newEnqPtrCandidate = (0 until RenameSnapshotNum).map(snptDeqPtr + _.U)
     val newEnqPtrQualified = Wire(Vec(RenameSnapshotNum, Bool()))

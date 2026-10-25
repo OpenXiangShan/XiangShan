@@ -79,6 +79,23 @@ class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModul
   val gpaMem = LazyModule(new GPAMem())
 }
 
+/**
+  * Frontend-facing control pipeline and precise-retirement coordination.
+  *
+  * {{{
+  * frontend --> decode --> decode buffer --> rename --> group pipe --> dispatch
+  *                                             |                         |
+  *                                             v                         v
+  *                                      RAT / free lists              ROB + LSQ
+  * execution / replay --> RedirectGenerator --> staged redirects --> all stages
+  * ROB flush + CSR trap target -------------------------------> frontend redirect
+  * snapshot selection --> ROB / RAT / free-list recovery and walk
+  * }}}
+  *
+  * Redirect stages also filter stale writeback. Rename groups remain held until
+  * dispatch consumes them; ROB enqueue has its own register and redirect masks.
+  * Recovery snapshot selection is shared across consumers with aligned controls.
+  */
 class CtrlBlockImp(
   override val wrapper: CtrlBlock
 )(implicit
@@ -652,6 +669,8 @@ class CtrlBlockImp(
     snpt.io.valids(idx) && (redirectRobidx.isAfterSlot(snptRobidx) && !(redirectRobidx.value === snptRobidx.value && redirectRobidx.flag =/= snptRobidx.flag) ||
       !s1_s3_redirect.bits.flushItself() && redirectRobidx.isSameSlot(snptRobidx))
   }.reduceTree(_ || _)
+  // Search backward from the enqueue end to choose the youngest snapshot that
+  // survives the redirect, minimizing the amount of recovery walk.
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map{case idx =>

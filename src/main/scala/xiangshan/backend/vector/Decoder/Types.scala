@@ -13,6 +13,7 @@ import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.{NamedDef, NamedDefObj}
 
 object Types {
+  /** Compact register class; the separate ren bit distinguishes NO from IMM. */
   class DecodeSrcType extends Bundle {
     val value = UInt(DecodeSrcType.width.W)
 
@@ -56,6 +57,9 @@ object Types {
     def FI        = ub"01111" // used by fli and it's fusion
     def CSRRVLENB = ub"10000" // load VLENB in gp
 
+    /** Translate decoder-only immediate kinds to the narrower backend selector.
+      * CSRRVLENB carries its constant in imm and uses the ordinary I format.
+      */
     def toSelImm(selImm: UInt): UInt = {
       Mux(
         !selImm.head(1),
@@ -94,6 +98,7 @@ object Types {
     val MF4 = Value(b"110")
     val MF2 = Value(b"111")
 
+    /** Return max(1, integer LMUL); seg and times currently do not affect this mapping. */
     def mapToRegs(lmul: this.Type, seg: Int = 1)(times: Int = 1): UInt = {
       val ms = Seq(M2, M4, M8)
       val regs = Seq(2, 4, 8)
@@ -121,8 +126,8 @@ object Types {
   }
 
   object SrcWidthType {
-    // NOTICE: widen type will be never conflict with f8, since the former is used by vext uop while the latter is used
-    // by other widen uops.
+    // WIDEN and F8 share an encoding. The instruction's operation class determines
+    // whether this field describes widening or an extension-source width ratio.
     private def NORMAL = b"00"  // EEW = SEW
     private def WIDEN  = b"01"  // EEW = SEW*2
     private def F8 = b"01"      // EEW = SEW/8
@@ -198,10 +203,13 @@ object Types {
     }
   }
 
+  /** Actual occupied tail-slot count, unlike the count-minus-one instruction fields. */
   object UopBufferNum extends NamedUInt(3)
 
+  /** Last uop index (instruction uop count minus one). */
   object NumUop extends NamedUInt(3)
 
+  /** Expected completion count minus one; stores can require more events than uops. */
   object NumWB extends NamedUInt(4) {
     val $1 = b"0000"
     val $2 = b"0001"
@@ -213,6 +221,7 @@ object Types {
     val $8 = b"0111"
   }
 
+  /** Old-VD elimination policy; the current adapter only drops unconditional Always cases. */
   object VdDepElim extends NamedUInt(2) {
     val Always = b"11"
     val IfVlmax = b"10"

@@ -10,6 +10,11 @@ import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.vector.VecRegionModule.RfWriteBundle
 import xiangshan.backend.vector.Exu
 
+/** Groups results by RF write port and exposes current, WB0, and WB1 data ages.
+  * Each port expects at most one enabled producer; issue-side reservations
+  * provide exclusion. Write enables advance every cycle, while payloads update
+  * only on a write, retaining the data used by delayed bypass consumers.
+  */
 class FltWbDataPath(pregParams: PregParams)(implicit val p: Parameters) extends Module with HasXSParameter {
   val in = IO(Input(new FltWbDataPath.In(pregParams)))
   val out = IO(Output(new FltWbDataPath.Out(pregParams)))

@@ -12,6 +12,9 @@ import xiangshan.HasXSParameter
 
 import scala.collection.immutable.SeqMap
 
+/** Implementation-specific control registers. Stored fields drive CSRCustomState in
+  * NewCSR; L2 flush completion is an external status view, not software-owned state.
+  */
 trait CSRCustom { self: NewCSR =>
   // Supervisor Custom Read/Write
   val sbpctl = Module(new CSRModule("Sbpctl", new SbpctlBundle))

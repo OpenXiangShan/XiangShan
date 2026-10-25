@@ -46,6 +46,21 @@ class VecExceptionGenOutput extends Bundle {
   val mtAgnostic = Bool() // when src-dst overlap with eew diff
 }
 
+/** Combinational vector legality checks before uop expansion.
+  * Decode-derived operand usage gates group alignment, bounds, and overlap tests;
+  * CSR context adds VS/FS, rounding-mode, vill, and required-zero vstart checks.
+  * mtAgnostic independently reports unequal-EEW overlap for mask/tail policy.
+  *
+  * {{{
+  * rawInst -> VS1/VS2/VD bases + decoded usage/EMUL -> alignment and range ends
+  * ranges + relative EEW + mask/NF ----------------> overlap restrictions --+
+  * CSR context + decoded legality ----------------> state restrictions ----+-> exception
+  * ranges + relative EEW -------------------------> overlap indication ------> mtAgnostic
+  * }}}
+  *
+  * There is no local valid or pipeline register. Callers qualify these results
+  * with decode validity; mtAgnostic is not suppressed when an exception is present.
+  */
 class VecExceptionGen(implicit p: Parameters) extends XSModule
 {
     val in = IO(Input(new VecExceptionGenInput()))
@@ -88,6 +103,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule
     val vstartNotZero = Ctx.vstart =/= 0.U && Dec.isVstartForceZero
 
     // 4.1 vreg not align
+    /** Integer register groups require aligned bases; fractional EMUL uses one register. */
     def vregNotAlign(emul: UInt, rs: UInt): Bool = {
       val rmul = VLmul.makeNoLessThanM1(emul)
       MuxLookup(rmul, false.B)(Seq(
@@ -104,6 +120,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule
 
     // 4.2 vreg out of bound
 
+    /** Form an inclusive group end by setting the low EMUL-dependent index bits. */
     def emulLoToHi(emul: UInt, Lo: UInt): UInt = {
         MuxLookup(emul, Lo(5,0))(Seq(
         VLmul.m2 -> Cat(Lo(5,1), 1.U(1.W)),
@@ -172,6 +189,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule
     val vs2vdOverlapIll = vs2vdOverlap && !Ctx.csrAllowSrcDstOverlap &&
                          (!Reg.eewVs2EqVs3 && !vs2vdEEWDiffSpecial || Dec.isSrcdstOverlapStrict)
     
+    /** Extend the destination group across nf+1 fields for segment overlap checks. */
     def emulNfLoToHi(emul: UInt, nf: UInt, Lo: UInt): UInt = {
         MuxLookup(emul, Lo(5,0) + nf(2, 0))(Seq(
         VLmul.m2 -> Cat(Lo(5,1) + nf(1, 0), 1.U(1.W)),

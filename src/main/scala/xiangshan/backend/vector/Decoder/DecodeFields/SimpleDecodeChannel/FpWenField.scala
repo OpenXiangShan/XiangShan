@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.macros.InstanceNameMacro.getVariableName
 
+/** Classify an FP destination independently of whether the instruction executes in FP. */
 object FpWenField extends BoolDecodeField[InstPattern] {
   override def name: String = "fpWen"
 

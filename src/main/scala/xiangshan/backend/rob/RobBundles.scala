@@ -80,6 +80,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     }
   }
 
+  // NORMAL uses one wide completion counter; compressed entries pack two
+  // narrower independent counters, latter above former.
   def encodeUopState(entryPairType: UInt, formerUopNum: UInt, latterUopNum: UInt)(implicit p: Parameters): UInt = {
     val normalState = fitUopStateWidth(formerUopNum, PackedUopStateWidth)
     val compressedState = fitUopStateWidth(
@@ -207,6 +209,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
   }
 
+  /** Project allocation metadata and seed packed completion counters/topdown state.
+    * This is combinational wiring; the caller owns entry validity and storage updates.
+    */
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
     robEntry.entryPairType := robEnq.entryPairType
     robEntry.noCompressReason := robEnq.noCompressReason
@@ -256,6 +261,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
   }
 
+  /** Build the retirement/walk view without deciding whether retirement is permitted.
+    * commit_v/walk_v mirror entry validity; commitW is supplied by ROB commit control.
+    */
   def connectCommitEntry(
     robCommitEntry: RobCommitEntryBundle,
     robEntry: RobEntryBundle,
@@ -291,6 +299,10 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
 import RobBundles._
 
+/** Physical ROB position plus former/latter slot identity. Entry arithmetic
+  * preserves the slot; slot ordering places former before latter in one entry.
+  * Wrap flags distinguish live positions on opposite sides of the ring.
+  */
 class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   entries
 ) with HasCircularQueuePtrHelper {
@@ -352,6 +364,7 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     ptr
   }
 
+  // Squash younger slots, and the redirect slot itself only for flush-itself.
   def needFlush(redirect: Valid[Redirect]): Bool = {
     val flushItself = redirect.bits.flushItself() && isSameSlot(redirect.bits.robIdx)
     redirect.valid && (flushItself || isAfterSlot(redirect.bits.robIdx))

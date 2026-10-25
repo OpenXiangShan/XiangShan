@@ -6,6 +6,7 @@ import circt.stage.{ChiselStage, FirtoolOption}
 import firrtl.{AnnotationSeq, EmittedVerilogCircuitAnnotation}
 
 object Verilog {
+  /** Standalone elaboration entry point with shared FIRTool lowering options. */
   def emitVerilog(gen: => RawModule, args: Array[String] = Array.empty): String = {
     val annotations = Array(
       "--lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none",

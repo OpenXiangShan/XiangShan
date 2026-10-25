@@ -50,6 +50,24 @@ class CoreDispatchTopDownIO extends Bundle {
   val fromMem = Flipped(new MemCoreTopDownIO)
 }
 // TODO delete trigger message from frontend to iq
+/**
+  * Routes renamed uops to issue queues and coordinates ROB/LSQ admission.
+  *
+  * {{{
+  * renameIn FU types --> queue selection --> [uopSelIQ] ---+
+  * IQ occupancy -----> occupancy ranking -----------------+
+  * fromRename ------> busy-table / reg-cache / store-set metadata
+  *                                      |
+  *                  IQ capacity + ROB space + LSQ limits + ordering
+  *                                      |
+  *                        fromRename.fire +--> enqRob / LSQ allocation
+  *                                        +--> toIssueQueues
+  * }}}
+  *
+  * Selection is registered alongside the rename pipeline and can be rebalanced
+  * during a stall when enabled. Eliminated moves and exceptional uops still
+  * enter ROB accounting, but do not create ordinary issue-queue requests.
+  */
 class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // std IQ donot need dispatch, only copy sta IQ, but need sta IQ's ready && std IQ's ready
   val allIssueParams = backendParams.allIssueParams.filter(x => x.StdCnt == 0 && x.VStdCnt == 0)
@@ -429,6 +447,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
   }
 
+  // Preserve queue choices with the held rename group. Occupancy estimates
+  // include recent selections because queue occupancy feedback is delayed.
   val uopSelIQ = Reg(Vec(renameWidth, Vec(issueQueueNum, Bool())))
   val needAppendIQValidNumVec = Wire(Vec(exuNum, UInt(RenameWidth.U.getWidth.W)))
   allExuParams.zipWithIndex.map { case (exuParams, iqDeqIdx) => {
@@ -577,6 +597,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       u := 0.U.asTypeOf(u)
     }
   }}
+  // Prefix rank assigns each selected lane an enqueue port within its queue.
+  // Requests beyond the queue's enqueue width are blocked for this cycle.
   val uopSelIQMatrix = Wire(Vec(renameWidth, Vec(issueQueueNum, UInt(renameWidth.U.getWidth.W))))
   uopSelIQMatrix.zipWithIndex.map{ case (u, i) => {
     u.zipWithIndex.map{ case (uu, j) => {
@@ -588,6 +610,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val allowDispatch = Wire(Vec(renameWidth, Bool()))
   val thisCanActualOut = Wire(Vec(renameWidth, Bool()))
   val lsqCanAccept = Wire(Bool())
+  // Admission and issue validity differ: a move or exception can be accepted by
+  // ROB without consuming an IQ port, while LSQ recovery stalls all acceptance.
   val lsqRecoverStall = Wire(Bool())
   for (i <- 0 until RenameWidth){
     // update valid logic

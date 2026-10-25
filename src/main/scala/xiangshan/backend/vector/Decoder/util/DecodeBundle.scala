@@ -14,7 +14,7 @@ class DecodeBundle(fields: Seq[DecodeField[_, _ <: Data]]) extends Record {
   val elements: SeqMap[String, Data] = SeqMap(fields.map(k => k.name -> k.chiselType): _*)
 
   /**
-   * Get result of each field in decoding result
+   * Look up a decoded value by field name; names and types must match the table.
    *
    * @param field field to be queried
    * @tparam D type of field

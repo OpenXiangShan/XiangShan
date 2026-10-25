@@ -7,6 +7,7 @@ import xiangshan.backend.vector.util.ScalaTypeExt.StringToExt
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Identify one-bit mask destinations independently of the current vector SEW. */
 object VdEew1bField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "vdEew1b"
 

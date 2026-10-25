@@ -11,6 +11,10 @@ import xiangshan.backend.vector.util.Verilog
 
 import scala.collection.mutable.ArrayBuffer
 
+/** Combinational uop and parent-metadata muxes for the current output group.
+  * filteredPorts lists reachable channel/uop pairs at elaboration time. Runtime
+  * selectors must be one-hot; buffer selection uses the output lane's fixed slot.
+  */
 class UopSelectModule[T1 <: Data, T2 <: Data](
   uopBundle    : => T1,
   mopBundle    : => T2,

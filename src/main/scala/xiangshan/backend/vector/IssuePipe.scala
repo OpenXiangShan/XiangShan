@@ -18,6 +18,22 @@ import xiangshan.backend.vector.datapath.VecImmExtractor
 import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.{HasXSParameter, Redirect, XSBundle, XSCoreParamsKey}
 
+/**
+  * Stages a vector issue request through RF reads into its execution unit.
+  *
+  * {{{
+  * IQ is0Next --> [IS0] --> [IS1] --> [IS2] --> ex0Next --> Exu
+  *                 |         |         |
+  *              addresses   RF data    scalar data / operand bypass control
+  *                 +---------+-----------> IS0/IS1 response to IQ
+  * redirect ----------------------------> bubbles at affected stages
+  * stage + result latency --------------> predicted VP wakeup
+  * }}}
+  *
+  * GP/FP/VP and V0/VL use their configured read paths. Scalar read failures at
+  * the IS1 boundary report retry to IQ; accepted requests carry immediate,
+  * vector configuration, and bypass provenance into execution.
+  */
 class IssuePipe(
   override val wrapper: IssuePipe.LazyMod
 )(implicit val param: ExuParam, p: Parameters) extends LazyModuleImp(wrapper) with HasXSParameter {

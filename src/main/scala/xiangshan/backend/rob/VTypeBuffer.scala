@@ -64,6 +64,20 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
   })
 }
 
+/**
+  * Records vset results and VL physical destinations for commit and recovery.
+  *
+  * {{{
+  * dispatched vlWen --> [vtypeBuffer: vtype + pdestVl]
+  * ROB commitSize --> deqPtr --> VL RAT commit + committed vtype
+  * ROB walkSize   --> walkPtr --> VL RAT walk + decodeResumeVType
+  * snapshot / architectural base --> recovery start --> newest walked vtype
+  * }}}
+  *
+  * Only the final VL-writing uop of a split vset allocates a record. As in RAB,
+  * special walk drains pending committed state before normal replay; decode
+  * receives the snapshot or newest walked configuration when recovery resumes.
+  */
 class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new VTypeBufferIO(size))
 

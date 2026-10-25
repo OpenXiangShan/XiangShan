@@ -29,6 +29,23 @@ import yunsuan.vector.Common.{SewOH, VSew, _}
 import yunsuan.vector.v2.MergeUnit
 import utility.XSPerfAccumulate
 
+/** FP execution with a separate multiply-to-add path for fused operations.
+  *
+  * {{{
+  * Valid uop + FP RF/bypass --> inEx --> [ex(0)] --> [ex(1)] --> ...
+  *                              |          |           |
+  *                              +--------> FUs --------+--> result slots --> out.uop
+  *                                         |
+  *                                      FMUL handoff
+  *                                         v
+  * direct FALU uop --------------------> [exFadd(0)] --> [exFadd(1)] --> FALU
+  * flush / raw load cancellation ----------> valid filtering
+  * }}}
+  *
+  * Each ex register advances every cycle; there is no ready/stall interface.
+  * FU latency selects a result slot, and scheduling must prevent colliding
+  * fixed-latency completions. Non-fixed-latency FUs publish separate busy/wakeup signals.
+  */
 class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module with HasXSParameter {
   override def desiredName: String = param.name
 
@@ -56,6 +73,7 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
   // source explicitly tagged as load-produced M4 is killed here.
   private val ldWBPort = param.backendParams.getIntRegionParam.issueParams
     .filter(_.hasLdu).map(_.fpWbPortIds.head)
+  /** Match a speculative third operand to the cancelling load's FP write port. */
   private def loadM4Cancel(uop: Exu.InUop): Bool = {
     // The marker survives the ordinary load M2 wakeup.  fmaSrc3Wait is only
     // the FMUL1 bypass selector and may already be zero when s3 cancels.
@@ -88,6 +106,8 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
       }
   }
 
+  // Fused operations re-enter the adder with the multiply's control context;
+  // ordinary FALU operations enter this path directly from inEx.
   val exFadd: Vec[ValidIO[Exu.ExStage]] = RegInit(
     VecInit.fill(numOfEx)(ValidIO(new Exu.ExStage(param)).Lit(_.valid -> false.B))
   )
@@ -201,12 +221,14 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
     }
   }
 
+  /** Map an element count to its vector-register index for a one-hot element width. */
   def elemIdxMapVdIdx(elemIdx: UInt, eewOH: UInt) = {
     require(elemIdx.getWidth >= log2Up(VLEN))
     // 3 = log2(8)
     Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => elemIdx(byteElemWidth - x + 3, byteElemWidth - x)))
   }
 
+  /** Convert the within-register element offset to a byte offset. */
   def elemIdxMapElemE8Idx(elemIdx: UInt, eewOH: UInt) = {
     // eewOH(0) -> Cat(elemIdx(byteElemWidth - 1, 0), 0.U(0.W)),
     // eewOH(1) -> Cat(elemIdx(byteElemWidth - 2, 0), 0.U(1.W)),
@@ -241,6 +263,7 @@ object FltExu {
   class ExStage(param: ExuParam)(implicit p: Parameters) extends InUop(param) {
     val fuSel = Vec(param.fuConfigs.size,Bool())
 
+    /** Copy uop context; the caller computes the FU-select vector separately. */
     def :<#=(source: InUop): Unit = {
       this.ctrl := source.ctrl
       this.data := source.data
@@ -255,6 +278,7 @@ object FltExu {
     val bypassCtrl = new InBypassCtrl(param)
     val debug = Option.when(backendParams.debugEn)(new DebugBundle())
 
+    /** Adapt to the legacy FU interface, defaulting fields absent from this pipeline. */
     def toOldExuInput: Bundles.ExuInput = {
       val exuInput = Wire(new Bundles.ExuInput(param.getExeUnitParams()))
       exuInput.fuType := this.ctrl.fuType
@@ -309,6 +333,7 @@ object FltExu {
       exuInput
     }
 
+    /** Project control fields supported by the selected FU configuration. */
     def <#=:(sink: Func.InCtrl): Unit = {
       sink.opcode                      := this.ctrl.opcode
       sink.latency                     := this.ctrl.latency
@@ -331,6 +356,7 @@ object FltExu {
       sink.frm         .foreach(x => x := this.ctrl.frm.get)
     }
 
+    /** Connect operands and optional vector context to a FU input. */
     def <#=:(sink: Func.InData): Unit = {
       sink.src                         := this.data.src
       sink.vl          .foreach(x => x := this.data.vl.get)
@@ -339,6 +365,7 @@ object FltExu {
       sink.imm                         := this.data.imm.getOrElse(0.U)
     }
 
+    /** Connect FU payload fields; the caller supplies the valid signal. */
     def <#=:(sink: Func.InUop) : Unit = {
       sink.data <#=: this
       sink.ctrl <#=: this
@@ -355,6 +382,7 @@ object FltExu {
     val toVlRf = param.getVlWriteCfg.map(new ToRf(_, backendParams.vlPregParams))
     val toSQ = Option.when(param.hasVStd)(new StoreQueueDataWrite)
 
+    /** Select mutually exclusive FU results; vector/flag fields need caller handling. */
     def :<#=(fuOuts: Seq[ValidIO[Func.OutUop]]): Unit = {
       val fuOutValidOH: Vec[Bool] = VecInit(fuOuts.map(_.valid))
 
@@ -434,6 +462,7 @@ object FltExu {
 
     val debug     = Option.when(backendParams.debugEn)(new DebugBundle)
 
+    /** Preserve issue identity and configured side effects across the execution boundary. */
     def fromIssueDeq(deq: Deq): Unit = {
       this.robIdx := deq.robIdx
       this.uopIdx := deq.uopIdx
@@ -506,6 +535,7 @@ object FltExu {
     val trigger       = Option.when(param.needTrigger)(TriggerAction())
     val debug         = Option.when(backendParams.debugEn)(new DebugBundle)
 
+    /** Seed completion metadata from the input; the FU supplies exceptions and results. */
     def :<#=(source: Exu.InUop): Unit = {
       this.robIdx              := source.ctrl.robIdx
       this.flushPipe   .foreach(_ := source.ctrl.flushPipe.get)

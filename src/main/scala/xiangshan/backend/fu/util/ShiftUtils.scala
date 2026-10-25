@@ -6,6 +6,9 @@ import utility.SignExt
 
 import math.pow
 
+/** Elaborate a fixed-width barrel shifter, consuming shift bits from largest to smallest.
+  * The shift encoding must not request a single stage wider than the input.
+  */
 object doShiftLeft {
   def apply(in: UInt, shamt: UInt): Bits = {
     doShiftLeft(in, shamt)
@@ -19,6 +22,7 @@ object doShiftLeft {
   }
 }
 
+/** Arithmetic right shift with sign fill at every combinational barrel stage. */
 object doShiftRightArith {
   def apply(in: UInt, shamt: UInt): Bits = {
     doShiftRightArith(in, shamt)
@@ -33,6 +37,7 @@ object doShiftRightArith {
   }
 }
 
+/** Fixed-width left rotate; concatenation wraps discarded high bits into the low end. */
 object doShiftRotateLeft {
   def apply(in: UInt, shamt: UInt): Bits = {
     doShiftRotateLeft(in, shamt)
@@ -46,6 +51,7 @@ object doShiftRotateLeft {
   }
 }
 
+/** Fixed-width right rotate; concatenation wraps discarded low bits into the high end. */
 object doShiftRotateRight {
   def apply(in: UInt, shamt: UInt): Bits = {
     doShiftRotateRight(in, shamt)
@@ -60,6 +66,7 @@ object doShiftRotateRight {
   }
 }
 
+/** Rotate a word and append a sign-filled upper word (32-bit input, 5-bit shift in ALU). */
 object doShiftRotateLeftWord {
   def apply(in: UInt, shamt: UInt): Bits = {
     val length = shamt.getWidth
@@ -69,6 +76,7 @@ object doShiftRotateLeftWord {
   }
 }
 
+/** Word right-rotate counterpart of doShiftRotateLeftWord, with the same extension. */
 object doShiftRotateRightWord {
   def apply(in: UInt, shamt: UInt): Bits = {
     val length = shamt.getWidth

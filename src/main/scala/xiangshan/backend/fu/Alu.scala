@@ -26,6 +26,7 @@ import xiangshan._
 import math.pow
 import xiangshan.backend.fu.util._
 
+/** XLEN add modulo 2^XLEN; all arithmetic helpers in this file are combinational. */
 class AddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -34,6 +35,7 @@ class AddModule(implicit p: Parameters) extends XSModule {
   io.add := io.src(0) + io.src(1)
 }
 
+/** Low-word adder; the enclosing ALU applies result extraction and sign extension. */
 class AddWModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src  = Input(UInt((XLEN/2).W))
@@ -43,6 +45,7 @@ class AddWModule(implicit p: Parameters) extends XSModule {
   io.addw := io.srcw + io.src
 }
 
+/** Return low XLEN difference bits plus the carry (no-borrow) bit used for comparisons. */
 class SubModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -126,6 +129,7 @@ class RotateRightShiftWordModule(implicit p: Parameters) extends XSModule {
   io.rorw := doShiftRotateRightWord(io.rorwSrc, io.shamt)
 }
 
+/** Decode the low opcode bits within the miscellaneous class to share result muxes. */
 class MiscResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt(6.W))
@@ -157,6 +161,7 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
   io.miscRes := Mux(io.func(5), maskedLogicRes, Mux(io.func(4), logicAdv, logicBase))
 }
 
+/** Zicond result selection: test condition and either forward value or replace it by zero. */
 class ConditionalZeroModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val condition = Input(UInt(XLEN.W))
@@ -172,6 +177,16 @@ class ConditionalZeroModule(implicit p: Parameters) extends XSModule {
   io.condRes := Mux(use_zero, 0.U, io.value)
 }
 
+/** Combinational integer ALU; the enclosing functional unit owns validity and registers.
+  * Opcode classes select parallel candidates through Mux1H, so legal class decodes must
+  * be mutually exclusive. Word operations sign-extend their final 32-bit result.
+  *
+  * {{{
+  * src1,src2 -> operand shaping -> add/sub, shifts/rotates, logic/pack, conditional zero
+  * func -----------------------> candidate selects ----------------------> result
+  *                              subtract carry -> signed/unsigned comparisons
+  * }}}
+  */
 class AluDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -329,7 +344,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   shaddModule.io.src(1) := src2
   val shadd = shaddModule.io.add
 
-  // sub
+  // One extended subtraction supplies SUB/SUBW, comparisons, and min/max selection.
   val sub  = subModule.io.sub
   subModule.io.src(0) := src1
   subModule.io.src(1) := src2

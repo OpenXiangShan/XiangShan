@@ -10,6 +10,7 @@ import xiangshan.backend.vector.fu.{FltFixLatFunc, VecFuConfig}
 import yunsuan.fpu.FloatCompare
 import utility.DelayN
 
+/** Legacy FP comparison/classification adapter using the shared scalar result interface. */
 class FCMP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   // io alias
   private val src0 = inData.src(0)
@@ -28,6 +29,7 @@ class FCMP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   io.out.bits.res.data       := resultData
 }
 
+/** Delay comparison data and flags by three edges to pair them with ex(3) context. */
 class FCMPFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltFixLatFunc(cfg) {
   // io alias
   private val src0 = ex0src0

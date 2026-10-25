@@ -13,6 +13,10 @@ import xiangshan.XSBundle
 
 import scala.collection.immutable.SeqMap
 
+/** AIA CSR views and indirect priority banks. xTOPEI comes from IMSIC, xTOPI from
+  * InterruptFilter. Priority readback masks absent/unwritable interrupts: machine masks
+  * are static, while supervisor masks also depend on current delegation/virtualization.
+  */
 trait CSRAIA extends HasSoCParameter { self: NewCSR with HypervisorLevel =>
   private def fieldWritableMap(fields: Seq[CSREnumType]): Map[Int, Boolean] =
     fields.map(f => f.lsb -> !f.isRO).toMap
@@ -159,6 +163,9 @@ trait CSRAIA extends HasSoCParameter { self: NewCSR with HypervisorLevel =>
   )
 }
 
+/** Selector legality uses the numeric range; reserved subranges add documentation,
+  * while actual data-window access restrictions are checked by the permit modules.
+  */
 class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnum with WARLApply {
   override protected def legalRange: Option[(BigInt, BigInt)] = Some(0, maxValue)
   override protected def legalBoundString(value: BigInt): String = f"0x$value%x"
@@ -255,6 +262,9 @@ class SIprio2Bundle extends CSRBundle {
   val Prio15    = RW(63, 56).withReset(0.U).withDescription("Priority value for local interrupt 15.")
 }
 
+/** Pulsed IMSIC access/claim interface. Address and write-data validity are separate;
+  * the parent retains transaction state until AIAToCSRBundle returns a valid response.
+  */
 class CSRToAIABundle(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val addr = ValidIO(new Bundle {
     val addr = UInt(soc.IMSICParams.iselectWidth.W)

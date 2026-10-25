@@ -6,6 +6,10 @@ import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 
 
+/** Snapshot both pre-write translation modes and privilege whenever either SATP view
+  * is written. This stores history for later fault handling; it emits no flush itself.
+  * Both input mode payloads must be meaningful on either write, and state is unreset.
+  */
 class SatpFlushMod extends Module {
   val in  = IO(Input(new SatpFlushMod.In))
   val out = IO(Output(new SatpFlushMod.Out))

@@ -32,6 +32,11 @@ class RCAgeTimerWritePort(addrWidth: Int) extends Bundle {
   val addr = Input(UInt(addrWidth.W))
 }
 
+/** Approximate replacement age for a bank, using two-bit saturating counters.
+  * Writes reset age; reads hold it; untouched valid entries age toward 3.
+  * Invalid entries rank ahead of valid ones, and rotating group counters break
+  * equal-age ties. Comparisons use next age to include this cycle's accesses.
+  */
 class RegCacheAgeTimer
 (
   numEntries: Int,
@@ -74,6 +79,8 @@ class RegCacheAgeTimer
     ageTimer(i) := atNext
   }
 
+  // True means row is preferred over col for replacement. Compute one triangle
+  // and invert the other so equal timers still produce a strict ranking.
   def age_cmp_func(row: Int, col: Int): Bool = {
     if (row == col)
       true.B

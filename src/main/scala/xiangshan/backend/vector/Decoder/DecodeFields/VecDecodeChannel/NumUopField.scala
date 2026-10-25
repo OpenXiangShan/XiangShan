@@ -9,6 +9,7 @@ import xiangshan.backend.vector.Decoder.Types.{NumUop, NumWB}
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
+/** Encode the last actual uop index, independently of the rounded one-hot count class. */
 object NumUopField extends DecodeField[
   DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   UInt,

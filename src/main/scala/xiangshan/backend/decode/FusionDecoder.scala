@@ -28,6 +28,10 @@ import xiangshan.backend.Bundles.DecodeOutUop
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import yunsuan.MULOpType
 
+/** One combinational adjacent-instruction pattern and optional replacements. isValid
+  * checks encoding/register relationships; FusionDecoder separately qualifies pair
+  * validity, x0 hints, enable, and overlap with an earlier accepted fusion.
+  */
 abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters) {
   require(pair.length == 2)
 
@@ -478,6 +482,9 @@ class FusionDecodeInfo extends Bundle {
   val rs2FromZero = Output(Bool())
 }
 
+/** Sparse control patch for the first instruction. update changes only valid fields;
+  * its caller must qualify the enclosing fusion result before applying the patch.
+  */
 class FusionDecodeReplace(implicit p: Parameters) extends XSBundle {
   val fuType = Valid(FuType())
   val fuOpType = Valid(FuOpType())
@@ -508,6 +515,16 @@ class FusionDecodeReplace(implicit p: Parameters) extends XSBundle {
   }
 }
 
+/** Detect adjacent fusions at T0 and patch the aligned decode result at T1. Pair state
+  * advances with inReady/fire; there is no independent output handshake or flush state.
+  * A low-to-high clear chain prevents one instruction from belonging to two fusions.
+  *
+  * {{{
+  * T0 adjacent instructions -> pattern matches / hint checks -> [enabled pair state]
+  * T1 aligned dec ----------> opcode transforms -------------> sparse replacement
+  * earlier clear -----------> suppress overlapping pair -----> clear next instruction
+  * }}}
+  */
 class FusionDecoder(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val disableFusion = Input(Bool())
@@ -568,6 +585,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     val thisCleared = io.clear(i)
     out.valid := instrPairValid && !thisCleared && fusionVec.asUInt.orR && notHint && enabled
     XSError(instrPairValid && PopCount(fusionVec) > 1.U, "more then one fusion matched\n")
+    // Group equal literal replacements to share mux terms; None preserves the old field.
     def connectByInt(field: FusionDecodeReplace => Valid[UInt], replace: Seq[Option[Int]]): Unit = {
       field(out.bits).valid := false.B
       field(out.bits).bits := DontCare
@@ -581,6 +599,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
         field(out.bits).bits := Mux1H(replSel, replTypes.map(_.U))
       }
     }
+    // Dynamic immediate payloads need T0 capture; constant selectors already align with fusionVec.
     def connectByUInt(field: FusionDecodeReplace => Valid[UInt], replace: Seq[Option[UInt]], needReg: Boolean): Unit = {
       field(out.bits).valid := false.B
       field(out.bits).bits := DontCare
@@ -593,6 +612,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
         field(out.bits).bits := Mux1H(replSel, replTypes)
       }
     }
+    // Apply transforms to T1 decode data, keeping literal and dynamic replacements separate.
     def connectByUIntFunc(
       field: FusionDecodeReplace => Valid[UInt],
       csField: DecodeOutUop => UInt,

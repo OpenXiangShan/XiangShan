@@ -11,6 +11,10 @@ import xiangshan.backend.vector.util.Verilog
 
 import scala.collection.mutable.ArrayBuffer
 
+/** Combinational selection of the uops left after the current output group.
+  * The caller owns all buffer registers and write enables. Shared mop metadata
+  * comes from the last accepted input, whose split tail may need another cycle.
+  */
 class BufferSelectModule[T1 <: Data, T2 <: Data](
   uopBundle      : => T1,
   mopBundle      : => T2,

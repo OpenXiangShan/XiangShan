@@ -37,6 +37,20 @@ class VlBusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val is_vlmax = Output(Bool())
 }
 
+/**
+  * Tracks physical-register readiness and speculative load dependencies.
+  *
+  * {{{
+  * rename allocation ----------> set busy --+
+  * load cancellation ----------> set busy   |--> [busy bits] --> indexed read
+  * valid wakeup / writeback ---> clear busy-+                      ^
+  * allocation to same preg ----------------- read-as-busy bypass --+
+  * IQ wakeup dependencies --> [per-preg masks, shifted each cycle] --> read
+  * }}}
+  *
+  * Current allocation bypasses the stored read state to prevent a reused preg
+  * from appearing ready. Canceled speculative wakeups are filtered before update.
+  */
 class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB: PregWB)(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
     // set preg state to busy
@@ -90,6 +104,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val tableUpdate = Wire(Vec(numPhyPregs, Bool()))
   val wakeupOHVec = Wire(Vec(numPhyPregs, UInt(wakeUpIn.size.W)))
 
+  // Merge valid physical-register indices into the bit mask used for state updates.
   def reqVecToMask(rVec: Vec[Valid[UInt]]): UInt = {
     ParallelOR(rVec.map(v => Mux(v.valid, UIntToOH(v.bits), 0.U)))
   }
@@ -145,6 +160,8 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || wakeUpMask(idx) || wbMask(idx))
   }).asUInt
 
+  // Ready-producing events take priority over allocation/cancel in the stored
+  // state; the read-side allocation bypass still makes a new allocation busy.
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
     when(wakeUpMask(idx) || wbMask(idx)) {
       update := false.B                                   //ready

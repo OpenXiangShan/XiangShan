@@ -30,6 +30,20 @@ class RenameBufferEntry(implicit p: Parameters) extends XSBundle {
   val robIdx = OptionWrapper(!env.FPGAPlatform, new RobPtr)
 }
 
+/**
+  * Stores logical/physical destination pairs independently of ROB compression.
+  *
+  * {{{
+  * dispatched destinations --> [renameBuffer, compacted by allocation prefix]
+  * ROB commitSize --> committed backlog --> deqPtr --> architectural RAT updates
+  * ROB walkSize   --> recovery backlog  --> walkPtr --> speculative RAT updates
+  * redirect + snapshot --------------------> walk start / restored enqueue end
+  * }}}
+  *
+  * ROB supplies destination counts rather than one record per physical entry.
+  * Without a snapshot, special walk first drains committed records that have
+  * not reached RAT, then rebuilds speculative state. VL uses VTypeBuffer.
+  */
 class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirect = Input(ValidIO(new Bundle {
@@ -139,6 +153,8 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val newCommitSize = io.fromRob.commitSize
   val newWalkSize = io.fromRob.walkSize
 
+  // Accumulate ROB-produced work and subtract only records emitted this cycle;
+  // ROB and RAB widths need not match.
   val commitSizeNxt = commitSize + newCommitSize - commitCount
   val walkSizeNxt = walkSize + newWalkSize - walkCount
 

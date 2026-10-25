@@ -5,6 +5,7 @@ import chisel3.util.HasBlackBoxInline
 
 import java.util.Properties
 
+/** Simulation-only initial print; SYNTHESIS removes the message from generated HDL. */
 class PrintCommitIDModule(shaWidth: Int, hartIdlen: Int) extends BlackBox with HasBlackBoxInline {
   val io = IO(new Bundle{
     val hartID = Input(UInt(hartIdlen.W))
@@ -31,6 +32,9 @@ class PrintCommitIDModule(shaWidth: Int, hartIdlen: Int) extends BlackBox with H
   )
 }
 
+/** Read the packaged gitStatus resource at elaboration and expose constant build IDs.
+  * shaWidth selects a hexadecimal prefix, so it is expected to be a multiple of four.
+  */
 class CommitIDModule(shaWidth: Int, hartIdlen: Int) extends Module {
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdlen.W))

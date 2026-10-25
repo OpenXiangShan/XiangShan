@@ -6,6 +6,9 @@ import xiangshan.{DistributedCSRIO, XSModule}
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.decode.isa.CSRs
 
+/** Distributed copies of performance-event selectors. Matching broadcast write pulses
+  * update each CSRModule; hpmevent continuously exposes the saved, filtered selectors.
+  */
 class PFEvent(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())

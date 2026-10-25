@@ -1,5 +1,4 @@
-// Dummy vector FuncUnit stub for build bringup
-// Until full vector backend (VecFixLatFunc/VecFuConfig/vector.Exu) is ported
+// Placeholder implementations for legacy FU configurations.
 package xiangshan.backend.fu.vector
 
 import chisel3._
@@ -7,6 +6,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.{FuncUnit, FuConfig, HasPipelineReg}
 
+/** Preserve the configured control pipeline while returning zero data and flags. */
 class DummyVecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasPipelineReg {
   override def latency: Int = cfg.latency.latencyVal.get
   
@@ -22,6 +22,7 @@ class DummyVecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncU
   }
 }
 
+/** Consume every input request and never produce a completion. */
 class DummyVecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   // Stub: always ready, never valid
   io.in.ready := true.B

@@ -25,6 +25,9 @@ import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.VSetOpcodes
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VLmul, VSew, VType, Vl, VsetVType}
 
+/** Combinational VSET operands and results; oldVt exists only for configurations that
+  * validate keeping VL. testOut exposes the internal, LMUL-scaled VLMAX calculation.
+  */
 class VsetModuleIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   private val vlWidth = p(XSCoreParamsKey).vlWidth
 
@@ -47,6 +50,14 @@ class VsetModuleIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   })
 }
 
+/** Compute VL and VTYPE without local pipeline state. Illegal configurations produce
+  * VL=0 and a cleared VTYPE payload with vill set. The wrapper supplies any kept AVL.
+  *
+  * {{{
+  * SEW,LMUL -> log2(VLMAX) -> VLMAX ---+--> min(AVL,VLMAX) / VLMAX -> VL
+  * old/new VTYPE -> legality checks --+--> vill and cleared illegal configuration
+  * }}}
+  */
 class VsetModule(cfg: FuConfig)(implicit p: Parameters) extends XSModule {
 
 
@@ -132,6 +143,8 @@ class VsetModule(cfg: FuConfig)(implicit p: Parameters) extends XSModule {
 
   private val log2VlenDivVsew = log2Vlen.U - log2Vsew
   private val vlenDivVsew = 1.U(vlWidth.W) << log2VlenDivVsew
+  // This output spans at least one physical vector register, even for fractional LMUL.
+  // The raw architectural VLMAX used to clamp AVL is exposed separately in testOut.
   io.out.vlmax := Mux(vlmax >= vlenDivVsew, vlmax, vlenDivVsew)
 
   io.testOut.vlmax := vlmax

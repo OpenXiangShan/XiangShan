@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Exempt whole-register memory transfers from the current vill check. */
 object IsVtypeIgnoreField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "isVtypeIgnore"
 

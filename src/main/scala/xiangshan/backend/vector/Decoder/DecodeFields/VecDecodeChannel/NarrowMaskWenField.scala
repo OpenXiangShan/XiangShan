@@ -5,10 +5,9 @@ import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.StringToExt
 
-/**
- * This field is used to specify if the uop write narrow mask, like vmseq.vv. <br/>
- * The mask operation uops are excluded, since they write whole register.
- */
+/** Classify partial mask-result families by name prefix, including compares and carry masks.
+  * Boolean mask-logic instructions outside these prefixes use whole-register handling.
+  */
 object NarrowMaskWenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "narrowMaskWen"
 

@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Require disjoint source/destination groups for patterns carrying OverlapStrict. */
 object IsSrcdstOverlapStrictField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "isSrcdstOverlapStrict"
 

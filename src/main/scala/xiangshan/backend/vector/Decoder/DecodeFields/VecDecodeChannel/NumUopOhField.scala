@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.NumUopOH
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
+/** Round expansion length up to a 1/2/4/8 packing class, reserving one for illegal input. */
 object NumUopOhField extends DecodeField[
   DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   UInt,

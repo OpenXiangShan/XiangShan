@@ -11,6 +11,10 @@ import xiangshan.backend.decode.opcode.Latency
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.FuTypeField
 
 
+/** Combinational opcode-to-result-slot latency decode, qualified by scheduling FU type.
+  * Opcode spaces can reuse encodings, so the FU-type match selects their tables.
+  * Callers must provide non-colliding groups for this one-hot output composition.
+  */
 class LatDecoder(opcodesSeq: Seq[Opcodes]) extends Module {
   val in = IO(Input(new LatDecoder.In))
   val out = IO(Output(new LatDecoder.Out))
@@ -99,6 +103,7 @@ object LatDecoder {
     override def bitPat: BitPat = opcode.encode
   }
 
+  /** Preserve uncertain latency except for store-address opcodes, which use slot zero. */
   class LatField(opcodes: Opcodes) extends DecodeField[OpcodePattern, UInt] {
     override def name: String = "lat"
 

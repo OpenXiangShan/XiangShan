@@ -6,6 +6,7 @@ import xiangshan.backend.vector.Decoder.InstPattern.{FpInstPattern, InstPattern,
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
+/** Enumerate operations that may update accrued FP exception flags, including vector FP. */
 object FFlagsWenField extends BoolDecodeField[InstPattern] {
 
   override def name: String = "fflagsWen"

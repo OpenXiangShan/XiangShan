@@ -15,12 +15,16 @@ trait DecodeField[-T <: DecodePattern, +D <: Data] {
 
   def chiselType: D
 
+  /** Unlisted inputs are don't-cares unless a field overrides this default.
+    * Match/legality fields must choose a defined default when used as valid bits.
+    */
   def default: BitPat = dc
 
   final def width: Int = chiselType.getWidth
 
   def dc: BitPat = BitPat.dontCare(width)
 
+  /** Return one output row at elaboration time, with the same width as chiselType. */
   def genTable(op: T): BitPat
 
   require(width == default.width)

@@ -23,12 +23,14 @@ import xiangshan.backend.fu.{FuncUnit, HasPipelineReg}
 import xiangshan.backend.fu.FuConfig
 import xiangshan.{FPUCtrlSignals, XSModule}
 
+/** Preserve an unsigned operand's magnitude when interpreting it as a signed value. */
 trait HasUIntToSIntHelper {
   implicit class UIntToSIntHelper(x: UInt){
     def toSInt: SInt = Cat(0.U(1.W), x).asSInt
   }
 }
 
+/** Scalar FP datapath shell with instruction-rm/CSR-frm dynamic rounding selection. */
 abstract class FPUDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Input(new Bundle() {
@@ -49,6 +51,7 @@ abstract class FPUSubModule(cfg: FuConfig)(implicit p: Parameters) extends FuncU
   with HasUIntToSIntHelper
 {
   val dataModule: FPUDataModule
+  /** Fill missing source slots with zero and connect scalar data/fflags results. */
   def connectDataModule = {
     for (i <- 0 until dataModule.io.in.src.length) {
       dataModule.io.in.src(i) := (if (i < io.in.bits.data.src.length) io.in.bits.data.src(i) else 0.U)
@@ -57,6 +60,7 @@ abstract class FPUSubModule(cfg: FuConfig)(implicit p: Parameters) extends FuncU
     io.out.bits.res.data := dataModule.io.out.data
     io.out.bits.res.fflags.get := dataModule.io.out.fflags
   }
+  /** Flip only the sign bit of the selected floating-point encoding width. */
   def invert_sign(x: UInt, len: Int) = {
     Cat(
       !x(len-1), x(len-2, 0)

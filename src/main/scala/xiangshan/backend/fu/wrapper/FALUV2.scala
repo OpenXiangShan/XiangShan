@@ -9,6 +9,10 @@ import xiangshan.backend.vector.fu.{FltFixLatFunc, VecFuConfig}
 import yunsuan.fpu.falu.FloatAdderV2
 import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 
+/** Dedicated FP adder for direct operations and FMUL's fused intermediate.
+  * The parent aligns the multiply handoff and ex(0) control; this adapter returns
+  * the rounded value/flags in the final configured result slot.
+  */
 class FAluFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltFixLatFunc(cfg) {
 
   // io alias

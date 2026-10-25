@@ -5,6 +5,7 @@ import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 
+/** Select vector destinations, excluding stores, configuration, and scalar-result ops. */
 object VpWenField extends BoolDecodeField[InstPattern] {
   override def name: String = "vpWen"
 

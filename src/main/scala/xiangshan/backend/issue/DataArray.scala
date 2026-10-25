@@ -22,6 +22,10 @@ class DataArrayIO[T <: Data](gen: T, numRead: Int, numWrite: Int, numEntries: In
   val write = Vec(numWrite, new OHWriteBundle(numEntries, gen))
 }
 
+/** Multiport asynchronous entry storage with one-hot addresses on every port.
+  * Simultaneous writes to one entry are reported as conflicting transfers;
+  * this wrapper provides no arbitration between write ports.
+  */
 class DataArray[T <: Data](gen: T, numRead: Int, numWrite: Int, numEntries: Int)
   (implicit p: Parameters)
   extends XSModule {

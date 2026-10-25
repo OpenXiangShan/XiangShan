@@ -8,6 +8,10 @@ import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 
+/** Combinational mask/tail classification without destination-data muxing.
+  * Indexed memory uses VSEW for mask element positions; other operations use EEW.
+  * Consumers decide how active/agnostic byte enables select new, old, or filled data.
+  */
 class NewMgu(vlen: Int)(implicit p: Parameters) extends Module {
   private val numBytes = vlen / 8
   private val byteWidth = log2Up(numBytes)

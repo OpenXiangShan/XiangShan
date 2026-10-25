@@ -12,6 +12,10 @@ import xiangshan.backend.vector.util.Verilog
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 
 
+/** Combinationally prepend buffered uops to an already flattened channel stream.
+  * The first uopWidth positions go to rename and the following positions form
+  * the next tail. This helper owns no buffer state or acceptance handshake.
+  */
 class DecoderUopSelectModule[T <: Data](
   uopWidth: Int = 8,
   uopBufferSize: Int = 7,

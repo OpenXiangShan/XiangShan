@@ -25,6 +25,11 @@ import xiangshan.backend.vector.util.Verilog
 
 import scala.language.implicitConversions
 
+/** Decode one vset form into a single uop with the required VL/vtype dependencies.
+  * Immediate vtype legality is known here and selects uvset_ill; register-sourced
+  * vtype is checked during execution. out.valid identifies a vset encoding, while
+  * out.bits.illegal specifically reports the current VS-off condition.
+  */
 @instantiable
 class VsetDecoder extends Module {
   import VsetDecoder._
@@ -126,12 +131,14 @@ class VsetDecoder extends Module {
     isVSETIVLI -> ImmUnion.VSETIVLI.minBitsFromInstr(rawInst),
     isVSETVLI -> ImmUnion.VSETVLI.minBitsFromInstr(rawInst),
   ))
+  // Register-sourced vtype cannot be predicted fully by immediate decode state.
   out.bits.flushPipe := isVSETVL
   out.bits.isVSETVL := isVSETVL
 
   implicit def castToUInt(bp: BitPat): UInt = bitPatToUInt(bp)
 }
 
+/** Elaboration-time vset bit fields used to construct opcode/rename tables. */
 case class ConfigInstDetailPattern(
   rawInst: BitPat
 ) extends DecodePattern {
@@ -226,6 +233,7 @@ object VsetDecoderUtil {
       bitPatSeq.reverse.reduce(_ ## _)
     }
 
+    /** Select dependencies from vset form, immediate legality, and rd/rs1 zero cases. */
     def genUop(op: InstPatternWithRdRs1Zero): Option[Opcode] = {
       val DecodePatternComb5(
         instP,

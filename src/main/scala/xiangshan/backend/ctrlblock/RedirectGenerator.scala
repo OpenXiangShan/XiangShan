@@ -7,6 +7,18 @@ import utility.{HasCircularQueuePtrHelper, XORFold, GatedValidRegNext}
 import xiangshan.frontend.ftq.FtqRead
 import xiangshan.{MemPredUpdateReq, Redirect, XSBundle, XSModule, AddrTransType}
 
+/**
+  * Chooses the older execution redirect or load replay and registers stage 2.
+  *
+  * {{{
+  * oldestExuRedirect --+--> oldest-slot choice --> [S1 redirect] --> stage2Redirect
+  * loadReplay --------+          ^
+  * recent redirect / robFlush ---+-- squash redundant younger requests
+  * }}}
+  *
+  * ROB flush suppresses this output and becomes the recent-flush boundary.
+  * A short shift counter retains that boundary while stale requests drain.
+  */
 class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
 

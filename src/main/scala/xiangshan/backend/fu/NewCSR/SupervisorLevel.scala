@@ -17,6 +17,10 @@ import xiangshan.backend.decode.isa.CSRs
 
 import scala.collection.immutable.SeqMap
 
+/** Supervisor bank and machine-backed aliases. Delegated interrupt bits read/write
+  * MIP/MIE, virtualized nondelegated bits use MVIP or local SIE state. SATP rejects
+  * the entire write for an unsupported MODE, unlike HGATP's per-field treatment.
+  */
 trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val sie = Module(new CSRModule("Sie", new SieBundle)
     with HasIpIeBundle
@@ -25,8 +29,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     val fromVSie = IO(Flipped(new VSieToSie))
 
     // Sie is alias of mie when mideleg=1.
-    // Otherwise, sie has seperate writable registers
-    // There are no regs in CSR sie.
+    // With mideleg=0 and mvien=1, use separate writable SIE state; other bits read zero.
     val mieIsAlias = mideleg
     val usingReg   = ~mideleg & mvien
     regOut := (mieIsAlias & mie) | (usingReg & reg)
@@ -98,16 +101,8 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     val toMip  = IO(new SipToMip)
     val toMvip = IO(new SipToMvip)
 
-    // Ref: 7.1.3. Supervisor Interrupt Registers (sip and sie)
-    // The sip and sie registers are subsets of the mip and mie registers. Reading any
-    // implemented field, or writing any writable field, of sip/sie effects a read or write of the
-    // homonymous field of mip/mie.
-
-    // Ref: 3.1.9. Machine Interrupt Registers (mip and mie)
-    // Restricted views of the mip and mie registers appear as the sip and sie registers for supervisor level. If
-    // an interrupt is delegated to S-mode by setting a bit in the mideleg register, it becomes visible in the
-    // sip register and is maskable using the sie register. Otherwise, the corresponding bits in sip and sie
-    // are **read-only zero**.
+    // MIDELEG chooses MIP aliases; otherwise MVIEN may expose MVIP injection state.
+    // Both read selection and write-intent routing use these same disjoint masks.
     val mipIsAlias  = mideleg
     val mvipIsAlias = ~mideleg & mvien
 

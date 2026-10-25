@@ -26,6 +26,21 @@ import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.Verilog
 import xiangshan.{CommitType, XSCoreParameters, XSCoreParamsKey}
 
+/** Expand one vector or multi-uop instruction with combinational decode tables.
+  *
+  * {{{
+  * rawInst ------------------> instruction fields / policies
+  * rawInst + SEW -----------> source/destination selection --> SrcSelectModule
+  * rawInst + SEW/LMUL/NF ---> per-uop opcode / FU / rename info / count
+  * CSR + register groups ---> VecExceptionGen
+  *                                         |
+  *                        Valid uop slots + one-hot count class
+  * }}}
+  *
+  * Tables are built from legal width/group combinations at elaboration time.
+  * Output valid denotes a matching decoded slot; the enclosing DecodeChannels
+  * supplies frontend validity and decides whether to accept the instruction.
+  */
 @instantiable
 class VectorDecodeChannel(
   instSeq: Seq[VecInstPattern],
@@ -233,6 +248,9 @@ class VectorDecodeChannel(
   val mu = !ma
   val tu = !ta
 
+  // Old VD can be dropped only when tail and masked elements need no preserved
+  // data. The current common-format adapter keeps the dependency for conditional
+  // policies and only eliminates the unconditional Always case.
   val vdDepElim: UInt = Mux1H(Seq(
     (ta && (vm || ma)) -> VdDepElim.Always,
     (tu && (vm || ma)) -> VdDepElim.IfVlmax,
@@ -287,6 +305,7 @@ class VectorDecodeChannel(
     ))
     out.uop(i).bits.vm := instFields.VM
 
+    // This path explicitly bypasses VecExceptionGen for IsVecIntInstField matches.
     out.uop(i).bits.exceptionII := Mux(
       instBundle(IsVecIntInstField),
       false.B,

@@ -20,6 +20,9 @@ package object vector {
     implicit val p: P
   }
 
+  /** Local decoder limits, including a fixed VLEN=128 and at most eight split uops.
+    * These settings are not all derived from the top-level core parameter bundle.
+    */
   trait HasVectorSettings {
     def VLEN = 128
     def VLENB: Int = VLEN / 8

@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
+/** Identify scalar integer results from vector mask queries and element extraction. */
 object GpWenField extends BoolDecodeField[VecInstPattern] {
   override def name: String = "gpWen"
 

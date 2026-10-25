@@ -6,6 +6,11 @@ import chisel3.util._
 import xiangshan._
 import utility._
 
+/** Form heuristic backend/memory stall events from low issue activity.
+  * Issue presence includes all regions, but the numeric issue count sums integer
+  * and vector inputs here. Load/store candidates are delayed once before memory
+  * attribution, and L1/L2/L3 miss events are nested rather than disjoint buckets.
+  */
 class TopDownGen(implicit p: Parameters) extends XSModule
   with HasPerfEvents {
   val io = IO(new TopDownGenIO)

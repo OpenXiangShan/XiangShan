@@ -2,10 +2,12 @@ package xiangshan.backend.fu.NewCSR
 
 import xiangshan.backend.decode.isa.CSRs
 
+/** CSR-read ordering policy catalog. These lists classify instruction reads; they
+  * neither enforce ordering themselves nor imply that architectural registers are RO.
+  */
 object CSROoORead {
   /**
-   * "Read only" CSRs that can be fully pipelined when read in CSRR instruction.
-   * Only read by csr instructions.
+   * Reads that must observe older in-flight architectural updates before execution.
    */
   val waitForwardInOrderCsrReadList = List(
     CSRs.fflags,
@@ -36,6 +38,7 @@ object CSROoORead {
     CSRs.hvip,
     CSRs.mvip,
   )
+  // Interrupt/indirect views also prevent younger operations from passing the read.
   val blockBackwardInOrderCsrReadList = List(
     CSRs.mireg,
     CSRs.sireg,

@@ -182,6 +182,21 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
   lazy val module = new BackendInlinedImp(this)
 }
 
+/**
+  * Connects control and the integer, FP, and vector execution regions.
+  *
+  * {{{
+  * frontend --> CtrlBlock (decode / rename / dispatch / ROB) --> region enqueue
+  *                              ^                                  |
+  *                              +--- ROB writeback / redirect -------+
+  * integer Region <------ wakeups / cross-register data ------> FP / vector regions
+  * memory <------ issue requests / replay / load wakeup ------> integer region
+  * }}}
+  *
+  * Dedicated FP/vector regions have their own issue pipelines and writeback
+  * controls; shared identities and port configuration keep cross-region wakeup,
+  * register data, redirects, and memory feedback aligned.
+  */
 class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parameters) extends LazyModuleImp(wrapper)
   with HasXSParameter
   with HasPerfEvents

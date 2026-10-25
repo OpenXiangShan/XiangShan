@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, Decode
 import xiangshan.backend.vector.Decoder.Sews
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
+/** Policies interpreted by SrcSelectModule; codes describe index progression, not EEW. */
 object DestSelectEnum extends Enumeration {
   import scala.language.implicitConversions
 
@@ -27,14 +28,15 @@ object DestSelectEnum extends Enumeration {
   def UInt(): UInt = chisel3.UInt(width.W)
 
   // Todo: if treat CONST and NONE as the same
-  val NONE       = DestVal("000") // no vs2
-  val INC1       = DestVal("001") // vd|0,1,2,3,4,5,6,7
-  val INCF2      = DestVal("010") // vd|0,0,1,1,2,2,3,3
-  val INCF4      = DestVal("011") // vd|0,0,0,0,1,1,1,1
-  val CONST      = DestVal("100") // vd|0
-  val AMOCASQ    = DestVal("101") // for amocas instruction, rd|0,0,1,1
+  val NONE       = DestVal("000") // Select index zero; write enable is separate.
+  val INC1       = DestVal("001") // rd + i
+  val INCF2      = DestVal("010") // rd + floor(i/2)
+  val INCF4      = DestVal("011") // rd + floor(i/4)
+  val CONST      = DestVal("100") // rd
+  val AMOCASQ    = DestVal("101") // 0, rd, 0, rd+1; preserve x0 in the final slot.
 }
 
+/** Choose destination reuse/progression from instruction kind and data/index EEW ratio. */
 object DestSelectField extends DecodeField[
   DecodePatternComb2[VecInstPattern, SewPattern],
   UInt

@@ -4,6 +4,7 @@ import chisel3.util.BitPat
 import xiangshan.backend.vector.Decoder.InstPattern.{InstPattern, MopInstPattern}
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
+/** Identify MOP encodings whose operands are replaced by x0 in scalar decode. */
 object IsMopField extends BoolDecodeField[InstPattern] {
   override def name: String = "isMop"
 

@@ -10,6 +10,9 @@ class VecDataSplitIO(inDataWidth: Int, outDataWidth: Int) extends Bundle {
   val outVec64b = Output(Vec(inDataWidth / 64, UInt(64.W)))
 }
 
+/** Combinational 8/16/32/64-bit views, with index zero holding the least-significant bits.
+  * outDataWidth is retained in the interface but does not select which views exist.
+  */
 class VecDataSplitModule(inDataWidth: Int, outDataWidth: Int) extends Module {
   val io = IO(new VecDataSplitIO(inDataWidth, outDataWidth))
 

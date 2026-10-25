@@ -5,6 +5,9 @@ import chisel3.util._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW}
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField.AddRecordSpecifyFields
 
+/** Sparse architectural interrupt bit positions. get* helpers return fields in the
+  * listed group order; priority is defined separately by InterruptNO.interruptDefaultPrio.
+  */
 class InterruptBundle extends CSRBundle {
   private def localDelegation(no: Int) = RO(no).withDescription(s"Local interrupt $no delegation bit.")
   // Software Interrupt
@@ -312,6 +315,9 @@ object NonMaskableIRNO{
 
 }
 
+/** Architectural IDs and explicit default-priority order (earlier index wins).
+  * The array order is intentionally different from ascending interrupt number.
+  */
 object InterruptNO {
   // Software Interrupt
   final val SSI  = 1
@@ -491,6 +497,10 @@ trait ToAliasIpLocalPart extends Bundle {
   )
 }
 
+/** Per-field alias-write intents: valid selects an update and bits carries its value.
+  * Subclasses change access metadata; connectZeroNonRW disables fields not writable
+  * through that alias without driving a meaningful payload for them.
+  */
 class IeValidBundle extends Bundle with IgnoreSeqInBundle {
   val SSIE     = ValidIO(RO( 1))
   val VSSIE    = ValidIO(RO( 2))
@@ -595,6 +605,7 @@ class IeValidBundle extends Bundle with IgnoreSeqInBundle {
   }
 }
 
+/** Pending-bit counterpart of IeValidBundle, with independent validity per alias field. */
 class IpValidBundle extends Bundle with IgnoreSeqInBundle {
   val SSIP     = ValidIO(RO( 1))
   val VSSIP    = ValidIO(RO( 2))

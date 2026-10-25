@@ -8,6 +8,7 @@ import xiangshan.backend.vector.Decoder.Types.NumUop
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
+/** Encode the last uop index (count minus one), with zero for an empty expansion. */
 class NumUopField(extensions: Seq[ExtBase]) extends DecodeField[InstPattern, UInt] {
   override def name: String = "numUop"
 

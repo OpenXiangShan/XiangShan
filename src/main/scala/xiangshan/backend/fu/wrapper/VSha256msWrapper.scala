@@ -9,6 +9,9 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{NewMgu, VecPipedFuncUnit}
 import yunsuan.vector.v2.Crypto.{CryptoIteration, VSha256c, VSha256ms}
 
+/** SHA-256 message-schedule adapter with activity delayed by four edges.
+  * Inactive bytes retain saved old VD rather than contributing the new crypto result.
+  */
 class VSha256msWrapper(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
   private implicit val opcode = fuOpType
   private val valid = io.in.valid

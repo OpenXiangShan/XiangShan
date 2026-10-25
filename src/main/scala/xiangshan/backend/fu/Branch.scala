@@ -22,6 +22,9 @@ import chisel3.util._
 import utility.LookupTree
 import xiangshan._
 
+/** Combinational branch direction check. Target generation and target mismatch detection
+  * belong to the wrapper; this module compares only predicted and resolved directions.
+  */
 class BranchModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
@@ -35,10 +38,11 @@ class BranchModule(implicit p: Parameters) extends XSModule {
   subModule.io.src(0) := src1
   subModule.io.src(1) := src2
   val sub  = subModule.io.sub
+  // The extended subtract carry means no unsigned borrow; differing sign bits invert it.
   val sltu    = !sub(XLEN)
   val slt     = src1(XLEN - 1) ^ src2(XLEN - 1) ^ sltu
   val xor     = src1 ^ src2
-  // branch
+  // EQ/LT/LTU share an invert bit for NE/GE/GEU.
   val branchOpTable = List(
     BRUOpType.getBranchType(BRUOpType.beq)  -> !xor.orR,
     BRUOpType.getBranchType(BRUOpType.blt)  -> slt,

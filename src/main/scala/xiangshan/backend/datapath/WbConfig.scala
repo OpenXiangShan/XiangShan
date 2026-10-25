@@ -4,6 +4,10 @@ import chisel3.util.log2Up
 import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig._
 
+/** Static writeback destinations; port IDs are local to each register-file namespace.
+  * Multiple EXUs may share a port with configured priority. CtrlWB carries only
+  * completion, and NoWB denotes no physical destination.
+  */
 object WbConfig {
   sealed abstract class WbConfig() {
     val port: Int

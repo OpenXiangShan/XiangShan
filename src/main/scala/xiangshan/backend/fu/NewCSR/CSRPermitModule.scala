@@ -9,6 +9,16 @@ import xiangshan.backend.decode.isa.CSRs
 import org.chipsalliance.cde.config.Parameters
 import system.HasSoCParameter
 
+/** Combinational CSR/xRET permission aggregation. Direct privilege/state checks take
+  * precedence over indirect-window checks; illegal instruction wins over virtual
+  * instruction. Address existence and operation validity are handled by NewCSR.
+  *
+  * {{{
+  * access + privilege/status -> M / S / privilege / virtual checks --+-> II > VI
+  * selector + delegation -----> indirect checks (if direct legal) --+
+  * xRET + privilege/status ---> return legality -------------------+-> legal enables
+  * }}}
+  */
 class CSRPermitModule(implicit p: Parameters) extends Module {
   val io = IO(new CSRPermitIO)
 
@@ -103,6 +113,7 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
   io.out.hasLegalWriteVcsr := mLevelPermitMod.io.out.hasLegalWriteVcsr
 }
 
+/** Gate each return instruction by current privilege, debug mode, and TSR/VTSR. */
 class XRetPermitModule extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
@@ -159,6 +170,10 @@ class XRetPermitModule extends Module {
   io.out.hasLegalDret  := dret  && !dretIllegal
 }
 
+/** Machine-controlled restrictions on lower-level state, counters, translation, and
+  * FP/vector CSR access. hasLegalWriteFcsr/Vcsr qualify writes with the local FS/VS
+  * state checks; they do not include the complete CSR access-permission decision.
+  */
 class MLevelPermitModule extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
@@ -305,6 +320,7 @@ class MLevelPermitModule extends Module {
   io.out.hasLegalWriteVcsr := wen && csrIsWritableVec && !vsEffectiveOff
 }
 
+/** Host-user counter/custom-state restrictions imposed by supervisor enables. */
 class SLevelPermitModule extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
@@ -338,6 +354,9 @@ class SLevelPermitModule extends Module {
   io.out.sLevelPermit_EX_II := accessHPM_EX_II || accessCustom_EX_II
 }
 
+/** Decode CSR address privilege bits with virtualization and debug overrides. A
+  * blocked machine CSR raises II even in a guest; blocked non-machine state raises VI.
+  */
 class PrivilegePermitModule extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
@@ -385,6 +404,9 @@ class PrivilegePermitModule extends Module {
   io.out.privilege_EX_VI := !privilegeLegal && privState.isVirtual && !csrIsM
 }
 
+/** Guest access restrictions from hypervisor state, timer/counter delegation, VGEIN,
+  * and virtual interrupt controls. The parent resolves overlap with machine-level II.
+  */
 class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with HasSoCParameter {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {

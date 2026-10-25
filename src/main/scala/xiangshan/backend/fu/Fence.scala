@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSDebug
 import xiangshan._
 
+/** Side effects of a serialized fence: drain stores, then pulse the selected flush. */
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
   val fencei = Output(Bool())
@@ -33,6 +34,17 @@ class FenceToSbuffer extends Bundle {
   val sbIsEmpty = Input(Bool())
 }
 
+/** Hold one serialized request while the store buffer drains, then complete in one cycle.
+  * Completion requires an always-ready consumer (asserted below); it is not held on stall.
+  * There is no local redirect cancellation of a captured request.
+  *
+  * {{{
+  * in.fire -> [uop, address, id]
+  * idle -> wait -- sbIsEmpty --> tlb / icache / fence / nofence -> idle
+  *         |                    |       |
+  *         +-- flushSb          +-- selected flush, out.valid (one cycle)
+  * }}}
+  */
 class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val sfence = io.fenceio.get.sfence
@@ -46,14 +58,8 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val s_idle :: s_wait :: s_tlb :: s_icache :: s_fence :: s_nofence :: Nil = Enum(6)
 
   val state = RegInit(s_idle)
-  /* fsm
-   * s_idle    : init state, send sbflush
-   * s_wait  : send sbflush, wait for sbEmpty
-   * s_tlb   : flush tlb, just hold one cycle
-   * s_icache: flush icache, just hold one cycle
-   * s_fence : do nothing, for timing optimiaztion
-   * s_nofence: do nothing , for Svinval extension
-   */
+  // Only idle accepts input. Every completion state returns to idle unconditionally;
+  // fence/nofence use the same completion boundary without a TLB or I-cache pulse.
 
   val sbuffer = toSbuffer.flushSb
   val sbEmpty = toSbuffer.sbIsEmpty

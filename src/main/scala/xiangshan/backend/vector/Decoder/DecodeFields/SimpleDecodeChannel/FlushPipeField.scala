@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
+/** Request post-completion pipeline flushing for the listed ordering operations. */
 object FlushPipeField extends BoolDecodeField[InstPattern] {
   import xiangshan.backend.decode.isa.Instructions._
 

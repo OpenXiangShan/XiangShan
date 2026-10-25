@@ -9,6 +9,7 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt._
 import xiangshan.backend.vector.util.ScalaTypeExt._
 
+/** Classify the first register operand; disabled operands leave type bits unconstrained. */
 object Src1Field extends DecodeField[InstPattern, SrcRenType] {
 
   override def name: String = "src1"
@@ -53,6 +54,8 @@ object Src1Field extends DecodeField[InstPattern, SrcRenType] {
     }
   }
 
+  // These suffix/prefix helpers classify vector operand conventions at elaboration;
+  // genTable above accepts scalar patterns only.
   def useIMM(op: VecArithInstPattern): Boolean = {
     val suffixes = Seq(
       "_VI",

@@ -893,6 +893,10 @@ object Instructions {
   def XPERM8             :BitPat = BitPat("b0010100??????????100?????0110011")
 
 
+  /** Named patterns for one generated instruction group. Mapping helpers require every
+    * pattern in the group to have an opcode assignment; this is an elaboration check,
+    * not a runtime legality signal or proof that patterns are mutually exclusive.
+    */
   trait InstType {
     val allWithNames: Seq[(BitPat, String)]
 

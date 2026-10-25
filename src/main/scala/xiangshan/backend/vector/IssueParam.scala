@@ -15,6 +15,11 @@ import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 
 import scala.beans.BeanProperty
 
+/** Shared configuration for one dedicated IQ and one pipe per dequeue lane.
+  * numEntries sums configured enqueue/fast/slow counts. The current dedicated
+  * queues instantiate enqueue and fast slots only, indexed by numEntry. Capability
+  * unions determine optional payloads, while port-ID lists deduplicate writers.
+  */
 class IssueParam(
   val exuParams   : Seq[ExuParam],
   val numEnq      : Int,
@@ -70,6 +75,7 @@ class IssueParam(
 
   def needSqIdx: Boolean = this.hasSta || this.hasLdu || this.hasStd || this.hasVStd
 
+  // These counts measure writer pipes, not distinct physical RF write ports.
   def numGpWen: Int = exuParams.count(_.needGpWen)
   def numFpWen: Int = exuParams.count(_.needFpWen)
   def numVpWen: Int = exuParams.count(_.needVpWen)
@@ -118,6 +124,7 @@ class IssueParam(
     exuParams.flatMap(_.getGpReadCfgs)
   }
 
+  /** Return stable global write-port IDs; busy tables translate them to dense indices. */
   private def collectWbPortIds(wbPorts: Seq[Option[Int]]): Seq[Int] = {
     wbPorts.flatten.distinct.sorted
   }
@@ -152,6 +159,8 @@ class IssueParam(
     exuParams.flatMap(_.getVpWriteCfg)
   }
 
+  // Bundle builders preserve EXU order within this IQ; conditional builders omit
+  // unsupported EXUs, so consumers must apply the same filtering to their sources.
   def genExuBundle[T <: Bundle](
     cond: ExuParam => Boolean = _ => true,
     gen: => T,
@@ -240,6 +249,7 @@ class IssueParam(
     cfg => cfg.writeVlRf,
   )
 
+  /** Select only ports actually written by a variable-latency FU of this register class. */
   private def collectNonFixedLatFuWbPortIds(
     wbPortSel: ExuParam => Option[Int],
     writeSel: VecFuConfig => Boolean,
@@ -251,6 +261,7 @@ class IssueParam(
 }
 
 object IssueParam {
+  /** Map legacy complex/simple entries to fast/slow slots and attach EXU parent links. */
   def apply(issueBlockParams: IssueBlockParams): IssueParam = {
     val instance: IssueParam = new IssueParam(
       exuParams = issueBlockParams.exuBlockParams.map(ExuParam(_)),

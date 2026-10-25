@@ -20,6 +20,10 @@ object Decode {
     def makeDecodeInput: UInt
   }
 
+  /** Generate a combinational decoder from explicit rows or a Cartesian product of literals.
+    * Exactly one input-pattern source is required. Pattern field order must match
+    * in.asUInt; output functions follow out.getElements order.
+    */
   abstract class DecoderModule[IB <: Bundle, OB <: Bundle](
     inB: IB,
     outB: OB,
@@ -51,6 +55,7 @@ object Decode {
       o := decodeResult(field)
     }
 
+    /** Enumerate literal combinations on the host before constructing truth-table rows. */
     def SeqProduct[T](seq2: Seq2[T]): Seq[Seq[T]] = {
       seq2.foldLeft[Seq[Seq[T]]](Seq())(SeqProductFold)
     }

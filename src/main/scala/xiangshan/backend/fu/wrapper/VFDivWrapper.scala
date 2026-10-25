@@ -11,6 +11,12 @@ import xiangshan.backend.vector.WbFuBusyTable
 import yunsuan.vector.Common.Fflags
 import yunsuan.vector.VectorFloatDivider
 
+/** Dedicated vector FP divide/sqrt returning unmerged data and per-byte flags.
+  * All arithmetic lanes must report ready for context capture and finish-valid
+  * for group completion. Lane outputs are always accepted, so the implementation
+  * relies on aligned lane completion. Merge/mask filtering occurs in Exu.
+  * An acceptance-time conservative WB reservation is followed by completion wakeup.
+  */
 class VFDivWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixedLatFunc(cfg) {
   private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
@@ -36,6 +42,7 @@ class VFDivWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixed
   private val divFflags = vfdivs.flatMap(_.io.fflags_o.asTypeOf(Vec(4, Fflags())).toSeq)
   private val divFflagsE8 = Wire(Vec(dataWidth / 8, Fflags()))
 
+  // Replicate each element's flags across its bytes; Exu later filters active bytes.
   for (i <- 0 until numVecModule; byte <- 0 until dataWidthOfDataModule / 8) {
     val fflagsIdx = i * 4 + (byte / 2)
     divFflagsE8(i * (dataWidthOfDataModule / 8) + byte) := MuxCase(

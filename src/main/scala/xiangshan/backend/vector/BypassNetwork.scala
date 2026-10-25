@@ -10,6 +10,11 @@ import xiangshan.backend.vector.VecIssueQueue.BypassDelay
 import yunsuan.vector.Common.SewOH
 import yunsuan.vector.Common._
 
+/** Selects vector operands from RF data or the producer's aged writeback lane.
+  * VP delay 0/1/2 selects WB0/WB1/WB2; delay 3 uses RF. Scalar GP/FP paths
+  * cross regions at delay 1, with FP scalars replicated to the active SEW.
+  * Producer selection is combinational and carries no local valid state.
+  */
 class BypassNetwork(implicit val param: ExuParam, val p: Parameters) extends Module with HasXSParameter {
   val in = IO(Input(new BypassNetwork.In))
   val out = IO(Output(new BypassNetwork.Out))
@@ -20,6 +25,7 @@ class BypassNetwork(implicit val param: ExuParam, val p: Parameters) extends Mod
   private val source = in.bypassCtrl.bypassSource
   private val delay = in.bypassCtrl.bypassDelay
 
+  // Replicate the low scalar element across every vector element at the current SEW.
   private def scalarToVector(data: UInt): UInt = Mux1H(Seq(
     in.sewOH.is8  -> Fill(VLEN /  8, data.take( 8)),
     in.sewOH.is16 -> Fill(VLEN / 16, data.take(16)),

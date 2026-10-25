@@ -14,6 +14,7 @@ class ScalaDupToVectorIO(vlen: Int) extends Bundle {
   })
 }
 
+/** Broadcast the low SEW-sized scalar element across the vector without FP boxing checks. */
 class ScalaDupToVector(vlen: Int) extends Module {
   val io = IO(new ScalaDupToVectorIO(vlen))
 

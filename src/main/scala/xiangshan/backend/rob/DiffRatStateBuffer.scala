@@ -68,6 +68,19 @@ object DiffRatState {
   }
 }
 
+/**
+  * Debug-only RAT snapshots at compressed ROB slot boundaries.
+  *
+  * {{{
+  * recovered diffRatBase --> ordered rename updates --> per-lane RAT states
+  * snapshotEnds -----------------------------------> lane banks + bank tags
+  * commit slot --> bank read --> [read registers] --> diffRat / retained commit state
+  * }}}
+  *
+  * Storage keys include ring generation and former/latter identity. Committing
+  * an entry releases both slot snapshots, including a squashed latter slot.
+  * This observation state does not supply functional rename operands.
+  */
 class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   private val params = DiffRatStateParams()
   private val stateWidth = params.totalEntries * PhyRegIdxWidth
@@ -81,6 +94,7 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
     val diffRat = Output(new DiffRatState(params))
   })
 
+  // Keep two ring generations and two segment boundaries per physical entry.
   private def slotOf(ptr: RobPtr): UInt = {
     val entryBits = params.slotBits - 1
     val generationOffset = Mux(ptr.flag, params.robEntries.U(entryBits.W), 0.U(entryBits.W))

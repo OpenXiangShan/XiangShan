@@ -24,6 +24,23 @@ import xiangshan._
 import yunsuan.vector.Common.{SewOH, VSew, _}
 import yunsuan.vector.v2.MergeUnit
 
+/** Vector execution with result-slot-aligned mask/tail merging.
+  *
+  * {{{
+  * Valid uop + RF/bypass --> inEx --> [ex(0)] --> [ex(1)] --> ...
+  *                            |          |           |
+  *                            +--------> FUs --------+--> per-slot results
+  *                                        ex(i) context --> MergeUnit(i)
+  *                                                             |
+  *                                         active-byte flags + merged VD
+  *                                                             v
+  *                                                     one-hot out.uop
+  * }}}
+  *
+  * ex(i) is i+1 edges after inEx and advances without backpressure. Each FU
+  * releases its result in the matching context slot; at most one result may
+  * complete per cycle. Redirects clear valid bits as context advances.
+  */
 class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with HasXSParameter {
   override def desiredName: String = param.name
 
@@ -116,6 +133,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       ))
   }
 
+  // Merge boundaries use the destination width, including widening results.
   private val eewOHEx = mgus.indices.map {
     case i =>
       val normalEewOH = UIntToOH(ex(i).bits.ctrl.vtype.get.vsew, SewOH.width)
@@ -174,6 +192,8 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       out.bits :<#= fuOuts
       out.bits.toVpRf.foreach(_.data := mgus(i).out.res.asUInt)
 
+      // Only active output bytes contribute saturation and FP exception flags;
+      // masked/tail bytes can retain old VD without affecting architectural flags.
       out.bits.toRob.vxsat.foreach {
         case x =>
           val vxsat: Vec[UInt] = Mux1H(
@@ -220,12 +240,14 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
     }
   }
 
+  /** Map an element count to its vector-register index for a one-hot element width. */
   def elemIdxMapVdIdx(elemIdx: UInt, eewOH: UInt) = {
     require(elemIdx.getWidth >= log2Up(VLEN))
     // 3 = log2(8)
     Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => elemIdx(byteElemWidth - x + 3, byteElemWidth - x)))
   }
 
+  /** Convert the within-register element offset to a byte offset. */
   def elemIdxMapElemE8Idx(elemIdx: UInt, eewOH: UInt) = {
     // eewOH(0) -> Cat(elemIdx(byteElemWidth - 1, 0), 0.U(0.W)),
     // eewOH(1) -> Cat(elemIdx(byteElemWidth - 2, 0), 0.U(1.W)),
@@ -258,6 +280,7 @@ object Exu {
   class ExStage(param: ExuParam)(implicit p: Parameters) extends InUop(param) {
     val fuSel = Vec(param.fuConfigs.size,Bool())
 
+    /** Copy uop context; the caller computes the FU-select vector separately. */
     def :<#=(source: InUop): Unit = {
       this.ctrl := source.ctrl
       this.data := source.data
@@ -272,6 +295,7 @@ object Exu {
     val bypassCtrl = new InBypassCtrl(param)
     val debug = Option.when(backendParams.debugEn)(new DebugBundle())
 
+    /** Project control fields supported by the selected FU configuration. */
     def <#=:(sink: Func.InCtrl): Unit = {
       sink.opcode                      := this.ctrl.opcode
       sink.latency                     := this.ctrl.latency
@@ -295,6 +319,7 @@ object Exu {
       sink.frm         .foreach(x => x := this.ctrl.frm.get)
     }
 
+    /** Connect available source lanes and optional vector context to a FU input. */
     def <#=:(sink: Func.InData): Unit = {
       sink.src.zip(this.data.src).foreach(x => x._1 := x._2)
       sink.vl          .foreach(x => x := this.data.vl.get)
@@ -303,6 +328,7 @@ object Exu {
       sink.imm                         := this.data.imm.getOrElse(0.U)
     }
 
+    /** Connect FU payload fields; the caller supplies the valid signal. */
     def <#=:(sink: Func.InUop) : Unit = {
       sink.data <#=: this
       sink.ctrl <#=: this
@@ -319,6 +345,7 @@ object Exu {
     val toVlRf = param.getVlWriteCfg.map(new ToRf(_, backendParams.vlPregParams))
     val toSQ = Option.when(param.hasVStd)(new StoreQueueDataWrite)
 
+    /** Select mutually exclusive FU results; the caller supplies merged vector data. */
     def :<#=(fuOuts: Seq[ValidIO[Func.OutUop]]): Unit = {
       val fuOutValidOH: Vec[Bool] = VecInit(fuOuts.map(_.valid))
 
@@ -398,6 +425,7 @@ object Exu {
 
     val debug     = Option.when(backendParams.debugEn)(new DebugBundle)
 
+    /** Preserve issue identity and configured side effects across the execution boundary. */
     def fromIssueDeq(deq: VecIssueQueue.Deq): Unit = {
       this.robIdx := deq.robIdx
       this.uopIdx := deq.uopIdx
@@ -479,6 +507,7 @@ object Exu {
     val trigger       = Option.when(param.needTrigger)(TriggerAction())
     val debug         = Option.when(backendParams.debugEn)(new DebugBundle)
 
+    /** Adapt completion metadata to the ROB interface; RF data travels separately. */
     def toWriteBackRobBundle(implicit p: Parameters): xiangshan.backend.Bundles.WriteBackRobBundle = {
       val toRob = Wire(new Bundles.WriteBackRobBundle(param.getExeUnitParams(), backendParams))
 
@@ -504,6 +533,7 @@ object Exu {
       toRob
     }
 
+    /** Import legacy completion metadata without introducing a register boundary. */
     def fromOldExuOutput(source: xiangshan.backend.Bundles.NewExuOutput): Unit = {
       this.robIdx                 := source.toRob.bits.robIdx
       this.flushPipe   .foreach(_ := source.toRob.bits.flushPipe   .get)
@@ -520,6 +550,7 @@ object Exu {
       }
     }
 
+    /** Seed completion metadata from the input; the FU supplies exceptions and results. */
     def :<#=(source: Exu.InUop): Unit = {
       this.robIdx              := source.ctrl.robIdx
       this.flushPipe   .foreach(_ := source.ctrl.flushPipe.get)

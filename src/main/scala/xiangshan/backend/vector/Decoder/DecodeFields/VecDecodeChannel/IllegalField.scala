@@ -7,6 +7,7 @@ import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb4, LmulP
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt._
 
+/** Reject listed width/group patterns whose expansion is empty; defaults remain don't-care. */
 object IllegalField extends DecodeField[
   DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   Bool,

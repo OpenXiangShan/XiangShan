@@ -8,6 +8,7 @@ import xiangshan.backend.fu.FuConfig.VialuCfg
 import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
 import yunsuan.vector.Common._
 
+/** Legacy vector input aliases and source-mask defaults, including carry-mask clearing. */
 trait VecFuncUnitAlias { this: FuncUnit =>
   protected val inCtrl  = io.in.bits.ctrl
   protected val inData  = io.in.bits.data
@@ -42,6 +43,9 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val vl = inData.vl.get
 }
 
+/** Fixed-latency vector base pairing operands and mask context at arithmetic completion.
+  * The original latency selects outCtrl/outData; extra timing stages are separate.
+  */
 class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasPipelineReg
   with VecFuncUnitAlias

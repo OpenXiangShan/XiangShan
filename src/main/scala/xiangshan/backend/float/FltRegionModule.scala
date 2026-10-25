@@ -42,6 +42,24 @@ import xiangshan.backend.float.FltWbDataPath
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.IntScheduler
 
+/** Own the dedicated FP issue queues, execution pipes, and shared FP register file.
+  *
+  * {{{
+  * dispatch --> FltIssueQueue --> FltIssuePipe --> FltExu --> robWbNext
+  *                  ^               |   ^           |
+  *                  | M4/M2 wakeup  |   | RF/bypass | fpWbNext
+  *                  +---------------+   |           v
+  * int/vector read requests --> FP read arbiter  FltWbDataPath
+  *                                  |              | wb0 / [wb1]
+  *                                  v              v
+  *                               FP RF <---- per-port writes
+  * int/vector FP results --------------------> FltWbDataPath
+  * }}}
+  *
+  * Queue acceptance is reported separately from the Valid-only dispatch payload.
+  * Cross-region results share global FP write ports; early wakeups predict data
+  * availability and must remain aligned with execution-failure feedback.
+  */
 class FltRegionModule(val regionParam: RegionParam)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
 
@@ -204,12 +222,16 @@ class FltRegionImp(
   ex0RespFailLat1 := ex0RespFailLat1Next
 
 
+  // Suppress failed one-cycle issues before publishing readiness to dispatch.
+  // IQ receives both the current event and its registered copy for late operands.
   val fpWbM2WakeupToDispatch = VecInit(fpWbM2WakeUp.zipWithIndex.map { case (wakeup, i) =>
     val d1 = Wire(new FltWakeUpBundle(backendParams.fpPregParams))
     d1 := wakeup
     if (i < ex0RespFailLat1Next.size) d1.wen := wakeup.wen && !ex0RespFailLat1Next(i)
     d1
   })
+  // IQ cancellation is delayed once; the execution pipes also receive the raw
+  // pulse to cancel load-M4 consumers already beyond the queue.
   val ldCancelToIQ = RegNext(in.fromMem.ldCancel)
   val fpWbM2D1Vec = RegNext(fpWbM2WakeupToDispatch)
   issueQueues.zipWithIndex.foreach {
@@ -266,6 +288,8 @@ class FltRegionImp(
   fpWaddr := fpWbDataPath.out.wb0.map(_.pdest)
   fpWdata := fpWbDataPath.out.wb0.map(_.data)
   // TODO
+  // Assemble requests in backend scheduler order. Integer requests carry an OG1
+  // payload, whereas vector requests arrive from IS1; ready is a read-port grant.
   private val intRFReadArbiterIn = Wire((new RFRdArbParams(backendParams.getRdCfgsIntSch[FpRD], backendParams.fpPregParams)).genInputBundle)
   private val fltRFReadArbiterIn = Wire((new RFRdArbParams(backendParams.getRdCfgsFltSch[FpRD], backendParams.fpPregParams)).genInputBundle)
   private val vecRFReadArbiterIn = Wire((new RFRdArbParams(backendParams.getRdCfgsVecSch[FpRD], backendParams.fpPregParams)).genInputBundle)
@@ -386,6 +410,8 @@ class FltRegionImp(
       }
     }
   }
+  // A denied vector read is reported one cycle after its address request, in
+  // parallel with the RF-data stage; data on an ungranted port is not usable.
   out.toVecRegion.is1RdDataFailNext.lazyZip(in.fromVecRegion.is1RdAddrNext).lazyZip(vecFpRdGrant).foreach { case (iqFail, iqAddr, iqGrant) =>
     iqFail.lazyZip(iqAddr).lazyZip(iqGrant).foreach { case (pipeFail, pipeAddr, pipeGrant) =>
       pipeFail.lazyZip(pipeAddr).lazyZip(pipeGrant).foreach { case (fail, raddr, grant) =>
@@ -425,12 +451,14 @@ class FltRegionImp(
     difftest.value := fpDiffReadData.get
   }
 
+  /** Associate each IQ reservation with its configured global write-port ID. */
   private def issueQueueWbSources(
     sinkSel: FltIssueQueue => Option[WbFuBusyTable.In],
     wbPortIdsSel: IssueParam => Seq[Int],
   ): Seq[WbFuBusyTable.Source] =
     WbFuBusyTable.issueQueueSources(issueQueues, sinkSel, wbPortIdsSel)
 
+  /** Include a variable-latency FU only for register classes that it writes. */
   private def nonFixedLatFuWbSources(
     wbPortSel: ExuParam => Option[Int],
     writeSel: VecFuConfig => Boolean,
@@ -445,12 +473,14 @@ class FltRegionImp(
       }
     }
 
+  /** Translate configured port IDs to dense busy-table indices, removing duplicates. */
   private def nonFixedLatFuPortIndices(
     wbPortIdsSel: IssueParam => Seq[Int],
     wbPortIdxMap: Map[Int, Int],
   ): Seq[Int] =
     param.issueParams.flatMap(wbPortIdsSel).distinct.flatMap(wbPortIdxMap.get)
 
+  /** Omit the table entirely when this register class has no write ports. */
   private def buildWbFuBusyTable(
     regfileWbPortIds: Seq[Int],
     nonFixedLatFuPortIndices: Seq[Int],
@@ -459,6 +489,7 @@ class FltRegionImp(
       Module(new WbFuBusyTable(regfileWbPortIds.size, nonFixedLatFuPortIndices))
     )
 
+  /** Merge IQ/FU reservations and expose reads keyed by dense table index. */
   private def connectWbFuBusyTable(
     table: Option[WbFuBusyTable],
     wbType: String,
@@ -471,9 +502,11 @@ class FltRegionImp(
       t.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
     }.getOrElse(Map.empty)
 
+  /** Expose variable-latency blocking metadata in the same index space as reservations. */
   private def ctrlBlockRead(table: Option[WbFuBusyTable]): Map[Int, WbFuBusyTable.CtrlBlockEntry] =
     table.map(_.out.ctrlBlock.zipWithIndex.map(_.swap).toMap).getOrElse(Map.empty)
 
+  /** Route each optional IQ read through the global-ID to dense-index mapping. */
   private def connectBusyTableRead[T <: Data](
     sink: Option[Vec[T]],
     wbPortIds: Seq[Int],

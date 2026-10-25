@@ -6,6 +6,9 @@ import chisel3.util._
 import utility.DataHoldBypass
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
 
+/** Scalar FP base retaining one accepted operation's control/data with input-cycle bypass.
+  * The concrete iterative unit supplies busy, flush, and result-valid behavior.
+  */
 class FpNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with FpFuncUnitAlias
 {

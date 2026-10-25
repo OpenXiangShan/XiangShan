@@ -9,6 +9,11 @@ import xiangshan.backend.vector.fu.{VecFixLatFunc, VecFuConfig}
 import yunsuan.vector.Common._
 import yunsuan.vector.mac.VIMac64b
 
+/** Dedicated vector integer multiply/MAC over 64-bit lanes, releasing in ex(2).
+  * Widening regroups alternating 32-bit chunks. Overwrite-multiplicand opcodes
+  * exchange VS2 and old VD; byte-level saturation flags accompany the unmerged
+  * result for Exu's active-element filtering.
+  */
 class VIMacU(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
   import VIMacOpcodes._
 

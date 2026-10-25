@@ -38,6 +38,9 @@ abstract class PMPBundle(implicit val p: Parameters) extends Bundle with PMPCons
 abstract class PMPModule(implicit val p: Parameters) extends Module with PMPConst
 abstract class PMPXSModule(implicit p: Parameters) extends XSModule with PMPConst
 
+/** Common PMP/PMA byte layout. PMP ignores cacheability/atomic attributes; a locked
+  * TOR entry also locks the preceding address register that supplies its lower bound.
+  */
 class PMPConfig(implicit p: Parameters) extends PMPBundle {
   val l = Bool()
   val c = Bool() // res(1), unuse in pmp
@@ -80,6 +83,9 @@ object PMPConfigUInt {
     config.U(8.W)
   }
 }
+/** CSR write legalization and cached-mask maintenance. Addresses omit two byte bits;
+  * reads force grain-dependent low bits without changing the saved address encoding.
+  */
 trait PMPReadWriteMethodBare extends PMPConst {
   def match_mask(cfg: PMPConfig, paddr: UInt) = {
     val match_mask_c_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
@@ -153,7 +159,7 @@ trait PMPReadWriteMethod extends PMPReadWriteMethodBare  { this: PMPBase =>
   }
 
   /** In general, the PMP grain is 2**{G+2} bytes. when G >= 1, na4 is not selectable.
-   * When G >= 2 and cfg.a(1) is set(then the mode is napot), the bits addr(G-2, 0) read as zeros.
+   * When G >= 2 and cfg.a(1) is set (NAPOT), addr(G-2, 0) reads as ones.
    * When G >= 1 and cfg.a(1) is clear(the mode is off or tor), the addr(G-1, 0) read as zeros.
    * The low OffBits is dropped
    */
@@ -187,16 +193,16 @@ class PMPBase(implicit p: Parameters) extends PMPBundle with PMPReadWriteMethod 
   }
 }
 
+/** Separate overlap matching from full-access coverage. Priority chooses an overlapping
+  * entry first; aligned then rejects an access that crosses that entry's boundary.
+  */
 trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
   /** compare_addr is used to compare with input addr */
   def compare_addr: UInt = ((addr << PMPOffBits) & ~(((1 << PlatformGrain) - 1).U(PMPAddrBits.W))).asUInt
 
-  /** size and maxSize are all log2 Size
-   * for dtlb, the maxSize is bPMXLEN which is 8
-   * for itlb and ptw, the maxSize is log2(512) ?
-   * but we may only need the 64 bytes? how to prevent the bugs?
-   * TODO: handle the special case that itlb & ptw & dcache access wider size than PMXLEN
-   */
+  /** lgSize and lgMaxSize are log2 byte counts. The caller supplies an aligned access
+    * and a maximum size that covers its requests; TOR uses the preceding entry's bound.
+    */
   def is_match(paddr: UInt, lgSize: UInt, lgMaxSize: Int, last_pmp: PMPEntry): Bool = {
     Mux(cfg.na4_napot, napotMatch(paddr, lgSize, lgMaxSize),
       Mux(cfg.tor, torMatch(paddr, lgSize, lgMaxSize, last_pmp), false.B))
@@ -245,6 +251,7 @@ trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
     }
   }
 
+  /** Check coverage by one region, rather than merely natural address alignment. */
   def aligned(paddr: UInt, lgSize: UInt, lgMaxSize: Int, last: PMPEntry) = {
     if (lgMaxSize <= PlatformGrain) {
       true.B
@@ -261,9 +268,7 @@ trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
   }
 }
 
-/** PMPEntry for outside pmp copies
-  * with one more elements mask to help napot match
-  * TODO: make mask an element, not an method, for timing opt
+/** Distributed PMP copy with a precomputed NAPOT mask to shorten the matching path.
   */
 class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
   val mask = UInt(PMPAddrBits.W) // help to match in napot
@@ -297,6 +302,11 @@ trait PMPMethod extends PMPConst {
     (cfg, addr, mask)
   }
 
+  /** Elaborate config/address storage and its CSR map, exposing decoded entries.
+    * Packed config writes legalize each byte and update cached NAPOT masks; address
+    * writes honor this entry's lock and the next entry's locked TOR lower bound.
+    * Read shaping applies the grain rule without changing saved address bits.
+    */
   def pmp_gen_mapping
   (
     init: () => (Vec[UInt], Vec[UInt], Vec[UInt]),
@@ -342,6 +352,9 @@ trait PMPMethod extends PMPConst {
   }
 }
 
+/** Local PMP/PMA register copies updated by broadcast CSR write pulses. Decoded entries
+  * include cached masks, allowing consumers to check permissions without CSR reads.
+  */
 class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with PMPMethod with PMAMethod with HasCSRConst {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
@@ -365,6 +378,7 @@ class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with P
   io.pma := pma
 }
 
+/** Permission-check request; size is log2(bytes), with no independent ready handshake. */
 class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle {
   val addr = Output(UInt(PMPAddrBits.W))
   val size = Output(UInt(log2Ceil(lgMaxSize+1).W))
@@ -382,6 +396,7 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
 
 }
 
+/** ld/st/instr indicate denial, while mmio/atomic describe PMA attributes. */
 class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
   val ld = Output(Bool())
   val st = Output(Bool())
@@ -411,6 +426,10 @@ trait PMPCheckMethod extends PMPConst {
     resp
   }
 
+  /** First matching index wins, even if its permissions deny access. Higher privilege
+    * bypasses unlocked permissions, but still requires full coverage by that entry.
+    * No match uses the privilege-dependent default; debug-region matches need debug.
+    */
   def pmp_match_res(leaveHitMux: Boolean = false, valid: Bool = true.B)(
     addr: UInt,
     size: UInt,
@@ -559,6 +578,17 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   }
 }
 
+/** Merge PMP denials, mandatory PMA attributes, and optional KeyID restrictions.
+  * sameCycle is combinational. Otherwise valid captures either the final result or,
+  * with leaveHitMux, the hit vectors/candidates and command before the priority mux.
+  * There is no response-valid output: callers track request timing themselves.
+  *
+  * {{{
+  * req + environment -> PMP/PMA overlap and coverage -> first-hit mux -> permissions
+  *                           [optional register]                    -> OR KeyID -> resp
+  *                                                       [default final register]
+  * }}}
+  */
 class PMPChecker
 (
   lgMaxSize: Int = 3,
@@ -622,7 +652,9 @@ class PMPChecker
   }
 }
 
-/* get config with check */
+/** Same timing choices as PMPChecker, returning merged permission bits instead of
+  * command-specific faults. Cacheability and atomic support come only from PMA.
+  */
 class PMPCheckerv2
 (
   lgMaxSize: Int = 3,
