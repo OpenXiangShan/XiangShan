@@ -1,513 +1,145 @@
-# MemBlock Random Verification
+# MemBlock Unit Verification
 
-This directory contains a block-level verification environment for the generated
-Kunminghu-v2 `MemBlock`. Picker/XS-MLVP builds the C++ DUT wrapper; the testbench
-source remains independent of generated build products.
+This directory verifies generated Kunminghu-v2 MemBlock with C++ transactions
+and a Picker/Verilator model. It supplies decoded backend/frontend/control and
+memory-manager traffic; it does not execute a full-core program. Byte memory,
+page tables and transaction expectations are testbench-owned.
 
-The environment treats `MemBlock` as a black box. It drives legal top-level
-transactions and checks architectural data, exceptions, queue disposition, and
-externally visible protocols against independent models. A passing run does not
-close behavior that has no implemented stimulus or oracle. The authoritative
-scope and remaining gaps are in [VERIFICATION_PLAN.md](docs/VERIFICATION_PLAN.md)
-and [IO_COVERAGE.md](docs/IO_COVERAGE.md).
+## Documentation
 
-## Scope
+| Document | Current responsibility |
+| --- | --- |
+| [DESIGN.md](docs/DESIGN.md) | Design flow, IO functions, legal inputs and boundary ownership |
+| [PORTS.md](docs/PORTS.md), [manifest](config/expected_ports.json) | Generated flattened interface/dimensions/idle policy |
+| [IO_COVERAGE.md](docs/IO_COVERAGE.md) | Current stimulus/check paths and missing IO stimulus |
+| [ORACLES.md](docs/ORACLES.md) | Implemented models/decision rules and missing oracles |
+| [VERIFICATION_PLAN.md](docs/VERIFICATION_PLAN.md) | Objectives, point inventory, gaps/review/acceptance |
+| [CONSTRAINED_RANDOM.md](docs/CONSTRAINED_RANDOM.md) | Knobs/profiles, scheduling, coverage/replay |
+| [RESULTS.md](docs/RESULTS.md) | Current qualification/review scope |
+| [TOOLCHAIN.md](docs/TOOLCHAIN.md) | Tools, lock resolution and diagnostics |
 
-The current harness covers the main MemBlock verification domains:
-
-- scalar and vector load/store issue, forwarding, misalignment, split replay,
-  redirects, and LSQ accounting;
-- Sv39/Sv48, Sv39x4/Sv48x4, nested VS/G translation, NAPOT, PBMT, PMP/PMA,
-  translation fences, guest faults, and hypervisor accesses;
-- DCache refill, replacement, probes, coherence, ECC/error injection, CMO,
-  MMIO, uncache, atomics, LR/SC, AMOCAS, and manager-side error responses;
-- frontend bridge, PTW, L2 hint, trace, DFT, Top-Down, reset, control, and
-  queue-pressure boundaries;
-- `directed-tests` plus the canonical `constrained-random` generator.
-
-The catalog has exactly two test families: **84 `directed-tests`** and
-**1 `constrained-random`** scenario. The constraint interface version is 53;
-its fields, presets, replay rules, and accounting contracts are in
-[CONSTRAINED_RANDOM.md](docs/CONSTRAINED_RANDOM.md). The schema number itself is
-not a correctness claim.
-
-Known boundary gaps include malformed or duplicate manager responses,
-cross-hart LR/SC reservation behavior, full-core fence integration, broader
-PMP/PMA matrices, architectural CSR WARL behavior, hardware A/D races,
-four-state behavior, and parts of the CMO/coherence/error space. These remain
-explicit gaps, not implicitly covered behavior.
-
-## Quick Start
-
-From the XiangShan repository root:
-
-```sh
-git submodule sync --recursive
-make init
-export NOOP_HOME="$PWD"
-make verilog CONFIG=DefaultConfig NUM_CORES=1 ISSUE=E.b JVM_XMX=40G
-
-make -C tests/memblock bootstrap-picker JOBS=8
-make -C tests/memblock ports prepare-rtl check-ports check-rtl unit
-make -C tests/memblock smoke JOBS=8
-```
-
-The first `smoke` invocation exports Picker, verilates the model, and compiles
-the simulator. Later targets normally reuse that binary and rebuild only the
-C++ harness when its sources change.
-
-The default `PICKER` is
-`build/memblock/tools/picker/build/bin/picker`. To use an existing Picker
-installation instead of bootstrapping one:
-
-```sh
-make -C tests/memblock smoke PICKER=/path/to/picker JOBS=8
-```
+These describe the present tree, not a campaign diary. A capability is not
+coverage completeness. The catalog has 90 scenarios: 89 directed-tests and one
+constrained-random. Default benchmark selects 85; explicitly run the remaining
+cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high and
+vector-segment-noncanonical when qualifying those contracts.
 
 ## Harness Layout
 
-The C++ harness separates test scenarios, verification components, and DUT access.
-Scenarios generate transactions; drivers and memory-side agents execute them;
-monitors, independent reference models, and scoreboards check observable results.
-
-| Area | Responsibility |
+| Path | Responsibility |
 | --- | --- |
-| `cpp/memblock_main.cpp`, `cpp/scenarios/` | CLI dispatch, focused scenarios, and mixed-traffic orchestration |
-| `cpp/random/` | Constraints, seeded generation, and coverage |
-| `cpp/memblock_env.hpp`, `cpp/environment/` | Environment coordination and domain verification components |
-| `cpp/environment/dut_adapter.*` | Boundary to generated DUT ports and Picker types |
-| `cpp/scenarios/catalog.json` | Shared scenario inventory for CLI, Make, and benchmarks |
-| `scripts/`, `Makefile` | Generation, build, regression, and result processing |
-| `unit/` | Tests for verification infrastructure and tooling |
-
-Domain components own their protocol and expectation state. The environment
-coordinates their execution, while the DUT adapter isolates hardware-interface
-details. Reference models compute expectations independently of DUT internals;
-structured failures carry diagnostics through to regression results.
-
-Scenarios and environment implementations compile separately and reuse the
-compiled Picker model. This keeps ordinary testbench changes independent of
-RTL-model rebuilding.
+| cpp/memblock_main.cpp and scenarios/catalog.json | CLI and exact inventory |
+| cpp/scenarios/*.inc and mixed_*.cpp | Directed sequences and common scheduler |
+| cpp/random/ | Constraints and observational coverage |
+| environment/model.inc and page_table_builder.* | Independent byte/address/permission rules |
+| Environment agents/monitors/scoreboards | Data/identity/queue/protocol/transport checking |
+| environment/dut_adapter.* | Generated-port boundary |
+| scripts/, unit/, sv/ | Build/runtime/controllers, infrastructure tests, assertions |
 
 ## Build From A Clean Checkout
 
-The UT consumes split SystemVerilog generated by the XiangShan top-level build.
-The expected toolchain is Java 17, Python 3, GNU Make, a C++20 compiler, CMake,
-SWIG 4.2 or newer, and a current Verilator. Bootstrap resolves Picker `v2.1.0`
-and xcomm `v1.0.0` from [`toolchain.lock.json`](toolchain.lock.json), verifies
-their exact commits, and rebuilds Picker and the generated MemBlock model when
-either revision changes. Tool versions are not acceptance gates. See
-[TOOLCHAIN.md](docs/TOOLCHAIN.md) for UT-relevant features.
+From XiangShan root:
 
-From a clean clone:
+    git submodule sync --recursive
+    make init
+    export NOOP_HOME="$PWD"
+    make verilog CONFIG=DefaultConfig NUM_CORES=1 ISSUE=E.b JVM_XMX=40G
+    test -s build/rtl/MemBlock.sv
+    test -s build/rtl/filelist.f
+    make -C tests/memblock bootstrap-picker JOBS=8
+    make -C tests/memblock prepare-rtl check-ports check-rtl unit
+    make -C tests/memblock smoke JOBS=8
 
-```sh
-cd /path/to/XiangShan
-git submodule sync --recursive
-make init
-export NOOP_HOME=/path/to/XiangShan
-make verilog CONFIG=DefaultConfig NUM_CORES=1 ISSUE=E.b JVM_XMX=40G
-test -s build/rtl/MemBlock.sv
-test -s build/rtl/filelist.f
-```
+Tools include Java 17, Python 3, Make, C++20, CMake, SWIG and Verilator. Check
+host memory/disk before RTL generation or native-model compilation.
 
-`make verilog` resolves Firtool, emits split SystemVerilog under `build/rtl`,
-and writes the SRAM wrappers referenced by `filelist.f`. On the recorded host it
-took 3-5 minutes and 20-27 GiB resident memory. Allow at least 32 GiB of usable
-RAM and 10 GiB of free disk for RTL, Picker, Verilator, and object files.
+Do not regenerate ports merely to silence mismatch. For intentional reviewed
+interface changes, run ports and review generated manifest/C++/SVA/adapters
+and IO inventory together. check-docs validates inventory/schema, not prose
+semantics. Scala bundle fields pruned from generated ports are not controllable.
 
-Then build the UT:
-
-```sh
-make -C tests/memblock bootstrap-picker JOBS=8
-make -C tests/memblock ports prepare-rtl check-ports check-rtl unit
-make -C tests/memblock smoke JOBS=8
-```
-
-`check-rtl` runs `check-ports` and `check-docs`. `check-docs` verifies that the
-generated interface inventory in `docs/IO_COVERAGE.md` matches the checked port
-manifest and that the constrained-random schema matches
-`cpp/random/constraints.inc`.
-
-Important generated state:
-
-- `tests/memblock/toolchain.lock.json` is the reviewed Picker/xcomm revision
-  source.
-- `build/memblock/tools/picker.json` records the observed Picker/xcomm revisions
-  and executable path.
-- `build/memblock/rtl.json` records the prepared RTL paths and counts.
-- `build/memblock/picker/MemBlock_offset.yaml` maps generated offsets.
-- `build/memblock/runtime/` contains an immutable runtime bundle when frozen.
-
-Do not reuse `build/rtl` after changing `CONFIG`, `ISSUE`, generation flags, or
-the RTL commit. Those choices are not all Make prerequisites. Regenerate the RTL
-and rerun `prepare-rtl` from a clean build tree. Do not run `make ports` merely
-to silence an interface mismatch; review and approve an intentional interface
-change first.
-
-## Parallel Work And Shared State
-
-Use one build owner per XiangShan checkout. The owner prepares and freezes the
-artifacts, records their paths, and only then releases simulation work. A
-scenario or regression is safe to parallelize only when Make has no stale
-dependency that can start a rebuild.
-
-| Resource or action | Writer | Parallel rule |
-| --- | --- | --- |
-| Root `out/`, `build/rtl/`, and `build/XSTop.*` from `make verilog` | Mill/RTL generation | Exclusive per checkout. Do not test this tree while RTL is being regenerated. Regenerate after an RTL, configuration, or generation-option change. |
-| `build/memblock/rtl.f` and `rtl.json` | `make prepare-rtl` | Exclusive with builds and final checks. Treat both files as one generated unit. |
-| `config/expected_ports.json`, `docs/PORTS.md`, `sv/memblock_protocol_sva.sv`, `cpp/generated_port_defaults.hpp`, `cpp/generated_interface_types.hpp`, and `cpp/environment/dut_adapter.*` | `make ports` | Exclusive write with explicit review. Do not regenerate to hide an interface mismatch. |
-| `build/memblock/tools/` and `build/memblock/picker/` | `bootstrap-picker`, export, model, and harness targets | One build owner. The Picker lock covers selected public targets, not every preparation or result path. |
-| `build/memblock/runtime/` | `freeze-runtime` | Replace only when no campaign uses that runtime. Active jobs may read a frozen runtime concurrently. |
-| Regression and benchmark JSON/Markdown | Controllers and verifiers | Use a unique output path. Do not share default result files across concurrent controllers. |
-| `MEMBLOCK_MEM_DIRECT_TRACE_FILE` | Simulator diagnostics | Use one filename per process. `run_regression.py` rejects `--jobs > 1` when this variable is set. |
-| Mutation or alternate-configuration RTL/model/runtime | Private build workflow | Use a separate worktree or private output tree. Do not replace canonical generated state. |
-
-The safe pattern is:
-
-1. One owner runs `verilog`, `bootstrap-picker`, `prepare-rtl`, `ports`, the
-   Picker export/model/harness steps, and `freeze-runtime` in a clean tree.
-2. Record the resolved RTL/tool revisions and `build/memblock/runtime/runtime.json`.
-3. Workers run scenario processes, regressions, or verifiers against the immutable
-   runtime. Each worker launches the frozen binary directly or invokes
-   `scripts/run_regression.py --runtime-metadata ...` with unique result and
-   trace paths.
-4. Run `check-rtl` and final verification only after source and generated-file
-   writers have stopped.
-
-For concurrent controllers, override the relevant output variables:
-
-```text
-REGRESSION_OUTPUT  EXTENDED_RESULT  FINAL_RESULT
-LONG_RESULT        ENDURANCE_RESULT
-BENCHMARK_RESULT   BENCHMARK_MARKDOWN  SPEC_COUNTER_JSON
-```
-
-Budget host resources explicitly. `REGRESSION_JOBS=8` means one controller may
-launch eight simulator processes; two controllers need sixteen process slots
-plus build memory. Reduce `REGRESSION_JOBS` or `BENCHMARK_JOBS` when sharing a
-host. The Picker lock is advisory for selected build targets; it does not make
-arbitrary parallel Make commands safe.
-
-## Common Setup Failures
-
-- Missing `build/rtl/MemBlock.sv` or `build/rtl/filelist.f`: run the root-level
-  `make verilog` command, not only a target under `tests/memblock`.
-- Wrong `NOOP_HOME`: export the absolute XiangShan root before `make verilog`.
-- Mill or Chisel import/module errors: rerun `make init` and check submodules.
-- Java heap or OOM failure: free memory or move RTL generation to a larger host;
-  lowering `JOBS` does not substantially lower Chisel heap demand.
-- `Picker requires SWIG`: install SWIG on `PATH` or provide `apt-get download`
-  and `dpkg-deb` for the bootstrap fallback.
-- Picker reports a missing RTL file: inspect `build/rtl/filelist.f`; relative
-  paths resolve from `build/rtl` and all listed files must come from one build.
-- `check-ports` reports a stale manifest: confirm the branch, `DefaultConfig`,
-  and RTL revision before treating the delta as a reviewed interface change.
+C++-only edits use make -C tests/memblock picker-harness JOBS=8. Source copies
+are synchronized before rebuilding. After RTL/configuration/generation-option
+changes, regenerate root out/ and build/rtl and rebuild prepared/exported
+model. Make prerequisites do not encode every configuration dependency; an
+interface check or familiar binary path is not source-to-model provenance.
 
 ## Focused Tests
 
-After the shared build is ready, focused targets run the same prepared binary.
-List its registered CLI scenarios with `UTMemBlock_example --list-tests`; validate
-catalog/module coverage and generated Make recipes with `make check-scenarios`.
-Add or change scenario names, defaults, aliases, and benchmark inclusion in
-`cpp/scenarios/catalog.json`, then regenerate Make targets with
-`python3 scripts/scenario_catalog.py generate-make --output cpp/scenarios/generated_targets.mk`.
-Focused invocations include:
+From XiangShan root:
 
-```sh
-make smoke PICKER="$PICKER" JOBS=8
-make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 ACTIONS=4096
-make translation-matrix PICKER="$PICKER" JOBS=8
-make dcache-errors PICKER="$PICKER" JOBS=8
-make vector-segment-canonical PICKER="$PICKER" JOBS=8
-make queue-pressure PICKER="$PICKER" JOBS=8
-```
+    make -C tests/memblock vector-segment-noncanonical
+    make -C tests/memblock translation-fence-all
+    make -C tests/memblock translation-inflight-context-all
+    make -C tests/memblock known-bug-sentinel
+    build/memblock/picker/UT_MemBlock/build/UTMemBlock_example --list-tests
 
-Representative target groups are:
-
-| Area | Targets |
-| --- | --- |
-| Basic and top-level | `smoke`, `pin-space`, `frontend-bridge`, `frontend-reset-recovery` |
-| Scalar/vector memory | `single-load`, `vector-load`, `vector-addressing`, `vector-fof`, `vector-segment`, `store-forwarding` |
-| Cache, coherence, errors | `dcache-errors`, `dcache-coherence`, `atomic-contracts`, `uncache-errors`, `cmo-contracts`, `mmio-contracts` |
-| Translation and protection | `translation-matrix`, `translation-fence-all`, `translation-permissions`, `translation-pbmt`, `pmp-contracts`, `hypervisor-contracts` |
-| Frontend, control, reset | `ifetch-prefetch`, `ifetch-ptw-bridge`, `trace-bridge-contracts`, `dft-bridge-contracts`, `reset-recovery`, `reset-partial-load`, `reset-tree-contracts` |
-| Queue and pressure | `queue-pressure`, `redirect`, `store-rdata-order`, `sbuffer-timeout` |
-
-`reset-recovery` includes outstanding DCache/PTW/Uncache cancellation and six
-LR/AMOADD/AMOCAS x W/D cold-refill reset cases plus four partial LR refill cases
-that permit legal early completion. `reset-partial-load` adds twelve partial scalar
-LD cases plus one clean CMO reset case: singleton and same-line opposite-half pairs, each crossing all three
-primary issue lanes and both target halves in a separate process to bound
-dynamic-loader TLS usage per scenario. They check exact post-reset
-results, readback, and stale completion. Its reset domain includes manager links;
-it does not claim dirty-cache persistence or reservation-reset coverage.
-
-The executable scenario inventory is `SCENARIOS` in
-`scripts/benchmark_tests.py`; the Makefile is the source for target names and
-arguments. Use the inventory rather than maintaining another prose list.
-
-To measure every registered scenario and write JSON/Markdown results:
-
-```sh
-make benchmark-tests PICKER="$PICKER" JOBS=8
-```
-
-Results default to `build/memblock/test-scale.json` and
-`build/memblock/test-scale.md`. Use `BENCHMARK_SCENARIOS` for a comma-separated
-subset, `BENCHMARK_JOBS=1` for serial measurement, and
-`BENCHMARK_TIMEOUT_SECONDS` to override the default per-scenario budget. A direct
-mem trace requires one concurrent scenario. An action is a generator scheduling
-unit, not necessarily one load/store or one bus request.
+The sentinel checks a current split guest-fault success signature; its target
+name does not imply an open RTL defect. Segment noncanonical counts both
+exceptional data/fix completions in their direction. Its lack of permissive
+canonical-alias controls remains an oracle limitation.
 
 ## Constrained Random And Regression
 
-The normal `regression` target runs `constrained-random`. Directed tests are run
-individually or through `make benchmark-tests`. All new workload directions
-belong in the common `constrained-random` constraint interface unless a separate
-scenario is needed by contract.
+coverage, spec, corner and cmo-stress share one generator. Examples:
 
-The three starting presets are:
+    make -C tests/memblock constrained-random SEED=1 ACTIONS=4608 CONSTRAINTS=spec
+    make -C tests/memblock constrained-random SEED=2 ACTIONS=4608 CONSTRAINTS=coverage CONSTRAINT='concurrent=250 latency=compact'
+    make -C tests/memblock regression REGRESSION_JOBS=8 SEEDS=8 ACTIONS=16384
 
-- `coverage`: balanced classes and high overlap, the default for the ordinary
-  `regression` and direct `constrained-random` targets;
-- `spec`: workload-like ordinary traffic and calibrated miss latency, the
-  default for duration campaigns;
-- `corner`: error-heavy and boundary-heavy traffic, useful for focused corner
-  campaigns.
+Sparse coverage does not cause functional FAIL. A 256/1024-action default
+profile does not reach heterogeneous windows because serial budget is reserved;
+inspect observed counters. One action is not necessarily one uop/bus request.
 
-Individual fields override a preset. Examples:
+benchmark-tests selects 85, not all 90. final-acceptance composes unit,
+benchmark, sentinel, a 48h duration campaign and eight million-action seeds.
+See actual configured budgets and verifier gaps in VERIFICATION_PLAN.md.
+Return-code PASS does not establish full coverage closure.
 
-```sh
-make constrained-random PICKER="$PICKER" SEED=1 ACTIONS=16384 \
-  CONSTRAINTS=spec
-make constrained-random PICKER="$PICKER" SEED=2 ACTIONS=32768 \
-  CONSTRAINTS=corner \
-  CONSTRAINT='translation-nested=250 translation-switch=750 tlb-flush=200'
-```
+## Parallel Work And Shared State
 
-`constrained-random` has no mandatory action floor and no coverage-completeness PASS
-gate: every run is constrained-random traffic from its first action. Coverage is
-still sampled and printed in the terminal summary, and the regression and
-benchmark drivers write one report per run under `coverage-reports/` next to the
-result file. A sparse report is valid; only functional, protocol, and accounting
-checks determine PASS/FAIL.
+One build owner controls root out/build RTL, prepared RTL, tracked generated
+interfaces, Picker/model/harness and canonical runtime per checkout. Build
+writers cannot run concurrently with users of mutable paths. Alternate RTL
+or mutation experiments need private outputs/worktrees. The Picker lock is
+not a universal artifact lock.
 
-The common multi-seed regression is:
+Freeze once, then use direct runtime/script invocations:
 
-```sh
-make regression PICKER="$PICKER" \
-  REGRESSION_JOBS=8 SEEDS=32 ACTIONS=16384
-```
+    make -C tests/memblock freeze-runtime JOBS=8
+    python3 tests/memblock/scripts/run_regression.py --runtime-metadata build/memblock/runtime/runtime.json --output build/memblock/my-campaign/results.json --jobs 8 --seeds 8 --actions 16384 --constraints spec
 
-The JSON output defaults to `build/memblock/regression.json`. It records each
-command, seed, scenario, elapsed time, artifact paths, and aggregate status.
-The `output` field is retained for failed, errored, or timed-out seeds and is
-empty for a passing seed; reproduce a pass from its command rather than treating
-the JSON as a complete log archive. RTL, executable, model, and artifact hashes
-are not acceptance gates.
+Every concurrent controller needs a different parent output directory, not
+merely a different JSON filename. coverage-reports uses controller-local
+scenario/seed/index names and collides within a parent. Use unique trace
+files. Never replace an active frozen runtime. Budget all process counts
+together. Workers must not use Make targets that may rebuild prerequisites.
 
-Duration campaigns freeze the executable, model, shared library, and prepared
-RTL metadata into `build/memblock/runtime`. The runtime is made read-only and
-`runtime.json` records the artifact and system-library paths. The campaign uses
-`runtime/rtl.json` but does not verify file hashes before or after the run.
-
-```sh
-make extended-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  DURATION_SECONDS=21600 ACTIONS=8192
-make final-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  DURATION_SECONDS=172800 ACTIONS=16384 \
-  TIMEOUT_SECONDS=12000
-make long-final-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  DURATION_SECONDS=43200 ACTIONS=32768
-```
-
-> **Measured performance note (2026-10-24, no coverage prefix):** the full
-> `make benchmark-tests` passes **85/85 in 781.752 s**;
-> `constrained-random` seed 1/16,384 takes **760.884 s** (1,840,675 cycles,
-> ~21.5 actions/s, ~2,419 cycles/s), and `vector-segment` is the next longest
-> scenario at 386.257 s. This supersedes the 2026-10-23 gated-generator figures
-> (3,750.501 s / 3,721.673 s). The existing **48 h / 128 seeds** and
-> **200 h / 8 x 1,000,000 actions** acceptance budgets were derived from the old
-> prefix-heavy stimulus and have not been recalibrated; the duration campaigns
-> must be re-measured under the new contract before closure. The optional
-> `extended-regression` and `long-final-regression` historical budgets are not
-> part of final acceptance and must be recalibrated before use.
-
-The exact duration, worker, seed, action-count, frozen-runtime, and verifier
-requirements are in
-[VERIFICATION_PLAN.md](docs/VERIFICATION_PLAN.md#regression-acceptance). Do not
-claim closure from a shorter local run.
-
-The finite endurance campaign uses the same generator with one million actions
-per seed:
-
-```sh
-make endurance-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
-  ENDURANCE_SEEDS=8 ENDURANCE_ACTIONS=1000000 \
-  ENDURANCE_TIMEOUT_SECONDS=720000 CONSTRAINTS=spec
-make verify-endurance-results PICKER="$PICKER" REGRESSION_JOBS=8 \
-  ENDURANCE_SEEDS=8 ENDURANCE_ACTIONS=1000000
-```
-
-Final acceptance composes unit tests, `make benchmark-tests`, the
-known-bug sentinel, the 48-hour `constrained-random` campaign, and the
-200-hour endurance campaign:
-
-```sh
-make final-acceptance PICKER="$PICKER" JOBS=8 REGRESSION_JOBS=8
-```
-
-After the corresponding artifact exists, validate it with:
-
-```sh
-make verify-extended-results PICKER="$PICKER"
-make verify-final-results PICKER="$PICKER"
-make verify-long-results PICKER="$PICKER"
-```
-
-Use `verify-stress-results`, `verify-extended-results`, `verify-final-results`,
-`verify-long-results`, or `verify-endurance-results` for the matching artifact.
-Each verifier checks the campaign duration, scale, continuous seeds, coverage,
-backpressure, and frozen-runtime requirements recorded in the plan.
-
-The runner may finish seeds already submitted at the deadline, so recorded wall
-time can exceed the requested duration. It preserves completed results when a
-seed fails or times out. At launch, the output is atomically replaced by a
-running marker with a unique run id; an interrupted campaign cannot leave an
-older accepting artifact at that path.
-
-The runtime can be prepared and inspected directly:
-
-```sh
-make freeze-runtime PICKER="$PICKER"
-LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
-  ldd ../../build/memblock/runtime/memblock_sim
-```
+Runtime metadata checks paths/sizes and local dependency resolution; it does
+not establish source-to-model identity. Keep source/config/tool revision and
+build commands with the campaign. Frozen and mutable binaries may expose
+different scenario inventories.
 
 ## Reproduction
 
-Run these commands from `tests/memblock`. Replay the exact scenario, seed,
-action count, constraint set, and frozen runtime recorded by the failing
-artifact. The command below is an example only.
+Replay the result command with its runtime, scenario/seed/actions/profile and
+overrides. From XiangShan root:
 
-```sh
-build/memblock/picker/UT_MemBlock/build/UTMemBlock_example \
-  --test constrained-random --seed 17 --actions 16384
-```
+    LD_LIBRARY_PATH="$PWD/build/memblock/runtime" build/memblock/runtime/memblock_sim --test constrained-random --seed 1 --actions 4608 --constraints spec
 
-A campaign seed should use its frozen runtime:
+Passing result entries retain
+summaries/report paths; full stdout is retained for failures/timeouts rather
+than every pass. Save stdout explicitly if a full transcript is required.
+A running marker replaces the result at controller launch; incomplete/timeout
+artifacts are not accepting campaigns.
 
-```sh
-LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
-  ../../build/memblock/runtime/memblock_sim \
-  --test constrained-random --seed 17 --actions 16384
-```
+MEMBLOCK_MIXED_PROGRESS_ACTIONS=64 adds action/cycle checkpoints.
+MEMBLOCK_TRACE_ADDR_LO/HI logs architectural reference-memory history.
+Internal mem_direct/FST traces are secondary diagnostics; no temporary RTL
+printf and no internal-derived expected values. Use unique private artifacts.
+MEMBLOCK_FORCE_DIRTY_OWNERSHIP_REJECT_ONCE is harness-only cleanup injection,
+not evidence of natural RTL ownership behavior.
 
-For mixed-run diagnostics, set `MEMBLOCK_MIXED_PROGRESS_ACTIONS=64` on the
-simulator or regression controller. It flushes action/cycle/last-phase checkpoints
-to stderr at action boundaries; zero or an unset variable disables it. It changes
-no random stream, DUT cycle, oracle, coverage statistic, or acceptance requirement.
-The controller retains the output tail for a failed/timed-out seed. A live
-checkpoint proves progress only when actions or cycles advance; a final checkpoint
-alone does not prove completion or a design deadlock.
-
-For current-revision rejected-construction coverage, set
-`MEMBLOCK_FORCE_DIRTY_OWNERSHIP_REJECT_ONCE=1`. It forces exactly the first
-refill-overlap ownership attempt through the rejected cleanup path, then clears
-itself so the retry follows the normal accepted path. This is harness-only
-fault injection, not natural ownership loss and not a CPU-bug oracle; it is used
-only for focused cleanup/accounting evidence.
-
-For internal-signal debug, do not add RTL `printf`/debug logic; use Picker
-`mem_direct` from C++ or an FST waveform analyzed with `pywellen`, as described
-in
-[`docs/TOOLCHAIN.md#debug-instrumentation-and-rebuild-policy`](docs/TOOLCHAIN.md#debug-instrumentation-and-rebuild-policy).
-
-The Picker export enables read-only `mem_direct` observation and does not enable
-VPI. Internal signals are for localization only; they never determine an
-architectural PASS/FAIL. For a focused replay, set:
-
-```sh
-export MEMBLOCK_MEM_DIRECT_TRACE_FILE=/unique/path/memblock-trace.log
-export MEMBLOCK_MEM_DIRECT_DEBUG_LINE=0x1234
-export MEMBLOCK_MEM_DIRECT_TRACE_ALL_A=1
-export MEMBLOCK_MEM_DIRECT_TRACE_APPEND=1
-```
-
-The trace includes selected load/refill, StoreMisalignBuffer, and load-exception
-events. A missing internal name disables only that diagnostic field. Use a
-unique trace path for each concurrent simulation. The internal trace is compiled
-only when the harness is built with `MEMBLOCK_MEM_DIRECT_DEBUG`.
-
-The independent reference-memory transcript is always available and needs no
-internal signal. Set a half-open address interval to log every load
-expectation, scalar/vector/atomic store update, and intersecting store issue,
-together with the surrounding reference line:
-
-```sh
-export MEMBLOCK_TRACE_ADDR_LO=0x8027afc0
-export MEMBLOCK_TRACE_ADDR_HI=0x8027b040
-```
-
-It prints to stderr and changes no stimulus, cycle, random stream, or oracle.
-Use it first when a data mismatch needs a store/load history before enabling
-the internal trace.
-
-Before calling a failure an RTL bug, replay it deterministically, minimize it
-without weakening the oracle, and exclude driver, manager, reference-model,
-scoreboard, stale-build, and provenance errors. The detailed procedure is in
-[VERIFICATION_PLAN.md](docs/VERIFICATION_PLAN.md#failure-triage) and
-[ORACLES.md](docs/ORACLES.md).
-
-## Pin Audit
-
-`config/expected_ports.json` is the machine-checked inventory: 749 inputs and
-586 outputs, 1,335 pins representing 7,155 input bits and 5,434 output bits.
-`make pin-space` derives directly from that inventory and has no handwritten
-omission list.
-
-```sh
-make pin-space PICKER="$PICKER" JOBS=8
-```
-
-With primary reset held active, the sweep drives and reads back every
-non-clock/non-primary-reset input using zero, all-one, and 254 seeded mixed
-patterns. Every output is sampled after every pattern. Normal reset and clock
-operation exercise the remaining two inputs.
-
-This proves structural connectivity and broad raw input reachability. It does
-not prove that arbitrary reset-held combinations are legal transactions.
-Semantic coverage comes from typed drivers, protocol assertions, agents, and
-scoreboards. The generated inventory is also rendered in
-[PORTS.md](docs/PORTS.md).
-
-Do not use `XData::CSelf()` to read signal values. It returns the address of the
-`XData` object; use `U()`, `B()`, or `GetBytes()` instead.
-
-## Documentation And Bug Reports
-
-| Document | Authority |
-| --- | --- |
-| [VERIFICATION_PLAN.md](docs/VERIFICATION_PLAN.md) | Scope, verification points, gaps, review, acceptance, and triage |
-| [ORACLES.md](docs/ORACLES.md) | Correctness contracts, anti-oracles, and failure classification |
-| [IO_COVERAGE.md](docs/IO_COVERAGE.md) | Top-level interface mapping, semantic status, and IO gaps |
-| [CONSTRAINED_RANDOM.md](docs/CONSTRAINED_RANDOM.md) | Constraint fields, presets, coverage, and replay contract |
-| [HISTORICAL_BUG_AUDIT.md](docs/HISTORICAL_BUG_AUDIT.md) | Historical fix sensitivity and evidence status |
-| [RESULTS.md](docs/RESULTS.md) | Compact evidence index; use Git history for removed campaign detail |
-| [PORTS.md](docs/PORTS.md) | Generated per-pin summary |
-| [TOOLCHAIN.md](docs/TOOLCHAIN.md) | Locked verification tools and UT-relevant features |
-
-Keep `IO_COVERAGE.md`, `VERIFICATION_PLAN.md`, and `CONSTRAINED_RANDOM.md`
-consistent with the implementation. After an interface or schema change, run:
-
-```sh
-make check-rtl
-make unit
-```
-
-Standalone `CPU_BUG_<SHORT_NAME>.md` files are reserved for independently
-reproduced and root-caused CPU RTL defects. A report must contain the symptom,
-deterministic reproducer, violated contract, root cause, impact, fix, and
-post-fix verification. Harness, oracle, controller, and documentation bugs are
-recorded in normal commits and consolidated documents instead.
+Exclude illegal backend traffic, model/manager/oracle errors and stale builds
+before classifying RTL. A shorter passing prefix does not prove a longer
+timeout is only slow. See ORACLES.md Failure Classification.

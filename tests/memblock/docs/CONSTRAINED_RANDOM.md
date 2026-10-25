@@ -2,608 +2,474 @@
 
 ## One Generator, Multiple Directions
 
-`constrained-random` is the canonical workload generator. A verification direction is a constraint set,
-not another scenario implementation. The same scheduler, drivers, scoreboards, architectural
-reference memory, translation machinery, and completion checks are used for realistic traffic,
-balanced coverage, and corner-heavy traffic. The current executable contract is `constraint_schema=53`.
+The executable scenario is `constrained-random`. `RandomConstraints` supplies
+four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
+one mixed scheduler, transaction builders, managers, architectural reference
+memory, scoreboards, and final accounting. The serialized interface is
+`constraint_schema=53`.
 
-> **Contract note (2026-10-24):** coverage counters are observational. The
-> generator no longer has a mandatory coverage prefix, a minimum action count,
-> or a coverage-completeness PASS gate. Historical "closes all bins" statements
-> below describe stimulus generated under the older gated contract and are not
-> current acceptance requirements.
+This document defines the implemented constraint interface and observations.
+[IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
+[VERIFICATION_PLAN.md](VERIFICATION_PLAN.md) owns verification scope and
+regression acceptance; [ORACLES.md](ORACLES.md) owns expected behavior.
+The parser, presets, validation, and target serialization are in
+[RandomConstraints](../cpp/random/constraints.inc).
 
-The complete top-level interface mapping and interface gaps are in
-`IO_COVERAGE.md`; `VERIFICATION_PLAN.md` owns the cross-domain verification
-gap inventory. This document defines configurable behavioral dimensions and the
-generator-level exclusions they do not cross. It does not claim that every
-flattened pin is a standalone random variable. Select a preset with
-`--constraints`, then override individual fields with repeatable
-`--constraint key=value` arguments. Overrides are applied after the preset.
+Choose the profile with `--constraints PROFILE`. Repeat `--constraint key=value`
+to override individual fields after the profile; later assignments to the same
+key replace earlier ones. From `tests/memblock`:
 
 ```sh
-# Balanced, high-overlap coverage.
 make constrained-random SEED=1 ACTIONS=16384 CONSTRAINTS=coverage
-
-# SPEC-like ordinary traffic and calibrated miss response latency.
-make constrained-random SEED=2 ACTIONS=65536 CONSTRAINTS=spec
-
-# Start from SPEC, but deliberately increase translation and MMIO pressure.
-make constrained-random SEED=3 ACTIONS=32768 CONSTRAINTS=spec \
-  CONSTRAINT='translation-nested=20 translation-switch=100 tlb-flush=100 mmio=30 nc=20 vector-load=80 vector-store=40'
-
-# CMO-heavy direction: dirty/younger-overlap CMO traffic with a tiny scalar
-# control (the shared verifier requires ordinary operation weights).
-make constrained-random SEED=5 ACTIONS=256 CONSTRAINTS=cmo-stress
-
-# Restrict the same generator to a scalar-load locality experiment.
+make constrained-random SEED=2 ACTIONS=16384 CONSTRAINTS=corner
+make constrained-random SEED=3 ACTIONS=256 CONSTRAINTS=cmo-stress
 make constrained-random SEED=4 ACTIONS=16384 CONSTRAINTS=spec \
-  CONSTRAINT='scalar-load=1000 scalar-store=0 vector-load=0 vector-store=0 prefetch=0 atomic=0 nc=0 mmio=0 locality-hot=1000 locality-warm=0 locality-cold=0 concurrent=0 tlb-flush=0 latency=compact'
+  CONSTRAINT='translation-nested=20 translation-switch=100 tlb-flush=100'
 ```
 
-The regression controller exposes the same interface:
+Make defaults `ACTIONS` to 16384 and `JOBS` to 8. The regression controller
+defaults to the `constrained-random` scenario, `coverage`, 8 seeds, 8 jobs,
+16384 actions, and a 1800-second case timeout; long-run Make targets select
+`spec` unless overridden. Defaults are execution choices, not acceptance
+thresholds. See the [Makefile](../Makefile) and
+[run_regression.py](../scripts/run_regression.py).
+
+For an already published frozen runtime, use a distinct output parent:
 
 ```sh
 python3 scripts/run_regression.py \
-  --binary build/memblock/picker/UT_MemBlock/build/UTMemBlock_example \
-  --output build/memblock/spec-mixed.json \
-  --scenarios constrained-random --seeds 32 --actions 65536 \
-  --constraints spec --constraint concurrent=250
+  --runtime-metadata ../../build/memblock/runtime/runtime.json \
+  --output ../../build/memblock/campaign-a/results.json \
+  --scenarios constrained-random --constraints spec \
+  --start-seed 1 --seeds 8 --jobs 8 --actions 16384 \
+  --constraint concurrent=250
 ```
+
+Follow [README.md](../README.md#parallel-work-and-shared-state) for build
+ownership, runtime publication, trace isolation, and concurrent execution.
 
 ## Constraint Fields
 
-Operation and locality fields are relative weights and do not need to sum to
-1000. A zero weight disables that class in the constrained tail. Probability
-fields use per-mille values in the inclusive range `0..1000`.
+Weights are nonnegative unsigned relative weights; they need not sum to 1000.
+A zero disables that weighted choice. Rates are integer per-mille values in
+`0..1000`, applied only at an eligible decision site. A rate is not an exact
+percentage of all requests or observed completions. Compound actions, fixed
+concurrent-window composition, translation prioritization, and legal-shape
+filtering change the resulting distribution.
 
-| Field | Meaning |
+The grouped spellings below denote separate supported keys. `8/16/32/64`,
+`mf8/mf4/mf2/m1/m2/m4/m8`, and numeric ranges enumerate those suffixes only;
+they do not imply arbitrary numeric suffix support.
+
+### Operations, locality, and scheduling
+
+| Keys | Type and meaning |
 | --- | --- |
-| `scalar-load`, `scalar-store` | Relative scalar load/store weights |
-| `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
-| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure`, `miss-burst` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads; `set-pressure` contains replacement traffic in disjoint windows of two physical sets; `miss-burst` issues distinct cold-line scalar loads or a scalar/vector-load mixture while their refills are held |
-| `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
-| `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
-| `atomic-error` | Per-mille share of atomic actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
-| `atomic-error-denied` | Per-mille denied share among atomic D-channel errors; the other class is independent corrupt |
-| `atomic-probe-depth0` .. `atomic-probe-depth8` | Relative Probe-burst weights for successful atomic actions. Depth zero preserves the ordinary path. Depths one through eight hold a cold target refill, queue that many distinct clean auxiliary Probes under C backpressure, then release D. The DCache may backpressure B until D is released; afterward the full burst must be accepted before C resumes. Errors issue no Probe |
-| `hypervisor-hlv`, `hypervisor-hlvx`, `hypervisor-hsv` | Relative family weights inside the `hypervisor` class |
-| `hypervisor-spvp-user` | Per-mille share of hypervisor actions using SPVP=U; zero selects only SPVP=S, 1000 only SPVP=U, and intermediate values require both |
-| `hypervisor-pbmt-pma-pma`, `hypervisor-pbmt-pma-nc`, `hypervisor-pbmt-pma-io`, `hypervisor-pbmt-nc-io`, `hypervisor-pbmt-io-nc` | Relative VS/G leaf-PBMT pair weights inside the hypervisor class. The five-pair basis covers final PMA/NC/IO selection and both VS-over-G priority directions |
-| `hypervisor-pma-device` | Per-mille share of hypervisor actions translated to an interior address in the fixed SoC `c=0`, R/W, X=0 PMA device interval. Zero selects only ordinary DDR aliases, 1000 only the device interval, and intermediate values require both |
-| `hypervisor-pmp-none`, `hypervisor-pmp-first`, `hypervisor-pmp-last`, `hypervisor-pmp-below`, `hypervisor-pmp-above`, `hypervisor-pmp-cross-lower`, `hypervisor-pmp-cross-upper` | Relative physical-PMP relation weights. Edge actions use a PMA/PMA DDR alias and a first-match 4-KiB NAPOT RWX region inside an enclosing deny region; first/last are allowed, while below/above/crossing relations fault |
-| `cmo-clean`, `cmo-flush`, `cmo-inval` | Relative operation weights inside the `cmo` class |
-| `cmo-dirty` | Per-mille share of CMO target lines made dirty by a committed store that CMO must drain from SBuffer |
-| `cmo-younger-overlap` | Per-mille share of CMO actions that issue a younger cold load into another MSHR and require `flushPipe` cancellation with no writeback |
-| `cmo-error` | Per-mille share of CMO actions whose opcode-qualified `CBOAck` carries a legal error; zero strictly disables error injection |
-| `cmo-error-denied` | Per-mille denied share among error CMO actions; false selects independent corrupt and true selects denied |
-| `cmo-probe-depth1` .. `cmo-probe-depth8` | Relative total Probe-depth weights for successful CMO actions. The target-line Probe plus zero through seven distinct clean auxiliary Probes are accepted while CBOAck is pending; error CMOs issue no Probe |
-| `dcache-load-error` | Per-mille share of weighted scalar-load actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
-| `dcache-load-error-denied` | Per-mille denied share among DCache load errors; the other class is independent corrupt |
-| `ptw-error-stage1`, `ptw-error-gstage`, `ptw-error-nested-g-implicit`, `ptw-error-nested-vs`, `ptw-error-nested-g-final` | Relative PTW manager-error site weights: host stage-1, G-only, implicit G translation of a VS PTE address, VS PTE data, and final nested G walk |
-| `ptw-error-root`, `ptw-error-intermediate`, `ptw-error-leaf` | Relative faulting page-table level classes; Sv48/Sv48x4 intermediate selection also reaches both internal levels |
-| `ptw-error-store` | Per-mille store share for PTW manager-error actions |
-| `ptw-error-denied` | Per-mille denied share; the other class is independent corrupt |
-| `ptw-error-corrupt-first` | Per-mille first-beat share among corrupt responses; the other class corrupts the last beat |
-| `load-merge-depth2`, `load-merge-depth3` | Relative two- and three-load batch weights inside `load-merge` |
-| `load-merge-same-address`, `load-merge-same-beat`, `load-merge-cross-beat` | Relative address patterns inside `load-merge`: exact duplicate, distinct offsets in the critical 32-byte beat, or distinct offsets spanning both beats |
-| `set-pressure-depth9`, `set-pressure-depth10` | Relative counts of nine/ten distinct target lines per window. The generated four-way, 256-set DCache places each 8-KiB-stride window in two physical sets, with total capacity eight; at least one/two target Releases are required over the complete fill |
-| `set-pressure-sb`, `set-pressure-sh`, `set-pressure-sw`, `set-pressure-sd` | Relative access-width weights inside `set-pressure`; clean actions use the corresponding unsigned load width and dirty actions use the store width |
-| `set-pressure-set-q0` .. `set-pressure-set-q3` | Relative weights for four quarters of the 128 low-seven-bit base indices. Each base index selects a pair of physical sets separated by 128 |
-| `set-pressure-dirty` | Per-mille share of dirty-store pressure; zero selects only clean-load replacement, 1000 selects only dirty replacement, and intermediate values require both states |
-| `set-pressure-refill-overlap` | Per-mille share that holds one address-qualified cold refill response per selected pressure window while replacement produces an attributed Release or ReleaseData; zero/1000 are strict endpoints |
-| `set-pressure-release-backpressure` | Per-mille share that forces the first address-attributed target Release or ReleaseData to retain its full C payload for 16 valid cycles; zero/1000 are strict endpoints and unrelated C traffic does not consume the target stall budget |
-| `set-pressure-window1` .. `set-pressure-window8` | Relative weights for one through eight independent windows over disjoint pairs of physical sets. A zero weight disables that exact window count; an overlap action holds one address-qualified cold refill per selected window |
-| `miss-burst-depth2` .. `miss-burst-depth17` | Relative weights for distinct cold target lines in one ordinary-load burst. Depths 2..16 hold every response concurrently. Depth 17 is the generated 16-entry DCache capacity plus one: it first reaches 16 externally pending responses, releases one fair response, then requires every target request and architectural operation to finish |
-| `miss-burst-issue-width1` .. `miss-burst-issue-width3` | Relative weights for the same-cycle scalar-load issue width at the head of a burst; widths larger than the composition's scalar-load count are excluded |
-| `miss-burst-scalar-only`, `miss-burst-scalar-vector-load` | Relative composition weights. The mixed class replaces one scalar line with one legal two-flow unit-stride vector-load uop while preserving the selected total target-line depth |
-| `bank-conflict` | Per-mille share of clean scalar-load actions replaced by a two/three-way resident same-bank issue wave; the address bank, depth, translation regime, and line identity remain randomized |
-| `locality-hot` | Ordinary addresses selected from a 32-line hot set; each explicitly prewarmed `bank-conflict` target wave also contributes one resident/hot observation |
-| `locality-warm` | Lines selected from a 512-line warm set |
-| `locality-cold` | Permutation of an 8192-line cold set |
-| `translation-bare`, `translation-stage1`, `translation-nested` | Relative Bare, host stage-1, and nested VS+G context weights |
-| `stage1-sv39`, `stage1-sv48` | Relative host stage-1 mode weights |
-| `vs-sv39`, `vs-sv48` | Relative VS-stage mode weights in nested contexts |
-| `g-sv39x4`, `g-sv48x4` | Relative G-stage mode weights in nested contexts and the independent G-only boundary subclass |
-| `translation-stage1-napot` | Per-mille share of eligible host stage-1 accesses placed in a legal 64-KiB Svnapot region |
-| `translation-vs-napot`, `translation-g-napot` | Independent per-mille Svnapot selection for the VS and final G leaf of eligible nested accesses; their product generates all four leaf topologies |
-| `translation-switch` | Per-mille chance of choosing a new translation context at a drained action/window boundary |
-| `fence-sfence`, `fence-hfence-vvma`, `fence-hfence-gvma` | Relative weights for fence kinds compatible with the active context |
-| `fence-global`, `fence-selective` | Relative global/selective scope weights for generated translation fences |
-| `concurrent` | Per-mille share of the tail reserved for heterogeneous overlap windows |
-| `special-concurrent` | Per-mille chance that a legal overlap window also contains an NC or MMIO load |
-| `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
-| `misaligned` | Per-mille chance of a misaligned address when width permits it |
-| `canonical-boundary` | Per-mille share of eligible scalar or singleton vector-store actions replaced by a Sv39/Sv48 canonical crossing; requires stage-1 traffic and a reachable scalar/vector subclass. Zero disables all such actions. Nonzero closes enabled 24 scalar and 36 vector bins before weighted sampling; vector eligibility intersects addressing, EEW=SEW, LMUL=EMUL=1 and policy gates below. Distances, lanes, data, index offsets, stride signs, and scalar issue order remain randomized. Presets: SPEC 1, coverage 100, corner 250 |
-| `gstage-boundary` | Per-mille share of eligible scalar/singleton vector-store actions replaced by G-only upper-limit crossings. Requires a reachable scalar/vector subclass and G-mode weight; independent of ordinary translation-regime and VS-mode weights. Closes 12 scalar and 18 vector bins before weighted sampling. Presets: SPEC 1, coverage 100, corner 250 |
-| `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
-| `vector-fof` | Low-rate per-mille share of ordinary vector-load actions replaced by unit-stride VLEFF. A nonzero value requires vector loads and stage-1 translation; 1000 is rejected because the profile must retain ordinary vector-shape closure |
-| `vector-fof-first-fault` | Conditional per-mille share of VFOF actions whose first element faults. The other class places element zero on a mapped page and element one on the next unmapped page |
-| `vector-masked` | Per-mille share of ordinary vector instructions with `vm=0`; generated masked instructions contain an observable mask-off body element |
-| `vector-vma`, `vector-vta` | Per-mille share of ordinary vector instructions with mask/tail agnostic policy enabled |
-| `vector-partial-vl` | Per-mille share of ordinary vector instructions with `vl < VLMAX` |
-| `vector-nonzero-vstart` | Per-mille share of ordinary vector instructions with `vstart != 0` |
-| `vector-unit-stride`, `vector-strided`, `vector-indexed-unordered`, `vector-indexed-ordered` | Relative ordinary vector addressing-mode weights shared by loads and stores |
-| `vector-eew8` .. `vector-eew64`, `vector-sew8` .. `vector-sew64` | Relative ordinary vector index/memory EEW and data SEW weights |
-| `vector-lmul-mf8` .. `vector-lmul-m8`, `vector-emul-mf8` .. `vector-emul-m8` | Relative ordinary vector LMUL and derived EMUL weights. Only legal `EMUL = EEW - SEW + LMUL` shapes are generated |
-| `vector-segment-store` | Per-mille store share within the vector-segment class |
-| `vector-segment-high-va` | Per-mille share of ordinary non-FOF segment actions using a legal high-half canonical alias under Sv39/Sv48. Requires stage-1 traffic and a compatible shape/direction/alignment. Zero disables the subclass; nonzero closes enabled mode x load/store x aligned/misaligned bins, then enables weighted selection after ordinary constraint coverage closes. SPEC 1, coverage 100, corner 250 |
-| `vector-segment-unit-stride`, `vector-segment-strided`, `vector-segment-indexed-unordered`, `vector-segment-indexed-ordered` | Relative segment addressing-mode weights |
-| `vector-segment-eew8` .. `vector-segment-eew64`, `vector-segment-sew8` .. `vector-segment-sew64` | Relative segment index/memory EEW and data SEW weights |
-| `vector-segment-lmul-mf8` .. `vector-segment-lmul-m8`, `vector-segment-emul-mf8` .. `vector-segment-emul-m8` | Relative fractional/integer LMUL and derived EMUL weights. A shape is enabled only when `EMUL = EEW - SEW + LMUL` and both selected weights are nonzero |
-| `vector-segment-nf2` .. `vector-segment-nf8` | Relative segment field-count weights |
-| `vector-segment-fof` | Per-mille share of vector-segment load actions replaced by unit-stride fault-only-first loads. The legal shape space has all 338 decoder-legal EEW/SEW/LMUL/derived-EMUL/NF shapes; there is no indexed or strided Segment FOF encoding |
-| `vector-segment-fof-first-fault` | Conditional per-mille share of segment FOF actions whose first element faults. The other class maps the first element and leaves the next segment element page unmapped |
-| `probe` | Per-mille chance that a completed cacheable scalar store is followed by a manager-originated dirty Probe sequence |
-| `probe-to-b` | Per-mille share of generated Probe sequences that retain the line in Branch state; the generator follows each with a toN cleanup Probe |
-| `probe-need-data` | Per-mille share of generated Probe sequences that explicitly request data; dirty lines must return exact data even when this is zero |
-| `probe-overlap` | Per-mille share of generated Probe sequences that hold an unrelated cold load refill open and queue at least one clean auxiliary Probe plus the primary dirty Probe on distinct B-source IDs |
-| `probe-triple-overlap` | Conditional per-mille share of overlapping Probe sequences that use at least two clean auxiliary Probes plus the primary dirty Probe; zero selects depth two, 1000 selects the depth-3..8 group, and intermediate values enable both |
-| `probe-depth3` .. `probe-depth8` | Relative weights inside the deep Probe-overlap group. A zero weight disables that exact accepted-but-unanswered depth |
-| `nc-store`, `mmio-store` | Per-mille store share within each memory-type class |
-| `uncache-error` | Per-mille share of NC/MMIO actions receiving a legal error response; zero strictly disables injection |
-| `uncache-load-error-denied` | Per-mille denied share among error loads; the other load class is independent corrupt. Error stores always use denied because `AccessAck` carries no data |
-| `stride-stream` | Per-mille chance that a scalar load joins a fixed-PC, 128-byte-stride cold stream; nonzero settings reserve eight closing loads so every seed can train the L1 stride prefetcher |
-| `latency` | Set DCache, PTW, and Uncache to `compact` or `spec` together |
-| `dcache-latency`, `ptw-latency`, `uncache-latency` | Override one manager's latency profile independently |
+| `scalar-load`, `scalar-store`, `vector-load`, `vector-store`, `vector-segment`, `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure`, `miss-burst` | Relative operation weights, in this serialized order. Each selects a complete helper action, which can issue multiple transactions. |
+| `locality-hot`, `locality-warm`, `locality-cold` | Relative address-pool choices for helpers using locality. |
+| `concurrent` | Rate used to allocate the initial heterogeneous-window budget, subject to serial reservation. |
+| `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
+| `translation-switch` | Rate for resampling the translation context after required context/leaf/fence observations. |
+| `tlb-flush` | Rate for a compatible translation fence after required fence observations. |
+| `misaligned` | Misalignment rate where width, operation, and legal address class permit it. |
+| `stride-stream` | Rate selecting a fixed-PC, 128-byte-stride cold scalar-load stream. |
+| `bank-conflict` | Rate replacing an eligible clean scalar-load action with a two- or three-load same-bank resident wave; banks are derived from request addresses. |
+| `latency` | `compact` or `spec`, applied to all three managers. |
+| `dcache-latency`, `ptw-latency`, `uncache-latency` | `compact` or `spec`, applied to one manager. |
 
-## Validation and Extension Contract
+### Scalar errors, atomics, and hypervisor accesses
 
-Invalid names, all-zero operation/locality or enabled sub-dimensions, an unreachable enabled class,
-incompatible fixed vector shape/policy settings, out-of-range per-mille values, inconsistent manager
-concurrency/latency, or an enabled error/fault subclass with no legal site or governing translation
-mode fails before traffic begins. In particular, NC/MMIO require stage-1 or nested PBMT translation
-and cannot use a Bare-only context.
+| Keys | Type and meaning |
+| --- | --- |
+| `dcache-load-error`, `dcache-load-error-denied` | Rates: cold cacheable scalar-load error injection, then conditional denied share; the alternative error is independent corrupt. |
+| `atomic-amo`, `atomic-lrsc`, `atomic-cas`; `atomic-w`, `atomic-d` | Relative family and width weights. |
+| `atomic-error`, `atomic-error-denied` | Rates: atomic cold-refill error injection, then conditional denied share. |
+| `atomic-probe-depth0` .. `atomic-probe-depth8` | Relative successful-atomic Probe burst depth. Zero selects no burst; nonzero depths use clean auxiliary lines and controlled C/D backpressure. Error atomics do not issue these Probes. |
+| `hypervisor-hlv`, `hypervisor-hlvx`, `hypervisor-hsv` | Relative hypervisor family weights. |
+| `hypervisor-spvp-user` | Rate for SPVP=U rather than S. |
+| `hypervisor-pbmt-pma-pma`, `hypervisor-pbmt-pma-nc`, `hypervisor-pbmt-pma-io`, `hypervisor-pbmt-nc-io`, `hypervisor-pbmt-io-nc` | Relative VS/G leaf-PBMT pair weights, in this order. |
+| `hypervisor-pma-device` | Rate for an aligned interior address in the fixed SoC noncacheable R/W, non-executable device interval, rather than a DDR alias. |
+| `hypervisor-pmp-none`, `hypervisor-pmp-first`, `hypervisor-pmp-last`, `hypervisor-pmp-below`, `hypervisor-pmp-above`, `hypervisor-pmp-cross-lower`, `hypervisor-pmp-cross-upper` | Relative PMP relation weights, in this order. Edges use a PMA/PMA DDR alias and a 4-KiB NAPOT RWX region inside an enclosing deny region: first/last allow; below/above/crossing deny. |
 
-- Hypervisor traffic requires nested translation. Non-PMA hypervisor PBMT and fixed-PMA device
-  traffic are aligned-only. Fixed-PMA device traffic requires the PMA/PMA PBMT pair and cannot
-  enable a non-PMA pair at a device-only endpoint; PMP edge relations require the no-PMP PMA/PMA control. A
-  hypervisor-only mix cannot claim Bare or host stage-1 coverage.
-- `stride-stream` requires nonzero scalar-load and cold-locality weights. `vector-fof` requires
-  vector loads, stage-1 translation, and a nonzero ordinary vector-load share. Segment FOF requires
-  segment loads, stage-1 translation, a legal unit-stride shape, and a nonzero ordinary segment-load share.
-- A nonzero segment high-VA rate requires a reachable ordinary stage-1 segment shape, direction, and
-  alignment. Non-FOF loads require `vector-segment-fof != 1000`; misaligned classes require data EEW
-  above eight bits.
-- `dcache-load-error=1000` requires `stride-stream=0` and `concurrent=0`. `uncache-error=1000`
-  requires `special-concurrent=0`. Endpoint error or vector-policy settings must leave every other
-  enabled compatibility class reachable.
+### CMO, PTW errors, and pressure actions
 
-`constrained-random` has no minimum action count and no mandatory architectural
-prefix. Every run is constrained-random traffic from its first action; short
-runs are valid. Coverage is still sampled and summarized, but it is not a PASS
-gate: sparse coverage is reported, not failed. The regression and benchmark
-drivers write one coverage/statistics report per run under `coverage-reports/`
-next to the result file.
+| Keys | Type and meaning |
+| --- | --- |
+| `cmo-clean`, `cmo-flush`, `cmo-inval` | Relative CMO operation weights. |
+| `cmo-dirty`, `cmo-younger-overlap` | Rates for dirtying the target by a committed store and for a younger cold-load cancellation check. |
+| `cmo-error`, `cmo-error-denied` | Rates for an opcode-qualified CBOAck error and conditional denied share; otherwise corrupt. |
+| `cmo-probe-depth1` .. `cmo-probe-depth8` | Relative successful-CMO total Probe depth: target plus zero through seven auxiliary lines. Error CMOs omit these Probes. |
+| `ptw-error-stage1`, `ptw-error-gstage`, `ptw-error-nested-g-implicit`, `ptw-error-nested-vs`, `ptw-error-nested-g-final` | Relative manager-error site weights, in this order. |
+| `ptw-error-root`, `ptw-error-intermediate`, `ptw-error-leaf` | Relative faulting level classes; Sv48/Sv48x4 intermediate selection can choose either internal level. |
+| `ptw-error-store`, `ptw-error-denied`, `ptw-error-corrupt-first` | Rates for store direction, denied response, and first rather than last beat among corrupt responses. |
+| `load-merge-depth2`, `load-merge-depth3` | Relative scalar-load batch depth. |
+| `load-merge-same-address`, `load-merge-same-beat`, `load-merge-cross-beat` | Relative address patterns: duplicate address, distinct offsets within one 32-byte beat, or across both beats of a line. |
+| `set-pressure-depth9`, `set-pressure-depth10` | Relative target-line count per window. The generated cache's four ways and two-set window supply replacement pressure. |
+| `set-pressure-sb`, `set-pressure-sh`, `set-pressure-sw`, `set-pressure-sd` | Relative access widths. |
+| `set-pressure-set-q0` .. `set-pressure-set-q3` | Relative physical-set quarter selection. |
+| `set-pressure-window1` .. `set-pressure-window8` | Relative number of independent windows. |
+| `set-pressure-dirty`, `set-pressure-refill-overlap`, `set-pressure-release-backpressure` | Rates for dirty lines, held-refill overlap, and C-channel backpressure. |
+| `miss-burst-depth2` .. `miss-burst-depth17` | Relative distinct cold-line depth with held refills; depth17 exceeds the generated 16 miss entries. |
+| `miss-burst-issue-width1` .. `miss-burst-issue-width3` | Relative scalar issue width, filtered by available scalar members. |
+| `miss-burst-scalar-only`, `miss-burst-scalar-vector-load` | Relative composition; the mixed composition replaces one scalar load with a vector load. |
 
-The constraint interface, not the CLI wrapper, is the verification abstraction.
-A new direction must be a field on `RandomConstraints` and must use the common
-transaction builders, scheduler, reference model, scoreboards, and final drain.
-Every new field must provide:
+### Translation, vector shapes, and memory type
 
-- range and reachability validation before the first request;
-- its resolved target in the replayable terminal summary and artifact;
-- an observed class counter distinct from neighboring classes;
-- a per-seed coverage obligation whenever it enables a class;
-- deterministic replay from the seed and complete constraint assignment.
+| Keys | Type and meaning |
+| --- | --- |
+| `translation-bare`, `translation-stage1`, `translation-nested` | Relative ordinary context weights. |
+| `stage1-sv39`, `stage1-sv48`; `vs-sv39`, `vs-sv48`; `g-sv39x4`, `g-sv48x4` | Relative host, VS, and G mode weights. |
+| `translation-stage1-napot`, `translation-vs-napot`, `translation-g-napot` | Rates for legal 64-KiB NAPOT leaf topology; nested VS/G choices are independent. |
+| `fence-sfence`, `fence-hfence-vvma`, `fence-hfence-gvma` | Relative compatible fence-kind weights. |
+| `fence-global`, `fence-selective` | Relative fence-scope weights. |
+| `canonical-boundary`, `gstage-boundary` | Rates replacing eligible scalar or singleton vector-store actions with canonical stage1 or unsigned G-only upper-limit boundary checks. G-only selection uses G-mode weights independently of the ordinary regime weights. Simultaneous selections are randomly arbitrated. |
+| `vector-corner` | Rate enabling helper-specific corner policy/address choices, including segment partial VL/masking/vstart and ordinary strided-load zero stride. |
+| `vector-fof`, `vector-fof-first-fault` | Rates for unit-stride VLEFF among serial vector loads and conditional first-element fault; otherwise element1 faults after mapped element0. |
+| `vector-masked`, `vector-vma`, `vector-vta`, `vector-partial-vl`, `vector-nonzero-vstart` | Ordinary vector rates for vm=0, VMA, VTA, VL below VLMAX, and nonzero vstart. These are not segment-policy knobs. |
+| `vector-unit-stride`, `vector-strided`, `vector-indexed-unordered`, `vector-indexed-ordered` | Relative ordinary addressing weights, in this order. |
+| `vector-eew8/16/32/64`, `vector-sew8/16/32/64` | Relative ordinary EEW/SEW weights. For indexed operations EEW is index width; data width is SEW. |
+| `vector-lmul-mf8/mf4/mf2/m1/m2/m4/m8`, `vector-emul-mf8/mf4/mf2/m1/m2/m4/m8` | Relative ordinary LMUL and derived EMUL weights. |
+| `vector-segment-unit-stride`, `vector-segment-strided`, `vector-segment-indexed-unordered`, `vector-segment-indexed-ordered` | Relative segment addressing weights, in this order. |
+| `vector-segment-eew8/16/32/64`, `vector-segment-sew8/16/32/64` | Relative segment EEW/SEW weights. |
+| `vector-segment-lmul-mf8/mf4/mf2/m1/m2/m4/m8`, `vector-segment-emul-mf8/mf4/mf2/m1/m2/m4/m8` | Relative segment LMUL/derived EMUL weights. |
+| `vector-segment-nf2` .. `vector-segment-nf8` | Relative field-count weights. |
+| `vector-segment-store` | Store-direction rate within the segment class. |
+| `vector-segment-high-va` | Rate selecting a legal high-half canonical alias for an ordinary non-FOF segment action. Enabled crosses include host Sv39/Sv48 and all four nested VS/G pairs, each by direction and alignment. |
+| `vector-segment-fof`, `vector-segment-fof-first-fault` | Unit-stride segment FOF rate among segment loads and conditional first-element fault; otherwise element1 faults. |
+| `nc-store`, `mmio-store` | Store-direction rates within the serial NC/MMIO classes. |
+| `uncache-error`, `uncache-load-error-denied` | Rates for legal NC/MMIO response error and conditional denied share among error loads; error stores use denied AccessAck. |
 
-Presets only assign defaults; they must not add hidden phases or select another
-scenario.
+### Probes
+
+| Keys | Type and meaning |
+| --- | --- |
+| `probe` | Rate for a manager-originated dirty Probe sequence after an eligible completed cacheable scalar store. |
+| `probe-to-b`, `probe-need-data` | Rates for retaining Branch state before toN cleanup and for explicitly requesting data. Dirty data must be exact even without needData. |
+| `probe-overlap` | Rate for holding an unrelated cold refill and issuing clean auxiliary Probes with the dirty target Probe. |
+| `probe-triple-overlap` | Conditional rate selecting depth3..8 rather than depth2 in an overlap sequence. |
+| `probe-depth3` .. `probe-depth8` | Relative depth weights within that deep group. Distinct accepted-but-unanswered B-source identities are used. |
 
 ## Shipped Presets
 
-Operation columns are relative weights. Locality is `hot/warm/cold`; remaining
-numeric rate columns are per-mille values.
+These are the values assigned by `RandomConstraints::preset`, including defaults
+for subclasses disabled by an operation weight or rate. `all 1` means every
+member of the listed array is one. Operation arrays follow the 15-key order in
+[Constraint Fields](#constraint-fields); other array orders are named in the row
+or the corresponding field table. Rates are per mille; arrays are weights.
 
-| Preset | Scalar L/S | Vector L/S | VSegment | Prefetch | Atomic | NC | MMIO | Hypervisor | CMO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe/overlap | Stride stream | Bank conflict | Latency |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | --- |
-| `coverage` | 200/150 | 150/150 | 75 | 100 | 100 | 75 | 75 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20/500 | 500 | 500 | compact |
-| `spec` | 648/270 | 90/45 | 20 | 35 | 5 | 5 | 5 | 1 | 1 | 800/150/50 | 100 | 20 | 5 | 100 | 1/10 | 100 | 250 | spec |
-| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100/750 | 750 | 750 | spec |
+| Dimension | `coverage` | `spec` | `corner` | `cmo-stress` |
+| --- | --- | --- | --- | --- |
+| Operation weights, in the order listed below | 200/150/150/150/75/100/100/75/75/75/75/75/100/75/100 | 648/270/90/45/20/35/5/5/5/1/1/0/10/2/15 | 125/125/125/125/125/125/125/125/125/125/125/125/125/125/125 | 1/1/0/0/0/0/0/0/0/0/1000/0/0/0/0 |
+| Locality hot/warm/cold | 250/250/500 | 800/150/50 | 100/200/700 | 250/250/500 |
+| Atomic AMO/LRSC/CAS | 8/2/2 | 90/5/5 | all 1 | 8/2/2 |
+| Atomic W/D | all 1 | all 1 | all 1 | all 1 |
+| `atomic-error` | 100 | 0 | 500 | 0 |
+| `atomic-error-denied` | 500 | 500 | 500 | 500 |
+| Atomic Probe depth 0..8 | all 1 | 1000/10/5/2/1/1/1/1/1 | 1/1/1/1/2/4/8/16/32 | all 1 |
+| Hypervisor HLV/HLVX/HSV | all 1 | 90/5/5 | all 1 | all 1 |
+| `hypervisor-spvp-user` | 500 | 1 | 500 | 500 |
+| Hypervisor PBMT pair, in listed order | all 1 | 996/1/1/1/1 | all 1 | all 1 |
+| `hypervisor-pma-device` | 500 | 1 | 500 | 500 |
+| Hypervisor PMP relation, in listed order | all 1 | 999994/1/1/1/1/1/1 | all 1 | all 1 |
+| CMO clean/flush/inval | all 1 | all 1 | all 1 | all 1 |
+| `cmo-dirty` | 500 | 50 | 500 | 1000 |
+| `cmo-younger-overlap` | 500 | 10 | 750 | 1000 |
+| `cmo-error` | 100 | 0 | 500 | 0 |
+| `cmo-error-denied` | 500 | 500 | 500 | 500 |
+| CMO Probe depth 1..8 | all 1 | 1000/10/5/2/1/1/1/1 | 1/1/1/2/4/8/16/32 | all 1 |
+| `dcache-load-error` | 100 | 0 | 500 | 0 |
+| `dcache-load-error-denied` | 500 | 500 | 500 | 500 |
+| PTW error site, in listed order | all 1 | all 1 | all 1 | all 1 |
+| PTW root/intermediate/leaf | all 1 | all 1 | all 1 | all 1 |
+| `ptw-error-store` | 500 | 500 | 500 | 500 |
+| `ptw-error-denied` | 500 | 500 | 500 | 500 |
+| `ptw-error-corrupt-first` | 500 | 500 | 500 | 500 |
+| Load-merge depth 2/3 | all 1 | 19/1 | all 1 | all 1 |
+| Load-merge same-address/same-beat/cross-beat | all 1 | 1/8/1 | all 1 | all 1 |
+| Set-pressure depth 9/10 | all 1 | 9/1 | all 1 | all 1 |
+| Set-pressure sb/sh/sw/sd | all 1 | 1/2/6/20 | all 1 | all 1 |
+| Set-pressure set quarter q0..q3 | all 1 | all 1 | all 1 | all 1 |
+| `set-pressure-dirty` | 500 | 50 | 500 | 500 |
+| `set-pressure-refill-overlap` | 500 | 10 | 750 | 500 |
+| `set-pressure-release-backpressure` | 500 | 10 | 750 | 500 |
+| Set-pressure window 1..8 | all 1 | 1000/10/2/1/1/1/1/1 | 1/1/1/2/4/8/16/32 | all 1 |
+| Miss-burst depth 2..17 | all 1 | 1000/200/100/50/20/10/5/2/1/1/1/1/1/1/1/1 | 1/1/1/1/1/1/1/2/2/4/4/8/8/16/32/64 | all 1 |
+| Miss-burst issue width 1/2/3 | all 1 | 100/20/1 | 1/2/4 | all 1 |
+| Miss-burst scalar-only/scalar-vector-load | all 1 | 8/1 | 1/4 | all 1 |
+| Translation Bare/stage1/nested | all 1 | 5/990/5 | all 1 | all 1 |
+| Stage1 Sv39/Sv48 | all 1 | 95/5 | all 1 | all 1 |
+| VS Sv39/Sv48 | all 1 | all 1 | all 1 | all 1 |
+| G Sv39x4/Sv48x4 | all 1 | all 1 | all 1 | all 1 |
+| `translation-stage1-napot` | 500 | 1 | 500 | 0 |
+| `translation-vs-napot` | 500 | 1 | 500 | 0 |
+| `translation-g-napot` | 500 | 1 | 500 | 0 |
+| Fence sfence/hfence-vvma/hfence-gvma | all 1 | 98/1/1 | all 1 | all 1 |
+| Fence global/selective | all 1 | 95/5 | all 1 | all 1 |
+| `concurrent` | 1000 | 100 | 500 | 0 |
+| `special-concurrent` | 500 | 20 | 750 | 0 |
+| `translation-switch` | 500 | 1 | 750 | 500 |
+| `tlb-flush` | 50 | 20 | 100 | 50 |
+| `misaligned` | 500 | 5 | 500 | 500 |
+| `canonical-boundary` | 100 | 1 | 250 | 0 |
+| `gstage-boundary` | 100 | 1 | 250 | 0 |
+| `vector-corner` | 1000 | 100 | 1000 | 0 |
+| `vector-fof` | 100 | 10 | 250 | 0 |
+| `vector-fof-first-fault` | 500 | 100 | 500 | 500 |
+| `vector-masked` | 500 | 100 | 500 | 500 |
+| `vector-vma` | 500 | 500 | 500 | 500 |
+| `vector-vta` | 500 | 500 | 500 | 500 |
+| `vector-partial-vl` | 500 | 100 | 500 | 500 |
+| `vector-nonzero-vstart` | 500 | 20 | 500 | 500 |
+| Vector addressing, in listed order | all 1 | 980/10/5/5 | all 1 | all 1 |
+| Vector EEW 8/16/32/64 | all 1 | 5/3/2/1 | all 1 | all 1 |
+| Vector SEW 8/16/32/64 | all 1 | 1/2/5/2 | all 1 | all 1 |
+| Vector LMUL mf8/mf4/mf2/m1/m2/m4/m8 | all 1 | 1/1/2/16/8/2/1 | all 1 | all 1 |
+| Vector EMUL mf8/mf4/mf2/m1/m2/m4/m8 | all 1 | 1/1/2/16/8/2/1 | all 1 | all 1 |
+| Segment addressing, in listed order | all 1 | 980/10/5/5 | all 1 | all 1 |
+| Segment EEW 8/16/32/64 | all 1 | 5/3/2/1 | all 1 | all 1 |
+| Segment SEW 8/16/32/64 | all 1 | 1/2/5/2 | all 1 | all 1 |
+| Segment LMUL mf8/mf4/mf2/m1/m2/m4/m8 | all 1 | 1/1/2/16/8/2/1 | all 1 | all 1 |
+| Segment EMUL mf8/mf4/mf2/m1/m2/m4/m8 | all 1 | 1/1/2/16/8/2/1 | all 1 | all 1 |
+| Segment NF 2..8 | all 1 | 32/16/8/4/2/1/1 | all 1 | all 1 |
+| `vector-segment-store` | 500 | 300 | 500 | 500 |
+| `vector-segment-high-va` | 100 | 1 | 250 | 0 |
+| `vector-segment-fof` | 100 | 10 | 250 | 0 |
+| `vector-segment-fof-first-fault` | 500 | 100 | 500 | 500 |
+| `probe` | 20 | 1 | 100 | 0 |
+| `probe-to-b` | 500 | 500 | 500 | 500 |
+| `probe-need-data` | 500 | 500 | 500 | 500 |
+| `probe-overlap` | 500 | 10 | 750 | 500 |
+| `probe-triple-overlap` | 500 | 10 | 750 | 500 |
+| Probe depth 3..8 | all 1 | 32/16/8/4/2/1 | all 1 | all 1 |
+| `nc-store` | 500 | 300 | 500 | 500 |
+| `mmio-store` | 500 | 300 | 500 | 500 |
+| `uncache-error` | 100 | 0 | 500 | 0 |
+| `uncache-load-error-denied` | 500 | 500 | 500 | 500 |
+| `stride-stream` | 500 | 100 | 750 | 0 |
+| `bank-conflict` | 500 | 250 | 750 | 0 |
+| Latency DCache/PTW/Uncache | compact/compact/compact | spec/spec/spec | spec/spec/spec | compact/compact/compact |
 
-Dimension-specific defaults:
+Profiles specify directions, not measured workload fidelity or observed coverage.
+`spec` favors hot scalar traffic and unit-stride vectors while retaining small
+weights for several stress classes. `coverage` spreads choices more broadly;
+`corner` increases cold, error, deep-pressure, and overlap selection.
+`cmo-stress` selects CMO with scalar load/store control traffic and disables the
+heterogeneous scheduler. Overrides still pass through the same validation.
 
-| Dimension | `coverage` | `spec` | `corner` |
-| --- | --- | --- | --- |
-| PTW error / load merge / set pressure / miss burst operation weights | 75/100/75/100 | 0/10/2/15 | 125/125/125/125 |
-| Atomic family AMO/LRSC/CAS; W/D | 8/2/2; 1/1 | 90/5/5; 1/1 | 1/1/1; 1/1 |
-| Atomic error; denied share | 100; 500 | 0; 500 | 500; 500 |
-| Atomic Probe-depth0..8 weights | all 1 | 1000/10/5/2/1/1/1/1/1 | 1/1/1/1/2/4/8/16/32 |
-| Hypervisor HLV/HLVX/HSV | 1/1/1 | 90/5/5 | 1/1/1 |
-| Hypervisor SPVP=U; fixed-PMA device share | 500; 500 | 1; 1 | 500; 500 |
-| Hypervisor PBMT pair weights | all 1 | 996 + 1/1/1/1 | all 1 |
-| Hypervisor PMP relation weights | all 1 | 999994 + 1 x6 | all 1 |
-| CMO CLEAN/FLUSH/INVAL | 1/1/1 | 1/1/1 | 1/1/1 |
-| CMO dirty / younger overlap / error / denied | 500/500/100/500 | 50/10/0/500 | 500/750/500/500 |
-| CMO Probe-depth1..8 weights | all 1 | 1000/10/5/2/1/1/1/1 | 1/1/1/2/4/8/16/32 |
-| PTW error site/level weights; store/denied/first-corrupt | all 1; 500/500/500 | all 1; 500/500/500 | all 1; 500/500/500 |
-| Load-merge depth; same-address/same-beat/cross-beat | 1/1; 1/1/1 | 19/1; 1/8/1 | 1/1; 1/1/1 |
-| Set-pressure depth; width; set quarter; windows | 1/1; all 1; all 1; all 1 | 9/1; 1/2/6/20; all 1; 1000/10/2/1/1/1/1/1 | 1/1; all 1; all 1; 1/1/1/2/4/8/16/32 |
-| Set-pressure dirty / refill overlap / C backpressure | 500/500/500 | 50/10/10 | 500/750/750 |
-| DCache-load / Uncache error; denied share | 100/100; 500/500 | 0/0; 500/500 | 500/500; 500/500 |
-| Vector-segment store; ordinary vector dimensions | 500; uniform | 300; weighted below | 500; uniform |
-| Ordinary VFOF / segment FOF; first-fault share | 100/100; 500/500 | 10/10; 100/100 | 250/250; 500/500 |
-| Vector masking / partial VL / nonzero vstart | 500/500/500 | 100/100/20 | 500/500/500 |
-| Vector VMA / VTA | 500/500 | 500/500 | 500/500 |
-| NC and MMIO store; special-concurrent | 500/500; 500 | 300/300; 20 | 500/500; 750 |
-| Probe; toB; need-data; overlap; triple overlap | 20; 500; 500; 500; 500 | 1; 500; 500; 10; 10 | 100; 500; 500; 750; 750 |
-| Probe-depth3..8 weights | all 1 | 32/16/8/4/2/1 | all 1 |
-| Stride stream / bank conflict | 500/500 | 100/250 | 750/750 |
-| Canonical / G-stage / segment high-VA | 100/100/100 | 1/1/1 | 250/250/250 |
+## Legal Constraints And Endpoint Rejection
 
-The `spec` vector shape weights favor unit stride (`980/10/5/5`), data SEW
-32-bit (`1/2/5/2`), and M1/M2 LMUL/EMUL (`1/1/2/16/8/2/1`) while retaining a
-nonzero floor for every legal class. Its segment NF weights are
-`32/16/8/4/2/1/1`. `coverage` and `corner` use uniform vector and segment
-dimensions. Per-seed deficit scheduling temporarily prioritizes uncovered
-legal classes, then returns to steady-state weights.
+[validate()](../cpp/random/constraints.inc) rejects malformed assignments,
+unknown profiles/keys, values exceeding unsigned range, rates outside
+`0..1000`, all-zero operation/locality/translation weights, and required
+all-zero subclass arrays before traffic. Legality is conditional; setting one
+rate to an endpoint can require disabling incompatible classes explicitly.
 
-Translation presets use these relative weights and switch rates:
+- Vector tuples satisfy `log2(EMUL) = log2(EEW/SEW) + log2(LMUL)`, supported
+  LMUL/EMUL bounds, and minimum VLMAX for forced policy combinations. Segment
+  tuples additionally fit at most eight data-register uops across NF fields.
+  Enabled dimensions must each have a reachable legal tuple. Tuple selection
+  uses the product of constituent weights over the legal set, not independent
+  unfiltered draws. Concurrent vectors must fit the reserved LQ/SQ flow budget.
+- Nonzero `concurrent` requires nonzero scalar-load, scalar-store, vector-load,
+  vector-store, and prefetch weights. `special-concurrent` requires nonzero
+  `concurrent` and NC or MMIO. `probe` requires scalar stores; enabled deep,
+  CMO, and atomic Probe groups require nonzero depth weights where used.
+- NC/MMIO require a translated PBMT context, and hypervisor traffic requires
+  nested translation. A hypervisor-only mix cannot enable Bare/host-stage1;
+  a Bare context with NC/MMIO also needs a supported cacheable control class.
+  PTW-error sites require the corresponding host, VS, and G mode weights.
+- Non-PMA hypervisor PBMT pairs and fixed-PMA device accesses are aligned.
+  Device traffic needs PMA/PMA and a DDR class for non-PMA PBMT pairs.
+  PMP edges need the no-PMP control, PMA/PMA, and DDR; natural edges need an
+  aligned class and crossing edges need a misaligned class. Invalid fixed
+  endpoint combinations are rejected rather than silently made reachable.
+- `vector-fof` requires vector loads and host-stage1 traffic; `1000` is rejected
+  to retain ordinary vector loads. Segment FOF requires segment loads,
+  host-stage1, and a legal enabled unit-stride tuple; its rate also cannot be
+  `1000`. Segment high-VA and canonical/G-stage boundary rates require at least
+  one eligible shape, direction, alignment, and mode combination.
+- `dcache-load-error=1000` requires `concurrent=0` and `stride-stream=0`;
+  `bank-conflict` needs a clean scalar-load share. `uncache-error=1000` requires
+  `special-concurrent=0`. Error rates require their governing operation class.
+  `stride-stream` needs scalar loads and cold locality.
+- `dcache-latency=spec` needs cacheable traffic; `ptw-latency=spec` needs
+  translated traffic and nonzero `tlb-flush`; `uncache-latency=spec` needs NC or
+  MMIO. A nonzero TLB-flush rate needs a fence kind compatible with an enabled
+  translated regime and a nonzero scope group. NAPOT choices need supported
+  scalar/vector/segment/prefetch traffic, or hypervisor traffic for nested NAPOT.
 
-| Preset | Bare/stage-1/nested | Stage-1 Sv39/Sv48 | VS Sv39/Sv48 | G Sv39x4/Sv48x4 | Stage-1/VS/G NAPOT | SFENCE/VVMA/GVMA | Global/selective | Switch |
-| --- | --- | --- | --- | --- | --- | --- | --- | ---: |
-| `coverage` | 1/1/1 | 1/1 | 1/1 | 1/1 | 500/500/500 | 1/1/1 | 1/1 | 500 |
-| `spec` | 5/990/5 | 95/5 | 1/1 | 1/1 | 1/1/1 | 98/1/1 | 95/5 | 1 |
-| `corner` | 1/1/1 | 1/1 | 1/1 | 1/1 | 500/500/500 | 1/1/1 | 1/1 | 750 |
+Validation proves supported choices exist. It does not prove a seed reaches
+those choices, that all Cartesian crosses are legal, or that a pin toggles.
 
-The per-seed gate overrides sampling order only until every enabled mode,
-nested pair, ordinary/NAPOT leaf topology, and compatible fence kind/scope has
-appeared. It then reselects the highest-weight enabled context once so a rare
-mandatory mode is not retained for a full switch interval; later switches use
-the configured distribution.
+## Scheduling And Action Counts
 
-`coverage` is intended for short pre-submit checks, `spec` for extended or final
-campaigns, and `corner` for boundary hunts. A campaign may sweep several
-constraint sets, but every run uses the same generator and records its resolved
-targets.
+[mixed_scheduler.cpp](../cpp/scenarios/mixed_scheduler.cpp) initializes the
+reference memory and page tables, then runs any budgeted heterogeneous windows,
+then serial weighted actions, and finally a canceled-load/survivor redirect
+check and drain. There is no mandatory operation-coverage prefix or
+coverage-completeness PASS gate. The final redirect check reserves two actions;
+`prepare_tail()` needs at least that budget, so CLI acceptance of a positive
+`--actions` value alone does not guarantee successful execution.
 
-## Calibration Conclusions
+The scheduler still reserves `minimum_serial_actions()` from
+[constraints.inc](../cpp/random/constraints.inc). For an initial available
+budget `A = requested_actions - 2`:
 
-The `cmo-stress` preset is a directed constrained-random direction: it sets
-the CMO operation weight to 1000 and leaves a scalar load/store weight of one
-as a control. Inside CMO it selects all CLEAN/FLUSH/INVAL operations, sets
-`cmo-dirty=1000` and `cmo-younger-overlap=1000`, disables CMO errors, and
-keeps the ordinary Probe and error subclasses off. Because each CMO action
-warms a line, drains a dirty store, issues a younger load, and may accept a
-Probe burst, use a smaller action budget (256, 512, or 1,024 actions) and more seeds rather
-than the ordinary 16,384-action budget. The direction targets the
-dirty + younger-overlap + Probe composition and is not a substitute for the
-ordinary mixed profiles.
-
-The `spec` preset is calibrated from generated workload counters, but those
-counters are never correctness oracles. The reproducible analysis entry is:
-
-```sh
-make analyze-spec-counters \
-  SPEC_COUNTER_ROOT=/path/to/checkpoints \
-  SPEC_COUNTER_JSON=../../build/memblock/spec-counters.json
+```text
+requested_concurrent = floor(A * concurrent / 1000)
+minimum_concurrent  = concurrent == 0 ? 0 : min(A, special_enabled ? 64 : 56)
+concurrent_limit   = min(max(requested_concurrent, minimum_concurrent),
+                         A - min(minimum_serial_actions(), A))
 ```
 
-The analyzer counts only the latest timestamp that reaches the stable generated
-terminator, avoiding cumulative-dump double counting and truncated final
-blocks. Each future dataset must record its own discovered and accepted counts;
-there is no frozen corpus-size constant.
+This floor is a scheduling reservation calculated from enabled dimensions,
+not a minimum legal run size and not a promise that serial bins will be filled.
+With unmodified presets, the floor is 4362 for `coverage` and `corner`, and
+4246 for `spec`. Therefore ordinary 256- or 1024-action runs of those presets
+have zero heterogeneous windows even when `concurrent` is nonzero. A custom
+profile can change the floor. Increasing only a concurrency rate cannot bypass
+this reservation. See [prepare_tail()](../cpp/scenarios/mixed_initialization.cpp).
 
-Calibration conclusions are:
+A heterogeneous window requires seven available actions, or eight with its
+optional clean NC/MMIO load. It includes scalar load, vector load, scalar
+store, vector store, and prefetch producers, plus scalar/vector store readbacks.
+Issue order is randomized subject to ordered-indexed-load dependencies; vector
+shapes are restricted to the concurrent flow budget. The helper drains before
+the next window. A requested concurrency rate is a budget, not a measured
+simultaneity fraction; use the reported unresolved classes and samples as
+observations. See [run_concurrent_windows()](../cpp/scenarios/mixed_concurrent.cpp).
 
-- Scalar memory is load-dominant, while MMIO and sampled NC traffic are rare. `spec` therefore keeps
-  scalar traffic highest, NC/MMIO at a verification floor, and synthetic CMO/DCache/Uncache errors disabled.
-- Vector issue traffic, resident-bank replay, multi-enqueue misses, replacement, and Probe traffic are
-  frequent enough to justify dedicated dimensions and nonzero `spec` floors. Queue-level issue
-  attempts are not distinct uops or architectural instructions, and do not provide a segment-only frequency.
-- The memory-bound mcf subset is a useful high-miss reference but is not pooled at equal weight with
-  broad SPEC-like data.
-- The calibrated first-beat DCache/PTW/Uncache latency model is approximately 74.1% below 20 cycles,
-  14.4% at 20-39, 5.1% at 40-99, and 6.4% at 100-400. Histogram boundaries overlap, so this is a test
-  model, not an exact performance-model claim. `spec` deterministically covers all four classes before
-  later responses follow the distribution statistically.
+Serial operation selection is weighted from its first action. Ordinary vector
+shape and binary-policy choices do not prioritize uncovered bins. Translation
+selection does prioritize unobserved enabled contexts, nested mode pairs,
+leaf topologies, and compatible fences before using dominant/weighted context
+selection and the configured switch/flush rates. Consequently a small nonzero
+NAPOT or flush rate may be overrepresented early. Context changes drain pending
+work. See [mixed_serial_selection.cpp](../cpp/scenarios/mixed_serial_selection.cpp),
+[mixed_vectors.cpp](../cpp/scenarios/mixed_vectors.cpp), and
+[mixed_translation_schedule.cpp](../cpp/scenarios/mixed_translation_schedule.cpp).
 
-These observations justify stimulus priorities only. They are not converted
-directly into transaction probabilities or expected DUT results.
+`transactions` is the completed top-level action count and must equal
+`--actions`. It is not a scalar/vector uop, memory-request, LSQ-entry, or
+writeback count. A load-merge, same-bank wave, set-pressure window, miss burst,
+atomic sequence, FOF sequence, or readback can contain multiple such events.
+`actual_ops` and subclass counters describe their own sampled scopes and need
+not sum to `transactions`.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=53`, resolved targets, and actual
-counts for operations, atomic/Probe/hypervisor/CMO/DCache state, ordinary and
-segment vector shapes, FOF, NC/MMIO, translation and leaf topology, fences,
-cache events, all load wakeup/cancel lanes, prefetch diagnostics, and manager
-latencies. The simulator and `verify_regression.py` enforce the same gates per seed.
+Coverage is observational. Sparse or zero counters are valid; successful
+completion does not assert complete shape, opcode, crossing, latency, Probe,
+or mixed-overlap coverage. Shape support, enabled bins, requested traffic,
+accepted requests, terminal completions, and reached observations are distinct
+claims. Neither runtime duration nor a profile name substitutes for counters
+and a corresponding oracle.
 
-Optional `MEMBLOCK_MIXED_PROGRESS_ACTIONS=N` diagnostics flush seed, action
-count, simulation cycle, and last phase to stderr at mixed-loop boundaries.
-They consume no random draws and advance no DUT cycles. Checkpoints are not
-terminal summaries, coverage evidence, or acceptance; N=0/unset disables them.
+The in-process PASS decision checks completion and protocol/oracle errors,
+requested action count, an empty expected GrantAck queue, queue allocation/dequeue/legal
+cancellation conservation, observed redirect cancellation, absence of unobserved
+queue cancellation, and Probe-source lifecycle accounting. It does not require
+coverage completion or nonzero stall counters. See
+[finish()](../cpp/scenarios/mixed_reporting.cpp).
 
-### General Accounting
+[run_regression.py](../scripts/run_regression.py) checks terminal-summary
+identity, seed, action count, and return status. It writes a per-case report at
+`OUTPUT_PARENT/coverage-reports/SCENARIO-seedSEED-INDEX.json`, preserving status,
+summary, command, elapsed time, a `metrics` object, and captured failure
+terminal output. The ordinary regression controller keeps parsed summary fields
+on the aggregate case result but does not populate `metrics`; read the report
+summary or aggregate fields for those counters. `INDEX` is the controller's
+result-completion index, not a global ID.
+Two controllers with different result filenames but the same parent can collide
+on report paths, including their temporary files. Give each controller a
+unique output parent directory and follow the README trace-isolation rules.
+A report-write error is recorded as `coverage_report_error`.
 
-- Coverage counters record which classes actually occurred; a zero target
-  describes a disabled class, while intermediate and endpoint weights describe
-  sampling probability rather than an obligation to observe both outcomes.
-- Class marginals, totals, and accounting tuples reconstruct source counts
-  exactly; disabled bins remain zero. These are per-seed statistics, not PASS
-  gates. Coverage is reported for analysis and never rejects an otherwise
-  functional run.
-- Functional PASS uses independent data, exception, identity, cancellation,
-  queue, and protocol oracles. Internal bank selection, arbitration, replay
-  count, MSHR/FSM state, cycle timing, prefetch causality, and feedback pulses
-  are diagnostic unless an external contract explicitly requires them.
-- There is no mandatory prefix and no coverage-completeness requirement. The
-  random tail determines workload direction from the first action; functional
-  oracles still check every generated transaction, and coverage counters record
-  what happened for later analysis.
+The current constrained-random branch of
+[verify_regression.py](../scripts/verify_regression.py) calls
+`_check_mixed_accounting`; other coverage-validation helpers in that file are
+not its acceptance path. It verifies replay command/summary consistency and
+queue/LSQ accounting, plus available grant/ack accounting and requested campaign
+metadata checks. It does not gate constrained-random acceptance on
+`constraint_schema`, complete coverage arrays, or nonzero stalls. Documentation
+schema consistency is separately checked by
+[check_io_coverage.py](../scripts/check_io_coverage.py).
+[VERIFICATION_PLAN.md#regression-acceptance](VERIFICATION_PLAN.md#regression-acceptance)
+is the sole owner of closure-scale requirements.
 
-### Stimulus Closure
+Replay requires the recorded seed, action count, profile, ordered overrides,
+backpressure options, runtime artifacts/dependencies, and relevant environment.
+Preserve the aggregate result and per-case report. Use the recorded command
+with the published runtime and the
+[README reproduction workflow](../README.md#reproduction); source and runtime
+revisions are provenance, not coverage or cryptographic PASS gates.
+`MEMBLOCK_MIXED_PROGRESS_ACTIONS=N` emits flushed action/cycle/phase checkpoints
+without consuming randomness or advancing the DUT. It is diagnostic output,
+not evidence that a coverage objective has been reached.
 
-Ordinary vectors report five shape marginals and the 896-slot `actual_vector_cross`
-direction x addressing x EEW x SEW x LMUL space. The 624 legal RVV classes are enabled by
-configured weights; EMUL is derived as `EEW - SEW + LMUL`, while illegal relations and
-policy-incompatible VLMAX classes remain zero. Each enabled class occurs, and every instruction
-produces one through eight data uops, with every enabled multi-uop shape producing a multi-uop
-instruction. Heterogeneous windows overlap scalar load/store, vector load/store, and prefetch;
-`special-concurrent` adds NC/MMIO loads, and windows report all 16 reachable direction x addressing x
-single/multi-uop classes. The selected scalar store stays within one 4-KiB page; page-crossing
-scalar-store replay and readback remain directed contracts in
-`scalar-misaligned`/`misaligned-stores` so the window never makes a younger store the backend ROB
-head while an older load is pending. Line-crossing misaligned stores remain in the window. The five binary policy marginals report false/true counts and conserve against
-`actual_vector_shape_ops`; a mask/tail endpoint requires an actual inactive body/tail element.
+### Report Identifier Guide
 
-Ordinary VFOF reports the ordinary/fault split, later/first-fault position, stage-1-mode and EEW
-marginals, and all 16 enabled fault-position x mode x EEW bins. A later fault returns the first
-mapped element with VL=1 and no exception; a first-element fault preserves the load-page-fault,
-fault VA, and VL=2. Both require one unique fix-VL writeback and no extra LQ allocation. Segment
-FOF covers all 338 decoder-legal unit-stride shapes and all 1,352 later/first-fault x Sv39/Sv48 x
-shape bins. A later segment fault requires the mapped element's exact bytes, suppresses the
-page-fault writeback, and trims VL; a first-element fault preserves the original VL and requires
-at least one identified page-fault writeback. Every segment action has exactly one fix-VL writeback
-and its exact one-through-eight data-uop count; ordinary segment dimension marginals conserve after
-subtracting FOF actions. Segment-field exception choice and faulting/remainder destinations remain unspecified.
+Array order and sampling code are authoritative in
+[coverage.inc](../cpp/random/coverage.inc),
+[constraints.inc](../cpp/random/constraints.inc), and
+[mixed_reporting.cpp](../cpp/scenarios/mixed_reporting.cpp).
 
-Load merge reports 12 depth x address-pattern x critical-beat bins and three translation-regime
-bins. Every enabled shape and regime occurs. A batch skips lines already observed at the manager
-and uses a fresh line from a 64-MiB region; all members issue in one cycle, target requests and
-global refill/GrantAck deltas conserve, and scalar writebacks equal the sum of batch depths.
-GrantAck conservation pairs each acknowledgement with a GrantData refill or a data-less
-AcquirePerm Grant, so legal background prefetch grants are counted while a duplicate or unpaired
-acknowledgement still fails.
-
-Set pressure reports 1536 clean/dirty x overlap/no-overlap x C-ready/stalled x one-through-eight-window x depth x width x
-translation crosses, four base-index quarters, and both store-half issue orders. Actions use fresh lines in one through
-eight windows, each spanning two of the generated DCache's 256 four-way sets. Generated stores, target requests, store writebacks, and SQ dequeues match exactly. Dirty target
-ReleaseData reaches at least `depth - 8`; attributed releases carry the stored bytes into manager memory. Clean actions
-require exact initial and reverse-revisit data, one initial target request per line, at least `depth - 8` revisit misses
-and target Releases, zero target ReleaseData, and exact load-writeback/LQ-dequeue conservation. Overlap holds one
-independently addressed cold load and requires at least `depth - 8` target Releases while pending. The C-stall tuple is
-`selected actions, stalled target releases, target stall cycles, payload-stability checks, completed windows` and is
-exactly `1,1,16,16,1` for a selected action or `0,0,0,0,1` otherwise.
-Clean overlap first allocates four older target loads per window without issuing them. It then establishes every
-younger held response, issues the older targets, and requires their exact writebacks and observed LQ dequeues before
-allocating the remaining targets. Thus all target accesses and required Releases occur while every associated held
-load remains pending, without assuming that a completed baseline remains resident. At eight windows, initial LQ
-occupancy is at most 40 and retained tail occupancy at most 56, below the 66-flow dispatch watermark. C backpressure
-is armed before the first target issue. Transaction creation order and metadata RNG assignment differ from earlier
-binaries; replay requires the matching frozen runtime. The constrained-random generator preserves the 1536 accepted replacement bins and adds ownership/construction accounting.
-Dirty overlap allocates every older overflow store into SQ before dispatching the younger held loads, then issues
-address/data and commits only after all holds are established. Baseline batches use at most 32 SQ entries and
-preallocated overflow at most 16, below the 52-entry watermark. It retains the committed baseline and incremental
-ReleaseData gate. Before the action, the constrained-random generator drains baseline SBuffer/D/E, disables the L1 stride prefetcher through its external
-CSR, runs 4 + 8 + 4 = 16 DUT cycles and drains DCache idle, establishes every held load, and requires exactly one
-store-class full-line AcquireBlock NtoT per fresh baseline line, unchanged manager error counters, and zero
-completed target Releases of either opcode; the current source drains the release channel before the ownership snapshot and after selected C backpressure, so an in-flight target ReleaseData is counted before qualification. The prior prefetch enable is restored after the action. No DUT cycle separates qualification from target
-C-stall arming. Coherence responsibility can remain in a writeback queue; array residency is not a prerequisite.
-A rejected attempt releases its held responses, issues each preallocated overflow once, commits in order with
-independent reference updates, and drains exact WB/queues/SBuffer/D/E/C under every functional oracle. The
-unqualified overlap/stall minima alone are inapplicable. Retries keep the selected dirty/overlap/depth/window/
-width/translation/base-index-quarter/C-backpressure tuple and use fresh addresses/identities without rewinding RNG.
-The cap is four attempts; exhaustion is `stimulus_construction_exhausted`, never PASS or a CPU-bug classification.
-Rejected construction contributes actual store issue-order, cacheable traffic, bus/response latency, WB/SQ/load/LQ,
-and cycle totals, plus separate rejected-manager totals; it does not increment the logical action or accepted bin.
-Only qualified and fully completed attempts populate accepted bins. Release overlap means completed transaction
-acceptance at the final C beat, not first-beat timing. Target Releases are attributed by line and opcode, so
-background ProbeAck/Release traffic remains legal without satisfying the target oracle.
-
-The ordinary miss-burst cross is 288 depth x issue-width x composition x translation bins. Depths
-2 through 17, legal issue width, scalar-only or one scalar+vector-load composition, every enabled
-translation regime, exact per-identity data, scalar writebacks, vector uops/writebacks, and LQ
-flows conserve. A vector-load uop uses two LQ flows. Depth-17 actions must observe 16 externally
-pending responses, release one response, and then request and complete all 17 target lines.
-`actual_miss_burst_saturation` is exactly `reached,release-scheduled,overflow-requested` for every
-depth-17 action. Target requests/refills can exceed target lines because hardware prefetch is
-legal; global response/GrantAck pairing still conserves.
-
-Bank conflict reports the 48 depth(2/3) x bank(0..7) x translation bins. Target lines are freshly
-warmed and then issued in one wave. Every member has exact data, one scalar writeback, and one LQ
-dequeue. The addresses are ordinary mapped 2-MiB traffic, not NAPOT placement. Wakeup, `ld2Cancel`,
-arbitration, prefetch traffic, and replay classification remain diagnostic. Only the target wave
-contributes a hit/resident-hot observation; setup fills are not action misses or locality claims.
-
-Atomic clean/error actions cover all 18 enabled family x width x clean/corrupt/denied outcomes.
-Errors require the exact exception, two-beat refill, errored GrantAck/refill, unchanged manager
-memory at response time, and the checked poisoned-line image if released; LR/SC errors stop at LR
-because a cold SC cannot request a refill. Successful atomic Probe bursts cover all 54 family x
-width x depth bins with exact old value/result, target-refill attribution, accepted Probe depth,
-address-qualified completion, zero auxiliary data, and manager conservation.
-
-Hypervisor traffic closes every enabled family x SPVP x alignment x five PBMT pair x
-DDR/fixed-device x seven PMP-relation class. Checks include final PA, exact bytes, DCache versus Uncache
-route, fault and queue recovery, and post-hypervisor load readback. The PMP edge fixture is a
-first-match 4-KiB NAPOT RWX region inside an enclosing 16-KiB deny region.
-
-CMO closes operation x line state x younger-overlap x error presence and all 48 successful operation x clean/dirty x
-depth bins. Success checks exact ProbeAckData and drains older SBuffer traffic first. Errors require the exact exception,
-unchanged backing memory, redirect cleanup, and no manager Probe. Successful categories plus error counts reconstruct
-`actual_cmo_operation`; depth-weighted accepted B requests and maximum accepted-but-unanswered depth match generation.
-
-DCache scalar-load clean/corrupt/denied outcome bins are exact enabled-class gates. For `N` error actions containing `D`
-denied actions, `error responses, denied beats, corrupt beats, errored GrantAcks, errored refills` equals `N,2D,2N,N,N`;
-sink attribution keeps this invariant under a concurrent clean hardware prefetch. NC/MMIO errors require exact
-response/D-beat accounting and distinct NC versus MMIO store contracts; error stores always use denied because
-`AccessAck` carries no data.
-
-PTW errors report 90 site x direction x level x outcome bins, 20 site-specific-mode bins, and 20 target-level bins.
-Duplicate faulting-PTE requests are legal, so responses may exceed actions. Denied beats are even and cover at least
-two beats per denied action; corrupt beats equal all response beats plus the additional denied beat. Each action
-requires the precise access fault, no target DCache/Uncache request, a clean same-address retry, and a fresh reread of
-the injected PTE block. PTW-only sets do not inherit ordinary translation-switch or TLB-flush gates. Coverage/corner
-use fresh page-table roots and addresses so each fault reaches its selected walk level; `spec` disables synthetic PTW
-errors while retaining nonzero sub-dimensions.
-
-Manager Probe subclasses conserve against generated sequences. Probe depth, toB cleanup, CMO-derived Probes, atomic
-auxiliary Probes, and `depth - 1` auxiliary clean Probes reconstruct manager traffic. The authoritative eight-field
-`actual_probe_depth` conserves to sequences and projects exactly onto compatibility `actual_probe_overlap`.
-`actual_probe_cross` closes all 32 depth x capacity x need-data bins and reconstructs its marginals. The B-source space
-is 64: for `N` accepted Probes, lifecycle `unique,reuse,wrap` equals `min(N,64), N-min(N,64), 0 if N=0 else (N-1)/64`;
-an active source ID cannot be reused. A Probe sequence first drains older SBuffer traffic, preventing an early legal
-NtoN response from being misclassified as a dirty-line failure under the long-tail profile.
-
-### Translation and Boundary Gates
-
-Every enabled translation regime, stage-1/VS/G mode, nested VS-G pair, ordinary/NAPOT leaf
-topology, and compatible fence kind/scope occurs. More than one enabled context requires an
-observed switch; translated profiles require both a PTW walk and a translation-reuse window.
-`prefetch.i` occurs at least once per seed. Under backpressure, each manager set to `spec`
-independently observes all four latency classes. `stride-stream` does not require source-12: an
-implementation may train, arbitrate, merge, suppress, or issue another legal stream.
-
-Scalar canonical coverage is the 24-bin cross `((invalid_first * 2 + mode) * 2 + store) * 3 +
-(eew - 1)`, with mode 0/1 = Sv39/Sv48, store 0/1 = load/store, and EEW 1/2/3 = 2/4/8 bytes.
-Total = sum(bins), recoveries = total, controls = `2 * total + 2 * store_faults`, and store checks
-= `store_faults`. Both aliases have permissive 4-KiB mappings; aligned controls prove them before
-the fault. Each fault has the first independently walked invalid VA, exact page-fault completion,
-observed redirect/queue conservation, clean edge readbacks, and unchanged manager memory. Legal
-speculative first-page traffic is allowed. The exception address is sampled only after other
-operations drain because it has no transaction identity.
-
-Vector canonical coverage is the 36-bin cross `((invalid_first * 2 + mode) * 3 + addressing - 1) *
-3 + (eew - 1)`, with addressing 1/2/3 = strided/indexed-unordered/indexed-ordered. The subclass
-uses one active element, `vl=1`, `vstart=0`, unmasked, EEW=SEW, LMUL=EMUL=1, and reserves
-`16 >> eew` SQ flows. Enabled bins require matching store, stage-1/mode/addressing/EEW/SEW/LMUL/
-EMUL weights plus `vector-partial-vl>0`, `vector-nonzero-vstart<1000`, and `vector-masked<1000`;
-VMA/VTA honor their endpoints. Each crossing requires an identified store-page fault, exact
-first-invalid VA, four edge controls, unchanged manager memory, and SQ dequeue/cancellation of
-every reserved flow. A raw VLS exception redirect handles cancellation; one committed scalar
-store/load pair in the same DUT proves recovery. Total, controls, recoveries, store checks, and
-flows conserve with the four-controls formula and `16 >> eew` multiplier. Ordinary vector stores
-plus canonical and G-only vector faults equal the vector-store action count.
-
-G-only coverage uses VS=Bare, Sv39x4/Sv48x4, and 41/50-bit zero-extended GPA limits. Scalar has 12
-bins `(mode * 2 + store) * 3 + eew - 1`; vector has 18 bins
-`(mode * 3 + addressing - 1) * 3 + eew - 1`. Ordinary translation-regime and VS-mode weights do
-not restrict this subclass, but a reachable scalar/vector class and G-mode weight are required.
-Every access byte is independently walked; the fault is the access-specific guest-page fault with
-exact first-invalid VA/GPA at the limit and VS-non-leaf-PTE false. Separate G roots and two actual
-loads prove legal permissive mappings; two unchanged-edge loads and a committed survivor prove
-side-effect suppression and recovery. Legal speculative prefix traffic is allowed. Per fault,
-controls/recovery/store checks conserve at four/one/one, vector flows use `16 >> eew`, and the VLS
-qualifier is present. G-only activation drains prior work, flushes pending fences, invalidates the
-ordinary context, and issues HFENCE.GVMA; the next ordinary action reenters its own context.
-
-Canonical and G-only boundary subclasses are selected by independent weighted random draws at their
-configured rates; a collision resolves by random equal choice, so both remain reachable even at rate
-1000. There is no missing-bin prefix and no coverage-closure gate. Their fault actions do not populate
-ordinary DCache outcomes, successful vector shape/policy counters, or ordinary leaf-topology
-accounting. Scalar ordinary plus canonical/G-only scalar faults conserve against scalar operation
-counts and are excluded from DCache outcomes.
-
-Segment high-VA coverage has 24 bins. Eight stage-1 bins use
-`(stage1_mode * 2 + store) * 2 + misaligned`; sixteen nested bins use all
-four VS/G pairs with the same `(store, misaligned)` dimensions, indexed from
-eight. A bin requires nonzero `vector-segment-high-va`, segment operation, the
-selected stage-1 or nested translation traffic, a reachable
-shape/direction/alignment, and enabled segment-store/load weights. Non-FOF
-loads require `vector-segment-fof != 1000`; misaligned bins require data EEW
-above eight bits, using SEW for indexed addressing. The subclass is selected by
-a weighted random draw when enabled; there is no missing-bin prefix and no
-coverage-closure gate. Each action uses the randomized ordinary physical address
-through a full-XLEN high-half alias and its own 4-KiB mappings; all active
-effective VA bytes are independently walked through the selected stage-1 or
-two-stage page table to the declared physical bytes. Shape, NF, stride/index
-values, data, partial VL, vstart, and mask remain randomized, and at least one
-field element is active. Exact vector completion identity/data and observed
-completion counts are checked; stores are followed by actual DUT loads of every
-active field element. The operation count equals the bin total;
-direction/stage-1/nested-pair accounting cannot exceed matching ordinary
-translation traffic; data uops are 2..8 times actions and active elements are
-2..128 times actions. These are successful ordinary segment instructions, not
-a new operation or fault subclass; with NAPOT-only ordinary traffic they are
-excluded from ordinary leaf-topology accounting while shape, direction, and
-FOF accounting retain their meaning.
-
-### Reporter Identifiers
-
-These names are part of the replayable coverage contract; `verify_regression.py`
-checks them from the terminal summary:
-
-| Identifier | Required interpretation |
+| Identifier | Interpretation |
 | --- | --- |
-| `actual_vector_shape_ops` | Total ordinary vector instructions used to conserve shape and policy marginals |
-| `actual_vector_cross` | 896-slot direction x addressing x EEW x SEW x LMUL cross; the configured 624 legal RVV classes must close |
-| `actual_vector_agnostic` | Observed mask/tail agnostic classes; an enabled endpoint requires the corresponding inactive body or tail element |
-| `actual_concurrent_vector_shape` | 16 reachable heterogeneous direction x addressing x single/multi-uop classes |
-| `actual_concurrent_vector_uops` | Load/store uop conservation inside heterogeneous windows |
-| `target_miss_burst_composition` | Requested scalar-only versus scalar+vector-load miss-burst composition |
-| `target_miss_burst_depth` | Requested depth class for ordinary miss bursts |
-| `target_miss_burst_issue_width` | Requested initial scalar issue width |
-| `actual_miss_burst_max_outstanding` | Externally observed maximum held target depth, used as a fair-progress sanity floor |
-| `actual_miss_burst_saturation` | `reached,release-scheduled,overflow-requested` count for depth-17 actions |
-| `actual_cmo_operation` | CMO operation marginal used to reconstruct the enabled operation/error crosses |
-| `target_cmo_probe_depth` | Requested CMO-derived Probe depth |
-| `actual_cmo_probe_depth` | Observed CMO-derived accepted Probe depth marginals |
-| `actual_cmo_probe_cross` | 48 operation x clean/dirty x depth bins |
-| `target_set_pressure_window` | Requested one-through-eight replacement-window class |
-| `actual_set_pressure_window_count` | Authoritative accepted replacement-window distribution |
-| `actual_set_pressure_dual_window` | Two-field compatibility tuple `[non-dual, dual]`; the fields sum to all set-pressure actions and project exactly from the authoritative window distribution |
-| `actual_set_pressure_ownership` | Attempts, qualified, accepted, rejected, cleaned, acquisition-reason, error-reason, Release-reason, in-flight. Reasons may overlap; normal termination requires attempts=accepted+rejected, qualified=accepted, rejected=cleaned, in-flight=0, and accepted equal to dirty-overlap cross actions |
-| `actual_set_pressure_rejected_manager` | Rejected attempts, stores, baseline stores, overflow stores, held loads, target A, held A, store WB, SQ dequeues, load WB, LQ dequeues, target C, target ReleaseData, global ReleaseData, verified global ReleaseData, expected target ReleaseData, preserved target stores, all A. Each target needs at least one accepted covering A; extra acquisitions are legal on rejection. Target ReleaseData counts transactions, while expected immutable images/preserved stores count distinct lines; WB/SQ and held-load/WB/LQ remain exact |
-| `actual_set_pressure_rejected_issue_order` | Rejected STA-first/SDA-first store totals; sum equals rejected stores |
-| `target_bank_conflict` | Requested resident two-/three-way bank-conflict class |
-| `actual_bank_conflict_terminal` | Four-value tuple `actions, accepted loads, writebacks, LQ dequeues`; all members conserve and internal replay/arbitration observations remain diagnostic |
-| `actual_probe_depth` | Authoritative accepted-but-unanswered Probe depth distribution |
-| `actual_probe_overlap` | Compatibility overlap counts projected from `actual_probe_depth` |
-| `actual_probe_cross` | Enabled depth x cap x need-data Probe bins |
-| `actual_canonical_boundary` | Scalar canonical-fault 24-bin total and marginal source |
-| `actual_vector_canonical_boundary` | Singleton vector canonical-fault 36-bin total |
-| `actual_vector_canonical_boundary_flows` | Queue-flow count weighted by `16 >> eew` |
-| `actual_gstage_boundary` | G-only scalar upper-limit 12-bin total |
-| `actual_vector_gstage_boundary` | G-only singleton vector upper-limit 18-bin total |
-| `actual_vector_segment_high_va_cross` | Twenty-four high-half segment bins: eight stage-1 mode x direction x alignment bins followed by all four nested VS/G pairs x direction x alignment |
+| `constraint_schema`, `constraints`, `target_*` | Serialization version, selected profile name, and resolved weights/rates/manager latency. The profile name alone does not encode overrides. |
+| `transactions`, `cycle`, `*_writebacks`, `*_requests`, `dcache_refills`, `grant_acks` | Completed actions, simulation cycles, and externally counted completion/manager events. Units differ. |
+| `actual_ops`, `actual_locality` | Sampled operation and address-pool observations in the field orders above. |
+| `actual_vector_*`, `actual_vector_segment_*` | Instruction-level shape/policy/subclass observations, with separate uop, multi-uop, FOF fix-VL, and high-VA counts. A shape tuple does not imply every mask, index, fault, or concurrency variant. |
+| `actual_canonical_boundary*`, `actual_vector_canonical_boundary*`, `actual_gstage_boundary*`, `actual_vector_gstage_boundary*` | Sampled boundary cases and their controls, recoveries, store checks, and flows. |
+| `actual_translation`, `actual_stage1_mode`, `actual_vs_mode`, `actual_g_mode`, `actual_nested_pairs`, `actual_*leaf*`, `actual_fences` | Sampled regime/mode/leaf/fence observations; not an arbitrary page-table or address-remapping inventory. |
+| `actual_atomic_*`, `actual_hypervisor_*`, `actual_cmo_*`, `actual_ptw_error_*`, `actual_uncache_*` | Sampled family, width, privilege, memory-type, error, and helper-specific manager observations. |
+| `actual_load_merge_*`, `actual_bank_conflict_*`, `actual_set_pressure_*`, `actual_miss_burst_*` | Compound-action shapes, manager/terminal counts, and pressure observations. Same-bank stimulus does not require a particular RTL replay policy. |
+| `concurrent_ops` | Five producer counts: scalar load, vector load, scalar store, vector store, prefetch. |
+| `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
+| `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
+| `dcache_latency_*`, `ptw_latency_*`, `uncache_latency_*` | Manager response-latency samples, four bucket counts, total cycles, and maximum. These are observed responses, not architectural deadlines. |
+| `lq`, `sq` | Dequeued + legally canceled / allocated entries. |
+| `lsq_monitor_schema`, `lsq_enqueued_observed`, `redirect_cancels_observed`, `unobserved_cancels` | Independently observed enqueue/cancellation accounting and any unobserved cancellation residual. |
+| `probe_source_space`, `probe_source_lifecycle`, `probe_max_outstanding` | Available manager source IDs, unique/reuse/wrap counts, and maximum outstanding Probes. |
+| `load_wakeups`, `load_cancels`, `raw_load_*` | Feedback diagnostics; they do not define independent expected memory values. |
 
-### Legal Driver and Replay Contracts
+## Explicit Stimulus And Oracle Gaps
 
-The harness must model upstream scheduling needed for legal stimulus. Scalar
-stores reissue when the DUT reports replay. A vector load whose active element
-crosses a 16-byte boundary advances to the modeled ROB head before issue,
-matching `LoadMisalignBuffer` eligibility; failure to drive that state is a UT
-deadlock, not RTL failure. Atomic operations are serializing and absent from
-overlap windows because LR/SC/AMO blocks the pipeline and redirects load-unit-0
-control while active. Translated MMIO stores reissue from observed store-TLB
-miss feedback until a hit is observed before the ROB-head pulse. NC/MMIO actions
-are never emitted in Bare because only PBMT supplies those attributes here.
-Misaligned vector stores drive ROB-head/pending state and replay; concurrent
-vector feedback is matched to the originating load/store by queue identity. SQ
-retirement uses the enqueue-time target, preventing double counting when a
-writeback retires before the helper's explicit commit step; scalar stores use
-the same target. Every LQ/SQ identity derives its modulo value and wrap flag from
-the same absolute cursor, an input-legality invariant checked by unit tests and
-not used as an internal RTL or architectural-data oracle.
+- Ordinary random vector traffic explores legal EEW/SEW/LMUL/EMUL and addressing
+  tuples, but masked global elements beyond the 16-bit mask carrier are not
+  available. Large unmasked shapes do not establish large masked-body coverage.
+  Ordinary indexed offsets are unique and fixed-spaced (`element * data_bytes
+  * 2`); segment indexed offsets use `element * data_bytes * (NF + 1)`.
+  Duplicate, overlapping, permuted, or arbitrary index vectors are not random
+  dimensions here. Ordered encoding on ordinary memory does not prove
+  architecturally observable order at a side-effecting target.
+- Ordinary random cacheable translation is predominantly identity-mapped,
+  including nested contexts; dedicated aliases exist for high-VA, hypervisor,
+  PBMT, FOF, and error helpers. Mode/leaf counters do not prove arbitrary
+  VA-to-GPA-to-PA permutations, arbitrary root/ASID/VMID churn, or broad
+  page-table mutation/invalidation races.
+- Ordinary VLEFF uses VL=2 and faults at element0 or element1. Segment FOF
+  supports legal unit-stride shape tuples but also uses those two fault
+  positions. Later arbitrary fault positions, all FOF policy combinations,
+  strided/indexed FOF encodings, and active-segment redirect are not generated
+  by this random interface. The segment FOF encoding is unit-stride only.
+- Heterogeneous windows have a fixed five-producer composition, optional clean
+  NC/MMIO load, bounded queue flow, dependent ordered-index issue, and a drain
+  between windows. Serial helpers supply local Probe/refill/pressure overlaps.
+  Broad arbitrary outstanding instruction mixtures, multiple CMO/atomic
+  ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
+  injection are not provided by these constraints.
+- The implemented manager response profiles generate selected legal timing,
+  denied, and corrupt cases. They do not establish exhaustive malformed,
+  duplicate, early/late, or missing-response detection. Some counters describe
+  generator choices or sampled windows rather than independent DUT events;
+  request-count hit/miss classification can include prefetch traffic.
+  Output-only store-data identity and two-state simulation retain limitations
+  described in [ORACLES.md](ORACLES.md#implementation-limitations).
 
-### Explicit Gaps
-
-The current contract does not claim malformed, duplicate, or unsolicited
-manager responses; replacement composed with Probe/CMO/atomic traffic; multiple
-simultaneous CMO sources; cross-hart atomic reservation; active segment
-redirect; full vector/atomic same-bank crossing; cross-operation miss-burst
-composition; or an independent starvation monitor/general simulator
-cross-coverage database. Dependency-aware overlap-window shapes, the full
-624-shape ordinary-vector cross against every concurrent producer, broader
-ordinary VFOF producer interactions, and concurrent special stores are not yet
-closed. Hardware-prefetch causality and positive L3-enabled integration remain
-characterization/configuration gaps.
-
-Boundary gaps include multi-active-element faults, vector-load and unit-stride
-canonical crossings, additional LMUL/EMUL/SEW shapes, nested boundary
-composition, GPA wrap, high-half FOF segment traffic, noncanonical segment
-faults, and broader partial-fault progress. Hypervisor gaps include
-non-PMA PBMT with misalignment and additional fixed-PMA/PMP sizes, TOR, lock,
-permission, and overlap-by-edge crosses. Do not infer these gaps from aggregate
-event counts; when a reachable known class cannot be reached, stop extending
-runtime and review trigger probability, per-seed closure, and oracle strength.
+New fields should extend the shared parser, pretraffic validation, resolved
+`target_*` serialization, actual observation counters, and deterministic replay.
+A material distribution, oracle, or coverage-claim change needs the independent
+review specified in
+[VERIFICATION_PLAN.md](VERIFICATION_PLAN.md#independent-review-and-no-progress-audits).
+No new field should introduce a hidden coverage-completeness PASS gate.

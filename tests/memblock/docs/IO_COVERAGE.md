@@ -1,35 +1,36 @@
 # MemBlock Top-Level IO Coverage
 
-## Scope
+## Scope and interpretation
 
-This document is the authoritative mapping from the generated MemBlock top-level
-interface to constrained-random stimulus, monitors, legal-value classes, and
-known coverage gaps. `config/expected_ports.json` remains the exact per-pin
-inventory. `docs/PORTS.md` renders the generated group and protocol summary.
+This is the current stimulus/check map for the generated MemBlock boundary.
+[DESIGN.md](DESIGN.md) explains transaction flow and ownership;
+[ORACLES.md](ORACLES.md) defines expected behavior;
+[VERIFICATION_PLAN.md](VERIFICATION_PLAN.md) owns behavioral points, gaps and
+acceptance. No inventory count or sampled activity establishes semantic closure.
 
-The current generated configuration has 1,335 flattened ports: 749 inputs and
-586 outputs. A pin being driven does not imply that every protocol-valid value
-combination has a semantic oracle. The status terms below are therefore used
-strictly:
+[expected_ports.json](../config/expected_ports.json) is the flattened interface
+inventory. [memblock.json](../config/memblock.json) defines grouping, lane counts,
+widths and fixed queue dimensions. [semantic_ports.json](../config/semantic_ports.json)
+and [DutAdapter](../cpp/environment/dut_adapter.hpp) provide private semantic
+access. Generated defaults/readback can touch a pin without implementing a legal
+transaction or an oracle for it. The pin-space scenario applies 256 patterns to
+747 non-clock/non-reset inputs and samples 586 outputs while reset is asserted;
+input readback and an output digest are access checks only.
 
-| Status | Meaning |
-| --- | --- |
-| **Semantic / constrained** | A typed driver generates legal transactions, an independent monitor/reference model checks observable behavior, and coverage is sampled and reported; functional and protocol oracles decide PASS |
-| **Semantic / directed** | A focused scenario drives and checks the interface, but it is not exposed as a general constrained-random dimension |
-| **Monitored / partial** | The interface is sampled and several contracts are checked, but field combinations or negative cases remain exposed |
-| **Structural only** | `pin-space` and idle policy exercise the pins, without claiming legal protocol semantics |
-| **Integration-owned** | Correct meaning depends on logic outside the MemBlock boundary |
-| **Planned gap** | No adequate producer, oracle, or acceptance rule exists yet |
+The catalog in [catalog.json](../cpp/scenarios/catalog.json) contains 90 scenarios:
+89 directed scenarios and the constrained-random scenario. The benchmark selects
+85 entries; cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high
+and vector-segment-noncanonical are catalogued but not benchmark-selected. This
+is registration, not passing-run or coverage evidence. MixedScenario implements
+the canonical constrained-random catalog entry. Constraint input/output uses
+constraint_schema=53. The legal field definitions and per-run observed counters
+are in [CONSTRAINED_RANDOM.md](CONSTRAINED_RANDOM.md), not duplicated here.
 
-All non-clock/non-primary-reset inputs participate in `pin-space`: zero,
-all-one, and 254 deterministic mixed patterns are driven and read back, and all
-outputs are sampled after each pattern. This proves wrapper connectivity and
-broad raw value reachability. It does not close any semantic row below.
+## Generated interface inventory
 
-## Generated Inventory
-
-The following block is generated from `config/expected_ports.json`; run
-`make check-docs` after any RTL interface change.
+This block is generated from the manifest by
+[check_io_coverage.py](../scripts/check_io_coverage.py). Keep it exact; changing
+prose does not authorize regenerating the tracked DUT manifest.
 
 <!-- BEGIN GENERATED INTERFACE INVENTORY -->
 | Interface group | Ports | Inputs | Outputs |
@@ -46,100 +47,136 @@ The following block is generated from `config/expected_ports.json`; run
 | **Total** | **1335** | **749** | **586** |
 <!-- END GENERATED INTERFACE INVENTORY -->
 
-## Interface Coverage Matrix
+## Driver, monitor and oracle owners
 
-The legal-value column names the dimensions that the harness deliberately
-varies or enumerates. Values outside these classes are either constrained as
-illegal, checked only by `pin-space`, or listed as gaps.
+| Owner | Responsibility |
+| --- | --- |
+| [control.cpp](../cpp/environment/control.cpp), [issue.cpp](../cpp/environment/issue.cpp) | Capacity-aware dispatch; stable ready/valid issue; ROB controls; scalar/vector/atomic/prefetch stimulus. |
+| [translation_context.cpp](../cpp/environment/translation_context.cpp), [translation_mapping.cpp](../cpp/environment/translation_mapping.cpp), [translation_ports.cpp](../cpp/environment/translation_ports.cpp), [page_table_builder.cpp](../cpp/environment/page_table_builder.cpp) | Independent page tables, mode/context/permission controls, IFetch PTW/L2 DTLB and trigger programming. |
+| [manager_control.cpp](../cpp/environment/manager_control.cpp) | Configure response delays, channel backpressure, error injection and explicit probes. |
+| [TileLinkMemoryAgent](../cpp/environment/dcache_agent.inc), [PtwMemoryAgent](../cpp/environment/ptw_agent.inc), [UncacheMemoryAgent](../cpp/environment/uncache_agent.inc) | Drive manager inputs and inspect accepted memory-side traffic; maintain separate bus memory and protocol records. |
+| [FeedbackMonitor](../cpp/environment/feedback_monitor.cpp) | Sample writebacks before the edge, feed scoreboards, record feedback/sideband events and collect vector replay requests after the edge. |
+| [QueueAccounting](../cpp/environment/queue_accounting.cpp) | Sample dispatch independently of driver counters; conserve aggregate allocation, dequeue and explicit cancellation, without a complete per-uop event identity oracle. |
+| [BridgeMonitor](../cpp/environment/bridge_monitor.cpp) | Build delayed/held routing expectations from captured top-level inputs. |
+| [model.inc](../cpp/environment/model.inc), [scoreboards.inc](../cpp/environment/scoreboards.inc), [completion.cpp](../cpp/environment/completion.cpp) | Byte/operation/translation reference state; match result identity/data/metadata; drive legal completion/commit/replay and cancellation. |
+| [frontend.cpp](../cpp/environment/frontend.cpp), [reset.cpp](../cpp/environment/reset.cpp) | Frontend bridge transaction checks, reset recovery and reset-held pin-space checks. |
 
-Rows below are semantic families and can share a physical control pin. The
-generated table above is the non-overlapping physical inventory.
+Environment::Impl::tick in [cycle.cpp](../cpp/environment/cycle.cpp) defines the
+sampling phases. Response fields driven by a manager and then read back by that
+same manager validate harness transport only. Independent result/side-effect
+checks are still required to establish DUT behavior.
 
-| Interface family | Ports | Legal-value dimensions exercised | Driver and oracle | Status |
-| --- | ---: | --- | --- | --- |
-| Clock and primary reset | 2 | Clock generation, external reset assertion, synchronized release, reset during outstanding manager traffic | Environment reset controller; reset/recovery and quiescence checks | Semantic / directed |
-| LSQ dispatch: `enqLsq_req_0..5`, `enqLsq_needAlloc_*`, `lsqio_scommit`, pending pointers, `flushSb` | 241 | Six dispatch lanes, allocation width, 24 exception classes, FU/op type, `flushPipe`, `uopIdx`, `lastUop`, ROB/LQ/SQ identity, `numLsElem`, commit/pending state | Typed LSQ enqueue/commit drivers and passive six-lane monitor; operation, lane, width, identity, and queue-flow conservation | Semantic / constrained |
-| Scalar load issue: `issueLda_0..2` | 72 | `lb/lh/lw/ld/lbu/lhu/lwu`, three lanes, aligned/misaligned and cross-page VA, both Sv39/Sv48 canonical boundary directions and 2/4/8-byte crossing widths, Bare/Sv39/Sv48 and nested translation, 41/50-bit G-only upper-limit crossings, cache/TLB/error outcomes | `issue_load`, load scoreboard, translation/PMP/PMA oracles; direction/lane/operation coverage | Semantic / constrained |
-| Vector memory issue: `issueVldu_0..1` | 75 | EEW/SEW 8/16/32/64, legal LMUL/EMUL, unit/strided/indexed-unordered/indexed-ordered/segment, mask, `vl`, `vstart`, old destination, split/cross-page replay, VFOF and Segment FOF, legal high-half Sv39/Sv48 and all four nested VS/G ordinary segment load/store addresses, eligible singleton strided/indexed store crossings at both Sv39/Sv48 canonical boundaries and 41/50-bit G-only upper limits | Vector builders, byte-accurate vector scoreboard and RVV reference; legal-shape and uop-flow coverage | Semantic / constrained |
-| Scalar store issue: `issueSta_0..1`, `issueStd_0..1` | 40 | `sb/sh/sw/sd`, both address and data lanes, explicit lane-0 MMIO/CMO/CBO.ZERO/split completions, two issue orders, byte masks, misaligned/replay, Sv39/Sv48 canonical range faults, 41/50-bit G-only range faults, forwarding, translation and manager errors | Store address/data drivers, store scoreboard, SQ/readback and forwarding oracles | Semantic / constrained |
-| Translation controls: `sfence`, `tlbCsr_*` | 41 | Bare/Sv39/Sv48, VS/VU/G modes, all four nested `vsatp` x `hgatp` pairs, ASID/VMID/PPN changes, global/selective SFENCE/HFENCE kinds and scopes | `issue_sfence`, translation-context and fence matrices; stale-response suppression and exact PA checks | Semantic / constrained |
-| Redirect and exception controls | 5 | ROB flag/value, redirect level, VLS-exception marker; all load/store/vector/atomic exception causes exercised by focused scenarios | Redirect driver, queue cancellation monitor, exception and writeback oracles | Semantic / constrained |
-| CSR, trigger and backend controls | 63 | CSR-distribution controls, debug/memory/frontend triggers, Debug Mode entry/exit with guarded-region LD/SD, CPU halted/critical-error/MSI ack, PMP CSRs | Distributed-CSR writers, trigger/PMP contracts and top-control bridge checks | Semantic / directed |
-| MemBlock-to-OOO outputs | 260 | Writeback payload/identity/data/error, successful vector data `vdIdxInField` across ordinary/indexed/segment/whole-register shapes, wakeup/cancel lanes, IQ feedback, memory violation, top-down and interrupt outputs | Load/store/vector scoreboards, feedback and protocol monitors, top-control and top-down oracles | Monitored / partial |
-| DCache A/B/C/D/E TileLink | 53 | A Get/Acquire/CMO opcode, size, source, grow, alignment, mask/corrupt and defined Acquire user alias/VA-page-offset relationships; B Probe opcode/param/source/address/permissions; C Release/ReleaseData and CMO; D beat data/denied/corrupt; E GrantAck; A/C/D/E ready stalls and response latency | Coherent DCache agent with accepted-A contract checks and bounded metadata diagnostics, SVA, release-data model, manager accounting and constrained-random coverage schemas; schema 53 qualifies retained dirty baseline coherence responsibility before held-refill overlap and accounts rejected construction separately through normal completion. ProbeAck(Data) is matched by address while its client-owned C source is observed; denied and last-beat-corrupt errors are also driven through cached poisoned lines into vector loads | Monitored / partial |
-| PTW A/D TileLink | 21 | Legal Get requests, multibeat data, denied/corrupt at first/all/last beats, source/address matching, request/response stalls and long latency | PTW agent and software page-table walker; fault cutoff and retry checks | Monitored / partial |
-| Uncache A/D TileLink | 20 | Get/Put, 1/2/4/8-byte accesses, mask/data, AccessAck/Data, denied/corrupt, FP FLH/FLW sign-bit-clear/set NaN-boxing payloads, device side effects, ready stalls and latency | Uncache agent, partial-write log, architectural and bus-memory comparison | Monitored / partial |
-| Frontend ICache, ICache-control, instruction-Uncache TileLink | 88 | Get/PutFull/PutPartial, sizes 1/2/4/8 and line requests, source credit, address/mask/data/user fields, two-beat ICache D, corrupt/denied, request/response stalls | `frontend-bridge` independent scoreboards and source-credit checks; all 88 fields explicitly driven or checked | Semantic / directed |
-| IFU-to-Mem PTW request/response | 64 | Sv39/Sv48 and all four nested pairs, VS/G leaf and non-leaf inputs, PBMT, faults, duplicate same-VPN requests, context changes, fences, response backpressure | `ifetch-ptw-bridge`; exact response fields, walk sharing, stale-response suppression | Semantic / directed |
-| L2 DTLB boundary: `io_l2_tlb_req_*` | 13 | Ordinary/prefetch, kill, `no_translate`, cacheable/NC/IO, hit/miss, stage-1/nested faults, PMP allow/deny, all `sourceId` hint values | `l2-tlb-contracts`; exact registered response fields and PTW request accounting | Semantic / directed |
-| L2 hint, flush, top-down, interrupt and WFI controls | 21 | Hint valid/source/keyword, flush completion, L1/L2/L3 miss and pressure, seven external interrupts, WFI request/safe | `l2-tlb-contracts`, `l2-flush-contracts`, `topdown-contracts`, `top-control-contracts`, `wfi-safety` | Semantic / directed |
-| Software and hardware prefetch outputs | 11 | `prefetch.i/r/w`, three IFU-prefetch lanes, fixed-PC strides, L2/L3 sender addresses and sources; CSR suppression | `ifetch-prefetch`, `hardware-prefetch`, stride traffic in `constrained-random`; IFU output has an architectural oracle, hardware sender selection is characterization only | Monitored / partial |
-| Trace bypass | 45 | Group-valid combinations, instruction types, retire counts, privilege, encoder ready/valid, FTQ offset, trap cause/tval | `trace-bridge-contracts`; exact transport transformation | Semantic / directed |
-| DFT bridge | 24 | Seven SRAM broadcast controls and three DFT-reset controls; all 1,024 combinations; functional and scan reset effects | `dft-bridge-contracts`, `reset-tree-contracts`; combinational output and reset routing | Semantic / directed |
-| Performance events and counters | 144 | Clock/reset operation and top-control transport for outer/inner hardware-counter lanes; `top-control-contracts` checks 67 shared lanes | Generated lane adapters and transport checks | Integration-owned |
-| Remaining direct top-level controls | remaining | Hart ID, reset vector, L2 enable/flush, clock/power, MSI ack, I-cache BEU, DCache/Uncache ECC outputs, MBMC and maintenance controls | `top-control-contracts`, `mbmc-contracts`, ECC scenarios and cycle-level monitors | Monitored / partial |
+The generated [protocol SVA](../sv/memblock_protocol_sva.sv) checks valid/payload
+stability for retained DUT producers including DCache A/C/E, PTW A, Uncache A,
+frontend producer channels and IFU PTW response. These checks require an
+assertion-enabled model containing the bind file. They do not replace source/
+sink lifetime, accepted-multibeat or architectural side-effect checking.
 
-## Constrained-Random Legal Inputs
+## Pin-family stimulus and check map
 
-The common `constrained-random` generator currently records
-`constraint_schema=53`. Its canonical legal-input dimensions are documented in
-`CONSTRAINED_RANDOM.md` and include:
+Each listed item is an exact flattened-name prefix, unless it is a complete pin
+name. A trailing asterisk includes every retained suffix and lane; brace notation
+lists alternatives, not additional pins. These families cover the manifest;
+consult it for individual fields, widths, direction and pruned fields. Driver
+names below are Environment::Impl members unless an owning class is stated.
+Existing stimulus refers to executable scenarios, not an assertion that all
+legal field combinations are covered. G identifiers refer to the gap table.
 
-- scalar loads/stores, vector loads/stores/segments, software prefetch and
-  atomic AMO/LR/SC/AMOCAS operations;
-- cacheable, PBMT-NC and PBMT-IO addresses, including MMIO store behavior;
-- Bare, host stage-1 and nested VS/G translation, all supported Sv39/Sv48 mode
-  pairs, Svnapot leaves, context switches, TLB flushes and translation fences;
-- all decoder-legal ordinary vector direction/addressing/EEW/SEW/LMUL/EMUL
-  classes, mask/tail agnostic policies, `vl`, `vstart`, alignment and replay;
-- dirty/clean Probe traffic, one-through-eight Probe depth, source lifecycle,
-  CMO operation/state/depth crosses and atomic Probe composition;
-- scalar-load, atomic and PTW denied/corrupt manager errors, response latency,
-  request/response stalls and six observed backpressure classes;
-- redirects, queue pressure, load merge, set replacement, miss bursts, bank
-  conflicts and cold/warm/hot locality;
-- scalar accesses crossing either canonical boundary in Sv39/Sv48, every
-  enabled load/store x mode x boundary direction x 2/4/8-byte width bin,
-  exact fault address, unchanged edge data, and observed queue recovery;
-- eligible singleton vector-store crossings in strided and both indexed modes,
-  EEW=SEW 16/32/64, LMUL=EMUL=1, exact terminal fault/VA, all reserved SQ flows
-  externally retired/canceled, unchanged edge readbacks, and a committed
-  store/load survivor pair;
-- independent G-only 41/50-bit upper-limit crossings with 12 scalar and 18
-  singleton vector-store bins, exact VA/GPA/marker, four real edge controls,
-  observed queue recovery and committed survivors.
+### Backend operations and translation
 
-Every enabled constrained class must be observed in each seed and must conserve
-its target/actual coverage counters. Architectural data, exceptions, identity,
-queue retirement and manager traffic remain independently checked.
-
-## Insufficient Coverage
-
-No current result supports the claim that every legal value combination on all
-1,335 ports is covered. The following classes still lack a complete producer,
-reference model, or externally observable acceptance contract. They are plan
-gaps, not silently accepted behavior.
-
-| Gap | Affected interfaces | Why current coverage is insufficient | Priority |
+| Exact pin family | Driver and observation/check | Existing legal stimulus | Remaining scope |
 | --- | --- | --- | --- |
-| Malformed, duplicate, unsolicited, early, or late manager responses | DCache, PTW and Uncache A/D TileLink | Legal denied/corrupt cases are covered, but negative protocol timing is not part of normal workload traffic | High |
-| Replacement composed with Probe/CMO/atomic traffic; multiple simultaneous CMO sources | DCache TileLink and maintenance controls | Individual mechanisms have depth and error coverage; externally attributable multi-class ordering is incomplete | High |
-| Full-core fence/fence.i integration and cross-hart LR/SC reservation interference | SFENCE, atomic issue/retirement, L2/L3 controls | MemBlock receives post-decode controls; cross-hart and whole-core ordering are outside this UT boundary | High |
-| Broader hypervisor PMP/PMA/misalignment combinations, instruction PMP and fixed-PMA region edges | HLV/HLVX/HSV issue, PMP/PBMT/TLB controls | The 4-KiB NAPOT relation cross and one fixed device interval are covered; several cross-products remain | Medium |
-| Software-visible `satp`/`vsatp`/`hgatp` WARL behavior and hardware A/D updates | TLB CSR/TLB feedback and PTW traffic | MemBlock consumes post-CSR controls; concurrent A/D and invalidation races need full-core or formal context | Medium |
-| Broad cross-cause exception priority and ordered indexed side-effecting accesses | LSQ enqueue/issue, redirect and writeback outputs | Selected page-fault/PBMT/PMP overlaps are covered; the complete priority matrix and ordered MMIO/indexed target semantics are not | Medium |
-| Reset during arbitrary LSQ producer/replay classes | OOO issue/enqueue, redirect and LSQ queues | Three manager-path recoveries plus six LR/AMOADD/AMOCAS x W/D cold-refill, four partial LR refill, and twelve singleton/opposite-half-pair scalar LD lane/target-half reset cases are covered; CMO, partial modifying/error refills, and additional producer/replay states remain | Medium |
-| Broader vector canonical ranges and stage-2 address limits | Scalar/vector issue and TLB controls | Schemas 49/50 compose scalar and eligible singleton strided/indexed store crossings at canonical and G-only upper limits into mixed traffic. Other vector shapes, multi-active-element fault progress, unit-stride/vector-load crossings, nested boundary composition and GPA wrap remain | Medium |
-| Split-load timing near RAR capacity | Scalar/vector load issue and load feedback | One directed three-pending-split case exists; the wider delay/occupancy space is not randomized | Medium |
-| Complete wakeup/cancel/memory-violation field attribution | MemBlock-to-OOO feedback outputs | Focused cases cover all exposed violation fields and representative wakeup/cancel classes, but there is no complete count/field relation for every producer, replay and exception cross | Medium |
-| Matching-MSHR L2-hint replay and external-L2 retry policy | L2 hint and L2 DTLB request/response | The MemBlock-side transport and idle/no-MSHR behavior are checked; matching-MSHR policy and downstream retry ownership are outside this boundary | Integration-owned |
-| Dynamic control reprogramming and remaining CSR/trigger cross-products | CSR, trigger, PMP, PMA, flush and maintenance controls | Default/legal static combinations are checked; arbitrary reprogramming during overlapping LSQ, cache and translation traffic is not exhaustively covered | Medium |
-| Broader physical ECC injection and coherence recovery | DCache/Uncache ECC and manager error paths | Current bank/tag/data single- and double-bit classes and same-cycle isolation are covered; broader masks, delayed/persistent events and wider concurrency remain | Medium |
-| Four-state/X behavior and uninitialized storage | All storage-bearing interfaces and internal arrays | Requires a four-state simulator or equivalent formal check; two-state Verilator cannot establish it | Medium |
-| Performance-counter meaning, top-down attribution, hardware-prefetch selection and training metadata | Performance and L2/L3 prefetch outputs | These have transport/characterization checks but no stable architectural oracle at the MemBlock boundary | Integration-owned |
-| MBIST and physical SRAM behavior | DFT and SRAM-facing controls | Functional reset/DFT routing is checked; physical array and MBIST behavior are below this UT boundary | Integration-owned |
+| io_ooo_to_mem_enqLsq_needAlloc_*, io_ooo_to_mem_enqLsq_req_* | enqueue_load_batch, enqueue_prefetch_batch, scalar/vector/atomic enqueue helpers; QueueAccounting samples accepted dispatch separately. | Mixed dispatch widths/lanes, queue pressure, scalar/vector allocation and redirect cancellation. | Capacity headroom and concrete generated shape limit the explored dispatch state; G5/G6. |
+| io_ooo_to_mem_issueLda_* | issue_load/issue_load_batch/issue_prefetch; LoadScoreboard observes writeback by ROB/destination identity. | Integer/FP width/sign, signed immediate, dependency metadata, cache hit/miss, forwarding, software prefetch, misalignment, translation/fault paths; mixed concurrent loads. | Cross-products require observed per-run counters; no writeback-ready input; G5/G7. |
+| io_ooo_to_mem_issueSta_*, io_ooo_to_mem_issueStd_* | issue.cpp address/data/atomic helpers; StoreScoreboard and scalar result scoreboard. | Address/data order and lane mixing, widths, forwarding, committed/exception stores, atomics, CBO.ZERO/CMO, uncached/MMIO. | Not every Scala atomic operand/uop shape has a driver; global store visibility requires an effect oracle; G6. |
+| io_ooo_to_mem_issueVldu_* | make_vector_memory_issue, vector issue/replay helpers; VectorMemoryScoreboard. | Unit-stride, strided/indexed, segment/FOF, whole-register, mask/tail/VSTART, register/uop shapes, split accesses, faults and partial store replay. | G4/G5: global mask is 16 bits; fault progress metadata is only partly checked. |
+| io_mem_to_ooo_writebackLda_* | FeedbackMonitor::sample_before_edge -> LoadScoreboard::observe. | Scalar/prefetch/atomic/split-load identity, result, exception, replay, write-enable, trigger and configured debug class. | Metadata options and producer variations need explicit expectations; all source bits are not automatically checked by sampling. |
+| io_mem_to_ooo_writebackSta_*, io_mem_to_ooo_writebackStd_* | FeedbackMonitor -> StoreScoreboard::observe_address/observe_data. | Matching address/data acknowledgements, exception and configured sidebands; deferred uncached/CBO.ZERO cases. | These acknowledgements do not independently prove persistent store bytes; G6. |
+| io_mem_to_ooo_writebackVldu_* | FeedbackMonitor -> VectorMemoryScoreboard::observe. | Returned bytes/mask, destination and vd-index, vector config, success VSTART, FOF fix-VL and configured exception/trigger/debug metadata. | G5: fault VSTART is optional and most config/data checks are bypassed for exception progress. |
+| io_mem_to_ooo_staIqFeedback_*, io_mem_to_ooo_vstuIqFeedback_* | FeedbackMonitor::sample_after_edge records queue identity, hit/replay and vector replay mask/index; completion helpers reissue selected transactions. | iq-slow-feedback, store-tlb-miss-preserve, vector-store and mixed replay traffic. | Complete producer/exception/concurrency attribution is absent; G7. |
+| io_mem_to_ooo_wakeup_*, io_mem_to_ooo_ldCancel_* | FeedbackMonitor records lane, destination/write class and cycle; load-feedback and forwarding scenarios assert selected relations. | Cache/refill wakeup, dependency/bank conflicts, load cancel and cancellation recovery. | Event recording alone does not validate each producer or exactly-once wakeup/cancel relation; G7. |
+| io_mem_to_ooo_memoryViolation_* | FeedbackMonitor records complete retained redirect metadata; memory-violation and rar-violation compare independently chosen victims. | RAW/RAR, release/coherence overlap, ROB wrap and replay paths. | Complete mixed attribution and timing/occupancy combinations remain; G7. |
+| io_ooo_to_mem_lsqio_*, io_mem_to_ooo_lqCancelCnt, io_mem_to_ooo_sqCancelCnt, io_mem_to_ooo_sqDeq, io_mem_to_ooo_lqDeq, io_mem_to_ooo_lqDeqPtr_* | set_rob_head, pending-load/store and commit helpers; QueueAccounting tracks retirement/cancellation; FeedbackMonitor records MMIO request identities. | Queue pressure/wrap, head authorization, commit and redirect drain. | Only scommit, pendingMMIOld, pendingst and pendingPtr survive on the generated input side. No generated lcommit/pendingld/pendingVst/commit input. |
+| io_mem_to_ooo_lsqio_loadMmio_*, io_mem_to_ooo_lsqio_loadMmioUop_*, io_mem_to_ooo_lsqio_storeMmio* | wait_for_mmio_request/wait_for_mmio_store_request and FeedbackMonitor; scenario-level head checks and device journal. | MMIO ordering, pending-head request, uncached width/error/outstanding and non-idempotent device paths. | Broader overlapping device/redirect/error/reset combinations remain; G3/G6. |
+| io_redirect_*, io_ooo_to_mem_isStoreException, io_mem_to_ooo_lsqio_vaddr, io_mem_to_ooo_lsqio_gpaddr, io_mem_to_ooo_lsqio_isForVSnonLeafPTE | redirect/flush helpers, exception selector and scenario reads; reference VA/GPA and no-effect checks. | Scalar/vector/guest exception addresses, selective cancellation, surviving work, vector-store flush. | Fault VSTART/VL standalone outputs are pruned; vector writeback progress still has G5. |
+| io_ooo_to_mem_sfence_*, io_ooo_to_mem_tlbCsr_* | translation context/mapping helpers, issue_sfence and in-flight context tests; independent page-table/permission calculations. | Bare/Sv39/Sv48, VS/G combinations, ASID/VMID, leaf/superpage, permission/PBMT, pointer masking, MBMC, selective fences, context changes and boundary faults. | Further nested, multi-active-element and dynamic-overlap combinations require distinct stimulus; G5/G8. |
+| io_ooo_to_mem_csrCtrl_distribute_csr_w_* | write_distributed_csr/configure_pmp plus explicit distribution settling; reference permissions and side effects. | PMP/PMA, bitmap/ECC injection, CSR-configured cache/protection paths. | Distribution transport is not a general proof of every writable CSR; G8/G9. |
+| io_ooo_to_mem_csrCtrl_mem_trigger_* | configure_memory_trigger; result trigger/exception and forbidden-access checks in trigger-contracts. | Exposed load/store trigger enable, address/match/select/action/chain/debug configurations and mixed trigger directions. | Remaining legal trigger cross-products and reprogramming under overlap; G8. |
+| io_ooo_to_mem_csrCtrl_frontend_trigger_*, io_ooo_to_mem_csrCtrl_bp_ctrl_*, io_ooo_to_mem_csrCtrl_fsIsOff | Generated idle/default and reset-held pin-space drive/readback. | Input access/width patterns only for these retained controls. | No complete frontend branch/trigger/FS functional oracle at this UT boundary; G10. |
+| io_ooo_to_mem_csrCtrl_sbuffer_timeout, io_ooo_to_mem_csrCtrl_ldld_vio_check_enable, io_ooo_to_mem_csrCtrl_cache_error_enable, io_ooo_to_mem_csrCtrl_uncache_write_outstanding_enable, io_ooo_to_mem_csrCtrl_hd_misalign_st_enable, io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable | Typed setters/control configuration; completion, feedback and manager/error observations. | Timeout/drain, load violation enable, error suppression, outstanding uncache and hardware split-access enable. | Exhaustive dynamic control changes with live work are not implemented; G8. |
 
-`VERIFICATION_PLAN.md` contains the behavioral test-point inventory and closure
-criteria. `CONSTRAINED_RANDOM.md` contains the executable constraint fields and
-per-seed stimulus coverage contract. Any new top-level port or legal class must
-update all three documents and pass `make check-docs`.
+### Memory-side and frontend protocols
+
+| Exact pin family | Driver and observation/check | Existing legal stimulus | Remaining scope |
+| --- | --- | --- | --- |
+| auto_inner_dcache_client_out_a_* | TileLinkMemoryAgent drives ready; capture_before_tick validates accepted request with dcache_a_protocol_error; tracks A sources until final matching D beat. | Get, AcquireBlock/AcquirePerm, CMO; alignment/size/mask/grow/source/user alias/page-offset; request stalls and delayed refills. | G1: generated SVA checks stalled A stability in assertion-enabled builds; A source lifecycle is not sink lifecycle. |
+| auto_inner_dcache_client_out_b_* | request_dcache_probe/manager drive; accepted probes enter pending identity/report/data tracking. | Permission caps, data/no-data probes, source reuse/wrap, resident/absent lines and overlap with releases/refills. | Probe response expectations are created before accepted B, so matching C does not establish prior B acceptance; broader alias/ownership interleavings remain. |
+| auto_inner_dcache_client_out_c_* | Manager ready and capture_before_tick; generated SVA and C stalled-payload check; accept_probe_response/accept_release validate records, reports, line data and configured expected lines. | ProbeAck/ProbeAckData, clean/dirty Release/ReleaseData, multibeat/stall windows, store visibility on release. | No complete C multibeat-field comparison or Release param/corrupt rule; ProbeAck address matching is ambiguous for same-address expectations; G6. |
+| auto_inner_dcache_client_out_d_* | Manager responds with source/size/sink/permission/keyword/data/error; D handshake removes queued beat and eventually releases A source. Result scoreboards and error checks inspect DUT consequences. | Multibeat grants, read/permission/CMO acknowledgements, response/interbeat delay, held-line response and denied/corrupt beats. | Manager input readback is not DUT-consumption proof; no broad cross-source D-reordering/interleaving campaign; G1. |
+| auto_inner_dcache_client_out_e_* | Manager drives ready; accepted sink must match expected_grant_acks_. | GrantAck count, sink identity, stalls and error-refill acknowledgement. | G2: expectation starts when responding to A, before first D acceptance; no independent busy-sink lifecycle; generated SVA checks stalled E stability. |
+| auto_inner_ptw_to_l2_buffer_out_a_*, auto_inner_ptw_to_l2_buffer_out_d_* | PtwMemoryAgent drives A ready/D; captures request shape, memory bytes, response identity and outstanding count; independent walk/permission result checks. | Translation modes/leaves, invalid/reserved PTEs, permission/guest/PBMT/MBMC paths, delayed PTW, denied/corrupt selected beats. | G3: no per-source busy table or general response-order permutations; generated SVA checks stalled A stability. |
+| auto_inner_buffers_out_a_*, auto_inner_buffers_out_d_* | UncacheMemoryAgent validates accepted width/address/mask, services independent memory/device journal, drives D and counts outstanding work. | 1/2/4/8-byte loads/stores, signed/unsigned loads, outstanding/non-outstanding settings, MMIO/device effects and denied/corrupt response. | G3: no per-source busy table; generated SVA checks stalled A stability, while aggregate drain/readback does not establish every lifecycle. |
+| auto_inner_frontendBridge_icache_in_*, auto_inner_frontendBridge_icache_out_* | exercise_frontend_bridges drives frontend A and external A-ready/D; compares ordered source/address and two 256-bit D data beats with corruption. | Buffered fetch transport, ready stalls, source turnover, reset cancellation and surviving new requests. | No backend execution, ICache refill semantics or complete frontend TileLink legal-shape oracle; G10. |
+| auto_inner_frontendBridge_instr_uncache_in_*, auto_inner_frontendBridge_instr_uncache_out_* | Same bridge exerciser; compare retained request address and 64-bit response source/data/corrupt. | Instruction-MMIO transport and reset recovery; constants are supplied by InstrUncacheBuffer. | Generated in-side has no D-ready pin and source is fixed; no instruction/device semantics; G10. |
+| auto_inner_frontendBridge_icachectrl_in_*, auto_inner_frontendBridge_icachectrl_out_* | Same bridge exerciser; compare retained opcode/size/source/address/mask/data and D; frontend D-ready can stall. | Read/write control transport, source turnover, payload stability during selected stalls, reset-discarded A/D and clean recovery. | Transport checking is distinct from functionality of the external cache-control target; G10. |
+| io_fetch_to_mem_itlb_req_*, io_fetch_to_mem_itlb_resp_* | start/complete/issue_ifetch_ptw_request; response backpressure/stability and independently built page-table response expectations. | Bare/stage-one/two-stage entries, errors/permissions, context/fence cancellation and held responses. | Wider requester overlap and integration-side consumer behavior are outside this boundary; G8/G10. |
+| io_l2_tlb_req_*, io_l2_pmp_resp_* | issue_l2_tlb_request and issue_killed_l2_tlb_request; scenario-level address/PBMT/fault/PMP checks. | no-translate/prefetch/kill and translated/faulting accesses under protection configurations. | Generated request-ready/response-ready are absent; external L2 retry/queue ownership is not modeled; G10. |
+| io_l2_hint_* | pulse_l2_hint; downstream activity/result checks in l2-tlb-contracts and related scenarios. | One-cycle hint inputs and idle/no-matching-MSHR behavior. | Matching-MSHR hint/replay policy is not comprehensively stimulated/checked; G7/G10. |
+
+### Control, bypass and observations
+
+| Exact pin family | Driver and observation/check | Existing legal stimulus | Remaining scope |
+| --- | --- | --- | --- |
+| clock, reset, io_reset_backend, io_resetInFrontendBypass_* | DutAdapter clock/step; reset clears agent link state and asserts reset; check_reset_backend_contract and BridgeMonitor. | Functional/DFT/scan reset assertions/releases, buffered/in-flight cancellation and restart. | Shared reset-domain assumption is modeled; four-state/uninitialized and arbitrary reset crosses remain G9/G10. |
+| io_dft_*, io_dft_reset_*, io_dft_frnt_*, io_dft_reset_frnt_*, io_dft_bcknd_*, io_dft_reset_bcknd_* | check_dft_bridge_space enumerates 1024 input patterns under reset; direct routing equality and reset-tree checks. | All ten exposed control-bit combinations for frontend projection, backend cgen and reset projection. | Physical SRAM, MBIST execution and scan-chain semantics are outside the check; G10. |
+| io_ooo_to_mem_flushSb, io_mem_to_ooo_sbIsEmpty, io_wfi_* | pulse_sbuffer_flush/set_wfi and require/run-until-safe; result/manager/queue checks. | Buffered-store/uncache drain, maintenance/atomic/translation work, WFI pending activity and reset recovery. | More overlapping producer/error states need explicit traffic and no-effect checks; G6/G8. |
+| io_ooo_to_mem_csrCtrl_flush_l2_enable, io_l2_flush_done, io_outer_l2_flush_en, io_ooo_to_mem_csrCtrl_power_down_enable, io_outer_power_down_en | drive_l2_flush/drive_top_controls; BridgeMonitor direct enable and registered done expectations. | Enable/done and power control patterns during idle/selected live traffic. | External L2 flush completion and power-controller correctness are integration-owned; G10. |
+| io_hartId, io_outer_reset_vector, io_inner_reset_vector, io_ooo_to_mem_backendToTopBypass_*, io_outer_cpu_halt, io_outer_cpu_critical_error, io_outer_msi_ack, io_mem_to_ooo_topToBackendBypass_* | drive_top_controls/drive_top_bridge_stimulus; BridgeMonitor direct/delayed input-derived comparisons. | Hart/reset-vector, halted/critical-error/MSI acknowledgement, interrupt/time/MSI and flush-done routing. | No full backend execution/trap/interrupt-service model; G10. |
+| auto_inner_clint_int_sink_*, auto_inner_plic_int_sink_*, auto_inner_debug_int_sink_*, auto_inner_nmi_int_sink_*, auto_inner_beu_local_int_sink_*, io_fromTopToBackend_* | drive_top_bridge_stimulus; BridgeMonitor validates delayed external interrupts/time/MSI and NMI OR relation. | Individual/composed interrupt levels, valid payloads and quiet transitions. | Interrupt priority, claim/acknowledgement and service are not verified; G10. |
+| io_inner_beu_errors_icache_*, io_outer_beu_errors_icache_* | drive_top_bridge_stimulus; BridgeMonitor registered error/address bypass. | Valid/error-address transport and deassertion. | Does not create or verify an ICache physical error; G10. |
+| io_dcacheError_*, io_uncacheError_* | Manager response-error controls, distributed ECC injection; FeedbackMonitor bus-error records and scenario assertions. | D-channel denied/corrupt, selected tag/data ECC bit classes, enable/suppression and attribution/isolation. | Injection uses the configured test-control mechanism; broader persistent/multibit/overlap states remain; G9. |
+| io_ooo_to_mem_csrCtrl_pf_ctrl_*, io_outer_l2PfCtrl_* | configure_stride_prefetch/configure_sms_pht_prefetch and top stimulus; BridgeMonitor two-stage control projection. | Enables/thresholds/stride/hit-training/control fields and selected trained traffic. | Control transport and exercised requests do not prove prefetch quality or complete algorithm selection; G10. |
+| auto_inner_l2_pf_sender_*, auto_inner_l3_pf_sender_*, io_ifetchPrefetch_* | Software-prefetch issue/training traffic; FeedbackMonitor records addresses/source; ifetch-prefetch/hardware-prefetch assert selected positive/negative relations. | Instruction-prefetch forwarding; stride/SMS directions and disabled-output classes. | No architectural oracle for all predictor/training outcomes or usefulness; G10. |
+| io_traceCoreInterfaceBypass_* | drive_trace_bridge_stimulus; BridgeMonitor captures inputs and tracks registered valid, enabled holds, trap/privilege and address-plus-offset. | Three groups, encoder control, offset/iretire/itype/size, valid/invalid hold cases. | Trace encoder/decoder and full instruction stream consistency are integration-owned; G10. |
+| io_outer_hc_perfEvents_*, io_inner_hc_perfEvents_*, io_perf_* | Hc event drive/read and BridgeMonitor shared-lane registered equality; pin-space samples all remaining outputs. | Generated input lanes 1..68 and output lanes 0..67; routing equality uses shared 1..67. | Lane 0 output/performance selections require their own semantics; digest/activity is observational; G10. |
+| io_topDownInfo_* | Top miss stimulus and BridgeMonitor delayed L2/L3 equality; topdown-contracts/queue traffic observe replay/SQ/Sbuffer/L1 events. | Selected miss/replay/full conditions and delayed external indicators. | Complete performance meaning/whole-core attribution is integration-owned; G10. |
+
+## Constrained-random legal stimulus
+
+MixedScenario composes existing transaction APIs. Its implementation is in
+[mixed_scheduler.cpp](../cpp/scenarios/mixed_scheduler.cpp),
+[mixed/scenario.hpp](../cpp/scenarios/mixed/scenario.hpp), the mixed action/policy
+files and [constraints.inc](../cpp/random/constraints.inc). Profiles constrain
+operations, address locality/boundaries, dependencies, vector shape, translation,
+protection, errors, probes and independent response latency. A sampled field is
+not evidence that its intended state was reached; per-seed observations and
+report identifiers are defined in [CONSTRAINED_RANDOM.md](CONSTRAINED_RANDOM.md).
+
+Directed scenarios are useful when a precise contract requires setup/observation
+that the mixed path does not provide. The current catalog and implementation,
+not this summary, determine which shapes are executable. No broad pin-pattern
+sweep may be treated as legal random traffic.
+
+## Unimplemented or incomplete stimulus and checks
+
+These are present capability limits, not requests to weaken a check. New legal
+stimulus must have an independent consequence oracle before its activity is
+counted as covered.
+
+| ID | Current limit | Missing legal stimulus/check |
+| --- | --- | --- |
+| G1 | DCache A is validated at acceptance and generated SVA checks stalled stability. A sources remain busy until final D. D responses are principally queued, with selected directed reverse-order cases rather than broad permutations. | Qualify assertion-enabled builds and exercise legal cross-source latency/order combinations with explicit source/beat/result matching and no response-derived expected data. |
+| G2 | TileLinkMemoryAgent::respond installs expected_grant_acks_ when A is serviced, before a Grant D beat is accepted. Sink allocation is derived from source and lacks an independent busy-sink lifecycle; generated SVA already checks stalled E stability. | Make E eligibility depend on the first accepted Grant D beat, permitting same-cycle D/E as in legalizeDESink in the [repository TileLink monitor](../../../rocket-chip/src/main/scala/tilelink/Monitor.scala); track independent sink allocation/reuse and qualify the existing E stall assertion. This is not a requirement to wait for final D. |
+| G3 | PTW and uncache count outstanding work but have no per-source busy table or comprehensive legal response reordering. Generated SVA checks their stalled A stability when enabled. Reading back driven D pins does not fill these gaps. | Separate source-lifetime/response matching and qualify the existing stability assertions; legal source reuse, concurrent responses, errors and reset cancellation with independent result/device checks. |
+| G4 | VectorMemoryTransaction::mask_bits is uint16_t. Active-element helpers test global_element < 16 for a masked element although the generated vmask is 128 bits. | A complete global mask representation/driver/oracle for legal masked elements 16..127, including multi-register and segment/indexed combinations; until then do not claim that range. |
+| G5 | VectorMemoryScoreboard compares exceptional VSTART only when expected_writeback_vstart is supplied. On exception progress it omits ordinary VSEW/EEW/LMUL/VL/NF and normal data/mask checks; vuop_idx and pdest identity matching remains active. Standalone fault VSTART/VL outputs are pruned. | Independent fault-element/progress expectations and checks for every meaningful retained exceptional field; broader multi-active-element, nested/boundary and masked exception/FOF partial progress. Existing success checks do not close this. |
+| G6 | MixedScenario::finish drains completions, queues and grants but does not read back every location changed by a successful committed store. Reference-state update plus store acknowledgement is not persistent-memory verification. | Track modified bytes independently and force an external observation for every selected final store effect, including alias/overlap and unaffected bytes; define legal cancellation/partial-fault expectations before adding checks. |
+| G7 | Feedback monitors record many sidebands; selected directed scenarios check relations. There is no universal identity/count/field oracle for every wakeup, cancel, violation, hint and replay producer. | Explicit producer expectations and mixed overlap checks, matching-MSHR hint scenarios, and wider split-load occupancy/delay states. |
+| G8 | Controls/modes/permissions are richly configurable, but arbitrary dynamic reprogramming during overlapping cache, translation, vector, queue and maintenance traffic is not exhaustively generated. | Legal state transitions with independent fence/context/permission and surviving/canceled-work expectations; wider trigger/protection/context overlap. |
+| G9 | Two-state simulation and bounded error injection do not establish four-state storage behavior or all physical ECC recovery cases. | Four-state/formal storage checks and broader persistent/multiple-event corruption/recovery stimulus where an external contract exists. |
+| G10 | Frontend/top/DFT/trace/performance/prefetch paths include transport and characterization checks, not the complete external system consuming them. | Integration verification for interrupt service, power/flush controller, frontend execution/cache-control targets, trace codecs, MBIST/physical SRAM and full performance/prefetch semantics. |
+
+The authoritative behavioral inventory and regression requirements remain in
+[VERIFICATION_PLAN.md](VERIFICATION_PLAN.md). Interface additions require review
+of this map, the generated inventory, semantic access, legal drivers and the
+matching oracle; running a generator alone does not establish that consistency.

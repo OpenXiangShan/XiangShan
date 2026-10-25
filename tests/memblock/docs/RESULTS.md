@@ -1,441 +1,85 @@
-# MemBlock Verification Results
-
-This file is the compact current evidence index for the MemBlock UT. Current
-contracts, acceptance rules, and verification-point status remain authoritative
-in [`VERIFICATION_PLAN.md`](VERIFICATION_PLAN.md), [`ORACLES.md`](ORACLES.md),
-and [`IO_COVERAGE.md`](IO_COVERAGE.md). Confirmed CPU bug details remain in the
-individual `CPU_BUG_*.md` documents.
-
-## Test Taxonomy
-
-Only two stimulus families exist:
-
-| Family | Scenarios | Description |
-| --- | ---: | --- |
-| `directed-tests` | 84 | Fixed semantic test sequences; a seed may randomize data, addresses, lanes, and timing, but not the test identity. |
-| `constrained-random` | 1 | `constrained-random`, driven by the common constraint interface and `coverage`/`spec`/`corner` presets. |
-
-There is no third scenario family. `make benchmark-tests` runs all 85 scenarios
-once (one seed, one action budget per scenario); it is a benchmark command, not
-a test family or a new mode. `make regression`, `make final-regression`, and
-`make endurance-regression` run `constrained-random` with different seed and
-duration budgets.
-
-The constraint interface version is metadata (`constraint_schema=53`), not a
-scenario or a work-round name.
-
-## Current Baseline
-
-### 2026-10-24
-
-- Inventory: **85 scenarios** = **84 `directed-tests` + 1 `constrained-random`**.
-- `make benchmark-tests` with 8 workers: **85/85 pass in 781.752 s**.
-- `constrained-random` seed 1/16,384: **760.884 s**, 1,840,675 DUT cycles,
-  ~21.5 actions/s, ~2,419 cycles/s.
-- Next longest scenarios: `vector-segment` 386.257 s,
-  `vector-guest-fault-boundary` 53.948 s.
-- Unit tests: **282 pass**.
-- `make check-rtl`: pass.
-- Frozen runtime binary SHA-256:
-  `4185c7ce787c05ac309a05fea58850175689e3a7d603bbd53c4af2a99c9b2404`;
-  model SHA-256:
-  `d659328ca82904a6ee33d3c5bc4ec32202a81e004c38e8d2fad5b57606b60d3f`.
-- Evidence: `build/memblock/taxonomy-20261024/benchmark.json`,
-  `benchmark.md`, and 85 per-run coverage reports under `coverage-reports/`.
-
-This is a capability/performance baseline, not closure. The 48-hour
-`constrained-random` campaign and the 200-hour endurance campaign have not run
-under the current taxonomy.
-
-### 2026-10-24 mixed-window legality correction
-
-A 16-seed `constrained-random --constraints coverage` run found two failures
-that were reproduced deterministically at seeds 5 and 7. Neither was a CPU bug.
-Seed 5 failed in heterogeneous window 950: an older `lw` at `0x8027afff`
-returned byte `0x67` from a younger `sh` at the same address instead of the
-pre-store byte `0x43`.
-
-Internal observation localized the cause to the testbench, not the DUT. The
-window's scalar store crossed a 4-KiB page. To make its split-store replay
-progress, the window made that younger store the backend ROB head and pulsed
-`scommit`. The older load was still pending. The StoreQueue therefore committed
-the store (`sq_cmt=25, committed[24]=1`) while the older load was outstanding;
-the split load's second part then read the now-visible store byte. A real
-backend cannot make a store the ROB head or commit it before an older load
-retires. Seed 7's earlier miss-burst accounting failure belongs to the separate
-grant-pairing class described below; it passed after the mixed-window
-correction, and the grant-pairing correction then addresses that class directly.
-
-The heterogeneous window now keeps its scalar store within one 4-KiB page.
-Page-crossing scalar-store replay and exact readback remain covered by
-`scalar-misaligned` and `misaligned-stores`, so the mixed window still owns
-line-crossing misalignment but never manufactures an illegal commit order.
-`single-load` also gained two directed younger-store ordering cases: an older
-aligned load miss and an older split cross-line load, each with a younger store
-issued while the older refill is held. Both require the load to retain its
-pre-store value and pass.
-
-A second false-positive class surfaced after that correction. Seeds 8 and 10
-failed the `random-load-merge-manager` and `random-miss-burst-manager` gates
-with one more GrantAck than GrantData refills. The extra acknowledgement was a
-legal background `AcquirePerm` (data-less `Grant`) from the hardware prefetcher,
-which the gates did not include in their grant pairing. Both gates now compare
-the GrantAck delta against the sum of GrantData refills and `AcquirePerm`
-grants; a genuinely duplicate or lost acknowledgement still fails. Because the
-artifact manager tuple records raw refills and acknowledgements, the streaming
-verifier also allows the artifact-global difference up to the recorded
-`dcache_acquire_perms`; the action-local gate still requires exact pairing.
-Seeds 8 and 10 then complete all 16,384 actions.
-
-With the corrected harness, seeds 5, 7, 8, and 10 all complete all 16,384
-actions (`MEMBLOCK_CONSTRAINED_RANDOM_PASS`). The frozen runtime was regenerated
-as binary SHA-256
-`98b1260afec033e6358ebc52171de7bf6b537ffd27565d3fa16c8ee34b20ae17` (model
-SHA-256 `d659328ca82904a6ee33d3c5bc4ec32202a81e004c38e8d2fad5b57606b60d3f`).
-The previous 16-seed artifacts and their pre-correction runtimes are superseded
-for campaign evidence; their failures are harness-provenance findings, not CPU
-bugs.
-
-The final 16-seed `constrained-random --constraints coverage` capability run
-passes **16/16 seeds**, **262,144 actions**, in 2,227 s
-(artifact `build/memblock/regression-20261024-final-coverage-16.json`) on the
-runtime frozen at that point (binary SHA-256 `98b1260a...`). This is a capability
-run under the 16,384-action budget, not the 48-hour or 200-hour closure campaigns
-required by
-[`VERIFICATION_PLAN.md#regression-acceptance`](VERIFICATION_PLAN.md#regression-acceptance).
-
-The directed `dcache-release` additions changed only the test scenario, not the
-constrained-random generator. The harness was re-frozen for those scenario
-updates as binary SHA-256
-`4375bf5ea7a6c155cb0570b0c4d979b8fe671258b664bcf54a7116fd5c6a85b9`; a 4-seed
-4,096-action `coverage` smoke run passes 4/4 (16,384 actions, 685 s,
-`build/memblock/regression-20261024-round5-smoke.json`). The larger 16-seed
-artifact remains prior-runtime evidence; the constrained-random code path is
-unchanged. The later replacement+atomic scenario addition re-froze the runtime
-as binary SHA-256
-`e4ffdd74675f0ed8fea2e790d86bbc3a527b9a5c9d9742beb80c4f7f0389a1b9`; the same
-`constrained-random` source is unchanged and the frozen binary includes the
-atomic composition.
-
-A 4-seed x 16,384-action `coverage` run on this current frozen runtime passes
-**4/4** (65,536 actions, 949.906 s, artifact
-`build/memblock/regression-20261024-round19-coverage-4.json`).
-
-A repeat 4-seed x 16,384-action `coverage` run on the restored frozen runtime
-also passes **4/4** (65,536 actions, 1,064.346 s, artifact
-`build/memblock/regression-round28-frozen-coverage-4x16k.json`). The 16-seed
-262,144-action capability run remains evidence on the prior runtime; the
-constrained-random source is unchanged. The open CMO/atomic redirect bug is in
-a directed scenario and does not affect this campaign.
-
-### 2026-10-24 single-set replacement and Probe composition
-
-`dcache-release` was corrected from stale 128-set/8-way constants to the
-generated 256-set/4-way geometry. Its first phase now drives six dirty lines
-through one set, requiring two attributed dirty replacements and exact
-`ReleaseData` images.
-
-A second phase composes replacement with a same-set Probe. Four dirty stores
-fill all four ways; a fifth store forces one dirty victim release. The C channel
-is held until a Probe to the just-refilled fifth line is accepted, so the
-victim release and the `ProbeAckData` overlap. The test requires exactly one
-victim `ReleaseData` with its immutable line image, one dirty ProbeAckData with
-the fifth line image, and five exact readbacks. The scenario passes
-(`probe_overlap_release_data=1 probe_overlap_victim_releases=1
-probe_overlap_probe_data=1 probe_overlap_readbacks=5`).
-
-A third phase composes the held victim release with a `CBO.CLEAN` on the same
-just-refilled dirty line. The manager delays `CBOAck` by 1,024 cycles so the
-CMO's dirty ProbeAckData and the older victim ReleaseData complete while the
-CMO is pending. The test requires the CMO request count, `flushPipe`
-completion, the victim image, the CMO probe image, and five readbacks to be
-exact (`cmo_overlap_release_data=1 cmo_overlap_victim_releases=1
-cmo_overlap_probe_data=1 cmo_overlap_requests=1 cmo_overlap_readbacks=5`). No
-new CPU bug was found; atomic replacement composition remains a gap.
-
-### 2026-10-24 PMP TOR lock and NAPOT size matrix
-
-`pmp-contracts` now covers the architectural rule that a TOR entry's base
-address is locked when the following entry is a locked TOR entry. After
-installing `[lower, upper)` through entry 1 with entry 1 locked, the test
-attempts to move `pmpaddr0` beyond `upper`; the write must be ignored and the
-original range must remain readable. A write that incorrectly took effect
-would make the TOR range empty and deny the old range; the independent load
-oracle detects that without reading DUT state. The same scenario then
-exercises NAPOT sizes 4 KiB, 8 KiB, 16 KiB, 64 KiB, 256 KiB, 1 MiB, and 4 MiB
-at allowed first/last and denied immediately-below/above doublewords. The full
-scenario passes 49 cases with `tor_next_lock=1` and `napot_sizes=7`.
-
-### 2026-10-24 LR reservation invalidation by Probe
-
-`atomic-contracts` now checks that a manager Probe to the LR line invalidates
-the LR/SC reservation. After a warmed `LR.D`, a toN dirty ProbeAckData returns
-the exact line image and invalidates the line; the following `SC.D` must fail
-with result `1`, issue no new DCache request, and leave the backing memory
-unchanged. A final readback returns the original value. The scenario passes
-with `reservation_probe_invalidated=1`. This observes the architectural
-reservation outcome, not the internal reservation bit.
-
-### 2026-10-24 split load across a PMP boundary
-
-`pmp-contracts` adds a misaligned S-mode `ld` starting four bytes inside a
-4-KiB NAPOT allow region and crossing into the denied next page. The load must
-report `LoadAccessFault`, may issue the allowed-prefix line request, and must
-issue no request to or return data from the denied line. The backing bytes
-remain unchanged. The scenario passes 59 cases with `split_pmp_edge=1`; the
-allowed prefix request explains the one-request increase over ordinary denied
-loads.
-
-### 2026-10-24 locked-OFF PMP entry immutability
-
-`pmp-contracts` adds a locked `A=OFF` entry and attempts to reconfigure it as a
-4-KiB NAPOT allow entry. The lock must reject the address/config rewrite, so
-the original S-mode load remains `LoadAccessFault` with no manager request.
-The scenario passes 61 cases with `locked_off=1`, covering the lock behavior
-of an entry that currently matches no address.
-
-### 2026-10-24 split store across a PMP boundary
-
-`pmp-contracts` adds the store-side counterpart of the split-load PMP edge. An
-S-mode `sd` starts four bytes inside an allowed 4-KiB NAPOT region and crosses
-into the denied next page. It must report `StoreAccessFault` and must not
-partially update the allowed line or write the denied line. A readback of the
-allowed line at `base+0xff8` returns the old value, and the denied line's
-backing bytes stay unchanged. The scenario passes 60 cases with
-`split_pmp_store=1`; the allowed-prefix request explains the one-request
-increase.
-
-### 2026-10-24 S-mode locked PMP immutability
-
-`pmp-contracts` adds an S-mode lock-immutability case. A NAPOT allow entry is
-locked, then a second PMP write attempts to move the same entry to a different
-address. The old address must remain allowed and the moved address must remain
-denied. The check runs in S mode because M mode's default allow for unmatched
-addresses would otherwise make a rewritten entry indistinguishable from an
-unmapped address. The scenario passes 58 cases with `locked_immutable=1`.
-
-### 2026-10-24 PMP W/R/X permission WARL
-
-`pmp-contracts` adds a reserved `W=1,R=0` NAPOT entry and an `X`-only NAPOT
-entry. The reserved entry must behave as a data-deny entry for a store, and the
-execute-only entry must deny data loads as well as stores. Both cases require
-the access fault and no DCache/Uncache data request. The scenario passes 56
-cases with `warl_permission=2`; this checks the architectural W-implies-R WARL
-and the distinction between execute and data-read permission.
-
-### 2026-10-24 PMP-before-PBMT priority
-
-`pmp-contracts` adds two Sv39 cases whose page-table pages are PMP-allowed but
-whose final physical page is PMP-denied, once with PBMT=NC and once with
-PBMT=IO. Each translated load must terminate with `LoadAccessFault` and must issue no
-DCache or Uncache data request; a TLB-hit store variant must terminate with
-`StoreAccessFault` and issue no data request. PTW traffic remains allowed. The
-positive PBMT/Uncache routing is covered separately by `translation-pbmt` and
-`uncache-widths`. The scenario passes 53 cases with `pbmt_pmp_cases=2` and
-`pbmt_pmp_stores=2`. Misalignment priority remains a gap.
-
-### 2026-10-24 replacement composed with an atomic refill
-
-`dcache-release` adds an atomic composition. Five dirty stores occupy one
-four-way set and the fifth forces a held dirty victim release. A cold
-`AMOADD.D` in a different set is issued while C is held; its refill response is
-delayed, and a Probe to the just-refilled fifth line releases C. The test
-requires the atomic's exact old-value writeback, no early writeback while the
-refill is held, the exact final memory/readback, and the victim/probe C
-payloads. The scenario passes with `atomic_overlap_release_data=1
-atomic_overlap_victim_releases=1 atomic_overlap_probe_data=1
-atomic_overlap_readbacks=1`. No new CPU bug was found.
-
-### 2026-10-24 replacement composed with a denied CMO response
-
-`dcache-release` adds a denied-CBOAck composition. Four dirty ways and a held
-fifth-store victim release are combined with a `CBO.CLEAN` on the dirty
-just-refilled line. The CMO's CBOAck is delayed and denied while two Probes
-keep C stalled: one returns the dirty fifth-line image and one invalidates an
-unrelated clean line. The error must not cancel the older committed victim
-`ReleaseData`, must not suppress either Probe response, and must leave the
-backing bytes and all five readbacks exact. The scenario passes
-(`cmo_error_release_data=1 cmo_error_victim_releases=1
-cmo_error_probe_data=1 cmo_error_requests=1 cmo_error_readbacks=5`). Up to two
-youngest committed LQ entries remain at the directed-drain lookahead boundary
-and are reported as `cmo_error_lq_pending=2`; their RF data is checked. No new
-CPU bug was found.
-
-### 2026-10-24 clean CMO reset cancellation
-
-`reset-partial-load` now also resets while a clean `CBO.CLEAN` has an accepted
-manager request and a delayed `CBOAck`. The test cancels only that CMO store
-identity at the completed reset boundary, rejects any stale address/data
-writeback, and requires a fresh CMO on the same line plus a readback to
-complete with the backing image unchanged. The scenario passes with
-`cmo_reset=1 cmo_canceled=1 cmo_fresh=1 cmo_readbacks=1`. This uses a
-store-reset cancellation API; dirty-cache persistence remains unclaimed.
-
-### 2026-10-24 corner-preset campaign
-
-The `corner` preset was exercised on the frozen runtime. A 4-seed x 4,096-action
-run passes **4/4** (16,384 actions, 1,625 s, artifact
-`build/memblock/regression-20261024-corner-smoke-4.json`). An 8-seed x
-16,384-action run passes **6/8**; seeds 2 and 3 hit the ad-hoc 3,600-second
-per-seed runner timeout, while their 4,096-action versions pass in the smoke
-run. The timed-out seeds emitted no `MEMBLOCK_*_FAIL` or terminal summary; the
-corner preset's rare error/retry traffic reduces throughput to roughly 2.5
-actions/s on this host, so 16,384 actions can exceed one hour per seed. This is
-a time-budget/throughput observation, not a functional failure; a future 16k
-corner campaign needs a larger per-seed timeout or more than eight workers. It
-is not closure evidence for the 48-hour or 200-hour campaigns.
-
-### 2026-10-24 out-of-order load D responses
-
-`single-load` now holds two cold-load refills for distinct sources, releases
-the younger load's response first, and requires the younger identity to
-complete with its own line data while the older load remains pending. Releasing
-the older response then produces both exact writebacks and LQ retirement. The
-scenario passes with `reverse_order=1 reverse_writebacks=2`; D-response
-ordering across distinct sources is therefore matched by identity rather than
-arrival order.
-
-### 2026-10-24 per-way tag ECC matrix
-
-`tag-ecc-ways` adds a dedicated four-way tag-ECC directed test. It fills the
-four ways of one set with distinct store data, injects the one-shot tag error
-on each resident line, verifies the BEU report and load cancel for every way,
-then performs a store hit and an exact data readback on that way. The scenario
-passes with `ways=4 tag_cases=4 tag_reports=4 readbacks=4`, covering tag ECC
-on all four ways rather than only the single resident line used by
-`dcache-errors`. The scenario is excluded from the default benchmark
-(`benchmark_order: null`).
-
-### 2026-10-24 constrained-random `cmo-stress` direction
-
-Add a dedicated CMO-heavy constrained-random preset. It sets the CMO
-operation weight to 1000 with a scalar load/store weight of one as the control,
-selects all CLEAN/FLUSH/INVAL operations, sets `cmo-dirty=1000`,
-`cmo-younger-overlap=1000`, disables CMO errors and ordinary Probe/error
-subclasses, and keeps the CMO Probe-depth weights enabled. A 4-seed x
-256-action campaign on the current build passes **4/4** (1,024 actions,
-372.5 s, artifact `build/memblock/regression-cmo-stress-4x256.json`); the
-shared verifier accepts the new profile. A longer 4-seed x 512-action campaign
-also passes **4/4** (2,048 actions, 882.6 s, artifact
-`build/memblock/regression-cmo-stress-4x512.json`), confirming the direction
-under twice the CMO action count.
-
-A 4-seed x 1,024-action campaign also passes **4/4** (4,096 actions,
-1,363.248 s, artifact `build/memblock/regression-cmo-stress-4x1024.json`),
-confirming the direction under four times the initial CMO action count.
-
-The generator's clean CMO path now commits the CMO **before** applying the
-ROB `flushAfter` redirect, matching the design: the CMO store sets `flushPipe`
-and the ROB's `flushOut` generates the commit-time redirect. The younger load
-is canceled through the LQ and the CMO's dirty line/probe accounting remains
-exact. This is a constrained-random direction, not a closure campaign; the
-CMO-heavy action cost is why the budget is 256 actions rather than 16,384.
-
-### 2026-10-24 high-half VFOF composition
-
-`vector-fof-high` adds a directed high-half canonical VFOF case. A high-half
-Sv39 VLEFF has element zero mapped and element one on the next unmapped page;
-the FOF result must suppress the later page fault, complete with the exact
-first element data, and write the fix-VL uop with VL=1. A separate high-half
-first-element fault must publish the exact high canonical `exception_vaddr`
-(0xffffffff53000180), suppress the DCache request, and complete the fix-VL
-path. The scenario passes with `high_data=1 high_fix_vl=1
-high_first_fault=1` and the expected fault VA; this closes the high-half FOF
-composition gap.
-
-## Open CPU RTL bug: noncanonical vector segment address does not fault
-
-`vector-segment-noncanonical` is a deterministic reproducer for an open RTL
-bug. A vector segment load with a noncanonical Sv39 VA
-(`0xffffff8040000000`, bit 38 differs from bits 63:39) completes with no
-exception and writes the input vector data; the expected `LoadPageFault` is
-absent. Scalar noncanonical cases in `translation-faults` fault correctly, and
-`vector-segment-canonical`/`vector-segment` remain green.
-
-The root is upstream of the DTLB. For the first/only segment uop,
-`VSegmentUnit` latches `instMicroOp.mask = 0` (`VSegmentUnit.scala:377-380`
-reads the registered `instMicroOp`, not `io.in.bits`), and the
-`instMicroOpValid` clear at `:901-903` overrides the set at `:387` when the
-first fire has `enqPtr == deqPtr`. `segmentActive` is therefore zero
-(`:215`), `io.dtlb.req.valid` is gated off (`:453`), and the FSM takes
-`s_tlb_req -> s_latch_and_merge_data` (`:285`), writing back the old
-destination data with exception 0. A one-uop segment has no second fire to
-repair the mask; `vector-segment-canonical` passes because it issues two uops
-per segment. A `mem_direct` trace in an isolated worktree confirms
-`mask=0x0 req_valid=0 tlbReqVaddr=0xffffff8040000000 pf39=0 pregpf=0
-exc13=0`. The line-455 truncation and the `checkfullva`/`pregpf` path are
-never reached. The fix is to compute the first-uop mask from `io.in.bits` and
-give the `instMicroOpValid` set priority over the `s_idle` clear. A
-noncanonical segment store control is included in the same reproducer and is
-part of the post-fix guard.
-
-See [`CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md`](CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md)
-for the reproducer, impact, proposed fix, and post-fix verification. The
-reproducer is excluded from the default benchmark; the open bug is not a
-closure claim.
-
-## Retracted testbench false positive: speculative AMO redirect
-
-The previously reported "CMO/redirect leaves a younger atomic's DCache
-result" was a **testbench false positive**, not an RTL bug. XiangShan marks
-every AMO `noSpec = T, blockBack = T` at decode
-(`DecodeUnit.scala:238-245`); an AMO does not execute speculatively and no
-redirect can cancel an AMO that is already executing. The two reproducers
-directly issued an `AMOADD.D` while an older CMO or load was still pending,
-then injected a redirect. That combination is not realizable by the real
-backend and therefore is not a legal MemBlock stimulus.
-
-Both invalid scenarios (`cmo-atomic-flush` and `redirect-atomic-flush`) and
-the CPU bug document have been removed. The prior CPU-bug notification was
-sent for this false positive; this entry records the retraction.
-
-Valid neighboring tests are retained:
-
-- `cmo-contracts` younger **load** overlap: loads are speculative and the
-  commit-time CMO `flushAfter` cancels the LQ entry;
-- `cmo-store-flush` and `redirect-store-flush`: younger **stores** are
-  speculative and the SBuffer/SQ flush drops their data;
-- the CMO timing constraint remains: the CMO store itself only sets
-  `uop.flushPipe`, and the ROB's `flushOut` at the CMO **commit** generates
-  the `flushAfter` redirect; tests apply `redirect_after` after
-  `commit_store`.
-
-Anti-oracle for future UT: do not issue an AMO at the MemBlock boundary while
-an older operation is unresolved, and never inject a redirect to cancel an
-in-flight AMO. `issue_atomic` must only model the non-speculative issue point.
-
-## Current Verification Position## Current Verification Position
-
-- `directed-tests` cover the focused protocol, translation, vector, cache,
-  reset, protection, and top-level contracts registered in the catalog.
-- `constrained-random` samples and reports coverage; coverage is observational
-  and is not a PASS gate.
-- The redirected-load epilogue in `constrained-random` randomizes supported
-  fields (address, opcode, lane, delay) while keeping redirect semantics fixed.
-- `frontend-bridge` is a `directed-tests` scenario. It is not part of the
-  `constrained-random` regression.
-
-## Remaining Gaps
-
-- Malformed or duplicate manager responses and broader PMP/PMA/hypervisor
-  crosses remain. Replacement composed with a same-set Probe, a single CMO, a
-  denied CMO response, and a cold atomic refill is covered by
-  `dcache-release`.
-- Single-set associativity coverage and some vector-segment fault/progress
-  crosses remain.
-- Constrained-random mutation sensitivity is not yet demonstrated.
-- The 48-hour and 200-hour campaigns, and any closure claim, remain future work.
-
-## Evidence Policy
-
-- Acceptance uses architectural observations and externally visible protocols,
-  not DUT-internal state.
-- A passing finite capability run is not a closure campaign.
-- Failed or repaired historical investigations remain in Git history and the
-  `CPU_BUG_*.md` / `HISTORICAL_BUG_AUDIT.md` provenance documents; they are not
-  current regression results.
-- Only a deterministic reproducer that excludes harness, model, scoreboard,
-  stale-build, and provenance errors establishes a CPU RTL bug.
-- The authoritative closure duration, seed count, worker count, and artifact
-  checks are in
-  [`VERIFICATION_PLAN.md#regression-acceptance`](VERIFICATION_PLAN.md#regression-acceptance).
+# Current MemBlock Qualification
+
+## Scope
+
+This file describes current readiness and its qualification boundary. It is
+not a chronological log. Capability inventory comes from the current catalog,
+producer/check implementations and the current-state documents, not preserved
+campaign claims.
+
+The catalog registers 90 scenarios: 89 directed-tests plus constrained-random.
+The default benchmark selects 85; five additional directed contracts require
+explicit execution. All claimed behavior remains limited by IO_COVERAGE.md
+and ORACLES.md. There is no defensible overall functional-coverage percentage.
+
+## Current Qualification
+
+The exceptional segment data/fix uops are counted as two direction-specific
+completions. The scenario checks exact expected page faults, full exception
+VA, zero DCache requests and its queue disposition; neither exception is
+counted as a successful FOF fix completion. An infrastructure test exercises
+this scoreboard distinction for both load and store. Canonical-alias mutation
+sensitivity is still incomplete because that scenario uses an empty root.
+
+The current qualification commands are:
+
+- make -C tests/memblock unit
+- make -C tests/memblock check-rtl
+- make -C tests/memblock picker-harness JOBS=8
+- A frozen-runtime benchmark with all 85 selected entries and 256 random actions.
+- Explicit execution of all five default-benchmark exclusions.
+- A two-seed spec run with 4608 actions per seed and observed overlap analysis.
+
+Build evidence is kept in build/memblock/current-docs-validation, including
+runtime/runtime.json, benchmark/results.json, catalog-extras.json,
+fix-focused.json and spec-overlap/results.json. These are local generated
+artifacts, not files guaranteed by a clean clone. Results must be replayed or
+checked at those paths; absent artifacts do not supply qualification evidence.
+The runtime reuses the available generated RTL model. A successful C++ rebuild
+and manifest/filelist check do not establish clean RTL elaboration provenance.
+
+The current qualification is:
+
+| Check | Current result | Scope limit |
+| --- | --- | --- |
+| Infrastructure unit | 283 tests pass | Unit checks do not establish DUT functional coverage |
+| check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
+| Selected benchmark | 85/85 pass | Seed 1; random budget 256; catalog-specific action overrides retained |
+| Extra directed contracts | 5/5 pass | All 90 catalog entries have a successful execution in this qualification |
+| Spec overlap | 2/2 seeds pass, 4608 actions each | 9216 actions, 1005842 cycles, 102 heterogeneous windows; capability only |
+| Runtime source copies | All 80 compared C++ source copies match | Existing Verilated model reused; no fresh root RTL generation |
+
+Queue accounting is exact in both mixed results, and all six reported manager
+stall/delay counters are nonzero. Per-case report commands and summaries agree
+with aggregate results. Full commands/runtime identity are in the local
+qualification.json and result artifacts. Execution of all catalog entries is
+not proof of all legal input combinations or missing oracle coverage.
+
+## Readiness
+
+Readiness is partial. Functional PASS means active checks accepted generated
+traffic, not all legal classes occurred or every external effect was checked.
+Current missing rules include guaranteed final random atomic/vector-store
+observation, uniform fault vstart/forbidden-demand checks, complete TileLink
+lifecycle/credit legality and independent verifier schema/backpressure checks.
+Masks, boundary faults, concurrency and reset/protection crosses also remain
+partial. Four-state/physical arrays and full-core/multi-hart behavior need
+other verification boundaries.
+
+Configured 48h breadth and million-action endurance targets are not completed
+qualification in this snapshot. Their current budgets and automated-check
+limitations are defined in VERIFICATION_PLAN.md. No closure claim follows
+from a short capability run or a controller/verifier return code alone.
+
+## Current Review
+
+The fresh-context independent review verdict is approve for the current
+documentation and exceptional-segment completion-accounting fix. The review
+checks the actual diff against implementation, supported input values, IO
+identity/check rules, effective regression budgets, local links and the
+qualification artifacts. No material finding remains open in that scope.
+
+This verdict confirms the accuracy of the stated capability and limitations;
+it does not establish verification closure or clean RTL elaboration provenance.
+The oracle, protocol lifecycle, vector-mask, final-byte observation and
+integration gaps described in the current documents remain open.
