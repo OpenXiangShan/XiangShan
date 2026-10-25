@@ -9,6 +9,11 @@
 class tlb_map_builder extends uvm_object;
     localparam bit [3:0] MEMBLOCK_SV39_MODE = 4'd8;
     localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
+    // Sparse payloads still have to target a manager reachable from MemBlock's
+    // uncache port.  Keep them in a 512 GiB-aligned cacheable DRAM window so
+    // 4 KiB through 512 GiB page shapes remain routable after level alignment.
+    localparam bit [47:0] MEMBLOCK_SPARSE_PADDR_BASE  = 48'h0080_0000_0000;
+    localparam bit [47:0] MEMBLOCK_SPARSE_PADDR_RANGE = 48'h0080_0000_0000;
 
     typedef struct {
         bit [1:0] s1_level;
@@ -150,7 +155,8 @@ class tlb_map_builder extends uvm_object;
 
     // Abstract responsibility: construct a reproducible raw PPN source for
     // one response payload.  Strict memory mode keeps it in the configured
-    // served range; sparse mode deliberately has no paddr-range ownership.
+    // served range. Sparse mode does not allocate backing storage eagerly,
+    // but it must still choose a physical address accepted by a real manager.
     function bit [43:0] make_canonical_ppn(input bit [37:0] vpn,
                                            input bit [43:0] root_ppn,
                                            input bit [1:0] level,
@@ -168,10 +174,18 @@ class tlb_map_builder extends uvm_object;
             ppn = (seq_csr_common::get_paddr_base() >> 12) + page_offset;
         end
         else begin
-            // Sparse mode is still deterministic per miss, but it does not
-            // reserve a DCache backing line or force a fixed physical window.
-            ppn = root_ppn ^ {6'b0, vpn} ^
-                  (s2 ? 44'h0000_005a_5a5 : 44'h0000_003c_3c3);
+            // The old full-space XOR could land in PMA-permitted peripheral
+            // holes (for example APLIC's unimplemented subranges). Uncache
+            // accepts such a request into its input TLBuffer, while TLXbar has
+            // no matching manager and permanently backpressures the request.
+            // Hash within cacheable DRAM instead; sparse memory remains lazily
+            // allocated by the responder and no fixed main-memory table is
+            // required.
+            page_count = MEMBLOCK_SPARSE_PADDR_RANGE >> 12;
+            page_offset = (root_ppn ^ {6'b0, vpn} ^
+                           (s2 ? 44'h0000_005a_5a5 : 44'h0000_003c_3c3)) %
+                          page_count;
+            ppn = (MEMBLOCK_SPARSE_PADDR_BASE >> 12) + page_offset;
         end
         case (level)
             2'd1: ppn[8:0]   = '0;
