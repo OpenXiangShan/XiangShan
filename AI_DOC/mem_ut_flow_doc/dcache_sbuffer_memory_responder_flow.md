@@ -26,6 +26,12 @@ memory backend，但不共享协议 queue、timer、D hold、source、sink 或�
 | `stop prepare` | UID 与公共 runtime work 已收敛、但尚未真正停止 responder 的准备阶段 | `global_stop_prepare_requested` | 由 `common_data_transaction` 启动 1us 静默窗口 |
 | `quiet window` | 从最近一次 responder activity 起连续没有新请求或进展的最小等待时间 | `global_stop_prepare_last_activity_time` | DCache/SBuffer activity 会重新起算；稳定卡住的 record 不会重复重置 |
 | `pre-stop A snapshot` | global stop 前已观察到、尚未完成 A.fire 的唯一 A payload | 两个 responder 的 `pre_stop_a_snapshot` | stop 后只允许这一笔保持 payload 一致后完成 fire |
+| `slot generation` | 一个 LoadQueueUncache 物理 slot 从 `req_valid=1` 到再次归零的单次占用 | `uncache_slot_owner_state[16]` | redirect 不结束 generation；连续 valid 时 ROB 改变属于非法覆盖 |
+| `frozen owner` | slot generation 首次可见时冻结的 UID、动态版本号、ROB、LQ 和 slot 身份 | `uncache_slot_owner_state[].owner` | active map 后续被 redirect 删除也不影响 DUT 旧 slot drain |
+| `A-consumed slot` | 已参与真实 A.fire、但仍可能等待 writeback 保持 valid 的旧 generation | `uncache_slot_owner_state[].a_consumed` | source 可复用后排除旧 owner |
+| `armed owner snapshot` | responder 准备驱动 A.ready 时按 A source 从 slot cache 复制的不可变 owner 集合 | `armed_a_owner_*` | A.fire 或 A.valid withdrawal 后与 armed payload 原子清除 |
+| `armed slot mask` | 当前 A arm 精确捕获的物理 slot 集合 | `armed_a_owner_slot_mask` | A.fire 只消费 mask 中 slot；withdrawal 不消费 |
+| `redirect-deleted owner` | 当前单代 redirect 删除 active LQ owner 前保存的短时旧身份 | `redirect_deleted_lq_owner_by_key` | 只在 slot 首次捕获且 active ROB miss 时按完整 ROB 唯一恢复 |
 | `terminal idle` | responder 在所有瞬态协议 owner 收敛后发送的最后一个全零输出 item | 两个 responder 的 idle xaction | `send_*_xaction()` 完成最后 idle item 的交付后才置对应 `*_responder_done` |
 | `drain audit` | responder 结束路径的只读残留检查 | `audit_*_responder_state()` 与 `audit_shared_memory_drain_state()` | 不清 queue；非空或未收敛状态报 `UVM_ERROR` |
 
@@ -40,12 +46,13 @@ flowchart TD
     E --> F[DCache driver]
 
     G[Uncache body] --> H[begin_shared_mem_sample]
-    H --> I[Uncache A/D fire]
-    I --> J[decode_uncache_a_opcode]
-    J --> K[create_uncache_response_record]
-    K --> L[Uncache scheduler]
-    L --> M[Uncache D item]
-    M --> N[SBuffer agent driver]
+    H --> I[service slot owner cache]
+    I --> J[arm A payload + owner snapshot]
+    J --> K[Uncache A/D fire]
+    K --> L[create_uncache_response_record]
+    L --> M[Uncache scheduler]
+    M --> N[Uncache D item]
+    N --> O1[SBuffer agent driver]
 
     B --> O[shared backing/overlay]
     H --> O
@@ -68,9 +75,11 @@ DCache：
   只报告错误并保留 owner；关闭检查时沿用原有二态匹配；Probe/C assembly 仍由 DCache 私有 owner 处理。
 
 Uncache：
+  slot 首次 req_valid 时冻结 Load owner，slaveAccept 后绑定 TileLink source；
+  准备 A.ready 时按 source 复制不可变 owner snapshot；
   确认 A.fire 后先用白名单解码 PutFullData/PutPartialData/Get；
   真实 store 写入 Uncache write batch，Get 固化 merged read data；
-  建立 AccessAck 或 AccessAckData record；
+  使用 armed owner snapshot 建立 AccessAck 或 AccessAckData record，不再回查 active ROB；
   用 Uncache 自己的 timer 和选择模式返回 D，D.ready=0 时保持 current D hold。
 
 只读 observer：
@@ -207,7 +216,29 @@ E.fire：按 sink 释放 Grant owner 和 sink。
 
 ## 5. Uncache Response Pipeline
 
-### 5.1 `decode_uncache_a_opcode()`
+### 5.1 Slot owner lifecycle
+
+抽象功能描述：`service_uncache_slot_owner_cache()` 在每个非 reset responder sample 维护 DUT 16 个
+LoadQueueUncache slot 的单 generation 身份。它只冻结 owner 和绑定 source，不建立 response、不执行
+shared-memory 访问，也不消费 redirect 临时记录。
+
+```text
+slot req_valid=0：清除该 slot generation；
+slot 首次 req_valid=1：按完整 ROB 查询 active UID，冻结 UID/epoch/ROB/LQ/slot；
+active ROB 已被同代 redirect 删除：只从当前 redirect-deleted LQ owner 集合唯一恢复；
+连续 req_valid=1：ROB 必须保持不变，否则 fatal；
+slaveAccept 首次出现：绑定 slaveId/source；同 generation source 改变 fatal；
+redirect：不清除 slot cache；reset：清除全部 slot cache。
+```
+
+准备驱动 A.ready 时，`capture_armed_uncache_load_owners()` 对 GET 按 source 只收集尚未 A-consumed 的
+已绑定 slot owner，并冻结精确 slot mask；对 PUT 建立 owner count/mask 均为0的合法空snapshot。下一
+sample真实A.fire把snapshot复制进response record，并只把mask中的slot标记为A-consumed；A.valid撤销时
+不创建response、不消费slot，但payload、owner snapshot和mask仍由`body()`同时清除。
+
+### 5.2 Response record
+
+### 5.3 `decode_uncache_a_opcode()`
 
 抽象功能描述：该函数只将已稳定的 Uncache A payload 分类为 store ack 或 load data，非法 opcode 在
 建立 record 前 fail-fast。它不访问 memory，不推进 queue。
@@ -221,15 +252,17 @@ Get -> LOAD_DATA；
 这避免旧逻辑将任何“非 Put”请求静默伪装为 `AccessAckData`。当前 V2 TL-UL edge 不支持在此
 responder 中模拟 Arithmetic、Logical、Hint、Acquire 或 CBO transaction。
 
-### 5.2 `create_uncache_response_record()`
+### 5.4 `create_uncache_response_record()`
 
-抽象功能描述：该 task 仅消费真实 Uncache A.fire，执行一次 shared-memory 读或写并建立语义固定、
+抽象功能描述：该 task 仅消费真实 Uncache A.fire 和调用者提供的 armed owner snapshot，执行一次 shared-memory 读或写并建立语义固定、
 当拍不可返回的 AccessAck/AccessAckData record。它不管理 timer，也不在 D hold 时重读 memory。
 
 ```text
 先检查未超过 MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING；
 解码 opcode；
 STORE_ACK：以 address/mask/data 创建 Uncache write batch，record 记录 AccessAck；
+LOAD_DATA：要求显式 owner count 大于 0，并把 frozen owner 复制进 immutable D-error ledger；
+STORE_ACK：要求 owner count 等于 0；
 LOAD_DATA：从当前 committed merged view 读取 64-bit data，record 记录 AccessAckData；
 record.eligible_cycle = accept_cycle + 1；入 uncache_rsp_q。
 ```
@@ -275,7 +308,9 @@ warning。它不超时删除 record、不改变 overlay、global stop、pass/fai
    静默窗口；持续不变的 D hold 或 queue 不会每拍重新计时。周期性 FlushSb producer 与 DCache 随机 Probe
    在 prepare 期间暂停创建新工作。
 3. 连续静默满 1us 后才置 `global_stop_requested`。两个 responder 不再接受 stop 后新出现的 A；若 A 在
-   stop 前已经可见，则只能通过 `pre_stop_a_snapshot` 的严格 payload 稳定性检查后完成那一次 A.fire。
+   stop 前已经可见的 PUT 只能通过 `pre_stop_a_snapshot` 的严格 payload 稳定性检查后完成那一次 A.fire；
+   stop 前已经冻结的 GET slot generation 即使 stop 后才 bind source 或出现 A.valid，也可以按 frozen owner
+   继续 drain。stop 后首次出现的新 slot generation 立即 fatal。
 4. 所有本地 owner、response queue、timer、D hold 和 pre-stop snapshot 归零时，responder 先发送
    `terminal idle`，随后执行本地 `drain audit`，再置 `dcache_responder_done` 或
    `sbuffer_responder_done`。audit 不会调用 `clear_runtime_state()` 或 `.delete()`；残留状态只报
@@ -284,7 +319,7 @@ warning。它不超时删除 record、不改变 overlay、global stop、pass/fai
    write batch 与 DCache fragment observer；scenario 的 `end_test_check()` 最后检查 raw/status 并关闭
    `dispatch_monitor_capture_en`。
 
-DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Uncache 还必须等待 armed A 和
+DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Uncache 还必须等待 slot owner cache、armed A 和
 `uncache_rsp_q` 清空。任何一侧自然退出都不应清另一个 responder 的 shared memory 或协议状态。reset 会
 取消尚未提交的 prepare timestamp，不能把 reset 前已经经过的时间继承到新 epoch。
 

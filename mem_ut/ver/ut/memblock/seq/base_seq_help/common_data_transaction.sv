@@ -4315,6 +4315,52 @@ class common_data_transaction extends uvm_object;
                owner.cancel_record_id == redirect_deleted_owner_record_id;
     endfunction:lookup_redirect_deleted_lq_owner
 
+    // 中文注释：只为 DUT 内仍存活的 LoadQueueUncache slot 提供单代 redirect
+    // fallback。调用者必须先按完整 ROB 查询 active owner；仅 active lookup miss
+    // 时才能使用本函数。函数只读当前 redirect-deleted LQ owner window，不消费记录。
+    function bit find_unique_redirect_deleted_load_owner_by_rob(
+        input memblock_rob_key_t rob_key,
+        output memblock_redirect_deleted_owner_t matched_owner,
+        output memblock_lq_key_t matched_lq_key,
+        output int unsigned matched_count);
+        memblock_lq_map_key_t map_key;
+
+        matched_owner = '{default:'0};
+        matched_lq_key = '{default:'0};
+        matched_count = 0;
+        if (!redirect_deleted_owner_window_active) begin
+            return 1'b0;
+        end
+        foreach (redirect_deleted_lq_owner_by_key[map_key]) begin
+            memblock_redirect_deleted_owner_t candidate_owner;
+            main_control_transaction main_tr;
+            status_transaction status;
+            memblock_lq_key_t candidate_lq_key;
+
+            candidate_owner = redirect_deleted_lq_owner_by_key[map_key];
+            if (!candidate_owner.valid ||
+                candidate_owner.redirect_epoch != redirect_deleted_owner_epoch ||
+                candidate_owner.cancel_record_id != redirect_deleted_owner_record_id ||
+                !is_valid_uid(candidate_owner.uid) ||
+                main_table_by_uid[candidate_owner.uid] == null ||
+                status_by_uid[candidate_owner.uid] == null) begin
+                continue;
+            end
+            main_tr = main_table_by_uid[candidate_owner.uid];
+            status = status_by_uid[candidate_owner.uid];
+            candidate_lq_key = memblock_lq_key_t'(map_key);
+            if (main_tr.get_rob_key() != rob_key ||
+                main_tr.get_lq_key() != candidate_lq_key ||
+                status.dynamic_epoch != candidate_owner.old_dynamic_epoch + 1) begin
+                continue;
+            end
+            matched_count++;
+            matched_owner = candidate_owner;
+            matched_lq_key = candidate_lq_key;
+        end
+        return matched_count == 1;
+    endfunction:find_unique_redirect_deleted_load_owner_by_rob
+
     function bit lookup_redirect_deleted_sq_owner(
         input memblock_sq_key_t key,
         output memblock_redirect_deleted_owner_t owner);

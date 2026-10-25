@@ -4836,6 +4836,20 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     // valid 撤销或 reset。作用：只有 A.fire 后才允许生成 response 或把 store 写入 shared batch。
     bit a_accept_armed;
     sbuffer_agent_agent_xaction armed_a_req_xact;
+    typedef struct packed {
+        bit                     valid;
+        bit                     existed_before_global_stop;
+        bit                     source_valid;
+        bit                     a_consumed;
+        bit [3:0]               source;
+        uncache_d_error_owner_t owner;
+    } uncache_slot_owner_state_t;
+    uncache_slot_owner_state_t uncache_slot_owner_state[UNCACHE_D_ERROR_MAX_OWNERS];
+    bit                        armed_a_owner_snapshot_valid;
+    bit [3:0]                  armed_a_owner_source;
+    int unsigned               armed_a_owner_count;
+    bit [15:0]                armed_a_owner_slot_mask;
+    uncache_d_error_owner_t    armed_a_owners[UNCACHE_D_ERROR_MAX_OWNERS];
     // 中文注释：与 DCache 的 pre-stop A owner 对称。Uncache A 在 stop-prepare 期间
     // 已经可见但因 response capacity 尚未可用时，global stop 后只能让这份快照继续
     // handshake；不能把 stop 后新出现的 A.valid 当作旧请求接收。
@@ -4869,8 +4883,11 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     typedef struct packed {
         bit              sampled_a_valid;
         bit              a_accept_armed;
+        bit              armed_a_owner_snapshot_valid;
         bit              pre_stop_a_snapshot_valid;
         bit              current_d_valid;
+        bit [15:0]       slot_owner_valid;
+        bit [15:0]       slot_owner_source_valid;
         int unsigned     uncache_rsp_q_size;
         bit              uncache_rsp_timer_active;
         longint unsigned uncache_rsp_timer_due_cycle;
@@ -4933,13 +4950,19 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     );
     extern virtual task create_uncache_response_record(
         input sbuffer_agent_agent_xaction req_xact,
-        input longint unsigned            accept_cycle
+        input longint unsigned            accept_cycle,
+        input int unsigned                owner_count,
+        input uncache_d_error_owner_t      owners[UNCACHE_D_ERROR_MAX_OWNERS]
     );
-    extern virtual function void capture_uncache_load_owners(
+    extern virtual function void service_uncache_slot_owner_cache(
+        input bit global_stop_requested
+    );
+    extern virtual function void capture_armed_uncache_load_owners(
+        input bit [3:0] opcode,
         input bit [3:0] source,
-        output int unsigned owner_count,
-        output uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS]
+        input bit global_stop_requested
     );
+    extern virtual function bit uncache_slot_owner_cache_empty();
     extern virtual function void build_current_uncache_d_xaction(
         inout sbuffer_agent_agent_xaction rsp_xact
     );
@@ -4971,6 +4994,14 @@ function void sbuffer_mem_access_base_sequence::clear_runtime_state();
     abort_uncache_d_error_pending("SBuffer responder reset");
     a_accept_armed = 1'b0;
     armed_a_req_xact = null;
+    armed_a_owner_snapshot_valid = 1'b0;
+    armed_a_owner_source = '0;
+    armed_a_owner_count = 0;
+    armed_a_owner_slot_mask = '0;
+    foreach (armed_a_owners[idx]) armed_a_owners[idx] = '{default:'0};
+    foreach (uncache_slot_owner_state[idx]) begin
+        uncache_slot_owner_state[idx] = '{default:'0};
+    end
     pre_stop_a_snapshot_valid = 1'b0;
     pre_stop_a_snapshot = null;
     uncache_rsp_q.delete();
@@ -4995,98 +5026,188 @@ function void sbuffer_mem_access_base_sequence::clear_runtime_state();
     sbuffer_stop_prepare_state       = '0;
 endfunction:clear_runtime_state
 
-// 抽象职责：在外部TL A.fire边界按DUT保存的slaveId找到所有消费该source的
-// LoadQueueUncache entry，并把active ROB owner冻结为UID/epoch/ROB/LQ快照。
-function void sbuffer_mem_access_base_sequence::capture_uncache_load_owners(
-    input bit [3:0] source,
-    output int unsigned owner_count,
-    output uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS]
+// 抽象职责：在 DUT LoadQueueUncache slot 首次 req_valid 时冻结 owner，后续
+// slaveAccept 只给同一 generation 绑定 source。redirect 不清缓存，req_valid=0 清除。
+function void sbuffer_mem_access_base_sequence::service_uncache_slot_owner_cache(
+    input bit global_stop_requested
 );
     common_data_transaction data;
     status_transaction status;
     main_control_transaction main_tr;
     memblock_rob_key_t rob_key;
     memblock_uid_t uid;
+    memblock_redirect_deleted_owner_t deleted_owner;
+    memblock_lq_key_t deleted_lq_key;
+    int unsigned deleted_match_count;
 
-    owner_count = 0;
-    foreach (owners[idx]) owners[idx] = '{default:'0};
     if (uncache_owner_vif == null) begin
         `uvm_fatal(get_type_name(), "Uncache owner VIF is not configured")
     end
     data = common_data_transaction::get();
     if (data == null) begin
-        `uvm_fatal(get_type_name(), "common_data owner unavailable for Uncache A.fire")
+        `uvm_fatal(get_type_name(), "common_data owner unavailable for Uncache slot capture")
     end
-    if ($isunknown({uncache_owner_vif.mon_cb.uncache_lq_req_valid,
-                    uncache_owner_vif.mon_cb.uncache_lq_slave_valid})) begin
-        `uvm_fatal(get_type_name(), "Uncache owner valid masks contain X/Z at A.fire")
+    if ($isunknown(uncache_owner_vif.mon_cb.uncache_lq_req_valid)) begin
+        `uvm_fatal(get_type_name(), "Uncache owner req_valid mask contains X/Z")
     end
     for (int unsigned slot = 0; slot < UNCACHE_D_ERROR_MAX_OWNERS; slot++) begin
-        if (uncache_owner_vif.mon_cb.uncache_lq_req_valid[slot] !== 1'b1 ||
-            uncache_owner_vif.mon_cb.uncache_lq_slave_valid[slot] !== 1'b1) begin
+        if (uncache_owner_vif.mon_cb.uncache_lq_req_valid[slot] !== 1'b1) begin
+            uncache_slot_owner_state[slot] = '{default:'0};
             continue;
         end
-        if ($isunknown({uncache_owner_vif.mon_cb.uncache_lq_slave_id[slot],
-                        uncache_owner_vif.mon_cb.uncache_lq_rob_flag[slot],
+        if ($isunknown({uncache_owner_vif.mon_cb.uncache_lq_rob_flag[slot],
                         uncache_owner_vif.mon_cb.uncache_lq_rob_value[slot]})) begin
             `uvm_fatal(get_type_name(),
                        $sformatf("active Uncache owner slot=%0d contains X/Z", slot))
         end
-        if (uncache_owner_vif.mon_cb.uncache_lq_slave_id[slot] != source) begin
-            continue;
-        end
         rob_key.flag = uncache_owner_vif.mon_cb.uncache_lq_rob_flag[slot];
         rob_key.value = uncache_owner_vif.mon_cb.uncache_lq_rob_value[slot];
-        if (!data.lookup_active_uid_by_rob(rob_key, uid)) begin
+        if (!uncache_slot_owner_state[slot].valid) begin
+            if (global_stop_requested) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("new Uncache slot generation after global stop slot=%0d ROB=%0d/%0d",
+                                     slot, rob_key.flag, rob_key.value))
+            end
+            if (data.lookup_active_uid_by_rob(rob_key, uid)) begin
+                status = data.get_status(uid);
+                main_tr = data.get_main_transaction(uid);
+                if (!status.active || main_tr.get_rob_key() != rob_key ||
+                    status.lqIdx_flag != main_tr.lqIdx_flag ||
+                    status.lqIdx_value != main_tr.lqIdx_value) begin
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("Uncache slot owner inconsistent slot=%0d uid=%0d epoch=%0d ROB=%0d/%0d",
+                                         slot, uid, status.dynamic_epoch,
+                                         rob_key.flag, rob_key.value))
+                end
+                uncache_slot_owner_state[slot].owner = '{
+                    valid: 1'b1,
+                    uid: uid,
+                    dynamic_epoch: status.dynamic_epoch,
+                    rob_flag: rob_key.flag,
+                    rob_value: rob_key.value,
+                    lq_flag: status.lqIdx_flag,
+                    lq_value: status.lqIdx_value,
+                    uncache_lq_slot: slot[3:0]
+                };
+            end
+            else if (data.find_unique_redirect_deleted_load_owner_by_rob(
+                         rob_key, deleted_owner, deleted_lq_key,
+                         deleted_match_count)) begin
+                uncache_slot_owner_state[slot].owner = '{
+                    valid: 1'b1,
+                    uid: deleted_owner.uid,
+                    dynamic_epoch: deleted_owner.old_dynamic_epoch,
+                    rob_flag: rob_key.flag,
+                    rob_value: rob_key.value,
+                    lq_flag: deleted_lq_key.flag,
+                    lq_value: deleted_lq_key.value,
+                    uncache_lq_slot: slot[3:0]
+                };
+                `uvm_info("UNCACHE_D_ERROR_LEDGER",
+                          $sformatf("slot-first owner recovered from redirect window slot=%0d uid=%0d epoch=%0d ROB=%0d/%0d LQ=%0d/%0d",
+                                    slot, deleted_owner.uid,
+                                    deleted_owner.old_dynamic_epoch,
+                                    rob_key.flag, rob_key.value,
+                                    deleted_lq_key.flag, deleted_lq_key.value),
+                          UVM_LOW)
+            end
+            else begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("Uncache slot=%0d ROB=%0d/%0d has no active or unique redirect-deleted owner matches=%0d",
+                                     slot, rob_key.flag, rob_key.value,
+                                     deleted_match_count))
+            end
+            uncache_slot_owner_state[slot].valid = 1'b1;
+            uncache_slot_owner_state[slot].existed_before_global_stop = 1'b1;
+        end
+        else if (uncache_slot_owner_state[slot].owner.rob_flag != rob_key.flag ||
+                 uncache_slot_owner_state[slot].owner.rob_value != rob_key.value) begin
             `uvm_fatal(get_type_name(),
-                       $sformatf("A.fire source=%0d slot=%0d ROB=%0d/%0d has no active UID owner",
-                                 source, slot, rob_key.flag, rob_key.value))
+                       $sformatf("occupied Uncache slot changed ROB without req_valid low slot=%0d old=%0d/%0d new=%0d/%0d",
+                                 slot,
+                                 uncache_slot_owner_state[slot].owner.rob_flag,
+                                 uncache_slot_owner_state[slot].owner.rob_value,
+                                 rob_key.flag, rob_key.value))
         end
-        status = data.get_status(uid);
-        main_tr = data.get_main_transaction(uid);
-        // A.fire可能晚于框架LQ active-map的释放，但只要完整ROB仍唯一映射到
-        // active UID，且main/status保存的ROB/LQ身份一致，就仍是同一动态owner。
-        // active_lq_mapped只描述当前反查map生命周期，不能否定DUT中尚未完成的
-        // LoadQueueUncache slot；redirect/source复用仍由UID+epoch+ROB/LQ冻结值隔离。
-        if (!status.active ||
-            main_tr.robIdx_flag != rob_key.flag ||
-            main_tr.robIdx_value != rob_key.value ||
-            status.lqIdx_flag != main_tr.lqIdx_flag ||
-            status.lqIdx_value != main_tr.lqIdx_value) begin
+        if ($isunknown(uncache_owner_vif.mon_cb.uncache_lq_slave_valid[slot])) begin
             `uvm_fatal(get_type_name(),
-                       $sformatf("A.fire owner inconsistent source=%0d slot=%0d uid=%0d epoch=%0d active/lq=%0d/%0d ROB(dut/main)=%0d/%0d:%0d/%0d LQ(status/main)=%0d/%0d:%0d/%0d",
-                                 source, slot, uid, status.dynamic_epoch,
-                                 status.active, status.active_lq_mapped,
-                                 rob_key.flag, rob_key.value,
-                                 main_tr.robIdx_flag, main_tr.robIdx_value,
-                                 status.lqIdx_flag, status.lqIdx_value,
-                                 main_tr.lqIdx_flag, main_tr.lqIdx_value))
+                       $sformatf("active Uncache owner slot=%0d slave_valid contains X/Z", slot))
         end
-        if (!status.active_lq_mapped) begin
-            `uvm_info("UNCACHE_D_ERROR_LEDGER",
-                      $sformatf("A.fire freezes post-LQ-map owner source=%0d slot=%0d uid=%0d epoch=%0d ROB=%0d/%0d LQ=%0d/%0d",
-                                source, slot, uid, status.dynamic_epoch,
-                                rob_key.flag, rob_key.value,
-                                status.lqIdx_flag, status.lqIdx_value),
-                      UVM_LOW)
+        if (uncache_owner_vif.mon_cb.uncache_lq_slave_valid[slot] === 1'b1) begin
+            if ($isunknown(uncache_owner_vif.mon_cb.uncache_lq_slave_id[slot])) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("active Uncache owner slot=%0d slave_id contains X/Z", slot))
+            end
+            if (!uncache_slot_owner_state[slot].source_valid) begin
+                uncache_slot_owner_state[slot].source_valid = 1'b1;
+                uncache_slot_owner_state[slot].source =
+                    uncache_owner_vif.mon_cb.uncache_lq_slave_id[slot];
+            end
+            else if (uncache_slot_owner_state[slot].source !=
+                     uncache_owner_vif.mon_cb.uncache_lq_slave_id[slot]) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("Uncache slot source changed within generation slot=%0d old=%0d new=%0d",
+                                     slot, uncache_slot_owner_state[slot].source,
+                                     uncache_owner_vif.mon_cb.uncache_lq_slave_id[slot]))
+            end
         end
-        owners[owner_count] = '{
-            valid: 1'b1,
-            uid: uid,
-            dynamic_epoch: status.dynamic_epoch,
-            rob_flag: rob_key.flag,
-            rob_value: rob_key.value,
-            lq_flag: status.lqIdx_flag,
-            lq_value: status.lqIdx_value,
-            uncache_lq_slot: slot[3:0]
-        };
-        owner_count++;
     end
-    if (owner_count == 0) begin
+endfunction:service_uncache_slot_owner_cache
+
+function void sbuffer_mem_access_base_sequence::capture_armed_uncache_load_owners(
+    input bit [3:0] opcode,
+    input bit [3:0] source,
+    input bit global_stop_requested
+);
+    if (armed_a_owner_snapshot_valid) begin
+        `uvm_fatal(get_type_name(), "Uncache A owner snapshot was armed twice")
+    end
+    armed_a_owner_source = source;
+    armed_a_owner_count = 0;
+    armed_a_owner_slot_mask = '0;
+    foreach (armed_a_owners[idx]) armed_a_owners[idx] = '{default:'0};
+    if (opcode == UNCACHE_A_OPCODE_PUT_FULL ||
+        opcode == UNCACHE_A_OPCODE_PUT_PARTIAL) begin
+        armed_a_owner_snapshot_valid = 1'b1;
+        return;
+    end
+    if (opcode != UNCACHE_A_OPCODE_GET) begin
         `uvm_fatal(get_type_name(),
-                   $sformatf("Load A.fire source=%0d has no LoadQueueUncache slave owner", source))
+                   $sformatf("unsupported Uncache opcode=%0d for owner snapshot", opcode))
     end
-endfunction:capture_uncache_load_owners
+    foreach (uncache_slot_owner_state[slot]) begin
+        if (!uncache_slot_owner_state[slot].valid ||
+            !uncache_slot_owner_state[slot].source_valid ||
+            uncache_slot_owner_state[slot].a_consumed ||
+            uncache_slot_owner_state[slot].source != source) begin
+            continue;
+        end
+        if (global_stop_requested &&
+            !uncache_slot_owner_state[slot].existed_before_global_stop) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("post-stop Uncache owner matched source=%0d slot=%0d",
+                                 source, slot))
+        end
+        armed_a_owners[armed_a_owner_count] =
+            uncache_slot_owner_state[slot].owner;
+        armed_a_owner_slot_mask[slot] = 1'b1;
+        armed_a_owner_count++;
+    end
+    if (armed_a_owner_count == 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Load A arm source=%0d has no frozen LoadQueueUncache owner", source))
+    end
+    armed_a_owner_snapshot_valid = 1'b1;
+endfunction:capture_armed_uncache_load_owners
+
+function bit sbuffer_mem_access_base_sequence::uncache_slot_owner_cache_empty();
+    foreach (uncache_slot_owner_state[slot]) begin
+        if (uncache_slot_owner_state[slot].valid) begin
+            return 1'b0;
+        end
+    end
+    return 1'b1;
+endfunction:uncache_slot_owner_cache_empty
 
 // 抽象职责：采样 Uncache responder 的有限 lifecycle 摘要，供 stop-prepare 用前后拍
 // 比较识别真实进展。它不读取 shared backing memory，也不把稳定 pending state 当作 progress。
@@ -5099,8 +5220,14 @@ function sbuffer_mem_access_base_sequence::sbuffer_stop_prepare_state_t
     state = '0;
     state.sampled_a_valid           = sampled_a_valid;
     state.a_accept_armed            = a_accept_armed;
+    state.armed_a_owner_snapshot_valid = armed_a_owner_snapshot_valid;
     state.pre_stop_a_snapshot_valid = pre_stop_a_snapshot_valid;
     state.current_d_valid           = current_d_valid;
+    foreach (uncache_slot_owner_state[slot]) begin
+        state.slot_owner_valid[slot] = uncache_slot_owner_state[slot].valid;
+        state.slot_owner_source_valid[slot] =
+            uncache_slot_owner_state[slot].source_valid;
+    end
     state.uncache_rsp_q_size        = uncache_rsp_q.size();
     state.uncache_rsp_timer_active  = uncache_rsp_timer_active;
     state.uncache_rsp_timer_due_cycle = uncache_rsp_timer_due_cycle;
@@ -5117,6 +5244,9 @@ function bit sbuffer_mem_access_base_sequence::audit_sbuffer_responder_state(
     input string audit_context
 );
     bit clean;
+    bit armed_opcode_known;
+    bit [3:0] armed_opcode;
+    int unsigned armed_slot_count;
 
     clean = 1'b1;
     if (sampled_a_valid) begin
@@ -5134,6 +5264,81 @@ function bit sbuffer_mem_access_base_sequence::audit_sbuffer_responder_state(
                    $sformatf("%s: armed A owner remains armed=%0d snapshot_null=%0d",
                              audit_context, a_accept_armed, armed_a_req_xact == null))
         clean = 1'b0;
+    end
+    if (armed_a_owner_snapshot_valid || armed_a_owner_count != 0 ||
+        armed_a_owner_slot_mask != '0) begin
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: armed A owner snapshot remains valid=%0d source=%0d count=%0d slot_mask=0x%0h",
+                             audit_context, armed_a_owner_snapshot_valid,
+                             armed_a_owner_source, armed_a_owner_count,
+                             armed_a_owner_slot_mask))
+        clean = 1'b0;
+    end
+    armed_slot_count = $countones(armed_a_owner_slot_mask);
+    if (armed_a_owner_count > UNCACHE_D_ERROR_MAX_OWNERS ||
+        armed_a_owner_count != armed_slot_count) begin
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: armed owner count/mask mismatch count=%0d mask_count=%0d mask=0x%0h max=%0d",
+                             audit_context, armed_a_owner_count,
+                             armed_slot_count, armed_a_owner_slot_mask,
+                             UNCACHE_D_ERROR_MAX_OWNERS))
+        clean = 1'b0;
+    end
+    armed_opcode_known = armed_a_req_xact != null;
+    armed_opcode = armed_opcode_known ?
+        armed_a_req_xact.auto_inner_buffers_out_a_bits_opcode : '0;
+    if (armed_a_owner_snapshot_valid && armed_opcode_known) begin
+        if ((armed_opcode == UNCACHE_A_OPCODE_PUT_FULL ||
+             armed_opcode == UNCACHE_A_OPCODE_PUT_PARTIAL) &&
+            (armed_a_owner_count != 0 || armed_a_owner_slot_mask != '0)) begin
+            `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                       $sformatf("%s: armed PUT carries Load owners opcode=%0d count=%0d mask=0x%0h",
+                                 audit_context, armed_opcode,
+                                 armed_a_owner_count, armed_a_owner_slot_mask))
+            clean = 1'b0;
+        end
+        else if (armed_opcode == UNCACHE_A_OPCODE_GET &&
+                 (armed_a_owner_count == 0 || armed_a_owner_slot_mask == '0)) begin
+            `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                       $sformatf("%s: armed GET lacks Load owners count=%0d mask=0x%0h",
+                                 audit_context, armed_a_owner_count,
+                                 armed_a_owner_slot_mask))
+            clean = 1'b0;
+        end
+    end
+    foreach (armed_a_owners[idx]) begin
+        if (idx >= armed_a_owner_count) begin
+            continue;
+        end
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: armed owner[%0d] uid=%0d epoch=%0d ROB=%0d/%0d LQ=%0d/%0d slot=%0d",
+                             audit_context, idx,
+                             armed_a_owners[idx].uid,
+                             armed_a_owners[idx].dynamic_epoch,
+                             armed_a_owners[idx].rob_flag,
+                             armed_a_owners[idx].rob_value,
+                             armed_a_owners[idx].lq_flag,
+                             armed_a_owners[idx].lq_value,
+                             armed_a_owners[idx].uncache_lq_slot))
+        clean = 1'b0;
+    end
+    foreach (uncache_slot_owner_state[slot]) begin
+        if (uncache_slot_owner_state[slot].valid) begin
+            `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                       $sformatf("%s: Uncache slot owner remains slot=%0d uid=%0d epoch=%0d ROB=%0d/%0d LQ=%0d/%0d source_valid/source=%0d/%0d a_consumed=%0d pre_stop=%0d",
+                                 audit_context, slot,
+                                 uncache_slot_owner_state[slot].owner.uid,
+                                 uncache_slot_owner_state[slot].owner.dynamic_epoch,
+                                 uncache_slot_owner_state[slot].owner.rob_flag,
+                                 uncache_slot_owner_state[slot].owner.rob_value,
+                                 uncache_slot_owner_state[slot].owner.lq_flag,
+                                 uncache_slot_owner_state[slot].owner.lq_value,
+                                 uncache_slot_owner_state[slot].source_valid,
+                                 uncache_slot_owner_state[slot].source,
+                                 uncache_slot_owner_state[slot].a_consumed,
+                                 uncache_slot_owner_state[slot].existed_before_global_stop))
+            clean = 1'b0;
+        end
     end
     if (pre_stop_a_snapshot_valid || pre_stop_a_snapshot != null) begin
         `uvm_error("SBUFFER_RESPONDER_AUDIT",
@@ -5447,7 +5652,9 @@ endfunction:apply_uncache_d_error_injection
 
 task sbuffer_mem_access_base_sequence::create_uncache_response_record(
     input sbuffer_agent_agent_xaction req_xact,
-    input longint unsigned            accept_cycle
+    input longint unsigned            accept_cycle,
+    input int unsigned                owner_count,
+    input uncache_d_error_owner_t      owners[UNCACHE_D_ERROR_MAX_OWNERS]
 );
     bit        corrupt;
     bit        denied;
@@ -5482,9 +5689,17 @@ task sbuffer_mem_access_base_sequence::create_uncache_response_record(
     response_record.data           = (response_kind == UNCACHE_RESPONSE_STORE_ACK) ? '0 : load_data;
     response_record.a_sample       = memblock_sync_pkg::peek_current_dut_global_sample();
     if (response_kind == UNCACHE_RESPONSE_LOAD_DATA) begin
-        capture_uncache_load_owners(response_record.source,
-                                    response_record.owner_count,
-                                    response_record.owners);
+        if (owner_count == 0) begin
+            `uvm_fatal(get_type_name(), "Uncache Load A.fire has empty armed owner snapshot")
+        end
+    end
+    else if (owner_count != 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Uncache Store A.fire has Load owner count=%0d", owner_count))
+    end
+    response_record.owner_count = owner_count;
+    for (int unsigned owner_idx = 0; owner_idx < owner_count; owner_idx++) begin
+        response_record.owners[owner_idx] = owners[owner_idx];
     end
     apply_uncache_d_error_injection(
         response_kind,
@@ -5777,6 +5992,7 @@ task sbuffer_mem_access_base_sequence::body();
             clear_runtime_state();
         end
         else begin
+            service_uncache_slot_owner_cache(data.is_global_stop_requested());
             // scheduler 只看见进入本拍前已有的 record。本拍 A.fire 新建的 record
             // 即使 eligible_cycle 已满足，也要在下一拍才可能进入返回仲裁。
             response_visible_count = uncache_rsp_q.size();
@@ -5789,7 +6005,30 @@ task sbuffer_mem_access_base_sequence::body();
                     capture_sbuffer_a_xaction(fired_a_req_xact);
                     check_sbuffer_a_payload_stable(armed_a_req_xact, fired_a_req_xact);
                     a_fire = 1'b1;
-                    create_uncache_response_record(fired_a_req_xact, service_cycle);
+                    if (!armed_a_owner_snapshot_valid ||
+                        armed_a_owner_source !=
+                            fired_a_req_xact.auto_inner_buffers_out_a_bits_source) begin
+                        `uvm_fatal(get_type_name(),
+                                   "Uncache A.fire lost or changed its armed owner snapshot")
+                    end
+                    create_uncache_response_record(fired_a_req_xact, service_cycle,
+                                                   armed_a_owner_count,
+                                                   armed_a_owners);
+                    foreach (uncache_slot_owner_state[slot]) begin
+                        if (armed_a_owner_slot_mask[slot]) begin
+                            if (!uncache_slot_owner_state[slot].valid ||
+                                uncache_slot_owner_state[slot].a_consumed ||
+                                !uncache_slot_owner_state[slot].source_valid ||
+                                uncache_slot_owner_state[slot].source !=
+                                    fired_a_req_xact.auto_inner_buffers_out_a_bits_source) begin
+                                `uvm_fatal(get_type_name(),
+                                           $sformatf("Uncache A.fire slot consumption mismatch slot=%0d source=%0d",
+                                                     slot,
+                                                     fired_a_req_xact.auto_inner_buffers_out_a_bits_source))
+                            end
+                            uncache_slot_owner_state[slot].a_consumed = 1'b1;
+                        end
+                    end
                     pre_stop_a_snapshot_valid = 1'b0;
                     pre_stop_a_snapshot = null;
                 end
@@ -5801,6 +6040,13 @@ task sbuffer_mem_access_base_sequence::body();
                 end
                 a_accept_armed = 1'b0;
                 armed_a_req_xact = null;
+                armed_a_owner_snapshot_valid = 1'b0;
+                armed_a_owner_source = '0;
+                armed_a_owner_count = 0;
+                armed_a_owner_slot_mask = '0;
+                foreach (armed_a_owners[idx]) begin
+                    armed_a_owners[idx] = '{default:'0};
+                end
             end
 
             if (current_d_valid && last_cycle_valid &&
@@ -5848,21 +6094,15 @@ task sbuffer_mem_access_base_sequence::body();
             sbuffer_stop_prepare_state_valid = 1'b0;
         end
 
-        // 中文注释：global stop 后只能 drain 已由前一拍 A.ready 接受的请求；若此时出现
-        // 新的未 fire A.valid，继续保持 A.ready=0 会让 DUT 与 responder 永久互等，必须 fail-fast。
-        if (!reset_active && data.is_global_stop_requested() && sampled_a_valid && !a_fire &&
-            !pre_stop_a_snapshot_valid) begin
-            `uvm_fatal(get_type_name(),
-                       "new Uncache A.valid observed after global stop without a sampled fire")
-        end
-
         build_sbuffer_idle_xaction(idle_xact);
         if (reset_active) begin
             // reset 周期保持所有 responder output 为零。
         end
         else if (data.is_global_stop_requested() && !current_d_valid &&
                  (uncache_rsp_q.size() == 0) && !uncache_rsp_timer_active &&
-                 !a_accept_armed && !pre_stop_a_snapshot_valid && !sampled_a_valid &&
+                 !a_accept_armed && !armed_a_owner_snapshot_valid &&
+                 uncache_slot_owner_cache_empty() &&
+                 !pre_stop_a_snapshot_valid && !sampled_a_valid &&
                  (dcache_write_batch.size() == 0) &&
                  (uncache_write_batch.size() == 0)) begin
             send_sbuffer_xaction(idle_xact);
@@ -5898,18 +6138,29 @@ task sbuffer_mem_access_base_sequence::body();
             end
             service_uncache_response_scheduler(service_cycle, response_visible_count);
             build_current_uncache_d_xaction(idle_xact);
-            if (!a_fire && sampled_a_valid &&
-                (!data.is_global_stop_requested() || pre_stop_a_snapshot_valid)) begin
+            if (!a_fire && sampled_a_valid) begin
                 capture_sbuffer_a_xaction(req_xact);
                 if (data.is_global_stop_requested()) begin
-                    if (pre_stop_a_snapshot == null) begin
-                        `uvm_fatal(get_type_name(), "global-stop Uncache A admission lost its pre-stop snapshot")
+                    if (pre_stop_a_snapshot_valid) begin
+                        if (pre_stop_a_snapshot == null) begin
+                            `uvm_fatal(get_type_name(), "global-stop Uncache A admission lost its pre-stop snapshot")
+                        end
+                        check_sbuffer_a_payload_stable(pre_stop_a_snapshot, req_xact);
+                        req_xact = pre_stop_a_snapshot;
                     end
-                    check_sbuffer_a_payload_stable(pre_stop_a_snapshot, req_xact);
-                    req_xact = pre_stop_a_snapshot;
                 end
                 void'(decode_uncache_a_opcode(req_xact));
+                if (data.is_global_stop_requested() &&
+                    !pre_stop_a_snapshot_valid &&
+                    req_xact.auto_inner_buffers_out_a_bits_opcode != UNCACHE_A_OPCODE_GET) begin
+                    `uvm_fatal(get_type_name(),
+                               "post-stop Uncache PUT has no pre-stop A payload snapshot")
+                end
                 if (has_uncache_response_capacity()) begin
+                    capture_armed_uncache_load_owners(
+                        req_xact.auto_inner_buffers_out_a_bits_opcode,
+                        req_xact.auto_inner_buffers_out_a_bits_source,
+                        data.is_global_stop_requested());
                     armed_a_req_xact = req_xact;
                     a_accept_armed   = 1'b1;
                     idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
