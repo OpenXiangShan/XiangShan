@@ -39,7 +39,7 @@ import xiangshan.backend.fu.NewCSR.Mcontrol6
 import xiangshan.backend.fu.NewCSR.Tdata1Bundle
 import xiangshan.backend.fu.NewCSR.Tdata2Bundle
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
+import xiangshan.backend.rob.RobCommitEntryBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.mem.LqPtr
