@@ -524,6 +524,7 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val vmxr = Bool()
     val vsum = Bool()
     val virt = Bool()
+    val fenceVirt = Bool()
     val virt_changed = Bool()
     val spvp = UInt(1.W)
     val imode = UInt(2.W)

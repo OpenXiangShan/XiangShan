@@ -227,6 +227,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val dmode = UInt(2.W)
       val debug = Bool()
       val dvirt = Bool()
+      val fenceVirt = Bool()
       val mPBMTE = Bool()
       val hPBMTE = Bool()
       val pmm = new Bundle {
@@ -1575,6 +1576,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     mstatus.regOut.MPV.asUInt,
     V.asUInt
   )
+  io.tlb.fenceVirt := V.asUInt.asBool
   io.tlb.debug := debugMode
   io.tlb.mPBMTE := RegNext(menvcfg.regOut.PBMTE.asBool)
   io.tlb.hPBMTE := RegNext(henvcfg.regOut.PBMTE.asBool)
