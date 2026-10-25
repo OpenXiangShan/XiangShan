@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Run all functional plus cfg presets with one shared VCS code-coverage mode.
-# Each preset gets ten random seeds. The common plusargs intentionally override
-# the preset request count and trigger metadata check without editing source cfgs.
+# Each preset gets ten random seeds. Default profiles use the common request
+# count override; CSR scalar 10k profiles preserve the exact cfg count.
 
-set -u
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIM_DIR="$(cd "$SCRIPT_DIR/../sim" && pwd)"
-RUNNER="$SCRIPT_DIR/run_eda_regression.sh"
+RUNNER="${FUNCTION_CFG_RUNNER:-$SCRIPT_DIR/run_eda_regression.sh}"
 MODE="${MODE:-functional_cfg_cov_20261022}"
-RESULT_ROOT="$SIM_DIR/${MODE}_results"
+RESULT_ROOT="${FUNCTION_CFG_RESULT_ROOT:-$SIM_DIR/${MODE}_results}"
 COUNT="${COUNT:-10}"
 JOBS="${JOBS:-20}"
 TRANS_NUM="${TRANS_NUM:-1000}"
@@ -22,39 +22,73 @@ fi
 
 mkdir -p "$RESULT_ROOT"
 
-# cfg | testcase | virtual sequence
+# cfg | testcase | virtual sequence | profile
 CASES=(
-    'default|tc_dispatch_real_smoke|virtual_base_sequence'
-    'tc_dispatch_real_smoke|tc_dispatch_real_smoke|virtual_base_sequence'
-    'tc_dispatch_real_store_smoke|tc_dispatch_real_store_smoke|virtual_base_sequence'
-    'tc_dispatch_real_store_wb_smoke|tc_dispatch_real_store_wb_smoke|virtual_base_sequence'
-    'tc_dispatch_real_store_sta_wb_smoke|tc_dispatch_real_store_sta_wb_smoke|virtual_base_sequence'
-    'tc_dispatch_real_multi_store_wb_smoke|tc_dispatch_real_multi_store_wb_smoke|virtual_base_sequence'
-    'tc_dispatch_real_mixed_wb_smoke|tc_dispatch_real_mixed_wb_smoke|virtual_base_sequence'
-    'tc_dispatch_real_mixed_sta_wb_smoke|tc_dispatch_real_mixed_sta_wb_smoke|virtual_base_sequence'
-    'tc_dispatch_real_smoke_flushsb|tc_dispatch_real_smoke|virtual_base_sequence'
-    'tc_dispatch_real_cancel_reconcile_smoke|basicTest|memblock_dispatch_real_cancel_reconcile_vseq'
-    'tc_dispatch_real_l2cache_model|tc_dispatch_real_smoke|virtual_base_sequence'
-    'tc_dispatch_real_mmu_sv39_smoke|basicTest|memblock_dispatch_real_smoke_vseq'
-    'tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k|basicTest|memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq'
-    'tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16|basicTest|memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq'
-    'tc_dispatch_real_mmu_sv39_strict_nc_100k|basicTest|memblock_dispatch_real_smoke_vseq'
-    'tc_l2tlb_fault_2pct_no_trigger|basicTest|memblock_dispatch_real_smoke_vseq'
-    'tc_l2tlb_pbmt_response_fault|basicTest|memblock_l2tlb_pbmt_response_fault_vseq'
-    'tc_l2tlb_pbmt_csr_gate_nc|tc_l2tlb_pbmt_csr_gate|virtual_base_sequence'
-    'tc_l2tlb_pbmt_csr_gate_io|tc_l2tlb_pbmt_csr_gate|virtual_base_sequence'
-    'tc_l2tlb_ppn_reuse_smoke|tc_l2tlb_ppn_reuse_smoke|virtual_base_sequence'
-    'tc_memblock_csr_random_config|basicTest|memblock_csr_random_config_vseq'
-    'tc_sfence_stress_1k|basicTest|memblock_dispatch_real_smoke_vseq'
-    'tc_sfence_stress_10k|basicTest|memblock_dispatch_real_smoke_vseq'
-    'csr_sfence_check_store_rob_control|basicTest|memblock_dispatch_real_smoke_vseq'
-    'csr_sfence_check_store_manual_control|basicTest|memblock_dispatch_manual_control_vseq'
-    'tc_boundary_addr_reuse_store_cross8_gate|tc_boundary_addr_reuse_gate|virtual_base_sequence'
-    'tc_csr_scalar_load_10k|basicTest|memblock_csr_scalar_load_10k_vseq'
-    'tc_csr_scalar_store_10k|basicTest|memblock_csr_scalar_store_10k_vseq'
-    'tc_csr_scalar_mixed_10k|basicTest|memblock_csr_scalar_mixed_10k_vseq'
-    'tc_csr_scalar_store_sta_std_10k|basicTest|memblock_csr_scalar_store_sta_std_10k_vseq'
+    'default|tc_dispatch_real_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_smoke|tc_dispatch_real_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_store_smoke|tc_dispatch_real_store_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_store_wb_smoke|tc_dispatch_real_store_wb_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_store_sta_wb_smoke|tc_dispatch_real_store_sta_wb_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_multi_store_wb_smoke|tc_dispatch_real_multi_store_wb_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_mixed_wb_smoke|tc_dispatch_real_mixed_wb_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_mixed_sta_wb_smoke|tc_dispatch_real_mixed_sta_wb_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_smoke_flushsb|tc_dispatch_real_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_cancel_reconcile_smoke|basicTest|memblock_dispatch_real_cancel_reconcile_vseq|default'
+    'tc_dispatch_real_l2cache_model|tc_dispatch_real_smoke|virtual_base_sequence|default'
+    'tc_dispatch_real_mmu_sv39_smoke|basicTest|memblock_dispatch_real_smoke_vseq|default'
+    'tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k|basicTest|memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq|default'
+    'tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16|basicTest|memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq|default'
+    'tc_dispatch_real_mmu_sv39_strict_nc_100k|basicTest|memblock_dispatch_real_smoke_vseq|default'
+    'tc_l2tlb_fault_2pct_no_trigger|basicTest|memblock_dispatch_real_smoke_vseq|default'
+    'tc_l2tlb_pbmt_response_fault|basicTest|memblock_l2tlb_pbmt_response_fault_vseq|default'
+    'tc_l2tlb_pbmt_csr_gate_nc|tc_l2tlb_pbmt_csr_gate|virtual_base_sequence|default'
+    'tc_l2tlb_pbmt_csr_gate_io|tc_l2tlb_pbmt_csr_gate|virtual_base_sequence|default'
+    'tc_l2tlb_ppn_reuse_smoke|tc_l2tlb_ppn_reuse_smoke|virtual_base_sequence|default'
+    'tc_memblock_csr_random_config|basicTest|memblock_csr_random_config_vseq|default'
+    'tc_sfence_stress_1k|basicTest|memblock_dispatch_real_smoke_vseq|default'
+    'tc_sfence_stress_10k|basicTest|memblock_dispatch_real_smoke_vseq|default'
+    'csr_sfence_check_store_rob_control|basicTest|memblock_dispatch_real_smoke_vseq|default'
+    'csr_sfence_check_store_manual_control|basicTest|memblock_dispatch_manual_control_vseq|default'
+    'tc_boundary_addr_reuse_store_cross8_gate|tc_boundary_addr_reuse_gate|virtual_base_sequence|default'
+    'tc_csr_scalar_load_10k|basicTest|memblock_csr_scalar_load_10k_vseq|csr_scalar_10k'
+    'tc_csr_scalar_store_10k|basicTest|memblock_csr_scalar_store_10k_vseq|csr_scalar_10k'
+    'tc_csr_scalar_mixed_10k|basicTest|memblock_csr_scalar_mixed_10k_vseq|csr_scalar_10k'
+    'tc_csr_scalar_store_sta_std_10k|basicTest|memblock_csr_scalar_store_sta_std_10k_vseq|csr_scalar_10k'
 )
+
+if [[ -n "${FUNCTION_CFG_CASES_FILE:-}" ]]; then
+    [[ -f "$FUNCTION_CFG_CASES_FILE" && -r "$FUNCTION_CFG_CASES_FILE" ]] || {
+        echo "invalid FUNCTION_CFG_CASES_FILE: $FUNCTION_CFG_CASES_FILE" >&2
+        exit 2
+    }
+    mapfile -t CASES < <(grep -Ev '^[[:space:]]*(#|$)' "$FUNCTION_CFG_CASES_FILE")
+    [[ "${#CASES[@]}" -gt 0 ]] || {
+        echo "FUNCTION_CFG_CASES_FILE has no cases: $FUNCTION_CFG_CASES_FILE" >&2
+        exit 2
+    }
+fi
+
+resolve_case_profile() {
+    local profile="$1"
+    case "$profile" in
+        default)
+            CASE_PLUS_FILE="$SIM_DIR/../seq/plus_cfg"
+            CASE_OVERRIDE_TRANS_NUM=1
+            ;;
+        csr_scalar_10k)
+            CASE_PLUS_FILE="$SIM_DIR/../seq/csr_scalar_stress/cfg"
+            CASE_OVERRIDE_TRANS_NUM=0
+            ;;
+        *)
+            echo "unknown functional cfg profile: $profile" >&2
+            return 2
+            ;;
+    esac
+}
+
+valid_case_name() {
+    [[ "$1" =~ ^[A-Za-z0-9_.-]+$ && "$1" != . && "$1" != .. ]]
+}
 
 SUMMARY="$RESULT_ROOT/summary.tsv"
 printf 'cfg\ttc\tts\tresult\trc\tresult_dir\n' >"$SUMMARY"
@@ -62,13 +96,25 @@ printf 'cfg\ttc\tts\tresult\trc\tresult_dir\n' >"$SUMMARY"
 compile=1
 overall_rc=0
 for item in "${CASES[@]}"; do
-    IFS='|' read -r cfg tc ts <<<"$item"
+    IFS='|' read -r cfg tc ts profile extra <<<"$item"
+    [[ -n "$cfg" && -n "$tc" && -n "$ts" && -n "$profile" && -z "${extra:-}" ]] || {
+        echo "invalid CASE entry: $item" >&2
+        exit 2
+    }
+    for value in "$cfg" "$tc" "$ts"; do
+        valid_case_name "$value" || {
+            echo "invalid CASE name: $value" >&2
+            exit 2
+        }
+    done
+    resolve_case_profile "$profile" || exit 2
     out="$RESULT_ROOT/$cfg"
     mkdir -p "$out"
 
     args=(
         --tc "$tc"
         --cfg "$cfg"
+        --plus-file "$CASE_PLUS_FILE"
         --ts "$ts"
         --mode "$MODE"
         --count "$COUNT"
@@ -77,10 +123,12 @@ for item in "${CASES[@]}"; do
         --no-wave
         --verbosity UVM_LOW
         --timeout-ns "$TIMEOUT_NS"
-        --plusarg "+MEMBLOCK_MAIN_TRANS_NUM=$TRANS_NUM"
         --plusarg '+MEMBLOCK_CHECK_TRIGGER_EN=0'
         --output-dir "$out"
     )
+    if (( CASE_OVERRIDE_TRANS_NUM )); then
+        args+=(--plusarg "+MEMBLOCK_MAIN_TRANS_NUM=$TRANS_NUM")
+    fi
     if (( compile )); then
         args+=(--compile)
         compile=0

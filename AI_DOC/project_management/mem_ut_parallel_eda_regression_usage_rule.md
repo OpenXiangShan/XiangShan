@@ -41,7 +41,7 @@ cd mem_ut/ver/ut/memblock/sim
 执行前应满足：
 
 1. 当前节点可以通过 `ssh eda01` 连接远端 EDA 节点；默认 host 不通时，脚本会尝试 `172.28.10.101`。
-2. `../seq/plus_cfg/<cfg>.cfg` 必须存在且可读。
+2. 默认 `../seq/plus_cfg/<cfg>.cfg` 必须存在且可读；使用 `--plus-file` 时，指定目录中的同名 cfg 必须存在且可读。
 3. `--output-dir` 指定的目录必须为空；不指定时，脚本在 `.eda_regression/` 下自动创建带 run id 的目录。
 4. 同一个 `mode` 同时只能有一个 controller 使用，避免不同批次覆盖同一 `simv` 或日志目录。
 5. 不要在回归运行期间重新编译或替换同一 `mode` 的 `simv`。
@@ -100,7 +100,23 @@ cd mem_ut/ver/ut/memblock/sim
 
 `--plusarg` 可以重复传入。用户 plusarg 与 cfg 中存在同名 key 时，用户传入值覆盖 cfg 值，最终只向仿真命令传递一次该 key。
 
-### 2.4 Debug、波形和覆盖率
+### 2.4 选择专用 plus cfg 目录
+
+```bash
+../scripts/run_eda_regression.sh \
+  --tc basicTest \
+  --cfg tc_csr_scalar_load_10k \
+  --plus-file ../seq/csr_scalar_stress/cfg \
+  --seed 666675 \
+  --dry-run
+```
+
+`--plus-file` 只接受目录，不接受任意 cfg 文件名。绝对路径直接使用；相对路径按 controller 启动时的当前
+工作目录解析。runner 会把目录规范化为物理绝对路径，要求目录可读、可遍历，并验证
+`<目录>/<cfg>.cfg` 的真实目标仍直接位于该目录内，拒绝 cfg symlink 逃逸。验证通过后只把所选 cfg
+复制到结果目录的 `frozen_plus_cfg/`，后续 effective plusargs、compile 和 seed run 均使用冻结副本。
+
+### 2.5 Debug、波形和覆盖率
 
 ```bash
 ../scripts/run_eda_regression.sh \
@@ -132,7 +148,7 @@ cd mem_ut/ver/ut/memblock/sim
 波形和 coverage 能力属于编译能力。`--no-compile --wave` 或
 `--no-compile --coverage` 要求已有 fingerprint 中的 `simv` 具备对应能力，否则脚本会在仿真前失败。
 
-### 2.5 只检查参数和配置
+### 2.6 只检查参数和配置
 
 ```bash
 ../scripts/run_eda_regression.sh \
@@ -154,6 +170,7 @@ cd mem_ut/ver/ut/memblock/sim
 |---|---:|---|
 | `--tc <name>` | 脚本无默认值 | testcase 名称，脚本命令行必填；主 agent 按回归执行规则在提示词未指定时传入 `basicTest`。 |
 | `--cfg <name>` | `default` | `seq/plus_cfg/<name>.cfg` 的名称，不带 `.cfg`。 |
+| `--plus-file <dir>` | `seq/plus_cfg` | plus cfg 源目录；支持绝对或相对目录，相对路径按 controller 当前工作目录解析。 |
 | `--ts <name>` | `virtual_base_sequence` | virtual sequence 名称。 |
 | `--mode <name>` | `base_fun` | 编译和仿真产物使用的 mode。 |
 | `--count <n>` | `1` | 未指定 seed 时自动生成的 seed 数量，范围 `1..100000`。 |
@@ -414,6 +431,9 @@ mem_ut/ver/ut/memblock/sim/.eda_regression/<run_id>/
 | `seeds.txt` | 本批次计划 seed。 | 是 |
 | `user_plusargs.txt` | 用户传入的 plusargs。 | 是 |
 | `effective_plusargs.txt` | cfg 合并后实际生效的 plusargs。 | 是 |
+
+`config.txt` 中的 `source_plus_file`、`source_cfg`、`frozen_cfg` 和 `cfg_sha256` 共同记录 cfg 的规范化源目录、
+规范化源文件、冻结副本和内容 hash，便于确认一次回归实际使用的 cfg 来源。
 | `summary.log` | 本批次最终 PASS/FAIL 和计数汇总。 | 是 |
 | `monitor_events.tsv` | 达到阈值的根因 seed 事件；仅触发 monitor 时生成。 | 是，按需生成 |
 | `monitor_failure.committed` | 根因记录已在联停前提交；仅触发 monitor 时生成。 | 是，按需生成 |

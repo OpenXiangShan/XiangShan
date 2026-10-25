@@ -348,6 +348,8 @@ Required:
 
 Test selection:
   --cfg <name>                Plus cfg name without .cfg (default: default).
+  --plus-file <dir>           Plus cfg directory (default: seq/plus_cfg).
+                              Relative paths resolve from the caller's cwd.
   --ts <name>                 Virtual sequence (default: virtual_base_sequence).
   --mode <name>               Build/run mode (default: base_fun).
   --count <n>                 Generated-seed count (default: 1).
@@ -406,6 +408,90 @@ normalize_bounded_decimal() {
     printf '%s\n' "$value"
 }
 
+normalize_plus_file_dir() {
+    local raw_dir="$1" candidate canonical_dir
+    if [[ -z "$raw_dir" || "$raw_dir" =~ [[:cntrl:]] ]]; then
+        log_error "--plus-file requires a non-empty directory without control characters"
+        return 2
+    fi
+    if [[ "$raw_dir" == /* ]]; then candidate="$raw_dir"; else candidate="$PWD/$raw_dir"; fi
+    [[ -d "$candidate" && -r "$candidate" && -x "$candidate" ]] || {
+        log_error "plus-file directory is not readable and searchable: $candidate"
+        return 2
+    }
+    canonical_dir="$(cd -- "$candidate" && pwd -P)" || {
+        log_error "failed to canonicalize plus-file directory: $candidate"
+        return 2
+    }
+    if [[ -z "$canonical_dir" || "$canonical_dir" =~ [[:cntrl:]] ]]; then
+        log_error "canonical plus-file directory contains control characters"
+        return 2
+    fi
+    [[ -d "$canonical_dir" && -r "$canonical_dir" && -x "$canonical_dir" ]] || {
+        log_error "canonical plus-file directory is not readable and searchable: $canonical_dir"
+        return 2
+    }
+    printf '%s\n' "$canonical_dir"
+}
+
+resolve_cfg_file() {
+    local canonical_dir="$1" cfg_name="$2" candidate resolved_file resolved_parent
+    candidate="$canonical_dir/$cfg_name.cfg"
+    [[ -f "$candidate" && -r "$candidate" ]] || {
+        log_error "cfg file is not a readable regular file: $candidate"
+        return 2
+    }
+    resolved_file="$(realpath -e -- "$candidate")" || {
+        log_error "failed to resolve cfg file: $candidate"
+        return 2
+    }
+    if [[ -z "$resolved_file" || "$resolved_file" =~ [[:cntrl:]] ]]; then
+        log_error "resolved cfg path contains control characters"
+        return 2
+    fi
+    [[ -f "$resolved_file" && -r "$resolved_file" ]] || {
+        log_error "resolved cfg is not a readable regular file: $resolved_file"
+        return 2
+    }
+    resolved_parent="$(dirname -- "$resolved_file")"
+    [[ "$resolved_parent" == "$canonical_dir" ]] || {
+        log_error "cfg file escapes plus-file directory: $candidate -> $resolved_file"
+        return 2
+    }
+    printf '%s\n' "$resolved_file"
+}
+
+validate_cfg_plusargs() {
+    local file="$1" line trimmed body key value line_no=0
+    declare -A cfg_seen=()
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        ((line_no += 1))
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+        [[ -z "$trimmed" || "$trimmed" == \#* || "$trimmed" == + ]] && continue
+        [[ "$trimmed" == +*=* && "$trimmed" != *"="*"="* ]] || {
+            log_error "invalid cfg plusarg at $file:$line_no; expected exactly +KEY=VALUE"
+            return 2
+        }
+        body="${trimmed#+}"
+        key="${body%%=*}"
+        value="${body#*=}"
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+            log_error "invalid cfg plusarg key '$key' at $file:$line_no"
+            return 2
+        }
+        [[ "$value" =~ ^[A-Za-z0-9_./,:@%+-]+$ ]] || {
+            log_error "invalid cfg plusarg value for '$key' at $file:$line_no"
+            return 2
+        }
+        [[ -z "${cfg_seen[$key]+x}" ]] || {
+            log_error "duplicate cfg plusarg key '$key' at $file:$line_no"
+            return 2
+        }
+        cfg_seen[$key]=1
+    done <"$file"
+}
+
 declare -A PLUSARG_SEEN=()
 declare -a USER_PLUSARGS=()
 validate_plusarg() {
@@ -436,18 +522,20 @@ POLL_INTERVAL="1"; LAUNCH_TIMEOUT="30"; PROBE_INTERVAL="5"; SSH_RETRIES="3"
 DO_COMPILE=0; WAVE_ON=0; COVERAGE_ON=0; MONITOR_ON=1; RECORD_ON=1
 DEBUG_ON=0; DRY_RUN=0; VERBOSITY="UVM_LOW"; REMOTE_HOST="$DEFAULT_REMOTE_HOST"
 OUTPUT_DIR=""; WAVE_EXPLICIT=0; VERBOSITY_EXPLICIT=0; COUNT_EXPLICIT=0
+PLUS_FILE_INPUT="$SIM_DIR/../seq/plus_cfg"
 EXPLICIT_SEED_MODE=0
 declare -a RAW_SEEDS=()
 
 while [[ $# -gt 0 ]]; do
     option="$1"
     case "$option" in
-        --tc|--cfg|--ts|--mode|--count|--seed|--seeds|--jobs|--plusarg|--verbosity|--error-limit|--timeout-ns|--remote-host|--output-dir|--poll-interval|--launch-timeout|--probe-interval|--ssh-retries)
+        --tc|--cfg|--plus-file|--ts|--mode|--count|--seed|--seeds|--jobs|--plusarg|--verbosity|--error-limit|--timeout-ns|--remote-host|--output-dir|--poll-interval|--launch-timeout|--probe-interval|--ssh-retries)
             require_option_value "$option" "$#" "${2-}" || { usage >&2; exit 2; }
             value="$2"
             case "$option" in
                 --tc) TC="$value" ;;
                 --cfg) CFG="$value" ;;
+                --plus-file) PLUS_FILE_INPUT="$value" ;;
                 --ts) TS="$value" ;;
                 --mode) MODE="$value" ;;
                 --count) COUNT="$value"; COUNT_EXPLICIT=1 ;;
@@ -509,9 +597,8 @@ LAUNCH_TIMEOUT="$(normalize_bounded_decimal launch-timeout "$LAUNCH_TIMEOUT" 1 3
 PROBE_INTERVAL="$(normalize_bounded_decimal probe-interval "$PROBE_INTERVAL" 1 3600)" || exit 2
 SSH_RETRIES="$(normalize_bounded_decimal ssh-retries "$SSH_RETRIES" 1 100)" || exit 2
 
-PLUS_FILE="$SIM_DIR/../seq/plus_cfg"
-CFG_FILE="$PLUS_FILE/$CFG.cfg"
-[[ -f "$CFG_FILE" && -r "$CFG_FILE" ]] || { log_error "cfg file is not a readable regular file: $CFG_FILE"; exit 2; }
+PLUS_FILE="$(normalize_plus_file_dir "$PLUS_FILE_INPUT")" || exit 2
+CFG_FILE="$(resolve_cfg_file "$PLUS_FILE" "$CFG")" || exit 2
 
 declare -a SEEDS=()
 declare -A SEED_SEEN=()
@@ -576,6 +663,7 @@ FROZEN_PLUS_FILE="$OUTPUT_DIR/frozen_plus_cfg"
 mkdir -p "$FROZEN_PLUS_FILE" || exit 2
 cp -- "$CFG_FILE" "$FROZEN_PLUS_FILE/$CFG.cfg" || exit 2
 chmod 0444 "$FROZEN_PLUS_FILE/$CFG.cfg" || exit 2
+validate_cfg_plusargs "$FROZEN_PLUS_FILE/$CFG.cfg" || exit 2
 CFG_HASH="$(sha256sum "$FROZEN_PLUS_FILE/$CFG.cfg" | awk '{print $1}')"
 if ! EFFECTIVE_PLUSARGS="$(make -s -C "$SIM_DIR" eda_print_effective_plusargs \
     cfg="$CFG" plus_file="$FROZEN_PLUS_FILE" plus_arg="$USER_PLUSARGS_STRING" | paste -sd' ' -)"; then
@@ -614,6 +702,8 @@ write_config() {
         printf 'note=%s\n' "$NOTE"
         printf 'user_plusargs=%s\n' "$USER_PLUSARGS_STRING"
         printf 'effective_plusargs=%s\n' "$EFFECTIVE_PLUSARGS"
+        printf 'source_plus_file=%s\n' "$PLUS_FILE"
+        printf 'source_cfg=%s\n' "$CFG_FILE"
         printf 'frozen_cfg=%s\n' "$FROZEN_PLUS_FILE/$CFG.cfg"
         printf 'cfg_sha256=%s\n' "$CFG_HASH"
     } | atomic_write "$OUTPUT_DIR/config.txt"
