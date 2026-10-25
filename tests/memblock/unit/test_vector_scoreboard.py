@@ -65,6 +65,9 @@ class VectorScoreboardTest(unittest.TestCase):
     def test_scalar_reset_cancellation_preserves_exact_identity_and_errors(self) -> None:
         self.check_case("scalar-reset")
 
+    def test_exceptional_segment_fix_counts_as_directional_completion(self) -> None:
+        self.check_case("segment-exception-counts")
+
     def test_indexed_split_and_fractional_destination_index(self) -> None:
         self.check_case("indexed")
 

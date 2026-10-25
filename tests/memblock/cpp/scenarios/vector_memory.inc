@@ -2044,6 +2044,7 @@ int run_vector_segment_noncanonical(int argc, char **argv)
     std::uint8_t next_rob = 90;
     for (unsigned index = 0; index < addresses.size(); ++index) {
         const std::uint64_t address = addresses[index];
+        const auto loads_before = environment.vector_load_writebacks();
         if (memblock::reference_sv39_walk(
                 environment.memory(), root, address).translated) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
@@ -2083,7 +2084,7 @@ int run_vector_segment_noncanonical(int argc, char **argv)
             return 1;
         }
         if (environment.exception_vaddr() != address ||
-            environment.vector_load_writebacks() != index + 1 ||
+            environment.vector_load_writebacks() != loads_before + 1 ||
             environment.tilelink_requests() != 0) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
                       << environment.cycle() << " phase=fault-metadata index="
@@ -2097,6 +2098,8 @@ int run_vector_segment_noncanonical(int argc, char **argv)
         fix.pdest = static_cast<std::uint8_t>(160 + index);
         // The segment's fault stays on the following uop of the same
         // instruction; only the fault-only-first fix-VL path clears it.
+        // Both exceptional uops count as load completions; neither is a
+        // successful FOF fix-VL completion.
         fix.expected_exception_mask = memblock::kExceptionLoadPageFault;
         fix.expected_vl = 2;
         fix.vuop_idx = 1;
@@ -2105,10 +2108,12 @@ int run_vector_segment_noncanonical(int argc, char **argv)
         environment.expect_vector_data(fix, {});
         if (!environment.issue_vector(fix, 1024) ||
             !environment.run_until_vector_complete(4096) ||
-            environment.vector_load_writebacks() != index + 1 ||
+            environment.vector_load_writebacks() != loads_before + 2 ||
             environment.lq_dequeued() != environment.lq_allocated()) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
                       << environment.cycle() << " phase=fix-vl index=" << index
+                      << " writebacks=" << environment.vector_load_writebacks()
+                      << " expected_writebacks=" << loads_before + 2
                       << " reason=" << environment.error() << '\n';
             return 1;
         }
@@ -2118,6 +2123,7 @@ int run_vector_segment_noncanonical(int argc, char **argv)
     std::uint8_t next_sq = 0;
     for (unsigned index = 0; index < addresses.size(); ++index) {
         const std::uint64_t address = addresses[index];
+        const auto stores_before = environment.vector_store_writebacks();
         memblock::VectorMemoryTransaction store_uop{
             .store = true,
             .segment = true,
@@ -2145,7 +2151,7 @@ int run_vector_segment_noncanonical(int argc, char **argv)
             !environment.run_until_vector_complete_with_replays(
                 store_uop, 16384) ||
             environment.exception_vaddr() != address ||
-            environment.vector_store_writebacks() != index + 1 ||
+            environment.vector_store_writebacks() != stores_before + 1 ||
             environment.tilelink_requests() != 0 ||
             !environment.run_until_sbuffer_empty(4096)) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
@@ -2166,11 +2172,14 @@ int run_vector_segment_noncanonical(int argc, char **argv)
         environment.expect_vector_data(store_fix, {});
         if (!environment.issue_vector(store_fix, 1024) ||
             !environment.run_until_vector_complete(4096) ||
-            environment.vector_store_writebacks() != index + 1 ||
+            environment.vector_store_writebacks() != stores_before + 2 ||
             environment.sq_dequeued() != environment.sq_allocated()) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
                       << environment.cycle() << " phase=store-fix-vl index="
-                      << index << " reason=" << environment.error() << '\n';
+                      << index << " writebacks="
+                      << environment.vector_store_writebacks()
+                      << " expected_writebacks=" << stores_before + 2
+                      << " reason=" << environment.error() << '\n';
             return 1;
         }
     }

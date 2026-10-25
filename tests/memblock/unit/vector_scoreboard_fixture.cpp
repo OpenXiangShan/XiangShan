@@ -142,6 +142,39 @@ int main(int argc, char **argv)
             check_scalar_reset_cancellation();
             return 0;
         }
+        if (name == "segment-exception-counts") {
+            for (bool store : {false, true}) {
+                memblock::VectorMemoryScoreboard scoreboard;
+                memblock::VectorMemoryTransaction fault;
+                fault.segment = true;
+                fault.store = store;
+                fault.nf = 1;
+                fault.expected_exception_mask = store
+                    ? memblock::kExceptionStorePageFault
+                    : memblock::kExceptionLoadPageFault;
+                auto fix = fault;
+                fix.vuop_idx = 1;
+                fix.pdest = 1;
+                fix.vl_wen = true;
+                fix.last_uop = true;
+                scoreboard.expect(fault, {});
+                scoreboard.expect(fix, {});
+                scoreboard.observe(0, completion(fault, 0));
+                require(scoreboard.ok() && scoreboard.pending() == 1,
+                        "exceptional segment first completion rejected");
+                require((store ? scoreboard.store_observed()
+                               : scoreboard.load_observed()) == 1,
+                        "first exceptional segment completion not counted");
+                scoreboard.observe(0, completion(fix, 0));
+                require(scoreboard.ok() && scoreboard.done(),
+                        "exceptional segment fix completion rejected");
+                require((store ? scoreboard.store_observed()
+                               : scoreboard.load_observed()) == 2 &&
+                            scoreboard.fof_fix_observed() == 0,
+                        "exceptional segment fix must count in its direction");
+            }
+            return 0;
+        }
         memblock::VectorMemoryTransaction transaction;
         if (name == "ordinary") {
             check_index(transaction, 0);
