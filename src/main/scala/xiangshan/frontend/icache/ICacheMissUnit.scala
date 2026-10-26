@@ -99,16 +99,15 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   io.txreq.valid := acquireArb.io.out.valid
   acquireArb.io.out.ready := io.txreq.ready
   io.txreq.bits := 0.U.asTypeOf(io.txreq.bits)
-  when(io.txreq.fire) {
-    val req = acquireArb.io.out.bits
-    ICacheCCHI.Tx.missReq(
-      io.txreq.bits,
-      txnId = req.mshrId,
-      addr = Cat(req.blkPAddr, 0.U(blockOffBits.W)),
-      alias = aliasFromVSetIdx(req.vSetIdx),
-      srcId = cchiIcacheSrcId
-    )
-  }
+  // Present the request payload independently of ready/fire.
+  private val acquireReq = acquireArb.io.out.bits
+  ICacheCCHI.Tx.missReq(
+    io.txreq.bits,
+    txnId = acquireReq.mshrId,
+    addr = Cat(acquireReq.blkPAddr, 0.U(blockOffBits.W)),
+    alias = aliasFromVSetIdx(acquireReq.vSetIdx),
+    srcId = cchiIcacheSrcId
+  )
 
   private val allMshr = (0 until NumAllMshr).map { i =>
     val isFetch = i < NumFetchMshr
