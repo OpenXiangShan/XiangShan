@@ -813,103 +813,103 @@ package object xiangshan {
   }
 
   object TopDownCounters extends Enumeration {
-    val NoStall = Value("NoStall") // Base
+    val NoStall = Value("NoStall") // 0x0 Base
     // frontend
-    val OverrideBubble = Value("OverrideBubble")
-    val FtqUpdateBubble = Value("FtqUpdateBubble")
+    val OverrideBubble = Value("OverrideBubble") // 0x1
+    val FtqUpdateBubble = Value("FtqUpdateBubble") // 0x2
     // val ControlRedirectBubble = Value("ControlRedirectBubble")
-    val TAGEMissBubble = Value("TAGEMissBubble")
-    val SCMissBubble = Value("SCMissBubble")
-    val ITTAGEMissBubble = Value("ITTAGEMissBubble")
-    val RASMissBubble = Value("RASMissBubble")
-    val MemVioRedirectBubble = Value("MemVioRedirectBubble")
-    val OtherRedirectBubble = Value("OtherRedirectBubble")
-    val FtqFullStall = Value("FtqFullStall")
+    val TAGEMissBubble = Value("TAGEMissBubble") // 0x3
+    val SCMissBubble = Value("SCMissBubble") // 0x4
+    val ITTAGEMissBubble = Value("ITTAGEMissBubble") // 0x5
+    val RASMissBubble = Value("RASMissBubble") // 0x6
+    val MemVioRedirectBubble = Value("MemVioRedirectBubble") // 0x7
+    val OtherRedirectBubble = Value("OtherRedirectBubble") // 0x8
+    val FtqFullStall = Value("FtqFullStall") // 0x9
 
-    val ICacheMissBubble = Value("ICacheMissBubble")
-    val ITLBMissBubble = Value("ITLBMissBubble")
-    val BTBMissBubble = Value("BTBMissBubble")
-    val FetchFragBubble = Value("FetchFragBubble")
-    val FrontendOtherCoreStall = Value("FrontendOtherCoreStall")
+    val ICacheMissBubble = Value("ICacheMissBubble") // 0xa
+    val ITLBMissBubble = Value("ITLBMissBubble") // 0xb
+    val BTBMissBubble = Value("BTBMissBubble") // 0xc
+    val FetchFragBubble = Value("FetchFragBubble") // 0xd
+    val FrontendOtherCoreStall = Value("FrontendOtherCoreStall") // 0xe
 
     // backend
     // long inst stall at rob head
-    val IssueCancelStallOg0 = Value("IssueCancelStallOg0")
-    val IssueCancelStallOg1 = Value("IssueCancelStallOg1")
-    val IssueCancelStallLd = Value("IssueCancelStallLd")
-    val IssueCancelStallSt = Value("IssueCancelStallSt")
-    val IssueCancelStallOther = Value("IssueCancelStallOther")
-    val IssueDelayStall = Value("IssueDelayStall")
-    val DivStall = Value("DivStall") // int div, float div/sqrt
-    val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head exec long
-    val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head exec long
-    val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head exec long
-    val OtherNotReadyStall = Value("OtherNotReadyStall")
-    val RobStall = Value("RobStall")
-    val LqStall = Value("LqStall")
-    val SqStall = Value("SqStall")
+    val IssueCancelStallOg0 = Value("IssueCancelStallOg0") // 0xf
+    val IssueCancelStallOg1 = Value("IssueCancelStallOg1") // 0x10
+    val IssueCancelStallLd = Value("IssueCancelStallLd") // 0x11
+    val IssueCancelStallSt = Value("IssueCancelStallSt") // 0x12
+    val IssueCancelStallOther = Value("IssueCancelStallOther") // 0x13
+    val IssueDelayStall = Value("IssueDelayStall") // 0x14
+    val DivStall = Value("DivStall") // 0x15 int div, float div/sqrt
+    val IntNotReadyStall = Value("IntNotReadyStall") // 0x16 int-inst at rob head exec long
+    val FPNotReadyStall = Value("FPNotReadyStall") // 0x17 fp-inst at rob head exec long
+    val MemNotReadyStall = Value("MemNotReadyStall") // 0x18 mem-inst at rob head exec long
+    val OtherNotReadyStall = Value("OtherNotReadyStall") // 0x19
+    val RobStall = Value("RobStall") // 0x1a
+    val LqStall = Value("LqStall") // 0x1b
+    val SqStall = Value("SqStall") // 0x1c
     // freelist full
-    val IntFlStall = Value("IntFlStall")
-    val FpFlStall = Value("FpFlStall")
-    val VecFlStall = Value("VecFlStall")
-    val V0FlStall = Value("V0FlStall")
-    val VlFlStall = Value("VlFlStall")
-    val MultiFlStall = Value("MultiFlStall")
+    val IntFlStall = Value("IntFlStall") // 0x1d
+    val FpFlStall = Value("FpFlStall") // 0x1e
+    val VecFlStall = Value("VecFlStall") // 0x1f
+    val V0FlStall = Value("V0FlStall") // 0x20
+    val VlFlStall = Value("VlFlStall") // 0x21
+    val MultiFlStall = Value("MultiFlStall") // 0x22
     // fusion bubble
-    val FusionBubble = Value("FusionBubble")
+    val FusionBubble = Value("FusionBubble") // 0x23
     // dispatch stall
     // dispatch stall for dispatch policy
     // TODO: explain only load store exist
-    val LoadDispatchPolicyStall = Value("LoadDispatchPolicyStall")
-    val StoreDispatchPolicyStall = Value("StoreDispatchPolicyStall")
-    val OtherDispatchPolicyStall = Value("OtherDispatchPolicyStall")
+    val LoadDispatchPolicyStall = Value("LoadDispatchPolicyStall") // 0x24
+    val StoreDispatchPolicyStall = Value("StoreDispatchPolicyStall") // 0x25
+    val OtherDispatchPolicyStall = Value("OtherDispatchPolicyStall") // 0x26
     // dispatch stall for issuequeue full
-    val BalanceDispatchPolicyStallAlu = Value("BalanceDispatchPolicyStallAlu")
-    val BalanceDispatchPolicyStallBrh = Value("BalanceDispatchPolicyStallBrh")
-    val BalanceDispatchPolicyStallInt = Value("BalanceDispatchPolicyStallInt")
-    val BalanceDispatchPolicyStallFp = Value("BalanceDispatchPolicyStallFp")
-    val BalanceDispatchPolicyStallVec = Value("BalanceDispatchPolicyStallVec")
-    val BalanceDispatchPolicyStallLoad = Value("BalanceDispatchPolicyStallLoad")
-    val BalanceDispatchPolicyStallStore = Value("BalanceDispatchPolicyStallStore")
-    val OtherBalanceDispatchPolicyStall = Value("OtherBalanceDispatchPolicyStall")
-    val IQEnqPolicyStallIssued = Value("IQEnqPolicyStallIssued")
-    val IQEnqPolicyStall = Value("IQEnqPolicyStall")
-    val IntIQFullStallAlu = Value("IntIQFullStallAlu")
-    val IntIQFullStallBrh = Value("IntIQFullStallBrh")
-    val IntIQFullStallOther = Value("IntIQFullStallOther")
-    val FpIQFullStall = Value("FpIQFullStall")
-    val VecIQFullStall = Value("VecIQFullStall")
-    val LoadIQFullStall = Value("LoadIQFullStall")
-    val StoreIQFullStall = Value("StoreIQFullStall")
-    val OtherIQFullStall = Value("OtherIQFullStall")
-    val RobHeadNotIssued = Value("RobHeadNotIssued")
+    val BalanceDispatchPolicyStallAlu = Value("BalanceDispatchPolicyStallAlu") // 0x27
+    val BalanceDispatchPolicyStallBrh = Value("BalanceDispatchPolicyStallBrh") // 0x28
+    val BalanceDispatchPolicyStallInt = Value("BalanceDispatchPolicyStallInt") // 0x29
+    val BalanceDispatchPolicyStallFp = Value("BalanceDispatchPolicyStallFp") // 0x2a
+    val BalanceDispatchPolicyStallVec = Value("BalanceDispatchPolicyStallVec") // 0x2b
+    val BalanceDispatchPolicyStallLoad = Value("BalanceDispatchPolicyStallLoad") // 0x2c
+    val BalanceDispatchPolicyStallStore = Value("BalanceDispatchPolicyStallStore") // 0x2d
+    val OtherBalanceDispatchPolicyStall = Value("OtherBalanceDispatchPolicyStall") // 0x2e
+    val IQEnqPolicyStallIssued = Value("IQEnqPolicyStallIssued") // 0x2f
+    val IQEnqPolicyStall = Value("IQEnqPolicyStall") // 0x30
+    val IntIQFullStallAlu = Value("IntIQFullStallAlu") // 0x31
+    val IntIQFullStallBrh = Value("IntIQFullStallBrh") // 0x32
+    val IntIQFullStallOther = Value("IntIQFullStallOther") // 0x33
+    val FpIQFullStall = Value("FpIQFullStall") // 0x34
+    val VecIQFullStall = Value("VecIQFullStall") // 0x35
+    val LoadIQFullStall = Value("LoadIQFullStall") // 0x36
+    val StoreIQFullStall = Value("StoreIQFullStall") // 0x37
+    val OtherIQFullStall = Value("OtherIQFullStall") // 0x38
+    val RobHeadNotIssued = Value("RobHeadNotIssued") // 0x39
 
     // memblock
-    val LoadTLBStall = Value("LoadTLBStall")
-    val LoadL1Stall = Value("LoadL1Stall")
-    val LoadL2Stall = Value("LoadL2Stall")
-    val LoadL3Stall = Value("LoadL3Stall")
-    val LoadMemStall = Value("LoadMemStall")
-    val StoreStall = Value("StoreStall") // include store tlb miss
-    val AtomicStall = Value("AtomicStall") // atomic, load reserved, store conditional
+    val LoadTLBStall = Value("LoadTLBStall") // 0x3a
+    val LoadL1Stall = Value("LoadL1Stall") // 0x3b
+    val LoadL2Stall = Value("LoadL2Stall") // 0x3c
+    val LoadL3Stall = Value("LoadL3Stall") // 0x3d
+    val LoadMemStall = Value("LoadMemStall") // 0x3e
+    val StoreStall = Value("StoreStall") // 0x3f include store tlb miss
+    val AtomicStall = Value("AtomicStall") // 0x40 atomic, load reserved, store conditional
 
     // xs replay (different to gem5)
-    val LoadVioReplayStall = Value("LoadVioReplayStall")
-    val LoadMSHRReplayStall = Value("LoadMSHRReplayStall")
+    val LoadVioReplayStall = Value("LoadVioReplayStall") // 0x41
+    val LoadMSHRReplayStall = Value("LoadMSHRReplayStall") // 0x42
 
     // bad speculation
-    val ControlRedirectStall = Value("ControlRedirectStall")
-    val MemVioRedirectStall = Value("MemVioRedirectStall")
-    val OtherRedirectStall = Value("OtherRedirectStall")
-    val ControlRecoveryStall = Value("ControlRecoveryStall")
-    val MemVioRecoveryStall = Value("MemVioRecoveryStall")
-    val OtherRecoveryStall = Value("OtherRecoveryStall")
+    val ControlRedirectStall = Value("ControlRedirectStall") // 0x43
+    val MemVioRedirectStall = Value("MemVioRedirectStall") // 0x44
+    val OtherRedirectStall = Value("OtherRedirectStall") // 0x45
+    val ControlRecoveryStall = Value("ControlRecoveryStall") // 0x46
+    val MemVioRecoveryStall = Value("MemVioRecoveryStall") // 0x47
+    val OtherRecoveryStall = Value("OtherRecoveryStall") // 0x48
 
-    val FlushedInsts = Value("FlushedInsts") // control flushed, memvio flushed, others
-    val SpecialInsts = Value("SpecialInsts")
+    val FlushedInsts = Value("FlushedInsts") // 0x49 control flushed, memvio flushed, others
+    val SpecialInsts = Value("SpecialInsts") // 0x4a
 
-    val BackendOtherCoreStall = Value("BackendOtherCoreStall")
+    val BackendOtherCoreStall = Value("BackendOtherCoreStall") // 0x4b
 
-    val NumStallReasons = Value("NumStallReasons")
+    val NumStallReasons = Value("NumStallReasons") // 0x4c
   }
 }

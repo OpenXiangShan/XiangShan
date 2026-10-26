@@ -6,6 +6,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
 import utility.{PerfCCT, XSPerfAccumulate}
+import xiangshan.backend.Bundles.IQCancelSource
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -156,14 +157,26 @@ class FltIssuePipe(
   XSPerfAccumulate("fma_src3_cancel_is1", is1FmaM4NoM2Cancel)
   XSPerfAccumulate("load_fma_src3_cancel_ex0", ex0LoadM4Cancel)
   XSPerfAccumulate("load_fma_src3_cancel_ex1", ex1LoadM4Cancel)
+  val is0LoadCancel = Wire(Vec(param.numRegSrc, Bool()))
   is0Resp.srcCancel.zipWithIndex.map { case (srcCancel, srcIdx) =>
+    is0LoadCancel(srcIdx) := is0.valid && ldWBPort.zip(ldCancelVecRegNext).map { case (wbIdx, ldCancel) =>
+      is0.bits.bypassSource(srcIdx).idx === wbIdx.U && is0.bits.bypassDelay(srcIdx) === BypassDelay.delay2 && ldCancel
+    }.reduce(_ || _)
     srcCancel := fltExuWBPort.zip(in.ex0RespFailLat1).map { case (wbIdx, ex0RespFail) =>
       is0.bits.bypassSource(srcIdx).idx === wbIdx.U && is0.bits.bypassDelay(srcIdx) === BypassDelay.delay0 && ex0RespFail
     }.reduce(_ || _) ||
-    is0.valid && ldWBPort.zip(ldCancelVecRegNext).map { case (wbIdx, ldCancel) =>
-      is0.bits.bypassSource(srcIdx).idx === wbIdx.U && is0.bits.bypassDelay(srcIdx) === BypassDelay.delay2 && ldCancel
-    }.reduce(_ || _) || (if (srcIdx == 2) is0FmaM4NoM2Cancel else false.B)
+    is0LoadCancel(srcIdx) || (if (srcIdx == 2) is0FmaM4NoM2Cancel else false.B)
   }
+  is0Resp.debugCancelSource.foreach { source =>
+    val loadCancel = is0LoadCancel.asUInt.orR ||
+      (is0FmaM4NoM2Cancel && is0.bits.fmaSrc3LoadM4.get)
+    source := Mux(is0Resp.fail, Mux(loadCancel, IQCancelSource.ld, IQCancelSource.og0), IQCancelSource.none)
+  }
+  is1Resp.debugCancelSource.foreach(_ := Mux(is1Resp.fail, IQCancelSource.ld, IQCancelSource.none))
+  // EX0 resource rejection uses the late issue-cancel class; the other EX0 and EX1 failures are load cancellations.
+  ex0Resp.debugCancelSource.foreach(_ := Mux(ex0Resp.fail,
+    Mux(ex0Resp.srcCancel.asUInt.orR, IQCancelSource.ld, IQCancelSource.og1), IQCancelSource.none))
+  ex1Resp.debugCancelSource.foreach(_ := Mux(ex1Resp.fail, IQCancelSource.ld, IQCancelSource.none))
   is1RespSrcCancelNext.zipWithIndex.map { case (srcCancel, srcIdx) =>
     srcCancel := is0.valid && ldWBPort.zip(ldCancelVec).map { case (wbIdx, ldCancel) =>
       is0.bits.bypassSource(srcIdx).idx === wbIdx.U && is0.bits.bypassDelay(srcIdx) === BypassDelay.delay1 && ldCancel
