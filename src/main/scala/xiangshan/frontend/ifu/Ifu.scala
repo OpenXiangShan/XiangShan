@@ -389,6 +389,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   // ---------------------- Fast Fetch ----------------------
+  private val frontendTriggerEnabled   = io.frontendTrigger.tEnableVec.reduce(_ || _)
+  private val s0_maybeFastFetch = !frontendTriggerEnabled &&
+    !s0_icacheMeta(0).exception.hasException && !s0_icacheMeta(0).isUncache &&
+    !s0_icacheMeta(0).isBackendException && !s0_icacheMeta(0).hasSatpFlush
+  private val s1_fastFetchHasEccError  = ExceptionType.fromEcc(
+    io.fromICache.corrupt(0).reduce(_ || _),
+    s1_valid
+  ).hasException
+  private val s1_maybeFastFetch        = RegEnable(s0_maybeFastFetch, s0_fire)
   private val s0_fastFetchData         = genFastFetchData(s0_rawFirstData, s0_fastFetchInfo.startIndex)
   private val s1_fastFetchInfo         = RegEnable(s0_fastFetchInfo, s0_fire)
   private val s1_fastFetchData         = RegEnable(s0_fastFetchData, s0_fire)
@@ -396,11 +405,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_fastNotJumpVec        = Wire(Vec(FastFetchMaxNum, Bool()))
   private val s1_fastValid             = Wire(Vec(FastFetchMaxNum, Bool()))
   private val backendRedirectWaitFetch = RegInit(false.B)
-  private val frontendTriggerEnabled   = io.frontendTrigger.tEnableVec.reduce(_ || _)
   private val s1_useFastFetch =
-    backendRedirectWaitFetch && !frontendTriggerEnabled &&
-      !s1_icacheMeta(0).exception.hasException && !s1_icacheMeta(0).isUncache &&
-      !s1_icacheMeta(0).isBackendException && !s1_icacheMeta(0).hasSatpFlush
+    backendRedirectWaitFetch && s1_maybeFastFetch && !s1_fastFetchHasEccError
 
   io.toIBuffer.fastFetch.valid         := s1_valid && s1_useFastFetch
   io.toIBuffer.fastFetch.bits.instrNum := PopCount(s1_fastValid)
