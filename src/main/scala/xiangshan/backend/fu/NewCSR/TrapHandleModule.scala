@@ -35,6 +35,7 @@ class TrapHandleModule extends Module {
 
   private val irToHS = io.in.trapInfo.bits.irToHS
   private val irToVS = io.in.trapInfo.bits.irToVS
+  private val virtualIRIsHvictlInject = io.in.trapInfo.bits.virtualIRIsHvictlInject
 
   private val highestPrioEXVec = Wire(Vec(64, Bool()))
   highestPrioEXVec.zipWithIndex.foreach { case (excp, i) =>
@@ -99,7 +100,8 @@ class TrapHandleModule extends Module {
     interruptNO - 1.U, // map VSSIP, VSTIP, VSEIP to SSIP, STIP, SEIP
     interruptNO,
   )
-  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, adjustinterruptNO(5, 0), 0.U), 0.U(2.W))
+  private val interruptNOFinal = Mux(hasIR && virtualIRIsHvictlInject, interruptNO, adjustinterruptNO)
+  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, interruptNOFinal, 0.U), 0.U(2.W))
 
   io.out.entryPrivState := MuxCase(default = PrivState.ModeM, mapping = Seq(
     traptoVS -> PrivState.ModeVS,
@@ -118,12 +120,13 @@ class TrapHandleIO extends Bundle {
   val in = Input(new Bundle {
     val trapInfo = ValidIO(new Bundle {
       val trapVec = UInt(64.W)
-      val intrVec = UInt(8.W)
+      val intrVec = UInt(12.W)
       val isInterrupt = Bool()
       val singleStep = Bool()
       // trap to x mode
       val irToHS = Bool()
       val irToVS = Bool()
+      val virtualIRIsHvictlInject = Bool()
     })
     val privState = new PrivState
     val mstatus = new MstatusBundle
