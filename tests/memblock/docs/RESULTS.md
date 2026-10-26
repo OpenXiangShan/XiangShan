@@ -47,9 +47,10 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
   TileLink user/echo fields are DUT-specific, not stability fields.
 - First-element FOF completions now carry an explicit exceptional `vstart`
   expectation. `cbo-zero-contracts` also contains sequential and back-to-back
-  zero controls, both same-line CBO.ZERO/ordinary-store orders, a dirty-line
-  zero, a younger load issued while the zero is still in the SBuffer pipeline,
-  and an older-load/younger-store/CBO age-direction control.
+  zero controls, a same-line repeated CBO.ZERO pair, both same-line
+  CBO.ZERO/ordinary-store orders, a dirty-line zero, a younger load issued
+  while the zero is still in the SBuffer pipeline, and an
+  older-load/younger-store/CBO age-direction control.
 - Vector transactions model and drive mask bits 0..127 (`mask_bits` plus
   `mask_high`). `vector-addressing` checks high-element unit-stride load/store,
   readback, LMUL8 full-range masks, and ordinary/special indexed shifts; mixed
@@ -142,7 +143,7 @@ The current qualification is:
 | Current full-mask + probe gate | 2/2 coverage seeds pass, 4608 actions each (9216 actions) | Seeds 205..206; artifact `agent-campaign-17`; current tree |
 | Accepted-B probe gate | 1/1 1024-action mixed seed passes with 407 probes, plus directed coherence/release/atomic | Seed 207; artifact `agent-campaign-17`; no dedicated counter for pre-B C because an illegal C fails immediately |
 | Cross-alias store/load | `translation-alias` passes at cycle 447 and also observes a first-access `ld2Cancel` (`canceled=1`), log in `agent-campaign-17/translation-alias.log` | One PA, two Sv39 VAs; after-drain and an in-flight store with SBuffer non-empty at load issue. The canceled attempt is LQ-accounted but not replayed by the UT; exact backend replay remains outside |
-| CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line zero/store both orders, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass | Directed `cbo-zero-contracts`; see CPU bug document |
+| CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line repeated zero, same-line zero/store both orders, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass; log at `agent-campaign-18/cbo-zero-contracts.log` | Directed `cbo-zero-contracts`; see CPU bug document |
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
 | High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
 | Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1` and exact faulting-element addresses; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | Broader fault-element/FOF progress remains open |

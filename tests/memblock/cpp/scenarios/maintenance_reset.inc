@@ -1565,6 +1565,7 @@ int run_mmio_contracts(int argc, char **argv)
 
 int run_cbo_zero_contracts(int argc, char **argv)
 {
+    unsigned same_line_double_zeros = 0;
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t virtual_base = 0x5003c000ULL;
     constexpr std::uint64_t physical_base = 0x9003c000ULL;
@@ -2352,6 +2353,104 @@ int run_cbo_zero_contracts(int argc, char **argv)
         }
     }
 
+    // Two CBO.ZEROs to the same line, still back-to-back before the first
+    // SBuffer line drains.  This exercises the single-completion slot together
+    // with the SBuffer merge path for a repeated wline zero: each operation
+    // must complete exactly once and the final line must be zero.
+    {
+        memblock::Environment double_zero(argc, argv);
+        constexpr std::uint64_t same_base =
+            memblock::kDefaultMemoryBase + 0x280000ULL;
+        double_zero.memory().fill_incrementing(same_base, 0x400, 0x3e);
+        double_zero.configure_backpressure(0x9216d5d98979fb1bULL, true);
+        if (!double_zero.reset()) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << double_zero.cycle()
+                      << " phase=same-line-double-zero-reset reason="
+                      << double_zero.error() << '\n';
+            return 1;
+        }
+        memblock::StoreTransaction zero_a{
+            .address = same_base + 0x20,
+            .oracle_address = same_base,
+            .data = 0x1122334455667788ULL,
+            .op = memblock::StoreOp::cbo_zero,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 0,
+            .expected_address_writeback_lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        memblock::StoreTransaction zero_b = zero_a;
+        zero_b.address = same_base + 0x28;
+        zero_b.data = 0x99aabbccddeeff00ULL;
+        zero_b.rob = 1;
+        zero_b.sq = 1;
+        zero_b.address_lane = 1;
+        zero_b.data_lane = 1;
+        const std::uint64_t sq_target = double_zero.sq_dequeued() + 2;
+        double_zero.expect_store(zero_a);
+        double_zero.expect_store(zero_b);
+        if (!double_zero.set_rob_head(zero_a.rob, zero_a.rob_flag) ||
+            !double_zero.enqueue_store(zero_a, 0) ||
+            !double_zero.enqueue_store(zero_b, 0) ||
+            !double_zero.issue_store_address_batch(
+                {zero_a, zero_b}, 4096) ||
+            !double_zero.issue_store_data(zero_a, 4096) ||
+            !double_zero.issue_store_data(zero_b, 4096) ||
+            !double_zero.commit_stores_through(zero_a, 1) ||
+            !double_zero.run_cycles(1) ||
+            !double_zero.commit_stores_through(zero_b, 1) ||
+            !double_zero.run_until_store_complete(32768) ||
+            !double_zero.run_until_sq_dequeued(sq_target, 32768)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << double_zero.cycle()
+                      << " phase=same-line-double-zero-store reason="
+                      << double_zero.error() << " sq="
+                      << double_zero.sq_dequeued() << '/'
+                      << double_zero.sq_allocated()
+                      << " store_writebacks="
+                      << double_zero.store_writebacks() << '\n';
+            return 1;
+        }
+        std::array<memblock::LoadTransaction, 3> readbacks{};
+        const std::array<std::uint64_t, 3> offsets{{0x0, 0x8, 0x30}};
+        for (unsigned index = 0; index < readbacks.size(); ++index) {
+            readbacks[index] = memblock::LoadTransaction{
+                .address = same_base + offsets[index],
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(2 + index),
+                .lq = static_cast<std::uint8_t>(index),
+                .sq = 2,
+                .pdest = static_cast<std::uint8_t>(250 + index),
+                .lane = index,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            };
+            double_zero.expect_load_data(readbacks[index], 0);
+        }
+        if (!double_zero.set_rob_head(
+                readbacks[0].rob, readbacks[0].rob_flag) ||
+            !double_zero.enqueue_load_batch(
+                {readbacks[0], readbacks[1], readbacks[2]}, {0, 1, 2}) ||
+            !double_zero.issue_load_batch(
+                {readbacks[0], readbacks[1], readbacks[2]}, 4096) ||
+            !double_zero.run_until_all_complete(16384) ||
+            !double_zero.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << double_zero.cycle()
+                      << " phase=same-line-double-zero-readback reason="
+                      << double_zero.error() << '\n';
+            return 1;
+        }
+        double_zero.record_committed_store(zero_a);
+        double_zero.record_committed_store(zero_b);
+        ++same_line_double_zeros;
+    }
+
     std::cout << "MEMBLOCK_CBO_ZERO_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " cbo_zero_line=1"
@@ -2359,6 +2458,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
               << " back_to_back_zero=2"
               << " following_store=1"
               << " same_line_zero=1"
+              << " same_line_double_zero=" << same_line_double_zeros
               << " zero_last=1"
               << " early_load=1"
               << " dirty_zero=1"
