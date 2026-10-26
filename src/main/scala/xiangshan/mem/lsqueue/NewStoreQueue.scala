@@ -1269,8 +1269,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       port.bits.addr     := writeSbufferPaddr(i)
       port.bits.vaddr    := writeSbufferVaddr(i)
 
-      port.bits.wline    := ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
-      port.bits.prefetch := dataEntry.prefetch
+      port.bits.wline    := !headCross16B && ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
+      port.bits.prefetch := !headCross16B && dataEntry.prefetch
       port.bits.vecValid := true.B
       if (i == 0) {
         // if cross16B, only port 1 deqPtr move, else both port 0 and port 1 deqPtr move.
