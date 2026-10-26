@@ -17,7 +17,7 @@ if [[ -n "${scala_files}" ]]; then
   exit 1
 fi
 
-TESTPOINT_CSV="src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+TESTPOINT_CSV="src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
 
 if git diff --cached --name-only --diff-filter=ACMR -- "${TESTPOINT_CSV}" | grep -Fxq "${TESTPOINT_CSV}"; then
   echo "[testpoint-csv-guard] checking staged CSV record layout"

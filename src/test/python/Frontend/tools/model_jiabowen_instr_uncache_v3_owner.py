@@ -21,7 +21,7 @@ _TESTPOINT_PATH = (
     _FRONTEND_ROOT
     / "docs"
     / "02_testpoint"
-    / "Frontend_testpoint_0525_coverage_backannotated.csv"
+    / "Frontend_testpoint_v1.0.csv"
 )
 _PILOT_PATH = (
     _FRONTEND_ROOT

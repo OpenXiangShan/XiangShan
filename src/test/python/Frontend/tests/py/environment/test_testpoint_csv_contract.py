@@ -10,7 +10,7 @@ from typing import TextIO
 
 def _canonical_testpoint_path() -> Path:
     root = Path(__file__).resolve().parents[3]
-    return root / "docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    return root / "docs/02_testpoint/Frontend_testpoint_v1.0.csv"
 
 
 def _check_one_physical_line_per_record(handle: TextIO) -> None:

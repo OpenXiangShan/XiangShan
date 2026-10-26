@@ -135,7 +135,7 @@ def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
     repo_root = Path(__file__).resolve().parents[7]
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
     with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.reader(handle))
@@ -200,7 +200,7 @@ def test_current_ifu_contract_rows_reject_obsolete_6220_signal_semantics():
     repo_root = Path(__file__).resolve().parents[7]
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
     pilot_path = (
         repo_root
@@ -299,7 +299,7 @@ def test_jiabowen_owner_event_bins_are_exactly_mapped_once():
     repo_root = Path(__file__).resolve().parents[7]
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
     owner_ids = {spec.bin_id for spec in OWNER_V3_BIN_SPECS}
     mapped = {}
@@ -438,7 +438,7 @@ def test_modeled_jiabowen_runtime_producer_gap_inventory_is_current():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
         pilot_rows = {row["Bin_ID"]: row for row in csv.DictReader(handle)}
@@ -526,7 +526,7 @@ def test_mmio_nc_owner_leaves_are_single_bin_and_match_registry():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
@@ -581,7 +581,7 @@ def test_instr_uncache_owner_leaves_are_complete_and_preserve_sv_models():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
@@ -657,7 +657,7 @@ def test_icache_mainpipe_s2_ecc_leaves_are_single_bin_and_match_registry():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
         pilot_rows = {
@@ -703,7 +703,7 @@ def test_icache_mainpipe_alignment_leaves_are_single_bin_and_match_registry():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
         pilot_rows = {
@@ -749,7 +749,7 @@ def test_ifu_predecode_and_two_fetch_leaves_are_single_bin_and_actionable():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
@@ -789,7 +789,7 @@ def test_ifu_cacheable_pipeline_leaves_are_single_bin_and_match_registry():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
@@ -837,7 +837,7 @@ def test_icache_prefetch_leaves_are_single_bin_and_match_registry():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
@@ -885,7 +885,7 @@ def test_icache_missunit_leaves_are_single_bin_and_match_registry():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
@@ -926,7 +926,7 @@ def test_icache_waylookup_leaves_are_single_bin_and_match_registry():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
@@ -967,7 +967,7 @@ def test_icache_hitmiss_leaves_are_single_bin_and_match_registry():
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:

@@ -6,7 +6,7 @@
 
 1. `03_funcov_model/skills.md`
    - 测试点驱动验证、功能覆盖率、真实 DUT artifact、反标和人工验收规范。
-2. `02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv`
+2. `02_testpoint/Frontend_testpoint_v1.0.csv`
    - 唯一测试点、状态、testcase 和 evidence 主表。
 3. `03_funcov_model/frontend_bt_functional_coverage_pilot.csv`
    - 唯一 active coverage registry；`pilot` 仅为兼容保留的历史文件名。
@@ -19,7 +19,7 @@
   - [Frontend BT 验证方案](01_testplan/Frontend_BT_验证方案.md)：策略基线；第 2.3 节维护 IFU 集成约束、待 review 问题和验收方向，不复制覆盖率状态表。
 - `02_testpoint/`
   - `Frontend_testpoint_0525.xlsx`：原始 Excel 测试点基线，只作来源追溯。
-  - `Frontend_testpoint_0525_coverage_backannotated.csv`：当前唯一可维护测试点主表。
+  - `Frontend_testpoint_v1.0.csv`：当前唯一可维护测试点主表。
 - `03_funcov_model/`
   - `skills.md`：当前闭环规范。
   - `frontend_bt_functional_coverage_pilot.csv`：当前唯一 coverage registry，与测试点、sampler 和 testcase 同步迭代，保留原路径。
@@ -33,7 +33,7 @@
 2. 新模型必须同步更新测试点、registry、sampler、testcase 和一致性测试。
 3. 真实回归 evidence 写入 `src/test/python/Frontend/data/`；不同 DUT、registry 或 sampler 签名的结果不得合并。
 4. 历史试点结果和旧 artifact 不得直接升级当前设计版本的 `HIT` 或 `CLOSED`。
-5. `Frontend_testpoint_0525_coverage_backannotated.csv` 的每条记录必须占一行，单元格内禁止真实换行；需要换行时改写成分号或空格串联，不要让物理行号和 `csv.reader` 逻辑记录号分离。
+5. `Frontend_testpoint_v1.0.csv` 的每条记录必须占一行，单元格内禁止真实换行；需要换行时改写成分号或空格串联，不要让物理行号和 `csv.reader` 逻辑记录号分离。
 6. 临时排查过程保存在 run artifact 或工作日志中，不持续向 `03_funcov_model/` 新增阶段 MD。需要长期保留的 review 结论应注明适用 SHA 和证据位置，进入现有正式文档或可执行检查；完成沉淀的过程 MD 可删除，由 Git 历史追溯，不能从旧报告中的 `current`、`Complete` 或 HIT 数字推导当前 DUT 状态。
 
 ## 已沉淀的历史记录

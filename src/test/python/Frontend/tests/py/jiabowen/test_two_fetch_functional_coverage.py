@@ -1103,7 +1103,7 @@ def test_two_fetch_backannotation_matches_registry_and_sampler():
 
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     )
     mapping = validate_mapping(
         testpoint_path,

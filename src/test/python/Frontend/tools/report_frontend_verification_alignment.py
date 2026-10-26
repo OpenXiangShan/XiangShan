@@ -543,7 +543,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--testpoints",
-        default=str(FRONTEND_ROOT / "docs" / "02_testpoint" / "Frontend_testpoint_0525_coverage_backannotated.csv"),
+        default=str(FRONTEND_ROOT / "docs" / "02_testpoint" / "Frontend_testpoint_v1.0.csv"),
     )
     parser.add_argument(
         "--pilot",
