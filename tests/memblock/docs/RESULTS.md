@@ -71,9 +71,10 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
   exact `vstart=1`; the masked case proves `vstart` is the architectural
   element index, not the active-element count. A third all-masked load at an
   unmapped VA must complete without a fault; the same run observes zero PTW
-  and zero DCache requests for it. The separate exception-address payload is
-  not a gate for the intra-uop shapes because the current DUT does not publish
-  the faulting element address there.
+  and zero DCache requests for it. Both faulting cases require the exact
+  faulting-element address in the separate exception-address payload; the
+  sample follows a four-cycle settle because the vector feedback reaches the
+  queue one cycle after the writeback.
 - `translation-alias` maps two Sv39 virtual pages to one physical page and
   proves a committed store through one VA is visible through the other, both
   after drain and with SBuffer non-empty at an in-flight load issue. A cold
@@ -128,7 +129,7 @@ The current qualification is:
 | Infrastructure unit | 290 tests pass | Unit checks do not establish DUT functional coverage |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Selected benchmark | 85/85 pass, 377.7 s | Seed 1; random budget 256; catalog-specific action overrides retained; `agent-campaign-16` |
-| Current selected benchmark | 85/85 pass, 437.96 s | Seed 1; random budget 256; current harness and private runtime; artifact `agent-campaign-18/benchmark.json`; run alongside six CMO-stress seeds, so wall time is not a clean solo measurement |
+| Current selected benchmark | 85/85 pass, 437.96 s | Seed 1; random budget 256; private runtime; artifact `agent-campaign-18/benchmark.json`; run before the four-cycle vector-feedback settle, with the settled `translation-faults` case passing separately; run alongside six CMO-stress seeds, so wall time is not a clean solo measurement |
 | Extra directed contracts | 6/6 pass | cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high, vector-segment-noncanonical, translation-alias |
 | All directed scenarios | 90/90 pass | Current-tree sweep of every catalogued directed test (constrained-random excluded); artifact `agent-campaign-17/directed-logs` |
 | Coverage campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 101..106; artifact `agent-campaign-12`; 1029.0 s; capability only |
@@ -144,7 +145,7 @@ The current qualification is:
 | CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line zero/store both orders, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass | Directed `cbo-zero-contracts`; see CPU bug document |
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
 | High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
-| Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1`; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | The intra-uop exception-address payload is unattributed and not checked; broader fault-element/FOF progress remains open |
+| Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1` and exact faulting-element addresses; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | Broader fault-element/FOF progress remains open |
 | Permission-fault store side effects | `translation-permissions` passes with 10/10 fault-store readbacks (readable mapping or Bare fallback); `pmp-contracts` adds one PMP-denied store readback | Device fault paths still need another observation route |
 | Non-cacheable final effects | committed NC store/atomic words match the manager bus image in passing mixed runs; 2/2 4608-action seeds (210/211) check 141/142 words, seed 215 checks 146, and smaller seeds cover the uncache-drain path | Manager bus image, not a DUT uncache read; device side effects, aliases and CMO remain outside |
 | Atomic dirty-line persistence | `atomic-contracts` passes; ProbeAckData carries the updated line and updates the manager image | AMO target only; cross-hart/concurrent eviction not covered |
@@ -176,8 +177,7 @@ traffic, not all legal classes occurred or every external effect was checked.
 Current missing rules include remaining aliased/device final-byte observation,
 uniform fault forbidden-demand checks, same-address B/C
 attribution and complete C multibeat identity, the same-line CBO.ZERO forward
-window before Sbuffer s2, intra-uop page-crossing fault-address attribution,
-and independent verifier schema/backpressure checks.
+window before Sbuffer s2, and independent verifier schema/backpressure checks.
 The accepted-B-before-C gate, full 128-bit mask operand and explicit
 first-access cross-alias cancellation accounting are implemented, but the UT
 does not model the backend replay that follows `ld2Cancel`.
@@ -215,9 +215,10 @@ check was corrected to ignore `corrupt` and approved.
 The later non-cacheable bus-image final check, the opt-in `ld2Cancel` canceled
 attempt handling, the same-line CBO/LMUL8 directed additions, and the
 single-uop/masked later-element vector fault additions were not part of that
-independent review; they are self-reviewed for this snapshot. The vector
-fault addition records an unattributed intra-uop exception-address payload as
-a gap, not as a confirmed bug.
+independent review; they are self-reviewed for this snapshot. The earlier
+unattributed intra-uop exception-address observation was root-caused to
+sampling before the vector feedback reached the LqExceptionBuffer; the
+four-cycle settle now checks the exact address and the DUT payload is correct.
 
 This qualification confirms the stated capability and limitations; it does not
 establish verification closure or clean RTL elaboration provenance. The oracle,

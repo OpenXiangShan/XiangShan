@@ -1365,7 +1365,6 @@ int run_translation_faults(int argc, char **argv)
     unsigned vector_vstart_faults = 0;
     unsigned vector_later_element_faults = 0;
     unsigned vector_later_address_matches = 0;
-    unsigned vector_later_address_unattributed = 0;
     unsigned vector_all_masked_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
@@ -2936,7 +2935,12 @@ int run_translation_faults(int argc, char **argv)
             !later.enqueue_vector(transaction) ||
             !later.issue_vector(transaction, 1024) ||
             !later.run_until_vector_complete_with_replays(
-                transaction, 32768)) {
+                transaction, 32768) ||
+            // The vector feedback reaches the LqExceptionBuffer one cycle
+            // after the writeback.  Settle before sampling the separate
+            // exception-address payload, which has no valid bit.
+            !later.run_cycles(4) ||
+            later.exception_vaddr() != expected_fault_address) {
             std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
                       << later.cycle() << " phase=vector-later-"
                       << test.name << "-fault reason=" << later.error()
@@ -2945,16 +2949,7 @@ int run_translation_faults(int argc, char **argv)
                       << std::dec << '\n';
             return 1;
         }
-        // The separate exception-address payload has no valid bit and the
-        // current DUT does not attribute an intra-uop page-crossing fault to
-        // the faulting element address.  Record the observation instead of
-        // using it as a PASS gate; the writeback exception and vstart above
-        // are the architectural checks for this shape.
-        if (later.exception_vaddr() == expected_fault_address) {
-            ++vector_later_address_matches;
-        } else {
-            ++vector_later_address_unattributed;
-        }
+        ++vector_later_address_matches;
         const std::uint64_t retired =
             later.lq_dequeued() + later.lq_canceled();
         if (retired > later.lq_allocated() ||
@@ -3067,8 +3062,6 @@ int run_translation_faults(int argc, char **argv)
               << vector_later_element_faults
               << " vector_later_address_matches="
               << vector_later_address_matches
-              << " vector_later_address_unattributed="
-              << vector_later_address_unattributed
               << " vector_all_masked_controls="
               << vector_all_masked_controls
               << " vector_all_masked_ptw_requests="
