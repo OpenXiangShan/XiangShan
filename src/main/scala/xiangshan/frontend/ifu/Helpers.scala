@@ -213,13 +213,8 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
   }
 
   /**
-    * Select the raw window used by fast fetch.
-    *
-    * The cache line is split into 8-byte chunks. `startIndex` is the byte offset
-    * inside the line, and `startIndex(5, 3)` selects the 8-byte-aligned chunk
-    * that contains the first instruction. Two adjacent chunks are concatenated
-    * to form the 16-byte window consumed by [[cutFastData]]. The `b111` entry
-    * indexes the chunks line-relative, so the last chunk wraps to the line start.
+    * Based on the ICache's 8-byte chunking, extracts the raw 16-byte data
+    * containing the 8-byte fast-fetch width.
     */
   def genFastFetchData(cacheline: UInt, startIndex: UInt): UInt = {
     val fastFetchBitsWidth = FastFetchBytes * 8
@@ -239,17 +234,7 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
   }
 
   /**
-    * Align the fast-fetch window to the first instruction and build candidate
-    * 32-bit instructions.
-    *
-    * `startIndex(2, 1)` is the 2-byte offset inside the first chunk, so only
-    * four shift amounts are possible. Keep the explicit shift table instead of
-    * a variable shifter: EDA tools may infer the same logic, but this makes the
-    * intended structure explicit. The shift amounts are in bits: 2/4/6 bytes
-    * become 16/32/48 bits. The window is then viewed as `FastFetchWidth`
-    * 16-bit slots; adjacent slots are concatenated into instructions. The last
-    * slot is zero-extended because its upper half is not guaranteed to be
-    * inside the window.
+    * Extracts the effective 8-byte data based on the 2-byte instruction alignment.
     */
   def cutFastData(fastFetch: UInt, startIndex: UInt): Vec[UInt] = {
     val width = FastFetchBytes * 8
@@ -268,14 +253,6 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     result
   }
 
-  /**
-    * Collect the fast-fetch metadata directly from the ICache request.
-    *
-    * The fast path bypasses the normal s2 predecode latency, so everything that
-    * IBuffer and decode need must be derived here: 2-byte slot boundaries, RVC
-    * information, PCs, predicted-taken CFI placement, and instruction ordering
-    * inside the FTQ entry.
-    */
   def genFastInfo(req: MainPipeToIfuReq): FastFetchInfo = {
     val maybeRvcMap = req.maybeRvcMap
     val firstRange  = req.firstRange
@@ -294,9 +271,7 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     val rawIsRvI            = Wire(Vec(FastFetchWidth + 1, Bool()))
     val fixedMask           = Wire(Vec(FastFetchWidth + 1, Bool()))
 
-    // Walk the 2-byte slots from left to right. A slot starts an instruction
-    // iff the previous slot did not start one, or the previous instruction was
-    // RVC and therefore occupied only one slot.
+    // Determine the valid instruction positions in the fastFetch window
     for (i <- 0 until FastFetchWidth) {
       rawInstrValid(i) := (if (i == 0) true.B else !rawInstrValid(i - 1) || maybeRvcMap(i - 1))
       rawIsRvI(i)      := rawInstrValid(i) && !maybeRvcMap(i)
@@ -307,26 +282,18 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
         (((takenCfiIdx === i.U) && rawIsRvC(i)) || ((altTakenCfiIdx === i.U) && rawIsRvI(i)))
       rawPc(i)         := GuardedPcInit(startVAddr + (2 * i).U)
     }
-    // Sentinel slot describing the instruction that ends at the window edge.
+
+    // Trim the extra half instruction of the predicted block
     rawInstrValid(FastFetchWidth) := !rawInstrValid(FastFetchWidth - 1) || maybeRvcMap(FastFetchWidth - 1)
     rawIsRvI(FastFetchWidth)      := rawInstrValid(FastFetchWidth) && !maybeRvcMap(FastFetchWidth)
     fixedMask(FastFetchWidth)     := (takenCfiIdx === FastFetchWidth.U) && rawIsRvI(FastFetchWidth)
 
-    // The fast path must not resolve a predicted-taken 4-byte instruction on
-    // its own: mask out the slot it would consume and leave the final boundary
-    // and target to predChecker. This also covers a block that ends in the
-    // middle of a 4-byte instruction, while keeping the fast-fetch width equal
-    // to the final fetch width.
-    val fixedRangeLow        = firstRange(FastFetchWidth - 1, 0) & ~fixedMask.asUInt(FastFetchWidth - 1, 0)
-    val fixedRangeEnd        = firstRange(FastFetchWidth) & ~fixedMask(FastFetchWidth)
-    val fixedRange           = Cat(fixedRangeEnd, fixedRangeLow)
+    // Determine whether the end of the predicted block is within the fastFetch window, and its position
+    val fixedRange  = firstRange(FastFetchWidth, 0) & ~(fixedMask.asUInt(FastFetchWidth, 0))
     val blockEndsInFastFetch = !fixedRange(FastFetchWidth)
-    // One-hot of the last valid slot in `fixedRange`.
     val lastSlotOH           = fixedRange & ~(fixedRange >> 1)
 
-    // Start slot of each fast-fetch instruction. Instruction 0 starts at slot 0;
-    // each following instruction starts after the previous RVC/RVI instruction.
-    // Fast fetch returns at most FastFetchMaxNum instructions.
+    // Based on the instruction layout, compute the MaskOH for the corresponding valid instructions
     validMaskOH(0) := "b0001".U
     validMaskOH(1) := Mux(rawIsRvI(0), "b0100".U, "b0010".U)
     validMaskOH(2) := Mux(
@@ -336,11 +303,9 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     )
 
     val info = Wire(new FastFetchInfo)
-    // Number of instructions that end inside the fast window. Each end slot is
-    // counted once, so this is the number of complete instructions to enqueue.
+    // Compute the maximum number of valid instructions within the fastFetch window
     val instrCount = PopCount(VecInit((0 until FastFetchWidth).map(i => rawEndMask(i) && fixedRange(i))))
-    // Mark the low `instrCount` entries valid; the mask naturally clamps to
-    // FastFetchMaxNum because only FastFetchMaxNum entries exist.
+    // Using IBuffer's write-bank rules, fastFetch is allowed to fetch at most NumWriteBank - 1 instructions
     info.realInstrValid := UIntToMask(instrCount, FastFetchMaxNum)
     info.rawIsPredTaken := rawPredTaken
     info.rawIsRvC       := rawIsRvC
