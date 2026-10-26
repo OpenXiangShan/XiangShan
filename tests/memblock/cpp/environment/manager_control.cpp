@@ -50,8 +50,19 @@ auto Environment::Impl::make_vector_memory_issue(const VectorMemoryTransaction &
         transaction.addressing == VectorAddressingMode::indexed_ordered) {
         issue.src[1] = transaction.index;
     }
-    issue.src[3][0] = static_cast<unsigned char>(transaction.mask_bits);
-    issue.src[3][1] = static_cast<unsigned char>(transaction.mask_bits >> 8);
+    std::array<unsigned char, 16> mask_bytes{};
+    if (transaction.vm) {
+        mask_bytes.fill(0xff);
+    } else {
+        for (unsigned bit = 0; bit < 128; ++bit) {
+            if (vector_mask_enabled(transaction, bit)) {
+                mask_bytes[bit / 8] |=
+                    static_cast<unsigned char>(1U << (bit % 8));
+            }
+        }
+    }
+    issue.vmask = mask_bytes;
+    issue.src[3] = mask_bytes;
     issue.src[4][0] = transaction.vl;
     return issue;
 }

@@ -59,6 +59,12 @@ class VectorScoreboardTest(unittest.TestCase):
                                 text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_high_mask_bits_and_vstart_classification(self) -> None:
+        self.check_case("high-mask")
+
+    def test_canceled_result_requires_opt_in_and_cancel_pulse(self) -> None:
+        self.check_case("canceled")
+
     def test_unit_and_strided_destination_index(self) -> None:
         self.check_case("ordinary")
 

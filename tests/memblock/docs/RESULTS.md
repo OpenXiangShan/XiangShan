@@ -7,8 +7,8 @@ not a chronological log. Capability inventory comes from the current catalog,
 producer/check implementations and the current-state documents, not preserved
 campaign claims.
 
-The catalog registers 90 scenarios: 89 directed-tests plus constrained-random.
-The default benchmark selects 85; five additional directed contracts require
+The catalog registers 91 scenarios: 90 directed-tests plus constrained-random.
+The default benchmark selects 85; six additional directed contracts require
 explicit execution. All claimed behavior remains limited by IO_COVERAGE.md
 and ORACLES.md. There is no defensible overall functional-coverage percentage.
 
@@ -46,8 +46,41 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
   subset 0..2. `corrupt` is per-beat and not a data-less Release validity field;
   TileLink user/echo fields are DUT-specific, not stability fields.
 - First-element FOF completions now carry an explicit exceptional `vstart`
-  expectation. The `cbo-zero-contracts` scenario also contains a sequential
-  control and a back-to-back zero case.
+  expectation. `cbo-zero-contracts` also contains sequential and back-to-back
+  zero controls, both same-line CBO.ZERO/ordinary-store orders, a dirty-line
+  zero, a younger load issued while the zero is still in the SBuffer pipeline,
+  and an older-load/younger-store/CBO age-direction control.
+- Vector transactions model and drive mask bits 0..127 (`mask_bits` plus
+  `mask_high`). `vector-addressing` checks high-element unit-stride load/store,
+  readback, LMUL8 full-range masks, and ordinary/special indexed shifts; mixed
+  vector generation draws high mask bits when `vm=0` and reports a `high_mask`
+  count of masked uops with an enabled global element >=16 (seed 214: 56 in
+  1024 actions; seed 215: 432 in 4608 actions). Four other 4608-action seeds
+  pass with that generator, in addition to the directed cases.
+- DCache ProbeAck requires an accepted B expectation for the same probe
+  address; a C before B, a B without an expectation, and duplicate B
+  acceptance fail. C's client-owned source is not tied to B source, so
+  same-address attribution remains address-keyed. Directed coherence, release,
+  atomic and a mixed run exercise the checker.
+- `translation-faults` adds a two-uop vector page fault: uop0 reads the mapped
+  tail of a page, uop1 faults at the next page with `vstart=8`. The exceptional
+  writeback is checked for exact `vstart=8` and fault address `page+0x1000`.
+- `translation-alias` maps two Sv39 virtual pages to one physical page and
+  proves a committed store through one VA is visible through the other, both
+  after drain and with SBuffer non-empty at an in-flight load issue. A cold
+  first access that raises `ld2Cancel` is recognized as an opt-in legal
+  canceled attempt and its LQ cancellation is accounted; exact replay remains
+  outside the UT.
+- Mixed finish also checks every committed non-cacheable store/atomic word
+  against the manager bus image after drain. This observes the bytes carried by
+  accepted A requests; it is not a DUT uncache readback, and device/CMO
+  semantics remain scenario-owned.
+- `translation-permissions` reads the target word back after a permission-fault
+  store, using the same readable mapping or a Bare identity fallback. This
+  checks that a faulting store did not leak bytes into the cache or backing
+  image; ten fault-store cases are covered. `pmp-contracts` adds a PMP-denied
+  store, reconfigures the region to allow reads, and verifies the original
+  physical word by Bare identity readback.
 
 ## Current Qualification
 
@@ -57,17 +90,19 @@ The current qualification commands are:
 - make -C tests/memblock check-rtl
 - make -C tests/memblock picker-harness JOBS=16
 - A frozen-runtime benchmark with all 85 selected entries and 256 random actions.
-- Explicit execution of all five default-benchmark exclusions.
+- Explicit execution of all six default-benchmark exclusions, including
+  `translation-alias`.
 - Finite coverage and corner campaigns with 4608 actions per seed.
+- Full-mask directed and mixed campaigns described below.
 - An 8-seed spec confidence run with 16384 actions per seed.
 - The configured 8-seed, 16384-action coverage regression.
 
 The qualification artifacts are local under
-`build/memblock/agent-campaign-12`, `agent-campaign-13`,
-`agent-campaign-14`, `agent-campaign-15` and `agent-campaign-16` (not guaranteed
+`build/memblock/agent-campaign-12` through `agent-campaign-17` (not guaranteed
 by a clean clone). The full 6x4608/4x4608 campaigns are from
 `agent-campaign-12`; the final benchmark is `agent-campaign-16`; the 8x16384
 spec and coverage runs are from `agent-campaign-13` and `agent-campaign-14`.
+The full-mask and accepted-B logs are in `agent-campaign-17`.
 The runtime was frozen after
 a fresh root `build/rtl` generation, `prepare-rtl`, and Picker/model rebuild for
 the `StoreQueue.scala` fix; the previous model was not reused.
@@ -76,18 +111,34 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 284 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 290 tests pass | Unit checks do not establish DUT functional coverage |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Selected benchmark | 85/85 pass, 377.7 s | Seed 1; random budget 256; catalog-specific action overrides retained; `agent-campaign-16` |
-| Extra directed contracts | 5/5 pass | cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high, vector-segment-noncanonical |
+| Extra directed contracts | 6/6 pass | cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high, vector-segment-noncanonical, translation-alias |
+| All directed scenarios | 90/90 pass | Current-tree sweep of every catalogued directed test (constrained-random excluded); artifact `agent-campaign-17/directed-logs` |
 | Coverage campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 101..106; artifact `agent-campaign-12`; 1029.0 s; capability only |
 | Corner campaign | 4/4 seeds pass, 4608 actions each (18432 actions) | Seeds 101..104; artifact `agent-campaign-12`; 1985.0 s; capability only |
 | Regression acceptance | 8/8 seeds pass, 16384 actions each (131072 actions) | Seeds 1..8; artifact `agent-campaign-14`; 1003.2 s; default coverage profile |
+| Current 8x16384 coverage | 8/8 seeds pass, 16384 actions each (131072 actions); per-seed high_mask 1436..1916 | Seeds 301..308; artifact `agent-campaign-17`; current mixed generator; not the 48h final campaign |
 | Spec confidence run | 8/8 seeds pass, 16384 actions each (131072 actions) | Seeds 1..8; artifact `agent-campaign-13`; 845.6 s; spec latency |
 | Data-less Release check | 2/2 coverage and 2/2 corner seeds pass, 4608 actions each | Seeds 121..122; artifact `agent-campaign-15`; final C-release monitor |
-| Back-to-back CBO.ZERO | Fixed model passes; pre-fix frozen model fails deterministically | Directed `cbo-zero-contracts`; see CPU bug document |
-| Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases/non-cacheable effects and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
+| Full high-mask campaign | 4/4 coverage seeds pass, 4608 actions each (18432 actions); directed LMUL8 full-range case passes; seed 215 reports 432 masked uops with an enabled element >=16 | Seeds 201..204; artifact `agent-campaign-17`; the first four use a binary that predates the accepted-B probe gate |
+| Current full-mask + probe gate | 2/2 coverage seeds pass, 4608 actions each (9216 actions) | Seeds 205..206; artifact `agent-campaign-17`; current tree |
+| Accepted-B probe gate | 1/1 1024-action mixed seed passes with 407 probes, plus directed coherence/release/atomic | Seed 207; artifact `agent-campaign-17`; no dedicated counter for pre-B C because an illegal C fails immediately |
+| Cross-alias store/load | `translation-alias` passes at cycle 447 and also observes a first-access `ld2Cancel` (`canceled=1`), log in `agent-campaign-17/translation-alias.log` | One PA, two Sv39 VAs; after-drain and an in-flight store with SBuffer non-empty at load issue. The canceled attempt is LQ-accounted but not replayed by the UT; exact backend replay remains outside |
+| CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line zero/store both orders, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass | Directed `cbo-zero-contracts`; see CPU bug document |
+| Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
+| High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
+| Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA | One directed shape; broader fault-element/FOF progress remains open |
+| Permission-fault store side effects | `translation-permissions` passes with 10/10 fault-store readbacks (readable mapping or Bare fallback); `pmp-contracts` adds one PMP-denied store readback | Device fault paths still need another observation route |
+| Non-cacheable final effects | committed NC store/atomic words match the manager bus image in passing mixed runs; 2/2 4608-action seeds (210/211) check 141/142 words, seed 215 checks 146, and smaller seeds cover the uncache-drain path | Manager bus image, not a DUT uncache read; device side effects, aliases and CMO remain outside |
 | Atomic dirty-line persistence | `atomic-contracts` passes; ProbeAckData carries the updated line and updates the manager image | AMO target only; cross-hart/concurrent eviction not covered |
+
+Rows through `agent-campaign-16` were produced before the current harness-only
+full-mask, accepted-B, cross-alias and fault-store changes.  `agent-campaign-17`
+qualifies those new checks on the current tree, including a fresh 8x16384
+coverage regression (seeds 301..308).  It is not a rerun of the 85-entry frozen
+benchmark or the 48-hour final acceptance campaign.
 
 The CBO.ZERO pre-fix replay fails at cycle 33333 with
 `timed out waiting for scalar store writebacks sq=3/6
@@ -106,12 +157,14 @@ combinations or missing oracle coverage.
 
 Readiness is partial. Functional PASS means active checks accepted generated
 traffic, not all legal classes occurred or every external effect was checked.
-Current missing rules include aliased/non-cacheable final-byte observation,
-uniform fault forbidden-demand checks, B/C acceptance provenance, the
-same-line CBO.ZERO forward window before Sbuffer s2, and independent verifier
-schema/backpressure checks.
-Masks, boundary faults, concurrency and reset/protection crosses also remain
-partial. PBMT=NC `CBO.ZERO` was probed and the DUT reports a store access fault
+Current missing rules include remaining aliased/device final-byte observation,
+uniform fault forbidden-demand checks, same-address B/C
+attribution and complete C multibeat identity, the same-line CBO.ZERO forward
+window before Sbuffer s2, and independent verifier schema/backpressure checks.
+The accepted-B-before-C gate, full 128-bit mask operand and explicit
+first-access cross-alias cancellation accounting are implemented, but the UT
+does not model the backend replay that follows `ld2Cancel`.
+Boundary faults, concurrency and reset/protection crosses also remain partial. PBMT=NC `CBO.ZERO` was probed and the DUT reports a store access fault
 before an uncache request; the architecture leaves CBO behavior for
 non-cacheable memory unspecified, so neither behavior is claimed. Four-state/
 physical arrays and full-core/multi-hart behavior need other verification
@@ -142,7 +195,12 @@ monitor was also approved; same-address ProbeAck lookup remains by base and is
 documented as a residual limitation. The data-less Release full-line/shrink
 check was corrected to ignore `corrupt` and approved.
 
+The later non-cacheable bus-image final check, the opt-in `ld2Cancel` canceled
+attempt handling, and the same-line CBO/LMUL8 directed additions were not part
+of that independent review; they are self-reviewed for this snapshot.
+
 This qualification confirms the stated capability and limitations; it does not
 establish verification closure or clean RTL elaboration provenance. The oracle,
-protocol lifecycle, vector-mask, aliased/non-cacheable final-byte observation
-and integration gaps described in the current documents remain open.
+protocol lifecycle, remaining alias/non-cacheable final-byte observation,
+first-access replay, vector-fault metadata and integration gaps described in the
+current documents remain open.

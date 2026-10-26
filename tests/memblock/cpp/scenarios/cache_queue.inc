@@ -4179,6 +4179,314 @@ int run_vector_addressing(int argc, char **argv)
         return 1;
     }
 
+    // Global mask bits above element 15.  A two-uop e8,m2 operation exposes
+    // global elements 16..31 only through src(3) bits 16..31; the old model
+    // treated those elements as permanently disabled.  The load uses an
+    // all-active first uop and a half-active second uop, so dropping the high
+    // mask changes both the returned bytes and the writeback mask.  The store
+    // then proves the same high mask controls architectural memory writes.
+    memblock::Environment high_mask(argc, argv);
+    constexpr std::uint64_t high_mask_base =
+        memblock::kDefaultMemoryBase + 0x140000;
+    high_mask.memory().fill_incrementing(high_mask_base, 0x1000, 0x93);
+    high_mask.configure_backpressure(0x9e3779b97f4a7c15ULL, true);
+    if (!high_mask.reset()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << high_mask.cycle()
+                  << " phase=high-mask-reset reason="
+                  << high_mask.error() << '\n';
+        return 1;
+    }
+
+    std::array<memblock::VectorMemoryTransaction, 2> high_mask_loads{};
+    for (unsigned uop = 0; uop < high_mask_loads.size(); ++uop) {
+        high_mask_loads[uop] = memblock::VectorMemoryTransaction{
+            .address = high_mask_base,
+            .addressing = memblock::VectorAddressingMode::unit_stride,
+            .eew = 0,
+            .vl = 32,
+            .vm = false,
+            .rob = 20,
+            .lq = static_cast<std::uint8_t>(uop),
+            .pdest = static_cast<std::uint8_t>(100 + uop),
+            .lane = uop,
+            .flow_num = 1,
+            .vlmul = 1,
+            .vuop_idx = static_cast<std::uint8_t>(uop),
+            .last_uop = uop + 1 == high_mask_loads.size(),
+        };
+    }
+    high_mask_loads[0].mask_bits = 0xffff;
+    high_mask_loads[1].mask_high[0] = 0x00ff;
+    for (const auto &transaction : high_mask_loads) {
+        high_mask.expect_vector(transaction);
+    }
+    if (!high_mask.set_rob_head(
+            high_mask_loads[0].rob, high_mask_loads[0].rob_flag) ||
+        !high_mask.enqueue_vector(high_mask_loads[0]) ||
+        !high_mask.enqueue_vector(high_mask_loads[1]) ||
+        !high_mask.issue_vector(high_mask_loads[1], 512) ||
+        !high_mask.issue_vector(high_mask_loads[0], 512) ||
+        !high_mask.run_until_vector_complete_with_replays(
+            {high_mask_loads[0], high_mask_loads[1]}, 16384) ||
+        !high_mask.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << high_mask.cycle()
+                  << " phase=high-mask-load reason="
+                  << high_mask.error() << '\n';
+        return 1;
+    }
+
+    std::array<memblock::VectorMemoryTransaction, 2> high_mask_stores{};
+    for (unsigned uop = 0; uop < high_mask_stores.size(); ++uop) {
+        high_mask_stores[uop] = memblock::VectorMemoryTransaction{
+            .store = true,
+            .address = high_mask_base,
+            .addressing = memblock::VectorAddressingMode::unit_stride,
+            .eew = 0,
+            .vl = 32,
+            .vm = false,
+            .rob = 24,
+            .sq = static_cast<std::uint8_t>(uop),
+            .pdest = static_cast<std::uint8_t>(104 + uop),
+            .lane = uop,
+            .flow_num = 1,
+            .vlmul = 1,
+            .vuop_idx = static_cast<std::uint8_t>(uop),
+            .last_uop = uop + 1 == high_mask_stores.size(),
+        };
+        for (unsigned byte = 0; byte < high_mask_stores[uop].data.size();
+             ++byte) {
+            high_mask_stores[uop].data[byte] = static_cast<unsigned char>(
+                0x40 + 0x20 * uop + byte);
+        }
+    }
+    high_mask_stores[0].mask_bits = 0xffff;
+    high_mask_stores[1].mask_high[0] = 0x0f0f;
+    for (const auto &transaction : high_mask_stores) {
+        high_mask.expect_vector(transaction);
+        if (!high_mask.enqueue_vector(transaction) ||
+            !high_mask.issue_vector(transaction, 512) ||
+            !high_mask.run_until_vector_complete(8192) ||
+            !high_mask.commit_vector_store(transaction, 8192)) {
+            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                      << high_mask.cycle()
+                      << " phase=high-mask-store reason="
+                      << high_mask.error() << '\n';
+            return 1;
+        }
+    }
+
+    for (unsigned uop = 0; uop < high_mask_stores.size(); ++uop) {
+        auto readback = high_mask_stores[uop];
+        readback.store = false;
+        readback.vm = true;
+        readback.mask_bits = 0xffff;
+        readback.mask_high = {};
+        readback.rob = static_cast<std::uint8_t>(28 + uop);
+        readback.lq = static_cast<std::uint8_t>(2 + uop);
+        readback.sq = 0;
+        readback.lane = uop;
+        readback.pdest = static_cast<std::uint8_t>(108 + uop);
+        readback.data.fill(0);
+        high_mask.expect_vector(readback);
+        if (!high_mask.set_rob_head(readback.rob, readback.rob_flag) ||
+            !high_mask.enqueue_vector(readback) ||
+            !high_mask.issue_vector(readback, 512) ||
+            !high_mask.run_until_vector_complete(8192) ||
+            !high_mask.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                      << high_mask.cycle()
+                      << " phase=high-mask-readback uop=" << uop
+                      << " reason=" << high_mask.error() << '\n';
+            return 1;
+        }
+    }
+    if (high_mask.lq_allocated() !=
+            high_mask.lq_dequeued() + high_mask.lq_canceled() ||
+        high_mask.sq_allocated() !=
+            high_mask.sq_dequeued() + high_mask.sq_canceled()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << high_mask.cycle()
+                  << " phase=high-mask-conservation"
+                  << " lq=" << high_mask.lq_allocated() << '/'
+                  << high_mask.lq_dequeued() << '+' << high_mask.lq_canceled()
+                  << " sq=" << high_mask.sq_allocated() << '/'
+                  << high_mask.sq_dequeued() << '+' << high_mask.sq_canceled()
+                  << '\n';
+        return 1;
+    }
+
+    // Indexed VSplit shifts a full element mask by the number of elements in
+    // preceding flows.  Reuse the same high-bit pattern in indexed mode so a
+    // shift limited to the low 16 mask bits is visible independently of the
+    // unit-stride path.
+    std::array<memblock::VectorMemoryTransaction, 2> high_mask_indexed{};
+    for (unsigned uop = 0; uop < high_mask_indexed.size(); ++uop) {
+        high_mask_indexed[uop] = memblock::VectorMemoryTransaction{
+            .address = high_mask_base + 0x800,
+            .addressing = memblock::VectorAddressingMode::indexed_unordered,
+            .eew = 0,
+            .vsew = 0,
+            .vl = 32,
+            .vm = false,
+            .rob = 32,
+            .lq = static_cast<std::uint8_t>(4 + 16 * uop),
+            .pdest = static_cast<std::uint8_t>(112 + uop),
+            .lane = uop,
+            .flow_num = 16,
+            .vlmul = 1,
+            .vuop_idx = static_cast<std::uint8_t>(uop),
+            .last_uop = uop + 1 == high_mask_indexed.size(),
+        };
+        for (unsigned element = 0; element < 16; ++element) {
+            high_mask_indexed[uop].index[element] =
+                static_cast<unsigned char>(uop * 16U + element);
+        }
+    }
+    high_mask_indexed[0].mask_bits = 0xffff;
+    high_mask_indexed[1].mask_high[0] = 0x00ff;
+    for (const auto &transaction : high_mask_indexed) {
+        high_mask.expect_vector(transaction);
+    }
+    if (!high_mask.set_rob_head(
+            high_mask_indexed[0].rob, high_mask_indexed[0].rob_flag) ||
+        !high_mask.enqueue_vector(high_mask_indexed[0]) ||
+        !high_mask.enqueue_vector(high_mask_indexed[1]) ||
+        !high_mask.issue_vector(high_mask_indexed[1], 512) ||
+        !high_mask.issue_vector(high_mask_indexed[0], 512) ||
+        !high_mask.run_until_vector_complete_with_replays(
+            {high_mask_indexed[0], high_mask_indexed[1]}, 16384) ||
+        !high_mask.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << high_mask.cycle()
+                  << " phase=high-mask-indexed-load reason="
+                  << high_mask.error() << '\n';
+        return 1;
+    }
+
+    // Special indexed mode (EMUL > LMUL) shifts the full source mask by the
+    // previous-uop element count and then forwards a split range.  A high-bit
+    // mask here checks that the split/writeback path uses the same 128-bit
+    // source, not just the low 16 bits used by the ordinary indexed case.
+    const memblock::VectorMemoryTransaction high_mask_special{
+        .address = high_mask_base + 0x200,
+        .addressing = memblock::VectorAddressingMode::indexed_unordered,
+        .eew = 2,
+        .vsew = 0,
+        .vl = 24,
+        .vm = false,
+        .mask_high = {{0x00f0ULL, 0}},
+        .rob = 34,
+        .lq = 36,
+        .pdest = 114,
+        .lane = 0,
+        .flow_num = 4,
+        .vlmul = 1,
+        .vuop_idx = 5,
+        .last_uop = true,
+    };
+    auto special = high_mask_special;
+    for (unsigned element = 0; element < 4; ++element) {
+        const std::uint32_t offset = element * 4;
+        for (unsigned byte = 0; byte < 4; ++byte) {
+            special.index[element * 4 + byte] =
+                static_cast<unsigned char>(offset >> (8 * byte));
+        }
+    }
+    high_mask.expect_vector(special);
+    if (!high_mask.set_rob_head(special.rob, special.rob_flag) ||
+        !high_mask.enqueue_vector(special) ||
+        !high_mask.issue_vector(special, 512) ||
+        !high_mask.run_until_vector_complete(16384) ||
+        !high_mask.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << high_mask.cycle()
+                  << " phase=high-mask-special-indexed reason="
+                  << high_mask.error() << '\n';
+        return 1;
+    }
+
+
+    // Full LMUL8/e8 mask: eight uops cover global elements 0..127.  The
+    // pattern keeps elements active in the highest uop, so a 16-bit-only mask
+    // or a truncated flow shift changes the returned data/mask.
+    {
+        std::array<memblock::VectorMemoryTransaction, 8> lmul8{};
+        const auto enabled = [](unsigned global) {
+            return global < 128 && (global % 5U) != 0U;
+        };
+        std::uint16_t low_mask = 0;
+        std::array<std::uint64_t, 2> lmul8_mask{};
+        for (unsigned global = 0; global < 128; ++global) {
+            if (!enabled(global)) {
+                continue;
+            }
+            if (global < 16) {
+                low_mask |= static_cast<std::uint16_t>(1U << global);
+            } else {
+                const unsigned relative = global - 16U;
+                lmul8_mask[relative / 64] |= std::uint64_t{1}
+                    << (relative % 64);
+            }
+        }
+        const std::uint64_t lmul8_lq_base = high_mask.lq_allocated();
+        for (unsigned uop = 0; uop < lmul8.size(); ++uop) {
+            lmul8[uop] = memblock::VectorMemoryTransaction{
+                .address = high_mask_base,
+                .addressing = memblock::VectorAddressingMode::unit_stride,
+                .eew = 0,
+                .vl = 128,
+                .vm = false,
+                .mask_bits = uop == 0 ? low_mask : std::uint16_t{0},
+                .mask_high = lmul8_mask,
+                .rob = 50,
+                .lq = static_cast<std::uint8_t>(lmul8_lq_base + uop),
+                .pdest = static_cast<std::uint8_t>(120 + uop),
+                .lane = uop % memblock::kVectorMemoryLanes,
+                .flow_num = 1,
+                .vlmul = 3,
+                .vuop_idx = static_cast<std::uint8_t>(uop),
+                .last_uop = uop + 1 == lmul8.size(),
+            };
+            high_mask.expect_vector(lmul8[uop]);
+        }
+        if (!high_mask.set_rob_head(lmul8[0].rob, lmul8[0].rob_flag)) {
+            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                      << high_mask.cycle()
+                      << " phase=lmul8-mask-head reason="
+                      << high_mask.error() << '\n';
+            return 1;
+        }
+        for (unsigned uop = 0; uop < lmul8.size(); ++uop) {
+            if (!high_mask.enqueue_vector(lmul8[uop])) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << high_mask.cycle()
+                          << " phase=lmul8-mask-enqueue uop=" << uop
+                          << " reason=" << high_mask.error() << '\n';
+                return 1;
+            }
+        }
+        for (unsigned index = 0; index < lmul8.size(); ++index) {
+            const unsigned uop = static_cast<unsigned>(lmul8.size() - 1 - index);
+            if (!high_mask.issue_vector(lmul8[uop], 512)) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << high_mask.cycle()
+                          << " phase=lmul8-mask-issue uop=" << uop
+                          << " reason=" << high_mask.error() << '\n';
+                return 1;
+            }
+        }
+        if (!high_mask.run_until_vector_complete(32768) ||
+            !high_mask.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                      << high_mask.cycle()
+                      << " phase=lmul8-mask-complete reason="
+                      << high_mask.error() << '\n';
+            return 1;
+        }
+    }
+
     std::cout << "MEMBLOCK_VECTOR_ADDRESSING_PASS"
               << " cycle=" << environment.cycle() + multi_uop.cycle() +
                     lmul_matrix.cycle() + strided_matrix.cycle() +
@@ -4234,13 +4542,22 @@ int run_vector_addressing(int argc, char **argv)
               << " whole_store_uops=" << whole_store_uops
               << " whole_lq_allocated=" << whole.lq_allocated()
               << " whole_sq_allocated=" << whole.sq_allocated()
+              << " high_mask_load_uops=2 high_mask_store_uops=2"
+              << " high_mask_indexed_uops=2 high_mask_special_indexed=1"
+              << " high_mask_lmul8=1"
+              << " high_mask_load_writebacks="
+                    << high_mask.vector_load_writebacks()
+              << " high_mask_store_writebacks="
+                    << high_mask.vector_store_writebacks()
+              << " high_mask_cycle=" << high_mask.cycle()
               << " tilelink_requests=" << environment.tilelink_requests() +
                     multi_uop.tilelink_requests() +
                     lmul_matrix.tilelink_requests() +
                     strided_matrix.tilelink_requests() +
                     indexed_matrix.tilelink_requests() +
                     indexed_lmul_matrix.tilelink_requests() +
-                    whole.tilelink_requests()
+                    whole.tilelink_requests() +
+                    high_mask.tilelink_requests()
               << '\n';
     return 0;
 }

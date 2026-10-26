@@ -20,6 +20,7 @@ public:
         std::optional<bool> debug_is_perf_cnt;
         std::uint64_t address;
         std::uint16_t op;
+        bool tolerate_canceled_result;
     };
 
     void expect(const LoadTransaction &transaction, std::uint64_t data)
@@ -51,6 +52,7 @@ public:
                 transaction.expected_debug_is_perf_cnt,
                 transaction.address,
                 static_cast<std::uint16_t>(transaction.op),
+                transaction.tolerate_canceled_result,
             });
         if (!inserted && error_.empty()) {
             std::ostringstream message;
@@ -72,7 +74,8 @@ public:
                 transaction.expected_debug_is_mmio,
                 transaction.expected_debug_is_ncio,
                 transaction.expected_debug_is_perf_cnt,
-                transaction.address, static_cast<std::uint16_t>(transaction.op)});
+                transaction.address, static_cast<std::uint16_t>(transaction.op),
+                false});
         if (!inserted && error_.empty()) {
             error_.record("duplicate outstanding scalar load ROB value");
         } else if (inserted) {
@@ -80,19 +83,21 @@ public:
         }
     }
 
-    void observe(unsigned lane, const generated::ScalarLoadWriteback &writeback)
+    void observe(unsigned lane, const generated::ScalarLoadWriteback &writeback,
+                 bool canceled = false)
     {
         if (!writeback.valid) {
             return;
         }
-        ++observed_;
         const auto it = expected_.find(
             rob_identity(writeback.rob_value, writeback.rob_flag));
         if (it == expected_.end()) {
+            ++observed_;
             fail("unexpected load writeback", lane, writeback);
             return;
         }
         if (it->second.prefetch) {
+            ++observed_;
             if (writeback.exception_mask != 0 || writeback.replay ||
                 writeback.rf_wen || writeback.fp_wen ||
                 writeback.trigger != it->second.trigger ||
@@ -114,6 +119,14 @@ public:
             expected_.erase(it);
             return;
         }
+        if (canceled && it->second.tolerate_canceled_result &&
+            it->second.exception_mask == 0 && writeback.exception_mask == 0 &&
+            !writeback.replay && writeback.data != it->second.data) {
+            ++canceled_observed_;
+            expected_.erase(it);
+            return;
+        }
+        ++observed_;
         const std::uint32_t missing_exception =
             it->second.exception_mask & ~writeback.exception_mask;
         const std::uint32_t unexpected_exception = writeback.exception_mask &
@@ -184,6 +197,7 @@ public:
 
     bool ok() const { return error_.empty(); }
     std::uint64_t observed() const { return observed_; }
+    std::uint64_t canceled_observed() const { return canceled_observed_; }
     std::uint64_t prefetch_observed() const { return prefetch_observed_; }
     const std::string &error() const { return error_.message(); }
     std::string pending_summary() const
@@ -272,6 +286,7 @@ private:
 
     std::unordered_map<RobIdentity, Expected, RobIdentityHash> expected_;
     std::uint64_t observed_ = 0;
+    std::uint64_t canceled_observed_ = 0;
     std::uint64_t reset_canceled_ = 0;
     std::uint64_t prefetch_observed_ = 0;
     std::size_t pending_prefetch_ = 0;

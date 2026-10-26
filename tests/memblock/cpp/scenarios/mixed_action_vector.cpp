@@ -307,6 +307,7 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
             vector_corner ? 1U + random() % vlmax : vlmax);
         const bool vm = !vector_corner || (random() & 1U) != 0;
         std::uint16_t mask_bits = static_cast<std::uint16_t>(random());
+        std::array<std::uint64_t, 2> mask_high{{random(), random()}};
         const std::uint8_t vstart = vector_corner
             ? static_cast<std::uint8_t>(random() %
                   (vector_segment_high_va_cross
@@ -315,7 +316,13 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
         if (vector_segment_high_va_cross && !vm) {
             // A high-VA bin requires actual translated memory work;
             // zero-active-element instructions cannot satisfy it.
-            mask_bits |= static_cast<std::uint16_t>(1U << vstart);
+            if (vstart < 16) {
+                mask_bits |= static_cast<std::uint16_t>(1U << vstart);
+            } else {
+                const unsigned relative = vstart - 16U;
+                mask_high[relative / 64] |= std::uint64_t{1}
+                    << (relative % 64);
+            }
         }
         const std::uint8_t first_pdest = static_cast<std::uint8_t>(
             1 + random() % (256 - uop_count));
@@ -380,6 +387,7 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
                 ? std::optional{index_group} : std::nullopt;
             segment_uop.vm = vm;
             segment_uop.mask_bits = mask_bits;
+            segment_uop.mask_high = mask_high;
             segment_uop.vstart = vstart;
             segment_uop.ftq_ptr = random() & 0x3fU;
             segment_uop.ftq_offset =

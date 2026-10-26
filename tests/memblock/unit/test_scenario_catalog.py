@@ -43,14 +43,15 @@ class ScenarioCatalogTest(unittest.TestCase):
 
     def test_existing_cli_make_defaults_and_benchmark_inventory_are_preserved(self):
         entries = scenario_catalog.load_catalog()
-        self.assertEqual(len(entries), 90)
+        self.assertEqual(len(entries), 91)
         by_name = {entry["name"]: entry for entry in entries}
         self.assertEqual(by_name["vector-guest-fault"]["call"], "run_vector_guest_fault(argc, argv)")
         self.assertEqual(by_name["vector-guest-fault-split"]["call"], "run_vector_guest_fault(argc, argv, true)")
         self.assertEqual(by_name["translation-fence-sv48-sv39x4-selective"]["call"], "run_translation_fence(argc, argv, true, true, false)")
         self.assertEqual(by_name["translation-inflight-context-sv39-sv48x4"]["call"], "run_translation_inflight_context(argc, argv, false, true)")
+        self.assertEqual(by_name["translation-alias"]["call"], "run_translation_alias(argc, argv)")
         targets = {target["name"]: (entry["name"], target["args"]) for entry in entries for target in entry["make_targets"]}
-        self.assertEqual(len(targets), 90)
+        self.assertEqual(len(targets), 91)
         self.assertEqual(targets["smoke"], ("smoke", ""))
         self.assertEqual(targets["frontend-bridge"], ("frontend-bridge", "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),4096)"))
         self.assertEqual(targets["constrained-random"], ("constrained-random", "--seed $(or $(SEED),1) --actions $(or $(ACTIONS),16384) $(CONSTRAINT_ARGS)"))
@@ -60,6 +61,7 @@ class ScenarioCatalogTest(unittest.TestCase):
             set(by_name) - {
                 "cmo-store-flush", "redirect-store-flush", "tag-ecc-ways",
                 "vector-fof-high", "vector-segment-noncanonical",
+                "translation-alias",
             },
         )
         self.assertEqual({entry["name"]: entry["benchmark_actions"] for entry in benchmark if "benchmark_actions" in entry}, {

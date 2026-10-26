@@ -1239,6 +1239,20 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile)
 
+    def test_dcache_probe_ack_requires_accepted_b_provenance(self) -> None:
+        environment = read_cpp_source("memblock_env.hpp")
+        for contract in (
+            "bool b_accepted = false",
+            "accepted a B Probe without a ",
+            "matching expectation",
+            "accepted the same B Probe source twice",
+            "response->b_accepted = true",
+            "expected.base == response.address &&",
+            "expected.b_accepted",
+            "DCache ProbeAck completed before its B Probe was accepted",
+        ):
+            self.assertIn(contract, environment)
+
     def test_dcache_errors_cross_per_beat_corruption_and_mshr_isolation(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")
         main = read_cpp_source("memblock_main.cpp")
@@ -2034,6 +2048,79 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "writeback.vmask, expected.active_elements,",
         ):
             self.assertIn(contract, environment)
+
+    def test_vector_full_mask_bits_are_modeled_and_driven(self) -> None:
+        model = read_cpp_source("environment/model.inc")
+        manager = read_cpp_source("environment/manager_control.cpp")
+        scenario = read_cpp_source("scenarios/cache_queue.inc")
+        for contract in (
+            "std::array<std::uint64_t, 2> mask_high{}",
+            "inline bool vector_mask_enabled(",
+            "if (global_element < 128)",
+            "vector_mask_enabled(transaction, global_element)",
+            "!vector_mask_enabled(transaction, *global)",
+        ):
+            self.assertIn(contract, model)
+        for contract in (
+            "std::array<unsigned char, 16> mask_bytes{}",
+            "if (vector_mask_enabled(transaction, bit))",
+            "mask_bytes[bit / 8] |=",
+            "issue.vmask = mask_bytes",
+            "issue.src[3] = mask_bytes",
+        ):
+            self.assertIn(contract, manager)
+        for contract in (
+            "high_mask_loads[1].mask_high[0] = 0x00ff",
+            "high_mask_stores[1].mask_high[0] = 0x0f0f",
+            "high_mask_indexed[1].mask_high[0] = 0x00ff",
+        ):
+            self.assertIn(contract, scenario)
+
+    def test_canceled_load_result_is_explicit_and_opt_in(self) -> None:
+        model = read_cpp_source("environment/model.inc")
+        scoreboard = read_cpp_source("environment/scoreboards.inc")
+        environment = read_cpp_source("memblock_env.hpp")
+        feedback = read_cpp_source("environment/feedback_monitor.cpp")
+        scenario = read_cpp_source("scenarios/translation_permissions.inc")
+        for contract in (
+            "bool tolerate_canceled_result = false",
+        ):
+            self.assertIn(contract, model)
+        for contract in (
+            "bool tolerate_canceled_result;",
+            "canceled_observed_",
+            "it->second.tolerate_canceled_result",
+            "canceled_observed() const",
+        ):
+            self.assertIn(contract, scoreboard)
+        self.assertIn("scalar_load_canceled_observed()", environment)
+        self.assertIn("scoreboard_.observe(lane, writeback, canceled)", feedback)
+        for contract in (
+            ".tolerate_canceled_result = true",
+            "scalar_load_canceled_observed()",
+            "account_lq_cancellation(1)",
+            "MEMBLOCK_TRANSLATION_ALIAS_FIRST_ACCESS",
+        ):
+            self.assertIn(contract, scenario)
+
+    def test_non_cacheable_final_effect_tracking_is_registered(self) -> None:
+        completion = read_cpp_source("environment/completion.cpp")
+        environment = read_cpp_source("memblock_env.hpp")
+        reporting = read_cpp_source("scenarios/mixed_reporting.cpp")
+        for contract in (
+            "final_observation_nc_words_",
+            "final_observation_nc_bytes_",
+            "non-cacheable final effect mismatch address=0x",
+            "bus_memory_.read_u64(word)",
+        ):
+            self.assertIn(contract, completion)
+        for contract in (
+            "final_observation_nc_words()",
+            "final_observation_nc_bytes()",
+            "verify_final_nc_effects()",
+        ):
+            self.assertIn(contract, environment + reporting)
+        self.assertIn("return environment.verify_final_nc_effects();", reporting)
 
     def test_vector_fault_only_first_contract_is_registered(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")

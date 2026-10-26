@@ -105,6 +105,44 @@ static void check_scalar_reset_cancellation()
             "scalar reset cancellation removed a prefetch");
 }
 
+static void check_canceled_result()
+{
+    const memblock::LoadTransaction transaction{
+        .address = 0x80002000, .op = memblock::LoadOp::ld,
+        .rob = 7, .pdest = 31, .lane = 0,
+    };
+    memblock::generated::ScalarLoadWriteback writeback{};
+    writeback.valid = true;
+    writeback.rob_value = transaction.rob;
+    writeback.pdest = transaction.pdest;
+    writeback.rf_wen = true;
+    writeback.trigger = transaction.expected_trigger;
+    writeback.data = 0xdeadbeefcafef00dULL;
+
+    auto tolerated = transaction;
+    tolerated.tolerate_canceled_result = true;
+    memblock::LoadScoreboard accepted;
+    accepted.expect(tolerated, 0x1122334455667788ULL);
+    accepted.observe(0, writeback, true);
+    require(accepted.ok() && accepted.done() &&
+            accepted.canceled_observed() == 1,
+            "opt-in canceled result was not accepted as a legal cancellation");
+
+    memblock::LoadScoreboard not_opted_in;
+    not_opted_in.expect(transaction, 0x1122334455667788ULL);
+    not_opted_in.observe(0, writeback, true);
+    require(!not_opted_in.ok() && !not_opted_in.done() &&
+            not_opted_in.canceled_observed() == 0,
+            "canceled result was accepted without opt-in");
+
+    memblock::LoadScoreboard no_cancel;
+    no_cancel.expect(tolerated, 0x1122334455667788ULL);
+    no_cancel.observe(0, writeback, false);
+    require(!no_cancel.ok() && !no_cancel.done() &&
+            no_cancel.canceled_observed() == 0,
+            "wrong data without ld2Cancel was accepted");
+}
+
 static void check_index(
     const memblock::VectorMemoryTransaction &transaction, unsigned index,
     bool significant = true)
@@ -133,6 +171,62 @@ static void check_index(
     }
 }
 
+static void check_high_mask()
+{
+    memblock::VectorMemoryTransaction transaction;
+    transaction.eew = 0;
+    transaction.vl = 32;
+    transaction.vlmul = 1; // LMUL2, two 16-element uops.
+    transaction.vm = false;
+    transaction.mask_bits = 0xffff;
+    transaction.mask_high[0] = 0x00ff;
+    transaction.vuop_idx = 0;
+    require(memblock::active_vector_elements(transaction) == 0xffff,
+            "low mask uop lost active elements");
+    transaction.vuop_idx = 1;
+    require(memblock::active_vector_elements(transaction) == 0x00ff,
+            "high mask bits were not applied");
+    require(memblock::vector_mask_inactive_elements(transaction) == 0xff00,
+            "high masked-off elements were not classified");
+    transaction.vstart = 20;
+    require(memblock::active_vector_elements(transaction) == 0x00f0,
+            "vstart did not suppress pre-vstart high elements");
+    require(memblock::vector_mask_inactive_elements(transaction) == 0xff00,
+            "vstart changed the masked-off classification range");
+    transaction = memblock::VectorMemoryTransaction{};
+    transaction.addressing =
+        memblock::VectorAddressingMode::indexed_unordered;
+    transaction.eew = 2; // EEW32 indices, SEW8 data, LMUL2, EMUL8.
+    transaction.vsew = 0;
+    transaction.vlmul = 1;
+    transaction.flow_num = 4;
+    transaction.vl = 24;
+    transaction.vuop_idx = 5;
+    transaction.vm = false;
+    transaction.mask_high[0] = 0x00f0;
+    require(memblock::active_vector_elements(transaction) == 0x00f0,
+            "special-indexed high mask was not applied after the split shift");
+    require(memblock::vector_writeback_elements(transaction) == 0x00f0,
+            "special-indexed writeback mask lost high elements");
+    require(memblock::vector_mask_inactive_elements(transaction) == 0x000f,
+            "special-indexed inactive elements were misclassified");
+
+    transaction = memblock::VectorMemoryTransaction{};
+    transaction.eew = 0;
+    transaction.vl = 32;
+    transaction.vlmul = 1;
+    transaction.vm = false;
+    transaction.mask_bits = 0xffff;
+    transaction.mask_high[0] = 0x00ff;
+    transaction.vuop_idx = 1;
+    transaction.vstart = 20;
+    transaction.vm = true;
+    require(memblock::active_vector_elements(transaction) == 0xfff0,
+            "vm=true did not enable all post-vstart elements");
+    require(memblock::vector_mask_inactive_elements(transaction) == 0,
+            "vm=true reported masked-off elements");
+}
+
 int main(int argc, char **argv)
 {
     try {
@@ -140,6 +234,14 @@ int main(int argc, char **argv)
         const std::string name = argv[1];
         if (name == "scalar-reset") {
             check_scalar_reset_cancellation();
+            return 0;
+        }
+        if (name == "high-mask") {
+            check_high_mask();
+            return 0;
+        }
+        if (name == "canceled") {
+            check_canceled_result();
             return 0;
         }
         if (name == "segment-exception-counts") {

@@ -258,6 +258,7 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
         }
     }
     std::uint16_t mask_bits = static_cast<std::uint16_t>(random());
+    std::array<std::uint64_t, 2> mask_high{{random(), random()}};
     if (masked) {
         mask_bits &= static_cast<std::uint16_t>(~(1U << vstart));
     }
@@ -300,6 +301,7 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
             .vstart = static_cast<std::uint8_t>(vstart),
             .vm = !masked,
             .mask_bits = mask_bits,
+            .mask_high = mask_high,
             .vma = vma,
             .vta = vta,
             .rob = memblock::rob_pointer_value(rob),

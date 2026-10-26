@@ -313,6 +313,9 @@ struct LoadTransaction {
     std::optional<bool> expected_debug_is_mmio;
     std::optional<bool> expected_debug_is_ncio;
     std::optional<bool> expected_debug_is_perf_cnt;
+    // Opt-in for a load whose ld2Cancel pulse makes a non-replay data pulse a
+    // legal canceled attempt.  The scenario must account the cancellation.
+    bool tolerate_canceled_result = false;
 };
 
 struct StoreTransaction {
@@ -439,7 +442,11 @@ struct VectorMemoryTransaction {
     std::optional<std::uint8_t> expected_vl;
     std::uint8_t vstart = 0;
     bool vm = true;
+    // Low 16 architectural mask bits are kept in the traditional field for
+    // existing directed cases.  Bits 16..127 live in mask_high; the issue
+    // driver writes all 16 bytes of src(3), the mask operand the RTL consumes.
     std::uint16_t mask_bits = 0xffff;
+    std::array<std::uint64_t, 2> mask_high{};
     bool vma = false;
     bool vta = false;
     std::uint8_t rob = 0;
@@ -735,6 +742,21 @@ inline std::uint64_t vector_element_address(
     throw std::logic_error("unknown vector addressing mode");
 }
 
+inline bool vector_mask_enabled(
+    const VectorMemoryTransaction &transaction,
+    unsigned global_element)
+{
+    if (global_element < 16) {
+        return ((transaction.mask_bits >> global_element) & 1U) != 0;
+    }
+    if (global_element < 128) {
+        const unsigned relative = global_element - 16;
+        return ((transaction.mask_high[relative / 64] >>
+                 (relative % 64)) & 1U) != 0;
+    }
+    return false;
+}
+
 inline std::uint16_t active_vector_elements(
     const VectorMemoryTransaction &transaction)
 {
@@ -750,8 +772,7 @@ inline std::uint16_t active_vector_elements(
             const bool in_range = global_element >= transaction.vstart &&
                                   global_element < transaction.vl;
             const bool enabled = transaction.vm ||
-                (global_element < 16 &&
-                 ((transaction.mask_bits >> global_element) & 1U) != 0);
+                vector_mask_enabled(transaction, global_element);
             if (in_range && enabled) {
                 result |= static_cast<std::uint16_t>(
                     1U << (split_offset + split_index));
@@ -770,8 +791,7 @@ inline std::uint16_t active_vector_elements(
         const bool in_range = global_element >= transaction.vstart &&
                               global_element < effective_vl;
         const bool enabled = transaction.vm ||
-            (global_element < 16 &&
-             ((transaction.mask_bits >> global_element) & 1U) != 0);
+            vector_mask_enabled(transaction, global_element);
         if (in_range && enabled) {
             result |= static_cast<std::uint16_t>(1U << element);
         }
@@ -819,8 +839,7 @@ inline std::uint16_t vector_mask_inactive_elements(
     for (unsigned element = 0; element < element_count; ++element) {
         const auto global = vector_writeback_global_element(transaction, element);
         if (global && *global >= transaction.vstart && *global < effective_vl &&
-            (*global >= 16 ||
-             ((transaction.mask_bits >> *global) & 1U) == 0)) {
+            !vector_mask_enabled(transaction, *global)) {
             result |= static_cast<std::uint16_t>(1U << element);
         }
     }
@@ -845,8 +864,7 @@ inline std::uint16_t vector_writeback_elements(
         const bool in_range = global_element >= transaction.vstart &&
                               global_element < transaction.vl;
         const bool enabled = transaction.vm ||
-            (global_element < 16 &&
-             ((transaction.mask_bits >> global_element) & 1U) != 0);
+            vector_mask_enabled(transaction, global_element);
         if (in_range && enabled) {
             result |= static_cast<std::uint16_t>(1U << element);
         }

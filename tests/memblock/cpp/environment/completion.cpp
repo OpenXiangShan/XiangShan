@@ -383,9 +383,40 @@ auto Environment::Impl::final_observation_words() const
     return {final_observation_words_.begin(), final_observation_words_.end()};
 }
 
+auto Environment::Impl::final_observation_nc_words() const
+    -> std::vector<std::uint64_t>
+{
+    return {
+        final_observation_nc_words_.begin(),
+        final_observation_nc_words_.end()};
+}
+
 auto Environment::Impl::final_observation_bytes() const -> std::uint64_t
 {
     return final_observation_bytes_;
+}
+
+auto Environment::Impl::final_observation_nc_bytes() const -> std::uint64_t
+{
+    return final_observation_nc_bytes_;
+}
+
+auto Environment::Impl::verify_final_nc_effects()  -> bool
+{
+    for (const std::uint64_t word : final_observation_nc_words_) {
+        const std::uint64_t expected = memory_.read_u64(word);
+        const std::uint64_t actual = bus_memory_.read_u64(word);
+        if (expected == actual) {
+            continue;
+        }
+        std::ostringstream message;
+        message << "non-cacheable final effect mismatch address=0x"
+                << std::hex << word << " expected=0x" << expected
+                << " actual=0x" << actual << std::dec;
+        error_.record(message.str());
+        return false;
+    }
+    return true;
 }
 
 auto Environment::Impl::final_observation_alias_skips() const -> std::uint64_t
@@ -421,6 +452,7 @@ auto Environment::Impl::discard_final_observation_range(
     const std::uint64_t last = (address + bytes - 1U) & ~std::uint64_t{7};
     for (std::uint64_t word = first; word <= last; word += 8U) {
         final_observation_words_.erase(word);
+        final_observation_nc_words_.erase(word);
     }
 }
 
@@ -428,7 +460,17 @@ auto Environment::Impl::track_final_observation_bytes(
     std::uint64_t address, unsigned bytes, bool cacheable,
     bool identity_mapped)  -> void
 {
-    if (!final_observation_tracking_ || !cacheable || bytes == 0) {
+    if (!final_observation_tracking_ || bytes == 0) {
+        return;
+    }
+    if (!cacheable) {
+        const std::uint64_t first = address & ~std::uint64_t{7};
+        const std::uint64_t last = (address + bytes - 1U) &
+            ~std::uint64_t{7};
+        for (std::uint64_t word = first; word <= last; word += 8U) {
+            final_observation_nc_words_.insert(word);
+        }
+        final_observation_nc_bytes_ += bytes;
         return;
     }
     if (!identity_mapped) {

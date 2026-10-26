@@ -529,6 +529,19 @@ public:
     {
         if (b_fire_) {
             const std::uint8_t source = b_beats_.front().source;
+            const auto response = std::find_if(
+                probe_responses_.begin(), probe_responses_.end(),
+                [source](const auto &pending) {
+                    return pending.b_source == source;
+                });
+            if (response == probe_responses_.end()) {
+                error_.record("DCache TileLink accepted a B Probe without a "
+                              "matching expectation");
+            } else if (response->b_accepted) {
+                error_.record("DCache TileLink accepted the same B Probe source twice");
+            } else {
+                response->b_accepted = true;
+            }
             if (probe_sources_seen_[source]) {
                 ++probe_source_reuse_count_;
             } else {
@@ -1139,6 +1152,7 @@ private:
         std::vector<unsigned char> expected_data;
         std::size_t received;
         std::uint8_t source = 0;
+        bool b_accepted = false;
     };
 
     void respond(const ARequest &request)
@@ -1276,10 +1290,18 @@ private:
         const auto expected_it = std::find_if(
             probe_responses_.begin(), probe_responses_.end(),
             [&](const auto &expected) {
-                return expected.base == response.address;
+                return expected.base == response.address &&
+                       expected.b_accepted;
             });
         if (expected_it == probe_responses_.end()) {
-            error_.record("unexpected DCache ProbeAck address");
+            const auto unaccepted = std::find_if(
+                probe_responses_.begin(), probe_responses_.end(),
+                [&](const auto &expected) {
+                    return expected.base == response.address;
+                });
+            error_.record(unaccepted == probe_responses_.end()
+                ? "unexpected DCache ProbeAck address"
+                : "DCache ProbeAck completed before its B Probe was accepted");
             return;
         }
         ProbeResponseState &expected = *expected_it;

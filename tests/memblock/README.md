@@ -19,10 +19,11 @@ page tables and transaction expectations are testbench-owned.
 | [TOOLCHAIN.md](docs/TOOLCHAIN.md) | Tools, lock resolution and diagnostics |
 
 These describe the present tree, not a campaign diary. A capability is not
-coverage completeness. The catalog has 90 scenarios: 89 directed-tests and one
+coverage completeness. The catalog has 91 scenarios: 90 directed-tests and one
 constrained-random. Default benchmark selects 85; explicitly run the remaining
-cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high and
-vector-segment-noncanonical when qualifying those contracts.
+cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high,
+vector-segment-noncanonical and translation-alias when qualifying those
+contracts.
 
 ## Harness Layout
 
@@ -69,6 +70,7 @@ interface check or familiar binary path is not source-to-model provenance.
 From XiangShan root:
 
     make -C tests/memblock vector-segment-noncanonical
+    make -C tests/memblock translation-alias
     make -C tests/memblock translation-fence-all
     make -C tests/memblock translation-inflight-context-all
     make -C tests/memblock known-bug-sentinel
@@ -94,7 +96,7 @@ Before accounting gates, the run drains Sbuffer/DCache/queues and reads back
 every tracked cacheable identity-mapped committed word; CMO-maintained lines are
 excluded and aliased/non-cacheable effects remain outside that oracle.
 
-benchmark-tests selects 85, not all 90. final-acceptance composes unit,
+benchmark-tests selects 85, not all 91. final-acceptance composes unit,
 benchmark, sentinel, a 48h duration campaign and eight million-action seeds.
 See actual configured budgets and verifier gaps in VERIFICATION_PLAN.md.
 Return-code PASS does not establish full coverage closure.

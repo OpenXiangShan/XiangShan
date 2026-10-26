@@ -24,9 +24,25 @@ auto Environment::final_observation_words() const
     return impl_->final_observation_words();
 }
 
+auto Environment::final_observation_nc_words() const
+    -> std::vector<std::uint64_t>
+{
+    return impl_->final_observation_nc_words();
+}
+
 auto Environment::final_observation_bytes() const -> std::uint64_t
 {
     return impl_->final_observation_bytes();
+}
+
+auto Environment::final_observation_nc_bytes() const -> std::uint64_t
+{
+    return impl_->final_observation_nc_bytes();
+}
+
+auto Environment::verify_final_nc_effects()  -> bool
+{
+    return impl_->verify_final_nc_effects();
 }
 
 auto Environment::final_observation_alias_skips() const -> std::uint64_t
@@ -897,6 +913,11 @@ auto Environment::cancel_scalar_load_for_reset(const LoadTransaction &transactio
 auto Environment::scalar_load_reset_canceled() const -> std::uint64_t
 {
     return impl_->scalar_load_reset_canceled();
+}
+
+auto Environment::scalar_load_canceled_observed() const -> std::uint64_t
+{
+    return impl_->scalar_load_canceled_observed();
 }
 
 auto Environment::cancel_scalar_store_for_reset(const StoreTransaction &transaction)  -> bool

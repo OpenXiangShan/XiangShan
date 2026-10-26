@@ -1839,12 +1839,96 @@ int run_store_forwarding(int argc, char **argv)
         }
     }
 
+
+    // Age direction control: an older load must not consume a younger store's
+    // data from the store queue.  The younger store is allocated first, then
+    // the older load is issued before the store data/address are driven.
+    {
+        memblock::Environment order(argc, argv);
+        constexpr std::uint64_t order_base =
+            memblock::kDefaultMemoryBase + 0x8000ULL;
+        order.memory().fill_incrementing(order_base, 128, 0x2d);
+        const std::uint64_t old_value = order.memory().read_u64(order_base);
+        if (!order.reset()) {
+            std::cerr << "MEMBLOCK_STORE_FORWARD_FAIL cycle="
+                      << order.cycle() << " phase=order-reset reason="
+                      << order.error() << '\n';
+            return 1;
+        }
+        constexpr std::uint64_t younger_data = 0x0123456789abcdefULL;
+        const memblock::StoreTransaction younger_store{
+            .address = order_base,
+            .data = younger_data,
+            .op = memblock::StoreOp::sd,
+            .rob = 1,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        const memblock::LoadTransaction older_load{
+            .address = order_base,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .sq = 0,
+            .pdest = 60,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        order.expect_store(younger_store);
+        order.expect_load_data(older_load, old_value);
+        if (!order.enqueue_store(younger_store, 0) ||
+            !order.set_rob_head(older_load.rob, older_load.rob_flag) ||
+            !order.enqueue_load(older_load) ||
+            !order.issue_load(older_load, 4096) ||
+            !order.run_until_complete(16384) ||
+            !order.run_until_lq_retired(4096) ||
+            !order.issue_store_address(younger_store, 4096) ||
+            !order.issue_store_data(younger_store, 4096) ||
+            !order.commit_store(younger_store, 16384) ||
+            !order.run_until_store_complete(16384)) {
+            std::cerr << "MEMBLOCK_STORE_FORWARD_FAIL cycle="
+                      << order.cycle() << " phase=order-load reason="
+                      << order.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction order_readback{
+            .address = order_base,
+            .op = memblock::LoadOp::ld,
+            .rob = 2,
+            .lq = 1,
+            .sq = 1,
+            .pdest = 61,
+            .lane = 1,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        order.expect_load_data(order_readback, younger_data);
+        if (!order.set_rob_head(
+                order_readback.rob, order_readback.rob_flag) ||
+            !order.enqueue_load(order_readback) ||
+            !order.issue_load(order_readback, 4096) ||
+            !order.run_until_complete(16384) ||
+            !order.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_STORE_FORWARD_FAIL cycle="
+                      << order.cycle() << " phase=order-readback reason="
+                      << order.error() << '\n';
+            return 1;
+        }
+    }
+
     std::cout << "MEMBLOCK_STORE_FORWARD_PASS"
               << " cycle=" << environment.cycle()
               << " stores=" << environment.store_writebacks()
               << " loads=" << environment.writebacks()
               << " immediate_stores=" << immediates.size()
               << " immediate_min=-2048 immediate_max=2047"
+              << " age_direction=1"
               << '\n';
     return 0;
 }

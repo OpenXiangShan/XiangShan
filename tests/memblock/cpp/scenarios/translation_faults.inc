@@ -1362,6 +1362,7 @@ int run_translation_faults(int argc, char **argv)
     }
 
     unsigned canonical_boundary_cases = 0;
+    unsigned vector_vstart_faults = 0;
     unsigned ppn_access_fault_cases = 0;
     unsigned stage1_ppn_access_fault_cases = 0;
     unsigned vs_only_ppn_access_fault_cases = 0;
@@ -2775,6 +2776,86 @@ int run_translation_faults(int argc, char **argv)
         }
     }
 
+
+    // Two-uop vector page fault: uop 0 reads the last 16 bytes of a mapped
+    // page, uop 1 begins at the next (unmapped) page with vstart=16.  The
+    // second exceptional writeback must report vstart=16.
+    {
+        memblock::Environment vstart_env(argc, argv);
+        constexpr std::uint64_t vstart_virtual = 0x71000000ULL;
+        constexpr std::uint64_t vstart_physical = 0xc5000000ULL;
+        constexpr std::uint64_t vstart_root = 0x9a800000ULL;
+        constexpr std::uint64_t vstart_base = vstart_virtual + 0xff0;
+        vstart_env.memory().fill_incrementing(vstart_physical, 0x1000, 0x42);
+        if (!vstart_env.reset() ||
+            !vstart_env.map_sv39_4k(
+                vstart_virtual, vstart_physical, vstart_root) ||
+            !vstart_env.activate_sv39(vstart_root)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << vstart_env.cycle()
+                      << " phase=vector-vstart-configuration reason="
+                      << vstart_env.error() << '\n';
+            return 1;
+        }
+        std::array<memblock::VectorMemoryTransaction, 2> uops{};
+        uops[0] = memblock::VectorMemoryTransaction{
+            .address = vstart_base,
+            .oracle_address = vstart_physical + 0xff0,
+            .eew = 1,
+            .vl = 16,
+            .rob = 90,
+            .lq = 0,
+            .pdest = 170,
+            .lane = 0,
+            .flow_num = 1,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = false,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        uops[1] = uops[0];
+        uops[1].lq = 1;
+        uops[1].pdest = 171;
+        uops[1].vstart = 8;
+        uops[1].vuop_idx = 1;
+        uops[1].last_uop = true;
+        uops[1].expected_exception_mask = memblock::kExceptionLoadPageFault;
+        uops[1].expected_writeback_vstart = 8;
+        vstart_env.expect_vector(uops[0]);
+        vstart_env.expect_vector(uops[1]);
+        if (!vstart_env.set_rob_head(uops[0].rob, uops[0].rob_flag) ||
+            !vstart_env.enqueue_vector(uops[0]) ||
+            !vstart_env.enqueue_vector(uops[1]) ||
+            !vstart_env.issue_vector(uops[0], 1024) ||
+            !vstart_env.issue_vector(uops[1], 1024) ||
+            !vstart_env.run_until_vector_complete_with_replays(
+                {uops[0], uops[1]}, 32768) ||
+            vstart_env.exception_vaddr() != vstart_virtual + 0x1000) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << vstart_env.cycle()
+                      << " phase=vector-vstart-fault reason="
+                      << vstart_env.error() << " vaddr=0x" << std::hex
+                      << vstart_env.exception_vaddr() << std::dec << '\n';
+            return 1;
+        }
+        const std::uint64_t retired =
+            vstart_env.lq_dequeued() + vstart_env.lq_canceled();
+        if (retired > vstart_env.lq_allocated() ||
+            (retired < vstart_env.lq_allocated() &&
+             !vstart_env.account_lq_cancellation(
+                 static_cast<unsigned>(
+                     vstart_env.lq_allocated() - retired)))) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << vstart_env.cycle()
+                      << " phase=vector-vstart-accounting reason="
+                      << vstart_env.error() << '\n';
+            return 1;
+        }
+        ++vector_vstart_faults;
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases="
               << canonical_boundary_cases + 4 + ppn_access_fault_cases +
                     vs_gpa_width_cases +
@@ -2798,6 +2879,7 @@ int run_translation_faults(int argc, char **argv)
               << " gstage_range_scalar_stores=" << gstage_range_coverage.scalar_stores
               << " gstage_range_vector_stores=" << gstage_range_coverage.vector_stores
               << " canonical_boundary_cases=" << canonical_boundary_cases
+              << " vector_vstart_faults=" << vector_vstart_faults
               << " noncanonical_ptw_requests=" << noncanonical_ptw_requests
               << " ppn_access_fault_cases=" << ppn_access_fault_cases
               << " stage1_ppn_access_fault_cases="

@@ -57,6 +57,7 @@ struct VectorCoverage {
     std::array<std::uint64_t, memblock::kVectorMemoryLanes> lanes{};
     std::uint64_t masked = 0;
     std::uint64_t unmasked = 0;
+    std::uint64_t high_mask = 0;
     std::uint64_t zero_vstart = 0;
     std::uint64_t nonzero_vstart = 0;
     std::uint64_t full_vl = 0;
@@ -76,6 +77,15 @@ struct VectorCoverage {
         ++eews.at(transaction.eew);
         ++lanes.at(transaction.lane);
         ++(transaction.vm ? unmasked : masked);
+        if (!transaction.vm) {
+            for (unsigned global = 16; global < 128; ++global) {
+                if (global >= transaction.vstart && global < transaction.vl &&
+                    memblock::vector_mask_enabled(transaction, global)) {
+                    ++high_mask;
+                    break;
+                }
+            }
+        }
         ++(transaction.vstart == 0 ? zero_vstart : nonzero_vstart);
         const unsigned element_count = 16U >> transaction.eew;
         ++(transaction.vl == element_count ? full_vl : partial_vl);
@@ -101,7 +111,7 @@ struct VectorCoverage {
                std::to_string(eews[3]) + " lanes=" + std::to_string(lanes[0]) +
                ',' + std::to_string(lanes[1]) + " masked=" +
                std::to_string(masked) + " unmasked=" + std::to_string(unmasked) +
-               " vstart0=" + std::to_string(zero_vstart) + " vstartnz=" +
+               " high_mask=" + std::to_string(high_mask) + " vstart0=" + std::to_string(zero_vstart) + " vstartnz=" +
                std::to_string(nonzero_vstart) + " full=" + std::to_string(full_vl) +
                " partial=" + std::to_string(partial_vl) + " aligned=" +
                std::to_string(aligned) + " split=" + std::to_string(split) +
@@ -3149,6 +3159,7 @@ struct MixedCoverage {
     std::uint64_t data_first = 0;
     std::uint64_t masked = 0;
     std::uint64_t unmasked = 0;
+    std::uint64_t high_mask = 0;
     std::uint64_t zero_vstart = 0;
     std::uint64_t nonzero_vstart = 0;
     std::uint64_t full_vl = 0;
@@ -3239,6 +3250,15 @@ struct MixedCoverage {
             }
         }
         ++(transaction.vm ? unmasked : masked);
+        if (!transaction.vm) {
+            for (unsigned global = 16; global < 128; ++global) {
+                if (global >= transaction.vstart && global < transaction.vl &&
+                    memblock::vector_mask_enabled(transaction, global)) {
+                    ++high_mask;
+                    break;
+                }
+            }
+        }
         ++(transaction.vstart == 0 ? zero_vstart : nonzero_vstart);
         const unsigned elements = 16U >> transaction.eew;
         ++(transaction.vl == elements ? full_vl : partial_vl);
@@ -3371,7 +3391,8 @@ struct MixedCoverage {
                std::to_string(prefetch_ops[1]) + ',' +
                std::to_string(prefetch_ops[2]) + " masked=" +
                std::to_string(masked) + " unmasked=" +
-               std::to_string(unmasked) + " vstart=" +
+               std::to_string(unmasked) + " high_mask=" +
+               std::to_string(high_mask) + " vstart=" +
                std::to_string(zero_vstart) + ',' +
                std::to_string(nonzero_vstart) + " vl=" +
                std::to_string(full_vl) + ',' + std::to_string(partial_vl) +
@@ -3432,6 +3453,7 @@ struct StressCoverage {
     std::array<std::uint64_t, 3> prefetch_ops{};
     std::uint64_t masked = 0;
     std::uint64_t unmasked = 0;
+    std::uint64_t high_mask = 0;
     std::uint64_t zero_vstart = 0;
     std::uint64_t nonzero_vstart = 0;
     std::uint64_t full_vl = 0;
@@ -3500,6 +3522,15 @@ struct StressCoverage {
         ++modes.at(static_cast<unsigned>(transaction.addressing));
         ++vector_lanes.at(transaction.lane);
         ++(transaction.vm ? unmasked : masked);
+        if (!transaction.vm) {
+            for (unsigned global = 16; global < 128; ++global) {
+                if (global >= transaction.vstart && global < transaction.vl &&
+                    memblock::vector_mask_enabled(transaction, global)) {
+                    ++high_mask;
+                    break;
+                }
+            }
+        }
         ++(transaction.vstart == 0 ? zero_vstart : nonzero_vstart);
         const unsigned elements = 16U >> transaction.eew;
         ++(transaction.vl == elements ? full_vl : partial_vl);

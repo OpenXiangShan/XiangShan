@@ -2552,6 +2552,112 @@ int run_pmp_contracts(int argc, char **argv)
         }
     }
 
+
+    // PMP-denied store side effect.  Deny writes with an NAPOT region, fault a
+    // store, then allow the region and read the same physical word through
+    // Bare identity.  A faulting store must not leave bytes behind.
+    {
+        memblock::Environment pmp_effect(argc, argv);
+        constexpr std::uint64_t pmp_base =
+            memblock::kDefaultMemoryBase + 0x320000ULL;
+        constexpr std::uint64_t pmp_offset = 0x48ULL;
+        constexpr std::uint64_t pmp_data = 0x3141592653589793ULL;
+        constexpr std::uint8_t pmp_read = 0x19;
+        constexpr std::uint8_t pmp_read_write_execute = 0x1f;
+        const std::uint64_t old_value =
+            pmp_effect.memory().read_u64(pmp_base + pmp_offset);
+        const std::uint64_t napot_address =
+            (pmp_base | (0x1000ULL / 2 - 1)) >> 2;
+        if (!pmp_effect.reset() ||
+            !pmp_effect.configure_pmp(
+                {napot_address, ~std::uint64_t{0}},
+                {pmp_read, pmp_read_write_execute}) ||
+            !pmp_effect.set_translation_permissions(
+                memblock::ReferencePrivilegeMode::supervisor, false, false)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << pmp_effect.cycle()
+                      << " phase=pmp-effect-configuration reason="
+                      << pmp_effect.error() << '\n';
+            return 1;
+        }
+        const memblock::StoreTransaction denied_store{
+            .address = pmp_base + pmp_offset,
+            .data = pmp_data,
+            .op = memblock::StoreOp::sd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+            .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t sq_before = pmp_effect.sq_dequeued();
+        pmp_effect.expect_store(denied_store);
+        if (!pmp_effect.set_rob_head(
+                denied_store.rob, denied_store.rob_flag) ||
+            !pmp_effect.enqueue_store(denied_store, 0) ||
+            !pmp_effect.issue_store_address_until_tlb_hit(
+                denied_store, 4096) ||
+            !pmp_effect.issue_store_data(denied_store, 2048) ||
+            !pmp_effect.run_until_store_complete(32768)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << pmp_effect.cycle()
+                      << " phase=pmp-effect-store reason="
+                      << pmp_effect.error() << '\n';
+            return 1;
+        }
+        if (!pmp_effect.configure_pmp(
+                {napot_address, ~std::uint64_t{0}},
+                {pmp_read_write_execute, pmp_read_write_execute})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << pmp_effect.cycle()
+                      << " phase=pmp-effect-allow reason="
+                      << pmp_effect.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = pmp_base + pmp_offset,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 0,
+            .sq = 1,
+            .pdest = 230,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        pmp_effect.expect_load_data(readback, old_value);
+        if (!pmp_effect.set_rob_head(readback.rob, readback.rob_flag) ||
+            !pmp_effect.enqueue_load(readback) ||
+            !pmp_effect.issue_load(readback, 4096) ||
+            !pmp_effect.run_until_complete(16384) ||
+            !pmp_effect.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << pmp_effect.cycle()
+                      << " phase=pmp-effect-readback reason="
+                      << pmp_effect.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t sq_after = pmp_effect.sq_dequeued();
+        if (sq_after == sq_before) {
+            if (!pmp_effect.account_sq_cancellation(1)) {
+                std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                          << pmp_effect.cycle()
+                          << " phase=pmp-effect-accounting reason="
+                          << pmp_effect.error() << '\n';
+                return 1;
+            }
+        } else if (sq_after != sq_before + 1U) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << pmp_effect.cycle()
+                      << " phase=pmp-effect-unexpected-sq-dequeue reason="
+                      << " sq=" << sq_after << '/' << sq_before << '\n';
+            return 1;
+        }
+    }
+
     std::cout << "MEMBLOCK_PMP_CONTRACTS_PASS"
               << " cycles=" << total_cycles
               << " cases=" << allowed_cases + denied_cases
@@ -2563,6 +2669,7 @@ int run_pmp_contracts(int argc, char **argv)
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
               << " machine_bypass=1 atomic_denied=1 tor_next_lock=1"
               << " napot_sizes=7 pbmt_pmp_cases=2 pbmt_pmp_stores=2"
+              << " pmp_fault_store_readback=1"
               << " warl_permission=2 locked_immutable=1 locked_off=1"
               << " split_pmp_edge=1 split_pmp_store=1"
               << '\n';

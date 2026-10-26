@@ -70,14 +70,15 @@ void FeedbackMonitor::sample_before_edge(DutAdapter &dut_, std::uint64_t sample_
                 .cycle = sample_cycle,
             };
         }
-        if (dut_.sample_scalar_load_cancel(lane)) {
+        const bool canceled = dut_.sample_scalar_load_cancel(lane);
+        if (canceled) {
             ++scalar_load_feedback_stats_.ld2_cancels[lane];
             scalar_load_feedback_stats_.last_cancel_cycle[lane] = sample_cycle;
         }
         const auto writeback =
             dut_.sample_scalar_load_writeback(lane);
         if (trace) trace(lane, writeback);
-        scoreboard_.observe(lane, writeback);
+        scoreboard_.observe(lane, writeback, canceled);
     }
     const auto hardware_prefetch =
         dut_.sample_hardware_prefetch_outputs();

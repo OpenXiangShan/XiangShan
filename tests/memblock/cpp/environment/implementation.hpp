@@ -42,7 +42,10 @@ public:
     SparseMemory &memory();
     void set_final_observation_tracking(bool enabled);
     std::vector<std::uint64_t> final_observation_words() const;
+    std::vector<std::uint64_t> final_observation_nc_words() const;
     std::uint64_t final_observation_bytes() const;
+    std::uint64_t final_observation_nc_bytes() const;
+    bool verify_final_nc_effects();
     std::uint64_t final_observation_alias_skips() const;
     std::uint64_t final_observation_observed_words() const;
     void set_final_observation_observed_words(std::uint64_t words);
@@ -296,6 +299,7 @@ public:
     bool scalar_load_pending(const LoadTransaction &transaction) const;
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);
     std::uint64_t scalar_load_reset_canceled() const;
+    std::uint64_t scalar_load_canceled_observed() const;
     bool cancel_scalar_store_for_reset(const StoreTransaction &transaction);
     std::uint64_t scalar_store_reset_canceled() const;
     std::size_t pending_prefetches() const;
@@ -1518,7 +1522,9 @@ private:
     std::uint64_t ifetch_ptw_pending_ = 0;
     bool final_observation_tracking_ = false;
     std::set<std::uint64_t> final_observation_words_;
+    std::set<std::uint64_t> final_observation_nc_words_;
     std::uint64_t final_observation_bytes_ = 0;
+    std::uint64_t final_observation_nc_bytes_ = 0;
     std::uint64_t final_observation_alias_skips_ = 0;
     std::uint64_t final_observation_observed_words_ = 0;
     QueueAccounting queues_{error_};

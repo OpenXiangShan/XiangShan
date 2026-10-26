@@ -454,7 +454,7 @@ Array order and sampling code are authoritative in
 | `constraint_schema`, `constraints`, `target_*` | Serialization version, selected profile name, and resolved weights/rates/manager latency. The profile name alone does not encode overrides. |
 | `transactions`, `cycle`, `*_writebacks`, `*_requests`, `dcache_refills`, `grant_acks` | Completed actions, simulation cycles, and externally counted completion/manager events. Units differ. |
 | `actual_ops`, `actual_locality` | Sampled operation and address-pool observations in the field orders above. |
-| `actual_vector_*`, `actual_vector_segment_*` | Instruction-level shape/policy/subclass observations, with separate uop, multi-uop, FOF fix-VL, and high-VA counts. A shape tuple does not imply every mask, index, fault, or concurrency variant. |
+| `actual_vector_*`, `actual_vector_segment_*` | Instruction-level shape/policy/subclass observations, with separate uop, multi-uop, FOF fix-VL, and high-VA counts. The mixed summary also reports `masked`, `unmasked`, and `high_mask`; `high_mask` counts masked vector uops with at least one enabled global element >=16. A shape tuple does not imply every mask, index, fault, or concurrency variant. |
 | `actual_canonical_boundary*`, `actual_vector_canonical_boundary*`, `actual_gstage_boundary*`, `actual_vector_gstage_boundary*` | Sampled boundary cases and their controls, recoveries, store checks, and flows. |
 | `actual_translation`, `actual_stage1_mode`, `actual_vs_mode`, `actual_g_mode`, `actual_nested_pairs`, `actual_*leaf*`, `actual_fences` | Sampled regime/mode/leaf/fence observations; not an arbitrary page-table or address-remapping inventory. |
 | `actual_atomic_*`, `actual_hypervisor_*`, `actual_cmo_*`, `actual_ptw_error_*`, `actual_uncache_*` | Sampled family, width, privilege, memory-type, error, and helper-specific manager observations. |
@@ -466,18 +466,19 @@ Array order and sampling code are authoritative in
 | `lq`, `sq` | Dequeued + legally canceled / allocated entries. Final-observation readbacks are included in LQ allocation/dequeue. |
 | `lsq_monitor_schema`, `lsq_enqueued_observed`, `redirect_cancels_observed`, `unobserved_cancels` | Independently observed enqueue/cancellation accounting and any unobserved cancellation residual. |
 | `final_observation_words`, `final_observation_observed_words`, `final_observation_bytes`, `final_observation_alias_skips` | Deduplicated 8-byte words registered for readback, words actually issued and retired by successful readback batches, committed cacheable bytes registered before CMO exclusion, and cacheable commits excluded because their physical and virtual forms differ. The finish gate requires the first two fields to be equal; a zero-word run is not behavioral evidence. |
+| `final_nc_words`, `final_nc_bytes` | Committed non-cacheable store/atomic words and bytes compared against the manager bus image after drain. A bus-image match is not a DUT uncache readback or a device side-effect oracle. |
 | `probe_source_space`, `probe_source_lifecycle`, `probe_max_outstanding` | Available manager source IDs, unique/reuse/wrap counts, and maximum outstanding Probes. |
 | `load_wakeups`, `load_cancels`, `raw_load_*` | Feedback diagnostics; they do not define independent expected memory values. |
 
 ## Explicit Stimulus And Oracle Gaps
 
 - Ordinary random vector traffic explores legal EEW/SEW/LMUL/EMUL and addressing
-  tuples, but masked global elements beyond the 16-bit mask carrier are not
-  available. Large unmasked shapes do not establish large masked-body coverage.
-  Ordinary indexed offsets are unique and fixed-spaced (`element * data_bytes
-  * 2`); segment indexed offsets use `element * data_bytes * (NF + 1)`.
-  Duplicate, overlapping, permuted, or arbitrary index vectors are not random
-  dimensions here. Ordered encoding on ordinary memory does not prove
+  tuples and draws mask bits 0..127 when `vm=0`; a shape tuple or nonzero
+  high-mask draw still does not establish every mask/element/vector-length
+  combination. Ordinary indexed offsets are unique and fixed-spaced (`element
+  * data_bytes * 2`); segment indexed offsets use `element * data_bytes * (NF +
+  1)`. Duplicate, overlapping, permuted, or arbitrary index vectors are not
+  random dimensions here. Ordered encoding on ordinary memory does not prove
   architecturally observable order at a side-effecting target.
 - Ordinary random cacheable translation is predominantly identity-mapped,
   including nested contexts; dedicated aliases exist for high-VA, hypervisor,

@@ -132,7 +132,9 @@ bool MixedScenario::observe_final_writes()
     if (!environment.run_until_sbuffer_empty(timeout) ||
         !environment.run_until_dcache_idle(timeout) ||
         !environment.run_until_all_complete(timeout) ||
-        !environment.run_until_queues_retired(timeout)) {
+        !environment.run_until_queues_retired(timeout) ||
+        !environment.run_until_uncache_drained(
+            environment.uncache_requests(), timeout)) {
         return false;
     }
 
@@ -190,10 +192,12 @@ bool MixedScenario::observe_final_writes()
     if (!environment.run_until_all_complete(timeout) ||
         !environment.run_until_queues_retired(timeout) ||
         !environment.run_until_sbuffer_empty(timeout) ||
-        !environment.run_until_dcache_idle(timeout)) {
+        !environment.run_until_dcache_idle(timeout) ||
+        !environment.run_until_uncache_drained(
+            environment.uncache_requests(), timeout)) {
         return false;
     }
-    return true;
+    return environment.verify_final_nc_effects();
 }
 
 bool MixedScenario::finish()
@@ -346,6 +350,10 @@ int MixedScenario::run()
                   << environment.final_observation_alias_skips()
                   << " final_observation_observed_words="
                   << environment.final_observation_observed_words()
+                  << " final_nc_words="
+                  << environment.final_observation_nc_words().size()
+                  << " final_nc_bytes="
+                  << environment.final_observation_nc_bytes()
                   << " ifetch_prefetches=" << total_ifetch_prefetches()
                   << " l2_stride_prefetches="
                   << environment.hardware_prefetch_stats().l2_source_counts[12]
@@ -402,6 +410,10 @@ int MixedScenario::run()
               << environment.final_observation_alias_skips()
               << " final_observation_observed_words="
               << environment.final_observation_observed_words()
+              << " final_nc_words="
+              << environment.final_observation_nc_words().size()
+              << " final_nc_bytes="
+              << environment.final_observation_nc_bytes()
               << " ifetch_prefetches=" << total_ifetch_prefetches()
               << " l2_stride_prefetches="
               << environment.hardware_prefetch_stats().l2_source_counts[12]

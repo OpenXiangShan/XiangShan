@@ -66,14 +66,14 @@ combinations have occurred or establishes a coverage percentage.
 | --- | --- | --- |
 | Scalar/FP loads | Width/sign/lane/immediate, FP boxing/destination, data/errors; load_feedback.inc, scoreboards | Wider timing/error interactions |
 | Stores/forwarding | Address/data order, masks, commit, cross-producer forwarding, directed readback, constrained-random final word readback for cacheable identity-mapped commits and same-context hypervisor readback for permitted/aligned cacheable stores | Output-only pulses, remaining aliased/non-cacheable/fault-path final state |
-| Vector addressing | Unit/strided/indexed/segment/whole-register shapes, data/identity/policy; cache_queue.inc, vector_memory.inc | Global mask above 16 bits, overlapping stores, ordered side-effect targets, all concurrent shapes |
-| Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions | Default exceptional vstart skip, arbitrary restart/progress, canonical-alias sensitivity |
-| Translation | Mode pairs, permissions, leaf sizes, encoding/PPN/range, PBMT/NAPOT | Uniform fault-side-effect checks, nested boundaries/GPA wrap/A-D races |
+| Vector addressing | Unit/strided/indexed/segment/whole-register shapes, data/identity/policy, full 128-bit mask operand with directed high-element load/store/indexed cases; cache_queue.inc, vector_memory.inc | Ordered side-effect targets, all concurrent shapes, and reserved/illegal mask-shape combinations remain |
+| Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA | Default exceptional vstart skip for other shapes, arbitrary restart/progress, canonical-alias sensitivity |
+| Translation | Mode pairs, permissions, leaf sizes, encoding/PPN/range, PBMT/NAPOT, permission-fault and PMP-denied store readback (readable mapping, Bare fallback, or re-enabled PMP region) | Uniform fault-side-effect checks for unreadable/device mappings, nested boundaries/GPA wrap/A-D races |
 | Protection/H | PMP TOR/NAPOT/lock/edges, HLV/HLVX/HSV; protection.inc | Instruction PMP and broader PMA/PMP/H/misalignment crosses |
 | Refill/MLP | Critical beat, merge, distinct misses, held/reversed D, capacity-plus-one, DCache/PTW/Uncache source lifetime | Broader error/interleaving and malformed response lifecycle |
-| Coherence/replacement | Clean/dirty Probes, Releases/data, replacement plus selected Probe/CMO/atomic, E first-D/sink lifetime, fixed C multibeat source/param/size/raw address, DUT full-line data-less Release size/alignment/shrink param | TileLink user/echo C fields are DUT-specific; data-less Release corrupt is ignored; accepted-B pairing for same-address probes and broader ordering remain |
+| Coherence/replacement | Clean/dirty Probes, Releases/data, replacement plus selected Probe/CMO/atomic, E first-D/sink lifetime, accepted-B-before-C provenance, fixed C multibeat source/param/size/raw address, DUT full-line data-less Release size/alignment/shrink param | TileLink user/echo C fields are DUT-specific; data-less Release corrupt is ignored; same-address B/C attribution and broader ordering remain |
 | Atomics | W/D AMO/CAS/LRSC, alignment/errors, reservation Probe, directed readback, successful cacheable final word readback, and forced dirty-line ProbeAckData persistence | Aliased/error-path final writes not forced observable, cross-hart/wider concurrency |
-| CBO/CMO | ZERO/CLEAN/FLUSH/INVAL, clean/dirty/error, delayed ack, younger cancellation, single/sequential/back-to-back CBO.ZERO completion (see CPU bug doc) | Multiple sources/classes, dirty persistence/reset, PBMT=NC behavior unspecified, same-line different-chunk younger-load forward window before Sbuffer s2 |
+| CBO/CMO | ZERO/CLEAN/FLUSH/INVAL, clean/dirty/error, delayed ack, younger cancellation, single/sequential/back-to-back CBO.ZERO completion, same-line zero/store both orders and an early younger load (see CPU bug doc) | Multiple sources/classes, dirty persistence/reset, PBMT=NC behavior unspecified, wider same-line forward-timing variants |
 | Uncache/MMIO | Width/mask/data, device side effects, errors, serialization | Source credit and malformed manager inputs |
 | ECC | Selected tag/data masks, banks/ways, reports/survivors | Wider masks, persistent/delayed events and concurrency |
 | LSQ/ROB/redirect | Six-lane enqueue, aggregate retire/cancel, wrap/stale suppression | Full per-retirement attribution and output-only pulse identity |
@@ -85,11 +85,11 @@ combinations have occurred or establishes a coverage percentage.
 
 ## Stimulus Matrix
 
-cpp/scenarios/catalog.json registers 90 scenarios: 89 directed-tests and
+cpp/scenarios/catalog.json registers 91 scenarios: 90 directed-tests and
 one constrained-random. The 85 entries with benchmark_order are selected
-by the default benchmark. Five registered directed cases require explicit
+by the default benchmark. Six registered directed cases require explicit
 invocation: cmo-store-flush, redirect-store-flush, tag-ecc-ways,
-vector-fof-high, vector-segment-noncanonical. The benchmark script cannot
+vector-fof-high, vector-segment-noncanonical, translation-alias. The benchmark script cannot
 select entries outside its own list. Its inventory unit test compares only
 that selected subset.
 
@@ -103,7 +103,7 @@ that selected subset.
 | vector_memory.inc | Load/split/FOF/segment, forwarding, high/noncanonical VA |
 | protection.inc | PMP/H/pointer masking/L2 DTLB |
 | translation_context.inc | IFU PTW, stages, fences/inflight/context |
-| Translation fault/permission/guest modules | PTE/range/permission/error and guest-address contracts |
+| Translation fault/permission/guest modules | PTE/range/permission/error, guest-address contracts, and cross-alias store/load visibility |
 | constrained_random.inc, mixed_*.cpp | Common generator and weighted policies |
 
 New directions normally extend common constraints. Focused scenarios serve
@@ -138,16 +138,21 @@ members are not controllable ports. IO_COVERAGE.md is the semantic map.
 
 Priority work, each requiring executable stimulus and an independent check:
 
-1. Extend final observation beyond cacheable identity-mapped commits to legal
-   aliased translations, non-cacheable/device effects and fault-path
-   side-effect checks; keep the CMO exclusion explicit. Check exceptional
-   `vstart` and broader forbidden-demand attribution.
-2. Add B/C causal provenance and complete C multibeat identity checking; retain
-   the implemented DCache E first-D/sink and PTW/Uncache source-lifetime checks.
+1. Extend final observation beyond cacheable identity-mapped commits to the
+   remaining legal aliased translations, non-cacheable/device effects and
+   fault-path side-effect checks; one cross-alias path is now directed, but
+   first-access cancellation is detected and LQ-accounted, but the backend replay that follows it is still not modeled. Keep the CMO
+   exclusion explicit. Check exceptional `vstart` and broader forbidden-demand
+   attribution.
+2. Preserve the accepted-B-before-C probe provenance now implemented; add
+   complete C multibeat identity checking. Retain the DCache E first-D/sink and
+   PTW/Uncache source-lifetime checks.
 3. Repair verifier schema/backpressure/statistic validation and report
    namespaces across controllers.
-4. Expand vector mask/fault/index/mapping/concurrency and reset/protection
-   crosses, plus mutation sensitivity of actual random paths.
+4. Expand the now-full 128-bit vector mask to more fault/index/mapping and
+   concurrency crosses, plus reset/protection crosses.  A driver-truncation
+   mutation is detected by the directed high-mask case; RTL mutation
+   sensitivity of actual random paths remains open.
 
 Malformed/duplicate/unsolicited responses, cross-hart interference, full-core
 fences/CSR WARL, A/D races, four-state X and physical arrays are not closed.
@@ -197,7 +202,7 @@ ACTIONS=8192 or ACTIONS=32768 changes both execution and the corresponding
 verifier expectation; those values are not separate effective defaults.
 
 final-acceptance runs unit/benchmark/sentinel/final+verifier/endurance+verifier;
-not all 90 catalog entries. verify-final-results also runs dcache-release and
+not all 91 catalog entries. verify-final-results also runs dcache-release and
 sentinel via the mutable build, not necessarily the campaign frozen binary.
 
 verify_regression.py checks completion/run ID, finite timings/duration,

@@ -553,6 +553,11 @@ auto Environment::Impl::scalar_load_reset_canceled() const -> std::uint64_t
     return scoreboard_.reset_canceled();
 }
 
+auto Environment::Impl::scalar_load_canceled_observed() const -> std::uint64_t
+{
+    return scoreboard_.canceled_observed();
+}
+
 auto Environment::Impl::cancel_scalar_store_for_reset(const StoreTransaction &transaction)  -> bool
 {
     // Cancel only at the completed reset boundary. A normal functional tick

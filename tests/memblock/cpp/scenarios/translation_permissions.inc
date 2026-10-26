@@ -4,6 +4,7 @@
 int run_translation_permissions(int argc, char **argv)
 {
     unsigned completed = 0;
+    unsigned fault_store_readbacks = 0;
     // Keep each permission case in a fresh environment so a prior TLB entry
     // cannot mask the PTE permission being tested.
     {
@@ -561,6 +562,8 @@ int run_translation_permissions(int argc, char **argv)
         };
         const std::uint64_t dcache_before = environment.tilelink_requests();
         const std::uint64_t uncache_before = environment.uncache_requests();
+        const std::uint64_t sq_dequeued_before =
+            environment.sq_dequeued();
         environment.expect_store(transaction);
         if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
             !environment.enqueue_store(transaction, 0) ||
@@ -604,8 +607,7 @@ int run_translation_permissions(int argc, char **argv)
             }
         } else {
             if (environment.tilelink_requests() != dcache_before ||
-                environment.uncache_requests() != uncache_before ||
-                !environment.account_sq_cancellation(1)) {
+                environment.uncache_requests() != uncache_before) {
                 std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
                           << test.name << "-side-effect reason="
                           << (environment.error().empty()
@@ -613,11 +615,102 @@ int run_translation_permissions(int argc, char **argv)
                                   : environment.error()) << '\n';
                 return 1;
             }
+            // A permission fault must not leak store bytes into the cache or
+            // backing image.  If the mapping is independently readable, read
+            // the same word back through the faulting VA.
+            if (memblock::reference_load_permitted(
+                    permissions, test.privilege, test.sum, false)) {
+                const std::uint64_t readback_address =
+                    physical_address + 0x188;
+                const memblock::LoadTransaction readback{
+                    .address = virtual_address + 0x188,
+                    .oracle_address = readback_address,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 1,
+                    .lq = 0,
+                    .sq = 1,
+                    .pdest = static_cast<std::uint8_t>(190 + index),
+                    .lane = 0,
+                    .expected_debug_is_mmio = false,
+                    .expected_debug_is_ncio = false,
+                    .expected_debug_is_perf_cnt = false,
+                };
+                environment.expect_load_data(
+                    readback, environment.memory().read_u64(readback_address));
+                if (!environment.set_rob_head(
+                        readback.rob, readback.rob_flag) ||
+                    !environment.enqueue_load(readback) ||
+                    !environment.issue_load(readback, 2048) ||
+                    !environment.run_until_complete(16384) ||
+                    !environment.run_until_lq_retired(4096)) {
+                    std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
+                              << test.name << "-fault-readback reason="
+                              << environment.error() << '\n';
+                    return 1;
+                }
+                ++fault_store_readbacks;
+            } else {
+                // No readable stage-one mapping exists.  Drop to Bare and
+                // observe the physical word by identity instead; PMP default
+                // configuration still decides whether this is reachable.
+                if (!environment.activate_bare()) {
+                    std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
+                              << test.name << "-bare-activation reason="
+                              << environment.error() << '\n';
+                    return 1;
+                }
+                const std::uint64_t readback_address =
+                    physical_address + 0x188;
+                const memblock::LoadTransaction readback{
+                    .address = readback_address,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 1,
+                    .lq = 0,
+                    .sq = 1,
+                    .pdest = static_cast<std::uint8_t>(190 + index),
+                    .lane = 0,
+                    .expected_debug_is_mmio = false,
+                    .expected_debug_is_ncio = false,
+                    .expected_debug_is_perf_cnt = false,
+                };
+                environment.expect_load_data(
+                    readback, environment.memory().read_u64(readback_address));
+                if (!environment.set_rob_head(
+                        readback.rob, readback.rob_flag) ||
+                    !environment.enqueue_load(readback) ||
+                    !environment.issue_load(readback, 2048) ||
+                    !environment.run_until_complete(16384) ||
+                    !environment.run_until_lq_retired(4096)) {
+                    std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
+                              << test.name << "-bare-fault-readback reason="
+                              << environment.error() << '\n';
+                    return 1;
+                }
+                ++fault_store_readbacks;
+            }
+            if (environment.sq_dequeued() == sq_dequeued_before) {
+                if (!environment.account_sq_cancellation(1)) {
+                    std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
+                              << test.name << "-cancel-accounting reason="
+                              << environment.error() << '\n';
+                    return 1;
+                }
+            } else if (environment.sq_dequeued() !=
+                       sq_dequeued_before + 1U) {
+                std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
+                          << test.name << "-unexpected-sq-dequeue reason="
+                          << " sq=" << environment.sq_dequeued() << '/'
+                          << sq_dequeued_before << '\n';
+                return 1;
+            }
         }
         if (environment.sq_dequeued() + environment.sq_canceled() !=
             environment.sq_allocated()) {
             std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
-                      << test.name << "-accounting reason=unbalanced-sq\n";
+                      << test.name << "-accounting reason=unbalanced-sq"
+                    << " sq=" << environment.sq_dequeued() << '+'
+                    << environment.sq_canceled() << '/'
+                    << environment.sq_allocated() << '\n';
             return 1;
         }
         ++completed;
@@ -1556,6 +1649,7 @@ int run_translation_permissions(int argc, char **argv)
         << implicit_g_store_permission_faults
         << " implicit_g_readonly_store_cases="
         << implicit_g_readonly_store_cases
+        << " fault_store_readbacks=" << fault_store_readbacks
         << '\n';
     return 0;
 }
@@ -2404,6 +2498,336 @@ int run_translation_superpages(int argc, char **argv)
               << " napot_readbacks=" << napot_readbacks
               << " napot_ptw_requests=" << napot_ptw_requests
               << " napot_cycles=" << napot_cycles
+              << '\n';
+    return 0;
+}
+
+// Two distinct Sv39 virtual pages map to the same physical page.  A committed
+// store through one alias must be visible to a younger load through the other,
+// including while the store may still be in the SBuffer.  This is a direct
+// cache-aliasing contract, distinct from an identity-mapped readback.
+int run_translation_alias(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t store_virtual = 0x20000000ULL;
+    constexpr std::uint64_t load_virtual = 0x30000000ULL;
+    constexpr std::uint64_t physical = 0x500001000ULL;
+    constexpr std::uint64_t root = 0x9d000000ULL;
+    constexpr std::uint64_t offset = 0x100ULL;
+    constexpr std::uint64_t store_data = 0x1122334455667788ULL;
+    environment.memory().fill_incrementing(physical, 0x1000, 0x37);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            store_virtual, physical, root, true, true) ||
+        !environment.map_sv39_4k(
+            load_virtual, physical, root, true, false) ||
+        !environment.activate_sv39(root)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction store{
+        .address = store_virtual + offset,
+        .oracle_address = physical + offset,
+        .data = store_data,
+        .op = memblock::StoreOp::sd,
+        .rob = 0,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(store);
+    if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+        !environment.enqueue_store(store, 0) ||
+        !environment.warm_store_translation(store, 4096) ||
+        !environment.issue_store_data(store, 2048) ||
+        !environment.pulse_pending_store(store.rob, store.rob_flag) ||
+        !environment.run_until_store_complete(16384) ||
+        !environment.commit_store(store, 16384)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle() << " phase=store reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // Drain the store and read it through the original alias before testing
+    // the second alias.  This separates a failed store/commit from an
+    // alias-specific visibility or translation failure.
+    if (!environment.run_until_sbuffer_empty(16384) ||
+        !environment.run_until_dcache_idle(16384)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle() << " phase=drain reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction original_load{
+        .address = store_virtual + offset,
+        .oracle_address = physical + offset,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        .lq = 0,
+        .sq = 1,
+        .pdest = 151,
+        .lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    environment.expect_load_data(original_load, store_data);
+    if (!environment.set_rob_head(original_load.rob, original_load.rob_flag) ||
+        !environment.enqueue_load(original_load) ||
+        !environment.issue_load(original_load, 4096) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle() << " phase=original-load reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction alias_load{
+        .address = load_virtual + offset,
+        .oracle_address = physical + offset,
+        .op = memblock::LoadOp::ld,
+        .rob = 2,
+        .lq = 1,
+        .sq = 1,
+        .pdest = 152,
+        .lane = 1,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    environment.expect_load_data(alias_load, store_data);
+    if (!environment.set_rob_head(alias_load.rob, alias_load.rob_flag) ||
+        !environment.enqueue_load(alias_load) ||
+        !environment.issue_load(alias_load, 4096) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle() << " phase=alias-load reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // An unmodified neighbouring word through the alias must still read the
+    // independently initialized physical bytes, proving the alias translation
+    // itself, not just a possible store forward, supplies the address.
+    const memblock::LoadTransaction alias_neighbour{
+        .address = load_virtual + offset + 8,
+        .oracle_address = physical + offset + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 3,
+        .lq = 2,
+        .sq = 1,
+        .pdest = 153,
+        .lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    environment.expect_load_data(
+        alias_neighbour, environment.memory().read_u64(physical + offset + 8));
+    if (!environment.set_rob_head(
+            alias_neighbour.rob, alias_neighbour.rob_flag) ||
+        !environment.enqueue_load(alias_neighbour) ||
+        !environment.issue_load(alias_neighbour, 4096) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle() << " phase=alias-neighbour reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // The same alias pair must also work while the committed store is still
+    // in the SBuffer pipeline.  This is the cross-alias forwarding window; a
+    // drained-cache-only check would not exercise it.
+    constexpr std::uint64_t second_offset = 0x200ULL;
+    constexpr std::uint64_t second_data = 0x8877665544332211ULL;
+    const memblock::StoreTransaction second_store{
+        .address = store_virtual + second_offset,
+        .oracle_address = physical + second_offset,
+        .data = second_data,
+        .op = memblock::StoreOp::sd,
+        .rob = 4,
+        .sq = 1,
+        .address_lane = 1,
+        .data_lane = 1,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(second_store);
+    if (!environment.set_rob_head(
+            second_store.rob, second_store.rob_flag) ||
+        !environment.enqueue_store(second_store, 0) ||
+        !environment.issue_store_address_until_tlb_hit(second_store, 4096) ||
+        !environment.issue_store_data(second_store, 2048) ||
+        !environment.pulse_pending_store(
+            second_store.rob, second_store.rob_flag) ||
+        !environment.run_until_store_complete(16384) ||
+        !environment.commit_store(second_store, 16384)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle() << " phase=second-store reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const bool second_sbuffer_busy = !environment.sbuffer_empty();
+    if (!second_sbuffer_busy) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=second-store-overlap reason="
+                  << "SBuffer drained before the alias load was issued\n";
+        return 1;
+    }
+    const memblock::LoadTransaction in_flight_load{
+        .address = load_virtual + second_offset,
+        .oracle_address = physical + second_offset,
+        .op = memblock::LoadOp::ld,
+        .rob = 5,
+        .lq = 3,
+        .sq = 2,
+        .pdest = 154,
+        .lane = 1,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    environment.expect_load_data(in_flight_load, second_data);
+    if (!environment.set_rob_head(
+            in_flight_load.rob, in_flight_load.rob_flag) ||
+        !environment.enqueue_load(in_flight_load) ||
+        !environment.issue_load(in_flight_load, 4096) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                  << environment.cycle() << " phase=in-flight-alias-load reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+
+    // First access to the second alias while the older store is still in the
+    // SBuffer pipeline.  The DUT may legally cancel this attempt through
+    // ld2Cancel; the opt-in expectation accepts exactly one canceled data
+    // pulse and the scenario accounts the LQ cancellation.  A wrong-data
+    // completion without ld2Cancel still fails.
+    {
+        memblock::Environment canceled_alias(argc, argv);
+        constexpr std::uint64_t cancel_store_virtual = 0x60000000ULL;
+        constexpr std::uint64_t cancel_load_virtual = 0x70000000ULL;
+        constexpr std::uint64_t cancel_physical = 0x500003000ULL;
+        constexpr std::uint64_t cancel_root = 0x9b000000ULL;
+        constexpr std::uint64_t cancel_offset = 0x80ULL;
+        constexpr std::uint64_t cancel_data = 0x55aa33cc0ff00ff0ULL;
+        canceled_alias.memory().fill_incrementing(
+            cancel_physical, 0x1000, 0x66);
+        canceled_alias.configure_backpressure(0x9e3779b97f4a7c15ULL, true);
+        if (!canceled_alias.reset() ||
+            !canceled_alias.map_sv39_4k(
+                cancel_store_virtual, cancel_physical, cancel_root,
+                true, true) ||
+            !canceled_alias.map_sv39_4k(
+                cancel_load_virtual, cancel_physical, cancel_root,
+                true, false) ||
+            !canceled_alias.activate_sv39(cancel_root)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                      << canceled_alias.cycle()
+                      << " phase=first-access-configuration reason="
+                      << canceled_alias.error() << '\n';
+            return 1;
+        }
+        const memblock::StoreTransaction cancel_store{
+            .address = cancel_store_virtual + cancel_offset,
+            .oracle_address = cancel_physical + cancel_offset,
+            .data = cancel_data,
+            .op = memblock::StoreOp::sd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        canceled_alias.expect_store(cancel_store);
+        if (!canceled_alias.set_rob_head(
+                cancel_store.rob, cancel_store.rob_flag) ||
+            !canceled_alias.enqueue_store(cancel_store, 0) ||
+            !canceled_alias.warm_store_translation(cancel_store, 4096) ||
+            !canceled_alias.issue_store_data(cancel_store, 2048) ||
+            !canceled_alias.pulse_pending_store(
+                cancel_store.rob, cancel_store.rob_flag) ||
+            !canceled_alias.run_until_store_complete(16384) ||
+            !canceled_alias.commit_store(cancel_store, 16384)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                      << canceled_alias.cycle()
+                      << " phase=first-access-store reason="
+                      << canceled_alias.error() << '\n';
+            return 1;
+        }
+        memblock::LoadTransaction first_access_load{
+            .address = cancel_load_virtual + cancel_offset,
+            .oracle_address = cancel_physical + cancel_offset,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 0,
+            .sq = 1,
+            .pdest = 160,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+            .tolerate_canceled_result = true,
+        };
+        canceled_alias.expect_load_data(first_access_load, cancel_data);
+        if (!canceled_alias.set_rob_head(
+                first_access_load.rob, first_access_load.rob_flag) ||
+            !canceled_alias.enqueue_load(first_access_load) ||
+            !canceled_alias.issue_load(first_access_load, 4096) ||
+            !canceled_alias.run_until_complete(16384)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                      << canceled_alias.cycle()
+                      << " phase=first-access-load reason="
+                      << canceled_alias.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t canceled_count =
+            canceled_alias.scalar_load_canceled_observed();
+        if (canceled_count > 1) {
+            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                      << canceled_alias.cycle()
+                      << " phase=first-access-cancellation reason="
+                      << canceled_alias.error()
+                      << " canceled=" << canceled_count << '\n';
+            return 1;
+        }
+        if (canceled_count == 1 &&
+            !canceled_alias.account_lq_cancellation(1)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                      << canceled_alias.cycle()
+                      << " phase=first-access-cancellation reason="
+                      << canceled_alias.error() << '\n';
+            return 1;
+        }
+        std::cout << "MEMBLOCK_TRANSLATION_ALIAS_FIRST_ACCESS"
+                  << " cycle=" << canceled_alias.cycle()
+                  << " canceled=" << canceled_count
+                  << " completed=" << (canceled_count == 0 ? 1 : 0)
+                  << '\n';
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_ALIAS_PASS cycle="
+              << environment.cycle() << " aliases=2"
+              << " store_virtual=0x" << std::hex << store_virtual
+              << " load_virtual=0x" << load_virtual
+              << " physical=0x" << physical << std::dec
+              << " data=0x" << std::hex << store_data << std::dec
+              << " dcache_requests=" << environment.tilelink_requests()
+              << " second_sbuffer_busy=" << second_sbuffer_busy
               << '\n';
     return 0;
 }

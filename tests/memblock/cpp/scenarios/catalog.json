@@ -1172,6 +1172,19 @@
       ],
       "benchmark_order": null,
       "kind": "directed-tests"
+    },
+    {
+      "name": "translation-alias",
+      "group": "translation_permissions",
+      "call": "run_translation_alias(argc, argv)",
+      "make_targets": [
+        {
+          "name": "translation-alias",
+          "args": ""
+        }
+      ],
+      "benchmark_order": null,
+      "kind": "directed-tests"
     }
   ]
 }
