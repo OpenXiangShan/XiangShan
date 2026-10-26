@@ -253,7 +253,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   ptw_resp.apply(resp_pf, resp_af, resp_level, resp_pte, vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false, not_merge = false, bitmap_checkfailed.asBool)
 
   val normal_resp = mem_addr_update && !need_last_s2xlate && (guestFault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
-  val stageHit_resp = hptw_resp_stage2
+  val stageHit_resp = hptw_resp_stage2 || (gvpn_gpf && mem_addr_update)
   io.resp.valid := !idle && Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
   io.resp.bits.resp := Mux(stage1Hit || (l3Hit || l2Hit) && guestFault && !pte_valid, stage1, ptw_resp)
@@ -300,7 +300,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.refill.level := level
   io.refill.req_info.source := source
 
-  io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
+  io.hptw.req.valid := (!s_hptw_req || !s_last_hptw_req) && !gvpn_gpf
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
   io.hptw.req.bits.gvpn := get_pn(gpaddr)
   io.hptw.req.bits.source := source
