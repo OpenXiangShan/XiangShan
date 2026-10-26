@@ -1228,7 +1228,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     for(i <- 0 until EnsbufferWidth) {
       val ctrlEntry = ctrlEntries(i)
       if(i == 0) {
-        toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && (!headCross16B || dataQueue.io.empty) &&
+        toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) &&
+          (!headCross16B || dataQueue.io.fromDeqModule(0).ready && dataQueue.io.fromDeqModule(1).ready) && // cross16B need 2 port ready
           !unalignStall(i) && ctrlEntry.committed && !ctrlEntry.vecInactive
         // [NOTE1]: entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
         // [NOTE2]: here I use dataQueue.io.empty because EnsbufferWifth == 2, if EnsbufferWifth > 2, need to modify.
