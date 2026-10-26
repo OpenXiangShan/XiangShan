@@ -51,7 +51,7 @@ jobs:
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
           SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}-DefaultConfig"
           # save list
-          RESULT_PATH="${SPEC_DIR}/fuzz.f"
+          RESULT_PATH="${SPEC_DIR}/fuzz-$(date '+%y%m%d').f"
           mkdir -p "${SPEC_DIR}"
           echo "${RESULT_LIST}" > "${RESULT_PATH}"
           echo "RESULT_PATH=${RESULT_PATH}" >> "$GITHUB_OUTPUT"
