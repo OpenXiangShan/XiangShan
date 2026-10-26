@@ -147,7 +147,7 @@ The current qualification is:
 | Current full-mask + probe gate | 2/2 coverage seeds pass, 4608 actions each (9216 actions) | Seeds 205..206; artifact `agent-campaign-17`; current tree |
 | Accepted-B probe gate | 1/1 1024-action mixed seed passes with 407 probes, plus directed coherence/release/atomic | Seed 207; artifact `agent-campaign-17`; no dedicated counter for pre-B C because an illegal C fails immediately |
 | Cross-alias store/load | `translation-alias` passes at cycle 447 and also observes a first-access `ld2Cancel` (`canceled=1`), log in `agent-campaign-17/translation-alias.log` | One PA, two Sv39 VAs; after-drain and an in-flight store with SBuffer non-empty at load issue. The canceled attempt is LQ-accounted but not replayed by the UT; exact backend replay remains outside |
-| CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line repeated zero, a three-line back-to-back zero burst, same-line zero/store both orders, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass; log at `agent-campaign-18/cbo-zero-contracts.log` | Directed `cbo-zero-contracts`; see CPU bug document |
+| CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line repeated zero, a three-line back-to-back zero burst, same-line zero/store both orders, an older-store/younger-zero/younger-load forward window, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass; log at `agent-campaign-18/cbo-zero-contracts.log` | Directed `cbo-zero-contracts`; see CPU bug document |
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
 | High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
 | Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1` and exact faulting-element addresses; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | Broader fault-element/FOF progress remains open |
@@ -182,8 +182,9 @@ Readiness is partial. Functional PASS means active checks accepted generated
 traffic, not all legal classes occurred or every external effect was checked.
 Current missing rules include remaining aliased/device final-byte observation,
 uniform fault forbidden-demand checks, same-address B/C
-attribution and complete C multibeat identity, the same-line CBO.ZERO forward
-window before Sbuffer s2, and independent verifier schema/backpressure checks.
+attribution and complete C multibeat identity, wider same-line CBO.ZERO
+forward-timing variants beyond the older-store/younger-zero/younger-load case,
+and independent verifier schema/backpressure checks.
 The accepted-B-before-C gate, full 128-bit mask operand and explicit
 first-access cross-alias cancellation accounting are implemented, but the UT
 does not model the backend replay that follows `ld2Cancel`.

@@ -1567,6 +1567,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
 {
     unsigned same_line_double_zeros = 0;
     unsigned three_line_zeros = 0;
+    unsigned older_store_zero_loads = 0;
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t virtual_base = 0x5003c000ULL;
     constexpr std::uint64_t physical_base = 0x9003c000ULL;
@@ -2170,6 +2171,107 @@ int run_cbo_zero_contracts(int argc, char **argv)
     }
 
 
+    // Same-line forwarding window: an older ordinary store leaves nonzero
+    // data in the SBuffer, a younger CBO.ZERO is committed behind it, and an
+    // even younger load reads the older store's byte before the zero drains.
+    // The load must observe the zero, never the older store data or the stale
+    // pre-zero memory value.
+    {
+        memblock::Environment forward_window(argc, argv);
+        constexpr std::uint64_t forward_base =
+            memblock::kDefaultMemoryBase + 0x2c0000ULL;
+        forward_window.memory().fill_incrementing(
+            forward_base, 0x400, 0x6e);
+        forward_window.configure_backpressure(
+            0x1f83d9abfb41bd6bULL, true);
+        if (!forward_window.reset()) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << forward_window.cycle()
+                      << " phase=forward-window-reset reason="
+                      << forward_window.error() << '\n';
+            return 1;
+        }
+        memblock::StoreTransaction older_store{
+            .address = forward_base + 0x8,
+            .data = 0xa1a2a3a4a5a6a7a8ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        memblock::StoreTransaction younger_zero{
+            .address = forward_base + 0x20,
+            .data = 0xdeadbeefcafef00dULL,
+            .op = memblock::StoreOp::cbo_zero,
+            .rob = 1,
+            .sq = 1,
+            .address_lane = 1,
+            .data_lane = 1,
+            .expected_address_writeback_lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        forward_window.expect_store(older_store);
+        forward_window.expect_store(younger_zero);
+        if (!forward_window.set_rob_head(
+                older_store.rob, older_store.rob_flag) ||
+            !forward_window.enqueue_store(older_store, 0) ||
+            !forward_window.enqueue_store(younger_zero, 0) ||
+            !forward_window.issue_store_address_batch(
+                {older_store, younger_zero}, 4096) ||
+            !forward_window.issue_store_data(older_store, 4096) ||
+            !forward_window.issue_store_data(younger_zero, 4096) ||
+            !forward_window.commit_stores_through(older_store, 1) ||
+            !forward_window.run_cycles(1) ||
+            !forward_window.commit_stores_through(younger_zero, 1)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << forward_window.cycle()
+                      << " phase=forward-window-store reason="
+                      << forward_window.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = forward_base + 0x8,
+            .op = memblock::LoadOp::ld,
+            .rob = 2,
+            .lq = 0,
+            .sq = 2,
+            .pdest = 222,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        forward_window.expect_load_data(readback, 0);
+        if (!forward_window.set_rob_head(readback.rob, readback.rob_flag) ||
+            !forward_window.enqueue_load(readback) ||
+            !forward_window.issue_load(readback, 4096) ||
+            !forward_window.run_until_complete(16384) ||
+            !forward_window.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << forward_window.cycle()
+                      << " phase=forward-window-readback reason="
+                      << forward_window.error() << '\n';
+            return 1;
+        }
+        if (!forward_window.run_until_store_complete(32768) ||
+            !forward_window.run_until_sq_dequeued(2, 32768)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << forward_window.cycle()
+                      << " phase=forward-window-drain reason="
+                      << forward_window.error() << " sq="
+                      << forward_window.sq_dequeued() << '/'
+                      << forward_window.sq_allocated() << '\n';
+            return 1;
+        }
+        forward_window.record_committed_store(older_store);
+        forward_window.record_committed_store(younger_zero);
+        ++older_store_zero_loads;
+    }
+
     // CBO.ZERO after a dirty cacheable store.  The older store leaves the line
     // dirty; the younger zero must make the whole line zero rather than
     // preserving or re-releasing the old dirty bytes.
@@ -2573,6 +2675,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
               << " same_line_zero=1"
               << " same_line_double_zero=" << same_line_double_zeros
               << " three_line_zero=" << three_line_zeros
+              << " older_store_zero_load=" << older_store_zero_loads
               << " zero_last=1"
               << " early_load=1"
               << " dirty_zero=1"
