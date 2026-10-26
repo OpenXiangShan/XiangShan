@@ -3000,7 +3000,13 @@ class BackendModel:
         pbmt = 0
         page_table = getattr(self.env, "page_table", None)
         if page_table is not None:
-            physical_pc, ok, metadata = page_table.translate(int(pc))
+            translate_kwargs = {}
+            if page_table.mode == "bare":
+                oracle = getattr(self.env, "translation_oracle", None)
+                active = oracle.get_active() if oracle is not None else None
+                if active is not None and int(active["expected_ptw_request"]["s2xlate"]) == 2:
+                    translate_kwargs["s2xlate"] = 2
+            physical_pc, ok, metadata = page_table.translate(int(pc), **translate_kwargs)
             if not ok:
                 return False
             # TLB gives nonzero stage-1 PBMT priority over stage-2 PBMT.

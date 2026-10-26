@@ -580,6 +580,20 @@ def test_cfvec_boundary_inference_uses_stage2_pbmt_when_stage1_is_pma() -> None:
     assert model._cfvec_uses_uncache_fetch(va) is True
 
 
+def test_cfvec_boundary_inference_uses_stage2_pbmt_with_bare_stage1() -> None:
+    model = BackendModel()
+    model.env = SimpleNamespace(
+        page_table=PageTableModel("bare"),
+        translation_oracle=SimpleNamespace(
+            get_active=lambda: {"expected_ptw_request": {"s2xlate": 2}}
+        ),
+    )
+    va = 0x80200F00
+    model.env.page_table.map_stage2_page(va >> 12, 0x80400, pbmt=1)
+
+    assert model._cfvec_uses_uncache_fetch(va) is True
+
+
 def test_cfvec_boundary_inference_ignores_historical_uncache_requests() -> None:
     model = BackendModel()
     model.env = SimpleNamespace(
