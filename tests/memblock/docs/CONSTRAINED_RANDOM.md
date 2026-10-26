@@ -306,10 +306,12 @@ those choices, that all Cartesian crosses are legal, or that a pin toggles.
 [mixed_scheduler.cpp](../cpp/scenarios/mixed_scheduler.cpp) initializes the
 reference memory and page tables, then runs any budgeted heterogeneous windows,
 then serial weighted actions, and finally a canceled-load/survivor redirect
-check and drain. There is no mandatory operation-coverage prefix or
-coverage-completeness PASS gate. The final redirect check reserves two actions;
-`prepare_tail()` needs at least that budget, so CLI acceptance of a positive
-`--actions` value alone does not guarantee successful execution.
+check and drain. The drain ends with a DUT readback of every tracked cacheable,
+identity-mapped committed word before the accounting gates run. There is no
+mandatory operation-coverage prefix or coverage-completeness PASS gate. The
+final redirect check reserves two actions; `prepare_tail()` needs at least that
+budget, so CLI acceptance of a positive `--actions` value alone does not
+guarantee successful execution.
 
 The scheduler still reserves `minimum_serial_actions()` from
 [constraints.inc](../cpp/random/constraints.inc). For an initial available
@@ -372,6 +374,39 @@ queue cancellation, and Probe-source lifecycle accounting. It does not require
 coverage completion or nonzero stall counters. See
 [finish()](../cpp/scenarios/mixed_reporting.cpp).
 
+### Final dirty-write observation
+
+While the mixed run executes, `commit_store`, `commit_vector_store`,
+`record_committed_store`, `record_atomic_result`, and
+`record_committed_vector_store` register the 8-byte words covered by each
+cacheable, identity-mapped committed write. `finish()` drains Sbuffer, DCache and
+the queues, switches to Bare, then issues ordinary scalar loads in batches of up
+to three and compares every tracked final word with the independently maintained
+reference image. A word is compared whole, so unchanged bytes sharing the word
+with a modified byte are also checked; vector masked/tail elements must remain
+untouched by a store. The readbacks are not counted as constrained-random actions;
+their allocations/dequeues remain part of the reported LQ accounting.
+
+Non-cacheable stores are marked `cacheable = false` and remain owned by the
+uncache/device transcript oracle. Writes whose physical and virtual forms differ
+are counted in `final_observation_alias_skips` and are not claimed by this
+readback; the hypervisor action additionally reads back each permitted,
+aligned, cacheable final-PMA store through the same translated context, and
+high-VA vector segment stores already have scenario-owned element readbacks.
+CBO.INVAL and errored CMOs drop the target line from the tracked set because
+the former may legally discard dirty data and the latter has no stable
+final-byte contract. Successful CBO.CLEAN/FLUSH keep the line tracked so a
+later readback detects a stale or corrupted data byte that is visible through
+the cache/memory path. It does not establish post-CMO clean/dirty state or
+memory persistence of a dirty line that remains cache-resident; the CMO
+scenario checks the probe report/data before completion, not the post-completion
+state. The same commit may overwrite a tracked word more than once; the
+final comparison observes the resulting word, and `final_observation_bytes`
+counts committed bytes rather than unique bytes.
+`final_observation_observed_words` is incremented after each successful
+readback batch, and `finish()` gates that it equals the registered word count;
+it remains short of the total if the sweep does not complete.
+
 [run_regression.py](../scripts/run_regression.py) checks terminal-summary
 identity, seed, action count, and return status. It writes a per-case report at
 `OUTPUT_PARENT/coverage-reports/SCENARIO-seedSEED-INDEX.json`, preserving status,
@@ -428,8 +463,9 @@ Array order and sampling code are authoritative in
 | `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
 | `dcache_latency_*`, `ptw_latency_*`, `uncache_latency_*` | Manager response-latency samples, four bucket counts, total cycles, and maximum. These are observed responses, not architectural deadlines. |
-| `lq`, `sq` | Dequeued + legally canceled / allocated entries. |
+| `lq`, `sq` | Dequeued + legally canceled / allocated entries. Final-observation readbacks are included in LQ allocation/dequeue. |
 | `lsq_monitor_schema`, `lsq_enqueued_observed`, `redirect_cancels_observed`, `unobserved_cancels` | Independently observed enqueue/cancellation accounting and any unobserved cancellation residual. |
+| `final_observation_words`, `final_observation_observed_words`, `final_observation_bytes`, `final_observation_alias_skips` | Deduplicated 8-byte words registered for readback, words actually issued and retired by successful readback batches, committed cacheable bytes registered before CMO exclusion, and cacheable commits excluded because their physical and virtual forms differ. The finish gate requires the first two fields to be equal; a zero-word run is not behavioral evidence. |
 | `probe_source_space`, `probe_source_lifecycle`, `probe_max_outstanding` | Available manager source IDs, unique/reuse/wrap counts, and maximum outstanding Probes. |
 | `load_wakeups`, `load_cancels`, `raw_load_*` | Feedback diagnostics; they do not define independent expected memory values. |
 
@@ -459,6 +495,11 @@ Array order and sampling code are authoritative in
   Broad arbitrary outstanding instruction mixtures, multiple CMO/atomic
   ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
   injection are not provided by these constraints.
+- The final readback forces cacheable identity-mapped store/atomic effects, but
+  does not observe aliased address translations, non-cacheable/device effects,
+  stores that may have happened on a faulted operation, or dirty data that a CMO
+  legally discards. Those paths retain the separate checks and limits described
+  in [ORACLES.md](ORACLES.md#implementation-limitations).
 - The implemented manager response profiles generate selected legal timing,
   denied, and corrupt cases. They do not establish exhaustive malformed,
   duplicate, early/late, or missing-response detection. Some counters describe

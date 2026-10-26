@@ -14,6 +14,7 @@
 #include <iostream>
 #include <optional>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -281,6 +282,21 @@ public:
     ~Environment();
 
     SparseMemory &memory();
+
+    // Constrained-random dirty-write tracking.  While enabled, commit/record
+    // helpers for cacheable identity-mapped stores accumulate the 8-byte words
+    // whose final architectural bytes must be observed by a DUT readback before
+    // the run can pass.  Alias/non-cacheable effects are counted separately and
+    // are not claimed by this oracle.
+    void set_final_observation_tracking(bool enabled);
+    std::vector<std::uint64_t> final_observation_words() const;
+    std::uint64_t final_observation_bytes() const;
+    std::uint64_t final_observation_alias_skips() const;
+    std::uint64_t final_observation_observed_words() const;
+    void set_final_observation_observed_words(std::uint64_t words);
+    void add_final_observation_observed_words(std::uint64_t words);
+    void discard_final_observation_range(
+        std::uint64_t address, unsigned bytes);
 
     std::uint64_t bus_expected_load(std::uint64_t address, LoadOp op) const;
 
@@ -1284,7 +1300,9 @@ public:
 
     void record_committed_store(const StoreTransaction &transaction);
 
-    void record_atomic_result(std::uint64_t address, std::uint64_t value);
+    void record_atomic_result(
+        std::uint64_t address, std::uint64_t value, bool cacheable = true,
+        bool identity_mapped = true);
 
     void record_committed_vector_store(
         const VectorMemoryTransaction &transaction);

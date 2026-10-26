@@ -15,6 +15,8 @@ bool MixedScenario::initialize_run()
     if (!environment.reset() || !environment.enable_misaligned_accesses()) {
         return false;
     }
+    environment.set_final_observation_tracking(true);
+    environment.set_final_observation_observed_words(0);
     if (constraints.uncache_error_per_mille != 0 ||
         constraints.dcache_load_error_per_mille != 0 ||
         constraints.atomic_error_per_mille != 0) {

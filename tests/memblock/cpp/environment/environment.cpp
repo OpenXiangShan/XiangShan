@@ -13,6 +13,50 @@ auto Environment::memory()  -> SparseMemory &
     return impl_->memory();
 }
 
+auto Environment::set_final_observation_tracking(bool enabled)  -> void
+{
+    impl_->set_final_observation_tracking(enabled);
+}
+
+auto Environment::final_observation_words() const
+    -> std::vector<std::uint64_t>
+{
+    return impl_->final_observation_words();
+}
+
+auto Environment::final_observation_bytes() const -> std::uint64_t
+{
+    return impl_->final_observation_bytes();
+}
+
+auto Environment::final_observation_alias_skips() const -> std::uint64_t
+{
+    return impl_->final_observation_alias_skips();
+}
+
+auto Environment::final_observation_observed_words() const -> std::uint64_t
+{
+    return impl_->final_observation_observed_words();
+}
+
+auto Environment::set_final_observation_observed_words(std::uint64_t words)
+    -> void
+{
+    impl_->set_final_observation_observed_words(words);
+}
+
+auto Environment::add_final_observation_observed_words(std::uint64_t words)
+    -> void
+{
+    impl_->add_final_observation_observed_words(words);
+}
+
+auto Environment::discard_final_observation_range(
+    std::uint64_t address, unsigned bytes)  -> void
+{
+    impl_->discard_final_observation_range(address, bytes);
+}
+
 auto Environment::bus_expected_load(std::uint64_t address,
     LoadOp op) const -> std::uint64_t
 {
@@ -1952,9 +1996,10 @@ auto Environment::record_committed_store(const StoreTransaction &transaction)  -
 }
 
 auto Environment::record_atomic_result(std::uint64_t address,
-    std::uint64_t value)  -> void
+    std::uint64_t value, bool cacheable, bool identity_mapped)  -> void
 {
-    return impl_->record_atomic_result(address, value);
+    return impl_->record_atomic_result(
+        address, value, cacheable, identity_mapped);
 }
 
 auto Environment::record_committed_vector_store(const VectorMemoryTransaction &transaction)  -> void

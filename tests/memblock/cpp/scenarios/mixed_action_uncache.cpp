@@ -66,6 +66,7 @@ bool MixedScenario::execute_noncacheable(ActionWindow &window)
         auto transaction = make_store(
             nc_base + offset, random(), memblock::StoreOp::sd,
             random() % 2, random() % 2);
+        transaction.cacheable = false;
         transaction.expected_debug_is_mmio = false;
         transaction.expected_debug_is_ncio = false;
         const std::uint64_t uncache_before =
@@ -251,6 +252,7 @@ bool MixedScenario::execute_mmio(ActionWindow &window)
             random() % 2, random() % 2);
         transaction.expected_address_writeback_lane = 0;
         transaction.oracle_address = mmio_physical + offset;
+        transaction.cacheable = false;
         transaction.expected_debug_is_mmio = false;
         transaction.expected_debug_is_ncio = false;
         if (uncache_error_denied) {

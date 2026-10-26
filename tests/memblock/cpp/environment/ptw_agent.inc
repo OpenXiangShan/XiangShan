@@ -82,6 +82,7 @@ public:
         d_fire_ = false;
         d_gap_ = 0;
         d_presenting_ = false;
+        active_sources_.fill(false);
         outstanding_requests_ = 0;
         forced_next_response_delay_.reset();
         force_a_stall_ = random_backpressure_;
@@ -123,6 +124,13 @@ public:
 
     void capture_before_tick(DutAdapter &dut)
     {
+        d_fire_ = !responses_.empty() &&
+                  dut.ptw_memory.d.valid.boolean() &&
+                  dut.ptw_memory.d.ready.boolean();
+        const std::optional<std::uint8_t> completing_source =
+            d_fire_ && responses_.front().last_beat
+            ? std::optional<std::uint8_t>{responses_.front().source}
+            : std::nullopt;
         const bool a_valid = dut.ptw_memory.a.valid.boolean();
         const bool a_ready = dut.ptw_memory.a.ready.boolean();
         if (a_valid && !a_ready) {
@@ -148,10 +156,14 @@ public:
             if (request_->size > 6) {
                 error_.record("oversized PTW TileLink A request");
             }
+            if (request_->source >= active_sources_.size() ||
+                (active_sources_[request_->source] &&
+                 (!completing_source ||
+                  *completing_source != request_->source))) {
+                error_.record(
+                    "PTW TileLink A reused an active source before D");
+            }
         }
-        d_fire_ = !responses_.empty() &&
-                  dut.ptw_memory.d.valid.boolean() &&
-                  dut.ptw_memory.d.ready.boolean();
         if (d_fire_) {
             const Response &expected = responses_.front();
             const auto actual_data =
@@ -173,6 +185,16 @@ public:
     {
         if (d_fire_) {
             const bool completed_request = responses_.front().last_beat;
+            const std::uint8_t source = responses_.front().source;
+            if (completed_request) {
+                if (source >= active_sources_.size() ||
+                    !active_sources_[source]) {
+                    error_.record(
+                        "PTW TileLink D completed an inactive source");
+                } else {
+                    active_sources_[source] = false;
+                }
+            }
             responses_.pop_front();
             if (completed_request) {
                 --outstanding_requests_;
@@ -182,6 +204,11 @@ public:
         }
         if (a_fire_ && request_) {
             request_->response_delay = respond(*request_);
+            if (request_->source >= active_sources_.size()) {
+                error_.record("PTW TileLink A source is out of range");
+            } else {
+                active_sources_[request_->source] = true;
+            }
             request_history_.push_back(*request_);
             ++request_count_;
             ++outstanding_requests_;
@@ -438,6 +465,7 @@ private:
     std::optional<PendingResponseError> pending_response_error_;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
+    std::array<bool, 16> active_sources_{};
     std::uint64_t outstanding_requests_ = 0;
     std::uint64_t max_outstanding_requests_ = 0;
     std::uint64_t request_stall_cycles_ = 0;

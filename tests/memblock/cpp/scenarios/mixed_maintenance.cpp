@@ -333,6 +333,12 @@ bool MixedScenario::issue_random_cmo(
         --rob_offset;
         --lq_offset;
     }
+    // CBO.INVAL may legally discard dirty data and an errored CMO has no
+    // stable final-byte contract.  Successful CLEAN/FLUSH must retain
+    // observed bytes, so keep the line tracked in those cases.
+    if (error_denied.has_value() || operation == 2U) {
+        environment.discard_final_observation_range(line, 64U);
+    }
     phase = "seeded-mixed-tail";
     return true;
 }

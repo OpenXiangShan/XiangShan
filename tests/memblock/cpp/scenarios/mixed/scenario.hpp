@@ -236,6 +236,7 @@ private:
     bool execute_mmio(ActionWindow &window);
     bool execute_action(ActionWindow &window);
     bool run_serial_action();
+    bool observe_final_writes();
     bool finish();
     bool execute();
 };

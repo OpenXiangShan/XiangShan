@@ -90,6 +90,9 @@ coverage, spec, corner and cmo-stress share one generator. Examples:
 Sparse coverage does not cause functional FAIL. A 256/1024-action default
 profile does not reach heterogeneous windows because serial budget is reserved;
 inspect observed counters. One action is not necessarily one uop/bus request.
+Before accounting gates, the run drains Sbuffer/DCache/queues and reads back
+every tracked cacheable identity-mapped committed word; CMO-maintained lines are
+excluded and aliased/non-cacheable effects remain outside that oracle.
 
 benchmark-tests selects 85, not all 90. final-acceptance composes unit,
 benchmark, sentinel, a 48h duration campaign and eight million-action seeds.

@@ -2937,5 +2937,49 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(target, final_acceptance)
 
 
+
+    def test_random_final_store_observation_and_protocol_lifecycle(self) -> None:
+        # Static integration-token inventory, not a behavioral regression:
+        # the directed CBO/hypervisor/protocol cases and mixed campaigns are
+        # the behavioral evidence for these paths.
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
+
+        for contract in (
+            "set_final_observation_tracking(true)",
+            "observe_final_writes()",
+            "track_final_observation_bytes(",
+            "final_observation_words()",
+            "final_observation_alias_skips()",
+            "DCache TileLink E GrantAck before first D acceptance",
+            "DCache TileLink sink reused before GrantAck",
+            "uncache TileLink A reused an active source before D",
+            "uncache TileLink D completed an inactive source",
+            "PTW TileLink A reused an active source before D",
+            "PTW TileLink D completed an inactive source",
+            "hypervisor-cacheable-store-readback",
+            "add_final_observation_observed_words",
+            "final_observation_observed_words",
+            "following_store",
+            "atomic_probe_persistence",
+            "multibeat source mismatch",
+            "invalid DCache Release identity",
+        ):
+            self.assertIn(contract, environment + driver)
+        store_queue = (
+            REPO_ROOT
+            / "src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala"
+        ).read_text()
+        self.assertIn("cboZeroDeqBlockPrefix", store_queue)
+        for skipped in (
+            "transaction.cacheable = false;",
+            "transaction.cacheable = !(final_nc || final_io);",
+        ):
+            self.assertIn(skipped, driver)
+        # The final sweep must not count its own readbacks as actions or
+        # bypass the independent reference image.
+        self.assertIn("environment.memory().read_u64(word)", driver)
+        self.assertIn("!observe_final_writes()", driver)
+
 if __name__ == "__main__":
     unittest.main()

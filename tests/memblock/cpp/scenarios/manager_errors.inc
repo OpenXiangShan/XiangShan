@@ -1405,6 +1405,45 @@ int run_atomic_contracts(int argc, char **argv)
         }
     }
 
+    // The atomic writes landed in the dirty L1 line.  Probe it with
+    // cap=2/toN and a data request so the ProbeAckData carries the final AMO
+    // line and updates the manager image, rather than observing only a
+    // cache-resident load.
+    const std::uint64_t atomic_line = address & ~std::uint64_t{63};
+    auto expected_atomic_line =
+        environment.memory().read_beat(atomic_line, 64);
+    for (unsigned byte = 0; byte < sizeof(model_value); ++byte) {
+        expected_atomic_line[byte] = static_cast<unsigned char>(
+            model_value >> (8 * byte));
+    }
+    const std::uint64_t atomic_probes_before = environment.dcache_probes();
+    const std::uint64_t atomic_probe_data_before =
+        environment.dcache_probe_data();
+    if (!environment.request_dcache_probe(
+            atomic_line, 2, false, 1, expected_atomic_line) ||
+        !environment.run_until_probe_responses(
+            atomic_probes_before + 1, 8192) ||
+        !environment.run_until_dcache_release_idle(4096) ||
+        environment.dcache_probe_data() !=
+            atomic_probe_data_before + 1 ||
+        environment.bus_expected_load(
+            address, memblock::LoadOp::ld) != model_value) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=atomic-persistence reason="
+                  << environment.error()
+                  << " probes=" << environment.dcache_probes()
+                  << '/' << atomic_probes_before + 1
+                  << " probe_data=" << environment.dcache_probe_data()
+                  << '/' << atomic_probe_data_before + 1
+                  << " bus=0x" << std::hex
+                  << environment.bus_expected_load(
+                         address, memblock::LoadOp::ld)
+                  << " expected=0x" << model_value << std::dec << '\n';
+        return 1;
+    }
+    environment.memory().write_u64(address, model_value);
+
     const std::uint64_t word_address = address + 8;
 
     // Atomics have no split/replay path: natural alignment is checked when
@@ -2102,6 +2141,7 @@ int run_atomic_contracts(int argc, char **argv)
               << " misaligned_w_cases=" << misaligned_w_cases
               << " misaligned=" << misaligned_d_cases + misaligned_w_cases
               << " misaligned_rob_wraps=" << misaligned_rob_wraps
+              << " atomic_probe_persistence=1"
               << " reservation_probe_invalidated=1"
               << " pma_atomic_denied=1"
               << " pma_atomic_cycles=" << pma_atomic.cycle()

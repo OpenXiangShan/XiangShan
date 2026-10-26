@@ -76,6 +76,8 @@ bool MixedScenario::execute_vector_memory(ActionWindow &window)
                 ? std::nullopt
                 : std::optional<std::uint8_t>{
                       memblock::kVectorWritebackTriggerNone},
+            .expected_writeback_vstart = vector_fof_first_fault
+                ? std::optional<std::uint8_t>{0} : std::nullopt,
             .vuop_idx = 0,
             .last_uop = false,
             .fault_only_first = true,

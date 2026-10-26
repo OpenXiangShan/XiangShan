@@ -125,6 +125,77 @@ unsigned long MixedScenario::total_ifetch_prefetches()
         stats.requests.begin(), stats.requests.end(), std::uint64_t{0});
 }
 
+bool MixedScenario::observe_final_writes()
+{
+    const unsigned timeout = constrained_completion_timeout;
+    phase = "final-write-observation-drain";
+    if (!environment.run_until_sbuffer_empty(timeout) ||
+        !environment.run_until_dcache_idle(timeout) ||
+        !environment.run_until_all_complete(timeout) ||
+        !environment.run_until_queues_retired(timeout)) {
+        return false;
+    }
+
+    // Every cacheable, identity-mapped store/atomic commit registered a set of
+    // 8-byte words.  Read each final word back through the DUT and compare it
+    // with the independently maintained reference image.  This turns the
+    // reference post-state into an externally observed architectural effect
+    // instead of trusting the commit helper's bookkeeping.
+    const std::vector<std::uint64_t> words =
+        environment.final_observation_words();
+    constexpr std::size_t kBatch = 3;
+    for (std::size_t offset = 0; offset < words.size(); offset += kBatch) {
+        const std::size_t count =
+            std::min(kBatch, words.size() - offset);
+        std::vector<memblock::LoadTransaction> readbacks;
+        std::vector<unsigned> dispatch_lanes;
+        readbacks.reserve(count);
+        dispatch_lanes.reserve(count);
+        for (std::size_t index = 0; index < count; ++index) {
+            const std::uint64_t word = words[offset + index];
+            const std::uint64_t rob = rob_offset++;
+            const std::uint64_t lq = lq_offset++;
+            memblock::LoadTransaction readback{
+                .address = word,
+                .op = memblock::LoadOp::ld,
+                .rob = memblock::rob_pointer_value(rob),
+                .rob_flag = memblock::rob_pointer_flag(rob),
+                .lq = memblock::lq_pointer_value(lq),
+                .lq_flag = memblock::lq_pointer_flag(lq),
+                .sq = memblock::sq_pointer_value(sq_offset),
+                .sq_flag = memblock::sq_pointer_flag(sq_offset),
+                .pdest = static_cast<std::uint8_t>(
+                    1U + static_cast<unsigned>(rob % 255U)),
+                .lane = static_cast<unsigned>(index),
+            };
+            environment.expect_load_data(
+                readback, environment.memory().read_u64(word));
+            readbacks.push_back(readback);
+            dispatch_lanes.push_back(static_cast<unsigned>(index));
+        }
+        phase = "final-write-observation-readback";
+        if (!environment.set_rob_head(
+                readbacks.front().rob, readbacks.front().rob_flag) ||
+            !environment.enqueue_load_batch(
+                readbacks, dispatch_lanes) ||
+            !environment.issue_load_batch(readbacks, timeout) ||
+            !environment.run_until_all_complete(timeout) ||
+            !environment.run_until_lq_retired(timeout)) {
+            return false;
+        }
+        environment.add_final_observation_observed_words(count);
+    }
+
+    phase = "final-write-observation-final-drain";
+    if (!environment.run_until_all_complete(timeout) ||
+        !environment.run_until_queues_retired(timeout) ||
+        !environment.run_until_sbuffer_empty(timeout) ||
+        !environment.run_until_dcache_idle(timeout)) {
+        return false;
+    }
+    return true;
+}
+
 bool MixedScenario::finish()
 {
     phase = "redirect-recovery-context";
@@ -178,7 +249,11 @@ bool MixedScenario::finish()
     phase = "final-drain";
     if (!environment.run_until_all_complete(2048) ||
         !environment.run_until_queues_retired(4096) ||
-        !environment.run_cycles(32)) {
+        !environment.run_cycles(32) ||
+        !observe_final_writes() ||
+        environment.final_observation_observed_words() !=
+            environment.final_observation_words().size()) {
+        phase = "final-observation-accounting";
         return false;
     }
     coverage.dcache_request_stalls = environment.dcache_request_stalls();
@@ -263,6 +338,14 @@ int MixedScenario::run()
                   << environment.dcache_probe_sources() << ','
                   << environment.dcache_probe_source_reuses() << ','
                   << environment.dcache_probe_source_wraps()
+                  << " final_observation_words="
+                  << environment.final_observation_words().size()
+                  << " final_observation_bytes="
+                  << environment.final_observation_bytes()
+                  << " final_observation_alias_skips="
+                  << environment.final_observation_alias_skips()
+                  << " final_observation_observed_words="
+                  << environment.final_observation_observed_words()
                   << " ifetch_prefetches=" << total_ifetch_prefetches()
                   << " l2_stride_prefetches="
                   << environment.hardware_prefetch_stats().l2_source_counts[12]
@@ -311,6 +394,14 @@ int MixedScenario::run()
               << environment.dcache_probe_sources() << ','
               << environment.dcache_probe_source_reuses() << ','
               << environment.dcache_probe_source_wraps()
+              << " final_observation_words="
+              << environment.final_observation_words().size()
+              << " final_observation_bytes="
+              << environment.final_observation_bytes()
+              << " final_observation_alias_skips="
+              << environment.final_observation_alias_skips()
+              << " final_observation_observed_words="
+              << environment.final_observation_observed_words()
               << " ifetch_prefetches=" << total_ifetch_prefetches()
               << " l2_stride_prefetches="
               << environment.hardware_prefetch_stats().l2_source_counts[12]

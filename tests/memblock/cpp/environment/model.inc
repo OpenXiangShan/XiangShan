@@ -318,6 +318,9 @@ struct LoadTransaction {
 struct StoreTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    // Set false for uncached/device accesses whose architectural effect is
+    // owned by the uncache manager rather than the cacheable reference image.
+    bool cacheable = true;
     std::int32_t immediate = 0;
     std::uint64_t data = 0;
     StoreOp op = StoreOp::sd;
@@ -422,6 +425,9 @@ struct VectorMemoryTransaction {
     bool whole_register = false;
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    // Set false for uncached/device stores whose final bytes are observed by
+    // the device transcript or uncache manager, not by a cacheable readback.
+    bool cacheable = true;
     std::array<unsigned char, 16> data{};
     std::array<unsigned char, 16> index{};
     std::optional<std::array<unsigned char, 128>> oracle_index_group;

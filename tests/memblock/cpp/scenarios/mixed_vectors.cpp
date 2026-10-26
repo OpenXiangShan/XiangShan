@@ -660,6 +660,8 @@ bool MixedScenario::issue_random_vector_segment_fof(
                 ? std::nullopt
                 : std::optional<std::uint8_t>{
                       memblock::kVectorWritebackTriggerNone},
+            .expected_writeback_vstart = first_fault
+                ? std::optional<std::uint8_t>{0} : std::nullopt,
             .vlmul = vlmul,
             .vuop_idx = static_cast<std::uint8_t>(uop),
             .last_uop = false,

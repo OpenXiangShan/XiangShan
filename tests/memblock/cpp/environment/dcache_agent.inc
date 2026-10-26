@@ -245,6 +245,7 @@ public:
         probe_responses_.clear();
         expected_grant_acks_.clear();
         accepted_grant_ack_index_.reset();
+        sink_busy_.fill(false);
         captured_a_.reset();
         captured_c_.reset();
         stalled_c_request_.reset();
@@ -469,6 +470,9 @@ public:
                 error_.record("oversized DCache TileLink C request");
             }
         }
+        const bool d_handshake = !d_beats_.empty() &&
+            dut.dcache.d.valid.boolean() &&
+            dut.dcache.d.ready.boolean();
         const bool e_valid = dut.dcache.e.valid.boolean();
         const bool e_ready = dut.dcache.e.ready.boolean();
         if (e_valid && !e_ready) {
@@ -485,6 +489,17 @@ public:
             if (expected == expected_grant_acks_.end()) {
                 error_.record("unexpected DCache TileLink E GrantAck");
             } else {
+                const bool sink_accepted =
+                    sink < sink_busy_.size() && sink_busy_[sink];
+                // TileLink legalizeDESink permits E in the same cycle as the
+                // first accepted D beat, but not before any D acceptance.
+                const bool same_cycle_first =
+                    d_handshake && d_beats_.front().first_beat &&
+                    d_beats_.front().sink == sink;
+                if (!sink_accepted && !same_cycle_first) {
+                    error_.record(
+                        "DCache TileLink E GrantAck before first D acceptance");
+                }
                 accepted_grant_ack_index_ = static_cast<std::size_t>(
                     std::distance(expected_grant_acks_.begin(), expected));
             }
@@ -539,6 +554,16 @@ public:
         }
         if (d_fire_) {
             const DBeat &response = d_beats_.front();
+            if (response.first_beat &&
+                (response.opcode == 4 || response.opcode == 5)) {
+                if (response.sink >= sink_busy_.size() ||
+                    sink_busy_[response.sink]) {
+                    error_.record(
+                        "DCache TileLink sink reused before GrantAck");
+                } else {
+                    sink_busy_[response.sink] = true;
+                }
+            }
             if (d_beats_.front().opcode == 5) {
                 ++grant_data_beat_count_;
             }
@@ -589,6 +614,9 @@ public:
             const auto expected = expected_grant_acks_.begin() +
                 static_cast<std::ptrdiff_t>(*accepted_grant_ack_index_);
             error_response_grant_ack_count_ += expected->second;
+            if (expected->first < sink_busy_.size()) {
+                sink_busy_[expected->first] = false;
+            }
             expected_grant_acks_.erase(expected);
             ++grant_ack_count_;
         }
@@ -896,8 +924,7 @@ public:
             (!expected_data.empty() && expected_data.size() != kLineBytes)) {
             error_.record("invalid DCache Probe request or expectation");
             return false;
-        }
-        std::vector<unsigned char> data(kBeatBytes, 0);
+        }        std::vector<unsigned char> data(kBeatBytes, 0);
         // XiangShan carries the virtual-index alias in B.data[2:1] and the
         // manager's data request in B.data[0]. Bare mappings use PA == VA.
         data[0] = static_cast<unsigned char>(
@@ -1043,6 +1070,7 @@ private:
         bool denied = false;
         bool corrupt = false;
         bool last_beat = true;
+        bool first_beat = false;
         unsigned delay_before = 0;
     };
 
@@ -1096,9 +1124,10 @@ private:
 
     struct ReleaseDataState {
         std::uint64_t base;
+        std::uint64_t address;
         std::uint8_t size;
         std::uint8_t source;
-        bool keyword;
+        std::uint8_t param;
         std::size_t beats;
         std::size_t received = 0;
     };
@@ -1109,6 +1138,7 @@ private:
         std::uint8_t report;
         std::vector<unsigned char> expected_data;
         std::size_t received;
+        std::uint8_t source = 0;
     };
 
     void respond(const ARequest &request)
@@ -1253,6 +1283,18 @@ private:
             return;
         }
         ProbeResponseState &expected = *expected_it;
+        if (expected.received == 0) {
+            expected.source = response.source;
+        } else if (response.source != expected.source) {
+            std::ostringstream message;
+            message << "DCache ProbeAck multibeat source mismatch"
+                    << " base=0x" << std::hex << response.address << std::dec
+                    << " beat=" << expected.received
+                    << " source=" << unsigned(response.source) << '/'
+                    << unsigned(expected.source);
+            error_.record(message.str());
+            return;
+        }
         const bool with_data = !expected.expected_data.empty();
         const std::uint8_t expected_opcode = with_data ? 5 : 4;
         if (response.opcode != expected_opcode || response.param != expected.report ||
@@ -1309,6 +1351,22 @@ private:
     void accept_release(const CRequest &request)
     {
         if (request.opcode == 6) { // Release -> ReleaseAck
+            // This DUT's voluntary releases are full-line with the shrink
+            // report subset 0..2.  `corrupt` is not a data-less Release
+            // validity field here (it is only meaningful on *Data messages).
+            if (request.size != 6 ||
+                (request.address & (kLineBytes - 1U)) != 0 ||
+                request.param > 2) {
+                std::ostringstream message;
+                message << "invalid DCache Release identity"
+                        << " size=" << unsigned(request.size)
+                        << " addr=0x" << std::hex << request.address
+                        << std::dec << " param="
+                        << unsigned(request.param)
+                        << " corrupt=" << request.corrupt;
+                error_.record(message.str());
+                return;
+            }
             push_response(DBeat{
                 6, 0, request.size, request.source, 0, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
@@ -1338,10 +1396,14 @@ private:
             transfer_bytes > kBeatBytes ? transfer_bytes / kBeatBytes : 1);
         if (!release_data_) {
             release_data_ = ReleaseDataState{
-                base, request.size, request.source, request.keyword, beats, 0};
+                base, request.address, request.size, request.source,
+                request.param, beats, 0};
         }
-        if (release_data_->base != base || release_data_->size != request.size ||
+        if (release_data_->base != base ||
+            release_data_->address != request.address ||
+            release_data_->size != request.size ||
             release_data_->source != request.source ||
+            release_data_->param != request.param ||
             release_data_->beats != beats) {
             error_.record("interleaved or inconsistent DCache ReleaseData transaction");
             return;
@@ -1481,6 +1543,7 @@ private:
         DBeat response, bool first_beat,
         std::optional<unsigned> forced_delay = std::nullopt)
     {
+        response.first_beat = first_beat;
         if (first_beat && forced_delay) {
             response.delay_before = *forced_delay;
             response_latency_stats_.sample(*forced_delay);
@@ -1527,6 +1590,7 @@ private:
     std::deque<HeldResponse> held_responses_;
     std::deque<ProbeResponseState> probe_responses_;
     std::deque<std::pair<std::uint16_t, bool>> expected_grant_acks_;
+    std::array<bool, 1024> sink_busy_{};
     std::optional<std::size_t> accepted_grant_ack_index_;
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;

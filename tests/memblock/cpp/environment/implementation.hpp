@@ -40,6 +40,15 @@ public:
     }
 
     SparseMemory &memory();
+    void set_final_observation_tracking(bool enabled);
+    std::vector<std::uint64_t> final_observation_words() const;
+    std::uint64_t final_observation_bytes() const;
+    std::uint64_t final_observation_alias_skips() const;
+    std::uint64_t final_observation_observed_words() const;
+    void set_final_observation_observed_words(std::uint64_t words);
+    void add_final_observation_observed_words(std::uint64_t words);
+    void discard_final_observation_range(
+        std::uint64_t address, unsigned bytes);
     std::uint64_t bus_expected_load(std::uint64_t address, LoadOp op) const;
     void expect_release_line(
         std::uint64_t base, const std::vector<unsigned char> &bytes);
@@ -960,7 +969,9 @@ public:
     // commits without issuing a second commit pulse for every store.
     void record_committed_store(const StoreTransaction &transaction);
 
-    void record_atomic_result(std::uint64_t address, std::uint64_t value);
+    void record_atomic_result(
+        std::uint64_t address, std::uint64_t value, bool cacheable = true,
+        bool identity_mapped = true);
 
     void record_committed_vector_store(
         const VectorMemoryTransaction &transaction);
@@ -1470,6 +1481,10 @@ private:
 
     bool check_components();
 
+    void track_final_observation_bytes(
+        std::uint64_t address, unsigned bytes, bool cacheable,
+        bool identity_mapped);
+
     static std::uint64_t scalar_store_key(const StoreTransaction &transaction);
 
     static std::uint64_t vector_store_key(
@@ -1501,6 +1516,11 @@ private:
     std::uint64_t reset_scan_transitions_ = 0;
     std::uint64_t reset_async_assertions_ = 0;
     std::uint64_t ifetch_ptw_pending_ = 0;
+    bool final_observation_tracking_ = false;
+    std::set<std::uint64_t> final_observation_words_;
+    std::uint64_t final_observation_bytes_ = 0;
+    std::uint64_t final_observation_alias_skips_ = 0;
+    std::uint64_t final_observation_observed_words_ = 0;
     QueueAccounting queues_{error_};
     PageTableBuilder page_tables_{memory_, error_};
 #ifdef MEMBLOCK_MEM_DIRECT_DEBUG

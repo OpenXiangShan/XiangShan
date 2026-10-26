@@ -48,8 +48,16 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
         phase += ":hypervisor-address-class";
         return false;
     }
+    // A committed store can leave the LSQ/Sbuffer before its DCache miss
+    // sends A.  Drain both before taking the exact manager-count baseline;
+    // otherwise a legal prior store request would be misattributed to this
+    // operation (and backpressured runs make that window observable).
     if (!environment.run_until_all_complete(8192) ||
         !environment.run_until_queues_retired(8192) ||
+        !environment.run_until_sbuffer_empty(16384) ||
+        !environment.run_until_dcache_idle(16384) ||
+        !environment.run_cycles(32) ||
+        !environment.run_until_dcache_idle(16384) ||
         !environment.set_hypervisor_access_permissions(
             spvp, false, false, false,
             physical_pmp_active
@@ -119,6 +127,14 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
             phase += ":hypervisor-store-alignment";
             return false;
         }
+        const std::uint64_t store_mask = size == 8
+            ? ~std::uint64_t{0}
+            : (std::uint64_t{1} << (size * 8U)) - 1U;
+        const auto hypervisor_store_readback_value =
+            [&](const memblock::StoreTransaction &store) {
+                return memblock::sign_extend(
+                    store.data & store_mask, size * 8U);
+            };
         const auto reference = memblock::reference_two_stage_access(
             environment.memory(),
             random_vs_roots[translation.vs_mode],
@@ -136,6 +152,7 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
             address,
             random(), op, random() % 2, random() % 2);
         transaction.oracle_address = reference.physical_address;
+        transaction.cacheable = !(final_nc || final_io);
         transaction.expected_debug_is_mmio = hypervisor_pma_device;
         transaction.expected_debug_is_ncio = false;
         transaction.expected_exception_mask = physical_pmp_denied
@@ -218,11 +235,27 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
             uncache_before +
             (!physical_pmp_denied && (final_nc || final_io)
                     ? 1U : 0U);
+        // Attribute DCache traffic by request source: a suppressed store or
+        // device access must not create a CPUStoreData acquire.  The whole
+        // channel total can legitimately change due to prior committed-store
+        // Sbuffer drains or background hardware prefetch.
+        const std::uint64_t store_source_requests =
+            environment.dcache_requests_from_source_since(
+                3, dcache_before);
+        const std::uint64_t store_target_requests =
+            environment.dcache_requests_from_source_covering_since(
+                3,
+                transaction.oracle_address.value_or(
+                    reference.physical_address) &
+                    ~std::uint64_t{63},
+                dcache_before);
         if (!completed_store ||
             !environment.run_until_queues_retired(8192) ||
+            !environment.run_until_sbuffer_empty(16384) ||
+            !environment.run_until_dcache_idle(16384) ||
             environment.uncache_requests() != expected_uncache ||
             ((physical_pmp_denied || final_nc || final_io) &&
-                environment.tilelink_requests() != dcache_before)) {
+                store_target_requests != 0)) {
             std::ostringstream detail;
             detail << phase << ":hypervisor-store-manager"
                    << ":operation_phase={" << operation_phase << '}'
@@ -240,6 +273,8 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
                    << ":pmp_relation=" << hypervisor_pmp_relation
                    << ":dcache=" << dcache_before << '/'
                    << environment.tilelink_requests()
+                   << ":store_source_requests=" << store_source_requests
+                   << ":store_target_requests=" << store_target_requests
                    << ":last_dcache=0x" << std::hex
                    << environment.dcache_last_request_address()
                    << std::dec
@@ -275,9 +310,14 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
             readback.expected_debug_is_mmio = false;
             readback.expected_debug_is_ncio = false;
             readback.expected_debug_is_perf_cnt = false;
+            const std::optional<std::uint64_t> expected_readback =
+                !physical_pmp_denied && !hypervisor_misaligned
+                ? std::optional<std::uint64_t>{
+                      hypervisor_store_readback_value(transaction)}
+                : std::nullopt;
             if (!environment.configure_pmp(
                     {~std::uint64_t{0}}, {pmp_napot_rwx}) ||
-                !issue_load(readback, std::nullopt, false) ||
+                !issue_load(readback, expected_readback, false) ||
                 !environment.run_until_queues_retired(8192)) {
                 phase += ":hypervisor-pmp-store-readback";
                 return false;
@@ -296,6 +336,39 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
                     read_ops[static_cast<unsigned>(op) & 3U]) !=
                 (transaction.data & mask)) {
                 phase += ":hypervisor-store-physical-image";
+                return false;
+            }
+        }
+        if (!physical_pmp_active && !physical_pmp_denied &&
+            !final_nc && !final_io && !hypervisor_misaligned) {
+            phase += ":hypervisor-cacheable-store-readback";
+            const std::uint64_t readback_rob = rob_offset++;
+            const std::uint64_t readback_lq = lq_offset++;
+            memblock::LoadTransaction readback{
+                .address = address,
+                .oracle_address = reference.physical_address,
+                .op = static_cast<memblock::LoadOp>(
+                    static_cast<unsigned>(op)),
+                .rob = memblock::rob_pointer_value(readback_rob),
+                .rob_flag = memblock::rob_pointer_flag(readback_rob),
+                .lq = memblock::lq_pointer_value(readback_lq),
+                .lq_flag = memblock::lq_pointer_flag(readback_lq),
+                .sq = memblock::sq_pointer_value(sq_offset),
+                .sq_flag = memblock::sq_pointer_flag(sq_offset),
+                .pdest = static_cast<std::uint8_t>(
+                    1U + static_cast<unsigned>(readback_rob % 255U)),
+                .lane = static_cast<unsigned>(
+                    readback_rob % memblock::kScalarLoadLanes),
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            };
+            if (!issue_load(
+                    readback,
+                    hypervisor_store_readback_value(transaction),
+                    false) ||
+                !environment.run_until_queues_retired(8192)) {
+                phase += ":hypervisor-cacheable-store-readback-failed";
                 return false;
             }
         }

@@ -54,6 +54,7 @@ public:
         d_fire_ = false;
         d_gap_ = 0;
         d_presenting_ = false;
+        active_sources_.fill(false);
         outstanding_requests_ = 0;
         forced_next_response_delay_.reset();
         force_a_stall_ = random_backpressure_;
@@ -94,6 +95,12 @@ public:
 
     void capture_before_tick(DutAdapter &dut)
     {
+        d_fire_ = !responses_.empty() &&
+                  dut.uncache.d.valid.boolean() &&
+                  dut.uncache.d.ready.boolean();
+        const std::optional<std::uint8_t> completing_source =
+            d_fire_ ? std::optional<std::uint8_t>{responses_.front().source}
+                    : std::nullopt;
         const bool a_valid = dut.uncache.a.valid.boolean();
         const bool a_ready = dut.uncache.a.ready.boolean();
         if (a_valid && !a_ready) {
@@ -114,6 +121,13 @@ public:
                 request_->opcode != 4) {
                 error_.record("unsupported uncache TileLink A opcode");
             }
+            if (request_->source >= active_sources_.size() ||
+                (active_sources_[request_->source] &&
+                 (!completing_source ||
+                  *completing_source != request_->source))) {
+                error_.record(
+                    "uncache TileLink A reused an active source before D");
+            }
             if (request_->size > 6) {
                 error_.record("oversized uncache TileLink A request");
             }
@@ -132,9 +146,6 @@ public:
                 }
             }
         }
-        d_fire_ = !responses_.empty() &&
-                  dut.uncache.d.valid.boolean() &&
-                  dut.uncache.d.ready.boolean();
         if (d_fire_) {
             const Response &expected = responses_.front();
             denied_d_beat_count_ += expected.denied;
@@ -154,6 +165,13 @@ public:
     void update_after_tick()
     {
         if (d_fire_) {
+            const std::uint8_t source = responses_.front().source;
+            if (source >= active_sources_.size() || !active_sources_[source]) {
+                error_.record(
+                    "uncache TileLink D completed an inactive source");
+            } else {
+                active_sources_[source] = false;
+            }
             responses_.pop_front();
             --outstanding_requests_;
             d_presenting_ = false;
@@ -161,6 +179,11 @@ public:
         }
         if (a_fire_ && request_) {
             respond(*request_);
+            if (request_->source >= active_sources_.size()) {
+                error_.record("uncache TileLink A source is out of range");
+            } else {
+                active_sources_[request_->source] = true;
+            }
             ++request_count_;
             ++outstanding_requests_;
             max_outstanding_requests_ = std::max(
@@ -364,6 +387,7 @@ private:
     std::optional<unsigned> forced_next_response_delay_;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
+    std::array<bool, 16> active_sources_{};
     std::uint64_t outstanding_requests_ = 0;
     std::uint64_t max_outstanding_requests_ = 0;
     std::uint64_t error_response_requests_ = 0;

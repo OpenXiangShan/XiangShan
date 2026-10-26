@@ -65,15 +65,15 @@ combinations have occurred or establishes a coverage percentage.
 | Domain | Executable subset and source | Remaining scope |
 | --- | --- | --- |
 | Scalar/FP loads | Width/sign/lane/immediate, FP boxing/destination, data/errors; load_feedback.inc, scoreboards | Wider timing/error interactions |
-| Stores/forwarding | Address/data order, masks, commit, cross-producer forwarding and directed readback | Output-only pulses, guaranteed random final-state observation |
+| Stores/forwarding | Address/data order, masks, commit, cross-producer forwarding, directed readback, constrained-random final word readback for cacheable identity-mapped commits and same-context hypervisor readback for permitted/aligned cacheable stores | Output-only pulses, remaining aliased/non-cacheable/fault-path final state |
 | Vector addressing | Unit/strided/indexed/segment/whole-register shapes, data/identity/policy; cache_queue.inc, vector_memory.inc | Global mask above 16 bits, overlapping stores, ordered side-effect targets, all concurrent shapes |
 | Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions | Default exceptional vstart skip, arbitrary restart/progress, canonical-alias sensitivity |
 | Translation | Mode pairs, permissions, leaf sizes, encoding/PPN/range, PBMT/NAPOT | Uniform fault-side-effect checks, nested boundaries/GPA wrap/A-D races |
 | Protection/H | PMP TOR/NAPOT/lock/edges, HLV/HLVX/HSV; protection.inc | Instruction PMP and broader PMA/PMP/H/misalignment crosses |
-| Refill/MLP | Critical beat, merge, distinct misses, held/reversed D, capacity-plus-one | Broader error/interleaving and channel lifecycle |
-| Coherence/replacement | Clean/dirty Probes, Releases/data, replacement plus selected Probe/CMO/atomic | C multibeat legality, accepted-B provenance, E/sink lifecycle, broader ordering |
-| Atomics | W/D AMO/CAS/LRSC, alignment/errors, reservation Probe, directed readback | Random final writes not forced observable, cross-hart/wider concurrency |
-| CBO/CMO | ZERO/CLEAN/FLUSH/INVAL, clean/dirty/error, delayed ack, younger cancellation | Multiple sources/classes, dirty persistence/reset |
+| Refill/MLP | Critical beat, merge, distinct misses, held/reversed D, capacity-plus-one, DCache/PTW/Uncache source lifetime | Broader error/interleaving and malformed response lifecycle |
+| Coherence/replacement | Clean/dirty Probes, Releases/data, replacement plus selected Probe/CMO/atomic, E first-D/sink lifetime, fixed C multibeat source/param/size/raw address, DUT full-line data-less Release size/alignment/shrink param | TileLink user/echo C fields are DUT-specific; data-less Release corrupt is ignored; accepted-B pairing for same-address probes and broader ordering remain |
+| Atomics | W/D AMO/CAS/LRSC, alignment/errors, reservation Probe, directed readback, successful cacheable final word readback, and forced dirty-line ProbeAckData persistence | Aliased/error-path final writes not forced observable, cross-hart/wider concurrency |
+| CBO/CMO | ZERO/CLEAN/FLUSH/INVAL, clean/dirty/error, delayed ack, younger cancellation, single/sequential/back-to-back CBO.ZERO completion (see CPU bug doc) | Multiple sources/classes, dirty persistence/reset, PBMT=NC behavior unspecified, same-line different-chunk younger-load forward window before Sbuffer s2 |
 | Uncache/MMIO | Width/mask/data, device side effects, errors, serialization | Source credit and malformed manager inputs |
 | ECC | Selected tag/data masks, banks/ways, reports/survivors | Wider masks, persistent/delayed events and concurrency |
 | LSQ/ROB/redirect | Six-lane enqueue, aggregate retire/cancel, wrap/stale suppression | Full per-retirement attribution and output-only pulse identity |
@@ -138,10 +138,12 @@ members are not controllable ports. IO_COVERAGE.md is the semantic map.
 
 Priority work, each requiring executable stimulus and an independent check:
 
-1. Force final observation of random atomic/vector-store targets; check
-   exceptional vstart and forbidden demand side effects.
-2. Add DCache sink/E and B/C provenance, C multibeat legality and Uncache
-   source-credit monitoring.
+1. Extend final observation beyond cacheable identity-mapped commits to legal
+   aliased translations, non-cacheable/device effects and fault-path
+   side-effect checks; keep the CMO exclusion explicit. Check exceptional
+   `vstart` and broader forbidden-demand attribution.
+2. Add B/C causal provenance and complete C multibeat identity checking; retain
+   the implemented DCache E first-D/sink and PTW/Uncache source-lifetime checks.
 3. Repair verifier schema/backpressure/statistic validation and report
    namespaces across controllers.
 4. Expand vector mask/fault/index/mapping/concurrency and reset/protection
@@ -202,7 +204,9 @@ verify_regression.py checks completion/run ID, finite timings/duration,
 continuous seeds, command/terminal agreement, requested/completed actions,
 aggregate totals, queue and GrantAck conservation, and selected runtime-layout
 requirements. For constrained-random it calls accounting checks only. The
-full coverage/schema/backpressure checker is not on that path.
+in-process final readback is a functional oracle before the summary is written;
+the verifier does not re-derive its expected data. The full
+coverage/schema/backpressure checker is not on that path.
 --require-backpressure checks the configuration flag, not nonzero per-seed
 stalls. Runtime metadata records paths/sizes/resolved dependencies, not
 source-to-model identity. These are present acceptance gaps.
