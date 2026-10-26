@@ -44,6 +44,7 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
         TLWidthWidget(4) :=
         TLFIFOFixer() :=
         TLBuffer() :=
+        TLBuffer(BufferParams.pipe) :=
         tlnode
     }
     tlnodes

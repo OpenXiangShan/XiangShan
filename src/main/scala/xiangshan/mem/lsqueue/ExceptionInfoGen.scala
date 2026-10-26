@@ -40,7 +40,7 @@ class MemExceptionInfo(implicit p: Parameters) extends XSBundle {
   val isHyper           = Bool()
   val vstart            = UInt((log2Up(VLEN) + 1).W)
   val vl                = UInt((log2Up(VLEN) + 1).W)
-  val gpaddr            = UInt(GPAddrBits.W)
+  val gpaddr            = UInt(XLEN.W)
   val isForVSnonLeafPTE = Bool()
 }
 
@@ -48,7 +48,7 @@ class ExceptionOut(implicit p: Parameters) extends XSBundle {
   val vaddr             = Output(UInt(XLEN.W))
   val vstart            = Output(UInt((log2Up(VLEN) + 1).W))
   val vl                = Output(UInt((log2Up(VLEN) + 1).W))
-  val gpaddr            = Output(UInt(GPAddrBits.W))
+  val gpaddr            = Output(UInt(XLEN.W))
   val isForVSnonLeafPTE = Output(Bool())
 }
 
