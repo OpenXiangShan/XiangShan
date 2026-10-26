@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 
 from env.support import record_scenario, scenario_rng
-from tests.py.jiabowen import test_icache_mainpipe_miss_response as icache
+from tests.py.support.dut_support import run_until
+from tests.py.support.icache_mainpipe import (
+    initialize_cacheable_stream,
+    register_mainpipe_observer,
+)
 from tests.py.support.translation_faults import _read_exception_bit
 
 
@@ -21,6 +27,7 @@ _TRIGGER_PC = 0x8009_0000
 _TRIGGER_DEBUG_MODE = 1
 _INSTRUCTION_ACCESS_FAULT_BIT = 1
 _HARDWARE_ERROR_BIT = 19
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 def _require_dut_signal(env, name: str):
@@ -125,7 +132,7 @@ def _configure_frontend_execute_trigger(env, pc: int) -> None:
         pytest.param({"denied": 1}, 1, id="corrupt-and-denied"),
     ],
 )
-@pytest.mark.skipif(not icache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_cacheable_cross64_refill_fault_delivery(
     env,
     fault_line: str,
@@ -150,17 +157,17 @@ def test_cacheable_cross64_refill_fault_delivery(
     )
     target_line = _CROSS64_FIRST_LINE if fault_line == "first" else _CROSS64_SECOND_LINE
     clean_line = _CROSS64_SECOND_LINE if fault_line == "first" else _CROSS64_FIRST_LINE
-    samples = icache._register_mainpipe_observer(env)
+    samples = register_mainpipe_observer(env)
     backend_records = _capture_backend_exception_state(env)
     env.icache_agent.inject_response_fault_at(target_line, **fault)
-    icache._initialize_cacheable_stream(
+    initialize_cacheable_stream(
         env,
         _CROSS64_PC,
         latency=latency,
         samples=samples,
     )
 
-    assert icache._run_until(
+    assert run_until(
         env,
         lambda: {
             int(record["address"])
@@ -172,7 +179,7 @@ def test_cacheable_cross64_refill_fault_delivery(
     expected_exception_bit = (
         _INSTRUCTION_ACCESS_FAULT_BIT if expected_denied else _HARDWARE_ERROR_BIT
     )
-    assert icache._run_until(
+    assert run_until(
         env,
         lambda: any(
             sample["to_ifu_valid"] == 1
@@ -181,7 +188,7 @@ def test_cacheable_cross64_refill_fault_delivery(
         ),
         max_cycles=2000,
     ), {"samples": samples[-64:], "icache": env.icache_agent.get_stats()}
-    assert icache._run_until(
+    assert run_until(
         env,
         lambda: any(
             record["pc"] == _CROSS64_PC
@@ -229,7 +236,7 @@ def test_cacheable_cross64_refill_fault_delivery(
     assert not env.get_errors()
 
 
-@pytest.mark.skipif(not icache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.parametrize("frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True)
 def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
     scenario_key = "zhaoxinran/exception/illegal-rvc-then-clean"
@@ -280,7 +287,7 @@ def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
                 return True
         return False
 
-    assert icache._run_until(
+    assert run_until(
         env,
         consecutive_illegal_then_legal,
         max_cycles=6000,
@@ -325,7 +332,7 @@ def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
     assert not env.get_errors()
 
 
-@pytest.mark.skipif(not icache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
     scenario_key = "zhaoxinran/exception/execute-pc-trigger"
     base_seed, seed, rng = scenario_rng(scenario_key)
@@ -342,7 +349,7 @@ def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
         },
     )
     samples = _capture_backend_cfvec_cycles(env, include_trigger=True)
-    icache._initialize_cacheable_stream(env, _TRIGGER_PC, latency=latency)
+    initialize_cacheable_stream(env, _TRIGGER_PC, latency=latency)
     _configure_frontend_execute_trigger(env, _TRIGGER_PC)
     env.step(2)
     _require_dut_signal(
@@ -357,7 +364,7 @@ def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
             for record in cycle
         )
 
-    assert icache._run_until(env, target_triggered, max_cycles=6000), {
+    assert run_until(env, target_triggered, max_cycles=6000), {
         "cfvec_cycles": list(samples.items())[-64:],
         "icache": env.icache_agent.get_stats(),
     }

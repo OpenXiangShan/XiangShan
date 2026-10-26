@@ -78,6 +78,15 @@ def poll_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
     return False
 
 
+def run_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
+    """Include a final predicate check after the last DUT step."""
+    for _ in range(int(max_cycles)):
+        if predicate():
+            return True
+        env.step(1)
+    return bool(predicate())
+
+
 def wait_until(
     env,
     predicate: Callable[[], bool],
