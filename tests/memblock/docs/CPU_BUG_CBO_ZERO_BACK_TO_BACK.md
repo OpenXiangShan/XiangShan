@@ -1,5 +1,11 @@
 # CPU Bug: Back-to-Back CBO.ZERO Loses a Store Completion
 
+## Status
+
+Confirmed RTL bug, fixed by `f0e5ba75b`; the current HEAD includes the fix and
+the directed regression. The fix remains in the verified runtime used for the
+current benchmark and regression snapshot.
+
 ## Symptom
 
 Two independent `CBO.ZERO` instructions to different cache lines, committed
@@ -132,7 +138,7 @@ contract; ordinary stores behind a blocked zero wait rather than bypassing it.
 - `make -C tests/memblock check-rtl` passes after regenerating RTL and
   re-preparing the model.
 - The full frozen-runtime benchmark passes 85/85 scenarios (377.7 s,
-  `build/memblock/agent-campaign-7/benchmark/results.json`), including the
+  `build/memblock/agent-campaign-16/benchmark/results.json`), including the
   expanded `cbo-zero-contracts` entry.
 - A six-seed finite coverage campaign (seeds 101..106) at 4608 actions per seed
   passes with the fixed runtime
@@ -155,6 +161,6 @@ contract; ordinary stores behind a blocked zero wait rather than bypassing it.
   `make -C tests/memblock prepare-rtl picker-harness JOBS=16` after forcing
   the prepared RTL timestamp, because the Picker targets do not encode the
   `build/rtl` source dependency.
-- Fixed qualification runtime: `build/memblock/agent-campaign-7/runtime`.
+- Fixed qualification runtime: `build/memblock/agent-campaign-16/runtime`.
 - The reproducer uses the UT-owned line contents and completion/queue
   observations; no internal DUT signal supplies an expected value.

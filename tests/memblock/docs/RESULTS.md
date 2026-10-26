@@ -12,6 +12,15 @@ The default benchmark selects 85; five additional directed contracts require
 explicit execution. All claimed behavior remains limited by IO_COVERAGE.md
 and ORACLES.md. There is no defensible overall functional-coverage percentage.
 
+## Confirmed CPU Bug Records
+
+- [CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md](CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md):
+  one-uop vector segment with a noncanonical VA failed to fault; fixed by
+  `d7d096e6e`, covered by the extra `vector-segment-noncanonical` contract.
+- [CPU_BUG_CBO_ZERO_BACK_TO_BACK.md](CPU_BUG_CBO_ZERO_BACK_TO_BACK.md):
+  back-to-back cacheable `CBO.ZERO` lost one store completion; fixed by
+  `f0e5ba75b`, covered by `cbo-zero-contracts`.
+
 ## Current Changes Qualified Below
 
 - Constrained-random finishes with a drain and an independent word readback of
