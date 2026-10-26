@@ -1569,7 +1569,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
     constexpr std::uint64_t virtual_base = 0x5003c000ULL;
     constexpr std::uint64_t physical_base = 0x9003c000ULL;
     constexpr std::uint64_t root = 0x97010000ULL;
-    environment.memory().fill_incrementing(physical_base, 64, 0xa7);
+    environment.memory().fill_incrementing(physical_base, 0x300, 0xa7);
     environment.configure_backpressure(0x4d595df4d0f33173ULL, true);
     if (!environment.reset() ||
         !environment.map_sv39_4k(
@@ -1659,9 +1659,254 @@ int run_cbo_zero_contracts(int argc, char **argv)
         return 1;
     }
     environment.record_committed_store(cbo_zero);
+
+
+    // Sequential control: two CBO.ZEROs to different lines, with the first
+    // fully drained before the second is committed.  This proves the harness
+    // can complete two independent zero operations before testing the
+    // back-to-back window.
+    const std::uint64_t sequential_sq_target =
+        environment.sq_dequeued() + 2;
+    memblock::StoreTransaction cbo_sequential_a{
+        .address = virtual_base + 0xa0,
+        .oracle_address = physical_base + 0x80,
+        .data = 0x1122334455667788ULL,
+        .op = memblock::StoreOp::cbo_zero,
+        .rob = 2,
+        .sq = 1,
+        .address_lane = 0,
+        .data_lane = 0,
+        .expected_address_writeback_lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    memblock::StoreTransaction cbo_sequential_b{
+        .address = virtual_base + 0x120,
+        .oracle_address = physical_base + 0x100,
+        .data = 0x99aabbccddeeff00ULL,
+        .op = memblock::StoreOp::cbo_zero,
+        .rob = 3,
+        .sq = 2,
+        .address_lane = 1,
+        .data_lane = 1,
+        .expected_address_writeback_lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    if (!environment.set_rob_head(
+            cbo_sequential_a.rob, cbo_sequential_a.rob_flag) ||
+        !environment.enqueue_store(cbo_sequential_a, 0) ||
+        !environment.enqueue_store(cbo_sequential_b, 0)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=sequential-enqueue reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.expect_store(cbo_sequential_a);
+    if (!environment.issue_store_address(cbo_sequential_a, 2048) ||
+        !environment.issue_store_data(cbo_sequential_a, 2048) ||
+        !environment.commit_stores_through(cbo_sequential_a, 1) ||
+        !environment.run_until_store_complete(16384) ||
+        !environment.run_until_sq_dequeued(
+            sequential_sq_target - 1, 16384)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=sequential-first reason="
+                  << environment.error() << " sq="
+                  << environment.sq_dequeued() << '/'
+                  << environment.sq_allocated() << '\n';
+        return 1;
+    }
+    environment.expect_store(cbo_sequential_b);
+    if (!environment.set_rob_head(
+            cbo_sequential_b.rob, cbo_sequential_b.rob_flag) ||
+        !environment.issue_store_address(cbo_sequential_b, 2048) ||
+        !environment.issue_store_data(cbo_sequential_b, 2048) ||
+        !environment.commit_stores_through(cbo_sequential_b, 1) ||
+        !environment.run_until_store_complete(16384) ||
+        !environment.run_until_sq_dequeued(
+            sequential_sq_target, 16384)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=sequential-second reason="
+                  << environment.error() << " sq="
+                  << environment.sq_dequeued() << '/'
+                  << environment.sq_allocated() << '\n';
+        return 1;
+    }
+    for (unsigned line = 1; line <= 2; ++line) {
+        const memblock::LoadTransaction readback_line{
+            .address = virtual_base + line * 0x80,
+            .oracle_address = physical_base + line * 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(6 + line),
+            .lq = static_cast<std::uint8_t>(line),
+            .pdest = static_cast<std::uint8_t>(191 + line),
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        environment.expect_load_data(readback_line, 0);
+        if (!environment.set_rob_head(readback_line.rob) ||
+            !environment.enqueue_load(readback_line) ||
+            !environment.issue_load(readback_line, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=sequential-readback line=" << line
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    environment.record_committed_store(cbo_sequential_a);
+    environment.record_committed_store(cbo_sequential_b);
+
+    // Two independent CBO.ZEROs must each produce one store completion and
+    // must not collapse into the single CBO.ZERO completion slot.  Use two
+    // still-nonzero lines so a lost second completion is visible both in the
+    // scoreboard and in the readback bytes.
+    const std::uint64_t back_to_back_sq_target =
+        environment.sq_dequeued() + 3;
+    memblock::StoreTransaction cbo_zero_a{
+        .address = virtual_base + 0x1a0,
+        .oracle_address = physical_base + 0x180,
+        .data = 0x1122334455667788ULL,
+        .op = memblock::StoreOp::cbo_zero,
+        .rob = 4,
+        .sq = 3,
+        .address_lane = 0,
+        .data_lane = 0,
+        .expected_address_writeback_lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    memblock::StoreTransaction cbo_zero_b{
+        .address = virtual_base + 0x220,
+        .oracle_address = physical_base + 0x200,
+        .data = 0x99aabbccddeeff00ULL,
+        .op = memblock::StoreOp::cbo_zero,
+        .rob = 5,
+        .sq = 4,
+        .address_lane = 1,
+        .data_lane = 1,
+        .expected_address_writeback_lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    constexpr std::uint64_t following_store_data = 0xfeedfacedeadbeefULL;
+    memblock::StoreTransaction following_store{
+        .address = virtual_base + 0x2a0,
+        .oracle_address = physical_base + 0x280,
+        .data = following_store_data,
+        .op = memblock::StoreOp::sd,
+        .rob = 6,
+        .sq = 5,
+        .address_lane = 0,
+        .data_lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(cbo_zero_a);
+    environment.expect_store(cbo_zero_b);
+    environment.expect_store(following_store);
+    if (!environment.set_rob_head(cbo_zero_a.rob, cbo_zero_a.rob_flag) ||
+        !environment.enqueue_store(cbo_zero_a, 0) ||
+        !environment.enqueue_store(cbo_zero_b, 0) ||
+        !environment.enqueue_store(following_store, 0) ||
+        !environment.issue_store_address_batch(
+            {cbo_zero_a, cbo_zero_b}, 4096) ||
+        !environment.issue_store_address(following_store, 4096) ||
+        !environment.issue_store_data(cbo_zero_a, 2048) ||
+        !environment.issue_store_data(cbo_zero_b, 2048) ||
+        !environment.issue_store_data(following_store, 2048) ||
+        // Pulse scommit once per store so each store's commit eligibility is
+        // established independently.  The contract under test is the
+        // back-to-back Sbuffer admission window followed by a non-CBO store,
+        // not a multi-store scommit.
+        !environment.commit_stores_through(cbo_zero_a, 1) ||
+        !environment.run_cycles(1) ||
+        !environment.commit_stores_through(cbo_zero_b, 1) ||
+        !environment.run_cycles(1) ||
+        !environment.commit_stores_through(following_store, 1) ||
+        !environment.run_until_store_complete(32768) ||
+        !environment.run_until_sq_dequeued(
+            back_to_back_sq_target, 32768)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=back-to-back-zero reason="
+                  << environment.error() << " sq="
+                  << environment.sq_dequeued() << '/'
+                  << environment.sq_allocated()
+                  << " store_writebacks=" << environment.store_writebacks()
+                  << " sbuffer_empty=" << environment.sbuffer_empty()
+                  << " store_mmio_valid=" << environment.store_mmio_valid()
+                  << '\n';
+        return 1;
+    }
+
+    for (unsigned line = 3; line <= 4; ++line) {
+        const memblock::LoadTransaction readback_line{
+            .address = virtual_base + line * 0x80,
+            .oracle_address = physical_base + line * 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(6 + line),
+            .lq = static_cast<std::uint8_t>(line),
+            .pdest = static_cast<std::uint8_t>(191 + line),
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        environment.expect_load_data(readback_line, 0);
+        if (!environment.set_rob_head(readback_line.rob) ||
+            !environment.enqueue_load(readback_line) ||
+            !environment.issue_load(readback_line, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=back-to-back-readback line=" << line
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    const memblock::LoadTransaction following_readback{
+        .address = virtual_base + 0x2a0,
+        .oracle_address = physical_base + 0x280,
+        .op = memblock::LoadOp::ld,
+        .rob = 10,
+        .lq = 5,
+        .pdest = 196,
+        .lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    environment.expect_load_data(following_readback, following_store_data);
+    if (!environment.set_rob_head(following_readback.rob) ||
+        !environment.enqueue_load(following_readback) ||
+        !environment.issue_load(following_readback, 2048) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=following-store-readback reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.record_committed_store(cbo_zero_a);
+    environment.record_committed_store(cbo_zero_b);
+    environment.record_committed_store(following_store);
+
     std::cout << "MEMBLOCK_CBO_ZERO_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " cbo_zero_line=1"
+              << " sequential_zero=2"
+              << " back_to_back_zero=2"
+              << " following_store=1"
               << " readback=1"
               << " dcache_requests=" << environment.tilelink_requests()
               << " uncache_requests=" << environment.uncache_requests()

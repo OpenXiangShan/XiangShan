@@ -1337,10 +1337,32 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     assert(!dataBuffer.io.enq(i).valid || allvalid(ptr) || hasException(ptr) || (allocated(ptr) && vecMbCommit(ptr)) || assert_flag)
   }
 
+  // CBO.ZERO has a single completion slot (cboZeroValid/WaitFlushSb).
+  // Two wline zero entries reaching the Sbuffer before that slot drains would
+  // overwrite cboZeroUop/SqIdx and lose one SQ completion.  Admit at most one
+  // CBO.ZERO to the Sbuffer per cycle and hold later ones until the slot is
+  // free; non-CBO stores remain unblocked.
+  val cboZeroDeqCandidate = (0 until EnsbufferWidth).map { i =>
+    dataBuffer.io.deq(i).valid && dataBuffer.io.deq(i).bits.vecValid &&
+    dataBuffer.io.deq(i).bits.wline &&
+    allocated(dataBuffer.io.deq(i).bits.sqPtr.value) &&
+    memBackTypeMM(dataBuffer.io.deq(i).bits.sqPtr.value)
+  }
+  val cboZeroDeqFirst = PriorityEncoder(cboZeroDeqCandidate)
+  val cboZeroDeqBlock = (0 until EnsbufferWidth).map { i =>
+    cboZeroValid || (cboZeroDeqCandidate(i) && cboZeroDeqFirst =/= i.U)
+  }
+  // DatamoduleResultBuffer is a prefix FIFO: deq(i).ready must never be
+  // asserted while an earlier deq lane is blocked.  Propagate the block from
+  // the first blocked lane to every lane behind it.
+  val cboZeroDeqBlockPrefix = cboZeroDeqBlock.scanLeft(false.B) {
+    (blocked, laneBlocked) => blocked || laneBlocked
+  }.tail
+
   // Send data stored in sbufferReqBitsReg to sbuffer
   for (i <- 0 until EnsbufferWidth) {
-    io.sbuffer(i).valid := dataBuffer.io.deq(i).valid
-    dataBuffer.io.deq(i).ready := io.sbuffer(i).ready
+    io.sbuffer(i).valid := dataBuffer.io.deq(i).valid && !cboZeroDeqBlockPrefix(i)
+    dataBuffer.io.deq(i).ready := io.sbuffer(i).ready && !cboZeroDeqBlockPrefix(i)
     io.sbuffer(i).bits.fromDataBufferEntry(dataBuffer.io.deq(i).bits, MemoryOpConstants.M_XWR)
     // io.sbuffer(i).fire is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load
