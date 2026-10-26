@@ -418,6 +418,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s1LoadWaitBit    = RegEnable(s0LoadWaitBit, s0Valid)
       val s1WaitSqIdx      = RegEnable(s0WaitSqIdx, s0Valid)
       val s1LoadOutOfRange = RegEnable(s0LoadOutOfRange, s0Valid)
+      val s1UpperFlag      = RegEnable(io.ctrlInfo.physicalQueueUpper.operation_flag, s0Valid)
 
       val s1AgeMaskLow   = RegEnable(s0AgeMaskLow, s0Valid)
       val s1AgeMaskHigh  = RegEnable(s0AgeMaskHigh, s0Valid)
@@ -546,7 +547,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
 
       s1DataInvalidSqIdx.value := OHToUInt(s1SelectOH)
       s1DataInvalidSqIdx.operation_flag  = Mux(s1SelectLowOH.orR,
-        s1LoadSqIdx.operation_flag,
+        s1UpperFlag,
         io.ctrlInfo.deqPtr.operation_flag
       )
 
