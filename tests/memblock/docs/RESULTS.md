@@ -76,7 +76,10 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
   and zero DCache requests for it. Both faulting cases require the exact
   faulting-element address in the separate exception-address payload; the
   sample follows a four-cycle settle because the vector feedback reaches the
-  queue one cycle after the writeback.
+  queue one cycle after the writeback. A vector store whose second element
+  lands in a read-only page must fault with exact `vstart=1` and address; its
+  read-only page is read back unchanged, while the writable first element may
+  legally have been written before the fault.
 - `translation-alias` maps two Sv39 virtual pages to one physical page and
   proves a committed store through one VA is visible through the other, both
   after drain and with SBuffer non-empty at an in-flight load issue. A cold
@@ -148,6 +151,7 @@ The current qualification is:
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
 | High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
 | Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1` and exact faulting-element addresses; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | Broader fault-element/FOF progress remains open |
+| Vector store fault side effect | `translation-faults` vector-store case passes with exact `vstart=1` and fault address; the read-only target page word is read back unchanged | Writable first-element visibility and other fault-path targets remain partial |
 | Permission-fault store side effects | `translation-permissions` passes with 10/10 fault-store readbacks (readable mapping or Bare fallback); `pmp-contracts` adds one PMP-denied store readback | Device fault paths still need another observation route |
 | Non-cacheable final effects | committed NC store/atomic words match the manager bus image in passing mixed runs; 2/2 4608-action seeds (210/211) check 141/142 words, seed 215 checks 146, and smaller seeds cover the uncache-drain path | Manager bus image, not a DUT uncache read; device side effects, aliases and CMO remain outside |
 | Atomic dirty-line persistence | `atomic-contracts` passes; ProbeAckData carries the updated line and updates the manager image | AMO target only; cross-hart/concurrent eviction not covered |

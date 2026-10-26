@@ -1366,6 +1366,7 @@ int run_translation_faults(int argc, char **argv)
     unsigned vector_later_element_faults = 0;
     unsigned vector_later_address_matches = 0;
     unsigned vector_all_masked_controls = 0;
+    unsigned vector_store_fault_readbacks = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
     unsigned ppn_access_fault_cases = 0;
@@ -2965,6 +2966,128 @@ int run_translation_faults(int argc, char **argv)
         ++vector_later_element_faults;
     }
 
+    // A vector store whose first element is writable and whose second element
+    // lands in a read-only page must fault at element 1 with vstart=1 and must
+    // not write the read-only page.  The first element may have been written
+    // before the fault, so only the read-only page is required to retain its
+    // original bytes.
+    {
+        memblock::Environment store_fault(argc, argv);
+        constexpr std::uint64_t store_virtual = 0x72000000ULL;
+        constexpr std::uint64_t store_physical = 0xc6000000ULL;
+        constexpr std::uint64_t store_root = 0x9ab00000ULL;
+        constexpr std::uint64_t readonly_physical = store_physical + 0x1000;
+        store_fault.memory().fill_incrementing(
+            readonly_physical, 0x20, 0x3c);
+        const std::uint64_t readonly_word =
+            store_fault.memory().read_u64(readonly_physical + 0x8);
+        store_fault.configure_backpressure(0x5be0cd19137e2179ULL, true);
+        if (!store_fault.reset() ||
+            !store_fault.map_sv39_4k(
+                store_virtual, store_physical, store_root,
+                true, true, false, false, false, false) ||
+            !store_fault.map_sv39_4k(
+                store_virtual + 0x1000, readonly_physical, store_root,
+                true, false, false, false, false, false) ||
+            !store_fault.activate_sv39(store_root)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << store_fault.cycle()
+                      << " phase=vector-store-fault-configuration reason="
+                      << store_fault.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction store{
+            .store = true,
+            .address = store_virtual + 0xff8,
+            .eew = 3,
+            .vl = 2,
+            .rob = 98,
+            .sq = 0,
+            .pdest = 183,
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask =
+                memblock::kExceptionStorePageFault,
+            .expected_writeback_vstart = 1,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (auto &byte : store.data) {
+            byte = static_cast<unsigned char>(0x44);
+        }
+        // The top-level exception-address mux selects the store queue only
+        // when the backend marks the completing exception as a store fault.
+        store_fault.select_store_exception_address(true);
+        store_fault.expect_vector(store);
+        if (!store_fault.set_rob_head(store.rob, store.rob_flag) ||
+            !store_fault.enqueue_vector(store) ||
+            !store_fault.issue_vector(store, 1024) ||
+            !store_fault.run_until_vector_complete_with_replays(
+                store, 32768) ||
+            !store_fault.run_cycles(4) ||
+            store_fault.exception_vaddr() != store_virtual + 0x1000) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << store_fault.cycle()
+                      << " phase=vector-store-fault reason="
+                      << store_fault.error() << " vaddr=0x" << std::hex
+                      << store_fault.exception_vaddr() << std::dec
+                      << '\n';
+            return 1;
+        }
+        const std::uint64_t sq_retired =
+            store_fault.sq_dequeued() + store_fault.sq_canceled();
+        if (sq_retired > store_fault.sq_allocated() ||
+            (sq_retired < store_fault.sq_allocated() &&
+             !store_fault.account_sq_cancellation(
+                 static_cast<unsigned>(
+                     store_fault.sq_allocated() - sq_retired)))) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << store_fault.cycle()
+                      << " phase=vector-store-fault-accounting reason="
+                      << store_fault.error() << '\n';
+            return 1;
+        }
+        if (!store_fault.redirect_after(
+                store.rob, store.rob_flag, true, true) ||
+            !store_fault.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << store_fault.cycle()
+                      << " phase=vector-store-fault-redirect reason="
+                      << store_fault.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = store_virtual + 0x1008,
+            .oracle_address = readonly_physical + 0x8,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 184,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        store_fault.expect_load_data(readback, readonly_word);
+        if (!store_fault.set_rob_head(readback.rob, readback.rob_flag) ||
+            !store_fault.enqueue_load(readback) ||
+            !store_fault.issue_load(readback, 4096) ||
+            !store_fault.run_until_complete(16384) ||
+            !store_fault.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << store_fault.cycle()
+                      << " phase=vector-store-fault-readback reason="
+                      << store_fault.error() << '\n';
+            return 1;
+        }
+        store_fault.select_store_exception_address(false);
+        ++vector_store_fault_readbacks;
+    }
+
     // A vector load with no active element must not fault even when its base
     // address is unmapped.  Masked-off elements are not accessed.  The
     // completion is checked by the normal vector scoreboard; this case also
@@ -3064,6 +3187,8 @@ int run_translation_faults(int argc, char **argv)
               << vector_later_address_matches
               << " vector_all_masked_controls="
               << vector_all_masked_controls
+              << " vector_store_fault_readbacks="
+              << vector_store_fault_readbacks
               << " vector_all_masked_ptw_requests="
               << vector_all_masked_ptw_requests
               << " vector_all_masked_dcache_requests="
