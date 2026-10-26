@@ -1566,6 +1566,7 @@ int run_mmio_contracts(int argc, char **argv)
 int run_cbo_zero_contracts(int argc, char **argv)
 {
     unsigned same_line_double_zeros = 0;
+    unsigned three_line_zeros = 0;
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t virtual_base = 0x5003c000ULL;
     constexpr std::uint64_t physical_base = 0x9003c000ULL;
@@ -2451,6 +2452,118 @@ int run_cbo_zero_contracts(int argc, char **argv)
         ++same_line_double_zeros;
     }
 
+    // Three independent CBO.ZEROs to distinct lines, committed before the
+    // first SBuffer line drains.  This is a longer regression for the single
+    // completion slot than the two-zero case: every operation must complete
+    // exactly once and all three lines must end as zero.
+    {
+        memblock::Environment triple_zero(argc, argv);
+        constexpr std::uint64_t triple_base =
+            memblock::kDefaultMemoryBase + 0x2a0000ULL;
+        triple_zero.memory().fill_incrementing(triple_base, 0x400, 0x77);
+        triple_zero.configure_backpressure(0x510e527fade682d1ULL, true);
+        if (!triple_zero.reset()) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << triple_zero.cycle()
+                      << " phase=three-line-zero-reset reason="
+                      << triple_zero.error() << '\n';
+            return 1;
+        }
+        std::array<memblock::StoreTransaction, 3> zeros{};
+        for (unsigned index = 0; index < zeros.size(); ++index) {
+            zeros[index] = memblock::StoreTransaction{
+                .address = triple_base + 0x20 + index * 0x40,
+                .oracle_address = triple_base + index * 0x40,
+                .data = 0x1122334455667788ULL ^
+                    (std::uint64_t{index} << 32),
+                .op = memblock::StoreOp::cbo_zero,
+                .rob = static_cast<std::uint8_t>(index),
+                .sq = static_cast<std::uint8_t>(index),
+                .address_lane = index % memblock::kScalarStoreLanes,
+                .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+                .expected_address_writeback_lane = 0,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+            };
+        }
+        const std::uint64_t sq_target = triple_zero.sq_dequeued() + 3;
+        for (const auto &zero : zeros) {
+            triple_zero.expect_store(zero);
+        }
+        if (!triple_zero.set_rob_head(zeros[0].rob, zeros[0].rob_flag)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << triple_zero.cycle()
+                      << " phase=three-line-zero-head reason="
+                      << triple_zero.error() << '\n';
+            return 1;
+        }
+        for (unsigned index = 0; index < zeros.size(); ++index) {
+            if (!triple_zero.enqueue_store(zeros[index], 0) ||
+                !triple_zero.issue_store_address(zeros[index], 4096) ||
+                !triple_zero.issue_store_data(zeros[index], 4096)) {
+                std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                          << triple_zero.cycle()
+                          << " phase=three-line-zero-issue index=" << index
+                          << " reason=" << triple_zero.error() << '\n';
+                return 1;
+            }
+        }
+        for (unsigned index = 0; index < zeros.size(); ++index) {
+            if (!triple_zero.commit_stores_through(zeros[index], 1) ||
+                (index + 1 < zeros.size() &&
+                 !triple_zero.run_cycles(1))) {
+                std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                          << triple_zero.cycle()
+                          << " phase=three-line-zero-commit index=" << index
+                          << " reason=" << triple_zero.error() << '\n';
+                return 1;
+            }
+        }
+        if (!triple_zero.run_until_store_complete(32768) ||
+            !triple_zero.run_until_sq_dequeued(sq_target, 32768)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << triple_zero.cycle()
+                      << " phase=three-line-zero-store reason="
+                      << triple_zero.error() << " sq="
+                      << triple_zero.sq_dequeued() << '/'
+                      << triple_zero.sq_allocated() << '\n';
+            return 1;
+        }
+        std::array<memblock::LoadTransaction, 3> readbacks{};
+        for (unsigned index = 0; index < readbacks.size(); ++index) {
+            readbacks[index] = memblock::LoadTransaction{
+                .address = triple_base + index * 0x40,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(3 + index),
+                .lq = static_cast<std::uint8_t>(index),
+                .pdest = static_cast<std::uint8_t>(230 + index),
+                .lane = index,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            };
+            triple_zero.expect_load_data(readbacks[index], 0);
+        }
+        if (!triple_zero.set_rob_head(
+                readbacks[0].rob, readbacks[0].rob_flag) ||
+            !triple_zero.enqueue_load_batch(
+                {readbacks[0], readbacks[1], readbacks[2]}, {0, 1, 2}) ||
+            !triple_zero.issue_load_batch(
+                {readbacks[0], readbacks[1], readbacks[2]}, 4096) ||
+            !triple_zero.run_until_all_complete(16384) ||
+            !triple_zero.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << triple_zero.cycle()
+                      << " phase=three-line-zero-readback reason="
+                      << triple_zero.error() << '\n';
+            return 1;
+        }
+        for (const auto &zero : zeros) {
+            triple_zero.record_committed_store(zero);
+        }
+        ++three_line_zeros;
+    }
+
     std::cout << "MEMBLOCK_CBO_ZERO_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " cbo_zero_line=1"
@@ -2459,6 +2572,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
               << " following_store=1"
               << " same_line_zero=1"
               << " same_line_double_zero=" << same_line_double_zeros
+              << " three_line_zero=" << three_line_zeros
               << " zero_last=1"
               << " early_load=1"
               << " dirty_zero=1"
