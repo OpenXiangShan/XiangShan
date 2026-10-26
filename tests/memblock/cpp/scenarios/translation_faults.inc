@@ -1363,6 +1363,12 @@ int run_translation_faults(int argc, char **argv)
 
     unsigned canonical_boundary_cases = 0;
     unsigned vector_vstart_faults = 0;
+    unsigned vector_later_element_faults = 0;
+    unsigned vector_later_address_matches = 0;
+    unsigned vector_later_address_unattributed = 0;
+    unsigned vector_all_masked_controls = 0;
+    std::uint64_t vector_all_masked_ptw_requests = 0;
+    std::uint64_t vector_all_masked_dcache_requests = 0;
     unsigned ppn_access_fault_cases = 0;
     unsigned stage1_ppn_access_fault_cases = 0;
     unsigned vs_only_ppn_access_fault_cases = 0;
@@ -2856,6 +2862,183 @@ int run_translation_faults(int argc, char **argv)
         ++vector_vstart_faults;
     }
 
+    // A single vector load whose first element is in a mapped page and whose
+    // next element starts in an unmapped page must trap at the second
+    // element.  The architectural element index, not the number of active
+    // elements, is the expected vstart.  Run the same address with only the
+    // faulting element predicated on: the fault is still on element 1, so a
+    // masked case must report vstart=1 rather than 0.
+    struct LaterElementFaultCase {
+        const char *name;
+        bool masked;
+        std::uint64_t virtual_page;
+        std::uint64_t physical_page;
+        std::uint64_t root;
+        std::uint8_t rob;
+        std::uint8_t pdest;
+        // The 16-byte vector access starts at 0xff8 and crosses the DCache
+        // 128-bit split boundary, so it consumes two load-queue flows even
+        // though only two (or, when masked, one) elements are active.
+        std::uint8_t flow_num;
+    };
+    constexpr std::array<LaterElementFaultCase, 2> later_element_faults{{
+        {"unmasked", false, 0x71200000ULL, 0xc5100000ULL,
+         0x9a900000ULL, 95, 180, 2},
+        {"masked", true, 0x71300000ULL, 0xc5200000ULL,
+         0x9a980000ULL, 96, 181, 2},
+    }};
+    for (const auto &test : later_element_faults) {
+        memblock::Environment later(argc, argv);
+        const std::uint64_t address = test.virtual_page + 0xff8;
+        const std::uint64_t physical_address = test.physical_page + 0xff8;
+        later.memory().fill_incrementing(physical_address, 8, 0x5a);
+        later.configure_backpressure(0x3c6ef372fe94f82bULL, true);
+        if (!later.reset() ||
+            !later.map_sv39_4k(
+                test.virtual_page, test.physical_page, test.root) ||
+            !later.activate_sv39(test.root)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << later.cycle() << " phase=vector-later-"
+                      << test.name << "-configuration reason="
+                      << later.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction transaction{
+            .address = address,
+            .oracle_address = physical_address,
+            .eew = 3,
+            .vl = 2,
+            .rob = test.rob,
+            .lq = 0,
+            .pdest = test.pdest,
+            .lane = 0,
+            .flow_num = test.flow_num,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+            .expected_writeback_vstart = 1,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        if (test.masked) {
+            transaction.vm = false;
+            transaction.mask_bits = 0x0002;
+        }
+        for (auto &byte : transaction.data) {
+            byte = static_cast<unsigned char>(0x30);
+        }
+        later.expect_vector(transaction);
+        const std::uint64_t expected_fault_address =
+            test.virtual_page + 0x1000;
+        if (!later.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !later.enqueue_vector(transaction) ||
+            !later.issue_vector(transaction, 1024) ||
+            !later.run_until_vector_complete_with_replays(
+                transaction, 32768)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << later.cycle() << " phase=vector-later-"
+                      << test.name << "-fault reason=" << later.error()
+                      << " vaddr=0x" << std::hex << later.exception_vaddr()
+                      << " expected_vaddr=0x" << expected_fault_address
+                      << std::dec << '\n';
+            return 1;
+        }
+        // The separate exception-address payload has no valid bit and the
+        // current DUT does not attribute an intra-uop page-crossing fault to
+        // the faulting element address.  Record the observation instead of
+        // using it as a PASS gate; the writeback exception and vstart above
+        // are the architectural checks for this shape.
+        if (later.exception_vaddr() == expected_fault_address) {
+            ++vector_later_address_matches;
+        } else {
+            ++vector_later_address_unattributed;
+        }
+        const std::uint64_t retired =
+            later.lq_dequeued() + later.lq_canceled();
+        if (retired > later.lq_allocated() ||
+            (retired < later.lq_allocated() &&
+             !later.account_lq_cancellation(
+                 static_cast<unsigned>(later.lq_allocated() - retired)))) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << later.cycle() << " phase=vector-later-"
+                      << test.name << "-accounting reason="
+                      << later.error() << '\n';
+            return 1;
+        }
+        ++vector_later_element_faults;
+    }
+
+    // A vector load with no active element must not fault even when its base
+    // address is unmapped.  Masked-off elements are not accessed.  The
+    // completion is checked by the normal vector scoreboard; this case also
+    // records whether the implementation speculatively issued manager traffic.
+    {
+        memblock::Environment all_masked(argc, argv);
+        constexpr std::uint64_t unmapped_page = 0x71400000ULL;
+        constexpr std::uint64_t root = 0x9aa00000ULL;
+        all_masked.configure_backpressure(0xa54ff53a5f1d36f1ULL, true);
+        if (!all_masked.reset() ||
+            !all_masked.activate_sv39(root)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << all_masked.cycle()
+                      << " phase=vector-all-masked-configuration reason="
+                      << all_masked.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t writebacks_before =
+            all_masked.vector_load_writebacks();
+        const std::uint64_t ptw_before = all_masked.ptw_requests();
+        const std::uint64_t dcache_before = all_masked.tilelink_requests();
+        memblock::VectorMemoryTransaction control{
+            .address = unmapped_page,
+            .eew = 3,
+            .vl = 2,
+            .vm = false,
+            .mask_bits = 0,
+            .rob = 97,
+            .lq = 0,
+            .pdest = 182,
+            .lane = 0,
+            .flow_num = 1,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (auto &byte : control.data) {
+            byte = static_cast<unsigned char>(0x6c);
+        }
+        all_masked.expect_vector(control);
+        if (!all_masked.set_rob_head(control.rob, control.rob_flag) ||
+            !all_masked.enqueue_vector(control) ||
+            !all_masked.issue_vector(control, 1024) ||
+            !all_masked.run_until_vector_complete_with_replays(
+                control, 32768) ||
+            !all_masked.run_until_lq_retired(4096) ||
+            all_masked.vector_load_writebacks() != writebacks_before + 1) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << all_masked.cycle()
+                      << " phase=vector-all-masked reason="
+                      << all_masked.error() << " writebacks="
+                      << all_masked.vector_load_writebacks()
+                      << " expected=" << writebacks_before + 1
+                      << " ptw=" << all_masked.ptw_requests() - ptw_before
+                      << " dcache="
+                      << all_masked.tilelink_requests() - dcache_before
+                      << '\n';
+            return 1;
+        }
+        vector_all_masked_ptw_requests +=
+            all_masked.ptw_requests() - ptw_before;
+        vector_all_masked_dcache_requests +=
+            all_masked.tilelink_requests() - dcache_before;
+        ++vector_all_masked_controls;
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases="
               << canonical_boundary_cases + 4 + ppn_access_fault_cases +
                     vs_gpa_width_cases +
@@ -2880,6 +3063,18 @@ int run_translation_faults(int argc, char **argv)
               << " gstage_range_vector_stores=" << gstage_range_coverage.vector_stores
               << " canonical_boundary_cases=" << canonical_boundary_cases
               << " vector_vstart_faults=" << vector_vstart_faults
+              << " vector_later_element_faults="
+              << vector_later_element_faults
+              << " vector_later_address_matches="
+              << vector_later_address_matches
+              << " vector_later_address_unattributed="
+              << vector_later_address_unattributed
+              << " vector_all_masked_controls="
+              << vector_all_masked_controls
+              << " vector_all_masked_ptw_requests="
+              << vector_all_masked_ptw_requests
+              << " vector_all_masked_dcache_requests="
+              << vector_all_masked_dcache_requests
               << " noncanonical_ptw_requests=" << noncanonical_ptw_requests
               << " ppn_access_fault_cases=" << ppn_access_fault_cases
               << " stage1_ppn_access_fault_cases="

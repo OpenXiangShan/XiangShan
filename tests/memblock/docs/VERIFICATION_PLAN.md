@@ -67,7 +67,7 @@ combinations have occurred or establishes a coverage percentage.
 | Scalar/FP loads | Width/sign/lane/immediate, FP boxing/destination, data/errors; load_feedback.inc, scoreboards | Wider timing/error interactions |
 | Stores/forwarding | Address/data order, masks, commit, cross-producer forwarding, directed readback, constrained-random final word readback for cacheable identity-mapped commits and same-context hypervisor readback for permitted/aligned cacheable stores | Output-only pulses, remaining aliased/non-cacheable/fault-path final state |
 | Vector addressing | Unit/strided/indexed/segment/whole-register shapes, data/identity/policy, full 128-bit mask operand with directed high-element load/store/indexed cases; cache_queue.inc, vector_memory.inc | Ordered side-effect targets, all concurrent shapes, and reserved/illegal mask-shape combinations remain |
-| Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA | Default exceptional vstart skip for other shapes, arbitrary restart/progress, canonical-alias sensitivity |
+| Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA, single-uop later-element/masked `vstart=1` faults, and an all-masked unmapped control that observes no PTW/DCache traffic | Default exceptional vstart skip for other shapes, arbitrary restart/progress, canonical-alias sensitivity, and exception-address attribution for intra-uop page-crossing faults |
 | Translation | Mode pairs, permissions, leaf sizes, encoding/PPN/range, PBMT/NAPOT, permission-fault and PMP-denied store readback (readable mapping, Bare fallback, or re-enabled PMP region) | Uniform fault-side-effect checks for unreadable/device mappings, nested boundaries/GPA wrap/A-D races |
 | Protection/H | PMP TOR/NAPOT/lock/edges, HLV/HLVX/HSV; protection.inc | Instruction PMP and broader PMA/PMP/H/misalignment crosses |
 | Refill/MLP | Critical beat, merge, distinct misses, held/reversed D, capacity-plus-one, DCache/PTW/Uncache source lifetime | Broader error/interleaving and malformed response lifecycle |
@@ -142,8 +142,12 @@ Priority work, each requiring executable stimulus and an independent check:
    remaining legal aliased translations, non-cacheable/device effects and
    fault-path side-effect checks; one cross-alias path is now directed, but
    first-access cancellation is detected and LQ-accounted, but the backend replay that follows it is still not modeled. Keep the CMO
-   exclusion explicit. Check exceptional `vstart` and broader forbidden-demand
-   attribution.
+   exclusion explicit. Single-uop later-element and masked page faults now
+   require `vstart=1`, and an all-masked unmapped load must complete without a
+   fault while the run observes no PTW/DCache request; extend this to broader
+   exceptional `vstart`, fault address attribution, and forbidden-demand
+   attribution. The intra-uop page-crossing faulting-VA payload remains
+   unattributed and is not an oracle.
 2. Preserve the accepted-B-before-C probe provenance now implemented; add
    complete C multibeat identity checking. Retain the DCache E first-D/sink and
    PTW/Uncache source-lifetime checks.

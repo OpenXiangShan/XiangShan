@@ -65,6 +65,15 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
 - `translation-faults` adds a two-uop vector page fault: uop0 reads the mapped
   tail of a page, uop1 faults at the next page with `vstart=8`. The exceptional
   writeback is checked for exact `vstart=8` and fault address `page+0x1000`.
+- `translation-faults` also checks two single-uop page-crossing vector loads:
+  one with element 0 mapped and element 1 in an unmapped page, and one with
+  only element 1 active (mask bit 0 clear). Both require a load page fault and
+  exact `vstart=1`; the masked case proves `vstart` is the architectural
+  element index, not the active-element count. A third all-masked load at an
+  unmapped VA must complete without a fault; the same run observes zero PTW
+  and zero DCache requests for it. The separate exception-address payload is
+  not a gate for the intra-uop shapes because the current DUT does not publish
+  the faulting element address there.
 - `translation-alias` maps two Sv39 virtual pages to one physical page and
   proves a committed store through one VA is visible through the other, both
   after drain and with SBuffer non-empty at an in-flight load issue. A cold
@@ -94,15 +103,20 @@ The current qualification commands are:
   `translation-alias`.
 - Finite coverage and corner campaigns with 4608 actions per seed.
 - Full-mask directed and mixed campaigns described below.
+- A current-tree `translation-faults` run with the single-uop/masked
+  later-element faults and the all-masked control.
 - An 8-seed spec confidence run with 16384 actions per seed.
 - The configured 8-seed, 16384-action coverage regression.
 
 The qualification artifacts are local under
-`build/memblock/agent-campaign-12` through `agent-campaign-17` (not guaranteed
+`build/memblock/agent-campaign-12` through `agent-campaign-18` (not guaranteed
 by a clean clone). The full 6x4608/4x4608 campaigns are from
-`agent-campaign-12`; the final benchmark is `agent-campaign-16`; the 8x16384
-spec and coverage runs are from `agent-campaign-13` and `agent-campaign-14`.
-The full-mask and accepted-B logs are in `agent-campaign-17`.
+`agent-campaign-12`; the older frozen benchmark is `agent-campaign-16`; the
+8x16384 spec and coverage runs are from `agent-campaign-13` and
+`agent-campaign-14`. The full-mask and accepted-B logs are in
+`agent-campaign-17`; the current-tree benchmark, private runtime,
+`translation-faults` log and vector fault evidence are in
+`agent-campaign-18`.
 The runtime was frozen after
 a fresh root `build/rtl` generation, `prepare-rtl`, and Picker/model rebuild for
 the `StoreQueue.scala` fix; the previous model was not reused.
@@ -114,6 +128,7 @@ The current qualification is:
 | Infrastructure unit | 290 tests pass | Unit checks do not establish DUT functional coverage |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Selected benchmark | 85/85 pass, 377.7 s | Seed 1; random budget 256; catalog-specific action overrides retained; `agent-campaign-16` |
+| Current selected benchmark | 85/85 pass, 437.96 s | Seed 1; random budget 256; current harness and private runtime; artifact `agent-campaign-18/benchmark.json`; run alongside six CMO-stress seeds, so wall time is not a clean solo measurement |
 | Extra directed contracts | 6/6 pass | cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high, vector-segment-noncanonical, translation-alias |
 | All directed scenarios | 90/90 pass | Current-tree sweep of every catalogued directed test (constrained-random excluded); artifact `agent-campaign-17/directed-logs` |
 | Coverage campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 101..106; artifact `agent-campaign-12`; 1029.0 s; capability only |
@@ -129,7 +144,7 @@ The current qualification is:
 | CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line zero/store both orders, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass | Directed `cbo-zero-contracts`; see CPU bug document |
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
 | High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
-| Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA | One directed shape; broader fault-element/FOF progress remains open |
+| Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1`; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | The intra-uop exception-address payload is unattributed and not checked; broader fault-element/FOF progress remains open |
 | Permission-fault store side effects | `translation-permissions` passes with 10/10 fault-store readbacks (readable mapping or Bare fallback); `pmp-contracts` adds one PMP-denied store readback | Device fault paths still need another observation route |
 | Non-cacheable final effects | committed NC store/atomic words match the manager bus image in passing mixed runs; 2/2 4608-action seeds (210/211) check 141/142 words, seed 215 checks 146, and smaller seeds cover the uncache-drain path | Manager bus image, not a DUT uncache read; device side effects, aliases and CMO remain outside |
 | Atomic dirty-line persistence | `atomic-contracts` passes; ProbeAckData carries the updated line and updates the manager image | AMO target only; cross-hart/concurrent eviction not covered |
@@ -137,8 +152,9 @@ The current qualification is:
 Rows through `agent-campaign-16` were produced before the current harness-only
 full-mask, accepted-B, cross-alias and fault-store changes.  `agent-campaign-17`
 qualifies those new checks on the current tree, including a fresh 8x16384
-coverage regression (seeds 301..308).  It is not a rerun of the 85-entry frozen
-benchmark or the 48-hour final acceptance campaign.
+coverage regression (seeds 301..308).  `agent-campaign-18` reruns the selected
+85-entry benchmark on the current harness and records the new single-uop/masked
+vector fault cases; it is not the 48-hour final acceptance campaign.
 
 The CBO.ZERO pre-fix replay fails at cycle 33333 with
 `timed out waiting for scalar store writebacks sq=3/6
@@ -160,7 +176,8 @@ traffic, not all legal classes occurred or every external effect was checked.
 Current missing rules include remaining aliased/device final-byte observation,
 uniform fault forbidden-demand checks, same-address B/C
 attribution and complete C multibeat identity, the same-line CBO.ZERO forward
-window before Sbuffer s2, and independent verifier schema/backpressure checks.
+window before Sbuffer s2, intra-uop page-crossing fault-address attribution,
+and independent verifier schema/backpressure checks.
 The accepted-B-before-C gate, full 128-bit mask operand and explicit
 first-access cross-alias cancellation accounting are implemented, but the UT
 does not model the backend replay that follows `ld2Cancel`.
@@ -196,8 +213,11 @@ documented as a residual limitation. The data-less Release full-line/shrink
 check was corrected to ignore `corrupt` and approved.
 
 The later non-cacheable bus-image final check, the opt-in `ld2Cancel` canceled
-attempt handling, and the same-line CBO/LMUL8 directed additions were not part
-of that independent review; they are self-reviewed for this snapshot.
+attempt handling, the same-line CBO/LMUL8 directed additions, and the
+single-uop/masked later-element vector fault additions were not part of that
+independent review; they are self-reviewed for this snapshot. The vector
+fault addition records an unattributed intra-uop exception-address payload as
+a gap, not as a confirmed bug.
 
 This qualification confirms the stated capability and limitations; it does not
 establish verification closure or clean RTL elaboration provenance. The oracle,
