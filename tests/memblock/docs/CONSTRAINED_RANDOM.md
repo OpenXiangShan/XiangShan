@@ -438,7 +438,8 @@ probe-depth classes 4..7 were unobserved; a 1×16384 run selected only six
 standalone probe sequences and also failed. Use `STRICT_CONSTRAINT='probe=500'`
 to target the standalone probe-depth classes explicitly; a 4608-action run then
 covered all eight depth classes but still left some enabled probe-cap/need-data
-cross classes unobserved. Documentation schema
+cross classes unobserved; `probe=1000` closed all probe bins but shifted the
+remaining strict gap to a vector canonical-boundary cross. Documentation schema
 consistency is separately checked by
 [check_io_coverage.py](../scripts/check_io_coverage.py).
 [VERIFICATION_PLAN.md#regression-acceptance](VERIFICATION_PLAN.md#regression-acceptance)

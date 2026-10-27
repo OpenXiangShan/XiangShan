@@ -226,7 +226,9 @@ also clean but still selected only six standalone probe sequences, so action
 count alone is not the lever. That is the intended sparse-coverage rejection,
 not a functional failure; `STRICT_CONSTRAINT='probe=500'` targets the depth
 bin, and a 150-sequence probe-heavy run covered all eight depth classes but
-still left some enabled probe-cap/need-data cross classes unobserved. The
+still left some enabled probe-cap/need-data cross classes unobserved; a
+317-sequence `probe=1000` run closed all probe bins but left one vector
+canonical-boundary cross unobserved. The
 in-process final readback is a functional oracle before the summary is
 written; the verifier does not re-derive its expected data. Runtime metadata
 records paths/sizes/resolved dependencies, not source-to-model identity. These
