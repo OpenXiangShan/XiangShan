@@ -1198,6 +1198,7 @@ int run_dcache_release(int argc, char **argv)
 
 int run_dcache_coherence(int argc, char **argv)
 {
+    unsigned deep_probe_depth = 0;
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t line = memblock::kDefaultMemoryBase + 0xd0000;
     environment.memory().fill_incrementing(line, 64, 0x31);
@@ -1394,6 +1395,98 @@ int run_dcache_coherence(int argc, char **argv)
         return 1;
     }
 
+    // Force the deepest probe window the DCache exposes.  A single clean
+    // probe pair only reaches depth 2; the strict coverage bins require the
+    // deeper enabled classes, so request eight distinct lines together and
+    // require eight accepted B transactions and eight C responses.
+    {
+        memblock::Environment deep(argc, argv);
+        constexpr std::uint64_t deep_base =
+            memblock::kDefaultMemoryBase + 0x100000ULL;
+        constexpr unsigned deep_lines = 8;
+        constexpr unsigned deep_depth = 8;
+        constexpr unsigned deep_warm = 4;
+        for (unsigned index = 0; index < deep_lines; ++index) {
+            deep.memory().fill_incrementing(
+                deep_base + index * 0x1000, 64,
+                static_cast<std::uint8_t>(0x21 + index * 7));
+        }
+        deep.configure_backpressure(0x3c6ef372fe94f82bULL, true);
+        if (!deep.reset()) {
+            std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                      << deep.cycle() << " phase=deep-probe-reset reason="
+                      << deep.error() << '\n';
+            return 1;
+        }
+        // Keep four distinct lines resident.  The remaining four are absent;
+        // the DUT encodes their no-permission ProbeAck report as 5 in this
+        // configuration, while the resident clean lines report 2.  One probe
+        // per line reaches depth eight without changing a line twice.
+        for (unsigned index = 0; index < deep_warm; ++index) {
+            const memblock::LoadTransaction warm{
+                .address = deep_base + index * 0x1000 + 0x8,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(index),
+                .lq = static_cast<std::uint8_t>(index),
+                .pdest = static_cast<std::uint8_t>(30 + index),
+                .lane = index % memblock::kScalarLoadLanes,
+            };
+            deep.expect_load(warm);
+            if (!deep.set_rob_head(warm.rob, warm.rob_flag) ||
+                !deep.enqueue_load(warm) ||
+                !deep.issue_load(warm, 1024) ||
+                !deep.run_until_complete(4096) ||
+                !deep.run_until_lq_retired(2048)) {
+                std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                          << deep.cycle() << " phase=deep-probe-warm index="
+                          << index << " reason=" << deep.error() << '\n';
+                return 1;
+            }
+        }
+        if (!deep.hold_dcache_c_until_probes(deep_depth)) {
+            std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                      << deep.cycle() << " phase=deep-probe-c-hold reason="
+                      << deep.error() << '\n';
+            return 1;
+        }
+        for (unsigned index = 0; index < deep_depth; ++index) {
+            const std::uint8_t expected_report =
+                index < deep_warm ? 2 : 5;
+            if (!deep.request_dcache_probe(
+                    deep_base + index * 0x1000,
+                    2, false, expected_report)) {
+                std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                          << deep.cycle()
+                          << " phase=deep-probe-request index=" << index
+                          << " reason=" << deep.error() << '\n';
+                return 1;
+            }
+        }
+        for (unsigned cycle = 0;
+             cycle < 4096 &&
+             (deep.dcache_probes() < deep_depth ||
+              deep.dcache_max_probe_outstanding() < deep_depth);
+             ++cycle) {
+            if (!deep.run_cycles(1)) {
+                break;
+            }
+        }
+        if (deep.dcache_probes() != deep_depth ||
+            deep.dcache_max_probe_outstanding() < deep_depth ||
+            !deep.run_until_probe_responses(deep_depth, 8192) ||
+            deep.dcache_probe_responses() != deep_depth) {
+            std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                      << deep.cycle() << " phase=deep-probe-depth reason="
+                      << deep.error() << " probes=" << deep.dcache_probes()
+                      << " max_outstanding="
+                      << deep.dcache_max_probe_outstanding()
+                      << " responses=" << deep.dcache_probe_responses()
+                      << '\n';
+            return 1;
+        }
+        deep_probe_depth = deep.dcache_max_probe_outstanding();
+    }
+
     const std::uint64_t expected_grants =
         environment.dcache_refills() + environment.dcache_acquire_perms();
     const bool passed = environment.dcache_probes() == 3 &&
@@ -1437,6 +1530,7 @@ int run_dcache_coherence(int argc, char **argv)
               << " overlap_probe_sources=" << overlap.dcache_probe_sources()
               << " overlap_probe_depth="
               << overlap.dcache_max_probe_outstanding()
+              << " deep_probe_depth=" << deep_probe_depth
               << '\n';
     return 0;
 }
