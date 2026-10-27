@@ -72,6 +72,9 @@ def _make_recorder(tmp_path):
         artifact_tag="ifu_compact_unit",
         output_dir=tmp_path,
     )
+    # Fake-DUT units have no compiled inventory; generated-ABI gates below
+    # independently require the published inventory and every native parent.
+    recorder._registered_internal_signals = None
     recorder.attach(env)
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     recorder.attach_toffee_sink(sink)
@@ -381,7 +384,7 @@ def _set_ifu_output(
         dut.set(_PREFIX + f"io_toIBuffer_bits_isRvc_{slot}", is_rvc)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_offset", end_offset)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_predTaken", slot == entries[-1][0])
-        dut.set(_PREFIX + f"io_toIBuffer_bits_isLastInFtqEntry_{slot}", slot == entries[-1][0])
+        dut.set(_PREFIX.replace("__Vtogcov__", "") + f"io_toIBuffer_bits_isLastInFtqEntry_{slot}", slot == entries[-1][0])
         dut.set(_PREFIX + f"io_toIBuffer_bits_ftqPtr_{slot}_flag", ftq_flag)
         dut.set(_PREFIX + f"io_toIBuffer_bits_ftqPtr_{slot}_value", ftq_value)
         exception_mask_value |= (int(exception_mask) & 1) << slot
@@ -1464,6 +1467,8 @@ def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
         ],
     )
 
+    for slot in range(4):
+        dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_fixedTaken", int(slot == 3))
     sample_cfvec_coverage(recorder, env, 1)
 
     assert recorder.key_hit("ifu_instr_compact", "contiguous_slots")
@@ -3074,7 +3079,10 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_offset",
         _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_predTaken",
         "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__fixedTakenVec_0",
-        _PREFIX + "io_toIBuffer_bits_isLastInFtqEntry_0",
+        # Ifu.scala output is optimized away; all native expression parents remain required.
+        "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
+        "Frontend_top.Frontend.inner_ifu.select_0",
+        "Frontend_top.Frontend.inner_ifu.select_1",
         _PREFIX + "io_toIBuffer_bits_exceptionType_value",
         _PREFIX + "io_toIBuffer_bits_exceptionMask",
         _PREFIX + "io_toIBuffer_bits_ftqPtr_0_flag",

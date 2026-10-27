@@ -1027,31 +1027,30 @@ class FrontendFuncovSampleHub:
         enq = self._read_first_dut_signal(
             dut,
             (
+                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable",
+                "inner_ifu.io_toIBuffer_bits_enqEnable",
                 "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
                 "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable",
+                "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_enqEnable",
             ),
         )
         if valid is None or enq is None:
             return
 
-        masks: list[int] = []
-        for index in range(35):
-            value = self._read_first_dut_signal(
-                dut,
-                (
-                    f"Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_exceptionMask_{index}",
-                    f"Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask_{index}",
-                    f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask_{index}",
-                ),
-            )
-            if value is None:
-                break
-            masks.append(int(value) & 1)
-        if not masks:
+        # Current V3 exports a packed [35:0] exceptionMask.
+        packed = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_exceptionMask",
+                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask",
+                "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask",
+            ),
+        )
+        if packed is None:
             return
 
         enq_bits = int(enq)
-        mask_bits = sum(bit << index for index, bit in enumerate(masks))
+        mask_bits = int(packed)
         invalid_mask = mask_bits & ~enq_bits
         self.risk_observations.append(
             {

@@ -51,6 +51,9 @@ def _make_recorder(tmp_path):
         artifact_tag="ifu_cacheable_pipeline_unit",
         output_dir=tmp_path,
     )
+    # Fake-DUT units have no compiled inventory; generated-ABI gates below
+    # independently require the published inventory and every native parent.
+    recorder._registered_internal_signals = None
     recorder.attach(env)
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     recorder.attach_toffee_sink(sink)
@@ -247,11 +250,9 @@ def _set_bin907_s2(
     )
     dut.set(_BIN907_SIGNALS["to_ibuffer_enq"][0], active_mask)
     dut.set(_BIN907_SIGNALS["to_ibuffer_valid_mask"][0], active_mask)
-    for index in range(35):
-        dut.set(
-            f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{index}",
-            int(index == int(slot)),
-        )
+    # New DUT exports packed [35:0] exceptionMask, not per-slot bits.
+    dut.set(f"{_IFU_PREFIX}io_toIBuffer_bits_exceptionMask", active_mask)
+    dut.set(f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask", active_mask)
     output_ftq = ftq if output_ftq is None else output_ftq
     dut.set(f"{_IFU_PREFIX}io_toIBuffer_bits_ftqPtr_{slot}_flag", output_ftq[0])
     dut.set(f"{_IFU_PREFIX}io_toIBuffer_bits_ftqPtr_{slot}_value", output_ftq[1])
@@ -600,11 +601,9 @@ def test_line0_late_fault_survives_stall_and_binds_one_exception_slot(tmp_path):
         "to_ibuffer_enq": 1,
     }.items():
         dut.set(_LATE_FAULT_SIGNALS[key][0], value)
-    for slot in range(35):
-        dut.set(
-            f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}",
-            int(slot == 0),
-        )
+    # New DUT exports packed [35:0] exceptionMask, not per-slot bits.
+    dut.set(f"{_IFU_PREFIX}io_toIBuffer_bits_exceptionMask", 1)
+    dut.set(f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask", 1)
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
 
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_008")
@@ -661,8 +660,9 @@ def test_line0_tl_fault_requires_matching_s0_source_before_s1_stall(tmp_path):
         f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_0_icacheMeta_exception_value",
         3,
     )
-    dut.set(_LATE_FAULT_SIGNALS["line0_tl_corrupt"][0], 1)
-    dut.set(_LATE_FAULT_SIGNALS["line0_tl_denied"][0], 1)
+    from env.support.ifu_native_aliases import LINE0_TL_EXCEPTION_PATHS, LINE0_PRIOR_EXCEPTION_PATHS
+    dut.set(LINE0_TL_EXCEPTION_PATHS[0], 3)
+    dut.set(LINE0_PRIOR_EXCEPTION_PATHS[0], 0)
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
 
     _idle_request(dut)
@@ -703,11 +703,9 @@ def test_line0_tl_fault_requires_matching_s0_source_before_s1_stall(tmp_path):
         "to_ibuffer_enq": 1,
     }.items():
         dut.set(_LATE_FAULT_SIGNALS[key][0], value)
-    for slot in range(35):
-        dut.set(
-            f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}",
-            int(slot == 0),
-        )
+    # New DUT exports packed [35:0] exceptionMask, not per-slot bits.
+    dut.set(f"{_IFU_PREFIX}io_toIBuffer_bits_exceptionMask", 1)
+    dut.set(f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask", 1)
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 4)
 
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_008")
@@ -716,8 +714,8 @@ def test_line0_tl_fault_requires_matching_s0_source_before_s1_stall(tmp_path):
     observations = detail["evidence"][-1]["observations"]
     assert observations["fault_source"] == "tl_denied"
     assert observations["source_signal_paths"] == {
-        "line0_tl_corrupt": _LATE_FAULT_SIGNALS["line0_tl_corrupt"][0],
-        "line0_tl_denied": _LATE_FAULT_SIGNALS["line0_tl_denied"][0],
+        "line0_tl_corrupt": f"({LINE0_TL_EXCEPTION_PATHS[0]} == 5)",
+        "line0_tl_denied": f"({LINE0_TL_EXCEPTION_PATHS[0]} == 3)",
     }
 
 
@@ -1693,7 +1691,8 @@ def test_cacheable_sampler_signals_match_generated_contract():
         _UPSTREAM_SIGNALS["real_two_fetch"][0],
         *(
             candidates[0]
-            for candidates in _LATE_FAULT_SIGNALS.values()
+            for key, candidates in _LATE_FAULT_SIGNALS.items()
+            if key not in {"line0_tl_corrupt", "line0_tl_denied"}
         ),
     }
     required.add(f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask")
@@ -1737,5 +1736,8 @@ def test_cacheable_sampler_signals_match_generated_contract():
         f"{_ICACHE_PREFIX}mainPipe.s1_data_r{'' if bank == 0 else f'_{bank}'}"
         for bank in range(16)
     }
+    from env.support.ifu_native_aliases import LINE0_TL_EXCEPTION_PATHS, LINE0_PRIOR_EXCEPTION_PATHS
+    required.add(LINE0_TL_EXCEPTION_PATHS[0])
+    required.add(LINE0_PRIOR_EXCEPTION_PATHS[0])
     assert required <= names
     assert len(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS) == 30

@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import deque
 from typing import Optional
 
+from ....support.ifu_native_aliases import LINE0_TL_EXCEPTION_PATHS, read_line0_tl_cause
+
 from ..common.dut import _dut, _read_first
 from .owner_v3_funcov import mark_owner_v3_checked
 
@@ -342,6 +344,19 @@ def _read_late_fault_signal_with_path(
     dut = _dut(recorder)
     if dut is None:
         return None, None
+    if key in {"line0_tl_corrupt", "line0_tl_denied"}:
+        projection = read_line0_tl_cause(lambda name: recorder._try_read_dut_signal(dut, name))
+        if projection is not None:
+            recorder._ifu_line0_tl_source_projection = {
+                "expression": projection.expression,
+                "source_values": projection.source_values,
+                "normalized_cause_only": True,
+            }
+            code = 5 if key == "line0_tl_corrupt" else 3
+            path = next(iter(projection.source_values))
+            return int(projection.value == code), f"({path} == {code})"
+        # Neither missing nor invalid encoded state can use raw/merged/live flags.
+        return None, None
     for name in _LATE_FAULT_SIGNALS[key]:
         value = recorder._try_read_dut_signal(dut, name)
         if value is not None:
@@ -413,9 +428,14 @@ def _read_bin907_raw_candidate_count(
 
 
 def _read_exception_mask(recorder) -> Optional[int]:
+    # Current V3 exports a packed [35:0] exceptionMask, not per-slot bits.
     return _read_first(
         recorder,
-        (f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask",),
+        (
+            f"{_IFU_PREFIX}io_toIBuffer_bits_exceptionMask",
+            f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask",
+            "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask",
+        ),
     )
 
 
@@ -511,6 +531,7 @@ def _capture_line0_tl_fault_source(recorder, cycle: int) -> None:
             "line0_tl_corrupt": tl_corrupt_path,
             "line0_tl_denied": tl_denied_path,
         },
+        "source_projection": getattr(recorder, "_ifu_line0_tl_source_projection", None),
     }
 
 

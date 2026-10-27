@@ -47,6 +47,7 @@ def funcov_sampler_paths() -> dict[str, Path]:
         "funcov/py/ifu/sampler.py": root / "py" / "ifu" / "sampler.py",
         "funcov/py/ifu/cfvec_funcov.py": root / "py" / "ifu" / "cfvec_funcov.py",
         "funcov/py/ifu/compact_funcov.py": root / "py" / "ifu" / "compact_funcov.py",
+        "env/support/ifu_native_aliases.py": root.parent / "support" / "ifu_native_aliases.py",
         "funcov/py/ifu/owner_v3_funcov.py": root / "py" / "ifu" / "owner_v3_funcov.py",
         "funcov/py/ifu/mmio_v3_funcov.py": root / "py" / "ifu" / "mmio_v3_funcov.py",
         "funcov/py/ifu/mmio_nc_owner_funcov.py": root / "py" / "ifu" / "mmio_nc_owner_funcov.py",

@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from ..common.dut import _read
 from ..common.fetch_memory import _read_expected_fetch_raw, _recover_unavailable_instr
+from ....support.ifu_native_aliases import read_last_in_ftq
 from ....support.pc_utils import fold_pc
 from ....support.rvc_decoder import expand_rvc
 from .owner_v3_funcov import mark_owner_v3_checked
@@ -173,7 +174,34 @@ def _record_predchecker_taken_jalr_form_observation(
 
 
 def _read_ifu_output_slot(recorder, dut, field: str, slot: int, suffix: str = "") -> Optional[int]:
+    if field == "isLastInFtqEntry" and not suffix:
+        projection = read_last_in_ftq(lambda name: recorder._try_read_dut_signal(dut, name), int(slot))
+        witnesses = getattr(recorder, "_ifu_last_in_ftq_projections", {})
+        if projection is None:
+            witnesses.pop(int(slot), None)
+            recorder._ifu_last_in_ftq_projections = witnesses
+            return None
+        witnesses[int(slot)] = {
+            "value": projection.value, "expression": projection.expression,
+            "source_values": projection.source_values,
+            "snapshot_cycle": getattr(recorder, "_cycle_snapshot_cycle", None),
+        }
+        recorder._ifu_last_in_ftq_projections = witnesses
+        return projection.value
     return _read_ifu_internal(recorder, dut, f"io_toIBuffer_bits_{field}_{int(slot)}{suffix}")
+
+
+def _read_packed_exception_mask(recorder, dut) -> Optional[int]:
+    """Read the current packed toIBuffer exceptionMask ([35:0])."""
+
+    return _read_ifu_internal(recorder, dut, "io_toIBuffer_bits_exceptionMask")
+
+
+def _read_exception_mask_bit(recorder, dut, slot: int) -> Optional[int]:
+    packed = _read_packed_exception_mask(recorder, dut)
+    if packed is None:
+        return None
+    return (int(packed) >> int(slot)) & 1
 
 
 def _read_ibuffer_internal(recorder, dut, stem: str) -> Optional[int]:
@@ -456,9 +484,7 @@ def _read_frontend_trigger_s2_transaction(recorder, dut, lane: int) -> Optional[
         "expanded": _read_ifu_internal(
             recorder, dut, f"s2_expandedInstrDataVec_{int(lane)}"
         ),
-        "exception_mask": _read_ifu_output_slot(
-            recorder, dut, "exceptionMask", int(lane)
-        ),
+        "exception_mask": _read_exception_mask_bit(recorder, dut, int(lane)),
     }
     missing = tuple(name for name, value in values.items() if value is None)
     if missing:
@@ -1185,9 +1211,15 @@ def _sample_owner_address_boundary(
 
 
 def _read_ifu_output_mask(recorder, dut, field: str) -> Optional[int]:
+    # Current V3 exports exceptionMask as a packed [35:0] bus.
+    if field == "exceptionMask":
+        packed = _read_packed_exception_mask(recorder, dut)
+        if packed is None:
+            return None
+        return int(packed)
+
     mask = 0
-    # The final aligned slot is a sentinel and is not part of IBufferEnqueueWidth.
-    for slot in range(_IFU_OUTPUT_SLOT_COUNT - 1):
+    for slot in range(_IFU_OUTPUT_SLOT_COUNT):
         value = _read_ifu_output_slot(recorder, dut, field, slot)
         if value is None:
             return None
@@ -3831,9 +3863,9 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         is_rvc = _read_ifu_output_slot(recorder, dut, "isRvc", slot)
         end_offset = _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_offset")
         pred_taken = _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_predTaken")
-        fixed_taken = _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_fixedTaken")
         is_last_in_ftq_entry = _read_ifu_output_slot(recorder, dut, "isLastInFtqEntry", slot)
-        exception_mask = _read_ifu_output_slot(recorder, dut, "exceptionMask", slot)
+        fixed_taken = _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_fixedTaken")
+        exception_mask = _read_exception_mask_bit(recorder, dut, slot)
         ftq_flag = _read_ifu_output_slot(recorder, dut, "ftqPtr", slot, "_flag")
         ftq_value = _read_ifu_output_slot(recorder, dut, "ftqPtr", slot, "_value")
         records.append(
@@ -3849,6 +3881,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 "pred_taken": pred_taken,
                 "fixed_taken": fixed_taken,
                 "is_last_in_ftq_entry": is_last_in_ftq_entry,
+                "last_in_ftq_source": getattr(recorder, "_ifu_last_in_ftq_projections", {}).get(slot),
                 "exception_mask": exception_mask,
                 "ftq_ptr": None if ftq_flag is None or ftq_value is None else (int(ftq_flag), int(ftq_value)),
             }
