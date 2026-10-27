@@ -1,3 +1,4 @@
++incdir+./base_seq_help/soft_test
 
 +incdir+./base_seq_help
 +incdir+./base_seq

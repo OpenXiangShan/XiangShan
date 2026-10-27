@@ -8,6 +8,17 @@
 `ifndef COMMON_DATA_TRANSACTION__SV
 `define COMMON_DATA_TRANSACTION__SV
 
+// 成熟 raw 前缀的离线提交凭据；只含本 replay 状态，不包含 issue residency。
+// prepare 冻结，commit 恰好消费一次；reset/model/raw revision 变化使其失效。
+class memblock_pma_pmp_replay_ticket;
+    bit consumed;
+    longint unsigned reset_epoch;
+    longint unsigned service_revision;
+    longint unsigned raw_revision;
+    memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t events[$];
+    pma_pmp_csr_replay_ticket model_ticket;
+endclass:memblock_pma_pmp_replay_ticket
+
 class common_data_transaction extends uvm_object;
 
     typedef bit [53:0] memblock_uid_tlb_wait_shape_key_t;
@@ -145,6 +156,8 @@ class common_data_transaction extends uvm_object;
     memblock_csr_pmp_pma_profile_t csr_dynamic_candidate_profile;
     longint unsigned             csr_dynamic_candidate_after_sample;
     bit                          csr_dynamic_candidate_pmp_pma_required;
+    // 当前 dynamic action 预期捕获/成熟的累计 write 数；stage 设置、提交/reset 清零。
+    longint unsigned csr_dynamic_candidate_expected_write_count;
     // 中文注释：PMA/PMP model 是整个 testcase 的唯一运行期表 owner。表项只由
     // CSR monitor 的 raw write 回放更新；UID request-fire 冻结 generation 后，RM
     // 只能通过只读 API 查询对应历史快照，不能读取当前可变表。
@@ -153,6 +166,10 @@ class common_data_transaction extends uvm_object;
     // 只允许单调增加；同 edge request 使用旧表，因此 sample 相等的写入保留给
     // 下一笔 request 才消费。
     longint unsigned         pma_pmp_last_applied_csr_sample;
+    // replay 所属 reset epoch、提交版本和已消费 generic write 数，独立于 model enable。
+    longint unsigned pma_pmp_csr_replay_reset_epoch;
+    longint unsigned pma_pmp_csr_replay_service_revision;
+    longint unsigned pma_pmp_csr_applied_count;
     memblock_issue_q_item_t  load_issue_q[$];
     memblock_issue_q_item_t  sta_issue_q[$];
     memblock_issue_q_item_t  std_issue_q[$];
@@ -330,6 +347,7 @@ class common_data_transaction extends uvm_object;
         csr_committed_pmp_pma_profile = '{default:'0};
         csr_dynamic_candidate_state = null;
         csr_dynamic_candidate_valid = 1'b0;
+        csr_dynamic_candidate_expected_write_count = 0;
         csr_dynamic_candidate_owner = '{default:'0};
         csr_dynamic_candidate_profile = '{default:'0};
         csr_dynamic_candidate_after_sample = 0;
@@ -337,6 +355,9 @@ class common_data_transaction extends uvm_object;
         pma_pmp_model = memblock_pma_pmp_model::get();
         pma_pmp_model.reset_and_init_v2_profile();
         pma_pmp_last_applied_csr_sample = 0;
+        pma_pmp_csr_replay_reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+        pma_pmp_csr_replay_service_revision = 1;
+        pma_pmp_csr_applied_count = 0;
         next_tlb_entry_generation = 0;
         parent_lookup_count = 0;
         parent_block_64k_count = 0;
@@ -371,6 +392,18 @@ class common_data_transaction extends uvm_object;
 
     function void reset_all_tables(input int unsigned main_trans_num_i);
         int unsigned uid;
+
+        if (!memblock_sync_pkg::pma_pmp_csr_epoch_is_current(
+                memblock_sync_pkg::get_l2tlb_current_reset_epoch())) begin
+            `uvm_fatal("COMMON_DATA", "reset_all_tables requires an initialized current PMA/PMP reset domain")
+        end
+        if (pma_pmp_model == null) begin
+            pma_pmp_model = memblock_pma_pmp_model::get();
+        end
+        if (!precheck_pma_pmp_csr_replay_reset(
+                1'b0, memblock_sync_pkg::get_l2tlb_current_reset_epoch())) begin
+            `uvm_fatal("COMMON_DATA", "PMA/PMP testcase reset revision precheck failed")
+        end
 
         if (main_trans_num_i == 0) begin
             `uvm_fatal("COMMON_DATA", "reset_all_tables requires non-zero main_trans_num")
@@ -500,15 +533,17 @@ class common_data_transaction extends uvm_object;
         csr_committed_pmp_pma_profile = '{default:'0};
         csr_dynamic_candidate_state = null;
         csr_dynamic_candidate_valid = 1'b0;
+        csr_dynamic_candidate_expected_write_count = 0;
         csr_dynamic_candidate_owner = '{default:'0};
         csr_dynamic_candidate_profile = '{default:'0};
         csr_dynamic_candidate_after_sample = 0;
         csr_dynamic_candidate_pmp_pma_required = 1'b0;
-        if (pma_pmp_model == null) begin
-            pma_pmp_model = memblock_pma_pmp_model::get();
-        end
         pma_pmp_model.reset_and_init_v2_profile();
+        memblock_sync_pkg::reset_raw_pma_pmp_csr_writes();
         pma_pmp_last_applied_csr_sample = 0;
+        pma_pmp_csr_replay_reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+        pma_pmp_csr_replay_service_revision = 1;
+        pma_pmp_csr_applied_count = 0;
         for (uid = 0; uid < main_trans_num_i; uid++) begin
             status_by_uid[uid] = status_transaction::type_id::create($sformatf("status_uid_%0d", uid));
             status_by_uid[uid].reset(uid);
@@ -554,7 +589,8 @@ class common_data_transaction extends uvm_object;
         input csr_ctrl_agent_agent_xaction source,
         input memblock_csr_pmp_pma_profile_t profile,
         input longint unsigned after_sample,
-        input bit pmp_pma_required
+        input bit pmp_pma_required,
+        input longint unsigned expected_write_count
     );
         if (!owner.valid || source == null || !profile.valid || after_sample == 0) begin
             `uvm_fatal("COMMON_DATA", "invalid CSR dynamic candidate staging request")
@@ -572,6 +608,7 @@ class common_data_transaction extends uvm_object;
         csr_dynamic_candidate_profile = profile;
         csr_dynamic_candidate_after_sample = after_sample;
         csr_dynamic_candidate_pmp_pma_required = pmp_pma_required;
+        csr_dynamic_candidate_expected_write_count = expected_write_count;
         csr_dynamic_candidate_valid = 1'b1;
     endfunction:stage_csr_dynamic_candidate
 
@@ -588,6 +625,9 @@ class common_data_transaction extends uvm_object;
         if (!memblock_control_owner_equal(csr_dynamic_candidate_owner, owner))
             `uvm_fatal("COMMON_DATA", "special CSR completion owner does not match staged candidate")
         service_csr_pmp_pma_write_observations();
+        if (!csr_pmp_pma_writes_observed(csr_dynamic_candidate_expected_write_count)) begin
+            return 1'b0;
+        end
         if (!memblock_sync_pkg::get_latest_csr_full_snapshot(observed) ||
             observed.sample_seq <= csr_dynamic_candidate_after_sample) begin
             return 1'b0;
@@ -608,6 +648,7 @@ class common_data_transaction extends uvm_object;
         publish_csr_committed_state(csr_dynamic_candidate_state);
         publish_csr_pmp_pma_profile(csr_dynamic_candidate_profile);
         csr_dynamic_candidate_valid = 1'b0;
+        csr_dynamic_candidate_expected_write_count = 0;
         csr_dynamic_candidate_owner = '{default:'0};
         csr_dynamic_candidate_profile = '{default:'0};
         csr_dynamic_candidate_after_sample = 0;
@@ -636,13 +677,78 @@ class common_data_transaction extends uvm_object;
         return profile.valid;
     endfunction:get_csr_pmp_pma_profile
 
-    function void service_csr_pmp_pma_write_observations();
-        longint unsigned current_sample;
-        current_sample = memblock_sync_pkg::peek_current_dut_global_sample();
-        if (current_sample == 0) begin
+    function bit csr_pmp_pma_writes_observed(input longint unsigned expected_count);
+        return memblock_sync_pkg::pma_pmp_csr_epoch_is_current(
+                   pma_pmp_csr_replay_reset_epoch) &&
+               pma_pmp_csr_applied_count >= expected_count &&
+               pma_pmp_csr_applied_count == memblock_sync_pkg::raw_pma_pmp_csr_write_produced_count &&
+               memblock_sync_pkg::raw_pma_pmp_csr_write_size() == 0;
+    endfunction:csr_pmp_pma_writes_observed
+
+
+    function bit precheck_pma_pmp_csr_end_state(
+        output longint unsigned produced_count,
+        output longint unsigned applied_count,
+        output longint unsigned pending_count
+    );
+        produced_count = memblock_sync_pkg::raw_pma_pmp_csr_write_produced_count;
+        applied_count = pma_pmp_csr_applied_count;
+        pending_count = $unsigned(memblock_sync_pkg::raw_pma_pmp_csr_write_size());
+        return produced_count == applied_count && pending_count == 0;
+    endfunction:precheck_pma_pmp_csr_end_state
+
+    function bit precheck_pma_pmp_csr_replay_reset(
+        input bit require_runtime_reset,
+        input longint unsigned epoch
+    );
+        if (pma_pmp_model == null ||
+            !pma_pmp_model.can_reset_csr_replay_state() ||
+            !memblock_sync_pkg::pma_pmp_csr_revision_can_advance(
+                memblock_sync_pkg::get_raw_pma_pmp_csr_write_revision()) ||
+            !memblock_sync_pkg::pma_pmp_csr_revision_can_advance(
+                pma_pmp_csr_replay_service_revision)) begin
+            return 1'b0;
+        end
+        if (require_runtime_reset) begin
+            return memblock_sync_pkg::l2tlb_reset_active() && epoch != 0 &&
+                   epoch == memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+        end
+        return memblock_sync_pkg::pma_pmp_csr_epoch_is_current(epoch);
+    endfunction:precheck_pma_pmp_csr_replay_reset
+
+    function void reset_pma_pmp_csr_replay_for_runtime_epoch();
+        longint unsigned epoch;
+        epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+        if (!memblock_sync_pkg::l2tlb_reset_active() || epoch == 0 ||
+            pma_pmp_csr_replay_reset_epoch == epoch) return;
+        if (!precheck_pma_pmp_csr_replay_reset(1'b1, epoch)) begin
+            `uvm_fatal("COMMON_DATA", "PMA/PMP runtime replay reset precheck failed")
             return;
         end
-        apply_pma_pmp_csr_writes_before_request(current_sample + 1);
+        pma_pmp_model.reset_and_init_v2_profile();
+        memblock_sync_pkg::reset_raw_pma_pmp_csr_writes();
+        pma_pmp_csr_replay_reset_epoch = epoch;
+        pma_pmp_last_applied_csr_sample = 0;
+        pma_pmp_csr_applied_count = 0;
+        pma_pmp_csr_replay_service_revision++;
+    endfunction:reset_pma_pmp_csr_replay_for_runtime_epoch
+
+
+    function void service_csr_pmp_pma_write_observations();
+        memblock_pma_pmp_replay_ticket ticket;
+        longint unsigned published;
+        if (memblock_sync_pkg::l2tlb_reset_active()) return;
+        published = memblock_sync_pkg::get_l2tlb_lifecycle_event_published_seq();
+        if (published == 0 || memblock_sync_pkg::raw_pma_pmp_csr_write_size() == 0) return;
+        if (!prepare_pma_pmp_csr_replay(published, ticket)) begin
+            `uvm_fatal("COMMON_DATA", "PMA/PMP CSR replay prepare failed")
+            return;
+        end
+        if (ticket.events.size() == 0) return;
+        if (!commit_pma_pmp_csr_replay(ticket)) begin
+            `uvm_fatal("COMMON_DATA", "PMA/PMP CSR replay commit precheck failed")
+            return;
+        end
     endfunction:service_csr_pmp_pma_write_observations
 
     function memblock_uid_t alloc_uid();
@@ -2121,6 +2227,7 @@ class common_data_transaction extends uvm_object;
         csr_control_worker_exited = 1'b0;
         sfence_control_worker_exited = 1'b0;
         csr_dynamic_candidate_valid = 1'b0;
+        csr_dynamic_candidate_expected_write_count = 0;
         csr_dynamic_candidate_owner = '{default:'0};
         csr_dynamic_candidate_profile = '{default:'0};
         csr_dynamic_candidate_after_sample = 0;
@@ -7858,7 +7965,6 @@ class common_data_transaction extends uvm_object;
         // 可能没有 L2TLB request-fire，因此不能只在 responder 回调中建立该快照。
         // 先回放严格早于本 sample 的 CSR 写，再用当前 dynamic_epoch 保存表代数。
         if (seq_csr_common::get_pma_pmp_model_en()) begin
-            apply_pma_pmp_csr_writes_before_request(current_sample);
             if (pma_pmp_model == null ||
                 !pma_pmp_model.capture_uid_context(
                     uid,
@@ -7962,34 +8068,78 @@ class common_data_transaction extends uvm_object;
     // 抽象职责：回放严格早于 request-fire 的 CSR write，使该 request 使用与
     // DUT 同边沿顺序一致的旧/新 PMA/PMP generation。该函数不扫描主表，只消费
     // monitor FIFO 的连续前缀；同 sample 写入留给后续 request。
-    function void apply_pma_pmp_csr_writes_before_request(
-        input longint unsigned request_sample_seq
+    function bit prepare_pma_pmp_csr_replay(
+        input longint unsigned published_sample,
+        output memblock_pma_pmp_replay_ticket ticket
     );
-        memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t write_event;
+        memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t event_item;
+        memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t effective_events[$];
+        longint unsigned previous_sample;
+        longint unsigned raw_size64;
+        ticket = null;
+        if (published_sample == 0 || pma_pmp_model == null ||
+            !memblock_sync_pkg::pma_pmp_csr_epoch_is_current(
+                pma_pmp_csr_replay_reset_epoch)) return 1'b0;
+        ticket = new();
+        ticket.reset_epoch = pma_pmp_csr_replay_reset_epoch;
+        ticket.service_revision = pma_pmp_csr_replay_service_revision;
+        ticket.raw_revision = memblock_sync_pkg::get_raw_pma_pmp_csr_write_revision();
+        previous_sample = pma_pmp_last_applied_csr_sample;
+        raw_size64 = $unsigned(memblock_sync_pkg::raw_pma_pmp_csr_write_size());
+        // 高频路径仅扫描 pending 成熟前缀和第一个 future head，不扫描 UID/history。
+        for (longint unsigned idx = 0; idx < raw_size64; idx++) begin
+            if (!memblock_sync_pkg::peek_raw_pma_pmp_csr_write_at(idx, event_item) ||
+                !event_item.valid || event_item.sample_seq == 0 || event_item.sample_time == 0 ||
+                !memblock_sync_pkg::pma_pmp_csr_epoch_is_current(event_item.reset_epoch) ||
+                event_item.reset_epoch != ticket.reset_epoch ||
+                event_item.sample_seq <= previous_sample ||
+                event_item.sample_seq > memblock_sync_pkg::MEMBLOCK_PMA_PMP_MAX_U64 - 2) return 1'b0;
+            if (published_sample < event_item.sample_seq ||
+                published_sample - event_item.sample_seq < 2) break;
+            ticket.events.push_back(event_item);
+            previous_sample = event_item.sample_seq;
+            // model history 使用 RTL effective sample，raw/audit 保留外部 capture sample。
+            event_item.sample_seq += 2;
+            effective_events.push_back(event_item);
+        end
+        if (ticket.events.size() == 0) return 1'b1;
+        return pma_pmp_model.prepare_csr_replay_batch(effective_events, ticket.model_ticket);
+    endfunction:prepare_pma_pmp_csr_replay
 
-        if (request_sample_seq == 0) begin
-            `uvm_fatal("COMMON_DATA", "PMA/PMP CSR replay requires non-zero request sample")
+
+    function bit commit_pma_pmp_csr_replay(input memblock_pma_pmp_replay_ticket ticket);
+        longint unsigned event_count64;
+        if (ticket == null) return 1'b0;
+        event_count64 = $unsigned(ticket.events.size());
+        if (ticket == null || ticket.consumed || ticket.events.size() == 0 ||
+            ticket.reset_epoch != pma_pmp_csr_replay_reset_epoch ||
+            !memblock_sync_pkg::pma_pmp_csr_epoch_is_current(ticket.reset_epoch) ||
+            ticket.service_revision != pma_pmp_csr_replay_service_revision ||
+            !memblock_sync_pkg::pma_pmp_csr_revision_can_advance(
+                pma_pmp_csr_replay_service_revision) ||
+            pma_pmp_csr_applied_count >
+                memblock_sync_pkg::MEMBLOCK_PMA_PMP_MAX_U64 - event_count64) return 1'b0;
+        if (!memblock_sync_pkg::precheck_raw_pma_pmp_csr_write_prefix(ticket.raw_revision, ticket.events) ||
+            !pma_pmp_model.precheck_csr_replay_commit(ticket.model_ticket)) return 1'b0;
+        // 此后无等待、无可失败检查；model snapshot 已在 prepare 分配。
+        pma_pmp_model.commit_csr_replay_batch(ticket.model_ticket);
+        memblock_sync_pkg::commit_raw_pma_pmp_csr_write_prefix(event_count64);
+        pma_pmp_last_applied_csr_sample = ticket.events[$].sample_seq;
+        pma_pmp_csr_applied_count += event_count64;
+        pma_pmp_csr_replay_service_revision++;
+        ticket.consumed = 1'b1;
+        foreach (ticket.events[idx]) begin
+            `uvm_info("PMA_PMP_CSR_REPLAY",
+                $sformatf("capture=%0d effective=%0d epoch=%0d addr=0x%0h data=0x%0h outcome=%0d pmp=%0d pma=%0d applied=%0d",
+                    ticket.events[idx].sample_seq, ticket.events[idx].sample_seq + 2,
+                    ticket.reset_epoch, ticket.events[idx].addr, ticket.events[idx].data,
+                    ticket.model_ticket.audit_rows[idx].outcome,
+                    ticket.model_ticket.audit_rows[idx].pmp_generation_after,
+                    ticket.model_ticket.audit_rows[idx].pma_generation_after,
+                    pma_pmp_csr_applied_count), UVM_LOW)
         end
-        if (pma_pmp_model == null) begin
-            `uvm_fatal("COMMON_DATA", "PMA/PMP model is unavailable during CSR replay")
-        end
-        while (memblock_sync_pkg::peek_raw_pma_pmp_csr_write(write_event) &&
-               write_event.sample_seq < request_sample_seq) begin
-            if (!memblock_sync_pkg::pop_raw_pma_pmp_csr_write(write_event)) begin
-                `uvm_fatal("COMMON_DATA", "PMA/PMP CSR FIFO peek/pop lost an event")
-            end
-            if (!write_event.valid || write_event.sample_seq == 0 ||
-                write_event.sample_seq <= pma_pmp_last_applied_csr_sample) begin
-                `uvm_fatal("COMMON_DATA",
-                           $sformatf("PMA/PMP CSR write sample is not strictly monotonic event=%0d applied=%0d",
-                                     write_event.sample_seq,
-                                     pma_pmp_last_applied_csr_sample))
-            end
-            pma_pmp_model.apply_csr_write(write_event.addr, write_event.data,
-                                          write_event.sample_seq);
-            pma_pmp_last_applied_csr_sample = write_event.sample_seq;
-        end
-    endfunction:apply_pma_pmp_csr_writes_before_request
+        return 1'b1;
+    endfunction:commit_pma_pmp_csr_replay
 
     // 抽象职责：向 readonly façade 提供 UID 在真实 request-fire 时冻结的
     // PMA/PMP context。该 helper 不创建 singleton、也不补写缺失 context。
@@ -8107,8 +8257,6 @@ class common_data_transaction extends uvm_object;
                                  key.s2xlate, request_key.asid,
                                  request_key.vmid))
         end
-
-        apply_pma_pmp_csr_writes_before_request(sample_seq);
 
         shape_key = make_uid_tlb_wait_shape_key(key.vpn, key.s2xlate);
         prune_uid_waiting_index_bucket(
@@ -9386,19 +9534,27 @@ class common_data_transaction extends uvm_object;
 
     function void end_test_check();
         int unsigned uid;
+        longint unsigned pma_pmp_produced_count;
+        longint unsigned pma_pmp_applied_count;
+        longint unsigned pma_pmp_pending_count;
 
         if (memblock_sync_pkg::raw_monitor_queue_size() != 0) begin
             `uvm_error("COMMON_DATA",
                        $sformatf("raw monitor queues are not drained at end_test_check: size=%0d",
                                  memblock_sync_pkg::raw_monitor_queue_size()))
         end
-        // PMA/PMP CSR FIFO 的正常 consumer 是下一次 request-fire；terminal 后没有
-        // 下一笔请求时它必须保留到最终审计报错，不能用它反向阻塞 global stop，也不能
-        // 在结束路径 delete。这样能同时保留语义可见性与 responder 自然退出。
-        if (memblock_sync_pkg::raw_pma_pmp_csr_write_q.size() != 0) begin
+        // PMA/PMP CSR FIFO 由逐拍成熟 service 维护；结束检查只审计守恒和残留，禁止补消费。
+        void'(precheck_pma_pmp_csr_end_state(
+            pma_pmp_produced_count, pma_pmp_applied_count,
+            pma_pmp_pending_count));
+        if (pma_pmp_applied_count != pma_pmp_produced_count) begin
+            `uvm_error("COMMON_DATA", $sformatf("PMA/PMP CSR conservation failed produced=%0d applied=%0d",
+                pma_pmp_produced_count, pma_pmp_applied_count))
+        end
+        if (pma_pmp_pending_count != 0) begin
             `uvm_error("COMMON_DATA",
                        $sformatf("PMA/PMP CSR write FIFO is not drained at end_test_check: size=%0d",
-                                 memblock_sync_pkg::raw_pma_pmp_csr_write_q.size()))
+                                 pma_pmp_pending_count))
         end
         if (main_trans_num == 0) begin
             memblock_sync_pkg::dispatch_monitor_capture_en = 1'b0;

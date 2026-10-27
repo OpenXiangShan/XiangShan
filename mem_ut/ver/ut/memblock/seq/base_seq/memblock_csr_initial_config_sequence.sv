@@ -32,8 +32,18 @@ class memblock_csr_initial_config_sequence extends uvm_sequence #(csr_ctrl_agent
                           input csr_ctrl_agent_agent_xaction level,
                           input memblock_csr_pmp_pma_profile_t profile);
         memblock_csr_pmp_pma_write_plan plan;
+        longint unsigned expected_count;
+        longint unsigned beat_count64;
         plan = memblock_csr_pmp_pma_write_plan::type_id::create("initial_pmp_pma_plan");
         plan.build(profile, data.pma_pmp_model);
+        beat_count64 = $unsigned(plan.beats.size());
+        if (!memblock_sync_pkg::pma_pmp_csr_epoch_is_current(
+                data.pma_pmp_csr_replay_reset_epoch) ||
+            !memblock_sync_pkg::checked_pma_pmp_csr_write_count_add(
+                memblock_sync_pkg::raw_pma_pmp_csr_write_produced_count,
+                beat_count64, expected_count)) begin
+            `uvm_fatal(get_type_name(), "invalid startup PMA/PMP epoch or expected-count overflow")
+        end
         foreach (plan.beats[i]) begin
             csr_ctrl_agent_agent_xaction write_tr;
             write_tr = csr_ctrl_agent_agent_xaction::type_id::create($sformatf("initial_csr_write_%0d", i));
@@ -47,8 +57,10 @@ class memblock_csr_initial_config_sequence extends uvm_sequence #(csr_ctrl_agent
             finish_item(write_tr);
         end
         for (int unsigned wait_count = 0;
-             !plan.model_matches(data.pma_pmp_model, profile); wait_count++) begin
+             ; wait_count++) begin
             data.service_csr_pmp_pma_write_observations();
+            if (data.csr_pmp_pma_writes_observed(expected_count) &&
+                plan.model_matches(data.pma_pmp_model, profile)) break;
             #1;
             if (wait_count > seq_csr_common::get_active_seq_no_progress_warn_cycles())
                 `uvm_fatal(get_type_name(), "PMP/PMA model did not observe the initial CSR write plan")

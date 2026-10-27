@@ -52,6 +52,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
                 memblock_sync_pkg::reset_l2tlb_adapter_runtime_state(reset_epoch);
                 data.clear_dispatch_l2tlb_live_entries();
                 data.clear_l2tlb_ppn_history();
+                data.reset_pma_pmp_csr_replay_for_runtime_epoch();
                 adapter_reset_serviced_epoch = reset_epoch;
                 if ((memblock_sync_pkg::l2tlb_runtime_reset_required_ack_mask &
                      memblock_sync_pkg::MEMBLOCK_L2TLB_RESET_ACK_ADAPTER) != '0) begin

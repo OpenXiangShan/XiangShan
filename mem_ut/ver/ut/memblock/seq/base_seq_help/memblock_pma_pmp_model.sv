@@ -59,6 +59,7 @@ typedef struct packed {
     longint unsigned     capture_sample;
 } pma_pmp_uid_context_t;
 
+
 typedef struct packed {
     bit                  valid;
     bit                  translation_success;
@@ -151,12 +152,71 @@ class pma_pmp_table_snapshot extends uvm_object;
     endfunction:copy_entries
 endclass:pma_pmp_table_snapshot
 
+typedef enum bit [2:0] {
+    PMA_PMP_CSR_ACCEPTED_CHANGED,
+    PMA_PMP_CSR_ACCEPTED_SAME_VALUE,
+    PMA_PMP_CSR_IGNORED_LOCKED,
+    PMA_PMP_CSR_IGNORED_UNSUPPORTED,
+    PMA_PMP_CSR_IGNORED_UNKNOWN
+} pma_pmp_csr_replay_outcome_e;
+
+typedef struct packed {
+    pma_pmp_csr_replay_outcome_e outcome;
+    bit                  is_pma;
+    bit [11:0]           addr;
+    bit [63:0]           data;
+    longint unsigned     write_sample;
+    longint unsigned     pmp_generation_before;
+    longint unsigned     pmp_generation_after;
+    longint unsigned     pma_generation_before;
+    longint unsigned     pma_generation_after;
+} pma_pmp_csr_replay_audit_t;
+
+typedef struct packed {
+    longint unsigned generation;
+    // 对生产 replay 为外部 capture+2 的 RTL 生效采样；soft model API 直接传生效采样。
+    longint unsigned write_sample;
+} pma_pmp_csr_replay_generation_event_t;
+
+class pma_pmp_csr_replay_ticket;
+    localparam int unsigned PMA_PMP_ENTRY_COUNT = 32;
+    bit valid;
+    bit consumed;
+    longint unsigned expected_model_revision;
+    longint unsigned expected_pmp_generation;
+    longint unsigned expected_pma_generation;
+    pma_pmp_entry_t post_pmp_entries[PMA_PMP_ENTRY_COUNT];
+    pma_pmp_entry_t post_pma_entries[PMA_PMP_ENTRY_COUNT];
+    longint unsigned post_pmp_generation;
+    longint unsigned post_pma_generation;
+    pma_pmp_table_snapshot prepared_pmp_snapshots[longint unsigned];
+    pma_pmp_table_snapshot prepared_pma_snapshots[longint unsigned];
+    pma_pmp_csr_replay_generation_event_t pmp_history_delta[$];
+    pma_pmp_csr_replay_generation_event_t pma_history_delta[$];
+    pma_pmp_csr_replay_audit_t audit_rows[$];
+
+    function new();
+        valid = 1'b0;
+        consumed = 1'b0;
+        expected_model_revision = 0;
+        expected_pmp_generation = 0;
+        expected_pma_generation = 0;
+        post_pmp_generation = 0;
+        post_pma_generation = 0;
+    endfunction:new
+endclass:pma_pmp_csr_replay_ticket
+
 class memblock_pma_pmp_model extends uvm_object;
+    typedef struct {
+        longint unsigned generation;
+        longint unsigned write_sample;
+    } pma_pmp_generation_event_t;
     localparam int unsigned PMA_PMP_ENTRY_COUNT = 32;
     localparam int unsigned PMA_PMP_CFG_PER_CSR = 8;
     localparam int unsigned PMA_PMP_PADDR_BITS = 48;
     localparam int unsigned PMA_PMP_OFF_BITS = 2;
     localparam int unsigned PMA_PMP_GRAIN_BITS = 12;
+    localparam longint unsigned PMA_PMP_MAX_U64 = 64'hffff_ffff_ffff_ffff;
     localparam bit [11:0] PMA_PMP_PMPCFG_BASE = 12'h3a0;
     localparam bit [11:0] PMA_PMP_PMPADDR_BASE = 12'h3b0;
     localparam bit [11:0] PMA_PMP_PMACFG_BASE = 12'h7c0;
@@ -179,6 +239,9 @@ class memblock_pma_pmp_model extends uvm_object;
     longint unsigned       next_access_seq;
     longint unsigned pmp_generation;
     longint unsigned pma_generation;
+    pma_pmp_generation_event_t pmp_generation_history[$];
+    pma_pmp_generation_event_t pma_generation_history[$];
+    longint unsigned csr_replay_revision;
     bit ready;
 
     `uvm_object_utils(memblock_pma_pmp_model)
@@ -186,12 +249,27 @@ class memblock_pma_pmp_model extends uvm_object;
     extern function new(string name = "memblock_pma_pmp_model");
     extern static function memblock_pma_pmp_model get();
     extern function void reset_and_init_v2_profile();
+    extern function bit can_reset_csr_replay_state();
     extern function bit is_ready();
     extern function void apply_csr_write(
         input bit [11:0] addr,
         input bit [63:0] data,
         input longint unsigned sample
     );
+    extern function bit prepare_csr_replay_batch(
+        input memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t events[$],
+        output pma_pmp_csr_replay_ticket ticket
+    );
+    extern function bit precheck_csr_replay_commit(
+        input pma_pmp_csr_replay_ticket ticket
+    );
+    extern function bit discard_csr_replay_ticket(
+        input pma_pmp_csr_replay_ticket ticket
+    );
+    extern function void commit_csr_replay_batch(
+        input pma_pmp_csr_replay_ticket ticket
+    );
+    extern function longint unsigned get_csr_replay_revision();
     extern function bit capture_uid_context(
         input memblock_uid_t uid,
         input int unsigned dynamic_epoch,
@@ -202,6 +280,15 @@ class memblock_pma_pmp_model extends uvm_object;
         input bit [7:0] keyid,
         input int unsigned csr_update_seq,
         input longint unsigned sample
+    );
+    extern function void get_current_generations(
+        output longint unsigned pmp_generation_o,
+        output longint unsigned pma_generation_o
+    );
+    extern function bit get_generations_before_sample(
+        input longint unsigned request_sample,
+        output longint unsigned pmp_generation_o,
+        output longint unsigned pma_generation_o
     );
     extern function bit read_uid_context(
         input memblock_uid_t uid,
@@ -275,6 +362,22 @@ class memblock_pma_pmp_model extends uvm_object;
         input bit is_pma,
         input int unsigned index,
         input bit [63:0] data
+    );
+    extern local function bit apply_config_write_to_tables(
+        input bit is_pma,
+        input int unsigned first_index,
+        input bit [63:0] data,
+        inout pma_pmp_entry_t pmp_table[PMA_PMP_ENTRY_COUNT],
+        inout pma_pmp_entry_t pma_table[PMA_PMP_ENTRY_COUNT],
+        output bit value_changed
+    );
+    extern local function bit apply_addr_write_to_tables(
+        input bit is_pma,
+        input int unsigned index,
+        input bit [63:0] data,
+        inout pma_pmp_entry_t pmp_table[PMA_PMP_ENTRY_COUNT],
+        inout pma_pmp_entry_t pma_table[PMA_PMP_ENTRY_COUNT],
+        output bit value_changed
     );
     extern local function bit find_first_match(
         input pma_pmp_table_snapshot snapshot,
@@ -414,6 +517,12 @@ function pma_pmp_table_snapshot memblock_pma_pmp_model::get_table_snapshot(
 endfunction:get_table_snapshot
 
 function void memblock_pma_pmp_model::reset_and_init_v2_profile();
+    pma_pmp_generation_event_t generation_event;
+    if (csr_replay_revision != 0 &&
+        csr_replay_revision > PMA_PMP_MAX_U64 - 2) begin
+        `uvm_fatal(get_type_name(), "PMA/PMP CSR replay revision has no next live value")
+        return;
+    end
     for (int unsigned i = 0; i < PMA_PMP_ENTRY_COUNT; i++) begin
         init_entry(pmp_entries[i], i);
         init_entry(pma_entries[i], i);
@@ -425,11 +534,27 @@ function void memblock_pma_pmp_model::reset_and_init_v2_profile();
     next_access_seq = 1;
     pmp_generation = 0;
     pma_generation = 0;
+    if (csr_replay_revision == 0) begin
+        csr_replay_revision = 1;
+    end else begin
+        csr_replay_revision++;
+    end
+    pmp_generation_history.delete();
+    pma_generation_history.delete();
     load_v2_pma_profile();
     save_table_snapshot(1'b0);
     save_table_snapshot(1'b1);
+    generation_event.generation = 0;
+    generation_event.write_sample = 0;
+    pmp_generation_history.push_back(generation_event);
+    pma_generation_history.push_back(generation_event);
     ready = 1'b1;
 endfunction:reset_and_init_v2_profile
+
+function bit memblock_pma_pmp_model::can_reset_csr_replay_state();
+    return csr_replay_revision == 0 ||
+           csr_replay_revision <= PMA_PMP_MAX_U64 - 2;
+endfunction:can_reset_csr_replay_state
 
 function bit memblock_pma_pmp_model::is_ready();
     return ready;
@@ -501,53 +626,348 @@ function bit memblock_pma_pmp_model::apply_addr_write(
     return 1'b1;
 endfunction:apply_addr_write
 
+function bit memblock_pma_pmp_model::apply_config_write_to_tables(
+    input bit is_pma,
+    input int unsigned first_index,
+    input bit [63:0] data,
+    inout pma_pmp_entry_t pmp_table[PMA_PMP_ENTRY_COUNT],
+    inout pma_pmp_entry_t pma_table[PMA_PMP_ENTRY_COUNT],
+    output bit value_changed
+);
+    bit accepted;
+    pma_pmp_entry_t entry;
+    bit [7:0] raw_cfg;
+    pma_pmp_a_mode_e raw_a;
+    pma_pmp_a_mode_e normalized_a;
+
+    accepted = 1'b0;
+    value_changed = 1'b0;
+    for (int unsigned slot = 0; slot < PMA_PMP_CFG_PER_CSR; slot++) begin
+        int unsigned table_index;
+        table_index = first_index + slot;
+        if (table_index >= PMA_PMP_ENTRY_COUNT) begin
+            continue;
+        end
+        entry = is_pma ? pma_table[table_index] : pmp_table[table_index];
+        if (entry.lock) begin
+            continue;
+        end
+        accepted = 1'b1;
+        raw_cfg = data[(slot * 8) +: 8];
+        raw_a = pma_pmp_a_mode_e'(raw_cfg[4:3]);
+        normalized_a = pma_pmp_a_mode_e'({raw_a[1], |raw_a});
+        if (entry.a != normalized_a || entry.lock != raw_cfg[7] ||
+            entry.c != raw_cfg[6] || entry.atomic != raw_cfg[5] ||
+            entry.x != raw_cfg[2] || entry.r != raw_cfg[0] ||
+            entry.w != (raw_cfg[1] && raw_cfg[0])) begin
+            value_changed = 1'b1;
+        end
+        entry.a = normalized_a;
+        entry.lock = raw_cfg[7];
+        entry.c = raw_cfg[6];
+        entry.atomic = raw_cfg[5];
+        entry.x = raw_cfg[2];
+        entry.r = raw_cfg[0];
+        entry.w = raw_cfg[1] && raw_cfg[0];
+        entry.origin = 2'd2;
+        refresh_entry_match(entry);
+        if (is_pma) pma_table[table_index] = entry;
+        else pmp_table[table_index] = entry;
+    end
+    return accepted;
+endfunction:apply_config_write_to_tables
+
+function bit memblock_pma_pmp_model::apply_addr_write_to_tables(
+    input bit is_pma,
+    input int unsigned index,
+    input bit [63:0] data,
+    inout pma_pmp_entry_t pmp_table[PMA_PMP_ENTRY_COUNT],
+    inout pma_pmp_entry_t pma_table[PMA_PMP_ENTRY_COUNT],
+    output bit value_changed
+);
+    pma_pmp_entry_t entry;
+    pma_pmp_entry_t next_entry;
+
+    value_changed = 1'b0;
+    if (index >= PMA_PMP_ENTRY_COUNT) return 1'b0;
+    entry = is_pma ? pma_table[index] : pmp_table[index];
+    if (index + 1 < PMA_PMP_ENTRY_COUNT) begin
+        next_entry = is_pma ? pma_table[index + 1] : pmp_table[index + 1];
+    end else begin
+        init_entry(next_entry, PMA_PMP_ENTRY_COUNT);
+    end
+    if (entry.lock || (next_entry.lock && next_entry.a == PMA_PMP_A_TOR)) begin
+        return 1'b0;
+    end
+    value_changed = entry.addr_raw != data[45:0];
+    entry.addr_raw = data[45:0];
+    entry.origin = 2'd2;
+    refresh_entry_match(entry);
+    if (is_pma) pma_table[index] = entry;
+    else pmp_table[index] = entry;
+    return 1'b1;
+endfunction:apply_addr_write_to_tables
+
+function bit memblock_pma_pmp_model::prepare_csr_replay_batch(
+    input memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t events[$],
+    output pma_pmp_csr_replay_ticket ticket
+);
+    bit accepted;
+    bit value_changed;
+    bit is_pma;
+    bit address_implemented;
+    bit address_unsupported;
+    pma_pmp_csr_replay_audit_t audit_row;
+    pma_pmp_csr_replay_generation_event_t history_event;
+    pma_pmp_table_snapshot snapshot;
+
+    ticket = null;
+    if (!ready || csr_replay_revision == 0 ||
+        csr_replay_revision > PMA_PMP_MAX_U64 - 2) begin
+        return 1'b0;
+    end
+    ticket = new();
+    if (ticket == null) begin
+        return 1'b0;
+    end
+    ticket.expected_model_revision = csr_replay_revision;
+    ticket.expected_pmp_generation = pmp_generation;
+    ticket.expected_pma_generation = pma_generation;
+    ticket.post_pmp_generation = pmp_generation;
+    ticket.post_pma_generation = pma_generation;
+    for (int unsigned table_index = 0;
+         table_index < PMA_PMP_ENTRY_COUNT; table_index++) begin
+        ticket.post_pmp_entries[table_index] = pmp_entries[table_index];
+        ticket.post_pma_entries[table_index] = pma_entries[table_index];
+    end
+
+    foreach (events[event_index]) begin
+        if (!events[event_index].valid || events[event_index].sample_seq == 0) begin
+            ticket.valid = 1'b0;
+            ticket.consumed = 1'b1;
+            return 1'b0;
+        end
+        accepted = 1'b0;
+        value_changed = 1'b0;
+        is_pma = 1'b0;
+        address_implemented = 1'b0;
+        address_unsupported = 1'b0;
+        audit_row = '{default:'0};
+        audit_row.addr = events[event_index].addr;
+        audit_row.data = events[event_index].data;
+        audit_row.write_sample = events[event_index].sample_seq;
+        audit_row.pmp_generation_before = ticket.post_pmp_generation;
+        audit_row.pma_generation_before = ticket.post_pma_generation;
+
+        for (int unsigned group = 0;
+             group < PMA_PMP_ENTRY_COUNT / PMA_PMP_CFG_PER_CSR; group++) begin
+            if (events[event_index].addr ==
+                PMA_PMP_PMPCFG_BASE + (group * 2)) begin
+                address_implemented = 1'b1;
+                is_pma = 1'b0;
+                accepted = apply_config_write_to_tables(
+                    1'b0, group * PMA_PMP_CFG_PER_CSR,
+                    events[event_index].data,
+                    ticket.post_pmp_entries, ticket.post_pma_entries,
+                    value_changed);
+            end else if (events[event_index].addr ==
+                         PMA_PMP_PMACFG_BASE + (group * 2)) begin
+                address_implemented = 1'b1;
+                is_pma = 1'b1;
+                accepted = apply_config_write_to_tables(
+                    1'b1, group * PMA_PMP_CFG_PER_CSR,
+                    events[event_index].data,
+                    ticket.post_pmp_entries, ticket.post_pma_entries,
+                    value_changed);
+            end
+        end
+        for (int unsigned table_index = 0;
+             table_index < PMA_PMP_ENTRY_COUNT; table_index++) begin
+            if (events[event_index].addr ==
+                PMA_PMP_PMPADDR_BASE + table_index) begin
+                address_implemented = 1'b1;
+                is_pma = 1'b0;
+                accepted = apply_addr_write_to_tables(
+                    1'b0, table_index, events[event_index].data,
+                    ticket.post_pmp_entries, ticket.post_pma_entries,
+                    value_changed);
+            end else if (events[event_index].addr ==
+                         PMA_PMP_PMAADDR_BASE + table_index) begin
+                address_implemented = 1'b1;
+                is_pma = 1'b1;
+                accepted = apply_addr_write_to_tables(
+                    1'b1, table_index, events[event_index].data,
+                    ticket.post_pmp_entries, ticket.post_pma_entries,
+                    value_changed);
+            end
+        end
+
+        if (!address_implemented &&
+            (((events[event_index].addr >= 12'h3a0) &&
+              (events[event_index].addr <= 12'h3a7)) ||
+             ((events[event_index].addr >= 12'h7c0) &&
+              (events[event_index].addr <= 12'h7c7)) ||
+             ((events[event_index].addr >= 12'h3d0) &&
+              (events[event_index].addr <= 12'h3ef)))) begin
+            address_unsupported = 1'b1;
+        end
+        audit_row.is_pma = address_implemented && is_pma;
+        if (!address_implemented) begin
+            audit_row.outcome = address_unsupported ?
+                PMA_PMP_CSR_IGNORED_UNSUPPORTED : PMA_PMP_CSR_IGNORED_UNKNOWN;
+        end else if (!accepted) begin
+            audit_row.outcome = PMA_PMP_CSR_IGNORED_LOCKED;
+        end else begin
+            audit_row.outcome = value_changed ?
+                PMA_PMP_CSR_ACCEPTED_CHANGED : PMA_PMP_CSR_ACCEPTED_SAME_VALUE;
+        end
+        if (accepted) begin
+            if (is_pma) begin
+                if (ticket.post_pma_generation > PMA_PMP_MAX_U64 - 2) begin
+                    ticket.valid = 1'b0;
+                    ticket.consumed = 1'b1;
+                    return 1'b0;
+                end
+                ticket.post_pma_generation++;
+                snapshot = pma_pmp_table_snapshot::type_id::create(
+                    $sformatf("prepared_pma_snapshot_r%0d_g%0d_e%0d",
+                              csr_replay_revision,
+                              ticket.post_pma_generation, event_index));
+                if (snapshot == null) begin
+                    ticket.valid = 1'b0;
+                    ticket.consumed = 1'b1;
+                    return 1'b0;
+                end
+                snapshot.copy_entries(ticket.post_pma_entries);
+                ticket.prepared_pma_snapshots[ticket.post_pma_generation] = snapshot;
+                history_event.generation = ticket.post_pma_generation;
+                history_event.write_sample = events[event_index].sample_seq;
+                ticket.pma_history_delta.push_back(history_event);
+            end else begin
+                if (ticket.post_pmp_generation > PMA_PMP_MAX_U64 - 2) begin
+                    ticket.valid = 1'b0;
+                    ticket.consumed = 1'b1;
+                    return 1'b0;
+                end
+                ticket.post_pmp_generation++;
+                snapshot = pma_pmp_table_snapshot::type_id::create(
+                    $sformatf("prepared_pmp_snapshot_r%0d_g%0d_e%0d",
+                              csr_replay_revision,
+                              ticket.post_pmp_generation, event_index));
+                if (snapshot == null) begin
+                    ticket.valid = 1'b0;
+                    ticket.consumed = 1'b1;
+                    return 1'b0;
+                end
+                snapshot.copy_entries(ticket.post_pmp_entries);
+                ticket.prepared_pmp_snapshots[ticket.post_pmp_generation] = snapshot;
+                history_event.generation = ticket.post_pmp_generation;
+                history_event.write_sample = events[event_index].sample_seq;
+                ticket.pmp_history_delta.push_back(history_event);
+            end
+        end
+        audit_row.pmp_generation_after = ticket.post_pmp_generation;
+        audit_row.pma_generation_after = ticket.post_pma_generation;
+        ticket.audit_rows.push_back(audit_row);
+    end
+    ticket.valid = 1'b1;
+    return 1'b1;
+endfunction:prepare_csr_replay_batch
+
+function bit memblock_pma_pmp_model::precheck_csr_replay_commit(
+    input pma_pmp_csr_replay_ticket ticket
+);
+    return ticket != null && ticket.valid && !ticket.consumed && ready &&
+           ticket.expected_model_revision == csr_replay_revision &&
+           ticket.expected_pmp_generation == pmp_generation &&
+           ticket.expected_pma_generation == pma_generation &&
+           csr_replay_revision <= PMA_PMP_MAX_U64 - 2;
+endfunction:precheck_csr_replay_commit
+
+function bit memblock_pma_pmp_model::discard_csr_replay_ticket(
+    input pma_pmp_csr_replay_ticket ticket
+);
+    if (ticket == null || !ticket.valid || ticket.consumed) begin
+        return 1'b0;
+    end
+    ticket.consumed = 1'b1;
+    ticket.valid = 1'b0;
+    return 1'b1;
+endfunction:discard_csr_replay_ticket
+
+function void memblock_pma_pmp_model::commit_csr_replay_batch(
+    input pma_pmp_csr_replay_ticket ticket
+);
+    pma_pmp_generation_event_t generation_event;
+
+    for (int unsigned table_index = 0;
+         table_index < PMA_PMP_ENTRY_COUNT; table_index++) begin
+        pmp_entries[table_index] = ticket.post_pmp_entries[table_index];
+        pma_entries[table_index] = ticket.post_pma_entries[table_index];
+    end
+    pmp_generation = ticket.post_pmp_generation;
+    pma_generation = ticket.post_pma_generation;
+    foreach (ticket.prepared_pmp_snapshots[generation]) begin
+        pmp_history[generation] = ticket.prepared_pmp_snapshots[generation];
+    end
+    foreach (ticket.prepared_pma_snapshots[generation]) begin
+        pma_history[generation] = ticket.prepared_pma_snapshots[generation];
+    end
+    foreach (ticket.pmp_history_delta[event_index]) begin
+        generation_event.generation =
+            ticket.pmp_history_delta[event_index].generation;
+        generation_event.write_sample =
+            ticket.pmp_history_delta[event_index].write_sample;
+        pmp_generation_history.push_back(generation_event);
+    end
+    foreach (ticket.pma_history_delta[event_index]) begin
+        generation_event.generation =
+            ticket.pma_history_delta[event_index].generation;
+        generation_event.write_sample =
+            ticket.pma_history_delta[event_index].write_sample;
+        pma_generation_history.push_back(generation_event);
+    end
+    csr_replay_revision++;
+    ticket.consumed = 1'b1;
+    ticket.valid = 1'b0;
+endfunction:commit_csr_replay_batch
+
+function longint unsigned memblock_pma_pmp_model::get_csr_replay_revision();
+    return csr_replay_revision;
+endfunction:get_csr_replay_revision
+
 function void memblock_pma_pmp_model::apply_csr_write(
     input bit [11:0] addr,
     input bit [63:0] data,
     input longint unsigned sample
 );
-    bit changed;
-    bit is_pma;
-    int unsigned index;
+    memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t event_item;
+    memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t events[$];
+    pma_pmp_csr_replay_ticket ticket;
 
-    if (!ready) begin
-        reset_and_init_v2_profile();
+    event_item = '{default:'0};
+    event_item.valid = 1'b1;
+    event_item.addr = addr;
+    event_item.data = data;
+    event_item.sample_seq = sample;
+    event_item.sample_time = $time;
+    events.push_back(event_item);
+    if (!prepare_csr_replay_batch(events, ticket)) begin
+        `uvm_fatal(get_type_name(), "PMA/PMP single-event replay prepare failed")
+        return;
     end
-    changed = 1'b0;
-    is_pma = 1'b0;
-    for (int unsigned group = 0; group < PMA_PMP_ENTRY_COUNT / PMA_PMP_CFG_PER_CSR; group++) begin
-        if (addr == PMA_PMP_PMPCFG_BASE + (group * 2)) begin
-            changed = apply_config_write(1'b0, group * PMA_PMP_CFG_PER_CSR, data);
-            is_pma = 1'b0;
+    if (!precheck_csr_replay_commit(ticket)) begin
+        if (!discard_csr_replay_ticket(ticket)) begin
+            `uvm_fatal(get_type_name(), "PMA/PMP single-event replay discard failed")
         end
-        if (addr == PMA_PMP_PMACFG_BASE + (group * 2)) begin
-            changed = apply_config_write(1'b1, group * PMA_PMP_CFG_PER_CSR, data);
-            is_pma = 1'b1;
-        end
+        `uvm_fatal(get_type_name(), "PMA/PMP single-event replay precheck failed")
+        return;
     end
-    for (index = 0; index < PMA_PMP_ENTRY_COUNT; index++) begin
-        if (addr == PMA_PMP_PMPADDR_BASE + index) begin
-            changed = apply_addr_write(1'b0, index, data);
-            is_pma = 1'b0;
-        end
-        if (addr == PMA_PMP_PMAADDR_BASE + index) begin
-            changed = apply_addr_write(1'b1, index, data);
-            is_pma = 1'b1;
-        end
-    end
-    if (changed) begin
-        if (is_pma) begin
-            pma_generation++;
-            save_table_snapshot(1'b1);
-        end else begin
-            pmp_generation++;
-            save_table_snapshot(1'b0);
-        end
-        `uvm_info(get_type_name(),
-                  $sformatf("PMA/PMP CSR write addr=0x%0h sample=%0d pmp_gen=%0d pma_gen=%0d",
-                            addr, sample, pmp_generation, pma_generation),
-                  UVM_HIGH)
-    end
+    commit_csr_replay_batch(ticket);
+    `uvm_info(get_type_name(),
+              $sformatf("PMA/PMP CSR write addr=0x%0h sample=%0d pmp_gen=%0d pma_gen=%0d",
+                        addr, sample, pmp_generation, pma_generation),
+              UVM_HIGH)
 endfunction:apply_csr_write
 
 function bit memblock_pma_pmp_model::capture_uid_context(
@@ -597,6 +1017,45 @@ function bit memblock_pma_pmp_model::capture_uid_context(
     latest_context_key_by_uid[uid] = access_key;
     return 1'b1;
 endfunction:capture_uid_context
+
+function void memblock_pma_pmp_model::get_current_generations(
+    output longint unsigned pmp_generation_o,
+    output longint unsigned pma_generation_o
+);
+    if (!ready) begin
+        `uvm_fatal(get_type_name(), "PMA/PMP generation query before model ready")
+    end
+    pmp_generation_o = pmp_generation;
+    pma_generation_o = pma_generation;
+endfunction:get_current_generations
+
+function bit memblock_pma_pmp_model::get_generations_before_sample(
+    input longint unsigned request_sample,
+    output longint unsigned pmp_generation_o,
+    output longint unsigned pma_generation_o
+);
+    if (!ready || request_sample == 0 ||
+        pmp_generation_history.size() == 0 ||
+        pma_generation_history.size() == 0) begin
+        pmp_generation_o = 0;
+        pma_generation_o = 0;
+        return 1'b0;
+    end
+    pmp_generation_o = 0;
+    pma_generation_o = 0;
+    foreach (pmp_generation_history[idx]) begin
+        if (pmp_generation_history[idx].write_sample <= request_sample) begin
+            pmp_generation_o = pmp_generation_history[idx].generation;
+        end
+    end
+    foreach (pma_generation_history[idx]) begin
+        if (pma_generation_history[idx].write_sample <= request_sample) begin
+            pma_generation_o = pma_generation_history[idx].generation;
+        end
+    end
+    return pmp_history.exists(pmp_generation_o) &&
+           pma_history.exists(pma_generation_o);
+endfunction:get_generations_before_sample
 
 function bit memblock_pma_pmp_model::read_uid_context(
     input memblock_uid_t uid,

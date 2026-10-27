@@ -76,6 +76,7 @@ package tc_pkg;
     `include "tc_sanity.sv"
     `include "tc_smoke.sv"
     `include "soft_test_tc_dispatch_smoke.sv"
+    `include "soft_test_tc_pma_pmp_csr_fifo.sv"
     `include "soft_test_tc_dispatch_replay_smoke.sv"
     `include "soft_test_tc_dispatch_fault_smoke.sv"
     `include "soft_test_tc_boundary_addr_reuse_gate.sv"

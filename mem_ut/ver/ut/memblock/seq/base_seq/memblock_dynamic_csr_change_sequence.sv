@@ -22,10 +22,20 @@ class memblock_dynamic_csr_change_sequence extends uvm_sequence #(csr_ctrl_agent
 
     task drive_write_plan(input common_data_transaction data,
                           input csr_ctrl_agent_agent_xaction level,
-                          input memblock_csr_pmp_pma_profile_t profile);
+                          input memblock_csr_pmp_pma_profile_t profile,
+                          output longint unsigned expected_count);
         memblock_csr_pmp_pma_write_plan plan;
+        longint unsigned beat_count64;
         plan = memblock_csr_pmp_pma_write_plan::type_id::create("dynamic_pmp_pma_plan");
         plan.build(profile, data.pma_pmp_model);
+        beat_count64 = $unsigned(plan.beats.size());
+        if (!memblock_sync_pkg::pma_pmp_csr_epoch_is_current(
+                data.pma_pmp_csr_replay_reset_epoch) ||
+            !memblock_sync_pkg::checked_pma_pmp_csr_write_count_add(
+                memblock_sync_pkg::raw_pma_pmp_csr_write_produced_count,
+                beat_count64, expected_count)) begin
+            `uvm_fatal(get_type_name(), "invalid dynamic PMA/PMP epoch or expected-count overflow")
+        end
         foreach (plan.beats[i]) begin
             csr_ctrl_agent_agent_xaction write_tr;
             write_tr = csr_ctrl_agent_agent_xaction::type_id::create($sformatf("dynamic_csr_write_%0d", i));
@@ -91,6 +101,7 @@ class memblock_dynamic_csr_change_sequence extends uvm_sequence #(csr_ctrl_agent
         memblock_csr_randomizer randomizer;
         memblock_sync_pkg::dispatch_raw_csr_t ignored;
         longint unsigned baseline_sample;
+        longint unsigned expected_write_count;
 
         if (!action_valid || !action.owner.valid ||
             action.completion_profile != MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT)
@@ -134,8 +145,9 @@ class memblock_dynamic_csr_change_sequence extends uvm_sequence #(csr_ctrl_agent
         baseline_sample = memblock_sync_pkg::peek_current_dut_global_sample();
         start_item(target);
         finish_item(target);
+        expected_write_count = memblock_sync_pkg::raw_pma_pmp_csr_write_produced_count;
         if (cfg.change_pmp_pma_enable)
-            drive_write_plan(data, target, target_region);
+            drive_write_plan(data, target, target_region, expected_write_count);
         clean = csr_ctrl_agent_agent_xaction::type_id::create("dynamic_csr_committed");
         clean.copy(target);
         memblock_csr_config_state::clear_protocol_metadata(clean);
@@ -145,7 +157,8 @@ class memblock_dynamic_csr_change_sequence extends uvm_sequence #(csr_ctrl_agent
         action.expected_runtime_csr = memblock_csr_config_state::make_runtime_payload(target);
         action.expected_runtime_csr_valid = 1'b1;
         data.stage_csr_dynamic_candidate(action.owner, clean, target_region,
-                                         baseline_sample, cfg.change_pmp_pma_enable);
+                                         baseline_sample, cfg.change_pmp_pma_enable,
+                                         expected_write_count);
         data.mark_csr_control_sendover(action);
         `uvm_info(get_type_name(),
                   $sformatf("dynamic CSR candidate staged and sent uid=%0d generation=%0d",

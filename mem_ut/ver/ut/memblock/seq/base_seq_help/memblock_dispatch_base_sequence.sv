@@ -563,6 +563,7 @@ function void memblock_dispatch_base_sequence::collect_runtime_context_events();
     // 中文注释：此 helper 只同步 CSR runtime。raw fence 必须由主 dispatch
     // service 在本 sample 唯一调用 adapter 的 service_l2tlb_sfence_events()。
     monitor_adapter.drain_csr_events();
+    data.service_csr_pmp_pma_write_observations();
 endfunction:collect_runtime_context_events
 
 task memblock_dispatch_base_sequence::collect_monitor_event_batch();

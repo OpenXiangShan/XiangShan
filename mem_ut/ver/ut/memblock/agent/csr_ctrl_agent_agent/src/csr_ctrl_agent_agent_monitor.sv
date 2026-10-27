@@ -521,6 +521,8 @@ task csr_ctrl_agent_agent_monitor::mon_data();
                     io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data;
                 raw_pma_pmp_csr_write.sample_seq = current_sample_seq;
                 raw_pma_pmp_csr_write.sample_time = $time;
+                raw_pma_pmp_csr_write.reset_epoch =
+                    memblock_sync_pkg::get_l2tlb_current_reset_epoch();
                 memblock_sync_pkg::push_raw_pma_pmp_csr_write(
                     raw_pma_pmp_csr_write);
             end

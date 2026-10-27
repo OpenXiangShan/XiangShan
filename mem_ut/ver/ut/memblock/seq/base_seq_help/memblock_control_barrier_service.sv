@@ -323,6 +323,9 @@ function void memblock_control_barrier_service::complete_csr_runtime_snapshot(
         !csr_payload_equal(status.control_expected_runtime_csr, snapshot)) begin
         return;
     end
+    data.service_csr_pmp_pma_write_observations();
+    if (!data.csr_pmp_pma_writes_observed(
+            memblock_sync_pkg::raw_pma_pmp_csr_write_produced_count)) return;
     // 专项动态 CSR 的 sendover 只表示 child 完成接口交付；完整 92 字段 snapshot
     // 和 PMP/PMA write model 必须在同一 control service 中确认，确认成功后才把
     // candidate 提升为下一次 action 使用的 committed state。legacy topology 没有

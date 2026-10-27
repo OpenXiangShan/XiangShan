@@ -125,6 +125,7 @@ package seq_pkg;
     `include "memblock_rm_dut_writeback_observer.sv"
     `include "memblock_rm_readonly_api.sv"
     `include "soft_test_rm_pbmt_effective_fault_sequence.sv"
+    `include "soft_test_pma_pmp_csr_fifo_sequence.sv"
     `include "soft_test_rm_provenance_followup_sequence.sv"
     `include "soft_test_rm_uncache_d_error_ledger_sequence.sv"
     `include "memblock_virtual_sequencer.sv"

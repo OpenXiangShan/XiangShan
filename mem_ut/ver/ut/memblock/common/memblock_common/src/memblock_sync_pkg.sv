@@ -635,6 +635,7 @@ package memblock_sync_pkg;
         bit [63:0]        data;
         longint unsigned  sample_seq;
         time              sample_time;
+        longint unsigned  reset_epoch;
     } dispatch_raw_pma_pmp_csr_write_t;
 
     typedef struct {
@@ -719,7 +720,7 @@ package memblock_sync_pkg;
     dispatch_raw_redirect_anchor_t raw_redirect_anchor_q[$];
     dispatch_raw_sfence_t      raw_sfence_q[$];
     // 中文注释：generic CSR 写只由 CSR monitor 追加、由 common_data 的
-    // request-fire snapshot 路径按前缀消费。队列中的事件尚未影响模型 generation。
+    // 持续 sample service 在 capture+2 成熟后按前缀消费，不依赖 request。
     dispatch_raw_pma_pmp_csr_write_t raw_pma_pmp_csr_write_q[$];
     // 中文注释：CSR monitor 每个 DUT sample 发布一份短生命周期 context。
     // 同拍 fence 先到时 raw 留在 FIFO 等待绑定；下拍仍未绑定即为 monitor 时序错误。
@@ -735,6 +736,11 @@ package memblock_sync_pkg;
     memblock_csr_full_snapshot_t csr_full_snapshot;
     // 中文注释：CSR changed或sfence monitor事件的non-destructive history。
     // producer只追加/合并，唯一response owner按连续cursor回收前缀。
+    longint unsigned raw_pma_pmp_csr_write_revision = 1;
+    // 当前 reset epoch 已捕获的 generic write 总数；producer push 递增，reset 清零。
+    // completion 与 consumer applied count 对照，避免最后一笔未捕获/未成熟时提前释放。
+    longint unsigned raw_pma_pmp_csr_write_produced_count = 0;
+    localparam longint unsigned MEMBLOCK_PMA_PMP_MAX_U64 = 64'hffff_ffff_ffff_ffff;
     longint unsigned           l2tlb_flush_event_seq;
     time                       l2tlb_flush_sample_time;
     bit                        l2tlb_flush_event_valid;
@@ -1028,8 +1034,54 @@ package memblock_sync_pkg;
         item.data = '0;
         item.sample_seq = 0;
         item.sample_time = 0;
+        item.reset_epoch = 0;
         return item;
     endfunction:make_empty_raw_pma_pmp_csr_write
+
+    function bit pma_pmp_csr_epoch_state_is_current(
+        input bit lifecycle_initialized,
+        input bit reset_active,
+        input longint unsigned current_epoch,
+        input longint unsigned event_epoch
+    );
+        if (!lifecycle_initialized || event_epoch != current_epoch) begin
+            return 1'b0;
+        end
+        return !reset_active || current_epoch != 0;
+    endfunction:pma_pmp_csr_epoch_state_is_current
+
+    function bit pma_pmp_csr_epoch_is_current(input longint unsigned event_epoch);
+        return pma_pmp_csr_epoch_state_is_current(
+            l2tlb_testcase_lifecycle_initialized,
+            l2tlb_runtime_reset_active,
+            l2tlb_current_reset_epoch,
+            event_epoch);
+    endfunction:pma_pmp_csr_epoch_is_current
+
+    function bit checked_pma_pmp_csr_write_count_add(
+        input longint unsigned base,
+        input longint unsigned delta,
+        output longint unsigned result
+    );
+        result = base;
+        if (base > MEMBLOCK_PMA_PMP_MAX_U64 - delta) begin
+            return 1'b0;
+        end
+        result = base + delta;
+        return 1'b1;
+    endfunction:checked_pma_pmp_csr_write_count_add
+
+    function bit pma_pmp_csr_revision_can_advance(input longint unsigned revision);
+        return revision <= MEMBLOCK_PMA_PMP_MAX_U64 - 2;
+    endfunction:pma_pmp_csr_revision_can_advance
+
+    function void bump_raw_pma_pmp_csr_write_revision();
+        if (!pma_pmp_csr_revision_can_advance(raw_pma_pmp_csr_write_revision)) begin
+            `uvm_fatal("MEMBLOCK_SYNC", "raw PMA/PMP CSR FIFO revision has no next live value")
+            return;
+        end
+        raw_pma_pmp_csr_write_revision++;
+    endfunction:bump_raw_pma_pmp_csr_write_revision
 
     function memblock_csr_full_snapshot_t make_empty_csr_full_snapshot();
         memblock_csr_full_snapshot_t item;
@@ -1048,6 +1100,7 @@ package memblock_sync_pkg;
         item.hg    = 1'b0;
         item.sample_seq = 0;
         item.sample_time = 0;
+        item.reset_epoch = 0;
         item.reset_epoch = 0;
         item.lifecycle_event_seq = MEMBLOCK_L2TLB_EVENT_SEQ_NONE;
         item.context_valid = 1'b0;
@@ -2343,6 +2396,10 @@ package memblock_sync_pkg;
                lifecycle_event_published_seq >= sample_seq;
     endfunction:l2tlb_sample_ready
 
+    function longint unsigned get_l2tlb_lifecycle_event_published_seq();
+        return lifecycle_event_published_seq;
+    endfunction:get_l2tlb_lifecycle_event_published_seq
+
     // 抽象职责：发布 CSR monitor 已观察到的 runtime snapshot。当前 control epoch
     // ready 后的首份 sample 即使 payload 不变也强制发布并登记 baseline；后续仍只在
     // payload 改变时递增，避免旧 snapshot 被新 action 当作当前代完成证据。
@@ -2701,16 +2758,35 @@ package memblock_sync_pkg;
     // semantic capture gate，确保静态 Sv39 或早期 PMP/PMA 写也能按 sample 顺序回放。
     // helper 不解释 CSR 地址，也不改变 PMA/PMP 表，语义由 common_data 的严格
     // sample-order consumer 负责。
+    // Report-free producer contract used by directed boundary tests and by the
+    // production wrapper before any queue/counter/revision mutation.
+    function bit precheck_raw_pma_pmp_csr_write_push(
+        input dispatch_raw_pma_pmp_csr_write_t item
+    );
+        return item.valid &&
+               item.sample_seq != 0 &&
+               item.sample_seq <= MEMBLOCK_PMA_PMP_MAX_U64 - 2 &&
+               pma_pmp_csr_epoch_is_current(item.reset_epoch) &&
+               raw_pma_pmp_csr_write_produced_count != MEMBLOCK_PMA_PMP_MAX_U64 &&
+               pma_pmp_csr_revision_can_advance(raw_pma_pmp_csr_write_revision);
+    endfunction:precheck_raw_pma_pmp_csr_write_push
+
     function void push_raw_pma_pmp_csr_write(
         input dispatch_raw_pma_pmp_csr_write_t item
     );
-        if (!item.valid) begin
+        if (!precheck_raw_pma_pmp_csr_write_push(item)) begin
+            `uvm_fatal("MEMBLOCK_SYNC", $sformatf(
+                "invalid PMA/PMP CSR write valid=%0d sample=%0d event_epoch=%0d current_epoch=%0d lifecycle=%0d reset=%0d produced=%0d revision=%0d",
+                item.valid,
+                item.sample_seq, item.reset_epoch, l2tlb_current_reset_epoch,
+                l2tlb_testcase_lifecycle_initialized, l2tlb_runtime_reset_active,
+                raw_pma_pmp_csr_write_produced_count,
+                raw_pma_pmp_csr_write_revision))
             return;
         end
-        if (item.sample_seq == 0) begin
-            `uvm_fatal("MEMBLOCK_SYNC", "PMA/PMP CSR write requires non-zero sample")
-        end
         raw_pma_pmp_csr_write_q.push_back(item);
+        raw_pma_pmp_csr_write_produced_count++;
+        bump_raw_pma_pmp_csr_write_revision();
     endfunction:push_raw_pma_pmp_csr_write
 
     function bit peek_raw_pma_pmp_csr_write(
@@ -2731,8 +2807,71 @@ package memblock_sync_pkg;
             return 1'b0;
         end
         item = raw_pma_pmp_csr_write_q.pop_front();
+        bump_raw_pma_pmp_csr_write_revision();
         return 1'b1;
     endfunction:pop_raw_pma_pmp_csr_write
+
+    function int unsigned raw_pma_pmp_csr_write_size();
+        return raw_pma_pmp_csr_write_q.size();
+    endfunction:raw_pma_pmp_csr_write_size
+
+    function bit peek_raw_pma_pmp_csr_write_at(
+        input int unsigned index,
+        output dispatch_raw_pma_pmp_csr_write_t item
+    );
+        if (index >= raw_pma_pmp_csr_write_q.size()) begin
+            item = make_empty_raw_pma_pmp_csr_write();
+            return 1'b0;
+        end
+        item = raw_pma_pmp_csr_write_q[index];
+        return item.valid;
+    endfunction:peek_raw_pma_pmp_csr_write_at
+
+    function longint unsigned get_raw_pma_pmp_csr_write_revision();
+        return raw_pma_pmp_csr_write_revision;
+    endfunction:get_raw_pma_pmp_csr_write_revision
+
+    function bit precheck_raw_pma_pmp_csr_write_prefix(
+        input longint unsigned expected_revision,
+        input dispatch_raw_pma_pmp_csr_write_t expected_events[$]
+    );
+        longint unsigned expected_count64;
+        longint unsigned queued_count64;
+        expected_count64 = $unsigned(expected_events.size());
+        queued_count64 = $unsigned(raw_pma_pmp_csr_write_q.size());
+        if (expected_revision != raw_pma_pmp_csr_write_revision ||
+            queued_count64 < expected_count64 ||
+            !pma_pmp_csr_revision_can_advance(raw_pma_pmp_csr_write_revision)) begin
+            return 1'b0;
+        end
+        foreach (expected_events[index]) begin
+            if (raw_pma_pmp_csr_write_q[index] != expected_events[index]) begin
+                return 1'b0;
+            end
+        end
+        return 1'b1;
+    endfunction:precheck_raw_pma_pmp_csr_write_prefix
+
+    function void commit_raw_pma_pmp_csr_write_prefix(
+        input longint unsigned count
+    );
+        dispatch_raw_pma_pmp_csr_write_t ignored_item;
+        for (longint unsigned index = 0; index < count; index++) begin
+            ignored_item = raw_pma_pmp_csr_write_q.pop_front();
+        end
+        raw_pma_pmp_csr_write_revision++;
+    endfunction:commit_raw_pma_pmp_csr_write_prefix
+
+    // runtime reset 的 replay owner 调用；只清本 FIFO 与本 epoch 计数。
+    function void reset_raw_pma_pmp_csr_writes();
+        if (!pma_pmp_csr_revision_can_advance(raw_pma_pmp_csr_write_revision)) begin
+            `uvm_fatal("MEMBLOCK_SYNC", "raw PMA/PMP CSR FIFO revision has no next live value on reset")
+            return;
+        end
+        raw_pma_pmp_csr_write_q.delete();
+        raw_pma_pmp_csr_write_produced_count = 0;
+        bump_raw_pma_pmp_csr_write_revision();
+    endfunction:reset_raw_pma_pmp_csr_writes
 
     // Abstract responsibility: copy one immutable CSR sample into a raw fence
     // from the same DUT sample/reset epoch. It never changes FIFO order and
@@ -3036,7 +3175,6 @@ package memblock_sync_pkg;
         raw_cancel_snapshot_q.delete();
         raw_redirect_anchor_q.delete();
         raw_sfence_q.delete();
-        raw_pma_pmp_csr_write_q.delete();
         l2tlb_sfence_csr_context = make_empty_l2tlb_sfence_csr_context();
         latest_raw_csr = make_empty_raw_csr();
         latest_raw_csr_valid = 1'b0;
