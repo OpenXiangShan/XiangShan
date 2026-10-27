@@ -266,13 +266,16 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     table.io.trainReq.bits.foldedHist := io.trainFoldedPhr
   }
 
+  /* --------------------------------------------------------------------------------------------------------------
+     train pipeline stage 1
+     - select the provider and alternate from the training read responses
+     - collect allocation eligibility independently of provider selection
+     -------------------------------------------------------------------------------------------------------------- */
+
   private val t1_fire           = RegNext(t0_fire, init = false.B)
   private val t1_needRead       = RegEnable(t0_needRead, false.B, t0_fire)
   private val t1_train          = RegEnable(io.train, 0.U.asTypeOf(new Train), t0_fire)
   private val t1_trainFoldedPhr = RegEnable(io.trainFoldedPhr, t0_fire)
-
-  private val updateStartPc   = t1_train.startPc
-  private val updateFoldedPhr = t1_trainFoldedPhr
 
   // The highest-numbered matching table has the longest history. Select the
   // provider and alternate again, since entries may have changed since prediction.
@@ -290,10 +293,37 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val t1_providerInfo    = t1_selectedInfo.first
   private val t1_altProviderInfo = t1_selectedInfo.second
 
+  private val t1_hasProvider    = t1_needRead && t1_selectedInfo.hasOne
+  private val t1_hasAltProvider = t1_needRead && t1_selectedInfo.hasTwo
+  private val t1_allocatableMask = VecInit(t1_resps.map(r =>
+    !r.valid && r.bits.usefulCnt.isSaturateNegative
+  )).asUInt
+
+  /* --------------------------------------------------------------------------------------------------------------
+     train pipeline stage 2
+     - reconstruct targets and select an allocation candidate
+     - generate updates and send them directly to tables
+     -------------------------------------------------------------------------------------------------------------- */
+
+  private val t2_fire            = RegNext(t1_fire, init = false.B)
+  private val t2_needRead        = RegEnable(t1_needRead, false.B, t1_fire)
+  private val t2_train           = RegEnable(t1_train, 0.U.asTypeOf(new Train), t1_fire)
+  private val t2_trainFoldedPhr  = RegEnable(t1_trainFoldedPhr, t1_fire)
+  private val t2_providerInfo    = RegEnable(t1_providerInfo, t1_fire)
+  private val t2_altProviderInfo = RegEnable(t1_altProviderInfo, t1_fire)
+  private val t2_hasProvider     = RegEnable(t1_hasProvider, false.B, t1_fire)
+  private val t2_hasAltProvider  = RegEnable(t1_hasAltProvider, false.B, t1_fire)
+  private val t2_allocatableMask = RegEnable(t1_allocatableMask, t1_fire)
+  // Keep the allocation random sample aligned with the response transaction.
+  private val t2_allocLFSR = RegEnable(s2_allocLFSR, t1_fire)
+
+  private val updateStartPc   = t2_train.startPc
+  private val updateFoldedPhr = t2_trainFoldedPhr
+
   // Dedicated combinational region reads allow training and prediction to
   // reconstruct their targets concurrently, using their own start PCs.
-  private val t1_targetOffsets = Seq(t1_providerInfo.targetOffset, t1_altProviderInfo.targetOffset)
-  private val t1_targets = t1_targetOffsets.zipWithIndex.map { case (offset, i) =>
+  private val t2_targetOffsets = Seq(t2_providerInfo.targetOffset, t2_altProviderInfo.targetOffset)
+  private val t2_targets = t2_targetOffsets.zipWithIndex.map { case (offset, i) =>
     rTable.io.trainReqPointer(i) := offset.pointer
     PcInit(Cat(
       Mux(
@@ -305,25 +335,21 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     ))
   }
 
-  private val t1_hasProvider       = t1_needRead && t1_selectedInfo.hasOne
-  private val t1_hasAltProvider    = t1_needRead && t1_selectedInfo.hasTwo
-  private val t1_providerTarget    = t1_targets.head
-  private val t1_altProviderTarget = t1_targets(1)
-  private val t1_altDiffers        = t1_hasAltProvider && t1_providerTarget =/= t1_altProviderTarget
+  private val t2_providerTarget    = t2_targets.head
+  private val t2_altProviderTarget = t2_targets(1)
+  private val t2_altDiffers        = t2_hasAltProvider && t2_providerTarget =/= t2_altProviderTarget
 
   // Allocation also uses the fresh hit/useful state, and only considers tables
   // with a longer history than the newly selected provider.
-  private val t1_allocatableSlots = VecInit(t1_resps.map(r =>
-    !r.valid && r.bits.usefulCnt.isSaturateNegative
-  )).asUInt & (~(LowerMask(UIntToOH(t1_providerInfo.tableIdx), NumTables) &
-    Fill(NumTables, t1_hasProvider.asUInt))).asUInt
-  private val t1_firstEntry    = PriorityEncoder(t1_allocatableSlots)
-  private val t1_maskedEntry   = PriorityEncoder(t1_allocatableSlots & s2_allocLFSR)
-  private val t1_allocateValid = t1_needRead && t1_allocatableSlots.orR
-  private val t1_allocateIdx   = Mux(t1_allocatableSlots(t1_maskedEntry), t1_maskedEntry, t1_firstEntry)
+  private val t2_allocatableSlots = t2_allocatableMask &
+    (~(LowerMask(UIntToOH(t2_providerInfo.tableIdx), NumTables) & Fill(NumTables, t2_hasProvider.asUInt))).asUInt
+  private val t2_firstEntry    = PriorityEncoder(t2_allocatableSlots)
+  private val t2_maskedEntry   = PriorityEncoder(t2_allocatableSlots & t2_allocLFSR)
+  private val t2_allocateValid = t2_needRead && t2_allocatableSlots.orR
+  private val t2_allocateIdx   = Mux(t2_allocatableSlots(t2_maskedEntry), t2_maskedEntry, t2_firstEntry)
 
   // Select the branch needed for training.
-  private val trainBranchIdxVec: Vec[Bool] = VecInit(t1_train.branches.map(b =>
+  private val trainBranchIdxVec: Vec[Bool] = VecInit(t2_train.branches.map(b =>
     b.valid && b.bits.attribute.needIttage && b.bits.taken
   ))
   assert(
@@ -333,7 +359,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val trainBranchIdx: UInt = PriorityEncoder(trainBranchIdxVec)
   private val hasTrainBranch: Bool = trainBranchIdxVec.asUInt.orR
 
-  private val updateValid = hasTrainBranch && t1_fire
+  private val updateValid = hasTrainBranch && t2_fire
 
   private val updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
@@ -353,11 +379,11 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   // Use the misprediction bits from the training bundle so allocation and
   // certain updates (e.g. alt-provider penalty) only happen on actual mispreds.
-  private val updateMisPred = hasTrainBranch && t1_train.branches(trainBranchIdx).bits.mispredict
+  private val updateMisPred = hasTrainBranch && t2_train.branches(trainBranchIdx).bits.mispredict
 
   // Update in loop
-  private val updateRealTarget       = t1_train.branches(trainBranchIdx).bits.target
-  private val updatePCRegion         = targetGetRegion(t1_train.startPc)
+  private val updateRealTarget       = t2_train.branches(trainBranchIdx).bits.target
+  private val updatePCRegion         = targetGetRegion(t2_train.startPc)
   private val updateRealTargetRegion = targetGetRegion(updateRealTarget)
   private val updateRealTargetOffset = WireInit(0.U.asTypeOf(new IttageOffset))
   updateRealTargetOffset.offset := targetGetOffset(updateRealTarget)
@@ -373,74 +399,74 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   updateRealTargetOffset.pointer     := rTable.io.writePointer
 
   // Retain the original SRAM target encoding when the target does not change.
-  rTable.io.updateRegion := VecInit(t1_targets.map(targetGetRegion))
+  rTable.io.updateRegion := VecInit(t2_targets.map(targetGetRegion))
 
-  private val provider    = t1_providerInfo.tableIdx
-  private val altProvider = t1_altProviderInfo.tableIdx
-  private val usedAltPred = t1_hasAltProvider && t1_providerInfo.cnt.isSaturateNegative
+  private val provider    = t2_providerInfo.tableIdx
+  private val altProvider = t2_altProviderInfo.tableIdx
+  private val usedAltPred = t2_hasAltProvider && t2_providerInfo.cnt.isSaturateNegative
   when(updateValid) {
-    when(t1_hasProvider) {
+    when(t2_hasProvider) {
       when(usedAltPred && updateMisPred) { // Train the freshly selected alternate.
         updateMask(altProvider)            := true.B
         updateUsefulCntMask(altProvider)   := false.B
-        updateCorrect(altProvider)         := t1_altProviderTarget === updateRealTarget
-        updateOldCnt(altProvider)          := t1_altProviderInfo.cnt
+        updateCorrect(altProvider)         := t2_altProviderTarget === updateRealTarget
+        updateOldCnt(altProvider)          := t2_altProviderInfo.cnt
         updateAlloc(altProvider)           := false.B
         updateTargetOffset(altProvider)    := updateRealTargetOffset
-        updateOldTargetOffset(altProvider) := t1_altProviderInfo.targetOffset
+        updateOldTargetOffset(altProvider) := t2_altProviderInfo.targetOffset
       }
 
       updateMask(provider)          := true.B
       updateUsefulCntMask(provider) := true.B
 
       updateUsefulCnt(provider) := Mux(
-        !t1_altDiffers,
-        t1_providerInfo.usefulCnt,
-        (t1_providerTarget === updateRealTarget).asTypeOf(UsefulCounter())
+        !t2_altDiffers,
+        t2_providerInfo.usefulCnt,
+        (t2_providerTarget === updateRealTarget).asTypeOf(UsefulCounter())
       )
-      updateCorrect(provider)         := t1_providerTarget === updateRealTarget
-      updateOldCnt(provider)          := t1_providerInfo.cnt
+      updateCorrect(provider)         := t2_providerTarget === updateRealTarget
+      updateOldCnt(provider)          := t2_providerInfo.cnt
       updateAlloc(provider)           := false.B
       updateTargetOffset(provider)    := updateRealTargetOffset
-      updateOldTargetOffset(provider) := t1_providerInfo.targetOffset
+      updateOldTargetOffset(provider) := t2_providerInfo.targetOffset
     }
   }
   XSDebug(
-    updateValid && t1_hasProvider,
-    p"t1_train provider $provider, pred cycle ${t1_train.meta.ittage.debug_predCycle.getOrElse(0.U)}\n"
+    updateValid && t2_hasProvider,
+    p"t2_train provider $provider, pred cycle ${t2_train.meta.ittage.debug_predCycle.getOrElse(0.U)}\n"
   )
   XSDebug(
-    updateValid && t1_hasProvider && usedAltPred && updateMisPred,
-    p"t1_train altprovider $altProvider, pred cycle ${t1_train.meta.ittage.debug_predCycle.getOrElse(0.U)}\n"
+    updateValid && t2_hasProvider && usedAltPred && updateMisPred,
+    p"t2_train altprovider $altProvider, pred cycle ${t2_train.meta.ittage.debug_predCycle.getOrElse(0.U)}\n"
   )
 
   // if mispredicted and not the case that
   // provider offered correct target but used altpred due to unconfident
-  private val providerCorrect = t1_hasProvider && t1_providerTarget === updateRealTarget
-  private val providerUnconf  = t1_providerInfo.cnt.isSaturateNegative
-  private val updatePredictionCorrect = t1_hasProvider && Mux(
+  private val providerCorrect = t2_hasProvider && t2_providerTarget === updateRealTarget
+  private val providerUnconf  = t2_providerInfo.cnt.isSaturateNegative
+  private val updatePredictionCorrect = t2_hasProvider && Mux(
     usedAltPred,
-    t1_altProviderTarget === updateRealTarget,
+    t2_altProviderTarget === updateRealTarget,
     providerCorrect
   )
   private val needAllocate = updateValid && updateMisPred && !updatePredictionCorrect &&
     !(providerCorrect && providerUnconf)
 
   when(needAllocate) {
-    tickCnt.selfUpdate(!t1_allocateValid)
-    when(t1_allocateValid) {
-      updateMask(t1_allocateIdx)          := true.B
-      updateCorrect(t1_allocateIdx)       := false.B // useless for alloc
-      updateAlloc(t1_allocateIdx)         := true.B
-      updateUsefulCntMask(t1_allocateIdx) := true.B
-      updateUsefulCnt(t1_allocateIdx)     := UsefulCounter.SaturateNegative
-      updateTargetOffset(t1_allocateIdx)  := updateRealTargetOffset
+    tickCnt.selfUpdate(!t2_allocateValid)
+    when(t2_allocateValid) {
+      updateMask(t2_allocateIdx)          := true.B
+      updateCorrect(t2_allocateIdx)       := false.B // useless for alloc
+      updateAlloc(t2_allocateIdx)         := true.B
+      updateUsefulCntMask(t2_allocateIdx) := true.B
+      updateUsefulCnt(t2_allocateIdx)     := UsefulCounter.SaturateNegative
+      updateTargetOffset(t2_allocateIdx)  := updateRealTargetOffset
     }
   }
 
   XSDebug(
-    needAllocate && t1_allocateValid,
-    p"allocate new table entry, pred cycle ${t1_train.meta.ittage.debug_predCycle.getOrElse(0.U)}\n"
+    needAllocate && t2_allocateValid,
+    p"allocate new table entry, pred cycle ${t2_train.meta.ittage.debug_predCycle.getOrElse(0.U)}\n"
   )
 
   when(tickCnt.isSaturatePositive) {
@@ -448,19 +474,21 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     updateResetUsefulCnt := true.B
   }
 
+  // The t1-to-t2 registers already isolate the SRAM response path. Tables
+  // accept these requests directly into their per-bank write buffers.
   for (i <- 0 until NumTables) {
-    tables(i).io.update.valid           := RegNext(updateMask(i), init = false.B)
-    tables(i).io.update.resetUsefulCnt  := RegNext(updateResetUsefulCnt, init = false.B)
-    tables(i).io.update.correct         := RegEnable(updateCorrect(i), updateMask(i))
-    tables(i).io.update.alloc           := RegEnable(updateAlloc(i), updateMask(i))
-    tables(i).io.update.oldCnt          := RegEnable(updateOldCnt(i), updateMask(i))
-    tables(i).io.update.targetOffset    := RegEnable(updateTargetOffset(i), updateMask(i))
-    tables(i).io.update.oldTargetOffset := RegEnable(updateOldTargetOffset(i), updateMask(i))
+    tables(i).io.update.valid           := updateMask(i)
+    tables(i).io.update.resetUsefulCnt  := updateResetUsefulCnt
+    tables(i).io.update.correct         := updateCorrect(i)
+    tables(i).io.update.alloc           := updateAlloc(i)
+    tables(i).io.update.oldCnt          := updateOldCnt(i)
+    tables(i).io.update.targetOffset    := updateTargetOffset(i)
+    tables(i).io.update.oldTargetOffset := updateOldTargetOffset(i)
 
-    tables(i).io.update.usefulCntValid := RegEnable(updateUsefulCntMask(i), false.B, updateMask(i))
-    tables(i).io.update.usefulCnt      := RegEnable(updateUsefulCnt(i), updateMask(i))
-    tables(i).io.update.startPc        := RegEnable(updateStartPc, updateMask(i))
-    tables(i).io.update.foldedHist     := RegEnable(updateFoldedPhr, updateMask(i))
+    tables(i).io.update.usefulCntValid := updateUsefulCntMask(i)
+    tables(i).io.update.usefulCnt      := updateUsefulCnt(i)
+    tables(i).io.update.startPc        := updateStartPc
+    tables(i).io.update.foldedHist     := updateFoldedPhr
   }
 
   // Debug and perf info
@@ -479,34 +507,34 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     )
   )
 
-  // Correlate each t0 read decision with its own t1 update mask. An update
-  // means a table update request (table.io.update.valid in the following cycle),
+  // Correlate each t0 read decision with its own t2 update mask. An update
+  // means a table update request (table.io.update.valid in this cycle),
   // rather than merely entering training or changing the stored data value.
   // Useful-counter reset sweeps are independent and are excluded here.
   private val perf_hasUpdate = updateMask.asUInt.orR
   private val perf_hasAlloc = VecInit(updateMask.zip(updateAlloc).map { case (valid, alloc) =>
     valid && alloc
   }).asUInt.orR
-  private val perf_metaProvider = t1_train.meta.ittage.provider
+  private val perf_metaProvider = t2_train.meta.ittage.provider
   XSPerfSeqAccumulate(
     "ittage_train",
     updateValid,
     Seq(
-      ("read_update", t1_needRead && perf_hasUpdate),
-      ("read_no_update", t1_needRead && !perf_hasUpdate),
-      ("no_read_update", !t1_needRead && perf_hasUpdate),
-      ("no_read_no_update", !t1_needRead && !perf_hasUpdate),
+      ("read_update", t2_needRead && perf_hasUpdate),
+      ("read_no_update", t2_needRead && !perf_hasUpdate),
+      ("no_read_update", !t2_needRead && perf_hasUpdate),
+      ("no_read_no_update", !t2_needRead && !perf_hasUpdate),
       ("update", perf_hasUpdate),
-      ("update_provider", t1_hasProvider && updateMask(provider)),
-      ("update_altprovider", t1_hasAltProvider && updateMask(altProvider)),
+      ("update_provider", t2_hasProvider && updateMask(provider)),
+      ("update_altprovider", t2_hasAltProvider && updateMask(altProvider)),
       ("update_allocate", perf_hasAlloc),
       ("update_entries", true.B, PopCount(updateMask)),
-      ("allocate_failed", needAllocate && !t1_allocateValid),
-      ("read_provider_lost", t1_needRead && perf_metaProvider.valid && !t1_hasProvider),
-      ("read_provider_found", t1_needRead && !perf_metaProvider.valid && t1_hasProvider),
+      ("allocate_failed", needAllocate && !t2_allocateValid),
+      ("read_provider_lost", t2_needRead && perf_metaProvider.valid && !t2_hasProvider),
+      ("read_provider_found", t2_needRead && !perf_metaProvider.valid && t2_hasProvider),
       (
         "read_provider_changed",
-        t1_needRead && perf_metaProvider.valid && t1_hasProvider &&
+        t2_needRead && perf_metaProvider.valid && t2_hasProvider &&
           perf_metaProvider.bits =/= provider
       )
     )
@@ -535,17 +563,17 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val predUseBimAsAltPred = predUseAltPred && !s2_altProvided
   private val predUseBimAsPred    = !s2_provided
 
-  private val commitUseProvider     = t1_hasProvider && !t1_providerInfo.cnt.isSaturateNegative
-  private val commitUseAltPred      = t1_hasProvider && t1_providerInfo.cnt.isSaturateNegative
-  private val commitUseHtAsAltPred  = commitUseAltPred && t1_hasAltProvider
-  private val commitUseFtbAsAltPred = commitUseAltPred && !t1_hasAltProvider
-  private val commitUseFtbAsPred    = !t1_hasProvider
+  private val commitUseProvider     = t2_hasProvider && !t2_providerInfo.cnt.isSaturateNegative
+  private val commitUseAltPred      = t2_hasProvider && t2_providerInfo.cnt.isSaturateNegative
+  private val commitUseHtAsAltPred  = commitUseAltPred && t2_hasAltProvider
+  private val commitUseFtbAsAltPred = commitUseAltPred && !t2_hasAltProvider
+  private val commitUseFtbAsPred    = !t2_hasProvider
 
   for (i <- 0 until NumTables) {
     val predThisIsProvider   = s2_provider === i.U
     val predThisIsAltPred    = s2_altProvider === i.U
-    val commitThisIsProvider = t1_providerInfo.tableIdx === i.U
-    val commitThisIsAltPred  = t1_altProviderInfo.tableIdx === i.U
+    val commitThisIsProvider = t2_providerInfo.tableIdx === i.U
+    val commitThisIsAltPred  = t2_altProviderInfo.tableIdx === i.U
     ittagePerf(
       s"table_${i}_final_provided",
       predUseProvider && predThisIsProvider,
@@ -568,7 +596,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     )
   }
 
-  ittagePerf("provided", s2_provided, t1_hasProvider)
+  ittagePerf("provided", s2_provided, t2_hasProvider)
   ittagePerf("use_provider", predUseProvider, commitUseProvider)
   ittagePerf("use_altpred", predUseAltPred, commitUseAltPred)
   ittagePerf("use_ht_as_altpred", predUseHtAsAltPred, commitUseHtAsAltPred)
@@ -599,14 +627,14 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
   XSDebug(
     updateValid,
-    p"pc: ${Hexadecimal(updateStartPc.toUInt)}, target: ${Hexadecimal(t1_train.branches(trainBranchIdx).bits.target.toUInt)}\n"
+    p"pc: ${Hexadecimal(updateStartPc.toUInt)}, target: ${Hexadecimal(t2_train.branches(trainBranchIdx).bits.target.toUInt)}\n"
   )
   XSDebug(
     updateValid,
-    p"pvdr(v:$t1_hasProvider num:$provider ctr:${t1_providerInfo.cnt} " +
-      p"u:${t1_providerInfo.usefulCnt} tar:${Hexadecimal(t1_providerTarget.toUInt)}), " +
-      p"altpvdr(v:$t1_hasAltProvider num:$altProvider ctr:${t1_altProviderInfo.cnt} " +
-      p"tar:${Hexadecimal(t1_altProviderTarget.toUInt)})\n"
+    p"pvdr(v:$t2_hasProvider num:$provider ctr:${t2_providerInfo.cnt} " +
+      p"u:${t2_providerInfo.usefulCnt} tar:${Hexadecimal(t2_providerTarget.toUInt)}), " +
+      p"altpvdr(v:$t2_hasAltProvider num:$altProvider ctr:${t2_altProviderInfo.cnt} " +
+      p"tar:${Hexadecimal(t2_altProviderTarget.toUInt)})\n"
   )
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")
 }
