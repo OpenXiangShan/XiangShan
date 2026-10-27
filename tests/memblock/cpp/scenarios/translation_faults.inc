@@ -1375,6 +1375,7 @@ int run_translation_faults(int argc, char **argv)
     unsigned pmp_vector_store_fault_readbacks = 0;
     unsigned pmp_masked_vector_store_fault_readbacks = 0;
     unsigned pmp_cross_page_vector_store_fault_readbacks = 0;
+    unsigned pmp_segment_store_fault_readbacks = 0;
     unsigned vector_masked_later_load_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
@@ -4233,6 +4234,148 @@ int run_translation_faults(int argc, char **argv)
         ++pmp_cross_page_vector_store_fault_readbacks;
     }
 
+    // PMP segment-store fault: field 0 is in a PMP read/write page and
+    // field 1 in a PMP read-only page.  The segment data and fix-VL uops must
+    // fault with vstart=0, no request may issue, and the read-only field page
+    // must stay unchanged.
+    {
+        memblock::Environment pmp_segment(argc, argv);
+        constexpr std::uint64_t segment_base =
+            memblock::kDefaultMemoryBase + 0x390000ULL;
+        constexpr std::uint64_t segment_high = segment_base + 0x1000;
+        constexpr std::uint8_t pmp_napot_read = 0x19;
+        constexpr std::uint8_t pmp_napot_read_write = 0x1b;
+        pmp_segment.memory().fill_incrementing(
+            segment_base + 0xff8, 8, 0x77);
+        pmp_segment.memory().fill_incrementing(
+            segment_high, 0x20, 0xd6);
+        const std::uint64_t high_word =
+            pmp_segment.memory().read_u64(segment_high);
+        pmp_segment.configure_backpressure(0x9b05688c2b3e6c1fULL, true);
+        const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+            return (base | (size / 2 - 1)) >> 2;
+        };
+        if (!pmp_segment.reset() || !pmp_segment.activate_bare() ||
+            !pmp_segment.configure_pmp(
+                {napot_address(segment_base, 0x1000),
+                 napot_address(segment_high, 0x1000)},
+                {pmp_napot_read_write, pmp_napot_read})) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_segment.cycle()
+                      << " phase=pmp-segment-store-configuration reason="
+                      << pmp_segment.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction segment_data{
+            .store = true,
+            .segment = true,
+            .address = segment_base + 0xff8,
+            .eew = 3,
+            .vl = 1,
+            .rob = 110,
+            .sq = 0,
+            .pdest = 211,
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask =
+                memblock::kExceptionStoreAccessFault,
+            .expected_writeback_vstart = 0,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = false,
+            .nf = 1,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (auto &byte : segment_data.data) {
+            byte = static_cast<unsigned char>(0x8f);
+        }
+        const std::uint64_t dcache_before = pmp_segment.tilelink_requests();
+        const std::uint64_t uncache_before = pmp_segment.uncache_requests();
+        pmp_segment.select_store_exception_address(true);
+        pmp_segment.expect_vector(segment_data);
+        if (!pmp_segment.set_rob_head(
+                segment_data.rob, segment_data.rob_flag) ||
+            !pmp_segment.enqueue_vector(segment_data) ||
+            !pmp_segment.issue_vector(segment_data, 1024) ||
+            !pmp_segment.run_until_vector_complete_with_replays(
+                segment_data, 32768) ||
+            !pmp_segment.run_cycles(4) ||
+            pmp_segment.exception_vaddr() != segment_high ||
+            pmp_segment.tilelink_requests() != dcache_before ||
+            pmp_segment.uncache_requests() != uncache_before ||
+            pmp_segment.vector_store_writebacks() != 1) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_segment.cycle()
+                      << " phase=pmp-segment-store-data reason="
+                      << pmp_segment.error() << " vaddr=0x" << std::hex
+                      << pmp_segment.exception_vaddr() << std::dec
+                      << " dcache=" << pmp_segment.tilelink_requests()
+                      << " uncache=" << pmp_segment.uncache_requests()
+                      << " writebacks="
+                      << pmp_segment.vector_store_writebacks() << '\n';
+            return 1;
+        }
+        auto segment_fix = segment_data;
+        segment_fix.pdest = 212;
+        segment_fix.expected_exception_mask =
+            memblock::kExceptionStoreAccessFault;
+        segment_fix.expected_vl = 1;
+        segment_fix.expected_writeback_vstart = 0;
+        segment_fix.vuop_idx = 1;
+        segment_fix.last_uop = true;
+        segment_fix.vl_wen = true;
+        pmp_segment.expect_vector_data(segment_fix, {});
+        if (!pmp_segment.issue_vector(segment_fix, 1024) ||
+            !pmp_segment.run_until_vector_complete(16384) ||
+            pmp_segment.vector_store_writebacks() != 2 ||
+            pmp_segment.sq_dequeued() != pmp_segment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_segment.cycle()
+                      << " phase=pmp-segment-store-fix reason="
+                      << pmp_segment.error() << " writebacks="
+                      << pmp_segment.vector_store_writebacks()
+                      << " sq=" << pmp_segment.sq_dequeued() << '/'
+                      << pmp_segment.sq_allocated() << '\n';
+            return 1;
+        }
+        if (!pmp_segment.redirect_after(
+                segment_data.rob, segment_data.rob_flag, true, true) ||
+            !pmp_segment.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_segment.cycle()
+                      << " phase=pmp-segment-store-redirect reason="
+                      << pmp_segment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = segment_high,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 213,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        pmp_segment.expect_load_data(readback, high_word);
+        if (!pmp_segment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !pmp_segment.enqueue_load(readback) ||
+            !pmp_segment.issue_load(readback, 4096) ||
+            !pmp_segment.run_until_complete(16384) ||
+            !pmp_segment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_segment.cycle()
+                      << " phase=pmp-segment-store-readback reason="
+                      << pmp_segment.error() << '\n';
+            return 1;
+        }
+        pmp_segment.select_store_exception_address(false);
+        ++pmp_segment_store_fault_readbacks;
+    }
+
     // A vector load with no active element must not fault even when its base
     // address is unmapped.  Masked-off elements are not accessed.  The
     // completion is checked by the normal vector scoreboard; this case also
@@ -4348,6 +4491,8 @@ int run_translation_faults(int argc, char **argv)
               << pmp_masked_vector_store_fault_readbacks
               << " pmp_cross_page_vector_store_fault_readbacks="
               << pmp_cross_page_vector_store_fault_readbacks
+              << " pmp_segment_store_fault_readbacks="
+              << pmp_segment_store_fault_readbacks
               << " vector_first_element_store_fault_readbacks="
               << vector_first_element_store_fault_readbacks
               << " vector_masked_later_load_controls="
