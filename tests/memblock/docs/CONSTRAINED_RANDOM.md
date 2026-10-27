@@ -431,8 +431,8 @@ backpressure bins. `make -C tests/memblock strict-coverage-regression` generates
 a finite coverage campaign and runs that opt-in mode. `STRICT_CONSTRAINTS`
 selects the preset (default `coverage`) and repeatable `STRICT_CONSTRAINT`
 assignments override individual fields, e.g.
-`STRICT_CONSTRAINT='probe=500'` to exercise the standalone probe-depth
-classes. A 2×4608 diagnostic run
+`STRICT_CONSTRAINT='probe=500'` (or the `probe-strict-coverage` target, which
+uses `probe=1000`) to exercise the standalone probe-depth classes. A 2×4608 diagnostic run
 was functionally clean but strict coverage rejected it because enabled
 probe-depth classes 4..7 were unobserved; a 1×16384 run selected only six
 standalone probe sequences and also failed. Use `STRICT_CONSTRAINT='probe=500'`

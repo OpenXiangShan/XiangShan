@@ -199,6 +199,7 @@ The Makefile configures these actual commands; execution alone is not closure:
 | long-final-regression | 43200s, 16384 actions, spec; verifier 128+ results, 8 workers |
 | endurance-regression | 8 seeds, 1000000 actions each, timeout 720000s, spec; finite exact-result verifier |
 | strict-coverage-regression | 2 finite coverage seeds by default (`STRICT_CONSTRAINTS`, optional `STRICT_CONSTRAINT` overrides), ACTIONS default 16384, 8 workers; strict coverage/backpressure verifier (opt-in) |
+| probe-strict-coverage | 1 finite coverage seed, 4608 actions, `probe=1000`; focused standalone probe-depth/cross audit |
 | known-bug-sentinel | vector-guest-fault-split with exact successful external metadata signature |
 
 The global ACTIONS default is 16384. It wins over the extended/long recipe's
