@@ -17,6 +17,9 @@ LONG_RESULT ?= $(PREPARED_DIR)/final-constrained-random-12h.json
 ENDURANCE_RESULT ?= $(PREPARED_DIR)/endurance-constrained-random-8x1000000.json
 STRICT_COVERAGE_RESULT ?= $(PREPARED_DIR)/strict-coverage-results.json
 PROBE_STRICT_COVERAGE_RESULT ?= $(PREPARED_DIR)/probe-strict-coverage-results.json
+BALANCED_STRICT_COVERAGE_RESULT ?= $(PREPARED_DIR)/balanced-strict-coverage-results.json
+PROBE_STRICT_ACTIONS ?= 4608
+BALANCED_STRICT_ACTIONS ?= 4608
 STRICT_CONSTRAINTS ?= coverage
 STRICT_CONSTRAINT_ARGS = $(foreach item,$(STRICT_CONSTRAINT),--constraint $(item))
 ACTIONS ?= 16384
@@ -62,7 +65,7 @@ CPP_SUPPORT := $(CPP_SCENARIOS) $(CPP_ENV_PARTS) $(CPP_RANDOM_PARTS) $(CPP_HEADE
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime translation-fence-all translation-inflight-context-all known-bug-sentinel regression extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results verify-coverage-results strict-coverage-regression probe-strict-coverage final-acceptance unit
+.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime translation-fence-all translation-inflight-context-all known-bug-sentinel regression extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results verify-coverage-results strict-coverage-regression probe-strict-coverage balanced-strict-coverage final-acceptance unit
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS) $(CPP_TYPES) $(CPP_ADAPTERS)
 
@@ -227,7 +230,10 @@ strict-coverage-regression:
 	$(MAKE) verify-coverage-results
 
 probe-strict-coverage:
-	$(MAKE) strict-coverage-regression STRICT_CONSTRAINT='probe=1000' SEEDS=$(or $(SEEDS),1) ACTIONS=$(or $(ACTIONS),4608) STRICT_COVERAGE_RESULT=$(PROBE_STRICT_COVERAGE_RESULT)
+	$(MAKE) strict-coverage-regression STRICT_CONSTRAINT='probe=1000' SEEDS=$(or $(SEEDS),1) ACTIONS=$(PROBE_STRICT_ACTIONS) STRICT_COVERAGE_RESULT=$(PROBE_STRICT_COVERAGE_RESULT)
+
+balanced-strict-coverage:
+	$(MAKE) strict-coverage-regression STRICT_CONSTRAINT='probe=1000 canonical-boundary=500' SEEDS=$(or $(SEEDS),1) ACTIONS=$(BALANCED_STRICT_ACTIONS) STRICT_COVERAGE_RESULT=$(BALANCED_STRICT_COVERAGE_RESULT)
 
 verify-extended-results:
 	$(MAKE) check-rtl
