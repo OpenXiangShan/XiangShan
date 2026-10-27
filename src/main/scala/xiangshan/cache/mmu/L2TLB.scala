@@ -301,6 +301,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       arb2.io.in(i).bits.req_info.mptOnly.get := DontCare // assign dont care to mpt port, it is not used. but arb2 uses L1TLB req as type, so...
     }
   }
+  arb2.io.out.ready := cache.io.req.ready
 
   // Instructs jmp_bitmap_check requests from cache need go to LLPTW/PTW for processing
   val toFsm_toLLPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check && cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
@@ -709,46 +710,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     !flush && !flush_latch(txnId) &&
     !(from_hptw(txnId) && hptw_bypassed)
 
-  // mem_resp_done / refill_valid pulse at the completing beat T.
-  // ptw/hptw io.refill.* is valid at T, but llptw_mem.refill is not: the LLPTW
-  // registers mem_refill_id with a RegNext, so io.mem.refill only carries the
-  // completing request's req_info at T+1.  Rather than dropping that RegNext
-  // (it cuts the DnDAT TxnID -> entries() path), align the whole cache refill
-  // payload one stage later so every source is sampled at T+1 and presented at
-  // T+2.  Combinational depth per stage is unchanged.  Cache reads must
-  // also wait for this extra refill stage (see the arb2 ready gate below).
-  // The L1 direct-response path does not go through cache.io.refill.
-  // Cancel pending refills on a flush at T+1 before they reach the cache at T+2.
-  // This also gates levelOH, which controls the actual cache writes.
-  val refill_valid_d1 = GatedValidRegNext(refill_valid, false.B) && !flush // T+1
-  // A normal PTW can recheck the page cache at T+1, before its refill reaches
-  // the SRAM at T+2.  Block cache reads during the pending refill stage;
-  // PtwCache's existing rwHarzad blocks them on the actual refill cycle.
-  // The earliest recheck is then T+3 and sees the newly written PTE, rather
-  // than repeatedly missing and losing that entry to other VPNs' refills.
-  // cache.io.req.valid is driven by arb2.io.out.fire, so this gate also
-  // backpressures every source without accepting a request on either side.
-  arb2.io.out.ready := cache.io.req.ready && !refill_valid_d1
-
-  val from_llptw_d1 = RegEnable(refill_from_llptw, refill_valid)
-  val from_ptw_d1 = RegEnable(refill_from_ptw, refill_valid)
-  // all three sources valid at T+1: llptw_mem.refill via its own RegNext,
-  // ptw/hptw captured here
-  val req_info_d1 = Mux(from_llptw_d1, llptw_mem.refill,
-    Mux(from_ptw_d1,
-      RegEnable(ptw.io.refill.req_info, refill_valid && refill_from_ptw),
-      RegEnable(hptw.io.refill.req_info, refill_valid && refill_from_hptw)))
-  val level_d1 = RegEnable(refill_level, refill_valid) // T+1
-  val sel_pte_d1 = RegEnable(sel_data(refill_data_tmp.asUInt, req_addr_low(txnId)), refill_valid) // T+1
-
-  cache.io.refill.valid := GatedValidRegNext(refill_valid_d1, false.B) // T+2
-  // refill_data is written at T, so T+1 still reads this request's line even
-  // if a later request completes at T+1 and rewrites it.
-  cache.io.refill.bits.ptes := RegEnable(refill_data.asUInt, refill_valid_d1)
-  cache.io.refill.bits.req_info_dup.map(_ := RegEnable(req_info_d1, refill_valid_d1))
-  cache.io.refill.bits.level_dup.map(_ := RegEnable(level_d1, refill_valid_d1))
-  cache.io.refill.bits.levelOH(level_d1, refill_valid_d1) // apply() adds its own GatedValidRegNext -> T+2
-  cache.io.refill.bits.sel_pte_dup.map(_ := RegEnable(sel_pte_d1, refill_valid_d1))
+  // All refill sources provide this request's metadata at the completing beat T.
+  // Register it with the assembled line so the cache writes at T+1.  Its
+  // single-port read/write hazard then stalls the PTW's earliest recheck.
+  cache.io.refill.valid := GatedValidRegNext(refill_valid, false.B)
+  cache.io.refill.bits.ptes := refill_data.asUInt
+  cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_llptw, llptw_mem.refill, Mux(refill_from_ptw, ptw.io.refill.req_info, hptw.io.refill.req_info)), refill_valid))
+  cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
+  cache.io.refill.bits.levelOH(refill_level, refill_valid)
+  cache.io.refill.bits.sel_pte_dup.map(_ := RegEnable(sel_data(refill_data_tmp.asUInt, req_addr_low(txnId)), refill_valid))
 
   if (env.EnableDifftest) {
     val difftest_ptw_addr = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U(PAddrBits.W))))
@@ -760,8 +730,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     difftest.coreid := io.hartId
     difftest.index := (1 + nCCHIChannelsFromDcache).U   // 0=ICache, 1..nCCHIChannels=DCache, 1+nCCHIChannels=L2TLB
     difftest.valid := cache.io.refill.valid
-    difftest.addr := RegEnable(difftest_ptw_addr(RegEnable(txnId, lastFire)), refill_valid_d1)
-    difftest.data := RegEnable(refill_data.asTypeOf(difftest.data), refill_valid_d1)
+    difftest.addr := difftest_ptw_addr(RegEnable(txnId, lastFire))
+    difftest.data := refill_data.asTypeOf(difftest.data)
     difftest.mask := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
   }
 
@@ -1173,10 +1143,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   PTWTable.log(PTWReqDB, isWritePTWTable.orR && ptw.io.req.fire, "PTWReq", clock, reset)
   PTWTable.log(PTWRespDB, isWritePTWTable.orR && ptw.io.mem.resp.fire, "PTWResp", clock, reset)
   PTWTable.log(LLPTWReqDB, isWritePTWTable.orR && llptw.io.in.fire, "LLPTWReq", clock, reset)
-  // llptw.io.mem.refill is RegNext'd inside the LLPTW (mem_refill_id), so it
-  // only carries this response's req_info one cycle after resp.fire. Sample it
-  // there, otherwise this table records the previous response's vpn.
-  PTWTable.log(LLPTWRespDB, isWritePTWTable.orR && RegNext(llptw.io.mem.resp.fire), "LLPTWResp", clock, reset)
+  PTWTable.log(LLPTWRespDB, isWritePTWTable.orR && llptw.io.mem.resp.fire, "LLPTWResp", clock, reset)
 
   val isWriteL2TlbMissQueueTable = Constantin.createRecord(s"isWriteL2TlbMissQueueTable$hartId")
   val L2TlbMissQueueTable = ChiselDB.createTable(s"L2TlbMissQueue_hart$hartId", new L2TlbMissQueueDB)
