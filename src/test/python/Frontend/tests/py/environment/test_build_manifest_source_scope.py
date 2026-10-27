@@ -4,6 +4,7 @@ import pytest
 
 from tools.write_frontend_build_manifest import (
     _git,
+    _source_tree_dirty,
     _worktree_head,
     _is_dut_input_path,
     _resolve_design_baseline_sha,
@@ -34,11 +35,17 @@ def test_linked_worktree_provenance_uses_its_own_head_and_index(tmp_path):
     git("worktree", "add", "--detach", str(linked), old)
     src.write_text("user dirty\n")
     assert _worktree_head(linked) == old
-    assert _git(linked, "status", "--porcelain") == ""
-    assert _git(linked, "rev-parse", "HEAD") == old
+    assert not _source_tree_dirty(linked, old)
+    untracked = linked / "src/main/scala/Frontend.scala"
+    untracked.parent.mkdir(parents=True)
+    untracked.write_text("untracked\n")
+    assert _source_tree_dirty(linked, old)
+    untracked.unlink()
     assert _git(main, "rev-parse", "HEAD") == new
     (linked / "Makefile").write_text("linked dirty\n")
-    assert "Makefile" in _git(linked, "status", "--porcelain")
+    assert _source_tree_dirty(linked, old)
+    subprocess.check_call(["git", "-C", str(linked), "add", "Makefile"])
+    assert _source_tree_dirty(linked, old)
     assert src.read_text() == "user dirty\n"
 
 

@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 
 
+# Compatibility requirement: support Git clients used in build and development
+# environments, including those that cannot use linked-worktree admin directories
+# as --git-dir. Preserve the current worktree's provenance.
 FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 PROVENANCE_ROOT = FRONTEND_ROOT / "env" / "runtime"
 if str(PROVENANCE_ROOT) not in sys.path:
@@ -63,12 +66,11 @@ def _git_invocation(repo_root: Path) -> tuple[list[str], dict[str, str] | None]:
     context = _worktree_git_context(repo_root)
     if context is None:
         return ["git"], None
-    _, index_file, admin_dir = context
+    common_dir, index_file, _ = context
     env = os.environ.copy()
     env["GIT_INDEX_FILE"] = str(index_file)
-    # The common directory has the main worktree's HEAD. Combining it with
-    # a linked index reports that index as staged against the wrong commit.
-    return ["git", "--git-dir", str(admin_dir), "--work-tree", str(repo_root)], env
+    # Use the common directory for clients that cannot open a worktree's admin dir.
+    return ["git", "--git-dir", str(common_dir), "--work-tree", str(repo_root)], env
 
 
 def _worktree_head(repo_root: Path) -> str:
@@ -114,6 +116,21 @@ def _is_dut_input_path(path: str) -> bool:
     return any(
         normalized == prefix or normalized.startswith(prefix)
         for prefix in _DUT_INPUT_PATHS
+    )
+
+
+def _source_tree_dirty(repo_root: Path, implementation_sha: str) -> bool:
+    # The common Git directory has the main worktree's HEAD, so compare the
+    # linked index and worktree against their own commit instead of using status.
+    changed = _git_bytes(
+        repo_root, "diff", "--name-only", "-z", "--no-renames",
+        "--ignore-submodules=untracked", implementation_sha, "--",
+    )
+    untracked = _git_bytes(repo_root, "ls-files", "--others", "--exclude-standard", "-z")
+    return any(
+        _is_dut_input_path(os.fsdecode(path))
+        for path in (changed + untracked).split(b"\0")
+        if path
     )
 
 
@@ -203,27 +220,7 @@ def main() -> int:
         "--",
         *delta_files,
     ) if delta_files else b""
-    # Generated/downloaded files inside submodules, such as the local NEMU
-    # executable under ready-to-run, are not part of the superproject source
-    # baseline and must not invalidate a commit-pinned DUT manifest.
-    status_output = _git(
-        repo_root,
-        "status",
-        # Use the unversioned spelling for compatibility with older Git
-        # releases that do not recognize the versioned form.
-        "--porcelain",
-        "--untracked-files=all",
-        "--ignore-submodules=untracked",
-    )
-    status_entries = []
-    for line in status_output.splitlines():
-        path = line[3:].split(" -> ", 1)[-1] if len(line) >= 4 else ""
-        # Build/run outputs are audit data, not source inputs to the DUT.
-        if path.startswith("data/runs/") or path.startswith("build-frontend/"):
-            continue
-        if _is_dut_input_path(path):
-            status_entries.append(line)
-    source_tree_dirty = bool(status_entries)
+    source_tree_dirty = _source_tree_dirty(repo_root, implementation_sha)
     manifest = write_frontend_build_manifest(
         args.output,
         build_root=args.build_root,
