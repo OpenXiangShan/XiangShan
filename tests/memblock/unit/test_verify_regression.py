@@ -203,6 +203,40 @@ class VerifyRegressionTest(unittest.TestCase):
                 {"constrained-random": 64},
             )
 
+    def test_require_coverage_uses_full_mixed_checker(self) -> None:
+        result = mixed_result(7)
+        verify_regression._check_result(
+            result,
+            0,
+            {"constrained-random": 64},
+            {"constrained-random": 64},
+            require_backpressure=True,
+            require_coverage=True,
+        )
+
+        sparse = mixed_result(7)
+        sparse["masked"] = 0
+        sparse["summary"] = str(sparse["summary"]).replace(
+            "masked=2", "masked=0")
+        # The default accounting path tolerates sparse observational coverage.
+        verify_regression._check_result(
+            sparse,
+            0,
+            {"constrained-random": 64},
+            {"constrained-random": 64},
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "masked coverage is absent"
+        ):
+            verify_regression._check_result(
+                sparse,
+                0,
+                {"constrained-random": 64},
+                {"constrained-random": 64},
+                require_backpressure=True,
+                require_coverage=True,
+            )
+
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
         result["constraint_schema"] = 54

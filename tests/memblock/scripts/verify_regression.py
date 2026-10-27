@@ -4487,6 +4487,7 @@ def _check_result(
     requested_transactions: dict[str, int],
     completed_transactions: dict[str, int],
     require_backpressure: bool = False,
+    require_coverage: bool = False,
 ) -> tuple[int, str, str, int, float, tuple[str, ...]]:
     prefix = f"result {index}"
     _require(isinstance(result, dict), f"{prefix} is not an object")
@@ -4588,7 +4589,10 @@ def _check_result(
             f"{prefix} DCache grants and GrantAcks are not conserved",
         )
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
-        _check_mixed_accounting(result)
+        if require_coverage:
+            _check_mixed_coverage(result, require_backpressure)
+        else:
+            _check_mixed_accounting(result)
     elif scenario == run_regression.FRONTEND_BRIDGE_SCENARIO:
         _check_frontend_bridge_coverage(result)
     return (
@@ -4606,6 +4610,7 @@ def _read_document(
     requested_transactions: dict[str, int],
     completed_transactions: dict[str, int],
     require_backpressure: bool,
+    require_coverage: bool,
     chunk_size: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     metadata: dict[str, Any] = {}
@@ -4653,6 +4658,7 @@ def _read_document(
                             requested_transactions,
                             completed_transactions,
                             require_backpressure,
+                            require_coverage,
                         )
                     except VerificationError as error:
                         raise VerificationError(f"result {result_count}: {error}") from error
@@ -4702,6 +4708,7 @@ def verify_regression(
     expected_scenarios: tuple[str, ...] | None = None,
     expected_jobs: int | None = None,
     require_backpressure: bool = False,
+    require_coverage: bool = False,
     require_frozen_runtime: bool = False,
     runtime_metadata: Path | None = None,
     chunk_size: int = 1024 * 1024,
@@ -4749,6 +4756,7 @@ def verify_regression(
         requested_action_counts,
         completed_action_counts,
         require_backpressure,
+        require_coverage,
         chunk_size,
     )
     stat_after = path.stat()
@@ -4954,6 +4962,11 @@ def main() -> int:
     parser.add_argument("--actions", type=int, default=64)
     parser.add_argument("--expected-jobs", type=int)
     parser.add_argument("--require-backpressure", action="store_true")
+    parser.add_argument(
+        "--require-coverage",
+        action="store_true",
+        help="require the full mixed coverage/schema/backpressure checker",
+    )
     parser.add_argument("--require-frozen-runtime", action="store_true")
     parser.add_argument("--runtime-metadata", type=Path)
     parser.add_argument(
@@ -4984,6 +4997,7 @@ def main() -> int:
             expected_scenarios=expected_scenarios,
             expected_jobs=args.expected_jobs,
             require_backpressure=args.require_backpressure,
+            require_coverage=args.require_coverage,
             require_frozen_runtime=args.require_frozen_runtime,
             runtime_metadata=args.runtime_metadata,
             allow_finite=args.allow_finite,

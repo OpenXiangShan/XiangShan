@@ -420,14 +420,16 @@ on report paths, including their temporary files. Give each controller a
 unique output parent directory and follow the README trace-isolation rules.
 A report-write error is recorded as `coverage_report_error`.
 
-The current constrained-random branch of
+The default constrained-random branch of
 [verify_regression.py](../scripts/verify_regression.py) calls
-`_check_mixed_accounting`; other coverage-validation helpers in that file are
-not its acceptance path. It verifies replay command/summary consistency and
+`_check_mixed_accounting`; it verifies replay command/summary consistency and
 queue/LSQ accounting, plus available grant/ack accounting and requested campaign
-metadata checks. It does not gate constrained-random acceptance on
-`constraint_schema`, complete coverage arrays, or nonzero stalls. Documentation
-schema consistency is separately checked by
+metadata checks. With `--require-coverage` it instead calls
+`_check_mixed_coverage`, which requires the constraint schema, complete coverage
+arrays and, when `--require-backpressure` is also set, nonzero per-result
+backpressure bins. `make -C tests/memblock strict-coverage-regression` generates
+a finite coverage campaign and runs that opt-in mode. Documentation schema
+consistency is separately checked by
 [check_io_coverage.py](../scripts/check_io_coverage.py).
 [VERIFICATION_PLAN.md#regression-acceptance](VERIFICATION_PLAN.md#regression-acceptance)
 is the sole owner of closure-scale requirements.

@@ -198,6 +198,7 @@ The Makefile configures these actual commands; execution alone is not closure:
 | final-regression | 172800s, 16384 actions, spec, timeout 12000s; verifier 128+ results, 8 workers |
 | long-final-regression | 43200s, 16384 actions, spec; verifier 128+ results, 8 workers |
 | endurance-regression | 8 seeds, 1000000 actions each, timeout 720000s, spec; finite exact-result verifier |
+| strict-coverage-regression | 2 finite coverage seeds, ACTIONS default 16384, 8 workers; strict coverage/backpressure verifier (opt-in) |
 | known-bug-sentinel | vector-guest-fault-split with exact successful external metadata signature |
 
 The global ACTIONS default is 16384. It wins over the extended/long recipe's
@@ -212,13 +213,16 @@ sentinel via the mutable build, not necessarily the campaign frozen binary.
 verify_regression.py checks completion/run ID, finite timings/duration,
 continuous seeds, command/terminal agreement, requested/completed actions,
 aggregate totals, queue and GrantAck conservation, and selected runtime-layout
-requirements. For constrained-random it calls accounting checks only. The
-in-process final readback is a functional oracle before the summary is written;
-the verifier does not re-derive its expected data. The full
-coverage/schema/backpressure checker is not on that path.
---require-backpressure checks the configuration flag, not nonzero per-seed
-stalls. Runtime metadata records paths/sizes/resolved dependencies, not
-source-to-model identity. These are present acceptance gaps.
+requirements. For constrained-random the default path calls accounting checks
+only; `--require-coverage` opts into the full `_check_mixed_coverage` checker,
+including the current constraint schema and complete coverage arrays. Combined
+with `--require-backpressure`, that mode also requires nonzero per-result
+backpressure bins. The new `strict-coverage-regression` target exercises this
+opt-in mode on a finite campaign; `final-acceptance` still uses the default
+path. The in-process final readback is a functional oracle before the summary is
+written; the verifier does not re-derive its expected data. Runtime metadata
+records paths/sizes/resolved dependencies, not source-to-model identity. These
+remain acceptance gaps for closure.
 
 Defaults are configurable. Report actual short-run budgets; they cannot
 substitute for configured long campaigns. Current readiness is partial until

@@ -15,6 +15,7 @@ EXTENDED_RESULT ?= $(PREPARED_DIR)/extended-constrained-random-6h.json
 FINAL_RESULT ?= $(PREPARED_DIR)/final-constrained-random-48h.json
 LONG_RESULT ?= $(PREPARED_DIR)/final-constrained-random-12h.json
 ENDURANCE_RESULT ?= $(PREPARED_DIR)/endurance-constrained-random-8x1000000.json
+STRICT_COVERAGE_RESULT ?= $(PREPARED_DIR)/strict-coverage-results.json
 ACTIONS ?= 16384
 ENDURANCE_ACTIONS ?= 1000000
 ENDURANCE_SEEDS ?= 8
@@ -58,7 +59,7 @@ CPP_SUPPORT := $(CPP_SCENARIOS) $(CPP_ENV_PARTS) $(CPP_RANDOM_PARTS) $(CPP_HEADE
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime translation-fence-all translation-inflight-context-all known-bug-sentinel regression extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
+.PHONY: ports check-ports check-docs prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime translation-fence-all translation-inflight-context-all known-bug-sentinel regression extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results verify-coverage-results strict-coverage-regression final-acceptance unit
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS) $(CPP_TYPES) $(CPP_ADAPTERS)
 
@@ -212,6 +213,15 @@ benchmark-tests: freeze-runtime
 analyze-spec-counters:
 	@test -n "$(SPEC_COUNTER_ROOT)" || (echo "set SPEC_COUNTER_ROOT to a checkpoint directory or simulator_err.txt" >&2; exit 2)
 	$(PYTHON) scripts/analyze_spec_counters.py $(SPEC_COUNTER_ROOT) --json $(SPEC_COUNTER_JSON)
+
+verify-coverage-results:
+	$(MAKE) check-rtl
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(STRICT_COVERAGE_RESULT) --min-duration-seconds 1 --min-results $(or $(SEEDS),2) --scenario constrained-random --actions $(or $(ACTIONS),16384) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-coverage --allow-finite
+
+strict-coverage-regression:
+	$(MAKE) check-rtl
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(STRICT_COVERAGE_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),2) --actions $(or $(ACTIONS),16384) --constraints coverage
+	$(MAKE) verify-coverage-results
 
 verify-extended-results:
 	$(MAKE) check-rtl
