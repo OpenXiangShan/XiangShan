@@ -2066,7 +2066,7 @@ int run_atomic_contracts(int argc, char **argv)
         std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
                   << reservation_probe.cycle()
                   << " phase=reservation-probe-probe reason="
-                  << reservation_probe.error() << ' probes='
+                  << reservation_probe.error() << " probes="
                   << reservation_probe.dcache_probes() << " responses="
                   << reservation_probe.dcache_probe_responses() << " data="
                   << reservation_probe.dcache_probe_data() << '\n';
