@@ -160,6 +160,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     // find the alt, the table with the second longest history among the hit tables
     val hitTableMaskNoProvider = hitTableMask & (~providerTableOH)
     val hasAlt                 = hasProvider && ParallelORR(hitTableMaskNoProvider)
+    val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider.asBools).asUInt
     val alt = ParallelPriorityMux(
       hitTableMaskNoProvider.asBools.zip(allTableTagMatchResults).reverse
     )
@@ -186,8 +187,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.meta.entries(i).providerWayIdx    := OHToUInt(provider.hitWayMaskOH)
     io.meta.entries(i).providerTakenCtr  := provider.takenCtr
     io.meta.entries(i).providerUsefulCtr := provider.usefulCtr
-    io.meta.entries(i).altOrBasePred     := Mux(hasAlt, alt.takenCtr.isPositive, branch.bits.taken)
-    io.meta.entries(i).altConf           := altConf
+    io.meta.entries(i).altTableIdx       := OHToUInt(altTableOH)
+    io.meta.entries(i).altWayIdx         := OHToUInt(alt.hitWayMaskOH)
+    io.meta.entries(i).altTakenCtr       := alt.takenCtr
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_table",
@@ -226,15 +228,22 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     (mbtbHit, baseCtr, meta)
   }.unzip3
 
-  // Meta stores enough state for provider-only training. Re-read SRAM when an alternate
-  // table entry is needed, or when the prediction was wrong and allocation state is needed.
+  // Meta stores provider and alternate state for training correct predictions.
+  // Re-read SRAM only on a misprediction to re-match entries and obtain allocation state.
   private val t0_needRead = t0_branches.zipWithIndex.map { case (branch, i) =>
-    val mbtbHit      = t0_mbtbHitMask(i)
-    val isCond       = t0_condMask(i)
-    val useProvider  = t0_meta(i).useProvider
-    val hasAlt       = t0_meta(i).hasAlt
-    val mispredicted = branch.bits.mispredict
-    mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt))
+    val mbtbHit = t0_mbtbHitMask(i)
+    val isCond  = t0_condMask(i)
+    val meta    = t0_meta(i)
+    val tagePred = MuxCase(
+      t0_baseCtr(i).isPositive,
+      Seq(
+        meta.useProvider -> meta.providerTakenCtr.isPositive,
+        meta.hasAlt      -> meta.altTakenCtr.isPositive
+      )
+    )
+    val tageMispredicted = tagePred =/= branch.bits.taken
+    val mispredicted     = branch.bits.mispredict
+    mbtbHit && isCond && (tageMispredicted || mispredicted)
   }.reduce(_ || _)
   private val t0_useMeta = !t0_needRead
 
@@ -383,11 +392,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       provider.takenCtr     := meta.providerTakenCtr
       provider.usefulCtr    := meta.providerUsefulCtr
 
-      hasAlt     := false.B
-      altTableOH := 0.U
-      alt        := 0.U.asTypeOf(new TrainTagMatchResult)
+      hasAlt     := meta.hasAlt
+      altTableOH := Mux(meta.hasAlt, UIntToOH(meta.altTableIdx, NumTables), 0.U)
 
-      altOrBasePred := meta.altOrBasePred
+      alt.hit          := meta.hasAlt
+      alt.hitWayMaskOH := Mux(meta.hasAlt, UIntToOH(meta.altWayIdx, MaxNumWays), 0.U)
+      alt.tag          := t2_rawTag(meta.altTableIdx) ^ position
+      alt.takenCtr     := meta.altTakenCtr
+      // Alternate training never writes useful SRAM. Its useful counter is unavailable on the meta path.
+      alt.usefulCtr := UsefulCounter.Zero
     }.otherwise { // use result from sram read resp
       hasProvider     := hitTableMask.reduce(_ || _)
       providerTableOH := getLongestHistTableOH(hitTableMask).asUInt
@@ -397,15 +410,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       hasAlt     := hasProvider && hitTableMaskNoProvider.reduce(_ || _)
       altTableOH := getLongestHistTableOH(hitTableMaskNoProvider).asUInt
       alt        := Mux1H(altTableOH, allTableTagMatchResults)
-
-      altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, t2_baseCtr(i).isPositive)
     }
 
-    val altConf       = Mux(t2_useMeta, meta.altConf, Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate))
+    // MainBTB meta already stores the prediction-time base counter, including VBTB results.
+    altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, t2_baseCtr(i).isPositive)
+    val altConf       = Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate)
     val useAltOnNaIdx = Cat(OHToUInt(providerTableOH), altConf)
     val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
     useProvider := Mux(t2_useMeta, meta.useProvider, hasProvider && !(useAltOnNa && provider.takenCtr.isWeak))
-    useAlt      := !t2_useMeta && !useProvider && hasAlt
+    useAlt      := !useProvider && hasAlt
 
     val providerPred = provider.takenCtr.isPositive
     val finalPred    = Mux(useProvider, providerPred, altOrBasePred)
@@ -602,7 +615,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
       val updateEn                = hitProvider || hitAlt
       val updateEntry             = Mux(hitProvider, providerInfo.providerEntry, altInfo.altEntry)
-      val updateUsefulCtr         = Mux(hitProvider, providerInfo.providerNewUsefulCtr, altInfo.altOldUsefulCtr)
       val updateBranchActualTaken = Mux(hitProvider, providerInfo.actualTaken, altInfo.actualTaken)
 
       val allocateEn = t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
@@ -611,7 +623,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       writeEntryEn(wayIdx)    := providerWriteCtr.reduce(_ || _) || hitAlt || allocateEn
       writeUsefulEn(wayIdx)   := providerWriteUseful.reduce(_ || _) || allocateEn
       writeEntries(wayIdx)    := Mux(allocateEn, t3_allocateEntry, updateEntry)
-      writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, updateUsefulCtr)
+      writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, providerInfo.providerNewUsefulCtr)
       actualTakenMask(wayIdx) := Mux(allocateEn, t3_allocateBranch.bits.taken, updateBranchActualTaken)
     }
 
