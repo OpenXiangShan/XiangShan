@@ -58,6 +58,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.ftq.prefetch.Pdip
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
 import xiangshan.frontend.icache.TwoFetchFailReason
@@ -151,6 +152,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
 
   private val redirect = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
+
+  private val commit = Wire(Bool())
 
   // Instruction page fault, guest page fault, and access fault are checked by backend and sent with redirect requests.
   private val backendException = RegInit(ExceptionType.None)
@@ -254,7 +257,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
   // --------------------------------------------------------------------------------
-  // prefetch
+  // prefetch: sw
   (prefetchQueue.io.enqFromSw zip io.softPrefetch).foreach { case (qPort, ioPort) =>
     // qPort.ready is ignored, because we don't want to back-pressure load unit
     // any extra softPrefetch requests that out of prefetchQueue capacity is silently dropped
@@ -262,6 +265,22 @@ class Ftq(implicit p: Parameters) extends FtqModule
     qPort.bits  := ioPort.bits // NOTE this ":=" is overloaded, we cannot use qPort := ioPort on a whole
   }
 
+  // prefetch: pdip
+  private val pdip = Module(new Pdip)
+  pdip.io.fecCandidates         := io.fromIfu.fecCandidates
+  pdip.io.commit.valid          := commit
+  pdip.io.commit.bits.ptr       := commitPtr(0)
+  pdip.io.commit.bits.startPc   := entryQueue(commitPtr(0).value).startPc.unGuard
+  pdip.io.redirect.valid        := redirect.valid
+  pdip.io.redirect.bits.ptr     := redirect.bits.newFtqIdx
+  pdip.io.redirect.bits.startPc := GuardedPcInit(redirect.bits.pc).unGuard
+  pdip.io.fetchPtr              := fetchPtr(0)
+
+  (prefetchQueue.io.enqFromPdip zip pdip.io.req).foreach { case (qPort, pdipPort) =>
+    qPort := pdipPort
+  }
+
+  // prefetch: fdip
   prefetchQueue.io.fdip.entries.zipWithIndex.foreach { case (qPort, i) =>
     qPort.bits := entryQueue(pfPtr(i).value)
     if (i == 0) {
@@ -508,7 +527,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     FtqPtr(true.B, (FtqSize - 1).U),
     io.fromBackend.commit.valid
   )
-  private val commit = commitPtr <= robCommitPtr
+  commit := commitPtr <= robCommitPtr
   when(commit) {
     commitPtr := commitPtr + 1.U
   }

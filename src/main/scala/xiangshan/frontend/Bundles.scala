@@ -145,8 +145,15 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val target:    UInt            = UInt(GuardedVAddrBits.W)
 }
 
+class FecCandidateInfo(implicit p: Parameters) extends FrontendBundle {
+  val miss:   Vec[Bool] = Vec(2, Bool()) // FIXME: magic 2: each Ftq entry can locate in 2 adjacent ICache lines
+  val ftqIdx: FtqPtr    = new FtqPtr
+}
+
 class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val wbRedirect: Valid[FrontendRedirect] = Valid(new FrontendRedirect)
+
+  val fecCandidates: Vec[Valid[FecCandidateInfo]] = Vec(MaxFetchReqNum, Valid(new FecCandidateInfo))
 }
 
 class ExceptionType extends Bundle {

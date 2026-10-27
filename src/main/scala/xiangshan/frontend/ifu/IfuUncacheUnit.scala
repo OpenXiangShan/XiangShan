@@ -42,7 +42,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
     val isFirstInstr = Input(Bool())
     val ifuStall     = Input(Bool())
     val flush        = Input(Bool())
-    val emptyAfter   = Input(Bool())
+    val coreEmpty    = Input(Bool())
     // Uncache: mmio request / response
     val toUncache   = new IfuToInstrUncacheIO
     val fromUncache = Flipped(new InstrUncacheToIfuIO)
@@ -98,7 +98,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
       when(isFirstInstr) {
         uncacheState := UncacheFsmState.SendReq
       }.otherwise {
-        uncacheState := Mux(io.emptyAfter, UncacheFsmState.SendReq, UncacheFsmState.WaitLastCommit)
+        uncacheState := Mux(io.coreEmpty, UncacheFsmState.SendReq, UncacheFsmState.WaitLastCommit)
       }
     }
 

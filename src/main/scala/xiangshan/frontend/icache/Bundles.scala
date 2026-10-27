@@ -243,6 +243,8 @@ class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
   val pAddr:              PrunedAddr    = PrunedAddr(PAddrBits)
   val gpAddr:             PrunedAddr    = PrunedAddr(PAddrBitsMax)
 
+  val miss: Vec[Bool] = Vec(PortNumber, Bool()) // for pdip
+
   def isUncache: Bool = pmpMmio || Pbmt.isUncache(itlbPbmt)
 }
 
@@ -295,9 +297,10 @@ class PrefetchSource extends Bundle {
 }
 
 object PrefetchSource {
-  object Value extends EnumUInt(2) {
+  object Value extends EnumUInt(3) {
     def Fdip: UInt = 0.U(width.W) // Fetch-directed instruction prefetch
     def Sw:   UInt = 1.U(width.W) // Zicbop prefetch.i
+    def Pdip: UInt = 2.U(width.W) // Priority-directed instruction prefetch
   }
 
   def apply(that: UInt): PrefetchSource = {
@@ -308,6 +311,7 @@ object PrefetchSource {
 
   def Fdip: PrefetchSource = apply(Value.Fdip)
   def Sw:   PrefetchSource = apply(Value.Sw)
+  def Pdip: PrefetchSource = apply(Value.Pdip)
 }
 
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {

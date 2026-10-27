@@ -55,7 +55,8 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
     // enqueue from non-FDIP sources
     val enq: Vec[DecoupledIO[Enqueue]] = Vec(EnqueueNum, Flipped(DecoupledIO(new Enqueue)))
     // convenient aliases
-    def enqFromSw: Seq[DecoupledIO[Enqueue]] = enq.slice(0, EnqueueSwNum)
+    def enqFromSw:   Seq[DecoupledIO[Enqueue]] = enq.slice(0, EnqueueSwNum)
+    def enqFromPdip: Seq[DecoupledIO[Enqueue]] = enq.slice(EnqueueSwNum, EnqueueSwNum + EnqueuePdipNum)
 
     val fdip: Fdip = Input(new Fdip)
 

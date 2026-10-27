@@ -18,6 +18,7 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
+import xiangshan.frontend.ftq.prefetch.PdipParameters
 
 case class FtqParameters(
     FtqSize:           Int = 64,
@@ -25,7 +26,8 @@ case class FtqParameters(
     BpTrainStallLimit: Int = 8,
     CommitQueueSize:   Int = 64,
     // submodules
-    pqParameters: FtqPrefetchQueueParameters = FtqPrefetchQueueParameters()
+    pqParameters:   FtqPrefetchQueueParameters = FtqPrefetchQueueParameters(),
+    pdipParameters: PdipParameters = PdipParameters()
 ) {
   // sanity check
   require(isPow2(FtqSize))
@@ -52,6 +54,7 @@ trait HasFtqPrefetchQueueParameters extends HasFtqParameters {
 
   def PreferFdipDistance: Int = pqParameters.PreferFdipDistance
 
-  def EnqueueSwNum: Int = backendParams.LduCnt // every load unit may send software prefetch.i request to pq
-  def EnqueueNum:   Int = EnqueueSwNum         // TODO: more prefetch source
+  def EnqueueSwNum:   Int = backendParams.LduCnt // every load unit may send software prefetch.i request to pq
+  def EnqueuePdipNum: Int = ftqParameters.pdipParameters.NumAdjacent
+  def EnqueueNum:     Int = EnqueueSwNum         // TODO: more prefetch source
 }
