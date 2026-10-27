@@ -147,6 +147,7 @@ The current qualification is:
 | Corner campaign | 4/4 seeds pass, 4608 actions each (18432 actions) | Seeds 101..104; artifact `agent-campaign-12`; 1985.0 s; capability only |
 | CMO stress campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 401..406; artifact `agent-campaign-18/cmo`; the binary predates later directed-only test additions, which do not change the constrained-random CMO path; capability only |
 | Current 4x4608 corner | 4/4 seeds pass, 4608 actions each (18432 actions) | Seeds 501..504; artifact `agent-campaign-19/corner`; directed-only additions after launch do not change the constrained-random path; capability only |
+| Strict coverage audit | 2/2 seeds functionally pass, but strict coverage rejects the campaign | 2×4608 coverage, seeds 1..2; artifact `build/memblock/strict-coverage-results.json`; enabled probe-depth classes 4..7 were unobserved (`actual_probe_depth=[4,1,1,1,0,0,0,0]`); this is a sparse-coverage finding, not a functional failure |
 | Regression acceptance | 8/8 seeds pass, 16384 actions each (131072 actions) | Seeds 1..8; artifact `agent-campaign-14`; 1003.2 s; default coverage profile |
 | Current 8x16384 coverage | 8/8 seeds pass, 16384 actions each (131072 actions); per-seed high_mask 1436..1916 | Seeds 301..308; artifact `agent-campaign-17`; current mixed generator; not the 48h final campaign |
 | Spec confidence run | 8/8 seeds pass, 16384 actions each (131072 actions) | Seeds 1..8; artifact `agent-campaign-13`; 845.6 s; spec latency |
@@ -202,9 +203,14 @@ non-cacheable memory unspecified, so neither behavior is claimed. Four-state/
 physical arrays and full-core/multi-hart behavior need other verification
 boundaries.
 
-The configured 8-seed, 16384-action coverage regression is completed in this
-snapshot. Configured 48 h breadth and million-action endurance targets are not
-completed. Their current budgets and automated-check limitations are defined in
+An opt-in strict coverage check on 2×4608 coverage seeds rejects the campaign
+because enabled probe-depth classes 4..7 were not observed, even though both
+seeds pass functionally and the default accounting verifier accepts them. This
+confirms that
+the strict gate is active and that 4608 actions is not a closure-scale coverage
+budget. The configured 8-seed, 16384-action coverage regression is completed in
+this snapshot. Configured 48-hour breadth and million-action endurance targets are
+not completed. Their current budgets and automated-check limitations are defined in
 VERIFICATION_PLAN.md. No closure claim follows from a short capability run or a
 controller/verifier return code alone.
 

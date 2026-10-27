@@ -428,7 +428,10 @@ metadata checks. With `--require-coverage` it instead calls
 `_check_mixed_coverage`, which requires the constraint schema, complete coverage
 arrays and, when `--require-backpressure` is also set, nonzero per-result
 backpressure bins. `make -C tests/memblock strict-coverage-regression` generates
-a finite coverage campaign and runs that opt-in mode. Documentation schema
+a finite coverage campaign and runs that opt-in mode. A 2×4608 diagnostic run
+was functionally clean but strict coverage rejected it because enabled
+probe-depth classes 4..7 were unobserved; 4608 actions is below the intended
+closure-scale budget. Documentation schema
 consistency is separately checked by
 [check_io_coverage.py](../scripts/check_io_coverage.py).
 [VERIFICATION_PLAN.md#regression-acceptance](VERIFICATION_PLAN.md#regression-acceptance)
