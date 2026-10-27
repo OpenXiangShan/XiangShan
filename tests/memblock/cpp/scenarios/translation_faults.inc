@@ -1371,6 +1371,7 @@ int run_translation_faults(int argc, char **argv)
     unsigned vector_first_element_store_fault_readbacks = 0;
     unsigned vector_segment_store_fault_readbacks = 0;
     unsigned vector_segment_element_fault_readbacks = 0;
+    unsigned vector_segment_first_field_fault_readbacks = 0;
     unsigned vector_masked_later_load_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
@@ -3711,6 +3712,159 @@ int run_translation_faults(int argc, char **argv)
         ++vector_segment_element_fault_readbacks;
     }
 
+    // First-field segment-store fault: field 0 itself is in a read-only page.
+    // The writable field 1 must not be written when field 0 faults first.
+    {
+        memblock::Environment segment_first(argc, argv);
+        constexpr std::uint64_t first_virtual = 0x73400000ULL;
+        constexpr std::uint64_t first_physical = 0xc9400000ULL;
+        constexpr std::uint64_t first_root = 0x9b100000ULL;
+        constexpr std::uint64_t first_readonly = first_physical;
+        constexpr std::uint64_t first_writable = first_physical + 0x1000;
+        segment_first.memory().fill_incrementing(
+            first_readonly + 0xff8, 8, 0x5a);
+        segment_first.memory().fill_incrementing(
+            first_writable, 0x20, 0xb2);
+        const std::uint64_t readonly_word =
+            segment_first.memory().read_u64(first_readonly + 0xff8);
+        const std::uint64_t writable_word =
+            segment_first.memory().read_u64(first_writable);
+        segment_first.configure_backpressure(0x9b05688c2b3e6c1fULL, true);
+        if (!segment_first.reset() ||
+            !segment_first.map_sv39_4k(
+                first_virtual, first_readonly, first_root,
+                true, false, false, false, false, false) ||
+            !segment_first.map_sv39_4k(
+                first_virtual + 0x1000, first_writable, first_root,
+                true, true, false, false, false, false) ||
+            !segment_first.activate_sv39(first_root)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << segment_first.cycle()
+                      << " phase=segment-first-field-configuration reason="
+                      << segment_first.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction segment_data{
+            .store = true,
+            .segment = true,
+            .address = first_virtual + 0xff8,
+            .eew = 3,
+            .vl = 1,
+            .rob = 104,
+            .sq = 0,
+            .pdest = 198,
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask =
+                memblock::kExceptionStorePageFault,
+            .expected_writeback_vstart = 0,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = false,
+            .nf = 1,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (auto &byte : segment_data.data) {
+            byte = static_cast<unsigned char>(0x5e);
+        }
+        segment_first.expect_vector(segment_data);
+        if (!segment_first.set_rob_head(
+                segment_data.rob, segment_data.rob_flag) ||
+            !segment_first.enqueue_vector(segment_data) ||
+            !segment_first.issue_vector(segment_data, 1024) ||
+            !segment_first.run_until_vector_complete_with_replays(
+                segment_data, 32768) ||
+            !segment_first.run_cycles(4) ||
+            segment_first.exception_vaddr() != first_virtual + 0xff8 ||
+            segment_first.vector_store_writebacks() != 1) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << segment_first.cycle()
+                      << " phase=segment-first-field-data reason="
+                      << segment_first.error() << " vaddr=0x" << std::hex
+                      << segment_first.exception_vaddr() << std::dec
+                      << " writebacks="
+                      << segment_first.vector_store_writebacks() << '\n';
+            return 1;
+        }
+        auto segment_fix = segment_data;
+        segment_fix.pdest = 199;
+        segment_fix.expected_exception_mask =
+            memblock::kExceptionStorePageFault;
+        segment_fix.expected_vl = 1;
+        segment_fix.expected_writeback_vstart = 0;
+        segment_fix.vuop_idx = 1;
+        segment_fix.last_uop = true;
+        segment_fix.vl_wen = true;
+        segment_first.expect_vector_data(segment_fix, {});
+        if (!segment_first.issue_vector(segment_fix, 1024) ||
+            !segment_first.run_until_vector_complete(16384) ||
+            segment_first.vector_store_writebacks() != 2 ||
+            segment_first.sq_dequeued() !=
+                segment_first.sq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << segment_first.cycle()
+                      << " phase=segment-first-field-fix reason="
+                      << segment_first.error() << " writebacks="
+                      << segment_first.vector_store_writebacks()
+                      << " sq=" << segment_first.sq_dequeued() << '/'
+                      << segment_first.sq_allocated() << '\n';
+            return 1;
+        }
+        if (!segment_first.redirect_after(
+                segment_data.rob, segment_data.rob_flag, true, true) ||
+            !segment_first.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << segment_first.cycle()
+                      << " phase=segment-first-field-redirect reason="
+                      << segment_first.error() << '\n';
+            return 1;
+        }
+        std::array<memblock::LoadTransaction, 2> readbacks{};
+        readbacks[0] = memblock::LoadTransaction{
+            .address = first_virtual + 0xff8,
+            .oracle_address = first_readonly + 0xff8,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 200,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        readbacks[1] = memblock::LoadTransaction{
+            .address = first_virtual + 0x1000,
+            .oracle_address = first_writable,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 1,
+            .pdest = 201,
+            .lane = 1,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        segment_first.expect_load_data(readbacks[0], readonly_word);
+        segment_first.expect_load_data(readbacks[1], writable_word);
+        if (!segment_first.set_rob_head(
+                readbacks[0].rob, readbacks[0].rob_flag) ||
+            !segment_first.enqueue_load_batch(
+                {readbacks[0], readbacks[1]}, {0, 1}) ||
+            !segment_first.issue_load_batch(
+                {readbacks[0], readbacks[1]}, 4096) ||
+            !segment_first.run_until_all_complete(16384) ||
+            !segment_first.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << segment_first.cycle()
+                      << " phase=segment-first-field-readback reason="
+                      << segment_first.error() << '\n';
+            return 1;
+        }
+        ++vector_segment_first_field_fault_readbacks;
+    }
+
     // A vector load with no active element must not fault even when its base
     // address is unmapped.  Masked-off elements are not accessed.  The
     // completion is checked by the normal vector scoreboard; this case also
@@ -3818,6 +3972,8 @@ int run_translation_faults(int argc, char **argv)
               << vector_segment_store_fault_readbacks
               << " vector_segment_element_fault_readbacks="
               << vector_segment_element_fault_readbacks
+              << " vector_segment_first_field_fault_readbacks="
+              << vector_segment_first_field_fault_readbacks
               << " vector_first_element_store_fault_readbacks="
               << vector_first_element_store_fault_readbacks
               << " vector_masked_later_load_controls="
