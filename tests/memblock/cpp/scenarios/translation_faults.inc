@@ -1374,6 +1374,7 @@ int run_translation_faults(int argc, char **argv)
     unsigned vector_segment_first_field_fault_readbacks = 0;
     unsigned pmp_vector_store_fault_readbacks = 0;
     unsigned pmp_masked_vector_store_fault_readbacks = 0;
+    unsigned pmp_cross_page_vector_store_fault_readbacks = 0;
     unsigned vector_masked_later_load_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
@@ -4115,6 +4116,123 @@ int run_translation_faults(int argc, char **argv)
         ++pmp_masked_vector_store_fault_readbacks;
     }
 
+    // PMP boundary crossing inside one vector store: element 0 is in a
+    // PMP read/write page, element 1 crosses into a PMP read-only page.  The
+    // store must fault at element 1 with vstart=1 and must not write the
+    // read-only page, even though the base address is writable.
+    {
+        memblock::Environment pmp_cross(argc, argv);
+        constexpr std::uint64_t pmp_base =
+            memblock::kDefaultMemoryBase + 0x380000ULL;
+        constexpr std::uint64_t pmp_high = pmp_base + 0x1000;
+        constexpr std::uint8_t pmp_napot_read = 0x19;
+        constexpr std::uint8_t pmp_napot_read_write = 0x1b;
+        pmp_cross.memory().fill_incrementing(pmp_base + 0xff8, 8, 0x75);
+        pmp_cross.memory().fill_incrementing(pmp_high, 0x20, 0xc4);
+        const std::uint64_t high_word = pmp_cross.memory().read_u64(pmp_high);
+        pmp_cross.configure_backpressure(0x3c6ef372fe94f82bULL, true);
+        const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+            return (base | (size / 2 - 1)) >> 2;
+        };
+        if (!pmp_cross.reset() || !pmp_cross.activate_bare() ||
+            !pmp_cross.configure_pmp(
+                {napot_address(pmp_base, 0x1000),
+                 napot_address(pmp_high, 0x1000)},
+                {pmp_napot_read_write, pmp_napot_read})) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_cross.cycle()
+                      << " phase=pmp-cross-store-configuration reason="
+                      << pmp_cross.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction store{
+            .store = true,
+            .address = pmp_base + 0xff8,
+            .eew = 3,
+            .vl = 2,
+            .rob = 109,
+            .sq = 0,
+            .pdest = 209,
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask =
+                memblock::kExceptionStoreAccessFault,
+            .expected_writeback_vstart = 1,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (auto &byte : store.data) {
+            byte = static_cast<unsigned char>(0x8d);
+        }
+        const std::uint64_t dcache_before = pmp_cross.tilelink_requests();
+        const std::uint64_t uncache_before = pmp_cross.uncache_requests();
+        pmp_cross.select_store_exception_address(true);
+        pmp_cross.expect_vector(store);
+        if (!pmp_cross.set_rob_head(store.rob, store.rob_flag) ||
+            !pmp_cross.enqueue_vector(store) ||
+            !pmp_cross.issue_vector(store, 1024) ||
+            !pmp_cross.run_until_vector_complete_with_replays(
+                store, 32768) ||
+            !pmp_cross.run_cycles(4) ||
+            pmp_cross.exception_vaddr() != pmp_high ||
+            pmp_cross.tilelink_requests() != dcache_before ||
+            pmp_cross.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_cross.cycle()
+                      << " phase=pmp-cross-store reason="
+                      << pmp_cross.error() << " vaddr=0x" << std::hex
+                      << pmp_cross.exception_vaddr() << std::dec
+                      << " dcache=" << pmp_cross.tilelink_requests()
+                      << " uncache=" << pmp_cross.uncache_requests() << '\n';
+            return 1;
+        }
+        const std::uint64_t retired =
+            pmp_cross.sq_dequeued() + pmp_cross.sq_canceled();
+        if (retired > pmp_cross.sq_allocated() ||
+            (retired < pmp_cross.sq_allocated() &&
+             !pmp_cross.account_sq_cancellation(
+                 static_cast<unsigned>(
+                     pmp_cross.sq_allocated() - retired))) ||
+            !pmp_cross.redirect_after(
+                store.rob, store.rob_flag, true, true) ||
+            !pmp_cross.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_cross.cycle()
+                      << " phase=pmp-cross-store-accounting reason="
+                      << pmp_cross.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = pmp_high,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 210,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        pmp_cross.expect_load_data(readback, high_word);
+        if (!pmp_cross.set_rob_head(readback.rob, readback.rob_flag) ||
+            !pmp_cross.enqueue_load(readback) ||
+            !pmp_cross.issue_load(readback, 4096) ||
+            !pmp_cross.run_until_complete(16384) ||
+            !pmp_cross.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_cross.cycle()
+                      << " phase=pmp-cross-store-readback reason="
+                      << pmp_cross.error() << '\n';
+            return 1;
+        }
+        pmp_cross.select_store_exception_address(false);
+        ++pmp_cross_page_vector_store_fault_readbacks;
+    }
+
     // A vector load with no active element must not fault even when its base
     // address is unmapped.  Masked-off elements are not accessed.  The
     // completion is checked by the normal vector scoreboard; this case also
@@ -4228,6 +4346,8 @@ int run_translation_faults(int argc, char **argv)
               << pmp_vector_store_fault_readbacks
               << " pmp_masked_vector_store_fault_readbacks="
               << pmp_masked_vector_store_fault_readbacks
+              << " pmp_cross_page_vector_store_fault_readbacks="
+              << pmp_cross_page_vector_store_fault_readbacks
               << " vector_first_element_store_fault_readbacks="
               << vector_first_element_store_fault_readbacks
               << " vector_masked_later_load_controls="
