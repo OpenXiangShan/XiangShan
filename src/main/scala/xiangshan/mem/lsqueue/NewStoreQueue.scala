@@ -456,14 +456,15 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       // so a cross-page store is handled by UnalignQueue instead of a long carry.
       val s1LoadVaddrTag    = s1LoadVaddr(s1LoadVaddr.getWidth - 1, pageOffset - VWordOffset)
       val s1LoadPageOffset  = s1LoadVaddr(pageOffset - VWordOffset - 1, 0)
+      val s1VaddrTagMatchVec = WireInit(VecInit(io.dataEntriesIn.map { dataEntry =>
+        dataEntry.vaddrPageTag === s1LoadVaddrTag
+      }))
       val s1Same16BMatchVec = WireInit(VecInit(io.dataEntriesIn.map { dataEntry =>
-        dataEntry.vaddrPageTag === s1LoadVaddrTag &&
-          dataEntry.vaddrPageOffset === s1LoadPageOffset
+        dataEntry.vaddrPageOffset === s1LoadPageOffset
       }))
       val s1Next16BMatchVec = WireInit(VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
         val storePageOffset = dataEntry.vaddrPageOffset
         ctrlEntry.cross16Byte &&
-          dataEntry.vaddrPageTag === s1LoadVaddrTag &&
           (storePageOffset +& 1.U) === Cat(0.U(1.W), s1LoadPageOffset)
       }))
       val s1SameLineMatchVec = WireInit(VecInit(io.dataEntriesIn.map(dataEntry =>
@@ -473,8 +474,10 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       // Virtual address match (high bits only, ignore byte offset)
       val s1VaddrMatchVec  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).zipWithIndex.map { case ((dataEntry, ctrlEntry), j) =>
         val storeIsCbo = ctrlEntry.isCbo
+        val cboMatch = storeIsCbo && s1SameLineMatchVec(j)
+        val normalMatch = (s1Same16BMatchVec(j) || s1Next16BMatchVec(j)) && s1VaddrTagMatchVec(j)
 
-        (s1Same16BMatchVec(j) || s1Next16BMatchVec(j) || (storeIsCbo && s1SameLineMatchVec(j))) && ctrlEntry.addrValid
+        (normalMatch || cboMatch) && ctrlEntry.addrValid
       }).asUInt
 
       // An UnalignQueue hit identifies the second page of an older cross-page store.
