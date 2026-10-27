@@ -1378,6 +1378,7 @@ int run_translation_faults(int argc, char **argv)
     unsigned pmp_segment_store_fault_readbacks = 0;
     unsigned pmp_segment_first_field_fault_readbacks = 0;
     unsigned pmp_vector_width_fault_readbacks = 0;
+    unsigned pmp_vector_load_faults = 0;
     unsigned vector_masked_later_load_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
@@ -4651,6 +4652,89 @@ int run_translation_faults(int argc, char **argv)
         ++pmp_vector_width_fault_readbacks;
     }
 
+    // PMP-denied vector load: a no-access PMP page must raise load access
+    // fault at the element address, issue no DCache/uncache request, and
+    // retire the load-queue entry without a data writeback.
+    {
+        memblock::Environment pmp_load(argc, argv);
+        constexpr std::uint64_t load_base =
+            memblock::kDefaultMemoryBase + 0x3c0000ULL;
+        constexpr std::uint8_t pmp_napot_deny = 0x18;
+        constexpr std::uint8_t pmp_napot_read_write_execute = 0x1f;
+        pmp_load.memory().fill_incrementing(load_base, 0x1000, 0x7d);
+        pmp_load.configure_backpressure(0xa4093822299f31d0ULL, true);
+        const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+            return (base | (size / 2 - 1)) >> 2;
+        };
+        if (!pmp_load.reset() || !pmp_load.activate_bare() ||
+            !pmp_load.configure_pmp(
+                {napot_address(load_base, 0x1000), ~std::uint64_t{0}},
+                {pmp_napot_deny, pmp_napot_read_write_execute})) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_load.cycle()
+                      << " phase=pmp-vector-load-configuration reason="
+                      << pmp_load.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction load{
+            .address = load_base + 0x8,
+            .eew = 3,
+            .vl = 1,
+            .rob = 112,
+            .lq = 0,
+            .pdest = 221,
+            .lane = 0,
+            .flow_num = 1,
+            .expected_exception_mask =
+                memblock::kExceptionLoadAccessFault,
+            .expected_writeback_vstart = 0,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        const std::uint64_t dcache_before = pmp_load.tilelink_requests();
+        const std::uint64_t uncache_before = pmp_load.uncache_requests();
+        pmp_load.expect_vector(load);
+        if (!pmp_load.set_rob_head(load.rob, load.rob_flag) ||
+            !pmp_load.enqueue_vector(load) ||
+            !pmp_load.issue_vector(load, 1024) ||
+            !pmp_load.run_until_vector_complete_with_replays(load, 32768) ||
+            !pmp_load.run_cycles(4) ||
+            pmp_load.exception_vaddr() != load_base + 0x8 ||
+            pmp_load.tilelink_requests() != dcache_before ||
+            pmp_load.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_load.cycle()
+                      << " phase=pmp-vector-load reason="
+                      << pmp_load.error() << " vaddr=0x" << std::hex
+                      << pmp_load.exception_vaddr() << std::dec
+                      << " dcache=" << pmp_load.tilelink_requests()
+                      << " uncache=" << pmp_load.uncache_requests() << '\n';
+            return 1;
+        }
+        const std::uint64_t retired =
+            pmp_load.lq_dequeued() + pmp_load.lq_canceled();
+        if (retired > pmp_load.lq_allocated() ||
+            (retired < pmp_load.lq_allocated() &&
+             !pmp_load.account_lq_cancellation(
+                 static_cast<unsigned>(
+                     pmp_load.lq_allocated() - retired))) ||
+            !pmp_load.redirect_after(load.rob, load.rob_flag, true) ||
+            !pmp_load.run_cycles(16)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_load.cycle()
+                      << " phase=pmp-vector-load-accounting reason="
+                      << pmp_load.error() << " lq="
+                      << pmp_load.lq_dequeued() << '/'
+                      << pmp_load.lq_allocated() << '\n';
+            return 1;
+        }
+        ++pmp_vector_load_faults;
+    }
+
     // A vector load with no active element must not fault even when its base
     // address is unmapped.  Masked-off elements are not accessed.  The
     // completion is checked by the normal vector scoreboard; this case also
@@ -4772,6 +4856,7 @@ int run_translation_faults(int argc, char **argv)
               << pmp_segment_first_field_fault_readbacks
               << " pmp_vector_width_fault_readbacks="
               << pmp_vector_width_fault_readbacks
+              << " pmp_vector_load_faults=" << pmp_vector_load_faults
               << " vector_first_element_store_fault_readbacks="
               << vector_first_element_store_fault_readbacks
               << " vector_masked_later_load_controls="
