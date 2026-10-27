@@ -1369,6 +1369,7 @@ int run_translation_faults(int argc, char **argv)
     unsigned vector_store_fault_readbacks = 0;
     unsigned vector_masked_store_fault_readbacks = 0;
     unsigned vector_first_element_store_fault_readbacks = 0;
+    unsigned vector_masked_later_load_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
     unsigned ppn_access_fault_cases = 0;
@@ -3375,6 +3376,66 @@ int run_translation_faults(int argc, char **argv)
         ++vector_first_element_store_fault_readbacks;
     }
 
+    // A partially masked vector load whose inactive element points into an
+    // unmapped page must complete successfully.  Masked-off elements are not
+    // accessed; only the active mapped element supplies data.
+    {
+        memblock::Environment masked_load(argc, argv);
+        constexpr std::uint64_t masked_virtual = 0x72300000ULL;
+        constexpr std::uint64_t masked_physical = 0xc9000000ULL;
+        constexpr std::uint64_t masked_root = 0x9ae00000ULL;
+        masked_load.memory().fill_incrementing(
+            masked_physical + 0xff8, 8, 0x7b);
+        masked_load.configure_backpressure(0xe49b69c19ef14ad2ULL, true);
+        if (!masked_load.reset() ||
+            !masked_load.map_sv39_4k(
+                masked_virtual, masked_physical, masked_root,
+                true, true, false, false, false, false) ||
+            !masked_load.activate_sv39(masked_root)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << masked_load.cycle()
+                      << " phase=masked-later-load-configuration reason="
+                      << masked_load.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction transaction{
+            .address = masked_virtual + 0xff8,
+            .oracle_address = masked_physical + 0xff8,
+            .eew = 3,
+            .vl = 2,
+            .vm = false,
+            .mask_bits = 0x0001,
+            .rob = 101,
+            .lq = 0,
+            .pdest = 191,
+            .lane = 0,
+            .flow_num = 2,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (auto &byte : transaction.data) {
+            byte = static_cast<unsigned char>(0x77);
+        }
+        masked_load.expect_vector(transaction);
+        if (!masked_load.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !masked_load.enqueue_vector(transaction) ||
+            !masked_load.issue_vector(transaction, 1024) ||
+            !masked_load.run_until_vector_complete_with_replays(
+                transaction, 32768) ||
+            !masked_load.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << masked_load.cycle()
+                      << " phase=masked-later-load reason="
+                      << masked_load.error() << '\n';
+            return 1;
+        }
+        ++vector_masked_later_load_controls;
+    }
+
     // A vector load with no active element must not fault even when its base
     // address is unmapped.  Masked-off elements are not accessed.  The
     // completion is checked by the normal vector scoreboard; this case also
@@ -3480,6 +3541,8 @@ int run_translation_faults(int argc, char **argv)
               << vector_masked_store_fault_readbacks
               << " vector_first_element_store_fault_readbacks="
               << vector_first_element_store_fault_readbacks
+              << " vector_masked_later_load_controls="
+              << vector_masked_later_load_controls
               << " vector_all_masked_ptw_requests="
               << vector_all_masked_ptw_requests
               << " vector_all_masked_dcache_requests="

@@ -83,7 +83,9 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
   element 1 and requires both the inactive writable page and the read-only
   page to stay unchanged. A first-element variant puts element 0 itself in a
   read-only page and requires `vstart=0` with neither that page nor the
-  following writable page written.
+  following writable page written. A partially masked load with only element
+  0 active must complete even though inactive element 1 points into an
+  unmapped page.
 - `translation-alias` maps two Sv39 virtual pages to one physical page and
   proves a committed store through one VA is visible through the other, both
   after drain and with SBuffer non-empty at an in-flight load issue. A cold
@@ -143,6 +145,8 @@ The current qualification is:
 | All directed scenarios | 90/90 pass | Current-tree sweep of every catalogued directed test (constrained-random excluded); artifact `agent-campaign-17/directed-logs` |
 | Coverage campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 101..106; artifact `agent-campaign-12`; 1029.0 s; capability only |
 | Corner campaign | 4/4 seeds pass, 4608 actions each (18432 actions) | Seeds 101..104; artifact `agent-campaign-12`; 1985.0 s; capability only |
+| CMO stress campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 401..406; artifact `agent-campaign-18/cmo`; the binary predates later directed-only test additions, which do not change the constrained-random CMO path; capability only |
+| Current 4x4608 corner | 4/4 seeds pass, 4608 actions each (18432 actions) | Seeds 501..504; artifact `agent-campaign-19/corner`; directed-only additions after launch do not change the constrained-random path; capability only |
 | Regression acceptance | 8/8 seeds pass, 16384 actions each (131072 actions) | Seeds 1..8; artifact `agent-campaign-14`; 1003.2 s; default coverage profile |
 | Current 8x16384 coverage | 8/8 seeds pass, 16384 actions each (131072 actions); per-seed high_mask 1436..1916 | Seeds 301..308; artifact `agent-campaign-17`; current mixed generator; not the 48h final campaign |
 | Spec confidence run | 8/8 seeds pass, 16384 actions each (131072 actions) | Seeds 1..8; artifact `agent-campaign-13`; 845.6 s; spec latency |
@@ -154,7 +158,7 @@ The current qualification is:
 | CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line repeated zero, a three-line back-to-back zero burst, same-line zero/store both orders, an older-store/younger-zero/younger-load forward window, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass; log at `agent-campaign-18/cbo-zero-contracts.log` | Directed `cbo-zero-contracts`; see CPU bug document |
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
 | High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
-| Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1` and exact faulting-element addresses; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | Broader fault-element/FOF progress remains open |
+| Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1` and exact faulting-element addresses; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; the partially masked load with an inactive unmapped element completes on the mapped element; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | Broader fault-element/FOF progress remains open |
 | Vector store fault side effect | `translation-faults` unmasked vector-store case passes with exact `vstart=1` and fault address; its read-only target page word is unchanged. The masked variant activates only element 1 and leaves both the inactive writable page and the read-only page unchanged. The first-element variant passes with exact `vstart=0` and both pages unchanged | Writable first-element visibility and other fault-path targets remain partial |
 | Permission-fault store side effects | `translation-permissions` passes with 10/10 fault-store readbacks (readable mapping or Bare fallback); `pmp-contracts` adds one PMP-denied store readback | Device fault paths still need another observation route |
 | Non-cacheable final effects | committed NC store/atomic words match the manager bus image in passing mixed runs; 2/2 4608-action seeds (210/211) check 141/142 words, seed 215 checks 146, and smaller seeds cover the uncache-drain path | Manager bus image, not a DUT uncache read; device side effects, aliases and CMO remain outside |
