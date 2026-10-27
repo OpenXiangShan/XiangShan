@@ -75,25 +75,29 @@ class InstrUncacheEntry(axiParams: AXI4BundleParameters)(implicit p: Parameters)
   private val readAddr = Cat(Mux(resending, resendAddr, alignedAddr), 0.U(log2Ceil(MmioBusBytes).W))
 
   // send AXI AR
-  // if there is a pending wfi request, we should not send new requests to L2
-  io.ar.valid := state === State.RefillReq && !io.wfi.wfiReq
+  // WFI blocks new requests, but an already presented AR must remain until accepted.
+  private val arPending = RegInit(false.B)
+  io.ar.valid := state === State.RefillReq && (!io.wfi.wfiReq || arPending)
   io.ar.bits := 0.U.asTypeOf(io.ar.bits)
-  when(io.ar.valid) {
-    fillAxiAddr(
-      io.ar.bits,
-      io.id,
-      readAddr,
-      log2Ceil(MmioBusBytes).U,
-      reqReg.memBackTypeMM,
-      reqReg.memPageTypeNC
-    )
+  fillAxiAddr(
+    io.ar.bits,
+    io.id,
+    readAddr,
+    log2Ceil(MmioBusBytes).U,
+    reqReg.memBackTypeMM,
+    reqReg.memPageTypeNC
+  )
+  when(io.ar.valid && !io.ar.ready) {
+    arPending := true.B
+  }.elsewhen(io.ar.fire) {
+    arPending := false.B
   }
 
   // receive AXI R
   io.r.ready := state === State.RefillResp
 
-  // we are safe to enter wfi if we have no pending response from L2
-  io.wfi.wfiSafe := state =/= State.RefillResp
+  // WFI must wait for any presented AR and its R response to drain.
+  io.wfi.wfiSafe := state =/= State.RefillResp && !io.ar.valid
 
   private val respDataReg    = RegInit(VecInit.fill(2)(0.U(16.W))) // FIXME: 2 * rvc, how to avoid magic number?
   private val respCorruptReg = RegInit(false.B)
