@@ -226,7 +226,8 @@ class VerifyRegressionTest(unittest.TestCase):
             {"constrained-random": 64},
         )
         with self.assertRaisesRegex(
-            verify_regression.VerificationError, "masked coverage is absent"
+            verify_regression.VerificationError,
+            "seed=7 scenario=constrained-random: masked coverage is absent",
         ):
             verify_regression._check_result(
                 sparse,

@@ -4590,7 +4590,12 @@ def _check_result(
         )
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
         if require_coverage:
-            _check_mixed_coverage(result, require_backpressure)
+            try:
+                _check_mixed_coverage(result, require_backpressure)
+            except VerificationError as error:
+                raise VerificationError(
+                    f"seed={seed} scenario={scenario}: {error}"
+                ) from error
         else:
             _check_mixed_accounting(result)
     elif scenario == run_regression.FRONTEND_BRIDGE_SCENARIO:
