@@ -15,7 +15,7 @@ import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{RespBundle, BypassDelay}
 import xiangshan.backend.vector.datapath.VecImmExtractor
-import xiangshan.mem.StoreQueueDataWrite
+import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import xiangshan.{HasXSParameter, Redirect, XSBundle, XSCoreParamsKey}
 
 class IssuePipe(
@@ -160,7 +160,11 @@ class IssuePipe(
 
   val is2RdFail = is2GpRdFail.asUInt.orR || is2FpRdFail.asUInt.orR
 
-  is1Resp.fail := is1.valid && is2RdFail
+  // TraceRTL: vstd writes the store queue without the physical-window check that
+  // scalar std/sta have, so replay an out-of-window vstd from the IQ instead.
+  val is2SqOutOfRange: Bool = in.sqDeqPtr.map(!is1.bits.sqIdx.get.withInPhysicalQueue(_)).getOrElse(false.B)
+
+  is1Resp.fail := is1.valid && (is2RdFail || is2SqOutOfRange)
   is1Resp.success := is2Next.valid
 
   val is2ImmNext: Option[UInt] = Option.when(is1.bits.imm.nonEmpty)(VecImmExtractor(
@@ -171,7 +175,7 @@ class IssuePipe(
     is1.bits.vtype.get.vsew
   ))
 
-  is2Next.valid := is1.valid && !is1Flush && !is2RdFail
+  is2Next.valid := is1.valid && !is1Flush && !is2RdFail && !is2SqOutOfRange
   is2Next.bits.ctrl.fromIssueDeq(is1.bits)
   is2Next.bits.data.imm.foreach(_ := is1.bits.imm.get)
   is2Next.bits.data.pc.foreach(_ := ???)
@@ -327,6 +331,7 @@ object IssuePipe {
     val is0RdFail = Bool()
     val is0WtFail = Bool()
     val is0LdCancel = Bool()
+    val sqDeqPtr = Option.when(env.TraceRTLMode && param.hasVStd)(new SqPtr)
     val is2VpRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.vfPregParams)
     val is2VlRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.vlPregParams)
 

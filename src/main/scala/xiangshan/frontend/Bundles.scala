@@ -49,6 +49,7 @@ import xiangshan.frontend.icache.WayLookupBundle
 import xiangshan.frontend.icache.WayLookupWriteBundle
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
+import xiangshan.frontend.tracertl.TraceInstrBundle
 
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
@@ -101,6 +102,8 @@ class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICa
   val vSetIdx:             Vec[UInt]      = Vec(PortNumber, UInt(idxBits.W))
   val hasBackendException: Bool           = Bool()
   val hasSatpFlush:        Bool           = Bool()
+
+  val nextStartVAddr: Option[GuardedPc] = Option.when(env.TraceRTLMode)(GuardedPc())
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
@@ -326,6 +329,9 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
+
+  val traceInfo: Option[Vec[TraceInstrBundle]] =
+    Option.when(env.TraceRTLMode)(Vec(IBufferEnqueueWidth, new TraceInstrBundle))
 }
 
 class IfuToGpAddrMem(implicit p: Parameters) extends FrontendBundle {

@@ -903,6 +903,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   io.flushOut.bits.interrupt := !isFlushPipe
   io.flushOut.bits.satpFlush := isFlushPipe && exceptionDataRead.bits.satpFlush
+  io.flushOut.bits.traceInfo.foreach(_ := Mux(
+    needModifyFtqIdxOffset,
+    debug_microOp(firstVInstrRobIdx.value).head.traceInfo.get,
+    deqExceptionUop.traceInfo.get
+  ))
   XSPerfAccumulate("flush_num", io.flushOut.valid)
   XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
   XSPerfAccumulate("exception_num", io.flushOut.valid && deqHasException)
@@ -938,6 +943,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.isHls := RegEnable(exceptionUop.isHls, exceptionHappen)
   io.exception.bits.vls := RegEnable(isVectorMemory(exceptionUop), exceptionHappen)
   io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
+  io.exception.bits.traceInfo.foreach(_ := RegEnable(exceptionUop.traceInfo.get, exceptionHappen))
 
   // A latter exception flushes itself but preserves its older former slot.
   // Hold only the difftest observation until that slot really retires after walk.
@@ -2077,6 +2083,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           reset = reset
         )
       }
+    }
+  }
+
+  if (env.TraceRTLMode) {
+    // The TraceRTL runtime checks committed instructions against the trace.
+    val traceCollector = Module(new xiangshan.frontend.tracertl.TraceCollectorHelper(CommitWidth))
+    traceCollector.clock := clock
+    traceCollector.reset := reset
+    for (i <- 0 until CommitWidth) {
+      val uop = commitDebugUop(2 * i)
+      traceCollector.enable(i)  := io.commits.isCommit && io.commits.commitValid(0) && io.commits.commitValid(i)
+      traceCollector.pc(i)      := SignExt(debugMeta(uop).pc, XLEN)
+      traceCollector.inst(i)    := uop.traceInfo.get.inst
+      traceCollector.instNum(i) := instrSizeCommit(i)
     }
   }
 

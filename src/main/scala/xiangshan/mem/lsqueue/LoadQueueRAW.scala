@@ -28,6 +28,7 @@ import xiangshan.backend.Bundles.DynInst
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
+import xiangshan.frontend.tracertl.{TraceInfo, TraceRTLChoose}
 
 class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -84,6 +85,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     // only fo
     val pc = UInt(VAddrBits.W)
     val debugInfo = new PerfDebugInfo
+    val traceInfo = TraceInfo()
   }
   private def isOlder(left: UopEntry, right: UopEntry): Bool = left.robIdx.isBeforeSlot(right.robIdx)
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
@@ -132,6 +134,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     io.stAddrReadySqPtr.isBefore(sqIdx)
   })
   val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
+  // TraceRTL: rank contenders by ROB age so a busy low-numbered load pipe cannot starve an older request.
+  def enqueueRank(w: Int): UInt =
+    PopCount(io.query.indices.map { other =>
+      val otherIsOlder = io.query(other).req.bits.robIdx.isBeforeSlot(io.query(w).req.bits.robIdx)
+      val sameSlot     = io.query(other).req.bits.robIdx.isSameSlot(io.query(w).req.bits.robIdx)
+      needEnqueue(other) && (otherIsOlder || sameSlot && (other < w).B)
+    })
 
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -147,7 +156,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     freeList.io.allocateReq(w) := true.B
 
     //  Allocate ready
-    val offset = PopCount(needEnqueue.take(w))
+    val offset = TraceRTLChoose(PopCount(needEnqueue.take(w)), enqueueRank(w))
     val canAccept = freeList.io.canAllocate(offset)
     val enqIndex = freeList.io.allocateSlot(offset)
     enq.ready := Mux(needEnqueue(w), canAccept, true.B)
@@ -179,6 +188,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       uop(enqIndex).ftqOffset := enq.bits.ftqOffset
       uop(enqIndex).pc := enq.bits.pc
       uop(enqIndex).debugInfo := enq.bits.debugInfo
+      uop(enqIndex).traceInfo.foreach(_ := enq.bits.traceInfo.get)
       datavalid(enqIndex) := enq.bits.dataValid
     }
     val debug_robIdx = enq.bits.robIdx.asUInt
@@ -387,6 +397,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.stFtqIdx    := stFtqIdx(i)
     redirect.bits.stFtqOffset := stFtqOffset(i)
     redirect.bits.level       := RedirectLevel.flush
+    redirect.bits.traceInfo.foreach(_ := rollbackLqWb(i).bits.traceInfo.get)
     redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
     redirect
   })

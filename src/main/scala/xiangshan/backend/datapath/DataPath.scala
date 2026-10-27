@@ -636,6 +636,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       }
       s1_data.fromIssueBundle(s0.bits) // no src data here
       s1_data.fromIssueDeqOg1PayloadBundle(fromIQDeqOg1Payload(i)(j))
+      s1_data.traceInfo.foreach(_ := s0.bits.traceInfo.get)
       s1_data.rfRen.foreach(x => x.zipWithIndex.foreach{ case(xx, idx) => xx := s0.bits.rfBankRen.get(idx).asUInt.orR })
       // same name, need shift logic, not simple connection
       s1_data.loadDependency.foreach(_ := s0.bits.loadDependency.get.map(_ << 1))

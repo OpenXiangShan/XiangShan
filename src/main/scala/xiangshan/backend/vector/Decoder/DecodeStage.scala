@@ -15,6 +15,7 @@ import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
 import xiangshan.backend.vector.LatDecoder
 import xiangshan.ExceptionNO._
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 class DecodeStage()(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -109,6 +110,7 @@ class DecodeStageImp(
         ctrl.vtype            := inMopBits.vtype
         ctrl.oldVType         := inMopBits.specvtype
         ctrl.rawInst          := inMopBits.instr
+        ctrl.traceInfo.foreach(_ := inMopBits.traceInfo.get)
         ctrl.debug.foreach(_  := inMopBits.debug.get)
     }
   }
@@ -123,7 +125,7 @@ class DecodeStageImp(
     val mopInfo = coUop.bits.ctrl
     val uopInfo = coUop.bits.info
 
-    uop.valid := coUop.valid
+    uop.valid := coUop.valid && TraceRTLChoose(true.B, !in.redirect.valid)
     uop.bits match {
       case bits =>
         bits.foldpc := mopInfo.foldpc
@@ -141,6 +143,7 @@ class DecodeStageImp(
         bits.ftqOffset := mopInfo.ftqOffset
         bits.isLastInFtqEntry := mopInfo.isLastInFtqEntry
         bits.instr := mopInfo.rawInst
+        bits.traceInfo.foreach(_ := mopInfo.traceInfo.get)
         bits.commitType := uopInfo.commitType
         bits.srcType :=
           Seq(uopInfo.src1Ren, uopInfo.src2Ren, uopInfo.src3Ren)
@@ -193,6 +196,11 @@ class DecodeStageImp(
           x.pc := mopInfo.debug.get.pc
           x.debug_seqNum.seqNum := mopInfo.debug.get.debug_seqNum.seqNum
           x.debug_seqNum.uopIdx := uopInfo.uopIdx
+        }
+        // TraceRTL raises every traced exception as an illegal instruction
+        bits.traceInfo.foreach { t =>
+          bits.exceptionVec := 0.U.asTypeOf(bits.exceptionVec)
+          bits.exceptionVec(illegalInstr) := t.hasException
         }
     }
   }

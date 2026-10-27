@@ -872,6 +872,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.pdestVl.foreach(_ := deqEntryVec(i).bits.payload.pdestVl.get)
     deq.bits.robIdx := deqEntryVec(i).bits.status.robIdx
     deq.bits.chanelIdx := deqEntryVec(i).bits.status.chanelIdx
+    deq.bits.traceInfo.foreach(_ := deqEntryVec(i).bits.payload.traceInfo.get)
 
     val deqDataSources = deqEntryVec.map(_.bits.status.srcStatus.map(_.dataSources))
     deq.bits.dataSources.zip(deqDataSources(i)).foreach { case (sink, source) => sink := source}

@@ -1068,6 +1068,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   oldestRedirect.bits.backendIAF := false.B
   oldestRedirect.bits.backendIPF := false.B
   oldestRedirect.bits.backendIGPF := false.B
+  oldestRedirect.bits.traceInfo.foreach(t => when(t.isFastSim) { oldestRedirect.valid := false.B })
   io.mem_to_ooo.memoryViolation := oldestRedirect
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
