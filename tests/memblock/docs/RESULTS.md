@@ -121,14 +121,15 @@ The current qualification commands are:
 - The configured 8-seed, 16384-action coverage regression.
 
 The qualification artifacts are local under
-`build/memblock/agent-campaign-12` through `agent-campaign-18` (not guaranteed
+`build/memblock/agent-campaign-12` through `agent-campaign-20` (not guaranteed
 by a clean clone). The full 6x4608/4x4608 campaigns are from
 `agent-campaign-12`; the older frozen benchmark is `agent-campaign-16`; the
 8x16384 spec and coverage runs are from `agent-campaign-13` and
 `agent-campaign-14`. The full-mask and accepted-B logs are in
-`agent-campaign-17`; the current-tree benchmark, private runtime,
+`agent-campaign-17`; the earlier current-tree benchmark, private runtime,
 `translation-faults` log and vector fault evidence are in
-`agent-campaign-18`.
+`agent-campaign-18`; the post-change benchmark and private runtime are in
+`agent-campaign-20`.
 The runtime was frozen after
 a fresh root `build/rtl` generation, `prepare-rtl`, and Picker/model rebuild for
 the `StoreQueue.scala` fix; the previous model was not reused.
@@ -141,6 +142,7 @@ The current qualification is:
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Selected benchmark | 85/85 pass, 377.7 s | Seed 1; random budget 256; catalog-specific action overrides retained; `agent-campaign-16` |
 | Current selected benchmark | 85/85 pass, 437.96 s | Seed 1; random budget 256; private runtime; artifact `agent-campaign-18/benchmark.json`; run before the four-cycle vector-feedback settle, with the settled `translation-faults` case passing separately; run alongside six CMO-stress seeds, so wall time is not a clean solo measurement |
+| Post-change selected benchmark | 85/85 pass, 390.75 s | Seed 1; random budget 256; current harness and private runtime; artifact `agent-campaign-20/benchmark.json`; solo run after the vector-fault, CBO-ordering, deep-probe and strict-verifier changes |
 | Extra directed contracts | 6/6 pass | cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high, vector-segment-noncanonical, translation-alias |
 | All directed scenarios | 90/90 pass | Current-tree sweep of every catalogued directed test (constrained-random excluded); artifact `agent-campaign-17/directed-logs` |
 | Coverage campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 101..106; artifact `agent-campaign-12`; 1029.0 s; capability only |
