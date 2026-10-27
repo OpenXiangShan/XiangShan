@@ -301,7 +301,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       arb2.io.in(i).bits.req_info.mptOnly.get := DontCare // assign dont care to mpt port, it is not used. but arb2 uses L1TLB req as type, so...
     }
   }
-  arb2.io.out.ready := cache.io.req.ready
 
   // Instructs jmp_bitmap_check requests from cache need go to LLPTW/PTW for processing
   val toFsm_toLLPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check && cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
@@ -716,12 +715,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // completing request's req_info at T+1.  Rather than dropping that RegNext
   // (it cuts the DnDAT TxnID -> entries() path), align the whole cache refill
   // payload one stage later so every source is sampled at T+1 and presented at
-  // T+2.  Combinational depth per stage is unchanged; only the background
-  // cache fill moves one cycle later.  The L1 direct-response path does not
-  // go through cache.io.refill and is unaffected.
+  // T+2.  Combinational depth per stage is unchanged.  Cache reads must
+  // also wait for this extra refill stage (see the arb2 ready gate below).
+  // The L1 direct-response path does not go through cache.io.refill.
   // Cancel pending refills on a flush at T+1 before they reach the cache at T+2.
   // This also gates levelOH, which controls the actual cache writes.
   val refill_valid_d1 = GatedValidRegNext(refill_valid, false.B) && !flush // T+1
+  // A normal PTW can recheck the page cache at T+1, before its refill reaches
+  // the SRAM at T+2.  Block cache reads during the pending refill stage;
+  // PtwCache's existing rwHarzad blocks them on the actual refill cycle.
+  // The earliest recheck is then T+3 and sees the newly written PTE, rather
+  // than repeatedly missing and losing that entry to other VPNs' refills.
+  // cache.io.req.valid is driven by arb2.io.out.fire, so this gate also
+  // backpressures every source without accepting a request on either side.
+  arb2.io.out.ready := cache.io.req.ready && !refill_valid_d1
+
   val from_llptw_d1 = RegEnable(refill_from_llptw, refill_valid)
   val from_ptw_d1 = RegEnable(refill_from_ptw, refill_valid)
   // all three sources valid at T+1: llptw_mem.refill via its own RegNext,
