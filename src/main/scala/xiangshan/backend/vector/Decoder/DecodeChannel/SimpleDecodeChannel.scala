@@ -43,7 +43,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   val patterns = instSeq
 
 
-  val patternsCboI2f: Seq[DecodePatternComb2[InstPattern, BoolPattern]] = for (
+  val patternsCbo: Seq[DecodePatternComb2[InstPattern, BoolPattern]] = for (
     instP <- instSeq.filter(x => ZICBOType.all.contains(x.bitPat));
     bool <- BoolPattern.all
   ) yield {
@@ -53,7 +53,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   println("[tmp-SimpleDecodeChannel]")
   instSeq.foreach(println)
   println("[tmp-SimpleDecodeChannel]")
-  patternsCboI2f.foreach(println)
+  patternsCbo.foreach(println)
 
   val uopInfoFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopInfoField(i, extensions))
   val opcodeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new OpcodeField(i, extensions))
@@ -80,17 +80,18 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
 
   println(s"The length of DecodeTable in SimpleDecodeChannel: ${patterns.length}")
   val table = new DecodeTable(patterns, fields)
-  val instCboI2fTable = new DecodeTable(patternsCboI2f, Seq(CboOpcodeField))
+  // Decode all CBO opcodes, including inval-to-flush conversion requested by CBIE.
+  val instCboTable = new DecodeTable(patternsCbo, Seq(CboOpcodeField))
 
   // Get the decode result by generating a decode table by programming logic array (pla)
   val result = table.decode(in.rawInst)
-  val resultInstCboI2f = instCboI2fTable.decode(in.rawInst ## in.fromCSR.special.cboI2F)
+  val resultInstCbo = instCboTable.decode(in.rawInst ## in.fromCSR.special.cboI2F)
 
   val uopInfos = uopInfoFields.map(field => result(field))
   val opcodes = opcodeFields.map(field => result(field))
   val fuTypes = fuTypeFields.map(field => result(field))
 
-  val cboOpcode = resultInstCboI2f(CboOpcodeField)
+  val cboOpcode = resultInstCbo(CboOpcodeField)
   val isCbo = ZICBOType.all.map(rawInst === _).reduce(_ || _)
 
   val isMop  = result(IsMopField)
@@ -150,6 +151,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.renameInfo := uopInfos(i).bits
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
+    // TODO: Consider integrating CBO opcode decoding into the main table to avoid this final opcode override.
     out.uop(i).bits.opcode := Mux(isCbo, cboOpcode, opcodes(i))
     out.uop(i).bits.lsrc1 := Mux(isMop, 0.U, instFields.RS1)
     out.uop(i).bits.lsrc2 := Mux(isMop, 0.U, instFields.RS2)
