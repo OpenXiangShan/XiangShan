@@ -3,12 +3,11 @@ package xiangshan.backend.float
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.backend.datapath.RdConfig.{FpRD, IntRD}
+import xiangshan.backend.datapath.RdConfig.FpRD
 import xiangshan.backend.vector.Exu.InBypassCtrl
 import xiangshan.backend.vector.VecIssueQueue.BypassDelay
 import xiangshan.backend.vector.ExuParam
 import xiangshan.{HasXSParameter, XSBundle}
-import yunsuan.vector.Common.SewOH
 
 class FltBypassNetwork(implicit val param: ExuParam, val p: Parameters) extends Module with HasXSParameter {
   val in = IO(Input(new FltBypassNetwork.In))
@@ -33,12 +32,10 @@ class FltBypassNetwork(implicit val param: ExuParam, val p: Parameters) extends 
 
 object FltBypassNetwork {
   class In(implicit val param: ExuParam, p: Parameters) extends XSBundle {
-    val sewOH = SewOH()
     val bypassCtrl = new InBypassCtrl(param)
     val fpRdData = Vec(param.numRegSrc, UInt(XLEN.W))
     val fpWb0Next = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
-    val fpWb1 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
   }
 
   class Out(implicit val param: ExuParam, p: Parameters) extends XSBundle {

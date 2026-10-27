@@ -20,25 +20,19 @@ import chisel3.util._
 import difftest.{DiffPhyFpRegState, DifftestModule}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility._
 import xiangshan._
-import xiangshan.backend.Bundles.{IssueQueueDeqOg1Payload, Og0InUop}
+import xiangshan.backend.Bundles.IssueQueueDeqOg1Payload
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.{FpRFReadArbiter, RFRdArbParams}
-import xiangshan.backend.datapath.RdConfig.RdConfig
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.regfile.{FpRegFile, PregParams, VfRegFile}
+import xiangshan.backend.regfile.FpRegFile
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.float.FltRegionModule._
 import xiangshan.backend.vector.fu.VecFuConfig
 import xiangshan.backend.vector.VecRegionModule.RfWriteBundle
-import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
-import xiangshan.mem.StoreQueueDataWrite
-import xiangshan.backend.vector.{Exu, ExuParam, IssueParam, IssuePipe, RegionParam, VecIssueQueue, VecRegionModule}
+import xiangshan.backend.vector.{Exu, ExuParam, IssueParam, RegionParam, VecRegionModule}
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, Enq, WakeUpBundle}
-import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.float.FltIssueQueue.{FltEarlyWakeUpBundle, FltWakeUpBundle}
-import xiangshan.backend.float.FltWbDataPath
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.IntScheduler
 
@@ -66,7 +60,6 @@ class FltRegionImp(
   implicit
   p: Parameters, param: RegionParam
 ) extends LazyModuleImp(wrapper) with HasXSParameter {
-  val debugEn = backendParams.debugEn
   val basicDebugEn = backendParams.basicDebugEn
 
   val numFp = backendParams.fpPregParams.numEntries
@@ -101,21 +94,12 @@ class FltRegionImp(
   // configuration, not a per-region subset.
   private val intRegfileWbPortIds = backendParams.getWbPortIndices(IntData())
   private val fpRegfileWbPortIds = backendParams.getWbPortIndices(FpData())
-  private val vpRegfileWbPortIds = backendParams.getWbPortIndices(VecData())
-  private val v0RegfileWbPortIds = backendParams.getWbPortIndices(V0Data())
-  private val vlRegfileWbPortIds = backendParams.getWbPortIndices(VlData())
 
   private val intWbPortIdxMap = intRegfileWbPortIds.zipWithIndex.toMap
   private val fpWbPortIdxMap = fpRegfileWbPortIds.zipWithIndex.toMap
-  private val vpWbPortIdxMap = vpRegfileWbPortIds.zipWithIndex.toMap
-  private val v0WbPortIdxMap = v0RegfileWbPortIds.zipWithIndex.toMap
-  private val vlWbPortIdxMap = vlRegfileWbPortIds.zipWithIndex.toMap
 
   private val intNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getGpWriteCfg.map(_.port), _.writeIntRf)
   private val fpNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getFpWriteCfg.map(_.port), _.writeFpRf)
-  private val vpNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getVpWriteCfg.map(_.port), _.writeVecRf)
-  private val v0NonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getV0WriteCfg.map(_.port), _.writeV0Rf)
-  private val vlNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getVlWriteCfg.map(_.port), _.writeVlRf)
 
   private val intWbFuBusyTable = buildWbFuBusyTable(
     intRegfileWbPortIds,
@@ -225,19 +209,17 @@ class FltRegionImp(
       iq.in.ldCancel := ldCancelToIQ
   }
 
-  (issueQueues lazyZip issuePipes).zipWithIndex.foreach { case ((iq, pipes), iqIdx) =>
+  (issueQueues lazyZip issuePipes).foreach { case (iq, pipes) =>
     pipes.zipWithIndex.foreach { case (pipe, pipeIdx) =>
       pipe.in.flush := in.flush
       pipe.in.is0Next := iq.out.deq(pipeIdx)
       pipe.in.is0RdFail := false.B // Todo
-      pipe.in.is0WtFail := false.B // Todo
       pipe.in.ldCancel := in.fromMem.ldCancel
       pipe.in.ex0RespFailLat1 := ex0RespFailLat1
       pipe.in.fpWbM2Vec := fpWbM2WakeUp
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.fpWb0Next := fpWbDataPath.out.wb0Next.map(_.data)
       pipe.in.fpWb0 := fpWbDataPath.out.wb0.map(_.data)
-      pipe.in.fpWb1 := fpWbDataPath.out.wb1.map(_.data)
       // for div
       pipe.in.busyTableEmpty.foreach(_ := !iq.in.fromWbFuBusyTable.fpWbFuBusyTableRead.get.head(4))
       pipe.in.busyTableI2F.foreach(_ := in.fromIntRegion.busyTableI2F)
@@ -381,7 +363,7 @@ class FltRegionImp(
   }
   out.toVecRegion.is2RdDataNext.lazyZip(in.fromVecRegion.is1RdAddrNext).lazyZip(vecFpRdGrant).foreach { case (iqRdata, iqAddr, iqGrant) =>
     iqRdata.lazyZip(iqAddr).lazyZip(iqGrant).foreach { case (pipeRdata, pipeAddr, pipeGrant) =>
-      pipeRdata.lazyZip(pipeAddr).lazyZip(pipeGrant).foreach { case (rdata, raddr, grant) =>
+      pipeRdata.lazyZip(pipeAddr).lazyZip(pipeGrant).foreach { case (rdata, _, _) =>
         rdata.data := fpRdata(rdata.rdConfig.port)
       }
     }
@@ -490,10 +472,7 @@ class FltRegionImp(
 object FltRegionModule {
   class In(implicit p: Parameters, param: RegionParam) extends XSBundle {
     val intRegion = backendParams.getIntRegionParam
-    val fltRegion = backendParams.getFltRegionParam
     val vecRegion = backendParams.getVecRegionParam
-
-    val fpSchdParam = backendParams.fpSchdParams.get
 
     val fromTop = new Bundle {
       val hartId = UInt(8.W)
@@ -523,15 +502,13 @@ object FltRegionModule {
     }
   }
 
-  class FromMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
+  class FromMem(implicit p: Parameters) extends XSBundle {
     val ldCancel = Vec(backendParams.LdExuCnt, Input(new LoadCancelIO))
   }
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {
-    private val intRegion = backendParams.getIntRegionParam
     private val vecRegion = backendParams.getVecRegionParam
 
-    val numDeq: Int = param.issueParams.map(_.numDeq).sum
     val numEntry: Int = param.issueParams.map(_.numEntry).max
     val numIQ: Int = param.issueParams.count(x => !x.hasVStd)
 
@@ -587,27 +564,5 @@ object FltRegionModule {
       backendParams.getRfWriteSize(backendParams.fpPregParams.dataCfg),
       new RfWriteBundle(backendParams.fpPregParams)
     )
-  }
-
-  class RfArbiterBundle(val rdConfig: RdConfig)(implicit p: Parameters) extends XSBundle {
-    val ren = Bool()
-    val addr = UInt(PhyRegIdxWidth.W)
-    val robIdx = new RobPtr()
-  }
-
-  object RfArbiterBundle {
-    def apply(rdConfig: RdConfig)(ren: Bool, addr: UInt, robIdx: RobPtr)(implicit p: Parameters): RfArbiterBundle = {
-      val rfArbiterBundle = Wire(new RfArbiterBundle(rdConfig))
-      rfArbiterBundle.ren := ren
-      rfArbiterBundle.addr := addr
-      rfArbiterBundle.robIdx := robIdx
-      rfArbiterBundle
-    }
-  }
-
-  class DebugBundle(implicit p: Parameters) extends XSBundle {
-    val debug          = new xiangshan.DebugBundle
-    val perfDebugInfo  = new PerfDebugInfo()
-    val seqNum         = InstSeqNum()
   }
 }

@@ -2,13 +2,6 @@ package xiangshan.backend.vector.fu
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util.{MuxCase, MuxLookup, Valid}
-import xiangshan._
-import xiangshan.backend.datapath.DataConfig.V0Data
-import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
-import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}
-import xiangshan.backend.vector.WbFuBusyTable
-import xiangshan.backend.vector.fu.VecFuConfig.VialuCfg
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 
 trait FltFuncAlias { this: Func =>
@@ -17,7 +10,6 @@ trait FltFuncAlias { this: Func =>
   protected def ex0src0 = ex0data.src(0)
   protected def ex0src1 = ex0data.src(1)
   protected def ex0src2 = ex0data.src(2)
-  protected def ex0uopIdx = ex0ctrl.uopIdx
 }
 
 

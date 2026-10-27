@@ -2,7 +2,6 @@ package xiangshan.backend.float
 
 import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
-import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.{HasXSParameter, XSBundle}
@@ -15,7 +14,7 @@ class FltWbDataPath(pregParams: PregParams)(implicit val p: Parameters) extends 
   val out = IO(Output(new FltWbDataPath.Out(pregParams)))
 
   private val fromExus: Seq[Exu.ToRf] = in.fromExus.flatten.flatten
-  private val wb0, wb1: Vec[RfWriteBundle] = RegInit(
+  private val wb0: Vec[RfWriteBundle] = RegInit(
     VecInit.fill(backendParams.getRfWriteSize(pregParams.dataCfg))(new RfWriteBundle(pregParams).Lit(_.wen -> false.B))
   )
 
@@ -30,11 +29,9 @@ class FltWbDataPath(pregParams: PregParams)(implicit val p: Parameters) extends 
   }
 
   connectWbWithWbNext(wb0, wb0Next)
-  connectWbWithWbNext(wb1, wb0)
 
   out.wb0Next := wb0Next
   out.wb0 := wb0
-  out.wb1 := wb1
 
   def connectWbWithWbNext(wbVec: Vec[RfWriteBundle], wbNextVec: Vec[RfWriteBundle]): Unit = {
     for ((wb, wbNext) <- wbVec lazyZip wbNextVec) {
@@ -54,6 +51,6 @@ object FltWbDataPath {
   }
 
   class Out(pregParams: PregParams)(implicit p: Parameters) extends XSBundle {
-    val wb0Next, wb0, wb1 = Vec(backendParams.getRfWriteSize(pregParams.dataCfg), new RfWriteBundle(pregParams))
+    val wb0Next, wb0 = Vec(backendParams.getRfWriteSize(pregParams.dataCfg), new RfWriteBundle(pregParams))
   }
 }
