@@ -1373,6 +1373,7 @@ int run_translation_faults(int argc, char **argv)
     unsigned vector_segment_element_fault_readbacks = 0;
     unsigned vector_segment_first_field_fault_readbacks = 0;
     unsigned pmp_vector_store_fault_readbacks = 0;
+    unsigned pmp_masked_vector_store_fault_readbacks = 0;
     unsigned vector_masked_later_load_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
@@ -3980,6 +3981,140 @@ int run_translation_faults(int argc, char **argv)
         ++pmp_vector_store_fault_readbacks;
     }
 
+    // Masked PMP-denied vector store: only element 1 is active, and it is in
+    // a PMP read-only page.  The store must fault at element 1 with vstart=1,
+    // not at the masked-off element 0, and must not write either address.
+    {
+        memblock::Environment pmp_masked(argc, argv);
+        constexpr std::uint64_t pmp_base =
+            memblock::kDefaultMemoryBase + 0x370000ULL;
+        constexpr std::uint8_t pmp_napot_read = 0x19;
+        constexpr std::uint8_t pmp_napot_read_write_execute = 0x1f;
+        pmp_masked.memory().fill_incrementing(pmp_base, 0x1000, 0x73);
+        const std::uint64_t low_word = pmp_masked.memory().read_u64(
+            pmp_base + 0x8);
+        const std::uint64_t high_word = pmp_masked.memory().read_u64(
+            pmp_base + 0x10);
+        pmp_masked.configure_backpressure(0x1f83d9abfb41bd6bULL, true);
+        const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+            return (base | (size / 2 - 1)) >> 2;
+        };
+        if (!pmp_masked.reset() || !pmp_masked.activate_bare() ||
+            !pmp_masked.configure_pmp(
+                {napot_address(pmp_base, 0x1000), ~std::uint64_t{0}},
+                {pmp_napot_read, pmp_napot_read_write_execute})) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_masked.cycle()
+                      << " phase=pmp-masked-store-configuration reason="
+                      << pmp_masked.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction store{
+            .store = true,
+            .address = pmp_base + 0x8,
+            .eew = 3,
+            .vl = 2,
+            .vm = false,
+            .mask_bits = 0x0002,
+            .rob = 108,
+            .sq = 0,
+            .pdest = 206,
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask =
+                memblock::kExceptionStoreAccessFault,
+            .expected_writeback_vstart = 1,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (auto &byte : store.data) {
+            byte = static_cast<unsigned char>(0x81);
+        }
+        const std::uint64_t dcache_before = pmp_masked.tilelink_requests();
+        const std::uint64_t uncache_before = pmp_masked.uncache_requests();
+        pmp_masked.select_store_exception_address(true);
+        pmp_masked.expect_vector(store);
+        if (!pmp_masked.set_rob_head(store.rob, store.rob_flag) ||
+            !pmp_masked.enqueue_vector(store) ||
+            !pmp_masked.issue_vector(store, 1024) ||
+            !pmp_masked.run_until_vector_complete_with_replays(
+                store, 32768) ||
+            !pmp_masked.run_cycles(4) ||
+            pmp_masked.exception_vaddr() != pmp_base + 0x10 ||
+            pmp_masked.tilelink_requests() != dcache_before ||
+            pmp_masked.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_masked.cycle()
+                      << " phase=pmp-masked-store reason="
+                      << pmp_masked.error() << " vaddr=0x" << std::hex
+                      << pmp_masked.exception_vaddr() << std::dec
+                      << " dcache=" << pmp_masked.tilelink_requests()
+                      << " uncache=" << pmp_masked.uncache_requests() << '\n';
+            return 1;
+        }
+        const std::uint64_t retired =
+            pmp_masked.sq_dequeued() + pmp_masked.sq_canceled();
+        if (retired > pmp_masked.sq_allocated() ||
+            (retired < pmp_masked.sq_allocated() &&
+             !pmp_masked.account_sq_cancellation(
+                 static_cast<unsigned>(
+                     pmp_masked.sq_allocated() - retired))) ||
+            !pmp_masked.redirect_after(
+                store.rob, store.rob_flag, true, true) ||
+            !pmp_masked.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_masked.cycle()
+                      << " phase=pmp-masked-store-accounting reason="
+                      << pmp_masked.error() << '\n';
+            return 1;
+        }
+        std::array<memblock::LoadTransaction, 2> readbacks{};
+        readbacks[0] = memblock::LoadTransaction{
+            .address = pmp_base + 0x8,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 207,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        readbacks[1] = memblock::LoadTransaction{
+            .address = pmp_base + 0x10,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 1,
+            .pdest = 208,
+            .lane = 1,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        pmp_masked.expect_load_data(readbacks[0], low_word);
+        pmp_masked.expect_load_data(readbacks[1], high_word);
+        if (!pmp_masked.set_rob_head(
+                readbacks[0].rob, readbacks[0].rob_flag) ||
+            !pmp_masked.enqueue_load_batch(
+                {readbacks[0], readbacks[1]}, {0, 1}) ||
+            !pmp_masked.issue_load_batch(
+                {readbacks[0], readbacks[1]}, 4096) ||
+            !pmp_masked.run_until_all_complete(16384) ||
+            !pmp_masked.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_masked.cycle()
+                      << " phase=pmp-masked-store-readback reason="
+                      << pmp_masked.error() << '\n';
+            return 1;
+        }
+        pmp_masked.select_store_exception_address(false);
+        ++pmp_masked_vector_store_fault_readbacks;
+    }
+
     // A vector load with no active element must not fault even when its base
     // address is unmapped.  Masked-off elements are not accessed.  The
     // completion is checked by the normal vector scoreboard; this case also
@@ -4091,6 +4226,8 @@ int run_translation_faults(int argc, char **argv)
               << vector_segment_first_field_fault_readbacks
               << " pmp_vector_store_fault_readbacks="
               << pmp_vector_store_fault_readbacks
+              << " pmp_masked_vector_store_fault_readbacks="
+              << pmp_masked_vector_store_fault_readbacks
               << " vector_first_element_store_fault_readbacks="
               << vector_first_element_store_fault_readbacks
               << " vector_masked_later_load_controls="
