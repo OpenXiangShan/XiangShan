@@ -434,8 +434,9 @@ assignments override individual fields, e.g.
 `STRICT_CONSTRAINT='probe=500'` to exercise the standalone probe-depth
 classes. A 2×4608 diagnostic run
 was functionally clean but strict coverage rejected it because enabled
-probe-depth classes 4..7 were unobserved; 4608 actions is below the intended
-closure-scale budget. Documentation schema
+probe-depth classes 4..7 were unobserved; a 1×16384 run selected only six
+standalone probe sequences and also failed. Use `STRICT_CONSTRAINT='probe=500'`
+to target the standalone probe-depth classes explicitly. Documentation schema
 consistency is separately checked by
 [check_io_coverage.py](../scripts/check_io_coverage.py).
 [VERIFICATION_PLAN.md#regression-acceptance](VERIFICATION_PLAN.md#regression-acceptance)
