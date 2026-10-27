@@ -148,6 +148,7 @@ object BranchAttribute {
 
 class BpuPredictionSource extends Bundle {
   val s1Source:   UInt = BpuPredictionSource.Stage1()
+  val s2Source:   UInt = BpuPredictionSource.Stage2()
   val s3Source:   UInt = BpuPredictionSource.Stage3()
   val s2Override: Bool = Bool()
   val s3Override: Bool = Bool()
@@ -155,6 +156,11 @@ class BpuPredictionSource extends Bundle {
   def s1Ubtb:        Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
   def s1Abtb:        Bool = s1Source === BpuPredictionSource.Stage1.Abtb
   def s1Fallthrough: Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
+  def s1UbtbUras:    Bool = s1Source === BpuPredictionSource.Stage1.UbtbUras
+  def s1AbtbUras:    Bool = s1Source === BpuPredictionSource.Stage1.AbtbUras
+  def s2Tage:        Bool = s2Source === BpuPredictionSource.Stage2.Tage
+  def s2Mbtb:        Bool = s2Source === BpuPredictionSource.Stage2.Mbtb
+  def s2Fallthrough: Bool = s2Source === BpuPredictionSource.Stage2.Fallthrough
   def s3Ras:         Bool = s3Source === BpuPredictionSource.Stage3.Ras
   def s3ITTage:      Bool = s3Source === BpuPredictionSource.Stage3.ITTage
   def s3Sc:          Bool = s3Source === BpuPredictionSource.Stage3.Sc
@@ -164,12 +170,20 @@ class BpuPredictionSource extends Bundle {
 }
 
 object BpuPredictionSource {
-  object Stage1 extends EnumUInt(5) {
+  object Stage1 extends EnumUInt(7) {
     def Ubtb:        UInt = 0.U(width.W)
     def Abtb:        UInt = 1.U(width.W)
     def UbtbUtage:   UInt = 2.U(width.W) // now utage must work with abtb, so this is unused and reserved
     def AbtbUtage:   UInt = 3.U(width.W)
     def Fallthrough: UInt = 4.U(width.W)
+    // The BTB supplies the branch; micro-RAS supplies its return target.
+    def UbtbUras: UInt = 5.U(width.W)
+    def AbtbUras: UInt = 6.U(width.W)
+  }
+  object Stage2 extends EnumUInt(3) {
+    def Tage:        UInt = 0.U(width.W)
+    def Mbtb:        UInt = 1.U(width.W)
+    def Fallthrough: UInt = 2.U(width.W)
   }
   object Stage3 extends EnumUInt(6) {
     def Ras:         UInt = 0.U(width.W)
