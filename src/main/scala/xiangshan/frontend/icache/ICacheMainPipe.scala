@@ -454,6 +454,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     req.icacheMeta.itlbPbmt           := s1_wayLookupEntry(i).itlbPbmt
     req.icacheMeta.pAddr              := getPAddrFromPTag(s1_vAddr(2 * i), s1_pTag)
     req.icacheMeta.gpAddr             := s1_exceptionInfo(i).gpAddr
+    // basically same as s1_shouldFetch, but use raw sramHits, used in Ifu to detect FEC miss
+    req.icacheMeta.miss.zipWithIndex.foreach { case (port, portIdx) =>
+      port := !s1_sramHits(i)(portIdx) && s1_lineValid(i)(portIdx) && s1_exception(i).isNone && !s1_isMmio
+    }
   }
   s1_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
   s1_ready := (s1_fetchFinish && io.toIfu.req.ready) || !s1_valid

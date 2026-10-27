@@ -65,12 +65,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val fromUncache: InstrUncacheToIfuIO = Flipped(new InstrUncacheToIfuIO)
 
     // IBuffer: enqueue
-    val toIBuffer:    DecoupledIO[FetchToIBuffer] = DecoupledIO(new FetchToIBuffer)
-    val ibufferEmpty: Bool                        = Input(Bool())
+    val toIBuffer: DecoupledIO[FetchToIBuffer] = DecoupledIO(new FetchToIBuffer)
 
     // Backend: gpaMem
-    val toBackend:    IfuToBackendIO = new IfuToBackendIO
-    val backendEmpty: Bool           = Input(Bool())
+    val toBackend: IfuToBackendIO = new IfuToBackendIO
+
+    val coreEmpty: Bool = Input(Bool())
 
     // debug extension: frontend trigger
     val frontendTrigger: FrontendTdataDistributeIO = Flipped(new FrontendTdataDistributeIO)
@@ -481,7 +481,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheUnit.io.flush           := s2_flush
   uncacheUnit.io.isFirstInstr    := isFirstInstr
   uncacheUnit.io.ifuStall        := !io.toIBuffer.ready
-  uncacheUnit.io.emptyAfter      := io.backendEmpty && io.ibufferEmpty
+  uncacheUnit.io.coreEmpty       := io.coreEmpty
   io.toUncache <> uncacheUnit.io.toUncache
   uncacheUnit.io.fromUncache <> io.fromUncache
 
@@ -623,6 +623,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   })
   io.toIBuffer.bits.debug_seqNum.zipWithIndex.foreach { case (seqNum, i) =>
     seqNum := Mux(s2_fire, allocateSeqNum(i), 0.U.asTypeOf(new InstSeqNum))
+  }
+
+  // tell Ftq if there is a fec (frontend-critical) candidate, see ftq/prefetch/Pdip.scala
+  toFtq.fecCandidates.zipWithIndex.foreach { case (port, i) =>
+    port.valid       := s2_fire && s2_fetchBlock(i).valid && io.coreEmpty
+    port.bits.miss   := s2_icacheMeta(i).miss
+    port.bits.ftqIdx := s2_fetchBlock(i).ftqIdx
   }
 
   /** to backend */

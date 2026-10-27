@@ -243,16 +243,16 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // IFU-Ibuffer
   ifu.io.toIBuffer <> ibuffer.io.in
-  ifu.io.ibufferEmpty := ibuffer.io.empty
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq := ftq.io.toBackend
-
-  ifu.io.backendEmpty := io.backend.backendEmpty
-  io.backend.fromIfu  := ifu.io.toBackend
+  io.backend.fromIfu := ifu.io.toBackend
 
   ibuffer.io.flush       := needFlush
   ibuffer.io.fromBackend := io.backend.toIBuf
+
+  private val coreEmpty = ibuffer.io.empty && io.backend.backendEmpty
+  ifu.io.coreEmpty := coreEmpty // used by uncache unit
 
   // Topdown analysis
   ifu.io.backendRedirectTopdown     := ftq.io.backendRedirectTopdown
