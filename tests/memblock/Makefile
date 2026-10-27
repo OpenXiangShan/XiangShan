@@ -16,6 +16,8 @@ FINAL_RESULT ?= $(PREPARED_DIR)/final-constrained-random-48h.json
 LONG_RESULT ?= $(PREPARED_DIR)/final-constrained-random-12h.json
 ENDURANCE_RESULT ?= $(PREPARED_DIR)/endurance-constrained-random-8x1000000.json
 STRICT_COVERAGE_RESULT ?= $(PREPARED_DIR)/strict-coverage-results.json
+STRICT_CONSTRAINTS ?= coverage
+STRICT_CONSTRAINT_ARGS = $(foreach item,$(STRICT_CONSTRAINT),--constraint $(item))
 ACTIONS ?= 16384
 ENDURANCE_ACTIONS ?= 1000000
 ENDURANCE_SEEDS ?= 8
@@ -220,7 +222,7 @@ verify-coverage-results:
 
 strict-coverage-regression:
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(STRICT_COVERAGE_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),2) --actions $(or $(ACTIONS),16384) --constraints coverage
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --output $(STRICT_COVERAGE_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),2) --actions $(or $(ACTIONS),16384) --constraints $(STRICT_CONSTRAINTS) $(STRICT_CONSTRAINT_ARGS)
 	$(MAKE) verify-coverage-results
 
 verify-extended-results:

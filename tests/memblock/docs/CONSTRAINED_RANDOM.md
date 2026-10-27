@@ -428,7 +428,11 @@ metadata checks. With `--require-coverage` it instead calls
 `_check_mixed_coverage`, which requires the constraint schema, complete coverage
 arrays and, when `--require-backpressure` is also set, nonzero per-result
 backpressure bins. `make -C tests/memblock strict-coverage-regression` generates
-a finite coverage campaign and runs that opt-in mode. A 2×4608 diagnostic run
+a finite coverage campaign and runs that opt-in mode. `STRICT_CONSTRAINTS`
+selects the preset (default `coverage`) and repeatable `STRICT_CONSTRAINT`
+assignments override individual fields, e.g.
+`STRICT_CONSTRAINT='probe=500'` to exercise the standalone probe-depth
+classes. A 2×4608 diagnostic run
 was functionally clean but strict coverage rejected it because enabled
 probe-depth classes 4..7 were unobserved; 4608 actions is below the intended
 closure-scale budget. Documentation schema
