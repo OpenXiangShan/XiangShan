@@ -440,7 +440,9 @@ to target the standalone probe-depth classes explicitly; a 4608-action run then
 covered all eight depth classes but still left some enabled probe-cap/need-data
 cross classes unobserved; `probe=1000` closed all probe bins but shifted the
 remaining strict gap to a vector canonical-boundary cross that the directed
-`translation-faults` range matrix already exercises. Documentation schema
+`translation-faults` range matrix already exercises. Adding
+`canonical-boundary=500` covered that class but re-sparsified four probe-cross
+bins at 4608 actions, so a longer mixed campaign is needed. Documentation schema
 consistency is separately checked by
 [check_io_coverage.py](../scripts/check_io_coverage.py).
 [VERIFICATION_PLAN.md#regression-acceptance](VERIFICATION_PLAN.md#regression-acceptance)

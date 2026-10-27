@@ -231,7 +231,8 @@ still left some enabled probe-cap/need-data cross classes unobserved; a
 317-sequence `probe=1000` run closed all probe bins but left one vector
 canonical-boundary cross unobserved; the directed canonical-range matrix
 already exercises that vector-store shape, so the residual is mixed-generator
-bin sparsity. The
+bin sparsity. A balanced run covered that class but re-sparsified probe-cross
+bins at 4608 actions; a longer mixed campaign is required. The
 in-process final readback is a functional oracle before the summary is
 written; the verifier does not re-derive its expected data. Runtime metadata
 records paths/sizes/resolved dependencies, not source-to-model identity. These
