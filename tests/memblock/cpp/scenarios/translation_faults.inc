@@ -1377,6 +1377,7 @@ int run_translation_faults(int argc, char **argv)
     unsigned pmp_cross_page_vector_store_fault_readbacks = 0;
     unsigned pmp_segment_store_fault_readbacks = 0;
     unsigned pmp_segment_first_field_fault_readbacks = 0;
+    unsigned pmp_vector_width_fault_readbacks = 0;
     unsigned vector_masked_later_load_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
@@ -4535,6 +4536,121 @@ int run_translation_faults(int argc, char **argv)
         ++pmp_segment_first_field_fault_readbacks;
     }
 
+    // PMP-denied vector stores at EEW 1 and 2.  These widths exercise the
+    // 2-byte and 4-byte element decode paths while the PMP read-only page is
+    // unchanged and no manager request is issued.
+    for (const unsigned eew : {1U, 2U}) {
+        memblock::Environment pmp_width(argc, argv);
+        constexpr std::uint64_t width_base =
+            memblock::kDefaultMemoryBase + 0x3b0000ULL;
+        constexpr std::uint8_t pmp_napot_read = 0x19;
+        constexpr std::uint8_t pmp_napot_read_write_execute = 0x1f;
+        pmp_width.memory().fill_incrementing(width_base, 0x1000, 0x7b);
+        const std::uint64_t original = pmp_width.memory().read_u64(
+            width_base + 0x10);
+        pmp_width.configure_backpressure(
+            0x13198a2e03707344ULL ^ eew, true);
+        const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+            return (base | (size / 2 - 1)) >> 2;
+        };
+        if (!pmp_width.reset() || !pmp_width.activate_bare() ||
+            !pmp_width.configure_pmp(
+                {napot_address(width_base, 0x1000), ~std::uint64_t{0}},
+                {pmp_napot_read, pmp_napot_read_write_execute})) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_width.cycle()
+                      << " phase=pmp-width-store-configuration eew=" << eew
+                      << " reason=" << pmp_width.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction store{
+            .store = true,
+            .address = width_base + 0x10,
+            .eew = static_cast<std::uint8_t>(eew),
+            .vl = 1,
+            .rob = static_cast<std::uint8_t>(112 + eew),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(219 + eew),
+            .lane = 0,
+            .flow_num = 1,
+            .expected_exception_mask =
+                memblock::kExceptionStoreAccessFault,
+            .expected_writeback_vstart = 0,
+            .vlmul = 1,
+            .vuop_idx = 0,
+            .last_uop = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (auto &byte : store.data) {
+            byte = static_cast<unsigned char>(0x83 + eew);
+        }
+        const std::uint64_t dcache_before = pmp_width.tilelink_requests();
+        const std::uint64_t uncache_before = pmp_width.uncache_requests();
+        pmp_width.select_store_exception_address(true);
+        pmp_width.expect_vector(store);
+        if (!pmp_width.set_rob_head(store.rob, store.rob_flag) ||
+            !pmp_width.enqueue_vector(store) ||
+            !pmp_width.issue_vector(store, 1024) ||
+            !pmp_width.run_until_vector_complete_with_replays(
+                store, 32768) ||
+            !pmp_width.run_cycles(4) ||
+            pmp_width.exception_vaddr() != width_base + 0x10 ||
+            pmp_width.tilelink_requests() != dcache_before ||
+            pmp_width.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_width.cycle()
+                      << " phase=pmp-width-store eew=" << eew
+                      << " reason=" << pmp_width.error() << " vaddr=0x"
+                      << std::hex << pmp_width.exception_vaddr() << std::dec
+                      << " dcache=" << pmp_width.tilelink_requests()
+                      << " uncache=" << pmp_width.uncache_requests() << '\n';
+            return 1;
+        }
+        const std::uint64_t retired =
+            pmp_width.sq_dequeued() + pmp_width.sq_canceled();
+        if (retired > pmp_width.sq_allocated() ||
+            (retired < pmp_width.sq_allocated() &&
+             !pmp_width.account_sq_cancellation(
+                 static_cast<unsigned>(
+                     pmp_width.sq_allocated() - retired))) ||
+            !pmp_width.redirect_after(
+                store.rob, store.rob_flag, true, true) ||
+            !pmp_width.run_until_sbuffer_empty(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_width.cycle()
+                      << " phase=pmp-width-store-accounting eew=" << eew
+                      << " reason=" << pmp_width.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = width_base + 0x10,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 220,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        pmp_width.expect_load_data(readback, original);
+        if (!pmp_width.set_rob_head(readback.rob, readback.rob_flag) ||
+            !pmp_width.enqueue_load(readback) ||
+            !pmp_width.issue_load(readback, 4096) ||
+            !pmp_width.run_until_complete(16384) ||
+            !pmp_width.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_width.cycle()
+                      << " phase=pmp-width-store-readback eew=" << eew
+                      << " reason=" << pmp_width.error() << '\n';
+            return 1;
+        }
+        pmp_width.select_store_exception_address(false);
+        ++pmp_vector_width_fault_readbacks;
+    }
+
     // A vector load with no active element must not fault even when its base
     // address is unmapped.  Masked-off elements are not accessed.  The
     // completion is checked by the normal vector scoreboard; this case also
@@ -4654,6 +4770,8 @@ int run_translation_faults(int argc, char **argv)
               << pmp_segment_store_fault_readbacks
               << " pmp_segment_first_field_fault_readbacks="
               << pmp_segment_first_field_fault_readbacks
+              << " pmp_vector_width_fault_readbacks="
+              << pmp_vector_width_fault_readbacks
               << " vector_first_element_store_fault_readbacks="
               << vector_first_element_store_fault_readbacks
               << " vector_masked_later_load_controls="
