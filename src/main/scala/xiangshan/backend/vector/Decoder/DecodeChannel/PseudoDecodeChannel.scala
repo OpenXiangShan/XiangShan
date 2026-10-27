@@ -159,7 +159,7 @@ object PseudoDecodeChannel {
 
     def onlyBlockBackwardList = CSROoORead.blockBackwardCsrReadList.diff(CSROoORead.waitForwardCsrReadList)
     def onlyWaitForwardList   = CSROoORead.waitForwardCsrReadList.diff(CSROoORead.blockBackwardCsrReadList)
-    def noBlockAndWaitList    = CSROoORead.fullCSRList.diff(CSROoORead.blockBackwardCsrReadList).diff(CSROoORead.waitForwardCsrReadList)
+    def noBlockAndWaitList    = CSROoORead.fullCSRList.diff(CSROoORead.blockBackwardCsrReadList).diff(CSROoORead.waitForwardCsrReadList).diff(List(CSRs.vl, CSRs.vlenb))
 
     val CSRR_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRBitPat(csr)))
     val CSRR_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRBitPat(csr)))
