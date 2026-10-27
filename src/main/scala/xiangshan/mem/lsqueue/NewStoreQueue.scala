@@ -1300,30 +1300,67 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     * NOTE: A write request only contributes a SQ dequeue credit after it actually fires from EnterSbufferQueue to sbuffer.
     * deqPtr will move when [write to sbuffer / writeback / vector inactive element]
     * rdataPtr will move when [nc request fire / write to SQ2SBPipelineConnect_i / vector inactive element]
-    * NOTE: when deq mmio/cbo, rdataPtr === deqPtr, because mmio/cbo need to execute at head of StoreQueue.
     * */
-    private val deqPtrMoveFromSbuffer = RegNext(dataQueue.io.deqPtrMove)
-
-    // [NOTE]: when point a inactive entry, move pointer.
-    private val deqPtrVectorInactiveValid = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
-
-    deqCtrlEntries.zip(deqDataEntries).zipWithIndex.map{case ((ctrl, data), i) =>
-      //TODO: vecMbCommit will be remove in the future
-      deqPtrVectorInactiveValid(i) := ctrl.committed && ctrl.vecInactive
-    }
-
-    private val deqPtrVectorInactiveMove = Cat(deqPtrVectorInactiveValid.zipWithIndex.map{case (v, i) =>
-      if(i == 0) v
-      else v && (deqPtrVectorInactiveValid(i - 1) || deqPtrMoveFromSbuffer(i - 1).asBool)
+    /*
+     * One credit represents one complete ordinary Store accepted by Sbuffer but not yet dequeued from SQ.
+     * EnterSbufferQueue preserves the relative order of ordinary Stores, although NC/CBO/inactive entries
+     * can intervene in SQ without passing through this FIFO. Credits therefore belong to the oldest
+     * remaining ordinary Stores; a count is sufficient and no SQ index needs to be stored in the FIFO.
+     *
+     * dataQueue.io.deqPtrMove marks complete Stores, not individual fragments: a cross-16B Store produces
+     * a credit only when its tail is accepted. CBO.zero produces no credit; its completion still requires
+     * the CBO writeback after draining both the FIFO and Sbuffer.
+     *
+     * Unconsumed credits persist until the corresponding ordinary Stores dequeue. They can accumulate
+     * beyond the FIFO depth, so the counter covers the physical SQ size. Redirects must not discard these
+     * credits, since the completed FIFO requests belong to committed Stores.
+     */
+    private val sbufferCreditCount = RegInit(0.U(log2Ceil(StoreQueuePhysicalSize + 1).W))
+    private val sbufferCreditIn = PopCount(dataQueue.io.deqPtrMove)
+    private val deqUsesSbufferCredit = VecInit(deqCtrlEntries.zip(deqDataEntries).map { case (ctrl, data) =>
+      isCacheable(data.memoryType) && !ctrl.isCbo && !ctrl.vecInactive
     })
 
-    private val uncacheMove = VecInit(deqCtrlEntries.map(x => x.handleFinish && x.committed && !x.vecInactive)).asUInt
+    // deqCreditNeeded(i) counts ordinary Stores in slots [0, i], assuming the entire prefix dequeues.
+    // For example, [ordinary, special] needs [1, 1] credits, while [special, ordinary] needs [0, 1].
+    // Demand depends only on entry types, so all credit checks can run in parallel without waiting for
+    // preceding dequeue decisions. The ready-prefix mask below rejects entries behind a blocked slot.
+    // sbufferCreditReady(n) precomputes whether at least n registered credits are available.
+    private val deqCreditNeeded = VecInit((0 until EnsbufferWidth).map { i =>
+      PopCount(deqUsesSbufferCredit.take(i + 1))
+    })
+    private val sbufferCreditReady = VecInit((0 to EnsbufferWidth).map { count =>
+      sbufferCreditCount >= count.U
+    })
+    private val deqReady = VecInit(deqCtrlEntries.zipWithIndex.map { case (ctrl, i) =>
+      val finished = Mux(deqUsesSbufferCredit(i),
+        sbufferCreditReady(deqCreditNeeded(i)),
+        ctrl.handleFinish || ctrl.vecInactive)
+      ctrl.committed && finished
+    })
 
-    // The credit vector needs one more cycle because storeQueue forwarding observes the entry for one additional cycle.
-    val deqCount = Cat(deqPtrMoveFromSbuffer.asUInt, deqPtrVectorInactiveMove, uncacheMove) // timing is ok ?
+    // Only a continuous ready prefix may dequeue. Count credit consumption separately from dequeue count:
+    // NC/MMIO/CBO and inactive entries may dequeue but consume no Sbuffer credit. For SQ [A, NC, B], if A
+    // and B have completed, dequeuing [A, NC] consumes one of the two credits and retains the other for B.
+    private val deqMask = VecInit((0 until EnsbufferWidth).map { i =>
+      deqReady.take(i + 1).reduce(_ && _)
+    })
+    private val deqCount = PopCount(deqMask)
+    private val sbufferCreditUsed = PopCount(deqMask.zip(deqUsesSbufferCredit).map { case (deq, usesCredit) =>
+      deq && usesCredit
+    })
 
-    io.sqDeqCnt := PopCount(VecInit(deqCount).asUInt)
-    io.deqPtrExtNext := io.deqPtrExt.map(_ + io.sqDeqCnt)
+    // Balance = previous credits + newly completed Stores - ordinary Stores dequeued this cycle.
+    // Readiness uses only the previous registered balance: a handshake in cycle T becomes usable in T+1.
+    // This replaces the old RegNext(deqPtrMove), preserving the one-cycle delay needed by forwarding;
+    // bypassing sbufferCreditIn would retire entries too early, while delaying it again would add a cycle.
+    private val sbufferCreditNext = (sbufferCreditCount +& sbufferCreditIn) - sbufferCreditUsed
+    sbufferCreditCount := sbufferCreditNext
+    XSError(sbufferCreditUsed > sbufferCreditCount, "Sbuffer dequeue credit underflow!\n")
+    XSError(sbufferCreditNext > StoreQueuePhysicalSize.U, "Sbuffer dequeue credit overflow!\n")
+
+    io.sqDeqCnt := deqCount
+    io.deqPtrExtNext := io.deqPtrExt.map(_ + deqCount)
 
     // TODO: cbo.zereo shouldn't write zero to sbuffer, it should be managed by next level cache.
     private val pipelineConnectFireNum = Mux(headIsCboZero, 0.U,
@@ -1421,8 +1458,14 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       dontTouch(outMask)
       dontTouch(outData)
       dontTouch(writeSbufferWire)
-      dontTouch(deqPtrVectorInactiveValid)
-      dontTouch(deqPtrVectorInactiveMove)
+      dontTouch(sbufferCreditCount)
+      dontTouch(sbufferCreditIn)
+      dontTouch(sbufferCreditUsed)
+      dontTouch(sbufferCreditReady)
+      dontTouch(deqUsesSbufferCredit)
+      dontTouch(deqCreditNeeded)
+      dontTouch(deqReady)
+      dontTouch(deqMask)
       dontTouch(rdataPtrVectorInactiveValid)
       dontTouch(rdataPtrVectorInactiveMove)
     }
