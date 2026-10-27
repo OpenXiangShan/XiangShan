@@ -223,7 +223,9 @@ path. A 2×4608 diagnostic run was functionally clean but failed strict coverage
 because enabled probe-depth classes 4..7 were unobserved; a 1×16384 run was
 also clean but still selected only six standalone probe sequences, so action
 count alone is not the lever. That is the intended sparse-coverage rejection,
-not a functional failure; `STRICT_CONSTRAINT='probe=500'` targets the bin. The
+not a functional failure; `STRICT_CONSTRAINT='probe=500'` targets the depth
+bin, and a 150-sequence probe-heavy run covered all eight depth classes but
+still left some enabled probe-cap/need-data cross classes unobserved. The
 in-process final readback is a functional oracle before the summary is
 written; the verifier does not re-derive its expected data. Runtime metadata
 records paths/sizes/resolved dependencies, not source-to-model identity. These
