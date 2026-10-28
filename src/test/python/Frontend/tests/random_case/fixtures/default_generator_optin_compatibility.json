@@ -1,0 +1,74 @@
+{
+  "purpose": "fixed synthetic defaults, not original100 membership or seed corpus",
+  "generator_source_sha256": "74af254a82e88df50a07c1e110c3b1a24308865304e92ad9117370602a46d034",
+  "cases": [
+    {
+      "config": {
+        "family": "cfg_layout_mix",
+        "seed": 42330,
+        "blocks": 16,
+        "iterations": 8,
+        "max_call_depth": 4
+      },
+      "source_sha256": "ed22338770016f2e28a05d42f2a6e8e9ec3e14e6d4887b813b2f11275e44604e",
+      "metadata_without_generator_sha256": "aadf769112fe4c8318cd10418b00d21b8c390b8068bc724e3991544f663e1447"
+    },
+    {
+      "config": {
+        "family": "ras_indirect_history",
+        "seed": 42330,
+        "blocks": 16,
+        "iterations": 8,
+        "max_call_depth": 4
+      },
+      "source_sha256": "c66bd6b9c1a7712eaf337d2700864059f1e7c80807e299861c25a65155aa7b54",
+      "metadata_without_generator_sha256": "2b8bd77e6b322dab4ff34f1e5d61d803d2811caa9d412d83d4c78a4761cfdc1e"
+    },
+    {
+      "config": {
+        "family": "ibuffer_pressure_cross",
+        "seed": 42330,
+        "blocks": 16,
+        "iterations": 8,
+        "max_call_depth": 4
+      },
+      "source_sha256": "3d471b0eef824a764fc1aa339ff1edc1d0b8057c7fbf4104e820138c8544f572",
+      "metadata_without_generator_sha256": "afd3ab0009977bd6e954c4fdd1ee84fbceb93be706cc55adf86ed4ebe1477c31"
+    },
+    {
+      "config": {
+        "family": "translation_timing_cross",
+        "seed": 42330,
+        "blocks": 16,
+        "iterations": 8,
+        "max_call_depth": 4
+      },
+      "source_sha256": "098454014562dec3219b1669c24c3af14d47a5372074f33f1ea66fad1f30a55c",
+      "metadata_without_generator_sha256": "5bb72d647c26d07def7227b8610e74ca31f85910564960ac4351d4733fc054ea"
+    },
+    {
+      "config": {
+        "family": "cfg_layout_mix",
+        "seed": 42330,
+        "blocks": 16,
+        "iterations": 8,
+        "max_call_depth": 4,
+        "indirect_target_mode": "history4"
+      },
+      "source_sha256": "83b61fcf2d70da93e8db0cda45b5d9fa89e8e3ea91dac1d9f9f4a54b699cbcee",
+      "metadata_without_generator_sha256": "1df2726ef0272c85549c0c07696cb86948679347f7d17d17d3ae3414f6eb4f57"
+    },
+    {
+      "config": {
+        "family": "translation_timing_cross",
+        "seed": 42330,
+        "blocks": 16,
+        "iterations": 8,
+        "max_call_depth": 4,
+        "directed_pattern": "page_tail_pair_sparse"
+      },
+      "source_sha256": "3722a912badfbc77d7b27c8ce43d5a87d2bb31149efc5705ce3d6d887cf07155",
+      "metadata_without_generator_sha256": "063a7a239763e1ca0c772901ced53ac00e16fe4963c74ac93ff424cc9428d33f"
+    }
+  ]
+}

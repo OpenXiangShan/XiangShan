@@ -307,6 +307,16 @@ def build_scenario_spec(
                     evidence_stage="program",
                 ),
             )
+    if spec.get("branch_history_mode", "loop_mask") == "site8":
+        scheduled = sum(e.get("parameters", {}).get("branch_history_mode") == "site8"
+                        for e in case_record.get("episodes", []))
+        if not scheduled:
+            raise ValueError("site8 requires actual scheduled branch episodes")
+        required_events += (EventRequirement(event="trace.site8_branch_sites_with_both_successors",
+                                             min_count=scheduled, evidence_stage="program"),)
+    if spec.get("ras_return_mode", "private") == "shared_leaf":
+        required_events += (EventRequirement(event="trace.shared_return_distinct_successors",
+                                             min_count=int(spec["blocks"]), evidence_stage="program"),)
     scenario = ScenarioSpec(
         scenario_id=str(case_record["name"]),
         family=family,

@@ -31,6 +31,8 @@ class CaseSpec:
     indirect_target_mode: str = "fixed"
     directed_pattern: str = "none"
     page_tail_probe_repetitions: int | None = None
+    branch_history_mode: str = "loop_mask"
+    ras_return_mode: str = "private"
 
     @property
     def name(self) -> str:
@@ -46,6 +48,8 @@ class CaseSpec:
                 "taken_cj_offset_ring": "_cjor",
                 "taken_cj_offset_ring_permuted": "_cjorp",
             }[self.directed_pattern]
+            + ("_bh8" if self.branch_history_mode == "site8" else "")
+            + ("_rshared" if self.ras_return_mode == "shared_leaf" else "")
             + (
                 f"_pr{self.page_tail_probe_repetitions:02d}"
                 if self.page_tail_probe_repetitions is not None
@@ -53,7 +57,27 @@ class CaseSpec:
             )
         )
 
+    def to_dict(self) -> dict:
+        payload = asdict(self)
+        # Omitted defaults preserve the original spec/manifest identity.
+        if self.branch_history_mode == "loop_mask":
+            payload.pop("branch_history_mode")
+        if self.ras_return_mode == "private":
+            payload.pop("ras_return_mode")
+        return payload
+
     def validate(self) -> None:
+        if self.branch_history_mode not in {"loop_mask", "site8"}:
+            raise ValueError("unsupported branch_history_mode")
+        if self.ras_return_mode not in {"private", "shared_leaf"}:
+            raise ValueError("unsupported ras_return_mode")
+        if self.branch_history_mode != "loop_mask":
+            if self.family not in {"cfg_layout_mix", "translation_timing_cross"}:
+                raise ValueError("site8 requires CFG or translation family")
+            if self.iterations < 8:
+                raise ValueError("site8 requires at least 8 iterations to exercise the bounded schedule")
+        if self.ras_return_mode != "private" and self.family != "ras_indirect_history":
+            raise ValueError("shared_leaf requires RAS family")
         if self.directed_pattern not in {
             "none", "page_tail_pair", "page_tail_pair_dense", "page_tail_pair_sparse",
             "taken_cj_offset_ring", "taken_cj_offset_ring_permuted",
@@ -272,6 +296,24 @@ def _emit_finish(builder: AsmBuilder, label: str) -> None:
     builder.padding(128)
 
 
+def site8_pattern(seed: int, ordinal: int, index: int) -> int:
+    """Stable per-site 8-bit schedule, both outcomes present in one full period.
+
+    Separate from layout RNG. Different sites can collide; no statistical
+    independence or hardware history is implied by these bounded patterns.
+    """
+    text = f"site8-v1:{seed}:{ordinal}:{index}".encode("ascii")
+    value = hashlib.sha256(text).digest()[0]
+    return value if value not in (0, 255) else 0x69
+
+
+def _emit_history_value(builder: AsmBuilder, register: str, pattern: int) -> None:
+    builder.instruction("andi t2, s0, 7", rvi=True)
+    builder.instruction(f"li t3, {pattern}", rvi=True)
+    builder.instruction(f"srl {register}, t3, t2", rvi=True)
+    builder.instruction(f"andi {register}, {register}, 1", rvi=True)
+
+
 def _emit_cfg_block(
     builder: AsmBuilder,
     *,
@@ -286,6 +328,7 @@ def _emit_cfg_block(
     indirect_target_mode: str = "fixed",
     directed_pattern: str = "none",
     page_tail_probe_repetitions: int | None = None,
+    branch_history_pattern: int | None = None,
 ) -> None:
     label = f"cfg_{index:03d}"
     taken = f"{label}_taken"
@@ -297,7 +340,11 @@ def _emit_cfg_block(
     builder.padding(cfi_offset // 2)
 
     if kind == "branch_rvi":
-        builder.instruction(f"andi s6, s0, {branch_mask}", rvi=True)
+        if branch_history_pattern is None:
+            builder.instruction(f"andi s6, s0, {branch_mask}", rvi=True)
+        else:
+            _emit_history_value(builder, "s6", branch_history_pattern)
+            builder.add(f"{label}_history_branch:")
         builder.instruction(f"beq s6, zero, {taken}", rvi=True)
         builder.instruction("addi s1, s1, 3", rvi=True)
         builder.instruction(f"jal zero, {join}", rvi=True)
@@ -305,7 +352,11 @@ def _emit_cfg_block(
         builder.instruction("addi s1, s1, -1", rvi=True)
         builder.add(f"{join}:")
     elif kind == "branch_rvc":
-        builder.instruction(f"andi a4, s0, {branch_mask}", rvi=True)
+        if branch_history_pattern is None:
+            builder.instruction(f"andi a4, s0, {branch_mask}", rvi=True)
+        else:
+            _emit_history_value(builder, "a4", branch_history_pattern)
+            builder.add(f"{label}_history_branch:")
         builder.instruction(f"c.beqz a4, {taken}")
         builder.instruction("c.addi s1, 1")
         builder.instruction(f"c.j {join}")
@@ -403,6 +454,8 @@ def _generate_cfg_layout_mix(spec: CaseSpec) -> tuple[str, dict]:
             kind = rng.choice(("branch_rvi", "branch_rvc", "branch_rvi", "call_ret"))
         else:
             kind = rng.choice(kinds)
+        if spec.branch_history_mode == "site8" and index == 0:
+            kind = "branch_rvi"  # At least one bounded schedule is exercised.
         kind_counts[kind] += 1
 
         alignment = rng.choice((16, 32, 32, 64))
@@ -423,6 +476,12 @@ def _generate_cfg_layout_mix(spec: CaseSpec) -> tuple[str, dict]:
                 },
             }
         )
+        history_pattern = None
+        if spec.branch_history_mode == "site8" and kind in {"branch_rvi", "branch_rvc"}:
+            history_pattern = site8_pattern(spec.seed, spec.ordinal, index)
+            episodes[-1]["parameters"].update(branch_history_mode="site8",
+                branch_history_pattern=history_pattern, branch_history_period=8,
+                branch_history_label=f"cfg_{index:03d}_history_branch")
         if kind == "jalr" and spec.indirect_target_mode in {"history4", "history4_page"}:
             episodes[-1]["parameters"]["indirect_target_mode"] = spec.indirect_target_mode
             episodes[-1]["parameters"]["target_count"] = 4
@@ -448,6 +507,7 @@ def _generate_cfg_layout_mix(spec: CaseSpec) -> tuple[str, dict]:
             indirect_target_mode=spec.indirect_target_mode,
             directed_pattern=spec.directed_pattern,
             page_tail_probe_repetitions=spec.page_tail_probe_repetitions,
+            branch_history_pattern=history_pattern,
         )
 
     ring_episodes: list[dict] = []
@@ -526,6 +586,7 @@ def _emit_ras_function(
     padding_halfwords: int,
     alignment: int,
     branch_mask: int,
+    shared_leaf: bool = False,
 ) -> None:
     label = f"ras_chain_{chain:03d}_d{depth:02d}"
     branch_target = f"{label}_branch"
@@ -547,12 +608,16 @@ def _emit_ras_function(
     if depth + 1 < max_depth:
         builder.instruction(f"jal ra, ras_chain_{chain:03d}_d{depth + 1:02d}", rvi=True)
     else:
-        builder.instruction(f"jal t0, {alt_leaf}", rvi=True)
-        builder.instruction(f"jal zero, {alt_leaf}_done", rvi=True)
-        builder.add(f"{alt_leaf}:")
-        builder.instruction("c.addi s3, 1")
-        builder.instruction("jalr zero, 0(t0)", rvi=True)
-        builder.add(f"{alt_leaf}_done:")
+        if shared_leaf:
+            builder.instruction("jal t0, ras_shared_leaf", rvi=True)
+            builder.add(f"{label}_shared_return_to:")
+        else:
+            builder.instruction(f"jal t0, {alt_leaf}", rvi=True)
+            builder.instruction(f"jal zero, {alt_leaf}_done", rvi=True)
+            builder.add(f"{alt_leaf}:")
+            builder.instruction("c.addi s3, 1")
+            builder.instruction("jalr zero, 0(t0)", rvi=True)
+            builder.add(f"{alt_leaf}_done:")
 
     builder.instruction("ld ra, 8(sp)", rvi=True)
     builder.instruction("addi sp, sp, 16", rvi=True)
@@ -617,8 +682,19 @@ def _generate_ras_indirect_history(spec: CaseSpec) -> tuple[str, dict]:
                 padding_halfwords=rng.choice((0, 1, 7, 14, 15)),
                 alignment=rng.choice((16, 32, 64)),
                 branch_mask=rng.choice((1, 3, 7)),
+                shared_leaf=spec.ras_return_mode == "shared_leaf",
             )
 
+    if spec.ras_return_mode == "shared_leaf":
+        builder.add("", "    .balign 16", "ras_shared_leaf:")
+        builder.instruction("c.addi s3, 1")
+        builder.add("ras_shared_return:")
+        builder.instruction("jalr zero, 0(t0)", rvi=True)
+        episodes.append({"episode_id": "ras-shared-leaf", "entry_labels": ["ras_shared_leaf"],
+                         "phase": "stress", "kind": "shared_return_contexts",
+                         "parameters": {"return_label": "ras_shared_return", "callsite_count": spec.blocks,
+                                        "return_context_labels": [f"ras_chain_{chain:03d}_d{depth - 1:02d}_shared_return_to"
+                                                                  for chain, depth in enumerate(depths)]}})
     _emit_page_tail_probe(builder, "ras_page_tail_probe")
     _emit_finish(builder, "ras_finish")
     episodes.append(
@@ -813,7 +889,7 @@ def generate_case(spec: CaseSpec) -> tuple[str, dict]:
     metadata = {
         "schema_version": GENERATOR_SCHEMA_VERSION,
         "name": spec.name,
-        "spec": asdict(spec),
+        "spec": spec.to_dict(),
         "source_sha256": _sha256_bytes(source_bytes),
         "generator_sha256": _sha256_bytes(Path(__file__).read_bytes()),
         **family_metadata,
@@ -853,6 +929,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--blocks", type=int, default=48)
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--max-call-depth", type=int, default=6)
+    parser.add_argument("--branch-history-mode", choices=("loop_mask", "site8"), default="loop_mask")
+    parser.add_argument("--ras-return-mode", choices=("private", "shared_leaf"), default="private")
     parser.add_argument("--indirect-target-mode", choices=("fixed", "history4", "history4_page"), default="fixed")
     parser.add_argument(
         "--directed-pattern",
@@ -892,6 +970,8 @@ def main() -> int:
             blocks=args.blocks,
             iterations=args.iterations,
             max_call_depth=args.max_call_depth,
+            branch_history_mode=args.branch_history_mode,
+            ras_return_mode=args.ras_return_mode,
             indirect_target_mode=args.indirect_target_mode,
             directed_pattern=args.directed_pattern,
             page_tail_probe_repetitions=args.page_tail_probe_repetitions,

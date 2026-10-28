@@ -909,6 +909,8 @@ def _parse_args() -> argparse.Namespace:
         help="loop count; 10 is the qualified default that keeps current CFG seeds above 5000 commits",
     )
     parser.add_argument("--max-call-depth", type=int, default=6)
+    parser.add_argument("--branch-history-mode", choices=("loop_mask", "site8"), default="loop_mask")
+    parser.add_argument("--ras-return-mode", choices=("private", "shared_leaf"), default="private")
     parser.add_argument("--indirect-target-mode", choices=("fixed", "history4", "history4_page"), default="fixed")
     parser.add_argument(
         "--directed-pattern",
@@ -1040,6 +1042,8 @@ def main() -> int:
         args.blocks = int(parameters.get("blocks", args.blocks))
         args.iterations = int(parameters.get("iterations", args.iterations))
         args.max_call_depth = int(parameters.get("max_call_depth", args.max_call_depth))
+        args.branch_history_mode = str(parameters.get("branch_history_mode", "loop_mask"))
+        args.ras_return_mode = str(parameters.get("ras_return_mode", "private"))
         args.indirect_target_mode = str(parameters.get("indirect_target_mode", "fixed"))
         args.directed_pattern = str(parameters.get("directed_pattern", "none"))
         args.page_tail_attribute_mode = str(
@@ -1144,6 +1148,31 @@ def main() -> int:
         raise SystemExit("campaign must select at least one family")
     if any(count <= 0 for count in family_case_counts.values()):
         raise SystemExit("all family case counts must be > 0")
+    # Reject incompatible opt-ins before creating any campaign artifacts.
+    specs = []
+    if resume_campaign is None:
+        specs = [
+            CaseSpec(
+                family=family,
+                seed=_derived_seed(args.master_seed, family, ordinal),
+                ordinal=ordinal,
+                blocks=args.blocks,
+                iterations=args.iterations,
+                max_call_depth=args.max_call_depth,
+                branch_history_mode=args.branch_history_mode,
+                ras_return_mode=args.ras_return_mode,
+                indirect_target_mode=args.indirect_target_mode,
+                directed_pattern=args.directed_pattern,
+                page_tail_probe_repetitions=args.page_tail_probe_repetitions,
+            )
+            for family in families
+            for ordinal in range(family_case_counts[family])
+        ]
+        try:
+            for spec in specs:
+                spec.validate()
+        except ValueError as exc:
+            raise SystemExit("invalid generator configuration: " + str(exc)) from exc
     source_root = output_root / "sources"
     case_runs_root = output_root / "cases"
     report_root = output_root / "report"
@@ -1194,21 +1223,6 @@ def main() -> int:
         testpoint_catalog_path = output_root / "testpoint_catalog.json"
         write_catalog(testpoint_catalog, testpoint_catalog_path)
 
-        specs = [
-            CaseSpec(
-                family=family,
-                seed=_derived_seed(args.master_seed, family, ordinal),
-                ordinal=ordinal,
-                blocks=args.blocks,
-                iterations=args.iterations,
-                max_call_depth=args.max_call_depth,
-                indirect_target_mode=args.indirect_target_mode,
-                directed_pattern=args.directed_pattern,
-                page_tail_probe_repetitions=args.page_tail_probe_repetitions,
-            )
-            for family in families
-            for ordinal in range(family_case_counts[family])
-        ]
         records = write_cases(specs, source_root)
         scenario_specs = {}
         for record in records:
@@ -1245,6 +1259,8 @@ def main() -> int:
                     if spec.get("page_tail_probe_repetitions") is not None
                     else ""
                 )
+                + (f"--branch-history-mode {spec['branch_history_mode']} " if "branch_history_mode" in spec else "")
+                + (f"--ras-return-mode {spec['ras_return_mode']} " if "ras_return_mode" in spec else "")
                 + f"--out-dir <replay-output-dir>"
             )
         build_manifest = REPO_ROOT / "build-frontend" / "frontend_build_manifest.verilator.json"
@@ -1269,6 +1285,8 @@ def main() -> int:
             "blocks": args.blocks,
             "iterations": args.iterations,
             "max_call_depth": args.max_call_depth,
+            **({"branch_history_mode": args.branch_history_mode} if args.branch_history_mode != "loop_mask" else {}),
+            **({"ras_return_mode": args.ras_return_mode} if args.ras_return_mode != "private" else {}),
             "indirect_target_mode": args.indirect_target_mode,
             "directed_pattern": args.directed_pattern,
             "page_tail_attribute_mode": args.page_tail_attribute_mode,

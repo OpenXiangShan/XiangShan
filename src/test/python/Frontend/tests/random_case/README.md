@@ -133,3 +133,31 @@ flush drops pending responses; explicit preservation retains request identity.
 A preserved response is not proof it passed the RTL PTWFilter or was consumed by
 TLB. VMID values must already fit a reviewed width; the planner never silently
 truncates them or claims to validate backend Fence implementation.
+
+
+## Optional CFG and RAS program exploration
+
+Defaults remain `--branch-history-mode loop_mask --ras-return-mode private`.
+The optional modes change source/bin/scenario and generator identity; never attach
+new hashes or qualification to old inputs. Both generator and campaign CLIs expose
+the same flags, and campaign resume restores the originally frozen modes.
+
+- CFG or translation `--branch-history-mode site8` gives each conditional site a
+  deterministic 8-bit sequence derived from program seed, ordinal and site index,
+  separately from layout RNG. Both outcomes occur over eight loop iterations;
+  `--iterations` must be at least eight. It composes with `history4` and page-tail
+  layouts. Patterns can collide and repeat every eight iterations; this is bounded
+  per-site variety, not a claim of statistical independence or unlimited growth.
+- RAS `--ras-return-mode shared_leaf` lets distinct nested call sites use the same
+  x5-linked leaf and one shared return instruction, with separate legal return
+  PCs. Each chain still saves/restores ra and sp. It cannot be combined with CFG
+  branch mode in a campaign spanning incompatible families; preflight rejects it
+  before creating artifacts. Select only the compatible family for each opt-in.
+
+Program realization additionally requires actual consecutive committed PCs: both
+linked branch successors at every tagged site, or distinct linked legal successors
+at the same shared return. Declared trace targets alone cannot satisfy these gates.
+The test-only `_bounded_program_model.py` interprets a small generated instruction
+subset and checks complete good-trap/stack restoration. It is not NEMU, an ISA
+oracle, hardware RAS/history evidence, native coverage or runtime qualification.
+No standalone execution entry or default DUT activation is added.

@@ -400,6 +400,7 @@ def analyze_trace(trace_path: Path, program_map: dict[str, Any]) -> dict[str, An
     branch_outcomes: dict[int, Counter[str]] = defaultdict(Counter)
     indirect_targets: dict[int, Counter[int]] = defaultdict(Counter)
     boundary_transitions: Counter[str] = Counter()
+    site8_relations: dict[int, set[bool]] = defaultdict(set)
     previous: tuple[int, dict[str, Any]] | None = None
     current_call_depth = 0
     max_call_depth = 0
@@ -448,6 +449,19 @@ def analyze_trace(trace_path: Path, program_map: dict[str, Any]) -> dict[str, An
                     "conditional_branch", "direct_jump", "indirect_jump", "call", "return",
                 )):
                     control_flow_edges[(prior_pc, pc)] += 1
+                parameters = prior_instruction.get("episode_parameters") or {}
+                if (prior_instruction.get("conditional_branch")
+                        and parameters.get("branch_history_mode") == "site8"
+                        and parameters.get("branch_history_label") in prior_instruction.get("labels", [])):
+                    fallthrough = prior_pc + int(prior_instruction["size"])
+                    # Accept only either actual linked branch successor. Declared
+                    # trace taken/target fields cannot satisfy this opt-in gate.
+                    try:
+                        target = int(prior_instruction["operands"].split(",")[-1].strip().split()[0], 16)
+                    except (KeyError, ValueError, IndexError):
+                        target = None
+                    if pc in (fallthrough, target):
+                        site8_relations[prior_pc].add(pc == fallthrough)
                 if prior_instruction.get("indirect_jump"):
                     indirect_targets[prior_pc][pc] += 1
             previous = (pc, instruction)
@@ -518,6 +532,21 @@ def analyze_trace(trace_path: Path, program_map: dict[str, Any]) -> dict[str, An
     event_counts["trace.taken_cj_offset_transition"] = len(
         set(zip(taken_cj_ring_sequence, taken_cj_ring_sequence[1:]))
     )
+    if any((i.get("episode_parameters") or {}).get("branch_history_mode") == "site8" for i in instructions):
+        event_counts["trace.site8_branch_sites_with_both_successors"] = sum(len(v) == 2 for v in site8_relations.values())
+    shared_instructions = [i for i in instructions if i.get("episode_kind") == "shared_return_contexts"
+                           and i.get("return") and i.get("indirect_jump")
+                           and (i.get("episode_parameters") or {}).get("return_label") in i.get("labels", [])]
+    if shared_instructions:
+        counts = []
+        for instruction in shared_instructions:
+            parameters = instruction["episode_parameters"]
+            labels = parameters.get("return_context_labels") or []
+            label_map = program_map.get("labels") or {}
+            legal = {label_map[label] for label in labels if label in label_map}
+            counts.append(len(set(indirect_targets[int(instruction["pc"])]) & legal))
+        # Multiple private returns do not add up to one shared-return context.
+        event_counts["trace.shared_return_distinct_successors"] = max(counts, default=0)
     events = []
     for event, count in sorted(event_counts.items()):
         first = event_first.get(event, {})
