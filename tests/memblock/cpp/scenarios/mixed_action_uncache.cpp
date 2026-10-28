@@ -103,9 +103,7 @@ bool MixedScenario::execute_noncacheable(ActionWindow &window)
             store_completed =
                 environment.set_rob_head(
                     transaction.rob, transaction.rob_flag) &&
-                environment.enqueue_store(
-                    transaction,
-                    memblock::lq_pointer_value(lq_offset)) &&
+                environment.enqueue_store(transaction) &&
                 (data_first
                         ? environment.issue_store_data(
                               transaction, 4096) &&
@@ -288,8 +286,7 @@ bool MixedScenario::execute_mmio(ActionWindow &window)
         const bool prepared_mmio_store = environment.set_rob_head(
             transaction.rob, transaction.rob_flag);
         if (!prepared_mmio_store ||
-            !environment.enqueue_store(
-                transaction, memblock::lq_pointer_value(lq_offset)) ||
+            !environment.enqueue_store(transaction) ||
             !environment.issue_store_address_until_tlb_hit(
                 transaction, constrained_completion_timeout) ||
             !environment.issue_store_data(transaction, 4096) ||

@@ -130,7 +130,7 @@ auto Environment::Impl::run_until_vector_complete(unsigned timeout)  -> bool
 
 auto Environment::Impl::run_until_vector_complete_with_replays(const VectorMemoryTransaction &transaction,
     unsigned timeout,
-    bool pulse_store_commit_after_replay,
+    bool pulse_pending_store_after_replay,
     bool hold_pending_store)  -> bool
 {
     // A store at the ROB head keeps pendingst asserted while a replaying
@@ -167,11 +167,10 @@ auto Environment::Impl::run_until_vector_complete_with_replays(const VectorMemor
             clear_pending_store();
             return false;
         }
-        if (pulse_store_commit_after_replay && replay.store &&
+        if (pulse_pending_store_after_replay && replay.store &&
             (!run_cycles(32) ||
              !(hold_pending_store
-                   ? pulse_store_commit_keep_pending(
-                         replay.rob, replay.rob_flag)
+                   ? run_cycles(1)
                    : pulse_pending_store(replay.rob, replay.rob_flag)))) {
             clear_pending_store();
             return false;
@@ -221,65 +220,44 @@ auto Environment::Impl::run_until_vector_complete_with_replays(const VectorMemor
 
 auto Environment::Impl::run_until_vector_complete_with_replays(const std::vector<VectorMemoryTransaction> &transactions,
     unsigned timeout,
-    bool pulse_store_commit_after_replay)  -> bool
+    bool pulse_pending_store_after_replay) -> bool
 {
-    const auto matches = [](const VectorMemoryTransaction &transaction,
-                            const VectorReplayRequest &request) {
-        // The monitored slow replay channel is vector-store-only. An LQ
-        // snapshot in that request must never match a load with the same index.
-        if (!transaction.store) return false;
-        const unsigned entries = kStoreQueueEntries;
-        const unsigned value = transaction.store
-            ? request.sq_value : request.lq_value;
-        const bool flag = transaction.store
-            ? request.sq_flag : request.lq_flag;
-        const unsigned base = transaction.store
-            ? transaction.sq : transaction.lq;
-        const bool base_flag = transaction.store
-            ? transaction.sq_flag : transaction.lq_flag;
-        const unsigned packed = value + (flag ? entries : 0);
-        const unsigned packed_base = base + (base_flag ? entries : 0);
-        const unsigned distance =
-            (packed + 2 * entries - packed_base) % (2 * entries);
-        return distance < transaction.flow_num;
+    const auto pending = [&]() {
+        return std::any_of(transactions.begin(), transactions.end(),
+            [&](const auto &transaction) { return vector_scoreboard_.pending(transaction); });
     };
-
     const std::uint64_t deadline = cycle() + timeout;
-    while (!vector_scoreboard_.done() && cycle() < deadline) {
-        if (feedback_.pending_replays() == 0) {
-            tick();
-            if (!check_components()) {
-                return false;
+    while (pending() && cycle() < deadline) {
+        std::optional<VectorReplayRequest> request;
+        const VectorMemoryTransaction *selected = nullptr;
+        for (const auto &transaction : transactions) {
+            request = feedback_.take_replay_for(transaction);
+            if (request) {
+                selected = &transaction;
+                break;
             }
+        }
+        if (!request) {
+            tick();
+            if (!check_components()) return false;
             continue;
         }
-        const VectorReplayRequest request = *feedback_.take_next_replay();
-        const auto transaction = std::find_if(
-            transactions.begin(), transactions.end(),
-            [&](const VectorMemoryTransaction &candidate) {
-                return matches(candidate, request);
-            });
-        if (transaction == transactions.end()) {
-            error_.record("vector replay did not match a mixed-window transaction");
+        if (!vector_scoreboard_.pending(*selected)) {
+            error_.record("vector replay matched an already completed uop");
             return false;
         }
-        auto replay = *transaction;
-        replay.lane = request.lane;
-        replay.is_part_replay = request.is_part_replay;
-        replay.replay_mask = request.replay_mask;
-        replay.replay_mb_index = request.replay_mb_index;
-        if (!issue_vector(replay, 256)) {
-            return false;
-        }
-        if (pulse_store_commit_after_replay && replay.store &&
-            (!run_cycles(32) ||
-             !pulse_pending_store(replay.rob, replay.rob_flag))) {
-            return false;
-        }
+        auto replay = *selected;
+        replay.lane = request->lane;
+        replay.is_part_replay = request->is_part_replay;
+        replay.replay_mask = request->replay_mask;
+        replay.replay_mb_index = request->replay_mb_index;
+        if (!issue_vector(replay, 256)) return false;
+        if (pulse_pending_store_after_replay && replay.store &&
+            (!run_cycles(32) || !pulse_pending_store(replay.rob, replay.rob_flag))) return false;
     }
-    if (!vector_scoreboard_.done()) {
+    if (pending()) {
         std::ostringstream message;
-        message << "timed out waiting for mixed vector replays"
+        message << "timed out waiting for selected vector replays"
                 << " transactions=" << transactions.size()
                 << " pending_replays=" << feedback_.pending_replays()
                 << " ptw_requests=" << ptw_agent_.request_count()
@@ -596,12 +574,11 @@ auto Environment::Impl::commit_vector_store(const VectorMemoryTransaction &trans
         return false;
     }
     const std::uint64_t target = *target_it;
-    StoreTransaction commit_point{
-        .rob = transaction.rob,
-        .rob_flag = transaction.rob_flag,
-    };
+    // ROB's scalar scommit excludes vector stores. A vector SQ flow becomes
+    // eligible from the architectural head and its own merge-buffer completion.
+    // The caller must have retired every older instruction before this point.
     if (queues_.sq_dequeued() < target &&
-        !commit_stores_through(commit_point, 1)) {
+        !set_rob_head(transaction.rob, transaction.rob_flag)) {
         return false;
     }
     if (!run_until_sq_dequeued(target, timeout)) {

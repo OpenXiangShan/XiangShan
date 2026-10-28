@@ -154,17 +154,31 @@ auto Environment::Impl::expect_store(const StoreTransaction &transaction)  -> vo
     store_scoreboard_.expect(transaction);
 }
 
+auto Environment::Impl::enqueue_store(const StoreTransaction &transaction) -> bool
+{
+    const auto lq = queues_.lq_allocated() - queues_.lq_canceled();
+    const auto sq = queues_.sq_allocated() - queues_.sq_canceled();
+    if (transaction.lq != lq_pointer_value(lq) ||
+        transaction.lq_flag != lq_pointer_flag(lq) ||
+        transaction.sq != sq_pointer_value(sq) ||
+        transaction.sq_flag != sq_pointer_flag(sq)) {
+        error_.record("scalar store dispatch snapshot differs from allocation cursors");
+        return false;
+    }
+    return enqueue_store(transaction, transaction.lq, transaction.lq_flag);
+}
+
 auto Environment::Impl::enqueue_store(const StoreTransaction &transaction,
-    std::uint8_t lq_value)  -> bool
+    std::uint8_t lq_value, bool lq_flag) -> bool
 {
     if (!wait_for_enqueue_capacity(0, 1)) {
         return false;
     }
-    return enqueue_store_pressure(transaction, lq_value);
+    return enqueue_store_pressure(transaction, lq_value, lq_flag);
 }
 
 auto Environment::Impl::enqueue_store_pressure(const StoreTransaction &transaction,
-    std::uint8_t lq_value)  -> bool
+    std::uint8_t lq_value, bool lq_flag) -> bool
 {
     const std::uint64_t retired = queues_.sq_dequeued() + queues_.sq_canceled();
     if (retired > queues_.sq_allocated() ||
@@ -181,6 +195,7 @@ auto Environment::Impl::enqueue_store_pressure(const StoreTransaction &transacti
     enqueue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
     enqueue.rob_flag = transaction.rob_flag;
     enqueue.rob_value = transaction.rob;
+    enqueue.lq_flag = lq_flag;
     enqueue.lq_value = lq_value;
     enqueue.sq_flag = transaction.sq_flag;
     enqueue.sq_value = transaction.sq;
@@ -685,79 +700,75 @@ auto Environment::Impl::warm_store_translation(const StoreTransaction &transacti
 }
 
 auto Environment::Impl::issue_store_address_until_tlb_hit(const StoreTransaction &transaction,
-    unsigned timeout)  -> bool
+    unsigned timeout) -> bool
 {
     const std::uint64_t deadline = cycle() + timeout;
     while (cycle() < deadline) {
-        const std::uint64_t feedbacks_before = feedback_.store_tlb_feedbacks();
-        const std::uint64_t misses_before = feedback_.store_tlb_misses();
+        const auto first_sample = feedback_.iq_slow_feedback_stats().sta_samples.size();
         const unsigned issue_timeout = static_cast<unsigned>(std::min(
             std::uint64_t{256}, deadline - cycle()));
-        if (issue_timeout == 0 ||
-            !issue_store_address(transaction, issue_timeout)) {
+        if (issue_timeout == 0 || !issue_store_address(transaction, issue_timeout)) {
             return false;
         }
-        while (cycle() < deadline &&
-               feedback_.store_tlb_feedbacks() == feedbacks_before) {
-            tick();
-            if (!check_components()) {
-                return false;
+        std::optional<bool> hit;
+        while (cycle() < deadline) {
+            const auto &samples = feedback_.iq_slow_feedback_stats().sta_samples;
+            const auto match = std::find_if(samples.begin() + first_sample, samples.end(),
+                [&](const auto &sample) {
+                    return sample.lane == transaction.address_lane &&
+                        sample.sq_flag == transaction.sq_flag &&
+                        sample.sq_value == transaction.sq;
+                });
+            if (match != samples.end()) {
+                hit = match->hit;
+                break;
             }
+            tick();
+            if (!check_components()) return false;
         }
-        if (feedback_.store_tlb_feedbacks() == feedbacks_before) {
-            break;
-        }
-        if (feedback_.store_tlb_misses() == misses_before) {
-            return check_components();
-        }
+        if (!hit) break;
+        if (*hit) return check_components();
         if (!run_cycles(static_cast<unsigned>(std::min(
-                std::uint64_t{8}, deadline - cycle())))) {
-            return false;
-        }
+                std::uint64_t{8}, deadline - cycle())))) return false;
     }
-    error_.record("timed out replaying store address until DTLB hit");
+    error_.record("timed out replaying store address until identified DTLB hit");
     return false;
 }
 
 auto Environment::Impl::run_until_store_complete_with_replay(const StoreTransaction &transaction,
     unsigned timeout,
-    bool hold_pending_store)  -> bool
+    bool hold_pending_store) -> bool
 {
-    // ROB keeps pendingst asserted while the same store remains at its
-    // head. A cold replay may not enter StoreMisalignBuffer until well
-    // after the first address issue, so retain that level across replays.
+    // ROB keeps pendingst asserted while this same store remains its head.
+    // The caller owns architectural age eligibility; this wait owns only the
+    // declared transaction and must retain unrelated younger obligations.
     if (hold_pending_store) {
         dut_.queues.backend.pending_ptr_value.set(transaction.rob);
         dut_.queues.backend.pending_ptr_flag.set(transaction.rob_flag);
         dut_.queues.backend.pendingst.set(std::uint64_t{1});
     }
     const auto clear_pending_store = [&]() {
-        if (hold_pending_store) {
-            dut_.queues.backend.pendingst.set(std::uint64_t{0});
-        }
+        if (hold_pending_store) dut_.queues.backend.pendingst.set(std::uint64_t{0});
     };
-    constexpr unsigned replay_interval = 32;
-    for (unsigned elapsed = 0;
-         elapsed < timeout && !store_scoreboard_.done();) {
-        const unsigned cycles = std::min(replay_interval, timeout - elapsed);
-        if (!run_cycles(cycles)) {
+    const std::uint64_t deadline = cycle() + timeout;
+    while (store_scoreboard_.pending(transaction) && cycle() < deadline) {
+        if (!run_cycles(static_cast<unsigned>(std::min(
+                std::uint64_t{32}, deadline - cycle())))) {
             clear_pending_store();
             return false;
         }
-        elapsed += cycles;
-        if (store_scoreboard_.done()) {
-            clear_pending_store();
-            return check_components();
-        }
-        if (!issue_store_address(transaction, replay_interval)) {
+        // A successful address result may precede STD. Reissuing that STA
+        // while waiting only for data would fabricate duplicate completions.
+        if (store_scoreboard_.address_pending(transaction) && cycle() < deadline &&
+            !issue_store_address(transaction, static_cast<unsigned>(std::min(
+                std::uint64_t{32}, deadline - cycle())))) {
             clear_pending_store();
             return false;
         }
-        ++elapsed;
     }
     clear_pending_store();
-    if (!store_scoreboard_.done()) {
-        error_.record("timed out waiting for replayed scalar store writeback");
+    if (store_scoreboard_.pending(transaction)) {
+        error_.record("timed out waiting for identified replayed scalar store writeback");
         return false;
     }
     return check_components();

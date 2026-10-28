@@ -905,6 +905,11 @@ auto Environment::scalar_load_pending(const LoadTransaction &transaction) const 
     return impl_->scalar_load_pending(transaction);
 }
 
+auto Environment::scalar_store_pending(const StoreTransaction &transaction) const -> bool
+{
+    return impl_->scalar_store_pending(transaction);
+}
+
 auto Environment::cancel_scalar_load_for_reset(const LoadTransaction &transaction)  -> bool
 {
     return impl_->cancel_scalar_load_for_reset(transaction);
@@ -1782,16 +1787,21 @@ auto Environment::expect_store(const StoreTransaction &transaction)  -> void
     return impl_->expect_store(transaction);
 }
 
-auto Environment::enqueue_store(const StoreTransaction &transaction,
-    std::uint8_t lq_value)  -> bool
+auto Environment::enqueue_store(const StoreTransaction &transaction) -> bool
 {
-    return impl_->enqueue_store(transaction, lq_value);
+    return impl_->enqueue_store(transaction);
+}
+
+auto Environment::enqueue_store(const StoreTransaction &transaction,
+    std::uint8_t lq_value, bool lq_flag) -> bool
+{
+    return impl_->enqueue_store(transaction, lq_value, lq_flag);
 }
 
 auto Environment::enqueue_store_pressure(const StoreTransaction &transaction,
-    std::uint8_t lq_value)  -> bool
+    std::uint8_t lq_value, bool lq_flag) -> bool
 {
-    return impl_->enqueue_store_pressure(transaction, lq_value);
+    return impl_->enqueue_store_pressure(transaction, lq_value, lq_flag);
 }
 
 auto Environment::expect_vector(const VectorMemoryTransaction &transaction)  -> void
@@ -1961,17 +1971,17 @@ auto Environment::run_until_vector_complete(unsigned timeout)  -> bool
 
 auto Environment::run_until_vector_complete_with_replays(const VectorMemoryTransaction &transaction,
     unsigned timeout,
-    bool pulse_store_commit_after_replay,
+    bool pulse_pending_store_after_replay,
     bool hold_pending_store)  -> bool
 {
-    return impl_->run_until_vector_complete_with_replays(transaction, timeout, pulse_store_commit_after_replay, hold_pending_store);
+    return impl_->run_until_vector_complete_with_replays(transaction, timeout, pulse_pending_store_after_replay, hold_pending_store);
 }
 
 auto Environment::run_until_vector_complete_with_replays(const std::vector<VectorMemoryTransaction> &transactions,
     unsigned timeout,
-    bool pulse_store_commit_after_replay)  -> bool
+    bool pulse_pending_store_after_replay)  -> bool
 {
-    return impl_->run_until_vector_complete_with_replays(transactions, timeout, pulse_store_commit_after_replay);
+    return impl_->run_until_vector_complete_with_replays(transactions, timeout, pulse_pending_store_after_replay);
 }
 
 auto Environment::run_until_all_complete(unsigned timeout)  -> bool

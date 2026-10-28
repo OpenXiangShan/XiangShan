@@ -498,6 +498,15 @@ public:
         retire_if_complete(match);
     }
 
+    bool pending(const StoreTransaction &transaction) const
+    {
+        return expected_.find(rob_identity(transaction.rob, transaction.rob_flag)) != expected_.end();
+    }
+    bool address_pending(const StoreTransaction &transaction) const
+    {
+        const auto entry = expected_.find(rob_identity(transaction.rob, transaction.rob_flag));
+        return entry != expected_.end() && entry->second.address_issued && !entry->second.address_seen;
+    }
     bool done() const { return expected_.empty(); }
     std::size_t pending() const { return expected_.size(); }
     const FailureState &failures() const { return error_; }

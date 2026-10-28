@@ -659,6 +659,7 @@ public:
     std::size_t pending_scalar_loads() const;
 
     bool scalar_load_pending(const LoadTransaction &transaction) const;
+    bool scalar_store_pending(const StoreTransaction &transaction) const;
 
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);
 
@@ -1192,10 +1193,16 @@ public:
 
     void expect_store(const StoreTransaction &transaction);
 
-    bool enqueue_store(const StoreTransaction &transaction, std::uint8_t lq_value);
+    // Canonical typed dispatch checks both queue cursors, then drives the
+    // transaction's immutable opposite-queue snapshot. Explicit-pointer
+    // overloads remain available for scenario-owned legacy contracts.
+    bool enqueue_store(const StoreTransaction &transaction);
+    bool enqueue_store(const StoreTransaction &transaction, std::uint8_t lq_value,
+        bool lq_flag = false);
 
     bool enqueue_store_pressure(
-        const StoreTransaction &transaction, std::uint8_t lq_value);
+        const StoreTransaction &transaction, std::uint8_t lq_value,
+        bool lq_flag = false);
 
     void expect_vector(const VectorMemoryTransaction &transaction);
 
@@ -1282,13 +1289,13 @@ public:
     bool run_until_vector_complete_with_replays(
         const VectorMemoryTransaction &transaction,
         unsigned timeout,
-        bool pulse_store_commit_after_replay = false,
+        bool pulse_pending_store_after_replay = false,
         bool hold_pending_store = false);
 
     bool run_until_vector_complete_with_replays(
         const std::vector<VectorMemoryTransaction> &transactions,
         unsigned timeout,
-        bool pulse_store_commit_after_replay = false);
+        bool pulse_pending_store_after_replay = false);
 
     bool run_until_all_complete(unsigned timeout);
 

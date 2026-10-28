@@ -536,6 +536,11 @@ auto Environment::Impl::scalar_load_pending(const LoadTransaction &transaction) 
     return scoreboard_.pending(transaction);
 }
 
+auto Environment::Impl::scalar_store_pending(const StoreTransaction &transaction) const -> bool
+{
+    return store_scoreboard_.pending(transaction);
+}
+
 auto Environment::Impl::cancel_scalar_load_for_reset(const LoadTransaction &transaction)  -> bool
 {
     // Cancel only at the completed reset boundary. A normal functional

@@ -18,6 +18,16 @@ None.
 
 ## Current Changes Qualified Below
 
+- Canonical scalar stores retain dispatch-time LQ value/wrap snapshots; typed
+  enqueue checks both queue cursors after cancellation. Scalar replay waits use
+  exact ROB value/wrap and never reissue a completed STA while waiting for data.
+  STA-hit waits select newly sampled lane/SQ value/wrap feedback. Vector-list
+  waits preserve unrelated obligations/replays; vector commit uses its recorded
+  SQ target without scalar `scommit`. Heterogeneous windows keep the actual
+  oldest head and distinct live integer destinations. Compiled production-method
+  tests and independent mutation review qualify these bounded prerequisites;
+  general sliding admission and a complete retirement/rename ledger remain open.
+
 - Canonical vector-data writing uops now select distinct destinations in 1..127;
   FOF fix-VL independently selects 1..31, and nonwriting uops drive zero.
   Repeated logical Vd in EMUL>LMUL indexed loads uses independently computed
@@ -209,7 +219,9 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 330 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 342 tests pass | Unit checks do not establish DUT functional coverage |
+| Dispatch/retirement helpers | 12 compiled production-method tests pass; independent review approves and detects ten private helper mutations | `build/memblock/retirement-contract-20261029/review-v2/report.md`; real scoreboards/queue accounting with synthetic scheduling/ports. No full-CPU reachability or RTL-mutation claim |
+| Dispatch/retirement DUT qualification | Frozen runtime-v2: 12/12 finite seeds pass 3200 actions; artifact verifiers accept; 9/9 selected directed scenarios pass | `build/memblock/retirement-contract-20261029/qualification-v2.json`; translated indexed mixed/special, dirty pressure, spec/corner/CMO compatibility. 66 heterogeneous windows and 2830/2830 final tracked words. Development qualification, not closure |
 | Vector operands and oracle | Frozen runtime-v2: 18/18 finite seeds pass 5888 actions; all retained artifact verifiers accept | `build/memblock/vector-operands-20261029/qualification.json`; ordered/unordered indexed and agnostic controls, coverage/spec/corner, mixed and legal ordinary/segment FOF profiles. 1804 load source-chain edges and 1804 checked predecessor waits, 1450 store-source reuses, 146 heterogeneous windows and 10563/10563 final tracked words; development qualification, no closure claim |
 | Vector builder and mutation checks | Six production builder/source/scheduler/wait/scoreboard/accounting tests pass; 4992 builder cases, 192 no-op cases and 453/512 distinct dependency issue orders | Fresh non-author review detects eight private input/scheduler/replay mutations plus removal of the no-op comparator gate; 128 additional normal-body controls preserve active/mask/tail decisions. Helper/unit sensitivity, not RTL mutation coverage |
 | Vector adjacent directed checks | 13/13 selected scenarios pass through runtime-v2 | `build/memblock/vector-operands-20261029/directed-v2/results.json`; full vector-segment matrix (676 unit/strided and 676 indexed configurations), ordinary/split/FOF/addressing/issue/forwarding plus translation/faults, scalar/FP and coherence; selected set, not full catalog |
@@ -322,13 +334,17 @@ between them. Multiple unresolved stores and variable producer counts/ages with
 sliding admission remain the next normal-workload priorities. Source samples do
 not establish unique complete-run schedules or guarantee a design bug.
 
-The pinned CPU-path audit identifies prerequisites before sliding admission:
-retain the actual oldest pending ROB identity; preserve dispatch-time opposite-
-queue snapshots; replace global scalar-store replay waits with exact identities;
-and model vector retirement without scalar `scommit` pulses. LQ dequeue alone
-cannot advance the ROB head, and a vector store may drain completed uops before
-its instruction finishes. These are remaining harness/integration boundaries,
-not CPU bug claims. Source evidence:
+Fresh-context non-author review approves the dispatch/retirement prerequisite
+patch against the CPU ROB, LSQ prefix, SQ vector-commit and completion-driven
+LQ rules. All twelve production-method tests pass, and ten private extracted-
+fixture mutations fail, covering global waits, ROB/SQ/LQ wrap, stale snapshots,
+scalar commits on vector paths and wrong SQ targets. There are no blocking
+findings. Review evidence is
+`build/memblock/retirement-contract-20261029/review-v2/report.md` with pinned
+source hashes and `mutations.json`; qualification and build provenance are in
+`qualification-v2.json` and `provenance-v2.json`. This is a bounded helper and
+canonical-callsite review, not complete CPU timing or sliding admission. The
+underlying CPU-path audit remains
 `build/memblock/mixed-scheduler-20261029/contract-audit.txt`.
 
 Full rename history, exceptional misaligned FP enables, uncheckpointed release

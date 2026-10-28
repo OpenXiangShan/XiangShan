@@ -393,6 +393,10 @@ struct StoreTransaction {
     StoreOp op = StoreOp::sd;
     std::uint8_t rob = 0;
     bool rob_flag = false;
+    // Opposite-queue pointer captured at architectural dispatch, before
+    // younger loads allocate. Replay retains this snapshot and its wrap bit.
+    std::uint8_t lq = 0;
+    bool lq_flag = false;
     std::uint8_t sq = 0;
     bool sq_flag = false;
     unsigned address_lane = 0;

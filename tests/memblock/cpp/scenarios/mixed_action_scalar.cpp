@@ -535,8 +535,7 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
             static_cast<memblock::StoreOp>(std::countr_zero(item.width)),
             random() % memblock::kScalarStoreLanes));
         environment.expect_store(stores.back());
-        if (!environment.enqueue_store(
-                stores.back(), memblock::lq_pointer_value(lq_offset))) {
+        if (!environment.enqueue_store(stores.back())) {
             return false;
         }
     }
@@ -564,8 +563,7 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
             static_cast<memblock::StoreOp>(std::countr_zero(plan.younger->width)),
             random() % memblock::kScalarStoreLanes));
         environment.expect_store(stores.back());
-        if (!environment.enqueue_store(
-                stores.back(), memblock::lq_pointer_value(lq_offset))) {
+        if (!environment.enqueue_store(stores.back())) {
             return false;
         }
     }
@@ -721,7 +719,7 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
     const auto sq_before = environment.sq_dequeued();
     environment.expect_store(store);
     environment.expect_load_data(load, initial);
-    if (!environment.enqueue_store(store, load.lq) ||
+    if (!environment.enqueue_store(store) ||
         !environment.enqueue_load(load) ||
         (plan.data_before_load && !environment.issue_store_data(store, timeout)) ||
         !environment.issue_load(load, timeout) ||

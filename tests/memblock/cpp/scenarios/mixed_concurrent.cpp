@@ -66,6 +66,11 @@ bool MixedScenario::run_concurrent_windows()
                 window_base,
                 1U << (static_cast<unsigned>(scalar_op) & 3U)),
             scalar_op, random() % 3, scalar_shape.fp);
+        // Independent live integer writers cannot share a rename destination.
+        if (special_load && !scalar.fp_wen && scalar.pdest == special_load->pdest) {
+            scalar.pdest = static_cast<std::uint8_t>(
+                scalar.pdest % (memblock::kIntegerPhysicalRegisters - 1U) + 1U);
+        }
         auto vector_load_uops = make_random_vector_uops(
             false, window_base + 32, vector_load_shape, vector_corner);
         const auto scalar_store_op =
@@ -158,8 +163,7 @@ bool MixedScenario::run_concurrent_windows()
             window_enqueued = window_enqueued &&
                 environment.enqueue_vector(uop);
         }
-        window_enqueued = window_enqueued && environment.enqueue_store(
-                                                 scalar_store, memblock::lq_pointer_value(lq_offset));
+        window_enqueued = window_enqueued && environment.enqueue_store(scalar_store);
         for (const auto &uop : vector_store_uops) {
             window_enqueued = window_enqueued &&
                 environment.enqueue_vector(uop);
@@ -170,6 +174,8 @@ bool MixedScenario::run_concurrent_windows()
             return false;
         }
 
+        const auto &oldest_load = special_load ? *special_load : scalar;
+        if (!environment.set_rob_head(oldest_load.rob, oldest_load.rob_flag)) return false;
         if (special_load) {
             const bool mmio = special_kind == RandomConstraints::mmio;
             const std::uint64_t uncache_before =
@@ -209,7 +215,9 @@ bool MixedScenario::run_concurrent_windows()
         for (const unsigned issue_class : issue_order) {
             switch (issue_class) {
             case 0:
-                if (!environment.set_rob_head(scalar.rob, scalar.rob_flag) ||
+                if ((special_load && !environment.run_until_load_complete(
+                        *special_load, constrained_completion_timeout)) ||
+                    !environment.set_rob_head(scalar.rob, scalar.rob_flag) ||
                     !environment.issue_load(scalar, 2048)) {
                     return false;
                 }

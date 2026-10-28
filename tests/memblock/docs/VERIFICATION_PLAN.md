@@ -169,7 +169,12 @@ segment operations; partial byte overlap and overlapping scatters remain open.
 
 A pinned source review finds meaningful local structural randomization but a
 fixed global schedule: five-producer heterogeneous windows all run before serial
-helpers and drain between windows. Next ordinary-workload work should vary
+helpers and drain between windows. Dispatch now freezes scalar-store opposite-
+queue value/wrap snapshots; selected store/vector-list waits retain unrelated
+obligations. Heterogeneous head movement waits for older special-load completion,
+and vector retirement uses recorded SQ targets without scalar commit pulses.
+These are bounded legality prerequisites, not sliding admission or a complete
+ROB/rename/cancellation ledger. Next ordinary-workload work should vary
 producer counts/ages with bounded sliding admission and interleave multiple
 unresolved store identities with younger loads. Canonical FP formats now share
 ordinary/concurrent/dependency/unresolved builders with independent value/boxing

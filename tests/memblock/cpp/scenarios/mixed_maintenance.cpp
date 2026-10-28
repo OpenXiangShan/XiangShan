@@ -54,8 +54,7 @@ bool MixedScenario::issue_random_cmo(
         environment.expect_store(dirty_store);
         if (!environment.set_rob_head(
                 dirty_store.rob, dirty_store.rob_flag) ||
-            !environment.enqueue_store(
-                dirty_store, memblock::lq_pointer_value(lq_offset)) ||
+            !environment.enqueue_store(dirty_store) ||
             !environment.issue_store_data(dirty_store, 4096) ||
             !environment.issue_store_address_until_tlb_hit(
                 dirty_store, cmo_completion_timeout) ||
@@ -160,8 +159,7 @@ bool MixedScenario::issue_random_cmo(
             line, *error_denied, !*error_denied);
     }
     phase = "random-cmo-issue";
-    if (!environment.enqueue_store(
-            cmo_transaction, memblock::lq_pointer_value(lq_offset)) ||
+    if (!environment.enqueue_store(cmo_transaction) ||
         !environment.issue_store_address_until_tlb_hit(
             cmo_transaction, cmo_completion_timeout) ||
         !environment.issue_store_data(cmo_transaction, 4096)) {

@@ -53,6 +53,8 @@ memblock::StoreTransaction MixedScenario::make_store(std::uint64_t address, std:
         .op = op,
         .rob = memblock::rob_pointer_value(rob),
         .rob_flag = memblock::rob_pointer_flag(rob),
+        .lq = memblock::lq_pointer_value(lq_offset),
+        .lq_flag = memblock::lq_pointer_flag(lq_offset),
         .sq = memblock::sq_pointer_value(sq),
         .sq_flag = memblock::sq_pointer_flag(sq),
         .address_lane = address_lane,
@@ -356,9 +358,7 @@ bool MixedScenario::issue_store(const memblock::StoreTransaction &transaction,
     bool hold_pending_store)
 {
     environment.expect_store(transaction);
-    const bool issued = environment.enqueue_store(
-                            transaction,
-                            memblock::lq_pointer_value(lq_offset)) &&
+    const bool issued = environment.enqueue_store(transaction) &&
         (data_first
                 ? environment.issue_store_data(transaction) &&
                     environment.issue_store_address(transaction)

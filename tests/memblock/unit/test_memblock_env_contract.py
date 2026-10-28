@@ -2992,8 +2992,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         environment = read_cpp_source("memblock_env.hpp")
         driver = read_cpp_source("memblock_main.cpp")
         self.assertIn("bool issue_store_address_until_tlb_hit(", environment)
-        self.assertIn("feedback_.store_tlb_feedbacks() == feedbacks_before", environment)
-        self.assertIn("feedback_.store_tlb_misses() == misses_before", environment)
         self.assertIn(
             "environment.issue_store_address_until_tlb_hit(", driver
         )

@@ -354,8 +354,13 @@ A heterogeneous window requires seven available actions, or eight with its
 optional clean NC/MMIO load. It includes scalar load, vector load, scalar
 store, vector store, and prefetch producers, plus scalar/vector store readbacks.
 Issue order is randomized subject to ordered-indexed-load dependencies; vector
-shapes are restricted to the concurrent flow budget. The helper drains before
-the next window. A requested concurrency rate is a budget, not a measured
+shapes are restricted to the concurrent flow budget. Store dispatch retains the
+architectural-prefix LQ snapshot and wrap bit. The pending ROB head cannot pass
+an older incomplete special load, and simultaneous integer destinations are
+distinct. Scalar-store and vector-list waits select only their declared
+transactions; vector retirement and pending-store replay drive no scalar commit
+pulse. These prerequisites do not implement sliding admission. The helper drains
+before the next window. A requested concurrency rate is a budget, not a measured
 simultaneity fraction; use the reported unresolved classes and samples as
 observations. See [run_concurrent_windows()](../cpp/scenarios/mixed_concurrent.cpp).
 

@@ -212,6 +212,14 @@ compares no data-writeback payload. Lack of a match is ignored; ambiguous,
 wrong-lane, and already-seen matches fail. The distinction matters for
 exactly-once claims. See [StoreScoreboard](../cpp/environment/scoreboards.inc).
 
+Scalar replay waits select ROB value plus wrap and leave other outstanding
+store obligations live. They reissue STA only while that store has an accepted
+address issue without its final address writeback; waiting for STD alone must
+not create another STA. The DTLB-hit helper selects newly sampled feedback by
+STA lane and SQ value/wrap, ignores unrelated samples and retries only after a
+matching miss. These rules qualify helper attribution, not a complete accepted-
+work or cancellation ledger.
+
 ### Vector values and exceptions
 
 [model.inc](../cpp/environment/model.inc) computes unit-stride, signed-stride,
@@ -234,7 +242,12 @@ Repeated-Vd stores reuse an unchanged source. Unordered indexed issue samples
 ready vertices and waits on each exact dependent predecessor, while independent
 chains can interleave. The transaction-specific replay wait tests only that
 ROB/flag/uop/destination obligation and retains unissued sibling expectations.
-Vector-store replay feedback cannot match a load by its LQ snapshot. Complete
+Vector-store replay feedback cannot match a load by its LQ snapshot. The
+list overload waits only for members of that list and leaves unrelated replay
+requests queued. Pending-store replay eligibility emits no scalar `scommit`.
+Vector-store commit waits for the uop's recorded SQ target, using its ROB head
+and merge-buffer completion eligibility; partial dequeue does not retire the
+whole instruction. Callers must retire older instructions first. Complete
 allocation history and general sliding retirement remain outside this model.
 
 The common indexed generator now supplies permuted, irregularly spaced and
@@ -551,6 +564,14 @@ assertion-enabled build containing these binds.
 enqueue totals to driver allocation after public operations. Circular LQ/SQ/ROB
 value/flag pairs are calculated from absolute cursors in
 [model.inc](../cpp/environment/model.inc); this is stimulus legality.
+Canonical scalar-store transactions freeze the opposite LQ cursor at dispatch,
+including wrap, before younger loads are constructed. Typed enqueue validates
+both queue snapshots against allocation minus cancellation and drives the saved
+LQ flag. Explicit-pointer overloads remain for focused legacy callers and rely
+on those callers to preserve the same architectural prefix. `pendingPtr` names
+the oldest unretired instruction; completion-driven LQ dequeue alone cannot
+advance it. The heterogeneous helper waits for an older special load before
+moving to the scalar load and preserves distinct live integer destinations.
 `run_until_queues_retired` waits until aggregate dequeue plus cancellation
 reaches allocation; its local final comparison checks only for a shortfall,
 not an excess. Exact equality is checked separately by selected scenario gates.

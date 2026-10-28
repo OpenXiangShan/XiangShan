@@ -198,9 +198,7 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
             completed_store = environment.set_rob_head(
                                   transaction.rob,
                                   transaction.rob_flag) &&
-                environment.enqueue_store(
-                    transaction,
-                    memblock::lq_pointer_value(lq_offset)) &&
+                environment.enqueue_store(transaction) &&
                 (data_first
                         ? environment.issue_store_data(
                               transaction, 4096) &&

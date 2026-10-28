@@ -874,8 +874,7 @@ bool MixedScenario::execute_set_pressure(ActionWindow &window)
                         (index != 0 ||
                             environment.set_rob_head(
                                 store.rob, store.rob_flag)) &&
-                        (already_enqueued || environment.enqueue_store(
-                                                 store, memblock::lq_pointer_value(lq_offset))) &&
+                        (already_enqueued || environment.enqueue_store(store)) &&
                         (data_first
                                 ? environment.issue_store_data(store, 4096) &&
                                     environment
@@ -941,9 +940,7 @@ bool MixedScenario::execute_set_pressure(ActionWindow &window)
                 for (std::size_t index = baseline_stores;
                      index < pressure_stores.size(); ++index) {
                     environment.expect_store(pressure_stores[index]);
-                    if (!environment.enqueue_store(
-                            pressure_stores[index],
-                            memblock::lq_pointer_value(lq_offset))) {
+                    if (!environment.enqueue_store(pressure_stores[index])) {
                         return false;
                     }
                 }

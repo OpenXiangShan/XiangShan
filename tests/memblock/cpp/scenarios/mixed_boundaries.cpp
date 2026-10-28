@@ -410,8 +410,7 @@ bool MixedScenario::issue_vector_canonical_boundary(unsigned cross)
     if (!survivor_walk.translated ||
         survivor_walk.physical_address != *survivor.oracle_address ||
         !environment.set_rob_head(survivor.rob, survivor.rob_flag) ||
-        !environment.enqueue_store(
-            survivor, memblock::lq_pointer_value(lq_offset)) ||
+        !environment.enqueue_store(survivor) ||
         !environment.issue_store_data(survivor, 2048) ||
         !environment.issue_store_address(survivor, 2048) ||
         !environment.run_until_store_complete_with_replay(
@@ -611,7 +610,7 @@ bool MixedScenario::issue_gstage_boundary(unsigned cross, bool vector)
         environment.expect_store(fault);
         const bool data_first = (random() & 1U) != 0;
         completed_fault = environment.set_rob_head(fault.rob, fault.rob_flag) &&
-            environment.enqueue_store(fault, memblock::lq_pointer_value(lq_offset)) &&
+            environment.enqueue_store(fault) &&
             (data_first
                     ? environment.issue_store_data(fault) &&
                         environment.issue_store_address(fault)
@@ -689,7 +688,7 @@ bool MixedScenario::issue_gstage_boundary(unsigned cross, bool vector)
     if (!survivor_walk.translated ||
         survivor_walk.physical_address != *survivor.oracle_address ||
         !environment.set_rob_head(survivor.rob, survivor.rob_flag) ||
-        !environment.enqueue_store(survivor, memblock::lq_pointer_value(lq_offset)) ||
+        !environment.enqueue_store(survivor) ||
         !environment.issue_store_data(survivor, 2048) ||
         !environment.issue_store_address(survivor, 2048) ||
         !environment.run_until_store_complete_with_replay(
