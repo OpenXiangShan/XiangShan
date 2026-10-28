@@ -28,10 +28,11 @@ import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.ftq.prefetch.PrefetchQueueEntry
+import xiangshan.frontend.ftq.prefetch.PrefetchSource
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.PrefetchReqBundle
-import xiangshan.frontend.icache.PrefetchSource
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
   val startPc:     GuardedPc = GuardedPc()
@@ -57,11 +58,6 @@ class ResolveEntry(implicit p: Parameters) extends FtqBundle {
   val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
   // used for bptrace & other debug proposes
   val debug_source: UInt = ResolveSource()
-}
-
-class PrefetchQueueEntry(implicit p: Parameters) extends FtqBundle {
-  val vAddr:  GuardedPc      = GuardedPc()
-  val source: PrefetchSource = new PrefetchSource
 }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends FtqBundle {

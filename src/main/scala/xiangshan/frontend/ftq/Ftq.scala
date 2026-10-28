@@ -33,7 +33,6 @@ import utility.XSPerfHistogram
 import utility.XSPerfRolling
 import utility.XSPerfSeqAccumulate
 import utility.XSPerfSeqRolling
-import xiangshan.RedirectLevel
 import xiangshan.SoftIPrefetchBundle
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
@@ -47,8 +46,6 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.IfuToFtqIO
-import xiangshan.frontend.PcInit
-import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.BpuRedirectMeta
@@ -59,6 +56,7 @@ import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.ftq.prefetch.Pdip
+import xiangshan.frontend.ftq.prefetch.PrefetchQueue
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
 import xiangshan.frontend.icache.TwoFetchFailReason

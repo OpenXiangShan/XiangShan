@@ -1,6 +1,5 @@
-// Copyright (c) 2024-2026 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2020-2021 Peng Cheng Laboratory
+// Copyright (c) 2026 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2026 Institute of Computing Technology, Chinese Academy of Sciences
 //
 // XiangShan is licensed under Mulan PSL v2.
 // You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -13,7 +12,7 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.ftq
+package xiangshan.frontend.ftq.prefetch
 
 import chisel3._
 import chisel3.util._
@@ -25,10 +24,12 @@ import utility.XSPerfSeqAccumulate
 import xiangshan.SoftIPrefetchBundle
 import xiangshan.frontend.PcInit
 import xiangshan.frontend.TwoPrefetchCase
-import xiangshan.frontend.icache.PrefetchSource
+import xiangshan.frontend.ftq.FtqEntry
+import xiangshan.frontend.ftq.FtqModule
+import xiangshan.frontend.ftq.FtqPrefetchReq
 
 class PrefetchQueue(implicit p: Parameters) extends FtqModule
-    with HasFtqPrefetchQueueParameters
+    with HasPrefetchQueueParameters
     with HasCircularQueuePtrHelper {
   class PrefetchQueueIO extends Bundle {
     class Enqueue extends PrefetchQueueEntry {
