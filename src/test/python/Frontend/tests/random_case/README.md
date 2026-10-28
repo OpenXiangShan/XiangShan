@@ -53,3 +53,35 @@ coverage, registry, sampler, or ctrl contracts.
 Tests inspect their historical semantics without running any `check` or `run`
 branch. They are not current replay entries. The seven old strategy documents
 remain historical references outside this current tooling delivery.
+
+## Coverage growth measurement (offline)
+
+`coverage_growth_audit.py` measures an existing qualified single-family campaign
+through the same pinned native-admission gate. Supply a reviewed, hash-pinned
+scope JSON (`schema_version: 1`, one `family`, explicit unique `bin_ids`); it does
+not change the full canonical denominator. Example, from Frontend:
+
+```bash
+python tests/random_case/coverage_growth_audit.py \
+  --campaign /absolute/existing-campaign-root/campaign.json \
+  --binding-index /absolute/coord-binding-index.json \
+  --binding-index-sha256 COORD_PUBLISHED_INDEX_SHA256 \
+  --scope /absolute/reviewed-family-scope.json \
+  --scope-sha256 REVIEWED_SCOPE_SHA256 \
+  --output /absolute/new-growth-report.json
+```
+
+All original cases must already have `qualification_pass=true`; admission never
+upgrades them. Version 1 requires one native report per case and measured positive
+`details.cycles_run` in its bound timeline. All runs consume budget, including
+repeated seeds and runs with no new scoped bins. The report preserves the recorded
+campaign order, full-definition counts, per-run scoped gain and cumulative cycles.
+Optional increasing `--cycle-budget` values report completed-run lower bounds;
+partial-run hits are unknown. No extrapolation or first-hit inference is allowed.
+
+Simulation cycles are not wall-clock regression time. Within-run coverage growth,
+wall time, semantic scene combinations and directed-test budget comparisons remain
+explicitly unmeasured until their evidence is available. Final native counts alone
+cannot establish saturation or a bug-finding advantage. The report is diagnostic;
+semantic probe review and canonical HIT decisions remain with the proper owner.
+No replay, corpus generation or DUT is invoked, and the fresh output is exclusive.
