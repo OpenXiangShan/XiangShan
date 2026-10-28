@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -418,6 +419,7 @@ def main() -> int:
         )
         return 2
 
+    run_id = uuid.uuid4().hex
     started = time.monotonic()
     results_by_index: list[dict[str, Any] | None] = [None] * len(requested)
     cancellation_event = threading.Event()
@@ -465,6 +467,7 @@ def main() -> int:
                         result,
                         args.output.parent / "coverage-reports",
                         index,
+                        run_id=run_id,
                     )
                 )
             except OSError as error:
@@ -500,6 +503,7 @@ def main() -> int:
     ]
     document = {
         "schema_version": 2,
+        "run_id": run_id,
         "status": "pass" if passed else "fail",
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "elapsed_seconds": round(time.monotonic() - started, 6),

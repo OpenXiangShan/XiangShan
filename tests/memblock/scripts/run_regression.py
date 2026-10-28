@@ -356,7 +356,7 @@ def write_results(path: Path, document: dict[str, Any]) -> None:
 
 
 def write_coverage_report(
-    result: dict[str, Any], directory: Path, unique: int
+    result: dict[str, Any], directory: Path, unique: int, *, run_id: str
 ) -> Path:
     """Write an informational coverage/statistics report for one run.
 
@@ -364,12 +364,16 @@ def write_coverage_report(
     run status. The report keeps the terminal summary, parsed metrics, and the
     exact command so a later analysis can reconstruct what was observed.
     """
+    if (len(run_id) != 32 or any(char not in "0123456789abcdef" for char in run_id)):
+        raise RegressionError("coverage report requires a valid campaign run id")
+    directory = directory / run_id
     directory.mkdir(parents=True, exist_ok=True)
     scenario = str(result.get("scenario", "unknown"))
     seed = result.get("seed", "na")
     path = directory / f"{scenario}-seed{seed}-{unique}.json"
     document = {
         "schema_version": 1,
+        "run_id": run_id,
         "scenario": result.get("scenario"),
         "seed": result.get("seed"),
         "status": result.get("status"),
@@ -558,6 +562,7 @@ def main() -> int:
                             result,
                             args.output.parent / "coverage-reports",
                             len(results),
+                            run_id=run_id,
                         )
                     )
                 except OSError as error:

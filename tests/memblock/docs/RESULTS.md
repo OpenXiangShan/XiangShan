@@ -18,6 +18,13 @@ None.
 
 ## Current Changes Qualified Below
 
+- Regression and benchmark sidecars use `coverage-reports/<run_id>/`; both
+  aggregate and per-case documents record the campaign ID. Concurrent
+  controllers cannot overwrite each other's sidecars if a parent is shared,
+  and reruns retain previous sidecars. Operational isolation still requires
+  unique parent output directories per concurrent controller. A subprocess integration test exercises
+  two regressions plus a benchmark with identical scenario/seed/index and an
+  aggregate-path rerun.
 - Constrained-random finishes with a drain and an independent word readback of
   cacheable identity-mapped committed stores/atomics; permitted/aligned
   cacheable hypervisor stores add a same-context HLV readback.
@@ -118,7 +125,8 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 292 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 294 tests pass | Unit checks do not establish DUT functional coverage |
+| Campaign report isolation | Concurrent two-regression/one-benchmark fixture and aggregate rerun pass | Fresh run-ID directory and matching document ID; previous sidecar bytes retained; artifact `build/memblock/report-namespace-20261028/check-unit.log` |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Restored-original directed | 90/90 pass | Every catalogued directed test through the corrected harness and runtime from RTL `43b971f2`; artifact `build/memblock/verify-restored-rtl-20261028/directed` |
 | Restored-original random | 4/4 seeds pass, 4608 actions each | `coverage` profile; artifact `build/memblock/verify-restored-rtl-20261028/random-4x4608`; development validation, not closure |
@@ -182,6 +190,13 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+The campaign report namespace change has a fresh-context, non-author APPROVE
+review with no findings. The review checks both controller call sites, run-ID
+propagation, the subprocess collision/rerun test and preservation of the
+unique-parent operational rule. Independent focused rerun: 19 unit tests pass;
+full local infrastructure qualification: 294 tests and `check-rtl` pass.
+Review artifact: `build/memblock/report-namespace-20261028/review.txt`.
 
 Temporary CPU-bug classifications for CBO.ZERO and noncanonical vector
 segments were withdrawn after full-CPU ordering review. The CBO reproducer

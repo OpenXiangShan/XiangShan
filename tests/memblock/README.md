@@ -116,10 +116,12 @@ Freeze once, then use direct runtime/script invocations:
     make -C tests/memblock freeze-runtime JOBS=8
     python3 tests/memblock/scripts/run_regression.py --runtime-metadata build/memblock/runtime/runtime.json --output build/memblock/my-campaign/results.json --jobs 8 --seeds 8 --actions 16384 --constraints spec
 
-Every concurrent controller needs a different parent output directory, not
-merely a different JSON filename. coverage-reports uses controller-local
-scenario/seed/index names and collides within a parent. Use unique trace
-files. Never replace an active frozen runtime. Budget all process counts
+Keep a unique parent output directory per concurrent controller and unique
+trace files. Both controllers additionally write sidecars under
+`coverage-reports/<run_id>/`, with a fresh campaign ID on every invocation;
+aggregate documents and sidecars record that ID. This prevents accidental
+shared-parent collisions and retains old sidecars when an aggregate filename
+is reused. Never concurrently target the same aggregate or Markdown file. Never replace an active frozen runtime. Budget all process counts
 together. Workers must not use Make targets that may rebuild prerequisites.
 
 Runtime metadata checks paths/sizes and local dependency resolution; it does

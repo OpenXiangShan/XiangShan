@@ -155,8 +155,11 @@ Priority work, each requiring executable stimulus and an independent check:
 2. Preserve the accepted-B-before-C probe provenance now implemented; add
    complete C multibeat identity checking. Retain the DCache E first-D/sink and
    PTW/Uncache source-lifetime checks.
-3. Repair verifier schema/backpressure/statistic validation and report
-   namespaces across controllers.
+3. Repair verifier schema/backpressure/statistic validation. Regression and
+   benchmark sidecars now use distinct campaign run-ID namespaces, including
+   reruns that replace an aggregate file; the unique-parent controller-isolation
+   requirement remains. Sidecar creation errors remain recorded
+   diagnostics rather than an acceptance gate.
 4. Expand the now-full 128-bit vector mask to more fault/index/mapping and
    concurrency crosses, plus reset/protection crosses.  A driver-truncation
    mutation is detected by the directed high-mask case; RTL mutation

@@ -6,6 +6,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -276,6 +277,98 @@ class RunRegressionTest(unittest.TestCase):
                 expected_seed=7,
                 expected_transactions=20,
             )
+
+    def test_campaigns_keep_sidecars_across_shared_parent_and_rerun(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "simulator"
+            binary.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "args = sys.argv\n"
+                "seed = args[args.index('--seed') + 1]\n"
+                "actions = args[args.index('--actions') + 1]\n"
+                "print(f'MEMBLOCK_SMOKE_PASS seed={seed} transactions={actions}')\n",
+                encoding="utf-8",
+            )
+            binary.chmod(0o755)
+            artifacts = [{"role": "binary", "path": binary.name}]
+            for role in ("model", "rtl_metadata", "xspcomm"):
+                (root / role).write_text("fixture", encoding="utf-8")
+                artifacts.append({"role": role, "path": role})
+            metadata = root / "runtime.json"
+            metadata.write_text(json.dumps({
+                "schema_version": 1,
+                "artifacts": artifacts,
+                "external_dependencies": [],
+            }), encoding="utf-8")
+            common = [
+                "--runtime-metadata", str(metadata), "--scenarios", "smoke",
+                "--actions", "256", "--jobs", "1",
+            ]
+            outputs = [root / name for name in ("first.json", "second.json", "bench.json")]
+            commands = [
+                [sys.executable, str(MEMBLOCK_ROOT / "scripts" / script),
+                 "--output", str(output), *common, *options]
+                for script, output, options in (
+                    ("run_regression.py", outputs[0], ["--seeds", "1"]),
+                    ("run_regression.py", outputs[1], ["--seeds", "1"]),
+                    ("benchmark_tests.py", outputs[2], []),
+                )
+            ]
+            environment = os.environ.copy()
+            environment.pop("MEMBLOCK_MEM_DIRECT_TRACE_FILE", None)
+            processes = []
+            try:
+                for command in commands:
+                    processes.append(subprocess.Popen(
+                        command, env=environment, stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, text=True,
+                    ))
+                for process in processes:
+                    output, _ = process.communicate(timeout=30)
+                    self.assertEqual(process.returncode, 0, output)
+            finally:
+                for process in processes:
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate()
+
+            reports = {}
+            run_ids = set()
+            for output in outputs:
+                document = json.loads(output.read_text(encoding="utf-8"))
+                run_ids.add(document["run_id"])
+                result = document["results"][0]
+                report_path = Path(result["coverage_report"])
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertEqual(report_path.parent.name, document["run_id"])
+                self.assertEqual(report["run_id"], document["run_id"])
+                for name in ("scenario", "seed", "status", "summary", "command"):
+                    self.assertEqual(report[name], result[name])
+                reports[report_path] = report_path.read_bytes()
+            self.assertEqual(len(run_ids), 3)
+            self.assertEqual(len(reports), 3)
+
+            # Reusing an aggregate filename must retain its previous reports.
+            replay = subprocess.run(commands[0], env=environment, capture_output=True,
+                                    text=True, timeout=30, check=False)
+            self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+            rerun = json.loads(outputs[0].read_text(encoding="utf-8"))
+            self.assertNotIn(rerun["run_id"], run_ids)
+            for report_path, contents in reports.items():
+                self.assertEqual(report_path.read_bytes(), contents)
+            self.assertEqual(len(list((root / "coverage-reports").glob("*/*.json"))), 4)
+
+    def test_coverage_report_rejects_invalid_campaign_namespace(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "reports"
+            for run_id in ("", "../escape", "a" * 31, "G" * 32, "a" * 31 + "/"):
+                with self.subTest(run_id=run_id), self.assertRaisesRegex(
+                    run_regression.RegressionError, "valid campaign run id"
+                ):
+                    run_regression.write_coverage_report({}, root, 0, run_id=run_id)
+            self.assertFalse(root.exists())
 
     def test_verifies_frozen_runtime_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
