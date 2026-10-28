@@ -1,5 +1,8 @@
 # Random-case tooling
 
+For four-family executed-space metrics and construction priorities, see
+[PROGRAM_EXPLORATION.md](PROGRAM_EXPLORATION.md).
+
 The generator and scenarios cover four families: `cfg_layout_mix`,
 `ras_indirect_history`, `ibuffer_pressure_cross`, and `translation_timing_cross`.
 Generator/assembly/ProgramMap unit tests use temporary synthetic inputs; they do

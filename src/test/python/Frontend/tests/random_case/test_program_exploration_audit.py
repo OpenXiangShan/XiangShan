@@ -208,6 +208,27 @@ def test_program_call_depth_is_not_hardware_ras_occupancy(tmp_path):
     assert r['hardware_ras_state']=='unmeasured'
 
 
+@pytest.mark.parametrize('ordinal',range(6))
+def test_translation_family_actual_builder_keeps_narrow_executable_domain(ordinal):
+    from types import SimpleNamespace
+    from .translation_timing import build_translation_scenario
+    scenario=SimpleNamespace(scenario_id=f'offline-{ordinal}',ordinal=ordinal,
+      parameters={'translation':{'schema_version':1,'randomizer_seed':7,'ordinal':ordinal}})
+    result=build_translation_scenario(scenario,bytes(8192))
+    assert result.mode=='sv39' and result.stage2_mode is None
+    assert result.priv_virt==0 and result.s2xlate==0 and result.s1_pte.level==0
+    assert result.s1_pf==result.s1_af==result.s2_gpf==result.s2_gaf==0
+    assert result.s1_sector_lanes==() and result.permission_probes==()
+    assert result.expected_result=='normal'
+
+
+@pytest.mark.parametrize('family',['ras_indirect_history','ibuffer_pressure_cross'])
+def test_history4_is_not_silently_available_to_other_families(family):
+    from .generate_random_asm import CaseSpec
+    with pytest.raises(ValueError,match='history4 indirect targets require'):
+        CaseSpec(family=family,seed=12,indirect_target_mode='history4').validate()
+
+
 def test_computed_x5_target_does_not_pop_a_real_matching_return_context(tmp_path):
     pm={'instructions':[
       {'pc':0x1000,'size':4,'encoding':'010000ef','mnemonic':'jal','operands':'x1,1010'},
