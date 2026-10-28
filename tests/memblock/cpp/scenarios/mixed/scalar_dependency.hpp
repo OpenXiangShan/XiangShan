@@ -26,15 +26,21 @@ struct DependencyLoad {
     unsigned width() const { return 1U << (op & 3U); }
 };
 
+enum class DependencyIssueKind { address, data, load };
+
+struct DependencyIssueEvent {
+    DependencyIssueKind kind;
+    unsigned index;
+    unsigned delay;
+};
+
 struct ScalarDependencyPlan {
     std::vector<DependencyStore> older;
     std::vector<DependencyLoad> loads;
     std::optional<DependencyStore> younger;
-    // Two events per store: even=address, odd=data. Store indices are in
-    // architectural order; event order describes independent operand arrival.
-    std::vector<unsigned> store_events;
-    std::vector<unsigned> load_order;
-    std::vector<unsigned> event_delays;
+    // Store indices retain architectural age. A load is ready after all older
+    // STA events, while their STD and the younger store may still be pending.
+    std::vector<DependencyIssueEvent> issue_events;
 };
 
 inline ScalarDependencyPlan make_scalar_dependency_plan(std::mt19937_64 &random,
@@ -60,19 +66,36 @@ inline ScalarDependencyPlan make_scalar_dependency_plan(std::mt19937_64 &random,
             ? (random() % (32U / width)) * width
             : plan.older[random() % stores].offset & ~(width - 1U);
         plan.loads.push_back({offset, op, shape.fp});
-        plan.load_order.push_back(index);
     }
     if ((random() & 1U) != 0) {
         plan.younger = DependencyStore{
             plan.loads[0].offset, plan.loads[0].width(), random()};
     }
     const unsigned all_stores = stores + unsigned(plan.younger.has_value());
-    for (unsigned event = 0; event < all_stores * 2U; ++event) {
-        plan.store_events.push_back(event);
-        plan.event_delays.push_back(random() % 8U);
+    std::vector<bool> address_done(all_stores, false);
+    std::vector<bool> data_done(all_stores, false);
+    std::vector<bool> load_done(loads, false);
+    while (plan.issue_events.size() < all_stores * 2U + loads) {
+        std::vector<DependencyIssueEvent> ready;
+        for (unsigned store = 0; store < all_stores; ++store) {
+            if (!address_done[store]) ready.push_back({DependencyIssueKind::address, store, 0});
+            if (!data_done[store]) ready.push_back({DependencyIssueKind::data, store, 0});
+        }
+        if (std::all_of(address_done.begin(), address_done.begin() + stores,
+                [](bool done) { return done; })) {
+            for (unsigned load = 0; load < loads; ++load) {
+                if (!load_done[load]) ready.push_back({DependencyIssueKind::load, load, 0});
+            }
+        }
+        auto event = ready[random() % ready.size()];
+        event.delay = random() % 8U;
+        switch (event.kind) {
+        case DependencyIssueKind::address: address_done[event.index] = true; break;
+        case DependencyIssueKind::data: data_done[event.index] = true; break;
+        case DependencyIssueKind::load: load_done[event.index] = true; break;
+        }
+        plan.issue_events.push_back(event);
     }
-    std::shuffle(plan.store_events.begin(), plan.store_events.end(), random);
-    std::shuffle(plan.load_order.begin(), plan.load_order.end(), random);
     return plan;
 }
 

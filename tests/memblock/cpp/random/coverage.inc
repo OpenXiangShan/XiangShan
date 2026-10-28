@@ -3228,6 +3228,9 @@ struct MixedCoverage {
     std::uint64_t scalar_dependency_forwarded_bytes = 0;
     std::uint64_t scalar_dependency_memory_bytes = 0;
     std::uint64_t scalar_dependency_multiple_sources = 0;
+    // Accepted loads before all store operands, with overlapping older STD
+    // unissued, with multiple such stores, and windows containing early loads.
+    std::array<std::uint64_t, 4> scalar_dependency_interleaving{};
     static constexpr unsigned kConcurrentClasses = 5;
     std::array<std::uint64_t, memblock::generated::kLsqEnqueueLanes>
         dispatch_widths{};
@@ -3578,6 +3581,11 @@ struct MixedCoverage {
                std::to_string(scalar_dependency_forwarded_bytes) + ',' +
                std::to_string(scalar_dependency_memory_bytes) + ',' +
                std::to_string(scalar_dependency_multiple_sources) +
+               " scalar_dependency_interleaving=" +
+               std::to_string(scalar_dependency_interleaving[0]) + ',' +
+               std::to_string(scalar_dependency_interleaving[1]) + ',' +
+               std::to_string(scalar_dependency_interleaving[2]) + ',' +
+               std::to_string(scalar_dependency_interleaving[3]) +
                " scalar_misaligned=" +
                std::to_string(scalar_misaligned) + " store_misaligned=" +
                std::to_string(scalar_store_misaligned) + ',' +

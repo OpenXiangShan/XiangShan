@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=60`.
+`constraint_schema=61`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -501,6 +501,7 @@ Array order and sampling code are authoritative in
 | `actual_atomic_*`, `actual_hypervisor_*`, `actual_cmo_*`, `actual_ptw_error_*`, `actual_uncache_*` | Sampled family, width, privilege, memory-type, error, and helper-specific manager observations. |
 | `actual_load_merge_*`, `actual_bank_conflict_*`, `actual_set_pressure_*`, `actual_miss_burst_*` | Compound-action shapes, manager/terminal counts, and pressure observations. Same-bank stimulus does not require a particular RTL replay policy. |
 | `vector_operand_chains` | Repeated-logical-Vd load-source edges, store-source reuses and completed predecessor waits. Generated load edges must equal completed waits in a passing run; this is a driver obligation, not a physical-register-file monitor. |
+| `scalar_dependency_interleaving` | Accepted loads before all store halves, with overlapping older STD unissued, with multiple such STD operands, and windows with early loads. These count input timing/byte overlaps; they do not require an internal replay or bypass. |
 | `concurrent_ops` | Five producer counts: scalar load, vector load, scalar store, vector store, prefetch. |
 | `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
@@ -567,8 +568,10 @@ address/data arrival independently of age. The common ordinary-store factory
 uses one paired STA/STD lane as the CPU scheduler does. Simultaneous dependency
 loads have distinct numeric destinations within their class domains: a window
 containing FP reserves indices in 1..191 and an integer-only window in 1..223.
-All store operands are known before loads issue; an optional younger store is already present but excluded from each
-load's SQ snapshot. No store may dequeue before those loads complete. Stores
+A ready-event sampler interleaves STA, STD and load issue. A load waits for all
+older STA helpers to return identified TLB-hit feedback, while one or several
+older STD operands may remain unissued. The optional younger store's halves may
+also interleave, but that store remains excluded from each load's SQ snapshot. No store may dequeue before those loads complete. Stores
 then commit in architectural order, and every touched word joins final readback.
 
 Each expected load comes from a pre-window byte snapshot overlaid with only
@@ -577,8 +580,12 @@ partial cache/store byte assembly, signed/unsigned widths and younger-store
 exclusion without depending on the DUT's forwarding or replay choices.
 `scalar_dependency` reports windows, stores, loads, younger-store controls,
 bytes supplied by older stores, bytes supplied by the initial image, and loads
-whose final bytes come from multiple older stores. These are semantic source
-counts, not assertions that a particular internal bypass was taken. A window is
+whose final bytes come from multiple older stores. `scalar_dependency_interleaving`
+reports accepted loads before all store operands, accepted loads overlapping one
+or more older stores whose STD is unissued, accepted loads overlapping multiple
+such stores, and windows containing early loads. These are accepted-issue/operand
+and semantic source counts, not assertions that a particular internal bypass or
+replay occurred. A window is
 one compound action; its uops still participate in ordinary completion and queue
 accounting. A short run may have no windows when eligible stores are not drawn.
 
@@ -822,9 +829,9 @@ unique full-run schedules or an assurance that a design bug exists.
 
 The highest remaining ordinary-workload limitations are the fixed five-producer
 composition of heterogeneous windows, all such windows preceding serial work,
-and a drain between windows. Dependency windows vary counts and operand order
-but place all store operands before their loads; unresolved-address windows have
-one store/load pair. Canonical FP formats now participate in ordinary,
+and a drain between windows. Dependency windows vary counts and interleave independent operand halves with
+loads after older addresses resolve; unresolved-address windows still have one
+store/load pair. Canonical FP formats now participate in ordinary,
 heterogeneous, SQ dependency and unresolved/refetch traffic with independent
 boxing/data checks. Prioritize bounded sliding admission with variable producer
 counts/ages and multiple unresolved store identities with interleaved operand

@@ -18,6 +18,18 @@ None.
 
 ## Current Changes Qualified Below
 
+- Ordinary scalar dependency traffic varies 1..4 older stores, 1..3 younger
+  loads and an optional younger store, sampling ready STA, STD and load events.
+  Loads wait for identified older address hits while older store data can remain
+  unissued; optional younger operands interleave without entering the expected
+  byte overlay. The common integer/FP oracle checks the completed value from
+  initial bytes plus all older input stores. Schema 61 records accepted early
+  loads and one/multiple overlapping pending-data stores without requiring any
+  internal replay/bypass or nonzero coverage. A 4096-window generator sample has
+  2978 event schedules after excluding payload, offsets, widths and delays;
+  one fixed-count bucket contains 193 schedules in 196 samples. These measure
+  the bounded builder, not unique full-run schedules or arbitrary sliding work.
+
 - Canonical scalar stores retain dispatch-time LQ value/wrap snapshots; typed
   enqueue checks both queue cursors after cancellation. Scalar replay waits use
   exact ROB value/wrap and never reissue a completed STA while waiting for data.
@@ -92,13 +104,6 @@ None.
   requires a fresh correct-data completion. The directed case reports
   `canceled=1 refetched=1 completed=1 lq=2+0/2`: one data pulse discarded,
   both LQ entries dequeued, no fabricated LQ cancellation.
-- The canonical generator includes `scalar-dependency`: 1..4 older stores,
-  1..3 younger loads and optional younger-store exclusion, with randomized byte
-  overlap, width/sign, operand arrival, issue order and delays. Expected bytes
-  come from a pre-window snapshot overlaid only by older store inputs. The common
-  ordinary-store factory preserves STA/STD lane pairing; simultaneous dependency
-  loads have distinct valid destinations within their integer/FP domains. A topology-only unit sample
-  (excluding data and timing/order) contains 510 distinct plans out of 512.
 - Ordinary random bare/cache/atomic/NAPOT and merge/miss/bank pools use lazy
   seed-and-physical-address initial words. Reference and manager images share
   initialization while later writes remain independent. Six production-model
@@ -219,9 +224,11 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 342 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 344 tests pass | Unit checks do not establish DUT functional coverage |
+| Scalar dependency interleaving | Frozen runtime-v1: 10/10 finite seeds pass 4608 actions; all artifact verifiers accept | `build/memblock/dependency-interleave-20261029/qualification-v1.json`; focused/translated mixed/spec/corner. 759 dependency windows, 546 accepted early loads, 269 with overlapping older STD unissued, 35 with multiple, 146 heterogeneous windows and 5465/5465 final tracked words. Known older addresses; no arbitrary unresolved-address or closure claim |
+| Dependency scheduler mechanics | Four compiled generator/oracle/accounting tests pass; private checks detect store-then-load, missing-STA-prerequisite, lost-event and duplicate-event mutants | `build/memblock/dependency-interleave-20261029/method-tests/verification.json`; actual generator and byte overlay, independent event invariants and sparse schema-61 accounting. Synthetic opportunity counts do not establish DUT timing |
 | Dispatch/retirement helpers | 12 compiled production-method tests pass; independent review approves and detects ten private helper mutations | `build/memblock/retirement-contract-20261029/review-v2/report.md`; real scoreboards/queue accounting with synthetic scheduling/ports. No full-CPU reachability or RTL-mutation claim |
-| Dispatch/retirement DUT qualification | Frozen runtime-v2: 12/12 finite seeds pass 3200 actions; artifact verifiers accept; 9/9 selected directed scenarios pass | `build/memblock/retirement-contract-20261029/qualification-v2.json`; translated indexed mixed/special, dirty pressure, spec/corner/CMO compatibility. 66 heterogeneous windows and 2830/2830 final tracked words. Development qualification, not closure |
+| Dispatch/retirement DUT qualification | Frozen runtime-v2: 14/14 finite seeds pass 12416 actions; artifact verifiers accept; 9/9 selected directed scenarios pass | `build/memblock/retirement-contract-20261029/qualification-v2.json`; translated indexed mixed/special, dirty pressure, spec/corner/CMO compatibility. 130 heterogeneous windows and 7512/7512 final tracked words. Development qualification, not closure |
 | Vector operands and oracle | Frozen runtime-v2: 18/18 finite seeds pass 5888 actions; all retained artifact verifiers accept | `build/memblock/vector-operands-20261029/qualification.json`; ordered/unordered indexed and agnostic controls, coverage/spec/corner, mixed and legal ordinary/segment FOF profiles. 1804 load source-chain edges and 1804 checked predecessor waits, 1450 store-source reuses, 146 heterogeneous windows and 10563/10563 final tracked words; development qualification, no closure claim |
 | Vector builder and mutation checks | Six production builder/source/scheduler/wait/scoreboard/accounting tests pass; 4992 builder cases, 192 no-op cases and 453/512 distinct dependency issue orders | Fresh non-author review detects eight private input/scheduler/replay mutations plus removal of the no-op comparator gate; 128 additional normal-body controls preserve active/mask/tail decisions. Helper/unit sensitivity, not RTL mutation coverage |
 | Vector adjacent directed checks | 13/13 selected scenarios pass through runtime-v2 | `build/memblock/vector-operands-20261029/directed-v2/results.json`; full vector-segment matrix (676 unit/strided and 676 indexed configurations), ordinary/split/FOF/addressing/issue/forwarding plus translation/faults, scalar/FP and coherence; selected set, not full catalog |
@@ -239,10 +246,7 @@ The current qualification is:
 | Indexed mixed development | Custom mixed seed897 passes 1024 actions with 46 heterogeneous windows and 1313/1313 final words | Artifact `build/memblock/vector-indices-20261029/mixed`; 208 indexed instructions, 327 generated repeated offsets, 1172 descents; these operand counts include inactive elements |
 | Indexed broad development | Seed891 passes 4608 coverage actions; finite artifact verifier accepts | `build/memblock/vector-indices-20261029/coverage-replay`; 32 heterogeneous windows, 113 dependency windows, 488 indexed instructions and 2325/2325 final words. Exact runtime/seed replay completes in 687 seconds after a 300-second budget timeout; no closure claim |
 | Indexed profile compatibility | 2/2 spec and 2/2 corner seeds pass at 512 actions with compact latency; seed892 passes 512 with default spec timing | Artifacts `build/memblock/vector-indices-20261029/{spec,corner,spec-timing}`; seeds871/872 have zero indexed instructions and establish compatibility only. Seed892 executes one indexed load/store pair; corner seeds exercise both ordinary/segment directions. Strict coverage rejects unrelated sparse prefetch/probe bins; no closure claim |
-| Ordinary dependency direction | Corrected runtime: 4/4 focused seeds 811..814 pass at 128 actions each; 453 windows | 243 younger-store exclusion controls and 122 multiple-older-store-source loads; final observed/registered words match; `build/memblock/scalar-dependency-20261028/focused-v2` |
-| Ordinary mixed development | Corrected generator seed821 passes 4608 actions with `latency=compact`; artifact verifier accepts | 32 heterogeneous windows, 101 dependency windows and 2068/2068 final observed/registered words; `build/memblock/scalar-dependency-20261028/coverage-v2`; no closure claim |
 | Refetch/forwarding regression | Corrected runtime-v4: translation-alias, memory-violation and store-forwarding each pass | `build/memblock/scalar-unresolved-20261029/directed-v4`; same-pdest alias refetch and CPU-paired STA/STD lanes; isolated scalar RAW directed coverage still checks source/metadata rather than general refetch arbitration |
-| Ordinary-profile development | Corrected runtime: 2/2 spec and 2/2 corner seeds pass at 512 actions each, all with `latency=compact`; artifact verifiers accept | 53/27 dependency windows; short runs have zero heterogeneous windows because of the serial reservation; `build/memblock/scalar-dependency-20261028/{spec-v2,corner-v2}`; no closure claim |
 | Campaign report isolation | Concurrent two-regression/one-benchmark fixture and aggregate rerun pass | Fresh run-ID directory and matching document ID; previous sidecar bytes retained; artifact `build/memblock/report-namespace-20261028/check-unit.log` |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Restored-original directed | 90/90 pass | Every catalogued directed test through the corrected harness and runtime from RTL `43b971f2`; artifact `build/memblock/verify-restored-rtl-20261028/directed` |
@@ -307,6 +311,19 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Fresh-context non-author review approves the ordinary scalar ready-event
+interleaving and schema-61 accounting change with no findings. It checks the
+CPU's independent paired STA/STD producers, matching-data replay eligibility,
+held oldest ROB head and independent byte overlay. Four generator/accounting
+and 55 verifier tests pass; an independent enumeration checks 24576 plans and
+49108 loads, and ten private sampler/oracle/verifier mutations are detected.
+The four read-only artifact verifiers accept ten DUT seeds and 4608 actions.
+Evidence is `build/memblock/dependency-interleave-20261029/review-v1/report.md`,
+with `review-v1a.hashes.json`, `review-disposition.json`, `qualification-v1.json`
+and `provenance-v1.json` in the parent directory. This is development evidence;
+full-CPU timing, arbitrary replay/rename histories and multiple speculative
+unresolved addresses remain outside the claim.
 
 Fresh-context non-author review approves the vector destination/source-chain,
 dependency-preserving issue, exact predecessor-wait, replay attribution and

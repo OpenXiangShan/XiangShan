@@ -127,8 +127,12 @@ load. It varies counts, overlap, sizes, signs, operand arrival and issue order;
 an optional younger store must be excluded even when its operands arrive first.
 Retirement stays behind an older non-memory ROB head until load completion,
 then stores commit in age order. Final word readback observes committed bytes.
-Known store operands precede load issue in that direction. Store halves retain
-their CPU scheduler lane pairing;
+All older STA results are known before a load issues, while older data and
+optional younger-store operands may still be pending. The independent byte
+expectation includes every older input store, including those whose STD has not
+yet issued; a provisional old-memory result is not accepted. Completion may use
+any legal internal replay/forwarding path. Store halves retain their CPU
+scheduler lane pairing;
 these simultaneous loads have distinct physical destinations within the selected
 integer/FP domains. A window containing FP uses the smaller common 1..191 domain;
 an integer-only window uses 1..223. Semantic byte-source counters do not require

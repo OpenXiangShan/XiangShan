@@ -181,8 +181,10 @@ ordinary/concurrent/dependency/unresolved builders with independent value/boxing
 checks. Vector-data/VL destinations stay within their separate default files;
 repeated-Vd indexed loads use distinct renames, independently modeled prior
 source bytes and exact predecessor completion, while stores reuse their source.
-Unordered indexed uop schedules vary subject to those dependencies; broader FP helper/error combinations remain explicit gaps. Existing dependency
-windows finish all store operands before their loads. These gaps take priority
+Unordered indexed uop schedules vary subject to those dependencies; broader FP helper/error combinations remain explicit gaps. Dependency windows now interleave loads with unissued older STD operands after
+all older addresses resolve; their independent byte overlays reject premature
+old-memory data. Multiple speculative unresolved addresses remain separate from
+this known-address direction. These gaps take priority
 over expanding rare error/protection crosses; structural uniqueness alone cannot
 guarantee a CPU bug.
 

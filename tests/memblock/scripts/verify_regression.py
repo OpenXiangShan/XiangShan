@@ -1488,7 +1488,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4561,6 +4561,14 @@ def _check_scalar_dependency_accounting(result: dict[str, Any]) -> None:
              "scalar dependency byte counts disagree with load widths")
     if rate == 0:
         _require(windows == 0, "disabled scalar dependency generated windows")
+    if result.get("constraint_schema", 0) >= 61:
+        early, pending_data, multiple_pending, interleaved = _csv_counts(
+            result, "scalar_dependency_interleaving", 4
+        )
+        _require(multiple_pending <= pending_data <= early <= loads,
+                 "scalar dependency interleaving exceeds eligible loads")
+        _require(interleaved <= windows and interleaved <= early <= 3 * interleaved,
+                 "scalar dependency interleaved windows disagree with early loads")
 
 
 def _check_mixed_accounting(result: dict[str, Any]) -> None:

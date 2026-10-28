@@ -568,36 +568,57 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
         }
     }
     std::vector<bool> seen_address(stores.size(), false);
+    std::vector<bool> seen_data(stores.size(), false);
     std::vector<bool> data_first(stores.size(), false);
-    for (unsigned index = 0; index < plan.store_events.size(); ++index) {
-        const unsigned event = plan.store_events[index];
-        const unsigned store = event / 2U;
+    bool interleaved = false;
+    for (const auto &event : plan.issue_events) {
         bool issued = false;
-        if ((event & 1U) == 0) {
-            seen_address[store] = true;
+        switch (event.kind) {
+        case DependencyIssueKind::address:
             issued = environment.issue_store_address_until_tlb_hit(
-                stores[store], timeout);
-        } else {
-            data_first[store] = !seen_address[store];
-            issued = environment.issue_store_data(stores[store], timeout);
+                stores[event.index], timeout);
+            seen_address[event.index] = issued;
+            break;
+        case DependencyIssueKind::data:
+            data_first[event.index] = !seen_address[event.index];
+            issued = environment.issue_store_data(stores[event.index], timeout);
+            seen_data[event.index] = issued;
+            break;
+        case DependencyIssueKind::load: {
+            // Addresses are known, but data can still be unavailable. The
+            // expected bytes include every older store regardless of arrival.
+            if (!std::all_of(seen_address.begin(), seen_address.begin() + plan.older.size(),
+                    [](bool seen) { return seen; })) {
+                phase += ":load-before-older-address";
+                return false;
+            }
+            issued = environment.issue_load(loads[event.index], timeout);
+            if (issued) {
+                const bool early = std::find(seen_address.begin(), seen_address.end(), false) != seen_address.end() ||
+                    std::find(seen_data.begin(), seen_data.end(), false) != seen_data.end();
+                unsigned pending_sources = 0;
+                const auto &load = plan.loads[event.index];
+                for (unsigned store = 0; store < plan.older.size(); ++store) {
+                    const auto &source = plan.older[store];
+                    pending_sources += !seen_data[store] &&
+                        source.offset < load.offset + load.width() &&
+                        load.offset < source.offset + source.width;
+                }
+                coverage.scalar_dependency_interleaving[0] += early;
+                coverage.scalar_dependency_interleaving[1] += pending_sources != 0;
+                coverage.scalar_dependency_interleaving[2] += pending_sources > 1;
+                interleaved |= early;
+            }
+            break;
         }
-        if (!issued || !environment.run_cycles(plan.event_delays[index])) {
+        }
+        if (!issued || !environment.run_cycles(event.delay) ||
+            environment.sq_dequeued() != sq_before) {
+            phase += ":operand-issue-or-premature-retirement";
             return false;
         }
     }
-    if (!environment.run_until_store_complete(timeout) ||
-        environment.sq_dequeued() != sq_before) {
-        phase += ":premature-store-retirement";
-        return false;
-    }
-    // Every older address and data operand is known, so the expected value
-    // is independent of whether hardware forwards all, some or no bytes.
-    for (unsigned index : plan.load_order) {
-        if (!environment.issue_load(loads[index], timeout) ||
-            !environment.run_cycles(random() % 8U)) {
-            return false;
-        }
-    }
+    coverage.scalar_dependency_interleaving[3] += interleaved;
     if (!environment.run_until_all_complete(timeout) ||
         environment.sq_dequeued() != sq_before) {
         phase += ":load-completion";
