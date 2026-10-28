@@ -40,17 +40,21 @@ import xiangshan.XSModule
  * used to update the entry's wayMask and wayData when hit the same entry
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
+ * @param hasLookup Register the lookup set index and return matching shadow entries in the following cycle
+ * @param hasUsefulCnt Train a second counter and track entry/useful SRAM writes separately
  * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:        T,
-    numEntries: Int = 1,
-    numPorts:   Int = 1,
-    numWays:    Int = 1,
-    hasCnt:     Boolean = false,
-    hasWayMask: Boolean = false,
-    hasFlush:   Boolean = false,
-    nameSuffix: String = ""
+    gen:          T,
+    numEntries:   Int = 1,
+    numPorts:     Int = 1,
+    numWays:      Int = 1,
+    hasCnt:       Boolean = false,
+    hasWayMask:   Boolean = false,
+    hasFlush:     Boolean = false,
+    hasLookup:    Boolean = false,
+    hasUsefulCnt: Boolean = false,
+    nameSuffix:   String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
@@ -63,8 +67,19 @@ class WriteBuffer[T <: WriteReqBundle](
     val overwrite: Vec[Bool]         = Output(Vec(numPorts, Bool()))
     val takenMask: Option[Vec[Bool]] = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
     val flush:     Option[Bool]      = Option.when(hasFlush)(Input(Bool()))
+
+    val lookupSetIdx: Option[UInt]          = Option.when(hasLookup)(Input(UInt(gen.setIdx.getWidth.W)))
+    val lookup:       Option[Vec[Valid[T]]] = Option.when(hasLookup)(Output(Vec(numPorts, Valid(gen))))
+    val entryDirty:   Option[Vec[Bool]]     = Option.when(hasUsefulCnt)(Output(Vec(numPorts, Bool())))
+    val usefulDirty:  Option[Vec[Bool]]     = Option.when(hasUsefulCnt)(Output(Vec(numPorts, Bool())))
+    // Clear only the useful state, keeping entry updates and lookup identities intact.
+    val resetUseful: Option[Bool] = Option.when(hasUsefulCnt)(Input(Bool()))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
+
+  require(!hasUsefulCnt || (hasCnt && io.write.head.bits.cnt.isDefined && io.write.head.bits.compareBits.isDefined &&
+    io.write.head.bits.usefulCnt.isDefined && io.write.head.bits.usefulInc.isDefined &&
+    io.write.head.bits.isAllocation.isDefined))
 
   private val namePrefix = s"WriteBuffer_${nameSuffix}"
 
@@ -90,6 +105,28 @@ class WriteBuffer[T <: WriteReqBundle](
   private val nextDirty       = WireInit(dirty)
   private val nextEntries     = WireInit(entries)
   private val nextShadowValid = WireInit(shadowValid)
+  private val entryDirty = Option.when(hasUsefulCnt)(
+    RegInit(VecInit.fill(numPorts)(VecInit.fill(numEntries)(false.B)))
+  )
+  private val usefulDirty = Option.when(hasUsefulCnt)(
+    RegInit(VecInit.fill(numPorts)(VecInit.fill(numEntries)(false.B)))
+  )
+  private val nextEntryDirty  = entryDirty.map(WireInit(_))
+  private val nextUsefulDirty = usefulDirty.map(WireInit(_))
+
+  if (hasLookup) {
+    // Register only the address. The following cycle searches the current shadow state,
+    // including updates accepted at the same edge as this lookup request.
+    val lookupSetIdxReg = RegNext(io.lookupSetIdx.get, 0.U)
+    io.lookup.get.zipWithIndex.foreach { case (lookupEntry, portIdx) =>
+      val hitMask = VecInit(entries(portIdx).zip(shadowValid(portIdx)).map { case (entry, valid) =>
+        valid && entry.setIdx === lookupSetIdxReg
+      })
+      assert(PopCount(hitMask) <= 1.U, "WriteBuffer lookup must match at most one entry per row")
+      lookupEntry.valid := hitMask.reduce(_ || _)
+      lookupEntry.bits  := Mux1H(hitMask, entries(portIdx))
+    }
+  }
 
   private val writePortValid = VecInit(Seq.fill(numPorts)(false.B))
   private val writePortBits  = VecInit(Seq.fill(numPorts)(0.U.asTypeOf(gen.cloneType)))
@@ -115,6 +152,10 @@ class WriteBuffer[T <: WriteReqBundle](
     val drainIdx = PriorityEncoder(dirty(rowIdx))
     when(io.read(rowIdx).fire) {
       nextDirty(rowIdx)(drainIdx) := false.B
+      if (hasUsefulCnt) {
+        nextEntryDirty.get(rowIdx)(drainIdx)  := false.B
+        nextUsefulDirty.get(rowIdx)(drainIdx) := false.B
+      }
     }
   }
 
@@ -195,35 +236,65 @@ class WriteBuffer[T <: WriteReqBundle](
         nextDirty(portIdx)(victim)       := true.B
         writeTouchVec(portIdx).valid     := true.B
         writeTouchVec(portIdx).bits      := victim
+        if (hasUsefulCnt) {
+          // A miss has no reliable copy of the SRAM contents to compare against.
+          nextEntryDirty.get(portIdx)(victim)  := true.B
+          nextUsefulDirty.get(portIdx)(victim) := true.B
+        }
       }
 
       // if hit need to update the entry
       when(hit) {
         hitTouchVec(rowIdx)(hitIdx).valid := hit
         hitTouchVec(rowIdx)(hitIdx).bits  := hitIdx
-        val mergedEntry =
-          if (hasWayMask) mergeSameWay(entries(rowIdx)(hitIdx), io.write(portIdx).bits) else io.write(portIdx).bits
-        when(hitNotWritten) {
-          nextEntries(rowIdx)(hitIdx)     := mergedEntry
+        if (hasUsefulCnt) {
+          val old      = entries(rowIdx)(hitIdx)
+          val updated  = WireInit(io.write(portIdx).bits)
+          val allocate = io.write(portIdx).bits.isAllocation.get
+          updated.cnt.get := Mux(
+            allocate,
+            io.write(portIdx).bits.cnt.get,
+            old.cnt.get.getUpdate(io.takenMask.get(portIdx))
+          )
+          updated.usefulCnt.get := Mux(
+            allocate,
+            io.write(portIdx).bits.usefulCnt.get,
+            old.usefulCnt.get.getIncrease(en = io.write(portIdx).bits.usefulInc.get)
+          )
+
+          val entryChanged  = old.compareBits.get =/= updated.compareBits.get
+          val usefulChanged = old.usefulCnt.get =/= updated.usefulCnt.get
+          val drained       = io.read(rowIdx).fire && PriorityEncoder(dirty(rowIdx)) === hitIdx
+          nextEntries(rowIdx)(hitIdx)     := updated
           nextShadowValid(rowIdx)(hitIdx) := true.B
-          nextDirty(rowIdx)(hitIdx)       := true.B
-        }.elsewhen(hitWritten) {
-          val entryCompareBits  = entries(rowIdx)(hitIdx).compareBits
-          val mergedCompareBits = mergedEntry.compareBits
-          val entryChange = if (entryCompareBits.isDefined) {
-            entryCompareBits.get =/= mergedCompareBits.get
-          } else { entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt }
-          when(entryChange) {
-            nextDirty(rowIdx)(hitIdx)       := true.B
+          // A concurrent drain writes the old snapshot; retain only newly changed fields.
+          nextEntryDirty.get(rowIdx)(hitIdx)  := (entryDirty.get(rowIdx)(hitIdx) && !drained) || entryChanged
+          nextUsefulDirty.get(rowIdx)(hitIdx) := (usefulDirty.get(rowIdx)(hitIdx) && !drained) || usefulChanged
+        } else {
+          val mergedEntry =
+            if (hasWayMask) mergeSameWay(entries(rowIdx)(hitIdx), io.write(portIdx).bits) else io.write(portIdx).bits
+          when(hitNotWritten) {
             nextEntries(rowIdx)(hitIdx)     := mergedEntry
             nextShadowValid(rowIdx)(hitIdx) := true.B
+            nextDirty(rowIdx)(hitIdx)       := true.B
+          }.elsewhen(hitWritten) {
+            val entryCompareBits  = entries(rowIdx)(hitIdx).compareBits
+            val mergedCompareBits = mergedEntry.compareBits
+            val entryChange = if (entryCompareBits.isDefined) {
+              entryCompareBits.get =/= mergedCompareBits.get
+            } else { entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt }
+            when(entryChange) {
+              nextDirty(rowIdx)(hitIdx)       := true.B
+              nextEntries(rowIdx)(hitIdx)     := mergedEntry
+              nextShadowValid(rowIdx)(hitIdx) := true.B
+            }
           }
         }
       }
 
       // If the write request has counter need update counter
       val temporarily = WireInit(io.write(portIdx).bits)
-      if (hasCnt) {
+      if (hasCnt && !hasUsefulCnt) {
         val takenMask = io.takenMask.getOrElse(VecInit.fill(numPorts)(false.B))
         when(hit) {
           // If a write request hits an entry, update its counter using 'taken'
@@ -258,6 +329,12 @@ class WriteBuffer[T <: WriteReqBundle](
 
     io.read(nRows).valid := !emptyVec(nRows)
     io.read(nRows).bits  := entries(nRows)(readIdx)
+    if (hasUsefulCnt) {
+      io.entryDirty.get(nRows)  := entryDirty.get(nRows)(readIdx)
+      io.usefulDirty.get(nRows) := usefulDirty.get(nRows)(readIdx)
+      XSPerfAccumulate(s"${namePrefix}_port${nRows}_entry_dirty", PopCount(entryDirty.get(nRows)))
+      XSPerfAccumulate(s"${namePrefix}_port${nRows}_useful_dirty", PopCount(usefulDirty.get(nRows)))
+    }
 
     val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
     replacerWay(nRows) := replacer.way
@@ -266,6 +343,10 @@ class WriteBuffer[T <: WriteReqBundle](
       // Discard all pending SRAM writes while retaining the shadow entries.
       for (i <- 0 until numEntries) {
         nextDirty(nRows)(i) := false.B
+        if (hasUsefulCnt) {
+          nextEntryDirty.get(nRows)(i)  := false.B
+          nextUsefulDirty.get(nRows)(i) := false.B
+        }
       }
     }
     XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
@@ -278,6 +359,17 @@ class WriteBuffer[T <: WriteReqBundle](
     )
   }
 
+  if (hasUsefulCnt) {
+    for (row <- 0 until numPorts; slot <- 0 until numEntries) {
+      when(io.resetUseful.get) {
+        nextEntries(row)(slot).usefulCnt.get.value := 0.U
+        nextUsefulDirty.get(row)(slot)             := false.B
+      }
+      nextDirty(row)(slot) := nextEntryDirty.get(row)(slot) || nextUsefulDirty.get(row)(slot)
+    }
+    entryDirty.get  := nextEntryDirty.get
+    usefulDirty.get := nextUsefulDirty.get
+  }
   dirty       := nextDirty
   entries     := nextEntries
   shadowValid := nextShadowValid

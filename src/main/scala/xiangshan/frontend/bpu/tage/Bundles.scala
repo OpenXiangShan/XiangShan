@@ -57,6 +57,11 @@ class TageEntry(implicit p: Parameters) extends TageBundle {
   val takenCtr: SaturateCounter = TakenCounter()
 }
 
+class TageEntryWithUseful(implicit p: Parameters) extends TageBundle {
+  val entry:     TageEntry       = new TageEntry
+  val usefulCtr: SaturateCounter = UsefulCounter()
+}
+
 class TagePrediction(implicit p: Parameters) extends TageBundle {
   val takenVec: Vec[Valid[Bool]] = Vec(NumBtbResultEntries, Valid(Bool()))
   // Fast s2 path: raw provider result, without alt/base selection.
@@ -88,27 +93,29 @@ class TableReadResp(implicit p: Parameters, info: TageTableInfo) extends TageBun
   val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
 }
 
-class EntrySramWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle with HasTageParameters {
-  val setIdx:       UInt                    = UInt(SetIdxWidth.W)
-  val entry:        TageEntry               = new TageEntry
-  override def tag: Option[UInt]            = Some(entry.tag)
-  override def cnt: Option[SaturateCounter] = Some(entry.takenCtr)
-}
+class TageWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle with HasTageParameters {
+  val setIdx:    UInt                = UInt(SetIdxWidth.W)
+  val data:      TageEntryWithUseful = new TageEntryWithUseful
+  val incUseful: Bool                = Bool()
+  val allocate:  Bool                = Bool()
 
-class UsefulCtrSramWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val setIdx:    UInt            = UInt(SetIdxWidth.W)
-  val usefulCtr: SaturateCounter = UsefulCounter()
+  override def tag:          Option[UInt]            = Some(data.entry.tag)
+  override def cnt:          Option[SaturateCounter] = Some(data.entry.takenCtr)
+  override def compareBits:  Option[UInt]            = Some(data.entry.asUInt)
+  override def usefulCnt:    Option[SaturateCounter] = Some(data.usefulCtr)
+  override def usefulInc:    Option[Bool]            = Some(incUseful)
+  override def isAllocation: Option[Bool]            = Some(allocate)
 }
 
 class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val setIdx:          UInt                 = UInt(SetIdxWidth.W)
-  val bankMask:        UInt                 = UInt(NumBanks.W)
-  val wayMask:         UInt                 = UInt(NumWays.W)
-  val writeEntryEn:    Vec[Bool]            = Vec(NumWays, Bool())
-  val writeUsefulEn:   Vec[Bool]            = Vec(NumWays, Bool())
-  val actualTakenMask: Vec[Bool]            = Vec(NumWays, Bool())
-  val entries:         Vec[TageEntry]       = Vec(NumWays, new TageEntry)
-  val usefulCtrs:      Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
+  val setIdx:          UInt      = UInt(SetIdxWidth.W)
+  val bankMask:        UInt      = UInt(NumBanks.W)
+  val wayMask:         UInt      = UInt(NumWays.W)
+  val actualTakenMask: Vec[Bool] = Vec(NumWays, Bool())
+  val incUsefulMask:   Vec[Bool] = Vec(NumWays, Bool())
+  val allocateMask:    Vec[Bool] = Vec(NumWays, Bool())
+  // Updated snapshots are used on a buffer miss; hits train the current buffered counters.
+  val entries: Vec[TageEntryWithUseful] = Vec(NumWays, new TageEntryWithUseful)
 }
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
@@ -122,6 +129,7 @@ class TageMetaEntry(implicit p: Parameters) extends TageBundle {
   val altTableIdx:       UInt            = UInt(TableIdxWidth.W)
   val altWayIdx:         UInt            = UInt(MaxWayIdxWidth.W)
   val altTakenCtr:       SaturateCounter = TakenCounter()
+  val altUsefulCtr:      SaturateCounter = UsefulCounter()
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
@@ -161,6 +169,7 @@ class TrainInfo(implicit p: Parameters) extends TageBundle {
   val providerEntry:        TageEntry       = new TageEntry
   val providerOldUsefulCtr: SaturateCounter = UsefulCounter()
   val providerNewUsefulCtr: SaturateCounter = UsefulCounter()
+  val incProviderUseful:    Bool            = Bool()
 
   val hasAlt:          Bool            = Bool()
   val useAlt:          Bool            = Bool()

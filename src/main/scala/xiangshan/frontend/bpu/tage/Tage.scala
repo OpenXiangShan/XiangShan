@@ -190,6 +190,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.meta.entries(i).altTableIdx       := OHToUInt(altTableOH)
     io.meta.entries(i).altWayIdx         := OHToUInt(alt.hitWayMaskOH)
     io.meta.entries(i).altTakenCtr       := alt.takenCtr
+    io.meta.entries(i).altUsefulCtr      := alt.usefulCtr
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_table",
@@ -390,8 +391,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       alt.hitWayMaskOH := Mux(meta.hasAlt, UIntToOH(meta.altWayIdx, MaxNumWays), 0.U)
       alt.tag          := t2_rawTag(meta.altTableIdx) ^ position
       alt.takenCtr     := meta.altTakenCtr
-      // Alternate training never writes useful SRAM. Its useful counter is unavailable on the meta path.
-      alt.usefulCtr := UsefulCounter.Zero
+      alt.usefulCtr    := meta.altUsefulCtr
     }.otherwise { // use result from sram read resp
       hasProvider     := hitTableMask.reduce(_ || _)
       providerTableOH := getLongestHistTableOH(hitTableMask).asUInt
@@ -450,6 +450,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trainInfo.providerEntry.takenCtr := providerNewTakenCtr
     trainInfo.providerOldUsefulCtr   := provider.usefulCtr
     trainInfo.providerNewUsefulCtr   := providerNewUsefulCtr
+    trainInfo.incProviderUseful      := incProviderUsefulCtr
 
     trainInfo.hasAlt            := hasAlt
     trainInfo.useAlt            := useAlt
@@ -573,11 +574,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     implicit val info: TageTableInfo = TableInfos(tableIdx)
 
     val writeWayMask    = Wire(Vec(NumWays, Bool()))
-    val writeEntryEn    = Wire(Vec(NumWays, Bool()))
-    val writeUsefulEn   = Wire(Vec(NumWays, Bool()))
-    val writeEntries    = Wire(Vec(NumWays, new TageEntry))
-    val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
+    val writeEntries    = Wire(Vec(NumWays, new TageEntryWithUseful))
     val actualTakenMask = Wire(Vec(NumWays, Bool()))
+    val incUsefulMask   = Wire(Vec(NumWays, Bool()))
+    val allocateMask    = Wire(Vec(NumWays, Bool()))
 
     (0 until NumWays).foreach { wayIdx =>
       val (providerWriteCtr, providerWriteUseful, altWriteCtr) = t3_trainInfoVec.map { info =>
@@ -606,28 +606,27 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
       val updateEn                = hitProvider || hitAlt
       val updateEntry             = Mux(hitProvider, providerInfo.providerEntry, altInfo.altEntry)
-      val updateUsefulCtr         = providerInfo.providerNewUsefulCtr
+      val updateUsefulCtr         = Mux(hitProvider, providerInfo.providerNewUsefulCtr, altInfo.altOldUsefulCtr)
       val updateBranchActualTaken = Mux(hitProvider, providerInfo.actualTaken, altInfo.actualTaken)
 
       val allocateEn = t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
 
-      writeWayMask(wayIdx)    := updateEn || allocateEn
-      writeEntryEn(wayIdx)    := providerWriteCtr.reduce(_ || _) || hitAlt || allocateEn
-      writeUsefulEn(wayIdx)   := providerWriteUseful.reduce(_ || _) || allocateEn
-      writeEntries(wayIdx)    := Mux(allocateEn, t3_allocateEntry, updateEntry)
-      writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, updateUsefulCtr)
-      actualTakenMask(wayIdx) := Mux(allocateEn, t3_allocateBranch.bits.taken, updateBranchActualTaken)
+      writeWayMask(wayIdx)           := updateEn || allocateEn
+      writeEntries(wayIdx).entry     := Mux(allocateEn, t3_allocateEntry, updateEntry)
+      writeEntries(wayIdx).usefulCtr := Mux(allocateEn, UsefulCounter.Init, updateUsefulCtr)
+      actualTakenMask(wayIdx)        := Mux(allocateEn, t3_allocateBranch.bits.taken, updateBranchActualTaken)
+      incUsefulMask(wayIdx)          := !allocateEn && hitProvider && providerInfo.incProviderUseful
+      allocateMask(wayIdx)           := allocateEn
     }
 
     table.io.writeReq.valid                := t3_fire && writeWayMask.reduce(_ || _)
     table.io.writeReq.bits.setIdx          := t3_setIdx(tableIdx)
     table.io.writeReq.bits.bankMask        := t3_bankMask(tableIdx)
     table.io.writeReq.bits.wayMask         := writeWayMask.asUInt
-    table.io.writeReq.bits.writeEntryEn    := writeEntryEn
-    table.io.writeReq.bits.writeUsefulEn   := writeUsefulEn
     table.io.writeReq.bits.entries         := writeEntries
-    table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
     table.io.writeReq.bits.actualTakenMask := actualTakenMask
+    table.io.writeReq.bits.incUsefulMask   := incUsefulMask
+    table.io.writeReq.bits.allocateMask    := allocateMask
 
     table.io.usefulResetStart := t3_usefulResetStart
   }

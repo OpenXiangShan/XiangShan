@@ -86,36 +86,24 @@ class TageTable(
   io.usefulResetInFlight := usefulResetInFlightMask.reduce(_ || _)
 
   private val readDuringUsefulReset = io.readReq.map { readReq =>
-    (0 until NumBanks).map { bankIdx =>
-      readReq.valid && readReq.bits.bankMask(bankIdx) && usefulResetInFlightMask(bankIdx)
-    }.reduce(_ || _)
+    readReq.valid && (io.usefulResetStart || (readReq.bits.bankMask & usefulResetInFlightMask.asUInt).orR)
   }
 
-  // use a write buffer to store a entrySram write request
-  private val entryWriteBuffers =
-    Seq.tabulate(NumBanks) { bankIdx =>
-      Module(new WriteBuffer(
-        new EntrySramWriteReq,
-        WriteBufferSize,
-        numPorts = NumWays,
-        hasCnt = true,
-        nameSuffix = s"tageTable${tableIdx}_${bankIdx}"
-      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
-    }
-
-  // use a write buffer to store a usefulCtr write request
-  private val usefulCtrWriteBuffers =
+  // Cache the entry and its useful counter together for prediction and training bypass.
+  private val writeBuffers =
     Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>
-      Module(new Queue(
-        new UsefulCtrSramWriteReq,
-        entries = WriteBufferSize,
-        pipe = true,
-        flow = true,
-        hasFlush = true
-      )).suggestName(s"tage_useful_write_buffer_bank${bankIdx}_way${wayIdx}")
+      Module(new WriteBuffer(
+        new TageWriteReq,
+        WriteBufferSize,
+        numPorts = 1,
+        hasCnt = true,
+        hasLookup = true,
+        hasUsefulCnt = true,
+        nameSuffix = s"tage_table_${tableIdx}_${bankIdx}_way${wayIdx}"
+      ))
     }
 
-  // read sram
+  // read
   entrySram.zip(usefulCtrSram).zipWithIndex.foreach { case ((entryBank, usefulBank), bankIdx) =>
     val readValid = VecInit(
       io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx),
@@ -131,6 +119,10 @@ class TageTable(
       way.io.r.req.valid       := readValid.reduce(_ || _) && !usefulResetInFlightMask(bankIdx)
       way.io.r.req.bits.setIdx := readSetIdx
     }
+
+    // read write buffer
+    writeBuffers(bankIdx).foreach(buffer => buffer.io.lookupSetIdx.get := readSetIdx)
+
     assert(!(readValid(0) && readValid(1)), s"read conflict in tage_table_${tableIdx}_bank_${bankIdx}")
   }
 
@@ -139,42 +131,37 @@ class TageTable(
   private val writeReq      = RegEnable(io.writeReq.bits, io.writeReq.valid)
 
   // write to write buffer
-  entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
-    buffer.io.write.zipWithIndex.foreach { case (bufferIn, wayIdx) =>
+  writeBuffers.zipWithIndex.foreach { case (bankBuffers, bankIdx) =>
+    bankBuffers.zipWithIndex.foreach { case (buffer, wayIdx) =>
       val writeValid =
-        writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx) && writeReq.writeEntryEn(wayIdx)
-      bufferIn.valid       := writeValid
-      bufferIn.bits.setIdx := writeReq.setIdx
-      bufferIn.bits.entry  := writeReq.entries(wayIdx)
-    }
-    buffer.io.takenMask.get := writeReq.actualTakenMask
-  }
-
-  usefulCtrWriteBuffers.zipWithIndex.foreach { case (bankBuffer, bankIdx) =>
-    bankBuffer.zipWithIndex.foreach { case (wayBuffer, wayIdx) =>
-      val writeValid =
-        writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx) && writeReq.writeUsefulEn(wayIdx)
-      wayBuffer.io.enq.valid          := writeValid && !io.usefulResetStart && !usefulResetInFlightMask(bankIdx)
-      wayBuffer.io.enq.bits.setIdx    := writeReq.setIdx
-      wayBuffer.io.enq.bits.usefulCtr := writeReq.usefulCtrs(wayIdx)
-      wayBuffer.io.flush.get          := io.usefulResetStart
+        writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx)
+      buffer.io.write.head.valid          := writeValid
+      buffer.io.write.head.bits.setIdx    := writeReq.setIdx
+      buffer.io.write.head.bits.data      := writeReq.entries(wayIdx)
+      buffer.io.write.head.bits.incUseful := writeReq.incUsefulMask(wayIdx)
+      buffer.io.write.head.bits.allocate  := writeReq.allocateMask(wayIdx)
+      buffer.io.takenMask.get.head        := writeReq.actualTakenMask(wayIdx)
+      buffer.io.resetUseful.get           := io.usefulResetStart || usefulResetInFlightMask(bankIdx)
     }
   }
 
-  // write entry to sram from write buffer
-  entrySram.zip(entryWriteBuffers).foreach { case (bank, buffer) =>
-    bank.zip(buffer.io.read).foreach { case (way, bufferOut) =>
-      way.io.w.apply(
-        bufferOut.valid && !way.io.r.req.valid,
-        bufferOut.bits.entry,
-        bufferOut.bits.setIdx,
-        1.U(1.W) // way mask
-      )
-      bufferOut.ready := way.io.w.req.ready && !way.io.r.req.valid
-    }
+  private val readBankMaskNext = io.readReq.map(req => RegEnable(req.bits.bankMask, req.valid))
+  private val readValidNext    = io.readReq.map(req => RegNext(req.valid, init = false.B))
+
+  // WriteBuffer registers the lookup address alongside the SRAM read request. Select
+  // its following-cycle result with the matching bank mask, without another data register.
+  private val readBypass = io.readReq.indices.map { i =>
+    VecInit((0 until NumWays).map { wayIdx =>
+      val validByBank = VecInit(writeBuffers.map(_(wayIdx).io.lookup.get.head.valid))
+      val entryByBank = writeBuffers.map(_(wayIdx).io.lookup.get.head.bits.data)
+      val bypass      = Wire(Valid(new TageEntryWithUseful))
+      bypass.valid := readValidNext(i) && Mux1H(readBankMaskNext(i), validByBank)
+      bypass.bits  := Mux1H(readBankMaskNext(i), entryByBank)
+      bypass
+    })
   }
 
-  usefulCtrSram.zip(usefulCtrWriteBuffers).zipWithIndex.foreach { case ((bank, bankBuffer), bankIdx) =>
+  usefulCtrSram.zipWithIndex.foreach { case (bank, bankIdx) =>
     when(io.usefulResetStart) {
       usefulResetInFlightMask(bankIdx) := true.B
       usefulResetSetIdx(bankIdx)       := 0.U
@@ -187,34 +174,59 @@ class TageTable(
       }
     }
 
-    bank.zip(bankBuffer).foreach { case (way, wayBuffer) =>
+    bank.zipWithIndex.foreach { case (way, wayIdx) =>
+      val entryWay         = entrySram(bankIdx)(wayIdx)
+      val buffer           = writeBuffers(bankIdx)(wayIdx)
+      val bufferOut        = buffer.io.read.head
+      val entryPending     = buffer.io.entryDirty.get.head
+      val usefulPending    = buffer.io.usefulDirty.get.head
       val usefulResetValid = io.usefulResetStart || usefulResetInFlightMask(bankIdx)
-      val usefulWriteValid = wayBuffer.io.deq.valid && !way.io.r.req.valid && !usefulResetValid
+
+      // Complete both pending writes together. An unchanged field does not occupy its SRAM port.
+      val entryReady  = !entryPending || (!entryWay.io.r.req.valid && entryWay.io.w.req.ready)
+      val usefulReady = !usefulPending || (!way.io.r.req.valid && way.io.w.req.ready && !usefulResetValid)
+      bufferOut.ready := entryReady && usefulReady
+
+      val entryWriteValid  = bufferOut.fire && entryPending
+      val usefulWriteValid = bufferOut.fire && usefulPending
+      entryWay.io.w.apply(
+        entryWriteValid,
+        bufferOut.bits.data.entry,
+        bufferOut.bits.setIdx,
+        1.U(1.W)
+      )
       way.io.w.apply(
         usefulResetValid || usefulWriteValid,
-        Mux(usefulResetValid, UsefulCounter.Zero, wayBuffer.io.deq.bits.usefulCtr),
-        Mux(usefulResetValid, usefulResetSetIdx(bankIdx), wayBuffer.io.deq.bits.setIdx),
+        Mux(usefulResetValid, UsefulCounter.Zero, bufferOut.bits.data.usefulCtr),
+        Mux(usefulResetValid, usefulResetSetIdx(bankIdx), bufferOut.bits.setIdx),
         1.U(1.W) // way mask
       )
-      wayBuffer.io.deq.ready := way.io.w.req.ready && !way.io.r.req.valid && !usefulResetValid
+      XSPerfAccumulate(s"entry_sram_write_bank${bankIdx}_way${wayIdx}", entryWay.io.w.req.fire)
+      XSPerfAccumulate(s"useful_sram_write_bank${bankIdx}_way${wayIdx}", way.io.w.req.fire && !usefulResetValid)
     }
   }
 
   io.readResp.zipWithIndex.foreach { case (resp, i) =>
-    val readBankMaskNext          = RegEnable(io.readReq(i).bits.bankMask, io.readReq(i).valid)
+    // Keep this aligned with the request: the final reset write can clear the mask before its response.
     val readDuringUsefulResetNext = RegEnable(readDuringUsefulReset(i), io.readReq(i).valid)
-
-    resp.entries := Mux1H(
-      readBankMaskNext,
+    val sramEntries = Mux1H(
+      readBankMaskNext(i),
       entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
     )
+    val sramUsefulCtrs = Mux1H(
+      readBankMaskNext(i),
+      usefulCtrSram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
+    )
+
+    resp.entries := VecInit(sramEntries.zip(readBypass(i)).map { case (sramEntry, bypassEntry) =>
+      Mux(bypassEntry.valid, bypassEntry.bits.entry, sramEntry)
+    })
     resp.usefulCtrs := Mux(
       readDuringUsefulResetNext,
       VecInit.fill(NumWays)(UsefulCounter.Zero),
-      Mux1H(
-        readBankMaskNext,
-        usefulCtrSram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
-      )
+      VecInit(sramUsefulCtrs.zip(readBypass(i)).map { case (sramUsefulCtr, bypassEntry) =>
+        Mux(bypassEntry.valid, bypassEntry.bits.usefulCtr, sramUsefulCtr)
+      })
     )
   }
 
@@ -225,17 +237,8 @@ class TageTable(
   XSPerfAccumulate("predict_read", io.readReq(0).valid)
   XSPerfAccumulate("train_read", io.readReq(1).valid)
   XSPerfAccumulate("write", io.writeReq.valid)
-  XSPerfAccumulate(
-    s"tage_write_entry_${tableIdx}",
-    Mux(io.writeReq.valid, PopCount(io.writeReq.bits.writeEntryEn), 0.U)
-  )
-  XSPerfAccumulate(
-    s"tage_write_useful_${tableIdx}",
-    Mux(io.writeReq.valid, PopCount(io.writeReq.bits.writeUsefulEn), 0.U)
-  )
   XSPerfAccumulate(s"tage_write_total_${tableIdx}", Mux(io.writeReq.valid, PopCount(io.writeReq.bits.wayMask), 0.U))
-  XSPerfAccumulate(
-    "overwrite",
-    PopCount(entryWriteBuffers.flatMap(_.io.overwrite))
-  )
+  XSPerfAccumulate("overwrite", PopCount(writeBuffers.flatMap(_.flatMap(_.io.overwrite))))
+  XSPerfAccumulate("predict_read_bypass_hit", PopCount(readBypass(0).map(_.valid)))
+  XSPerfAccumulate("train_read_bypass_hit", PopCount(readBypass(1).map(_.valid)))
 }
