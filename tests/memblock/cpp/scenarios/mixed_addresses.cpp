@@ -65,14 +65,14 @@ unsigned long long MixedScenario::hypervisor_pmp_physical_base(unsigned spvp,
 
 std::uint64_t MixedScenario::action_cacheable_address(ActionWindow &window,
     unsigned alignment,
-    std::optional<bool> force_misaligned)
+    std::optional<bool> force_misaligned, bool allow_permuted)
 {
     auto &translation = window.translation;
     auto &leaf = window.leaf;
     auto &leaf_addressed = window.leaf_addressed;
     leaf_addressed = true;
     return constrained_cacheable_address(
-        alignment, translation, leaf, force_misaligned);
+        alignment, translation, leaf, force_misaligned, allow_permuted);
 }
 
 } // namespace memblock::scenarios::mixed

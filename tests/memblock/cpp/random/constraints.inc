@@ -239,6 +239,7 @@ struct RandomConstraints {
     unsigned vector_index_repeat_per_mille = 250;
     unsigned scalar_unresolved_per_mille = 100;
     unsigned scalar_unresolved_conflict_per_mille = 500;
+    unsigned translation_permuted_per_mille = 500;
     memblock::ResponseLatencyProfiles response_latency{};
 
     static RandomConstraints preset(std::string_view name)
@@ -338,6 +339,7 @@ struct RandomConstraints {
                 .bank_conflict_per_mille = 0,
                 .scalar_dependency_per_mille = 0,
                 .scalar_unresolved_per_mille = 0,
+                .translation_permuted_per_mille = 0,
                 .response_latency = {},
             };
         }
@@ -1039,6 +1041,10 @@ struct RandomConstraints {
         }
         if (key == "g-sv48x4") {
             g_mode_weights[1] = parsed;
+            return;
+        }
+        if (key == "translation-permuted") {
+            translation_permuted_per_mille = parsed;
             return;
         }
         if (key == "translation-stage1-napot") {
@@ -1787,7 +1793,8 @@ struct RandomConstraints {
             scalar_dependency_per_mille > 1000 ||
             vector_index_repeat_per_mille > 1000 ||
             scalar_unresolved_per_mille > 1000 ||
-            scalar_unresolved_conflict_per_mille > 1000) {
+            scalar_unresolved_conflict_per_mille > 1000 ||
+            translation_permuted_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
         }
@@ -2960,7 +2967,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=56 constraints=" << name
+        stream << "constraint_schema=57 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3140,6 +3147,7 @@ struct RandomConstraints {
                << " target_vector_index_repeat=" << vector_index_repeat_per_mille
                << " target_scalar_unresolved=" << scalar_unresolved_per_mille
                << " target_scalar_unresolved_conflict=" << scalar_unresolved_conflict_per_mille
+               << " target_translation_permuted=" << translation_permuted_per_mille
                << " target_latency=" << latency_name(response_latency.dcache)
                << ',' << latency_name(response_latency.ptw) << ','
                << latency_name(response_latency.uncache);

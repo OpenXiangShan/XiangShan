@@ -43,7 +43,9 @@ void MixedScenario::initialize_memory()
     environment.memory().define_seeded_random(
         bare_base, 0x20000, options.seed ^ 0x19U);
     environment.memory().define_seeded_random(
-        cache0_base, 0x90000, options.seed ^ 0x43U);
+        cache0_base, 0x93000, options.seed ^ 0x43U);
+    environment.memory().define_seeded_random(
+        permuted_physical_base, OrdinaryPageMappings::span, options.seed ^ 0xa7U);
     environment.memory().define_seeded_random(
         cache1_base, 0x10000, options.seed ^ 0x71U);
     for (unsigned pbmt = 0; pbmt < hypervisor_pbmt_mappings.size(); ++pbmt) {

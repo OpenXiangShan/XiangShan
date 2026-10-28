@@ -18,6 +18,18 @@ None.
 
 ## Current Changes Qualified Below
 
+- `translation-permuted` adds structural host/VS/G page randomization to the
+  canonical ordinary scalar/vector builders. Each seed permutes 132 pages
+  within four cache colours; nested expectations compose declared VS/G maps.
+  Per-byte expectations, store reference updates and physical final-word
+  registration support discontinuous adjacent physical pages. Global fences
+  cover root/mode reuse, and context entry drains SBuffer. The manager's missing
+  cross-colour alias directory/dirty-data recall is an explicit input boundary.
+  The mixed tail now uses a distinct non-memory branch ROB anchor, observed
+  cancellation and same-pdest refetch; scalar/atomic and readback integer
+  destinations stay in 1..223. Six standalone oracle tests check replay,
+  structural diversity, wrong-page/contiguous-PA substitutions and extracted
+  record paths; runtime evidence is required for commit/issue integration.
 - `scalar-unresolved` adds randomized one-store/one-load delayed-address
   windows with partial byte conflicts and same-region disjoint controls.
   Strict provisional loads use the pre-store snapshot; conflicts require the
@@ -73,7 +85,8 @@ None.
   two regressions plus a benchmark with identical scenario/seed/index and an
   aggregate-path rerun.
 - Constrained-random finishes with a drain and an independent word readback of
-  cacheable identity-mapped committed stores/atomics; permitted/aligned
+  cacheable identity-mapped store/atomic and declared permuted-page store effects;
+  permitted/aligned
   cacheable hypervisor stores add a same-context HLV readback.
 - DCache E GrantAck is admitted only after a first Grant/GrantData D beat (or in
   that same cycle), with sink lifetime tracked through E.
@@ -172,7 +185,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 308 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 315 tests pass | Unit checks do not establish DUT functional coverage |
+| Ordinary nonidentity maps | Runtime-v4: 14/14 seeds pass 6400 actions; 4407 mapped samples across all six contexts/four kinds, 74 cross-page uops, 72 heterogeneous windows, 4180/4180 tracked final words | `build/memblock/nonidentity-20261029/{qualification-v4.json,runtime-v4}`; diverse, coverage/spec/corner, identity controls and reduced-shape mixed profiles; finite artifact verifiers accept. Four cache colours are preserved; zero runtime intra-element page splits, no dynamic PTE or cross-colour alias claim |
+| Nonidentity oracle mechanics | Six standalone tests pass; 128/128 seeded topologies and 768 distinct context maps sampled; wrong-page and contiguous-PA scalar/vector substitutions rejected | Production model/scoreboards plus extracted record-only paths; byte-crossing mechanics do not establish DUT crossing coverage. Full unit count is 315 |
+| Nonidentity adjacent directed checks | 16/16 selected scalar/FP, forwarding, misalignment, vector/segment, translation/fault, CBO.ZERO and atomic scenarios pass | Runtime-v4, native command/log evidence at `build/memblock/nonidentity-20261029/directed-v4`; this is a selected set, not the full catalog |
 | Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
 | Unresolved-address focused | Corrected runtime-v4: 4/4 seeds 901..904 pass 128 actions each, with 504 windows and 260 correct-data refetches | `build/memblock/scalar-unresolved-20261029/focused-v4`; 244 disjoint-byte controls, all 504 committed store readbacks; zero observed LQ cancellations |
 | Unresolved-address controls | Conflict rate 0 and 1000 each pass 2×128 actions | `build/memblock/scalar-unresolved-20261029/{controls-v4,conflicts-v4}`; 252 disjoint controls and 252 matching redirect/return/refetch obligations; finite artifact verifiers accept |
@@ -249,6 +265,21 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+A fresh-context non-author review approves the bounded page-permutation
+implementation and the corrected tail branch/refetch/register-domain follow-up,
+with no blocking findings. The byte model uses immutable declared maps, and
+colour preservation holds for host and composed nested translations. A separate
+full-CPU/manager audit classifies an unqualified cross-colour stale refill as a
+manager ownership gap: the real L2 must Probe the old alias and use its returned
+data before granting another alias, while this UT manager directly serves
+backing memory. The scoped generator preserves colour and documents that limit;
+no CPU bug is claimed. The audit's redirect-producer and scalar-destination
+findings are resolved by the separate branch anchor and integer-domain bounds.
+Initial focused evidence had no runtime crossings; the retained current-runtime
+diverse campaign supplies crossing evidence, while intra-element page splits
+remain unit-only. Review artifacts:
+`build/memblock/nonidentity-20261029/{direction-review,store-legality-review}.txt`.
 
 A fresh-context non-author review approves the unresolved-address change after
 disposition of live-mapping reuse and free-list recovery findings. Warm and

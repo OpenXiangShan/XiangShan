@@ -531,14 +531,14 @@ auto Environment::Impl::commit_store(const StoreTransaction &transaction,
         // must retain observable final bytes, so keep those lines tracked.
         if (transaction.op == StoreOp::cbo_inval) {
             const std::uint64_t cmo_line =
-                transaction.oracle_address.value_or(transaction.address) &
+                reference_byte_address(transaction, transaction.address) &
                 ~std::uint64_t{63};
             discard_final_observation_range(cmo_line, 64U);
         }
         return true;
     }
-    const std::uint64_t raw_address = transaction.oracle_address.value_or(
-        transaction.address);
+    const std::uint64_t raw_address =
+        reference_byte_address(transaction, transaction.address);
     const std::uint64_t address = is_cbo_zero(transaction.op)
         ? raw_address & ~std::uint64_t{63}
         : raw_address;
@@ -546,16 +546,23 @@ auto Environment::Impl::commit_store(const StoreTransaction &transaction,
     // line, not a 128-byte scalar transfer.
     const unsigned bytes = scalar_store_bytes(transaction.op);
     for (unsigned byte = 0; byte < bytes; ++byte) {
-        memory_.write_reference_byte(
-            address + byte,
+        const auto physical = reference_byte_address(transaction,
+            (is_cbo_zero(transaction.op)
+                ? transaction.address & ~std::uint64_t{63}
+                : transaction.address) + byte);
+        memory_.write_reference_byte(physical,
             is_cbo_zero(transaction.op)
                 ? 0
                 : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
+        if (transaction.reference_pages) {
+            track_final_observation_bytes(physical, 1U, transaction.cacheable, true);
+        }
     }
-    track_final_observation_bytes(
-        address, bytes, transaction.cacheable,
-        !transaction.oracle_address ||
-            *transaction.oracle_address == transaction.address);
+    if (!transaction.reference_pages) {
+        track_final_observation_bytes(address, bytes, transaction.cacheable,
+            !transaction.oracle_address ||
+                *transaction.oracle_address == transaction.address);
+    }
     trace_reference_store(
         memory_, "store-commit", address, bytes, transaction.data,
         transaction.rob, transaction.rob_flag, transaction.sq,
@@ -598,8 +605,6 @@ auto Environment::Impl::commit_vector_store(const VectorMemoryTransaction &trans
         return false;
     }
     queues_.forget_vector_store(vector_store_key(transaction));
-    const std::uint64_t address = transaction.oracle_address.value_or(
-        transaction.address);
     const unsigned element_bytes = 1U << vector_data_eew(transaction);
     const unsigned elements = 16U >> vector_data_eew(transaction);
     const std::uint16_t active = active_vector_elements(transaction);
@@ -611,7 +616,7 @@ auto Environment::Impl::commit_vector_store(const VectorMemoryTransaction &trans
             vector_element_address(transaction, element);
         for (unsigned byte = 0; byte < element_bytes; ++byte) {
             memory_.write_reference_byte(
-                element_address + byte,
+                vector_byte_address(transaction, element, byte),
                 transaction.data[element * element_bytes + byte]);
         }
         std::ostringstream extra;
@@ -624,10 +629,18 @@ auto Environment::Impl::commit_vector_store(const VectorMemoryTransaction &trans
                 transaction.data[element * element_bytes + byte]}
                 << (8 * byte);
         }
-        track_final_observation_bytes(
-            element_address, element_bytes, transaction.cacheable,
-            !transaction.oracle_address ||
-                *transaction.oracle_address == transaction.address);
+        if (transaction.reference_pages) {
+            for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                track_final_observation_bytes(
+                    vector_byte_address(transaction, element, byte), 1U,
+                    transaction.cacheable, true);
+            }
+        } else {
+            track_final_observation_bytes(
+                vector_element_address(transaction, element), element_bytes,
+                transaction.cacheable, !transaction.oracle_address ||
+                    *transaction.oracle_address == transaction.address);
+        }
         trace_reference_store(
             memory_, "vstore-commit", element_address, element_bytes,
             element_data, transaction.rob, transaction.rob_flag,
@@ -641,29 +654,36 @@ auto Environment::Impl::record_committed_store(const StoreTransaction &transacti
     if (is_cmo(transaction.op)) {
         if (transaction.op == StoreOp::cbo_inval) {
             const std::uint64_t cmo_line =
-                transaction.oracle_address.value_or(transaction.address) &
+                reference_byte_address(transaction, transaction.address) &
                 ~std::uint64_t{63};
             discard_final_observation_range(cmo_line, 64U);
         }
         return;
     }
-    const std::uint64_t raw_address = transaction.oracle_address.value_or(
-        transaction.address);
+    const std::uint64_t raw_address =
+        reference_byte_address(transaction, transaction.address);
     const std::uint64_t address = is_cbo_zero(transaction.op)
         ? raw_address & ~std::uint64_t{63}
         : raw_address;
     const unsigned bytes = scalar_store_bytes(transaction.op);
     for (unsigned byte = 0; byte < bytes; ++byte) {
-        memory_.write_reference_byte(
-            address + byte,
+        const auto physical = reference_byte_address(transaction,
+            (is_cbo_zero(transaction.op)
+                ? transaction.address & ~std::uint64_t{63}
+                : transaction.address) + byte);
+        memory_.write_reference_byte(physical,
             is_cbo_zero(transaction.op)
                 ? 0
                 : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
+        if (transaction.reference_pages) {
+            track_final_observation_bytes(physical, 1U, transaction.cacheable, true);
+        }
     }
-    track_final_observation_bytes(
-        address, bytes, transaction.cacheable,
-        !transaction.oracle_address ||
-            *transaction.oracle_address == transaction.address);
+    if (!transaction.reference_pages) {
+        track_final_observation_bytes(address, bytes, transaction.cacheable,
+            !transaction.oracle_address ||
+                *transaction.oracle_address == transaction.address);
+    }
     trace_reference_store(
         memory_, "store-record", address, bytes, transaction.data,
         transaction.rob, transaction.rob_flag, transaction.sq,
@@ -696,7 +716,7 @@ auto Environment::Impl::record_committed_vector_store(const VectorMemoryTransact
         const std::uint64_t address = vector_element_address(transaction, element);
         for (unsigned byte = 0; byte < element_bytes; ++byte) {
             memory_.write_reference_byte(
-                address + byte,
+                vector_byte_address(transaction, element, byte),
                 transaction.data[element * element_bytes + byte]);
         }
         std::uint64_t element_data = 0;
@@ -705,10 +725,18 @@ auto Environment::Impl::record_committed_vector_store(const VectorMemoryTransact
                 transaction.data[element * element_bytes + byte]}
                 << (8 * byte);
         }
-        track_final_observation_bytes(
-            address, element_bytes, transaction.cacheable,
-            !transaction.oracle_address ||
-                *transaction.oracle_address == transaction.address);
+        if (transaction.reference_pages) {
+            for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                track_final_observation_bytes(
+                    vector_byte_address(transaction, element, byte), 1U,
+                    transaction.cacheable, true);
+            }
+        } else {
+            track_final_observation_bytes(
+                vector_element_address(transaction, element), element_bytes,
+                transaction.cacheable, !transaction.oracle_address ||
+                    *transaction.oracle_address == transaction.address);
+        }
         trace_reference_store(
             memory_, "vstore-record", address, element_bytes, element_data,
             transaction.rob, transaction.rob_flag, transaction.sq,

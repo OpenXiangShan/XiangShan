@@ -9,6 +9,7 @@ memblock::LoadTransaction MixedScenario::make_load(std::uint64_t address, memblo
     const std::uint64_t lq = lq_offset++;
     auto transaction = memblock::LoadTransaction{
         .address = address,
+        .reference_pages = reference_pages_for(address),
         .op = op,
         .rob = memblock::rob_pointer_value(rob),
         .rob_flag = memblock::rob_pointer_flag(rob),
@@ -16,7 +17,7 @@ memblock::LoadTransaction MixedScenario::make_load(std::uint64_t address, memblo
         .lq_flag = memblock::lq_pointer_flag(lq),
         .sq = memblock::sq_pointer_value(sq_offset),
         .sq_flag = memblock::sq_pointer_flag(sq_offset),
-        .pdest = static_cast<std::uint8_t>(1 + random() % 255),
+        .pdest = static_cast<std::uint8_t>(1 + random() % 223),
         .lane = lane,
     };
     transaction.predecode_rvc = (rob % 4U) == 0 || (random() & 3U) == 0;
@@ -44,6 +45,7 @@ memblock::StoreTransaction MixedScenario::make_store(std::uint64_t address, std:
     const std::uint64_t sq = sq_offset++;
     auto transaction = memblock::StoreTransaction{
         .address = address,
+        .reference_pages = reference_pages_for(address),
         .data = data,
         .op = op,
         .rob = memblock::rob_pointer_value(rob),
@@ -63,6 +65,7 @@ memblock::PrefetchTransaction MixedScenario::make_prefetch(std::uint64_t address
     const std::uint64_t lq = lq_offset++;
     return memblock::PrefetchTransaction{
         .address = address,
+        .reference_pages = reference_pages_for(address),
         .op = op,
         .rob = memblock::rob_pointer_value(rob),
         .rob_flag = memblock::rob_pointer_flag(rob),
@@ -93,6 +96,7 @@ memblock::VectorMemoryTransaction MixedScenario::make_vector(bool store, std::ui
     memblock::VectorMemoryTransaction transaction{
         .store = store,
         .address = address,
+        .reference_pages = reference_pages_for(address),
         .addressing = addressing,
         .eew = static_cast<std::uint8_t>(eew),
         .vl = static_cast<std::uint8_t>(16U >> eew),
@@ -131,7 +135,7 @@ memblock::AtomicTransaction MixedScenario::make_atomic(std::uint64_t address, me
         .rob_flag = memblock::rob_pointer_flag(rob),
         .sq = memblock::sq_pointer_value(sq_offset),
         .sq_flag = memblock::sq_pointer_flag(sq_offset),
-        .pdest = static_cast<std::uint8_t>(1 + random() % 255),
+        .pdest = static_cast<std::uint8_t>(1 + random() % 223),
         .address_lane = static_cast<unsigned>(random() % 2),
         .data_lane = static_cast<unsigned>(random() % 2),
     };
@@ -169,7 +173,7 @@ std::uint64_t MixedScenario::constrained_locality_line()
 std::uint64_t MixedScenario::constrained_cacheable_address(
     unsigned alignment, const TranslationContext &translation,
     const TranslationLeafTopology &leaf,
-    std::optional<bool> force_misaligned)
+    std::optional<bool> force_misaligned, bool allow_permuted)
 {
     std::uint64_t line = constrained_locality_line();
     std::uint64_t region_base = cache0_base + 0x10000;
@@ -203,6 +207,14 @@ std::uint64_t MixedScenario::constrained_cacheable_address(
         address += 1 + random() % (alignment - 1);
     } else {
         address += ((random() % 64) / alignment) * alignment;
+    }
+    const bool ordinary_4k = region_base == cache0_base + 0x10000 &&
+        translation.regime != RandomConstraints::translation_bare;
+    if (allow_permuted && ordinary_4k &&
+        constraints.translation_permuted_per_mille != 0 &&
+        random() % 1000U < constraints.translation_permuted_per_mille) {
+        address = OrdinaryPageMappings::virtual_base +
+            (address - (cache0_base + 0xf000));
     }
     return address;
 }
@@ -307,7 +319,7 @@ bool MixedScenario::issue_vector(
             continue;
         }
         const std::uint64_t address =
-            memblock::vector_element_address(transaction, element);
+            memblock::vector_element_virtual_address(transaction, element);
         requires_misaligned_head |= !transaction.store &&
             ((address & 0xfU) + element_bytes) > 16U;
         requires_store_pending |= transaction.store &&
@@ -445,10 +457,8 @@ std::array<unsigned char, 16> MixedScenario::overlay_vector_store(const memblock
         if (((store_active >> element) & 1U) == 0) {
             continue;
         }
-        const std::uint64_t address =
-            memblock::vector_element_address(store, element);
         for (unsigned byte = 0; byte < store_bytes; ++byte) {
-            forwarded[address + byte] =
+            forwarded[memblock::vector_byte_address(store, element, byte)] =
                 store.data[element * store_bytes + byte];
         }
     }
@@ -459,10 +469,9 @@ std::array<unsigned char, 16> MixedScenario::overlay_vector_store(const memblock
         if (((load_active >> element) & 1U) == 0) {
             continue;
         }
-        const std::uint64_t address =
-            memblock::vector_element_address(load, element);
         for (unsigned byte = 0; byte < load_bytes; ++byte) {
-            const auto value = forwarded.find(address + byte);
+            const auto value = forwarded.find(
+                memblock::vector_byte_address(load, element, byte));
             if (value != forwarded.end()) {
                 expected[element * load_bytes + byte] = value->second;
             }

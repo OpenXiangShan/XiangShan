@@ -454,7 +454,7 @@ void trace_store_issue(
     const char *kind, const StoreTransaction &transaction)
 {
     const std::uint64_t address =
-        transaction.oracle_address.value_or(transaction.address);
+        reference_byte_address(transaction, transaction.address);
     const unsigned bytes = scalar_store_bytes(transaction.op);
     if (!debug_trace::enabled_for(transaction.address, bytes) &&
         !debug_trace::enabled_for(address, bytes)) {

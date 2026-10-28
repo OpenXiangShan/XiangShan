@@ -483,7 +483,8 @@ bool MixedScenario::execute_scalar_store(ActionWindow &window)
         !environment.run_until_queues_retired(8192)) {
         return false;
     }
-    probe_candidate = transaction.address & ~std::uint64_t{63};
+    probe_candidate = memblock::reference_byte_address(
+        transaction, transaction.address) & ~std::uint64_t{63};
     ++coverage.cacheable;
 
     return true;
@@ -501,7 +502,9 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
         ~std::uint64_t{63};
     std::array<unsigned char, 64> snapshot{};
     for (unsigned byte = 0; byte < snapshot.size(); ++byte) {
-        snapshot[byte] = environment.memory().read_byte(base + byte);
+        const auto pages = reference_pages_for(base);
+        snapshot[byte] = environment.memory().read_byte(pages
+            ? pages->physical_address(base + byte) : base + byte);
     }
     auto plan = make_scalar_dependency_plan(random);
     if (plan.younger) {
@@ -638,7 +641,8 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
             std::count(sources.begin(), sources.end(), true) > 1;
     }
     coverage.cacheable += stores.size() + loads.size();
-    window.probe_candidate = base;
+    const auto pages = reference_pages_for(base);
+    window.probe_candidate = pages ? pages->physical_address(base) : base;
     ++actions; // One compound action; all accepted uops remain accounted.
     return true;
 }
@@ -654,7 +658,9 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
         random, constraints.scalar_unresolved_conflict_per_mille);
     std::array<unsigned char, 64> snapshot{};
     for (unsigned byte = 0; byte < snapshot.size(); ++byte) {
-        snapshot[byte] = environment.memory().read_byte(base + byte);
+        const auto pages = reference_pages_for(base);
+        snapshot[byte] = environment.memory().read_byte(pages
+            ? pages->physical_address(base + byte) : base + byte);
     }
     if (plan.conflict) {
         const unsigned common = std::max(plan.store.offset, plan.load.offset);
@@ -800,7 +806,8 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
             std::max(plan.store.offset, plan.load.offset);
     }
     coverage.cacheable += 4U + static_cast<unsigned>(plan.conflict);
-    window.probe_candidate = base;
+    const auto pages = reference_pages_for(base);
+    window.probe_candidate = pages ? pages->physical_address(base) : base;
     ++actions;
     return true;
 }

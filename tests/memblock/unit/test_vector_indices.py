@@ -25,6 +25,7 @@ public:
     MixedCoverage coverage;
     std::mt19937_64 random{17};
     std::uint64_t rob_offset=0, sq_offset=0, lq_offset=0;
+    std::shared_ptr<const memblock::ReferencePageMap> reference_pages_for(std::uint64_t) const { return {}; }
     static unsigned vector_shape_uop_count(const RandomVectorShape &);
     static unsigned vector_shape_flow_num(const RandomVectorShape &);
     bool choose_binary_class(unsigned, const std::array<std::uint64_t,2> &);

@@ -300,6 +300,7 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
         uops.push_back(memblock::VectorMemoryTransaction{
             .store = store,
             .address = address,
+            .reference_pages = reference_pages_for(address),
             .stride = stride,
             .addressing = static_cast<memblock::VectorAddressingMode>(
                 shape.addressing),
@@ -411,6 +412,7 @@ bool MixedScenario::issue_random_vector_instruction(
         bool requires_misaligned_head = false;
         bool requires_store_pending = false;
         for (const auto &uop : window) {
+            if (!validate_vector_translation(uop)) return false;
             const unsigned element_bytes =
                 1U << memblock::vector_data_eew(uop);
             const std::uint16_t active =
@@ -421,62 +423,7 @@ bool MixedScenario::issue_random_vector_instruction(
                     continue;
                 }
                 const std::uint64_t element_address =
-                    memblock::vector_element_address(uop, element);
-                bool translation_valid = true;
-                if (current_translation.regime ==
-                    RandomConstraints::translation_stage1) {
-                    const auto reference =
-                        memblock::reference_page_walk_permissions(
-                            environment.memory(),
-                            random_stage1_roots[
-                                current_translation.stage1_mode],
-                            element_address,
-                            page_mode(
-                                current_translation.stage1_mode));
-                    translation_valid = reference.walk.translated &&
-                        reference.walk.physical_address ==
-                            element_address &&
-                        (!reference.leaf_permissions ||
-                            memblock::reference_memory_access_permitted(
-                                store
-                                    ? memblock::ReferenceMemoryAccess::store
-                                    : memblock::ReferenceMemoryAccess::load,
-                                *reference.leaf_permissions,
-                                memblock::ReferencePrivilegeMode::supervisor,
-                                false, false));
-                } else if (current_translation.regime ==
-                    RandomConstraints::translation_nested) {
-                    const auto reference =
-                        memblock::reference_two_stage_access(
-                            environment.memory(),
-                            random_vs_roots[current_translation.vs_mode],
-                            random_g_roots[current_translation.g_mode],
-                            element_address,
-                            store
-                                ? memblock::ReferenceMemoryAccess::store
-                                : memblock::ReferenceMemoryAccess::load,
-                            page_mode(current_translation.vs_mode),
-                            page_mode(current_translation.g_mode));
-                    translation_valid = reference.translated &&
-                        reference.physical_address == element_address;
-                }
-                if (!translation_valid) {
-                    std::ostringstream detail;
-                    detail << "random-vector-translation-reference"
-                           << ":store=" << store
-                           << ":regime=" << current_translation.regime
-                           << ":stage1_mode="
-                           << current_translation.stage1_mode
-                           << ":vs_mode=" << current_translation.vs_mode
-                           << ":g_mode=" << current_translation.g_mode
-                           << ":uop="
-                           << static_cast<unsigned>(uop.vuop_idx)
-                           << ":element=" << element
-                           << ":address=0x" << std::hex
-                           << element_address << std::dec;
-                    phase = detail.str();
-                    return false;
-                }
+                    memblock::vector_element_virtual_address(uop, element);
                 requires_misaligned_head |= !store &&
                     ((element_address & 0xfU) + element_bytes) > 16U;
                 requires_store_pending |= store &&

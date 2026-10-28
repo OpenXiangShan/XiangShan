@@ -276,7 +276,8 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
         }
         std::uint64_t address = action_cacheable_address(window,
             data_bytes, vector_segment_high_va_cross
-                ? std::optional<bool>{high_va_misaligned} : std::nullopt);
+                ? std::optional<bool>{high_va_misaligned} : std::nullopt,
+            !vector_segment_high_va_cross);
         if (stride < 0) {
             address += static_cast<std::uint64_t>(-stride) *
                 (vlmax - 1U);
@@ -354,6 +355,7 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
                 .store = vector_segment_store,
                 .segment = true,
                 .address = address,
+                .reference_pages = reference_pages_for(address),
                 .stride = stride,
                 .addressing = addressing,
                 .eew = static_cast<std::uint8_t>(shape.eew),
@@ -441,6 +443,8 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
                     }
                 }
             }
+            if (segment_uop.reference_pages && uop < data_uops &&
+                !validate_vector_translation(segment_uop)) return false;
             if (!vector_segment_store && uop >= data_uops) {
                 environment.expect_vector_data(
                     segment_uop, segment_uop.data);

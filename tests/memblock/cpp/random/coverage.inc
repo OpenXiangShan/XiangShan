@@ -3133,6 +3133,33 @@ private:
 };
 
 struct MixedCoverage {
+    // Successful helper samples, not demand-transaction counts. Vector page
+    // sets include active bytes only, so an all-masked uop adds no page work.
+    std::array<std::uint64_t, 3> context_fences{};
+    std::array<std::uint64_t, 6> permuted_contexts{};
+    std::array<std::uint64_t, 4> permuted_kinds{}; // scalar L/S, vector L/S
+    std::set<std::pair<unsigned, std::uint64_t>> permuted_pages;
+    std::uint64_t permuted_cross_page_uops = 0;
+    std::uint64_t permuted_split_elements = 0;
+
+    void sample_permuted(const std::shared_ptr<const memblock::ReferencePageMap> &pages,
+        unsigned kind, const std::vector<std::uint64_t> &virtual_bytes,
+        unsigned split_elements = 0)
+    {
+        if (!pages || virtual_bytes.empty()) return;
+        ++permuted_contexts.at(pages->context());
+        ++permuted_kinds.at(kind);
+        std::set<std::uint64_t> uop_pages;
+        for (auto va : virtual_bytes) {
+            (void)pages->physical_address(va); // Reject an undeclared byte.
+            const auto page = va >> 12U;
+            permuted_pages.emplace(pages->context(), page);
+            uop_pages.insert(page);
+        }
+        permuted_cross_page_uops += uop_pages.size() > 1;
+        permuted_split_elements += split_elements;
+    }
+
     std::uint64_t scalar_unresolved_windows = 0;
     std::uint64_t scalar_unresolved_conflicts = 0;
     std::uint64_t scalar_unresolved_controls = 0;
@@ -3258,6 +3285,11 @@ struct MixedCoverage {
         strict_load_wait += transaction.load_wait_strict;
         const unsigned size = 1U << (static_cast<unsigned>(transaction.op) & 3U);
         scalar_misaligned += (transaction.address & (size - 1)) != 0;
+        if (transaction.reference_pages) {
+            std::vector<std::uint64_t> bytes;
+            for (unsigned byte = 0; byte < size; ++byte) bytes.push_back(transaction.address + byte);
+            sample_permuted(transaction.reference_pages, 0U, bytes);
+        }
     }
 
     void sample(const memblock::StoreTransaction &transaction, bool data_was_first)
@@ -3269,11 +3301,30 @@ struct MixedCoverage {
         ++(data_was_first ? data_first : address_first);
         const unsigned size = memblock::scalar_store_bytes(transaction.op);
         scalar_store_misaligned += (transaction.address & (size - 1)) != 0;
+        if (transaction.reference_pages) {
+            std::vector<std::uint64_t> bytes;
+            for (unsigned byte = 0; byte < size; ++byte) bytes.push_back(transaction.address + byte);
+            sample_permuted(transaction.reference_pages, 1U, bytes);
+        }
     }
 
     void sample(const memblock::VectorMemoryTransaction &transaction)
     {
         ++(transaction.store ? vector_stores : vector_loads);
+        if (transaction.reference_pages) {
+            std::vector<std::uint64_t> bytes;
+            const unsigned width = 1U << memblock::vector_data_eew(transaction);
+            const auto active = memblock::active_vector_elements(transaction);
+            unsigned split_elements = 0;
+            for (unsigned element = 0; element < 16U / width; ++element) {
+                if (((active >> element) & 1U) == 0) continue;
+                const auto va = memblock::vector_element_virtual_address(transaction, element);
+                split_elements += (va & 0xfffU) + width > 0x1000U;
+                for (unsigned byte = 0; byte < width; ++byte) bytes.push_back(va + byte);
+            }
+            sample_permuted(transaction.reference_pages, transaction.store ? 3U : 2U,
+                bytes, split_elements);
+        }
         ++(transaction.store ? vector_store_eews : vector_load_eews)
               .at(transaction.eew);
         ++vector_lanes.at(transaction.lane);
@@ -3445,7 +3496,23 @@ struct MixedCoverage {
                std::to_string(indexed_elements) + ',' +
                std::to_string(indexed_repeats) + ',' +
                std::to_string(indexed_descents) + ',' +
-               std::to_string(indexed_max_offset) + " scalar_unresolved=" +
+               std::to_string(indexed_max_offset) + " context_fences=" +
+               std::to_string(context_fences[0]) + ',' +
+               std::to_string(context_fences[1]) + ',' +
+               std::to_string(context_fences[2]) + " permuted_contexts=" +
+               std::to_string(permuted_contexts[0]) + ',' +
+               std::to_string(permuted_contexts[1]) + ',' +
+               std::to_string(permuted_contexts[2]) + ',' +
+               std::to_string(permuted_contexts[3]) + ',' +
+               std::to_string(permuted_contexts[4]) + ',' +
+               std::to_string(permuted_contexts[5]) + " permuted_kinds=" +
+               std::to_string(permuted_kinds[0]) + ',' +
+               std::to_string(permuted_kinds[1]) + ',' +
+               std::to_string(permuted_kinds[2]) + ',' +
+               std::to_string(permuted_kinds[3]) + " permuted_pages=" +
+               std::to_string(permuted_pages.size()) + " permuted_cross_page_uops=" +
+               std::to_string(permuted_cross_page_uops) + " permuted_split_elements=" +
+               std::to_string(permuted_split_elements) + " scalar_unresolved=" +
                std::to_string(scalar_unresolved_windows) + ',' +
                std::to_string(scalar_unresolved_conflicts) + ',' +
                std::to_string(scalar_unresolved_controls) + ',' +

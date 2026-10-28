@@ -275,9 +275,65 @@ enum class AtomicOp : std::uint16_t {
     amocas_d = 0x2f,
 };
 
+// Immutable, scenario-declared 4-KiB translations. Expected byte addresses
+// come from this map, never a DUT translation or a walk of the installed PTEs.
+class ReferencePageMap {
+public:
+    ReferencePageMap(std::uint64_t virtual_base,
+        std::vector<std::uint64_t> physical_pages, unsigned context = 0)
+        : virtual_base_(virtual_base), pages_(std::move(physical_pages)),
+          context_(context)
+    {
+        if ((virtual_base & 0xfffU) != 0 || pages_.empty() ||
+            pages_.size() > (~std::uint64_t{0} - virtual_base) / 0x1000U ||
+            std::any_of(pages_.begin(), pages_.end(), [](auto page) {
+                return (page & 0xfffU) != 0;
+            })) {
+            throw std::invalid_argument("invalid reference page map");
+        }
+    }
+
+    std::uint64_t physical_address(std::uint64_t virtual_address) const
+    {
+        if (!contains(virtual_address)) {
+            throw std::out_of_range("byte outside declared reference page map");
+        }
+        const auto relative = virtual_address - virtual_base_;
+        return pages_.at(relative >> 12U) + (relative & 0xfffU);
+    }
+
+    bool contains(std::uint64_t address) const
+    {
+        return address >= virtual_base_ &&
+            (address - virtual_base_) / 0x1000U < pages_.size();
+    }
+    unsigned context() const { return context_; }
+
+private:
+    std::uint64_t virtual_base_;
+    std::vector<std::uint64_t> pages_;
+    unsigned context_;
+};
+
+template <typename Transaction>
+inline std::uint64_t reference_byte_address(
+    const Transaction &transaction, std::uint64_t virtual_address)
+{
+    if (transaction.reference_pages) {
+        if (transaction.oracle_address) {
+            throw std::invalid_argument("ambiguous reference address forms");
+        }
+        return transaction.reference_pages->physical_address(virtual_address);
+    }
+    return transaction.oracle_address
+        ? *transaction.oracle_address + (virtual_address - transaction.address)
+        : virtual_address;
+}
+
 struct LoadTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    std::shared_ptr<const ReferencePageMap> reference_pages;
     std::int32_t immediate = 0;
     std::optional<std::uint64_t> pc;
     LoadOp op = LoadOp::ld;
@@ -323,6 +379,7 @@ struct LoadTransaction {
 struct StoreTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    std::shared_ptr<const ReferencePageMap> reference_pages;
     // Set false for uncached/device accesses whose architectural effect is
     // owned by the uncache manager rather than the cacheable reference image.
     bool cacheable = true;
@@ -385,6 +442,7 @@ struct AtomicTransaction {
 struct PrefetchTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    std::shared_ptr<const ReferencePageMap> reference_pages;
     std::int32_t immediate = 0;
     PrefetchOp op = PrefetchOp::read;
     std::uint8_t rob = 0;
@@ -430,6 +488,7 @@ struct VectorMemoryTransaction {
     bool whole_register = false;
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    std::shared_ptr<const ReferencePageMap> reference_pages;
     // Set false for uncached/device stores whose final bytes are observed by
     // the device transcript or uncache manager, not by a cacheable readback.
     bool cacheable = true;
@@ -677,11 +736,10 @@ inline std::uint64_t vector_fu_type(const VectorMemoryTransaction &transaction)
     return transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
 }
 
-inline std::uint64_t vector_element_address(
+inline std::uint64_t vector_element_virtual_address(
     const VectorMemoryTransaction &transaction, unsigned element)
 {
-    std::uint64_t base = transaction.oracle_address.value_or(
-        transaction.address);
+    std::uint64_t base = transaction.address;
     const unsigned element_bytes = 1U << vector_data_eew(transaction);
     if (!transaction.segment) {
         if (transaction.addressing == VectorAddressingMode::unit_stride) {
@@ -761,6 +819,20 @@ inline std::uint64_t vector_element_address(
     }
     }
     throw std::logic_error("unknown vector addressing mode");
+}
+
+inline std::uint64_t vector_byte_address(
+    const VectorMemoryTransaction &transaction, unsigned element,
+    unsigned byte = 0)
+{
+    return reference_byte_address(transaction,
+        vector_element_virtual_address(transaction, element) + byte);
+}
+
+inline std::uint64_t vector_element_address(
+    const VectorMemoryTransaction &transaction, unsigned element)
+{
+    return vector_byte_address(transaction, element);
 }
 
 inline bool vector_mask_enabled(
@@ -1068,6 +1140,18 @@ public:
         return is_unsigned ? value : sign_extend(value, size * 8);
     }
 
+    std::uint64_t expected_load(const LoadTransaction &transaction) const
+    {
+        const unsigned encoding = static_cast<unsigned>(transaction.op);
+        const unsigned size = 1U << (encoding & 3U);
+        std::uint64_t value = 0;
+        for (unsigned byte = 0; byte < size; ++byte) {
+            value |= std::uint64_t{read_byte(reference_byte_address(
+                transaction, transaction.address + byte))} << (8 * byte);
+        }
+        return (encoding & 4U) != 0 ? value : sign_extend(value, size * 8);
+    }
+
     std::array<unsigned char, 16> expected_vector_load(
         const VectorMemoryTransaction &transaction) const
     {
@@ -1081,7 +1165,7 @@ public:
             for (unsigned byte = 0; byte < element_bytes; ++byte) {
                 const unsigned offset = element * element_bytes + byte;
                 result[offset] = read_byte(
-                    vector_element_address(transaction, element) + byte);
+                    vector_byte_address(transaction, element, byte));
             }
         }
         return result;

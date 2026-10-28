@@ -1692,7 +1692,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("if (!environment.reset()", initialize_run)
         for definition in (
             "bare_base, 0x20000, options.seed ^ 0x19U",
-            "cache0_base, 0x90000, options.seed ^ 0x43U",
+            "cache0_base, 0x93000, options.seed ^ 0x43U",
             "cache1_base, 0x10000, options.seed ^ 0x71U",
             "atomic_base, 0x1000, options.seed ^ 0xd3U",
             "stage1_napot_base, 0x40000, options.seed ^ 0xe1U",

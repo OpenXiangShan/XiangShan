@@ -102,6 +102,120 @@ bool MixedScenario::map_g_napot(
               noncacheable, io);
 }
 
+std::shared_ptr<const memblock::ReferencePageMap> MixedScenario::reference_pages_for(
+    std::uint64_t address) const
+{
+    if (address < OrdinaryPageMappings::virtual_base ||
+        address - OrdinaryPageMappings::virtual_base >= OrdinaryPageMappings::span) {
+        return {};
+    }
+    if (!translation_context_valid ||
+        current_translation.regime == RandomConstraints::translation_bare) {
+        throw std::logic_error("permuted VA without a translated context");
+    }
+    return current_translation.regime == RandomConstraints::translation_stage1
+        ? ordinary_pages.host_maps.at(current_translation.stage1_mode)
+        : ordinary_pages.nested_maps.at(current_translation.vs_mode).at(
+              current_translation.g_mode);
+}
+
+bool MixedScenario::validate_translation_byte(std::uint64_t virtual_address,
+    std::uint64_t physical_address, bool store, const TranslationContext &context)
+{
+    const auto access = store ? memblock::ReferenceMemoryAccess::store
+                              : memblock::ReferenceMemoryAccess::load;
+    bool valid = virtual_address == physical_address;
+    if (context.regime == RandomConstraints::translation_stage1) {
+        const auto reference = memblock::reference_page_walk_permissions(
+            environment.memory(), random_stage1_roots.at(context.stage1_mode),
+            virtual_address, page_mode(context.stage1_mode));
+        valid = reference.walk.translated &&
+            reference.walk.physical_address == physical_address &&
+            reference.leaf_permissions && memblock::reference_memory_access_permitted(
+                access, *reference.leaf_permissions,
+                memblock::ReferencePrivilegeMode::supervisor, false, false);
+    } else if (context.regime == RandomConstraints::translation_nested) {
+        const auto reference = memblock::reference_two_stage_access(
+            environment.memory(), random_vs_roots.at(context.vs_mode),
+            random_g_roots.at(context.g_mode), virtual_address, access,
+            page_mode(context.vs_mode), page_mode(context.g_mode));
+        valid = reference.translated && reference.physical_address == physical_address;
+    }
+    if (!valid) {
+        std::ostringstream detail;
+        detail << "random-translation-byte-reference:store=" << store
+               << ":context=" << context.regime << '/' << context.stage1_mode
+               << '/' << context.vs_mode << '/' << context.g_mode
+               << ":va=0x" << std::hex << virtual_address
+               << ":expected_pa=0x" << physical_address;
+        phase = detail.str();
+    }
+    return valid;
+}
+
+bool MixedScenario::validate_vector_translation(
+    const memblock::VectorMemoryTransaction &uop)
+{
+    const unsigned bytes = 1U << memblock::vector_data_eew(uop);
+    const auto active = memblock::active_vector_elements(uop);
+    for (unsigned element = 0; element < 16U / bytes; ++element) {
+        if (((active >> element) & 1U) == 0) continue;
+        for (unsigned byte = 0; byte < bytes; ++byte) {
+            if (!validate_translation_byte(
+                    memblock::vector_element_virtual_address(uop, element) + byte,
+                    memblock::vector_byte_address(uop, element, byte), uop.store,
+                    current_translation)) return false;
+        }
+    }
+    return true;
+}
+
+bool MixedScenario::prepare_permuted_translation_pages()
+{
+    if (constraints.translation_permuted_per_mille == 0) return true;
+    constexpr auto physical_base = permuted_physical_base;
+    for (unsigned mode = 0; mode < 2; ++mode) {
+        for (unsigned page = 0; page < OrdinaryPageMappings::page_count; ++page) {
+            const auto va = OrdinaryPageMappings::virtual_base + page * 0x1000ULL;
+            if (!map_stage_page(mode, random_stage1_roots[mode], va,
+                    physical_base + ordinary_pages.host[mode][page] * 0x1000ULL,
+                    false, false, true) ||
+                !map_stage_page(mode, random_vs_roots[mode], va,
+                    OrdinaryPageMappings::guest_base +
+                        ordinary_pages.vs[mode][page] * 0x1000ULL,
+                    false, false, true) ||
+                !map_g_page(mode, random_g_roots[mode],
+                    OrdinaryPageMappings::guest_base + page * 0x1000ULL,
+                    physical_base + ordinary_pages.g[mode][page] * 0x1000ULL, true)) {
+                return false;
+            }
+        }
+    }
+    // Check installed tables against the separately declared permutations,
+    // including permissions and both page edges. Walk results validate setup;
+    // expected data continues to use the immutable declared map.
+    for (unsigned context = 0; context < 6; ++context) {
+        TranslationContext translation{};
+        const auto pages = context < 2 ? ordinary_pages.host_maps[context]
+            : ordinary_pages.nested_maps[(context - 2) / 2][(context - 2) % 2];
+        translation.regime = context < 2 ? RandomConstraints::translation_stage1
+                                        : RandomConstraints::translation_nested;
+        translation.stage1_mode = context % 2;
+        translation.vs_mode = context < 2 ? 0 : (context - 2) / 2;
+        translation.g_mode = context < 2 ? 0 : (context - 2) % 2;
+        for (unsigned page = 0; page < OrdinaryPageMappings::page_count; ++page) {
+            for (const unsigned offset : {0U, 0xfffU}) {
+                const auto va = OrdinaryPageMappings::virtual_base + page * 0x1000ULL + offset;
+                for (bool store : {false, true}) {
+                    if (!validate_translation_byte(va, pages->physical_address(va),
+                            store, translation)) return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 bool MixedScenario::prepare_random_translation_contexts()
 {
     if (constraints.gstage_boundary_per_mille != 0) {
@@ -530,6 +644,7 @@ bool MixedScenario::prepare_random_translation_contexts()
             }
         }
     }
+    if (!prepare_permuted_translation_pages()) return false;
     std::vector<std::pair<std::uint64_t, std::uint64_t>>
         reference_addresses{{
             {cache0_base + 0x106a8, cache0_base + 0x106a8},
@@ -630,18 +745,30 @@ bool MixedScenario::activate_translation_context(const TranslationContext &conte
     if (context.regime == RandomConstraints::translation_bare) {
         return environment.activate_bare();
     }
+    // These roots reuse host ASID 23, VS ASID 29 and VMID 31. A root/mode
+    // write does not invalidate an old translation. Fence the newly active
+    // context before any traffic can observe its independently declared map.
     if (context.regime == RandomConstraints::translation_stage1) {
-        return context.stage1_mode == 0
-            ? environment.activate_sv39(
-                  random_stage1_roots[context.stage1_mode], 23)
-            : environment.activate_sv48(
-                  random_stage1_roots[context.stage1_mode], 23);
+        const bool activated = context.stage1_mode == 0
+            ? environment.activate_sv39(random_stage1_roots[context.stage1_mode], 23)
+            : environment.activate_sv48(random_stage1_roots[context.stage1_mode], 23);
+        if (!activated || !environment.issue_sfence(0, 0, true, true, false, false)) {
+            return false;
+        }
+        ++coverage.context_fences[0];
+        return true;
     }
-    return environment.activate_two_stage_modes(
-               page_mode(context.vs_mode), page_mode(context.g_mode),
-               random_vs_roots[context.vs_mode],
-               random_g_roots[context.g_mode], 29, 31) &&
-        environment.set_page_based_memory_types(true, true);
+    if (!environment.activate_two_stage_modes(
+            page_mode(context.vs_mode), page_mode(context.g_mode),
+            random_vs_roots[context.vs_mode], random_g_roots[context.g_mode], 29, 31) ||
+        !environment.set_page_based_memory_types(true, true) ||
+        !environment.issue_sfence(0, 0, true, true, true, false) ||
+        !environment.issue_sfence(0, 0, true, true, false, true)) {
+        return false;
+    }
+    ++coverage.context_fences[1];
+    ++coverage.context_fences[2];
+    return true;
 }
 
 } // namespace memblock::scenarios::mixed

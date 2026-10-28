@@ -138,7 +138,7 @@ bool MixedScenario::observe_final_writes()
         return false;
     }
 
-    // Every cacheable, identity-mapped store/atomic commit registered a set of
+    // Every tracked cacheable store/atomic commit registered physical
     // 8-byte words.  Read each final word back through the DUT and compare it
     // with the independently maintained reference image.  This turns the
     // reference post-state into an externally observed architectural effect
@@ -167,7 +167,7 @@ bool MixedScenario::observe_final_writes()
                 .sq = memblock::sq_pointer_value(sq_offset),
                 .sq_flag = memblock::sq_pointer_flag(sq_offset),
                 .pdest = static_cast<std::uint8_t>(
-                    1U + static_cast<unsigned>(rob % 255U)),
+                    1U + static_cast<unsigned>(rob % 223U)),
                 .lane = static_cast<unsigned>(index),
             };
             environment.expect_load_data(
@@ -210,7 +210,14 @@ bool MixedScenario::finish()
         return false;
     }
     phase = "redirect-recovery";
-    const std::uint64_t canceled_rob_offset = rob_offset;
+    // A distinct older branch can resolve after the preceding memory work
+    // retires. It owns this redirect and remains head while its younger load
+    // is squashed; it allocates no memory queue entry.
+    const std::uint64_t branch_anchor = rob_offset++;
+    if (!environment.set_rob_head(memblock::rob_pointer_value(branch_anchor),
+            memblock::rob_pointer_flag(branch_anchor))) return false;
+    const auto lq_cancels_before = environment.lq_redirect_canceled_observed();
+    const auto sq_cancels_before = environment.sq_redirect_canceled_observed();
     const auto canceled_op = static_cast<memblock::LoadOp>(random() % 7);
     const unsigned canceled_size =
         1U << (static_cast<unsigned>(canceled_op) & 3U);
@@ -222,28 +229,26 @@ bool MixedScenario::finish()
         random() % memblock::kScalarLoadLanes);
     if (!environment.enqueue_load(canceled) || !environment.issue_load(canceled) ||
         !environment.redirect_after(
-            memblock::rob_pointer_value(canceled_rob_offset - 1),
-            memblock::rob_pointer_flag(canceled_rob_offset - 1), false) ||
+            memblock::rob_pointer_value(branch_anchor),
+            memblock::rob_pointer_flag(branch_anchor), false) ||
         !environment.run_cycles(32U + random() % 129U)) {
         return false;
     }
     coverage.sample(canceled);
     ++actions;
-    --lq_offset;
+    const auto canceled_lq = environment.lq_redirect_canceled_observed() - lq_cancels_before;
+    if (canceled_lq != 1 || environment.sq_redirect_canceled_observed() != sq_cancels_before) {
+        phase = "redirect-recovery-cancellation";
+        return false;
+    }
+    lq_offset -= canceled_lq;
     const std::uint64_t survivor_lq = lq_offset++;
-    const memblock::LoadTransaction survivor{
-        .address = canceled.address,
-        .op = canceled.op,
-        .rob = canceled.rob,
-        .rob_flag = canceled.rob_flag,
-        .lq = memblock::lq_pointer_value(survivor_lq),
-        .lq_flag = memblock::lq_pointer_flag(survivor_lq),
-        .sq = memblock::sq_pointer_value(sq_offset),
-        .sq_flag = memblock::sq_pointer_flag(sq_offset),
-        .pdest = static_cast<std::uint8_t>(1U + random() % 255U),
-        .lane = static_cast<unsigned>(
-            random() % memblock::kScalarLoadLanes),
-    };
+    auto survivor = canceled;
+    survivor.lq = memblock::lq_pointer_value(survivor_lq);
+    survivor.lq_flag = memblock::lq_pointer_flag(survivor_lq);
+    survivor.lane = static_cast<unsigned>(random() % memblock::kScalarLoadLanes);
+    // Rename recovery restores this instruction's original free-list
+    // candidate, so refetch reuses pdest with a fresh LQ/scoreboard epoch.
     if (!issue_load(survivor)) {
         return false;
     }
@@ -314,6 +319,10 @@ int MixedScenario::run()
                   << " requested=" << options.transactions
                   << " cycle=" << environment.cycle()
                   << " phase=" << phase
+                  << " accepted_a={" << environment.dcache_request_summary_since(
+                         environment.tilelink_requests() > 16U
+                             ? environment.tilelink_requests() - 16U : 0U, 16U)
+                  << '}'
                   << " lq=" << environment.lq_dequeued() << '+'
                   << environment.lq_canceled() << '/'
                   << environment.lq_allocated()

@@ -260,6 +260,12 @@ bool MixedScenario::enter_translation_context(const TranslationContext &context)
     }
     if (!environment.run_until_all_complete(4096) ||
         !environment.run_until_queues_retired(4096) ||
+        // Different roots permute a common physical pool. Drain committed
+        // writes before a context change; general alias redirect/refetch
+        // arbitration remains a separate verification direction.
+        (constraints.translation_permuted_per_mille != 0 &&
+            (!environment.pulse_sbuffer_flush() ||
+             !environment.run_until_sbuffer_empty(constrained_completion_timeout))) ||
         !flush_pending_translation_fences() ||
         !activate_translation_context(context)) {
         return false;

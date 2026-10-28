@@ -56,6 +56,9 @@ struct AddressSequenceState {
 struct AddressConstants {
     static constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     static constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
+    // Dedicated physical pages prevent identity/high-VA helper stores from
+    // creating unmodeled in-flight cross-alias SBuffer dependencies.
+    static constexpr std::uint64_t permuted_physical_base = cache0_base + 0x3000f000;
     static constexpr std::uint64_t cache1_base =
         memblock::kDefaultMemoryBase + (std::uint64_t{1} << 30) + 0x200000;
     static constexpr std::uint64_t nc_base =

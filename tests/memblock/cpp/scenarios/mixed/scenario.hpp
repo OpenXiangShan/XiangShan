@@ -3,6 +3,7 @@
 #include "scalar_dependency.hpp"
 #include "unresolved_dependency.hpp"
 #include "vector_indices.hpp"
+#include "translation_permutation.hpp"
 
 namespace memblock::scenarios::mixed {
 
@@ -22,6 +23,7 @@ private:
     const std::uint64_t progress_interval;
     memblock::Environment environment;
     std::mt19937_64 random;
+    OrdinaryPageMappings ordinary_pages{options.seed, permuted_physical_base};
     MixedCoverage coverage;
     ConstraintCoverage constraint_coverage;
     const std::uint64_t bank_conflict_line_offset =
@@ -81,7 +83,8 @@ private:
     std::uint64_t constrained_cacheable_address(
         unsigned alignment, const TranslationContext &translation,
         const TranslationLeafTopology &leaf,
-        std::optional<bool> force_misaligned = std::nullopt);
+        std::optional<bool> force_misaligned = std::nullopt,
+        bool allow_permuted = true);
     std::uint64_t constrained_hypervisor_address(
         unsigned alignment, const TranslationLeafTopology &leaf,
         unsigned spvp, unsigned pbmt, bool pma_device, bool misaligned,
@@ -140,6 +143,13 @@ private:
         bool noncacheable = false,
         bool io = false);
     bool prepare_random_translation_contexts();
+    bool prepare_permuted_translation_pages();
+    std::shared_ptr<const memblock::ReferencePageMap> reference_pages_for(
+        std::uint64_t address) const;
+    bool validate_translation_byte(std::uint64_t virtual_address,
+        std::uint64_t physical_address, bool store,
+        const TranslationContext &context);
+    bool validate_vector_translation(const memblock::VectorMemoryTransaction &uop);
     bool activate_translation_context(const TranslationContext &context);
     unsigned int first_enabled_mode(const std::array<unsigned, 2> &weights);
     TranslationContext random_translation_context();
@@ -221,7 +231,8 @@ private:
     bool observe_action(ActionWindow &window);
     std::uint64_t action_cacheable_address(ActionWindow &window,
         unsigned alignment,
-        std::optional<bool> force_misaligned = std::nullopt);
+        std::optional<bool> force_misaligned = std::nullopt,
+        bool allow_permuted = true);
     bool execute_scalar_load(ActionWindow &window);
     bool execute_load_merge(ActionWindow &window);
     bool execute_set_pressure(ActionWindow &window);

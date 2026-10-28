@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=56`.
+`constraint_schema=57`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -129,6 +129,7 @@ they do not imply arbitrary numeric suffix support.
 | --- | --- |
 | `translation-bare`, `translation-stage1`, `translation-nested` | Relative ordinary context weights. |
 | `stage1-sv39`, `stage1-sv48`; `vs-sv39`, `vs-sv48`; `g-sv39x4`, `g-sv48x4` | Relative host, VS, and G mode weights. |
+| `translation-permuted` | Rate selecting seeded nonidentity 4-KiB page permutations for eligible ordinary cacheable addresses in translated contexts. Defaults coverage/spec/corner/cmo-stress: 500/500/500/0. Bare, NAPOT and special high-VA/FOF/error/helper pools retain their existing mappings. |
 | `translation-stage1-napot`, `translation-vs-napot`, `translation-g-napot` | Rates for legal 64-KiB NAPOT leaf topology; nested VS/G choices are independent. |
 | `fence-sfence`, `fence-hfence-vvma`, `fence-hfence-gvma` | Relative compatible fence-kind weights. |
 | `fence-global`, `fence-selective` | Relative fence-scope weights. |
@@ -211,6 +212,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | Stage1 Sv39/Sv48 | all 1 | 95/5 | all 1 | all 1 |
 | VS Sv39/Sv48 | all 1 | all 1 | all 1 | all 1 |
 | G Sv39x4/Sv48x4 | all 1 | all 1 | all 1 | all 1 |
+| `translation-permuted` | 500 | 500 | 500 | 0 |
 | `translation-stage1-napot` | 500 | 1 | 500 | 0 |
 | `translation-vs-napot` | 500 | 1 | 500 | 0 |
 | `translation-g-napot` | 500 | 1 | 500 | 0 |
@@ -321,7 +323,7 @@ those choices, that all Cartesian crosses are legal, or that a pin toggles.
 reference memory and page tables, then runs any budgeted heterogeneous windows,
 then serial weighted actions, and finally a canceled-load/survivor redirect
 check and drain. The drain ends with a DUT readback of every tracked cacheable,
-identity-mapped committed word before the accounting gates run. There is no
+identity-mapped or declared permuted-page committed word before the accounting gates run. There is no
 mandatory operation-coverage prefix or coverage-completeness PASS gate. The
 final redirect check reserves two actions; `prepare_tail()` needs at least that
 budget, so CLI acceptance of a positive `--actions` value alone does not
@@ -393,7 +395,9 @@ coverage completion or nonzero stall counters. See
 While the mixed run executes, `commit_store`, `commit_vector_store`,
 `record_committed_store`, `record_atomic_result`, and
 `record_committed_vector_store` register the 8-byte words covered by each
-cacheable, identity-mapped committed write. `finish()` drains Sbuffer, DCache and
+cacheable identity-mapped or declared permuted-page committed write. Permuted
+stores register the actual physical word for each byte, including discontinuous
+page boundaries. `finish()` drains Sbuffer, DCache and
 the queues, switches to Bare, then issues ordinary scalar loads in batches of up
 to three and compares every tracked final word with the independently maintained
 reference image. A word is compared whole, so unchanged bytes sharing the word
@@ -402,9 +406,9 @@ untouched by a store. The readbacks are not counted as constrained-random action
 their allocations/dequeues remain part of the reported LQ accounting.
 
 Non-cacheable stores are marked `cacheable = false` and remain owned by the
-uncache/device transcript oracle. Writes whose physical and virtual forms differ
-are counted in `final_observation_alias_skips` and are not claimed by this
-readback; the hypervisor action additionally reads back each permitted,
+uncache/device transcript oracle. Legacy aliases that declare only a contiguous `oracle_address` remain counted
+in `final_observation_alias_skips`; declared permuted-page writes join the
+physical readback. For other aliases, the hypervisor action additionally reads back each permitted,
 aligned, cacheable final-PMA store through the same translated context, and
 high-VA vector segment stores already have scenario-owned element readbacks.
 CBO.INVAL and errored CMOs drop the target line from the tracked set because
@@ -608,6 +612,54 @@ distinct offset vectors without using address bases, payloads or issue timing.
 The production ordinary builder is also checked across all 78 indexed shapes
 for shared-register consistency and disjoint store elements.
 
+## Ordinary Nonidentity Page Mappings
+
+`translation-permuted` changes ordinary address relationships rather than
+selecting a separate fixed transaction template. A mapping-only RNG derived
+from the seed shuffles 132 pages within four cache colours independently for host Sv39/Sv48, VS Sv39/Sv48
+and G Sv39x4/Sv48x4. Each nested reference map composes the independently declared
+VS and G permutations for its mode pair. The VA window at `0x2000000000` and
+GPA window at `0x2400000000` map into a dedicated cacheable physical pool,
+initialized with seed-and-physical-address bytes before traffic. Each colour
+contains 33 pages. Host, VS and G mappings preserve the low two page-number bits
+across their absolute address bases, so final VA[13:12] equals PA[13:12]. The
+current manager lacks a directory that recalls dirty data before granting a
+second cache colour for the same PA. Arbitrary cross-colour synonyms therefore
+remain excluded; this is a manager legality boundary, not an RTL failure.
+Identity controls
+and all six translated contexts share the ordinary scalar dependency, unresolved,
+vector/segment and heterogeneous-window builders; dedicated helper pools remain
+unchanged. High-half segment aliases opt out of this selection.
+
+Transactions retain an immutable declared map for their context. Scalar expected
+loads map each byte, and vectors compute architectural element VAs before mapping
+each active byte. Store reference updates and final-word registration use the
+same independently declared byte addresses. The setup validates both page edges
+and load/store permissions with the independent page-table walkers; walker
+results do not supply expected data addresses. Vector prevalidation also checks
+active byte translations, including intra-element page crossings. This does not
+make a cross-page scalar store legal as one backend uop.
+
+Root/mode activation reuses fixed ASID/VMID values and therefore issues covering
+global SFENCE.VMA or HFENCE.VVMA/HFENCE.GVMA before further traffic. When this
+direction is enabled, translation-context entry also drains SBuffer; the common
+physical pool could otherwise introduce a cross-alias recovery obligation across
+roots that the general scheduler does not model. The separate directed alias test
+owns its in-flight redirect/refetch contract. Context fences are reported separately
+from randomly selected fence coverage.
+
+`permuted_contexts` counts successful helper samples in host Sv39/Sv48 then nested
+VS39/G39, VS39/G48, VS48/G39, VS48/G48 order. `permuted_kinds` splits scalar load,
+scalar store, vector load and vector store samples. `permuted_pages` counts
+context/virtual-page pairs with active bytes; `permuted_cross_page_uops` counts
+samples touching more than one virtual page, and `permuted_split_elements` counts
+vector elements whose bytes cross a page. These are semantic helper observations,
+not cache-demand counts or exhaustive permutation coverage; all-masked uops add
+no page work. `context_fences` reports activation fences in SFENCE/VVMA/GVMA order.
+The artifact verifier checks field conservation and bounds without requiring
+positive bins in a sparse run. Unit substitution tests exercise wrong-page and
+contiguous-PA results against production scoreboards.
+
 ## Explicit Stimulus And Oracle Gaps
 
 - Ordinary random vector traffic explores legal EEW/SEW/LMUL/EMUL and addressing
@@ -619,11 +671,14 @@ for shared-register consistency and disjoint store elements.
   full-width index values remain outside this direction. Ordered encoding on
   ordinary memory does not prove architecturally observable order at a
   side-effecting target.
-- Ordinary random cacheable translation is predominantly identity-mapped,
-  including nested contexts; dedicated aliases exist for high-VA, hypervisor,
-  PBMT, FOF, and error helpers. Mode/leaf counters do not prove arbitrary
-  VA-to-GPA-to-PA permutations, arbitrary root/ASID/VMID churn, or broad
-  page-table mutation/invalidation races.
+- Ordinary 4-KiB translations now include seeded host and nested page
+  permutations, with byte-wise data checks and physical final readback. The
+  bounded 132-page maps preserve cache colour and remain static. The manager
+  still needs alias-directory/probe handling for cross-colour synonyms.
+  NAPOT/special helper pools retain their
+  own mappings, and context transitions drain SBuffer. Arbitrary root/ASID/VMID
+  churn, dynamic PTE mutation/invalidation races and general in-flight
+  cross-alias recovery remain outside this direction.
 - Ordinary VLEFF uses VL=2 and faults at element0 or element1. Segment FOF
   supports legal unit-stride shape tuples but also uses those two fault
   positions. Later arbitrary fault positions, all FOF policy combinations,
@@ -638,8 +693,8 @@ for shared-register consistency and disjoint store elements.
   remain absent. Broad arbitrary
   outstanding instruction mixtures, multiple CMO/atomic ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
   injection are not provided by these constraints.
-- The final readback forces cacheable identity-mapped store/atomic effects, but
-  does not observe aliased address translations, non-cacheable/device effects,
+- The final readback forces cacheable identity-mapped store/atomic effects and
+  declared permuted-page store effects, but does not observe remaining aliases, non-cacheable/device effects,
   stores that may have happened on a faulted operation, or dirty data that a CMO
   legally discards. Those paths retain the separate checks and limits described
   in [ORACLES.md](ORACLES.md#implementation-limitations).
