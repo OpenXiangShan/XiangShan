@@ -2860,7 +2860,9 @@ int run_translation_alias(int argc, char **argv)
                 canceled_alias.lq_redirect_canceled_observed();
             replay.lq = memblock::lq_pointer_value(next_lq);
             replay.lq_flag = memblock::lq_pointer_flag(next_lq);
-            replay.pdest = 161;
+            // No intervening integer allocation: rename restores the original
+            // free-list candidate as well as this load's ROB identity.
+            replay.pdest = first_access_load.pdest;
             replay.tolerate_canceled_result = false;
             canceled_alias.expect_load_data(replay, cancel_data);
             if (!canceled_alias.set_rob_head(replay.rob, replay.rob_flag) ||

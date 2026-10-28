@@ -237,6 +237,8 @@ struct RandomConstraints {
     unsigned bank_conflict_per_mille = 0;
     unsigned scalar_dependency_per_mille = 200;
     unsigned vector_index_repeat_per_mille = 250;
+    unsigned scalar_unresolved_per_mille = 100;
+    unsigned scalar_unresolved_conflict_per_mille = 500;
     memblock::ResponseLatencyProfiles response_latency{};
 
     static RandomConstraints preset(std::string_view name)
@@ -335,6 +337,7 @@ struct RandomConstraints {
                 .stride_stream_per_mille = 0,
                 .bank_conflict_per_mille = 0,
                 .scalar_dependency_per_mille = 0,
+                .scalar_unresolved_per_mille = 0,
                 .response_latency = {},
             };
         }
@@ -433,6 +436,7 @@ struct RandomConstraints {
                 .stride_stream_per_mille = 500,
                 .bank_conflict_per_mille = 500,
                 .scalar_dependency_per_mille = 350,
+                .scalar_unresolved_per_mille = 200,
                 .response_latency = {},
             };
         }
@@ -536,6 +540,7 @@ struct RandomConstraints {
                 .stride_stream_per_mille = 100,
                 .bank_conflict_per_mille = 250,
                 .scalar_dependency_per_mille = 200,
+                .scalar_unresolved_per_mille = 100,
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
                     memblock::ResponseLatencyProfile::spec,
@@ -637,6 +642,7 @@ struct RandomConstraints {
                 .stride_stream_per_mille = 750,
                 .bank_conflict_per_mille = 750,
                 .scalar_dependency_per_mille = 500,
+                .scalar_unresolved_per_mille = 300,
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
                     memblock::ResponseLatencyProfile::spec,
@@ -1157,6 +1163,10 @@ struct RandomConstraints {
             stride_stream_per_mille = parsed;
         } else if (key == "vector-index-repeat") {
             vector_index_repeat_per_mille = parsed;
+        } else if (key == "scalar-unresolved") {
+            scalar_unresolved_per_mille = parsed;
+        } else if (key == "scalar-unresolved-conflict") {
+            scalar_unresolved_conflict_per_mille = parsed;
         } else if (key == "scalar-dependency") {
             scalar_dependency_per_mille = parsed;
         } else if (key == "bank-conflict") {
@@ -1775,7 +1785,9 @@ struct RandomConstraints {
             stride_stream_per_mille > 1000 ||
             bank_conflict_per_mille > 1000 ||
             scalar_dependency_per_mille > 1000 ||
-            vector_index_repeat_per_mille > 1000) {
+            vector_index_repeat_per_mille > 1000 ||
+            scalar_unresolved_per_mille > 1000 ||
+            scalar_unresolved_conflict_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
         }
@@ -2948,7 +2960,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=55 constraints=" << name
+        stream << "constraint_schema=56 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3126,6 +3138,8 @@ struct RandomConstraints {
                << " target_bank_conflict=" << bank_conflict_per_mille
                << " target_scalar_dependency=" << scalar_dependency_per_mille
                << " target_vector_index_repeat=" << vector_index_repeat_per_mille
+               << " target_scalar_unresolved=" << scalar_unresolved_per_mille
+               << " target_scalar_unresolved_conflict=" << scalar_unresolved_conflict_per_mille
                << " target_latency=" << latency_name(response_latency.dcache)
                << ',' << latency_name(response_latency.ptw) << ','
                << latency_name(response_latency.uncache);

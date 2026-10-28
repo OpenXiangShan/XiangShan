@@ -1488,7 +1488,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4411,6 +4411,31 @@ def _check_mixed_coverage(
         )
 
 
+def _check_scalar_unresolved_accounting(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 56:
+        return
+    rate = result.get("target_scalar_unresolved")
+    conflict_rate = result.get("target_scalar_unresolved_conflict")
+    for value in (rate, conflict_rate):
+        _require(type(value) is int and 0 <= value <= 1000,
+                 "invalid scalar unresolved rate")
+    windows, conflicts, controls, provisional, redirects, returned, refetched, readbacks, before, overlap, canceled = _csv_counts(
+        result, "scalar_unresolved", 11
+    )
+    _require(windows == conflicts + controls and provisional == windows and readbacks == windows,
+             "unresolved load provisional/final obligations are not conserved")
+    _require(redirects == returned == refetched == conflicts,
+             "unresolved load redirect/refetch obligations are not conserved")
+    _require(before <= windows and conflicts <= overlap <= 8 * conflicts and canceled <= conflicts,
+             "unresolved load operand/overlap/cancellation counts exceed bounds")
+    if rate == 0:
+        _require(windows == 0, "disabled unresolved load direction generated windows")
+    if conflict_rate == 0:
+        _require(conflicts == 0, "disabled unresolved conflict generated redirects")
+    if conflict_rate == 1000:
+        _require(controls == 0, "conflict-only unresolved direction generated controls")
+
+
 def _check_vector_index_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 55:
         return
@@ -4631,6 +4656,7 @@ def _check_result(
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
         _check_scalar_dependency_accounting(result)
         _check_vector_index_accounting(result)
+        _check_scalar_unresolved_accounting(result)
         if require_coverage:
             try:
                 _check_mixed_coverage(result, require_backpressure)

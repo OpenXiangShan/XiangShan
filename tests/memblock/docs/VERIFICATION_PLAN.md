@@ -77,7 +77,7 @@ combinations have occurred or establishes a coverage percentage.
 | Uncache/MMIO | Width/mask/data, device side effects, errors, serialization | Source credit and malformed manager inputs |
 | ECC | Selected tag/data masks, banks/ways, reports/survivors | Wider masks, persistent/delayed events and concurrency |
 | LSQ/ROB/redirect | Six-lane enqueue, aggregate retire/cancel, wrap/stale suppression | Full per-retirement attribution and output-only pulse identity |
-| RAW/RAR/feedback | Selected sources/arbitration/metadata; load_feedback.inc | All source crosses and stable architectural feedback rules |
+| RAW/RAR/feedback | Random aligned one-store/one-load unresolved-address conflicts and same-region disjoint controls, strict provisional data, matching flush-itself return and correct-data frontend refetch before store commit; selected sources/arbitration/metadata; mixed_action_scalar.cpp, load_feedback.inc | Multiple unresolved producers, trained prediction, general redirect arbitration, all source crosses and stable architectural feedback rules |
 | Reset | Manager/frontend, cold atomic, partial LR/LD, clean CMO | Partial modifying/error refills, dirty state, more replay producers |
 | Bridges/control | Frontend TL/PTW, trace/DFT/reset, interrupts, L2/TLB/hint/flush/WFI | Matching-MSHR/external consumer policy and dynamic controls |
 | Performance/prefetch | Transport, characterization, selected suppression | Integration-owned meaning/training/selection |
@@ -153,8 +153,10 @@ The common scalar dependency direction now varies store/load counts, overlap,
 operand arrival and issue order with independent byte-overlay expectations and
 younger-store exclusion controls. Seed/address-dependent ordinary initial bytes
 also distinguish representative wrong-line substitutions. Next normal-workload
-gaps include unresolved-address dependencies, varied heterogeneous producer
-composition and ordinary nonidentity mappings. Bounded random indexed vectors
+gaps include multiple unresolved-address dependencies, varied heterogeneous
+producer composition and ordinary nonidentity mappings. A bounded one-store/
+one-load direction now checks provisional execution, late RAW recovery,
+uncommitted-store refetch data and disjoint byte-mask controls. Bounded random indexed vectors
 now vary offset spacing/permutation and repeated gathers for ordinary and
 segment operations; partial byte overlap and overlapping scatters remain open.
 
@@ -166,7 +168,8 @@ Priority work, each requiring executable stimulus and an independent check:
    the first-access alias mismatch now requires its exact flush-itself request,
    observed queue recovery and correct-data frontend refetch. Its retained DUT
    case dequeues both LQ epochs with zero cancellations; nonzero-cancellation
-   alias refetch still needs qualification. General IQ/LQ replay and arbitrary
+   alias refetch still needs qualification, as does a correct-first-data alias
+   redirect. General IQ/LQ replay and arbitrary
    refetch overlaps remain open. Keep the CMO exclusion
    explicit. Single-uop later-element and masked page faults now
    require `vstart=1`, and an all-masked unmapped load must complete without a

@@ -3133,6 +3133,18 @@ private:
 };
 
 struct MixedCoverage {
+    std::uint64_t scalar_unresolved_windows = 0;
+    std::uint64_t scalar_unresolved_conflicts = 0;
+    std::uint64_t scalar_unresolved_controls = 0;
+    std::uint64_t scalar_unresolved_provisional = 0;
+    std::uint64_t scalar_unresolved_redirects = 0;
+    std::uint64_t scalar_unresolved_returned = 0;
+    std::uint64_t scalar_unresolved_refetched = 0;
+    std::uint64_t scalar_unresolved_readbacks = 0;
+    std::uint64_t scalar_unresolved_data_before = 0;
+    std::uint64_t scalar_unresolved_overlap_bytes = 0;
+    std::uint64_t scalar_unresolved_lq_canceled = 0;
+
     // Operand-pattern observations, once per architectural indexed instruction.
     // These include inactive offsets and do not claim memory requests occurred.
     std::array<std::uint64_t, 4> indexed_instructions{};
@@ -3433,7 +3445,18 @@ struct MixedCoverage {
                std::to_string(indexed_elements) + ',' +
                std::to_string(indexed_repeats) + ',' +
                std::to_string(indexed_descents) + ',' +
-               std::to_string(indexed_max_offset) + " scalar_dependency=" +
+               std::to_string(indexed_max_offset) + " scalar_unresolved=" +
+               std::to_string(scalar_unresolved_windows) + ',' +
+               std::to_string(scalar_unresolved_conflicts) + ',' +
+               std::to_string(scalar_unresolved_controls) + ',' +
+               std::to_string(scalar_unresolved_provisional) + ',' +
+               std::to_string(scalar_unresolved_redirects) + ',' +
+               std::to_string(scalar_unresolved_returned) + ',' +
+               std::to_string(scalar_unresolved_refetched) + ',' +
+               std::to_string(scalar_unresolved_readbacks) + ',' +
+               std::to_string(scalar_unresolved_data_before) + ',' +
+               std::to_string(scalar_unresolved_overlap_bytes) + ',' +
+               std::to_string(scalar_unresolved_lq_canceled) + " scalar_dependency=" +
                std::to_string(scalar_dependency_windows) + ',' +
                std::to_string(scalar_dependency_stores) + ',' +
                std::to_string(scalar_dependency_loads) + ',' +

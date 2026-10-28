@@ -1,6 +1,7 @@
 #pragma once
 #include "state.hpp"
 #include "scalar_dependency.hpp"
+#include "unresolved_dependency.hpp"
 #include "vector_indices.hpp"
 
 namespace memblock::scenarios::mixed {
@@ -227,6 +228,7 @@ private:
     bool execute_miss_burst(ActionWindow &window);
     bool execute_scalar_store(ActionWindow &window);
     bool execute_scalar_dependency(ActionWindow &window);
+    bool execute_scalar_unresolved(ActionWindow &window);
     bool execute_ptw_error(ActionWindow &window);
     bool execute_vector_memory(ActionWindow &window);
     bool execute_vector_segment(ActionWindow &window);

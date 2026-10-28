@@ -1,3 +1,4 @@
+#include "scenarios/mixed/unresolved_dependency.hpp"
 // Compiled by test_vector_scoreboard.py with the production model, scoreboard,
 // and generated writeback structs.  No simulator or Picker build is needed.
 
@@ -188,8 +189,7 @@ static void check_canceled_result()
     memblock::LoadScoreboard epoch;
     epoch.expect(tolerated, 0x1122334455667788ULL);
     epoch.observe(0, writeback, redirect);
-    auto fresh = tolerated;
-    ++fresh.pdest;
+    auto fresh = tolerated; // Isolated refetch reuses the recovered free-list candidate.
     fresh.tolerate_canceled_result = false;
     epoch.expect(fresh, 0x1122334455667788ULL);
     auto correct = writeback;
@@ -200,6 +200,11 @@ static void check_canceled_result()
             epoch.observed() == 1, "refetch epoch did not complete exactly once");
     epoch.observe(0, correct);
     require(!epoch.ok(), "duplicate refetch completion was accepted");
+
+    memblock::LoadScoreboard stale;
+    stale.expect(fresh, 0x1122334455667788ULL);
+    stale.observe(0, writeback);
+    require(!stale.ok(), "stale wrong data satisfied same-pdest alias refetch");
 
     memblock::LoadScoreboard no_cancel;
     no_cancel.expect(tolerated, 0x1122334455667788ULL);
@@ -354,11 +359,64 @@ static void check_permuted_indices()
     }
 }
 
+static void check_late_raw_refetch()
+{
+    memblock::LoadTransaction first{.address=0x80001000, .op=memblock::LoadOp::ld,
+        .rob=7, .pdest=21, .lane=0, .ftq_ptr=17, .ftq_offset=3};
+    constexpr std::uint64_t initial=0x8877665544332211ULL;
+    constexpr std::uint64_t final=0x88776655beef2211ULL;
+    memblock::generated::ScalarLoadWriteback wb{};
+    wb.valid=true; wb.rob_value=first.rob; wb.pdest=first.pdest; wb.rf_wen=true;
+    wb.data=initial;
+    memblock::LoadScoreboard executed;
+    executed.expect(first,initial);
+    executed.observe(0,wb);
+    require(executed.ok() && executed.done(),executed.error());
+    memblock::scenarios::mixed::UnresolvedLoadObligation obligation(first,true);
+    require(obligation.provisional() && !obligation.done(),
+            "provisional execution incorrectly discharged architectural recovery");
+    memblock::generated::MemoryViolation redirect{};
+    redirect.valid=redirect.level=true; redirect.rob_value=first.rob;
+    redirect.ftq_value=first.ftq_ptr; redirect.ftq_offset=first.ftq_offset;
+    require(obligation.redirect(redirect) && obligation.returned() && !obligation.done(),
+            "late RAW redirect was not matched to the provisional load");
+    auto replay=first; replay.lq=1; // Rename recovery reuses the original pdest.
+    memblock::LoadScoreboard good;
+    good.expect(replay,final);
+    wb.pdest=replay.pdest; wb.data=final;
+    good.observe(0,wb);
+    require(good.ok() && good.done() && obligation.refetched() && !obligation.done(),good.error());
+    require(obligation.readback() && obligation.done(),"full recovery did not complete");
+    for (unsigned mutation=0; mutation<3; ++mutation) {
+        memblock::LoadScoreboard bad;
+        bad.expect(replay,final);
+        auto corrupted=wb;
+        if(mutation==0) corrupted.data=initial;
+        if(mutation==1) ++corrupted.pdest;
+        if(mutation==2) corrupted.rf_wen=false;
+        bad.observe(0,corrupted);
+        require(!bad.ok(),"bad refetch data/epoch/metadata accepted");
+    }
+    memblock::LoadScoreboard duplicate;
+    duplicate.expect(replay,final);
+    duplicate.observe(0,wb); duplicate.observe(0,wb);
+    require(!duplicate.ok(),"duplicate refetch completion accepted");
+    memblock::LoadScoreboard early_data;
+    early_data.expect(first,initial);
+    wb.pdest=first.pdest;
+    early_data.observe(0,wb);
+    require(!early_data.ok(),"unresolved first attempt accepted post-store data without STA");
+}
+
 int main(int argc, char **argv)
 {
     try {
         require(argc == 2, "one case name required");
         const std::string name = argv[1];
+        if (name == "late-raw-refetch") {
+            check_late_raw_refetch();
+            return 0;
+        }
         if (name == "permuted-indices") {
             check_permuted_indices();
             return 0;

@@ -115,10 +115,38 @@ load. It varies counts, overlap, sizes, signs, operand arrival and issue order;
 an optional younger store must be excluded even when its operands arrive first.
 Retirement stays behind an older non-memory ROB head until load completion,
 then stores commit in age order. Final word readback observes committed bytes.
-Known store operands precede load issue; unresolved-address speculation is not
-covered by this direction. Store halves retain their CPU scheduler lane pairing;
+Known store operands precede load issue in that direction. Store halves retain
+their CPU scheduler lane pairing;
 these simultaneous loads have distinct valid integer destinations. Semantic byte-source counters do not require any
 particular internal forwarding path.
+
+The separate `scalar-unresolved` direction deliberately withholds an older
+store address while a younger, nonpredicted load completes. Its initial strict
+expectation is the pre-store snapshot; retirement stays behind an older
+incomplete non-memory ROB group, so that result is provisional. The group can
+contain completed integer operand producers and an unfinished independent FP
+DIV/SQRT operation: `CompressUnit` groups these last-uop instructions,
+`Rename` assigns their shared ROB identity and aggregate WB count, and ROB commit
+waits for the whole group. This avoids treating a completed scalar producer as
+an arbitrary retirement stall. These paths are in `backend/rename/CompressUnit.scala`,
+`backend/rename/Rename.scala` and `backend/rob/RobBundles.scala` under
+`src/main/scala/xiangshan`. The proof is source ordering, not a full-CPU timing
+run covering every injected delay. Input byte overlap
+independently selects conflict or same-region disjoint control. A conflict must
+produce the full exposed flush-itself identity and a two-stage backend return,
+then a fresh strict refetch of snapshot-plus-older-store bytes while the store
+is still uncommitted. Only observed redirect cancellations rewind the LQ cursor.
+After store commit/drain, a DUT word readback checks the predicted post-state;
+provisional WB alone cannot discharge this architectural obligation. The control
+must produce no redirect during its bounded quiet/terminal observation. Both
+initial and refetch epochs retain data/identity/sideband checks; the same-cycle
+alias data exception is unused. This is one unresolved store/load, not a general
+speculative execution or commit reference engine. Three distinct integer
+destinations preserve live warm, provisional/refetch and readback mappings.
+The isolated redirect restores the free-list candidate, so refetch reuses its
+original pdest with a new strict expectation. Conflict data differs from the
+provisional value; stale provisional data must fail. Execution completion does
+not free an architectural destination.
 
 Ordinary constrained-random initial-data pools use stateless seed-and-physical-
 word-address values, defined in both images before traffic. Explicit writes
@@ -132,7 +160,8 @@ cancel an instruction or an LQ allocation. The alias forwarding-tag mismatch
 instead requests a same-instruction flush-itself through `memoryViolation`.
 `translation-alias` checks its full retained identity, returns the redirect after
 the isolated backend's two registered stages, and dispatches a fresh refetch
-expectation. ROB numeric identity is restored by flush-itself; LQ dispatch
+expectation. With no intervening allocation, rename restores the original pdest
+as well as the ROB identity. LQ dispatch
 position rewinds only by observed redirect cancellations, since the first entry
 may already have dequeued. The refetch must return exact committed store bytes,
 with no second data opt-out and no unobserved queue cancellation. This directed

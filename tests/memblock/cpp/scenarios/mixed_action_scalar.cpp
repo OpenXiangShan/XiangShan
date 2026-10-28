@@ -464,6 +464,10 @@ bool MixedScenario::execute_load_merge(ActionWindow &window)
 bool MixedScenario::execute_scalar_store(ActionWindow &window)
 {
     auto &probe_candidate = window.probe_candidate;
+    if (constraints.scalar_unresolved_per_mille != 0 &&
+        random() % 1000U < constraints.scalar_unresolved_per_mille) {
+        return execute_scalar_unresolved(window);
+    }
     if (constraints.scalar_dependency_per_mille != 0 &&
         random() % 1000U < constraints.scalar_dependency_per_mille) {
         return execute_scalar_dependency(window);
@@ -636,6 +640,168 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
     coverage.cacheable += stores.size() + loads.size();
     window.probe_candidate = base;
     ++actions; // One compound action; all accepted uops remain accounted.
+    return true;
+}
+
+bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
+{
+    phase = "random-scalar-unresolved";
+    const unsigned timeout = constrained_completion_timeout;
+    if (!environment.run_until_all_complete(timeout) ||
+        !environment.run_until_queues_retired(timeout)) return false;
+    const auto base = action_cacheable_address(window, 64, false) & ~std::uint64_t{63};
+    auto plan = make_unresolved_dependency_plan(
+        random, constraints.scalar_unresolved_conflict_per_mille);
+    std::array<unsigned char, 64> snapshot{};
+    for (unsigned byte = 0; byte < snapshot.size(); ++byte) {
+        snapshot[byte] = environment.memory().read_byte(base + byte);
+    }
+    if (plan.conflict) {
+        const unsigned common = std::max(plan.store.offset, plan.load.offset);
+        const unsigned shift = (common - plan.store.offset) * 8U;
+        if (static_cast<unsigned char>(plan.store.data >> shift) == snapshot[common]) {
+            plan.store.data ^= std::uint64_t{1} << shift;
+        }
+    }
+    const auto initial = scalar_dependency_expected(snapshot, {}, plan.load);
+    const auto final = scalar_dependency_expected(snapshot, {plan.store}, plan.load);
+    if ((initial != final) != plan.conflict) {
+        phase += ":indistinguishable-plan";
+        return false;
+    }
+    // Warm the line and translation before allocating the unresolved store.
+    // This is a reachability aid; no correctness decision requires a cache hit.
+    const auto pdests = unresolved_load_destinations(random);
+    auto warm = make_load(base, memblock::LoadOp::ld, random() % memblock::kScalarLoadLanes);
+    warm.pdest = pdests[0];
+    if (!environment.set_rob_head(warm.rob, warm.rob_flag) ||
+        !issue_load(warm, std::nullopt, false) ||
+        !environment.run_until_queues_retired(timeout)) return false;
+    coverage.sample(warm);
+    const auto anchor = rob_offset++;
+    if (!environment.set_rob_head(memblock::rob_pointer_value(anchor),
+            memblock::rob_pointer_flag(anchor))) return false;
+    auto store = make_store(base + plan.store.offset, plan.store.data,
+        static_cast<memblock::StoreOp>(std::countr_zero(plan.store.width)),
+        random() % memblock::kScalarStoreLanes);
+    auto load = make_load(base + plan.load.offset,
+        static_cast<memblock::LoadOp>(plan.load.op), random() % memblock::kScalarLoadLanes);
+    load.pdest = pdests[1];
+    // A legal untrained predictor tuple permits independent younger speculation.
+    load.store_set_hit = load.load_wait_bit = load.load_wait_strict = false;
+    load.wait_for_rob_flag = false;
+    load.wait_for_rob_value = 0;
+    UnresolvedLoadObligation obligation(load, plan.conflict);
+    const auto violations_before = environment.memory_violation_stats().count;
+    const auto sq_before = environment.sq_dequeued();
+    environment.expect_store(store);
+    environment.expect_load_data(load, initial);
+    if (!environment.enqueue_store(store, load.lq) ||
+        !environment.enqueue_load(load) ||
+        (plan.data_before_load && !environment.issue_store_data(store, timeout)) ||
+        !environment.issue_load(load, timeout) ||
+        !environment.run_until_load_complete(load, timeout) ||
+        !obligation.provisional() ||
+        environment.sq_dequeued() != sq_before ||
+        environment.memory_violation_stats().count != violations_before) {
+        phase += ":provisional";
+        return false;
+    }
+    if ((!plan.data_before_load && !environment.issue_store_data(store, timeout)) ||
+        !environment.run_cycles(plan.resolve_delay)) return false;
+    const auto lq_cancel_before = environment.lq_redirect_canceled_observed();
+    const auto sq_cancel_before = environment.sq_redirect_canceled_observed();
+    // Poll promptly after STA: a long completion wait could miss the backend's
+    // registered redirect-return deadline. Store TLB feedback precedes RAW
+    // selection; replay only its miss, since the store TLB can still be cold.
+    if (!environment.issue_store_address_until_tlb_hit(store, timeout)) return false;
+    if (plan.conflict) {
+        for (unsigned cycle = 0; cycle < timeout &&
+             environment.memory_violation_stats().count == violations_before; ++cycle) {
+            if (!environment.run_cycles(1)) return false;
+        }
+        const auto violation = environment.memory_violation_stats();
+        if (violation.count != violations_before + 1 || !obligation.redirect(violation.last)) {
+            phase += ":missing-or-mismatched-redirect";
+            return false;
+        }
+        const auto return_cycle = violation.last_cycle + 2U;
+        if (environment.cycle() > return_cycle ||
+            !environment.run_cycles(static_cast<unsigned>(return_cycle - environment.cycle())) ||
+            !environment.redirect_after(load.rob, load.rob_flag, true) ||
+            !obligation.returned() || !environment.run_cycles(8)) {
+            phase += ":redirect-return";
+            return false;
+        }
+        const auto canceled = environment.lq_redirect_canceled_observed() - lq_cancel_before;
+        if (canceled > 1 || environment.sq_redirect_canceled_observed() != sq_cancel_before ||
+            environment.sq_dequeued() != sq_before || canceled > lq_offset) {
+            phase += ":redirect-accounting";
+            return false;
+        }
+        lq_offset -= canceled;
+        coverage.scalar_unresolved_lq_canceled += canceled;
+        // Flush-itself restores the same architectural ROB identity. Allocate a
+        // fresh LQ/scoreboard epoch without advancing the ROB tail. Rename
+        // restores the free-list head, so this first refetched load reuses pdest.
+        auto replay = load;
+        replay.lq = memblock::lq_pointer_value(lq_offset);
+        replay.lq_flag = memblock::lq_pointer_flag(lq_offset++);
+        replay.pdest = load.pdest;
+        environment.expect_load_data(replay, final);
+        if (!environment.enqueue_load(replay) || !environment.issue_load(replay, timeout) ||
+            !environment.run_until_load_complete(replay, timeout) || !obligation.refetched()) {
+            phase += ":refetch";
+            return false;
+        }
+        coverage.sample(replay);
+    } else {
+        if (!environment.run_until_store_complete(timeout) || !environment.run_cycles(32) ||
+            environment.memory_violation_stats().count != violations_before ||
+            !obligation.no_conflict()) {
+            phase += ":nonoverlap-control";
+            return false;
+        }
+    }
+    if (!environment.run_until_store_complete(timeout) || environment.sq_dequeued() != sq_before ||
+        !environment.commit_store(store, timeout) ||
+        !environment.set_rob_head(load.rob, load.rob_flag) ||
+        !environment.run_until_queues_retired(timeout) ||
+        !environment.pulse_sbuffer_flush() || !environment.run_until_sbuffer_empty(timeout)) {
+        phase += ":store-retirement";
+        return false;
+    }
+    auto readback = make_load(base + (plan.store.offset & ~7U), memblock::LoadOp::ld,
+        random() % memblock::kScalarLoadLanes);
+    readback.pdest = pdests[2];
+    if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+        !issue_load(readback, std::nullopt, false) ||
+        !environment.run_until_queues_retired(timeout) || !obligation.readback() ||
+        !obligation.done() || environment.memory_violation_stats().count !=
+            violations_before + static_cast<unsigned>(plan.conflict)) {
+        phase += ":terminal-readback";
+        return false;
+    }
+    coverage.sample(store, true);
+    coverage.sample(load);
+    coverage.sample(readback);
+    ++coverage.scalar_unresolved_windows;
+    coverage.scalar_unresolved_conflicts += plan.conflict;
+    coverage.scalar_unresolved_controls += !plan.conflict;
+    ++coverage.scalar_unresolved_provisional;
+    coverage.scalar_unresolved_redirects += plan.conflict;
+    coverage.scalar_unresolved_returned += plan.conflict;
+    coverage.scalar_unresolved_refetched += plan.conflict;
+    ++coverage.scalar_unresolved_readbacks;
+    coverage.scalar_unresolved_data_before += plan.data_before_load;
+    if (plan.conflict) {
+        coverage.scalar_unresolved_overlap_bytes +=
+            std::min(plan.store.offset + plan.store.width, plan.load.offset + plan.load.width()) -
+            std::max(plan.store.offset, plan.load.offset);
+    }
+    coverage.cacheable += 4U + static_cast<unsigned>(plan.conflict);
+    window.probe_candidate = base;
+    ++actions;
     return true;
 }
 

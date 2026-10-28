@@ -1317,7 +1317,7 @@ int run_memory_violation(int argc, char **argv)
         .rob_flag = memblock::rob_pointer_flag(156),
         .sq = 0,
         .address_lane = 1,
-        .data_lane = 0,
+        .data_lane = 1,
     };
     const memblock::LoadTransaction nonoverlap_load{
         .address = base + 40,
@@ -1371,7 +1371,7 @@ int run_memory_violation(int argc, char **argv)
         .rob_flag = memblock::rob_pointer_flag(158),
         .sq = 1,
         .address_lane = 0,
-        .data_lane = 1,
+        .data_lane = 0,
     };
     std::vector<memblock::LoadTransaction> younger_loads;
     for (unsigned index = 0; index < memblock::kScalarLoadLanes; ++index) {

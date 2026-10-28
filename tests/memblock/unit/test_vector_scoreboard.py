@@ -59,6 +59,9 @@ class VectorScoreboardTest(unittest.TestCase):
                                 text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_late_raw_redirect_requires_a_fresh_strict_refetch_epoch(self) -> None:
+        self.check_case("late-raw-refetch")
+
     def test_permuted_repeated_indices_reject_wrong_data_routing(self) -> None:
         self.check_case("permuted-indices")
 

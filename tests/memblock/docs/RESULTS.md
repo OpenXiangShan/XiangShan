@@ -18,6 +18,18 @@ None.
 
 ## Current Changes Qualified Below
 
+- `scalar-unresolved` adds randomized one-store/one-load delayed-address
+  windows with partial byte conflicts and same-region disjoint controls.
+  Strict provisional loads use the pre-store snapshot; conflicts require the
+  exact flush-itself identity, two-stage return and strict program-order refetch
+  while the older store remains uncommitted. Store commit/drain and DUT readback
+  complete the obligation. The separate store TLB uses legal miss reissue.
+  Warm, provisional/refetch and readback roles have distinct live destinations;
+  refetch reuses the free-list-restored original pdest with a new LQ/scoreboard
+  epoch. The same-pdest correction also applies to directed alias refetch.
+  The incomplete head is a non-memory ROB group, whose operand-producing member
+  can finish before an independent FP member; its source witness does not prove
+  cycle-accurate full-CPU timing for every manager delay.
 - Ordinary and segment indexed operands now vary bounded offset spacing,
   permutation and repeated gathers. Each instruction generates one complete
   architectural index vector before CPU-compatible uop slicing. Scatters use
@@ -160,15 +172,18 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 305 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 308 tests pass | Unit checks do not establish DUT functional coverage |
 | Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
+| Unresolved-address focused | Corrected runtime-v4: 4/4 seeds 901..904 pass 128 actions each, with 504 windows and 260 correct-data refetches | `build/memblock/scalar-unresolved-20261029/focused-v4`; 244 disjoint-byte controls, all 504 committed store readbacks; zero observed LQ cancellations |
+| Unresolved-address controls | Conflict rate 0 and 1000 each pass 2×128 actions | `build/memblock/scalar-unresolved-20261029/{controls-v4,conflicts-v4}`; 252 disjoint controls and 252 matching redirect/return/refetch obligations; finite artifact verifiers accept |
+| Unresolved-address mixed/profile | 14 random seeds pass 5120 actions in total; 1092 unresolved windows, 562 correct-data refetches, 530 controls and 1092 DUT store readbacks | Runtime-v4 only; default-timing spec 2×512, compact corner 2×512, coverage 1×1024 and custom mixed 1×1024; latter has 46 heterogeneous windows and 1204/1204 final words. No closure claim |
 | Random indexed operands | 4/4 focused seeds 861..864 pass at 128 actions each; repeat endpoints 0/1000 pass 2 seeds each | Frozen runtime `build/memblock/vector-indices-20261029/runtime`; ordinary/segment directions, repeats and descending offsets observed. All tracked final words read back; finite accounting verifiers accept. Overlapping scatter/device ordering remain excluded |
 | Indexed mixed development | Custom mixed seed897 passes 1024 actions with 46 heterogeneous windows and 1313/1313 final words | Artifact `build/memblock/vector-indices-20261029/mixed`; 208 indexed instructions, 327 generated repeated offsets, 1172 descents; these operand counts include inactive elements |
 | Indexed broad development | Seed891 passes 4608 coverage actions; finite artifact verifier accepts | `build/memblock/vector-indices-20261029/coverage-replay`; 32 heterogeneous windows, 113 dependency windows, 488 indexed instructions and 2325/2325 final words. Exact runtime/seed replay completes in 687 seconds after a 300-second budget timeout; no closure claim |
 | Indexed profile compatibility | 2/2 spec and 2/2 corner seeds pass at 512 actions with compact latency; seed892 passes 512 with default spec timing | Artifacts `build/memblock/vector-indices-20261029/{spec,corner,spec-timing}`; seeds871/872 have zero indexed instructions and establish compatibility only. Seed892 executes one indexed load/store pair; corner seeds exercise both ordinary/segment directions. Strict coverage rejects unrelated sparse prefetch/probe bins; no closure claim |
 | Ordinary dependency direction | Corrected runtime: 4/4 focused seeds 811..814 pass at 128 actions each; 453 windows | 243 younger-store exclusion controls and 122 multiple-older-store-source loads; final observed/registered words match; `build/memblock/scalar-dependency-20261028/focused-v2` |
 | Ordinary mixed development | Corrected generator seed821 passes 4608 actions with `latency=compact`; artifact verifier accepts | 32 heterogeneous windows, 101 dependency windows and 2068/2068 final observed/registered words; `build/memblock/scalar-dependency-20261028/coverage-v2`; no closure claim |
-| Refetch-oracle regression | Revised scoreboard: seed851 compact and seed852 default `spec` timing each pass 512 actions; 3/3 scalar directed cases pass | Separate frozen runtime under `build/memblock/alias-refetch-20261029`; artifact verifiers accept; isolated alias refetch also passes |
+| Refetch/forwarding regression | Corrected runtime-v4: translation-alias, memory-violation and store-forwarding each pass | `build/memblock/scalar-unresolved-20261029/directed-v4`; same-pdest alias refetch and CPU-paired STA/STD lanes; isolated scalar RAW directed coverage still checks source/metadata rather than general refetch arbitration |
 | Ordinary-profile development | Corrected runtime: 2/2 spec and 2/2 corner seeds pass at 512 actions each, all with `latency=compact`; artifact verifiers accept | 53/27 dependency windows; short runs have zero heterogeneous windows because of the serial reservation; `build/memblock/scalar-dependency-20261028/{spec-v2,corner-v2}`; no closure claim |
 | Campaign report isolation | Concurrent two-regression/one-benchmark fixture and aggregate rerun pass | Fresh run-ID directory and matching document ID; previous sidecar bytes retained; artifact `build/memblock/report-namespace-20261028/check-unit.log` |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
@@ -184,7 +199,7 @@ The current qualification is:
 | Deep probe window | `dcache-coherence` passes with 8 accepted B probes, 8 C responses and `deep_probe_depth=8` | Directed eight-line window; four resident clean lines report permission 2 and four absent lines report the DUT's no-permission encoding 5; the report values are scenario-owned, not an architectural permission oracle |
 | Same-address B/C attribution | Two simultaneous probes to one resident line cannot be uniquely matched by address/opcode/report; a data-less C with report 5 appeared while the accepted expectation expected report 2, and C was observed before the manager's second B acceptance | C's client-owned source is not tied to B; this is an oracle gap, not a confirmed RTL violation. Source/ownership attribution remains open |
 | Accepted-B probe gate | 1/1 1024-action mixed seed passes with 407 probes, plus directed coherence/release/atomic | Seed 207; artifact `agent-campaign-17`; no dedicated counter for pre-B C because an illegal C fails immediately |
-| Cross-alias store/load | `translation-alias` passes after-drain/in-flight visibility and identified correct-data frontend refetch; `refetched=1 completed=1 lq=2+0/2` | One PA, two Sv39 VAs; zero-cancellation refetch observed. Nonzero LQ cancellation, arbitrary IQ/LQ replay and redirect arbitration remain unqualified; `build/memblock/alias-refetch-20261029/alias.log` |
+| Cross-alias store/load | `translation-alias` passes after-drain/in-flight visibility and identified correct-data frontend refetch; `refetched=1 completed=1 lq=2+0/2` | One PA, two Sv39 VAs; zero-cancellation refetch observed. Nonzero LQ cancellation, arbitrary IQ/LQ replay and redirect arbitration remain unqualified; `build/memblock/scalar-unresolved-20261029/directed-v4/translation-alias.log` |
 | CBO.ZERO ordering | Corrected sequence passes on both restored-original and latest-overlay RTL with `sequential_zero=2 consecutive_zero=2 following_store=1`, repeated same-line and three-line consecutive zero cases, both zero/store age directions, a dirty-line zero and an early younger load | CBO.ZERO remains the ROB head until deferred SBuffer completion; no simultaneous CBO completion window is legal or claimed |
 | Segment noncanonical fault | Corrected legal two-uop `nf=1` segment load/store cases pass on both restored-original and latest-overlay RTL; the later uop exposes the exact page fault with no DCache/Uncache request or SBuffer side effect | The first data uop may defer the fault and is not an independent architectural oracle |
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
@@ -235,6 +250,24 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
+A fresh-context non-author review approves the unresolved-address change after
+disposition of live-mapping reuse and free-list recovery findings. Warm and
+terminal mappings remain distinct, and refetch restores the original load
+pdest rather than inventing another allocation. Both alias and late-RAW unit
+cases explicitly require a fresh same-pdest strict expectation and reject stale
+wrong data/duplicate completion. The compressed non-memory ROB-group head has a
+source-level producer/aggregate-completion witness; full-CPU timing across every
+random PTW delay is unqualified. Review also checks lane pairing, store-TLB miss
+reissue before RAW, two-stage redirect return, observed cancellation-only cursor
+rewind, uncommitted-store forwarding, committed readback and balanced accounting.
+All 308 units and check-rtl pass; independent focused suites pass 2+12. Corrected
+runtime-v4's 14 seeds/5120 actions and 3 directed checks pass. All retained RAW
+refetches have zero LQ cancellations; cancellation=1, trained prediction, multiple
+unresolved producers and general redirect arbitration remain unqualified. The
+alias correct-first-data redirect branch has source/unit evidence but no retained
+native qualification; its observed native case discards wrong first data.
+Review artifact: `build/memblock/scalar-unresolved-20261029/review.txt`.
+
 A fresh-context independent review approves the bounded random indexed-operand
 change with no blocking findings. It checks the actual diff, CPU VS2 sharing and
 segment decomposition, disjoint scatter spans, independent byte expectations,
@@ -245,22 +278,13 @@ seeds total 9216 actions. The broad exact replay and the custom mixed run
 exercise heterogeneous windows. Review artifact:
 `build/memblock/vector-indices-20261029/review.txt`.
 
-A fresh-context independent review approves the scalar alias-refetch correction
-with no blocking findings. It traces the full CPU alias-mismatch, registered
-redirect and queue-recovery chain and checks the actual scoreboard/driver diff.
-Independent production scoreboard validation passes 10/10, including negative
-redirect/sideband cases and duplicate completion rejection. The retained DUT
-case proves the zero-LQ-cancellation refetch path; nonzero cancellation and
-correct-first-data redirect paths have source/contract evidence rather than
-DUT qualification. Review artifact:
-`build/memblock/alias-refetch-20261029/review.txt`.
-
 The constrained-random audit identified genuine value/choice variation but
 serialized scalar dependencies, fixed heterogeneous composition and repeating
 initial-data blind spots. The new dependency direction and seed/address initial
 data address those two ordinary-workload gaps. Bounded ordinary and segment
-indexed-offset variation is also implemented and reviewed. Unresolved-address
-replay and arbitrary heterogeneous composition remain open. Fresh-context reviews approve the memory and dependency changes. The
+indexed-offset variation is also implemented and reviewed. Bounded one-store/
+one-load unresolved-address replay now has strict terminal data/readback checks;
+multiple unresolved producers and arbitrary heterogeneous composition remain open. Fresh-context reviews approve the memory and dependency changes. The
 latter resolved paired store lanes, valid/distinct dependency destinations and
 a topology metric that had included timing variation. All 302 unit tests and
 check-rtl pass; corrected-runtime development artifacts above pass their effect,

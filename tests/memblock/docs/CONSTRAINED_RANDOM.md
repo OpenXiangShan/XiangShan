@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=55`.
+`constraint_schema=56`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -81,7 +81,9 @@ they do not imply arbitrary numeric suffix support.
 | `misaligned` | Misalignment rate where width, operation, and legal address class permit it. |
 | `stride-stream` | Rate selecting a fixed-PC, 128-byte-stride cold scalar-load stream. |
 | `bank-conflict` | Rate replacing an eligible clean scalar-load action with a two- or three-load same-bank resident wave; banks are derived from request addresses. |
-| `scalar-dependency` | Rate replacing an eligible ordinary scalar-store action with a randomized dependency window: 1..4 older stores, 1..3 younger loads, and an optional store younger than those loads. Widths, byte overlap, payloads, lanes, operand arrival, issue order and 0..7-cycle gaps vary. Defaults coverage/spec/corner/cmo-stress: 350/200/500/0. |
+| `scalar-unresolved` | Rate replacing an eligible ordinary scalar-store action with a delayed-address window, before the `scalar-dependency` selection. Defaults coverage/spec/corner/cmo-stress: 200/100/300/0. |
+| `scalar-unresolved-conflict` | Conditional byte-overlap rate in that window; default 500 in all presets. Zero forces disjoint-byte controls and 1000 forces conflicts. |
+| `scalar-dependency` | Rate replacing a remaining eligible ordinary scalar-store action with a randomized dependency window: 1..4 older stores, 1..3 younger loads, and an optional store younger than those loads. Widths, byte overlap, payloads, lanes, operand arrival, issue order and 0..7-cycle gaps vary. Defaults coverage/spec/corner/cmo-stress: 350/200/500/0. |
 | `latency` | `compact` or `spec`, applied to all three managers. |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | `compact` or `spec`, applied to one manager. |
 
@@ -257,6 +259,8 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | `stride-stream` | 500 | 100 | 750 | 0 |
 | `bank-conflict` | 500 | 250 | 750 | 0 |
 | `scalar-dependency` | 350 | 200 | 500 | 0 |
+| `scalar-unresolved` | 200 | 100 | 300 | 0 |
+| `scalar-unresolved-conflict` | 500 | 500 | 500 | 500 |
 | Latency DCache/PTW/Uncache | compact/compact/compact | spec/spec/spec | spec/spec/spec | compact/compact/compact |
 
 Profiles specify directions, not measured workload fidelity or observed coverage.
@@ -528,6 +532,54 @@ bus writes. This removes representative +256-byte and +16-KiB repeated-pattern
 blind spots. It does not make every individual byte unique or randomize the
 remaining fault/device setup pools.
 
+## Unresolved Scalar Store Addresses
+
+`scalar-unresolved` uses the same ordinary cacheable context and one line, with
+one older store and one younger scalar load held behind an older incomplete
+non-memory ROB group. A legal source witness is a compressed group containing
+completed integer base/data producers and an independent unfinished FP
+DIV/SQRT completion; aggregate completion keeps the group pending after STA can
+issue. This is not a completed scalar producer artificially held at the head.
+Width/sign, aligned offsets, conflict/control choice, STA/STD lane,
+load lane, payload, STD arrival before/after the first load, and 0..7-cycle
+address-resolution delay vary. Both operands lie in the same 16-byte comparison
+region; controls have disjoint byte masks. A conflict always changes at least
+one byte of the load. A preliminary ordinary load warms the line and load TLB;
+the store's separate TLB can still miss and uses legal same-allocation STA
+reissue until its hit feedback. The load uses an untrained nonwaiting predictor
+tuple so its independent execution is legal. Warm, provisional/refetch and
+readback roles reserve three distinct physical destinations in 1..223; a completed
+load's architectural mapping can remain live across the following anchor.
+Refetch restores the rename free-list head and reuses the provisional pdest.
+
+The first strict completion must match the pre-store snapshot while STA is
+withheld. It is a provisional execution, not architectural success. Resolving a
+conflicting address must produce the matching flush-itself ROB/FTQ/RVC identity.
+The isolated backend returns it after two registered stages. LQ dispatch position
+rewinds only by observed cancellation; the already-completed load may have
+dequeued, giving zero cancellation. The older store must survive, uncommitted.
+A fresh LQ/scoreboard epoch with the restored ROB/pdest identity then requires exact
+snapshot-plus-older-store bytes. Only after refetch does the store commit, drain
+and receive a strict DUT word readback. A disjoint control requires no observed
+redirect through its completion/32-cycle quiet interval and terminal readback,
+with one load execution and no refetch. These checks do not impose a particular
+forwarding path or store-issue-to-redirect cycle.
+
+An explicit obligation gates provisional completion, matching redirect, returned
+redirect, correct refetch and committed readback; missing/duplicate/out-of-order
+steps cannot pass. Both execution epochs retain ordinary data and sideband
+checks, and wrong destinations/duplicate completions remain errors. Since the
+conflict changes the load value, stale provisional data cannot satisfy refetch. The
+`scalar_unresolved` tuple reports windows, conflicts, controls, provisional
+completions, matched redirects, returned redirects, refetch completions,
+committed readbacks, STD-before-first-load windows, overlapping bytes, and
+observed LQ cancellations. All terminal obligations must balance; a zero-window
+short run is still sparse. These are isolated windows, not arbitrary outstanding
+store/load graphs, trained predictor behavior or general redirect arbitration.
+The incomplete external ROB group is a unit-level premise. Source reachability
+of the producer/completion ordering is not cycle-accurate full-CPU qualification
+for every randomized PTW/backend delay; a timeout is not an RTL liveness proof.
+
 ## Random Indexed Operands
 
 Ordinary and non-FOF segment indexed instructions generate one architectural
@@ -580,8 +632,10 @@ for shared-register consistency and disjoint store elements.
 - Heterogeneous windows have a fixed five-producer composition, optional clean
   NC/MMIO load, bounded queue flow, dependent ordered-index issue, and a drain
   between windows. Serial helpers supply local Probe/refill/pressure overlaps.
-  The scalar dependency direction adds variable ordinary store/load chains,
-  but unresolved-store-address recovery is not generated there. Broad arbitrary
+  The scalar dependency direction adds variable ordinary store/load chains;
+  the unresolved direction adds one-store/one-load late RAW recovery and
+  disjoint-mask controls. Multiple unresolved stores/loads and predictor training
+  remain absent. Broad arbitrary
   outstanding instruction mixtures, multiple CMO/atomic ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
   injection are not provided by these constraints.
 - The final readback forces cacheable identity-mapped store/atomic effects, but
