@@ -107,6 +107,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // an entry has passed the point of no return, so Bpu can no longer override it
   private def passedPnr(ptr: FtqPtr): Bool = pnrPtr > ptr
 
+  // an entry is retired here, driven in the commit section below
+  private val commit = Wire(Bool())
+
   // entryQueue stores predictions made by BPU.
   private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
 
@@ -179,13 +182,22 @@ class Ftq(implicit p: Parameters) extends FtqModule
     bpTrainStallCnt := 0.U
   }
 
-  // One enqueue carries up to MaxPredictionNum blocks and cannot be partially accepted, so that many entries must be
-  // free before we accept one.
-  private val ftqHasRoom = distanceBetween(bpuPtr(0), commitPtr(0)) <= (FtqSize - MaxPredictionNum).U
+  // Entries not yet allocated by Bpu. One enqueue carries up to MaxPredictionNum blocks and cannot be partially
+  // accepted, so that many entries must be free before we accept one.
+  // This is tracked as a counter, and the comparison is registered, so that prediction.ready is a register output
+  // rather than a pointer subtraction feeding Bpu's fire path. It is not stale: freeNumNext already accounts for the
+  // enqueue of this cycle, so registering the comparison yields exactly "freeNum of that cycle >= MaxPredictionNum".
+  private val freeNum    = RegInit(FtqSize.U(log2Ceil(FtqSize + 1).W))
+  private val ftqHasRoom = RegInit(true.B)
 
   // We limit the distance between BP and IF and stall counts of BP train so that branch update can be written back to
   // BPU
-  private val bpNotRunTooFar = distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U &&
+  // Registered as well, so that prediction.ready is a plain register output. Unlike the capacity check this one lags
+  // by a cycle, which is acceptable as it is a throttle rather than a correctness check. A redirect is the exception:
+  // it moves bpuPtr and fetchPtr to the same entry, so Bpu is known not to be ahead of fetch in the next cycle, and the
+  // lag must not delay the first prediction from the redirect target.
+  private val bpNotRunTooFar = RegInit(true.B)
+  bpNotRunTooFar := (redirect.valid || distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U) &&
     bpTrainStallCnt < BpTrainStallLimit.U
 
   io.fromBpu.prediction.ready := ftqHasRoom && bpNotRunTooFar
@@ -217,6 +229,25 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }.elsewhen(bpuEnqueue) {
     bpuPtr := bpuPtr + prediction.bits.numBlocks
   }
+
+  // Track free entries alongside bpuPtr: an enqueue takes as many entries as it carries, a commit gives one back, and
+  // the cases that move bpuPtr backwards release everything they cut away. This mirrors the bpuPtr update above, so
+  // the cases must stay in the same priority order.
+  private def freeNumAfterRewind(newBpuPtr: FtqPtr): UInt =
+    FtqSize.U - distanceBetween(newBpuPtr, commitPtr(0)) + commit
+
+  private val freeNumNext = MuxCase(
+    freeNum - Mux(bpuEnqueue, prediction.bits.numBlocks, 0.U) + commit,
+    Seq(
+      redirect.valid             -> freeNumAfterRewind(redirect.bits.newFtqIdx),
+      prediction.bits.s3Override -> freeNumAfterRewind(io.fromBpu.s3FtqPtr + prediction.bits.numBlocks),
+      prediction.bits.s2Override -> freeNumAfterRewind(io.fromBpu.s2FtqPtr + prediction.bits.numBlocks)
+    )
+  )
+  freeNum    := freeNumNext
+  ftqHasRoom := freeNumNext >= MaxPredictionNum.U
+
+  XSError(freeNumNext > FtqSize.U, "Ftq free entry count overflows\n")
 
   private val entryEnqueue = (prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
   when(entryEnqueue) {
@@ -550,7 +581,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     FtqPtr(true.B, (FtqSize - 1).U),
     io.fromBackend.commit.valid
   )
-  private val commit = commitPtr <= robCommitPtr
+  commit := commitPtr <= robCommitPtr
   when(commit) {
     commitPtr := commitPtr + 1.U
   }
