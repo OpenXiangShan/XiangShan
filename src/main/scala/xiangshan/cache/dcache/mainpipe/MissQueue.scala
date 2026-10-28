@@ -1481,12 +1481,22 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
     val has_merge = (analysis.strategy(i) & 2.U) =/= 0.U
     val has_alloc = (analysis.strategy(i) & 1.U) =/= 0.U
     val is_valid = analysis.valid(i)
-    val target_mshr = analysis.target_mshr(i)  // Explicit use to prevent Chisel optimization
     val target_group = analysis.compress_group(i)
+    val target_mshr = analysis.target_mshr(target_group)
 
     // Compress: only the first in group is master, others are slaves
     val is_first_in_group = target_group === i.U
-    val compress_ready = has_compress && Mux(is_first_in_group, has_merge || has_alloc, (analysis.strategy(target_group) & 3.U) =/= 0.U)
+    val group_has_alloc = (analysis.strategy(target_group) & 1.U) =/= 0.U
+    val group_has_merge = (analysis.strategy(target_group) & 2.U) =/= 0.U
+    // A follower must be able to merge into the leader's target. In particular,
+    // a store's late-merge eligibility must not admit a load after data refill.
+    val follower_can_merge = VecInit(secondary_ready_vec(i))(target_mshr) ||
+      (can_merge_from_pipe(i) && can_merge_from_pipe_mshr(i) === target_mshr)
+    val compress_ready = has_compress && Mux(
+      is_first_in_group,
+      has_merge || has_alloc,
+      group_has_alloc || (group_has_merge && follower_can_merge)
+    )
 
     val merge_ready = has_merge && !has_compress && is_valid
 
@@ -1545,9 +1555,10 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
   }
 
   for(i <- 0 until reqNum) {
-    // merged to pipeline reg
+    // Compressed requests use the leader's target, including pipe-reg merges.
+    val has_compress = (analysis.strategy(i) & 4.U) =/= 0.U
     io.resp(i).id := Mux(
-      can_merge_from_pipe(i),
+      can_merge_from_pipe(i) && !has_compress,
       can_merge_from_pipe_mshr(i),
       actual_target_mshr_for_group(i)
     )
