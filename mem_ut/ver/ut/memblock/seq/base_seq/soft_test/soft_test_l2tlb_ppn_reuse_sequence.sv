@@ -106,6 +106,8 @@ function void soft_test_l2tlb_ppn_reuse_sequence::check_smoke_cfg_snapshot();
                 responder.ppn_reuse_history_size == 1 &&
                 responder.ppn_reuse_wt == 100,
                 "PPN reuse smoke cfg must be frozen by responder.configure_from_plus");
+    expect_true(seq_csr_common::get_l2tlb_level_weight_en() == 1'b0,
+                "PPN reuse smoke cfg must force deterministic 4KB page shape");
     expect_true(seq_csr_common::get_main_mem_ranges_en() == 1'b0,
                 "PPN reuse smoke cfg must exercise sparse PPN generation");
 endfunction:check_smoke_cfg_snapshot
