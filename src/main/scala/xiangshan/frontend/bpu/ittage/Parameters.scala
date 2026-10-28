@@ -22,10 +22,10 @@ import xiangshan.frontend.bpu.IttageTableInfo
 case class IttageParameters(
     TableInfos: Seq[IttageTableInfo] = Seq(
       new IttageTableInfo(256, 4),
-      new IttageTableInfo(256, 10),
-      new IttageTableInfo(512, 23),
-      new IttageTableInfo(512, 53),
-      new IttageTableInfo(512, 128)
+      new IttageTableInfo(256, 11),
+      new IttageTableInfo(512, 31),
+      new IttageTableInfo(512, 89),
+      new IttageTableInfo(512, 256)
     ),
     NumBanks:           Int = 2,
     TagWidth:           Int = 9,
