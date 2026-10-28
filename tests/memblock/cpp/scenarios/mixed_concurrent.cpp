@@ -228,7 +228,17 @@ bool MixedScenario::run_concurrent_windows()
                             vector_load_uops.front().rob_flag))) {
                     return false;
                 }
-                for (const auto &uop : vector_load_uops) {
+                for (const unsigned index : vector_uop_issue_order(vector_load_uops, random)) {
+                    const auto &uop = vector_load_uops[index];
+                    if (index != 0 && vector_load_depends_on_previous(
+                            vector_load_uops[index - 1U], uop)) {
+                        if (!environment.run_until_vector_complete_with_replays(
+                                vector_load_uops[index - 1U],
+                                constrained_completion_timeout)) {
+                            return false;
+                        }
+                        ++coverage.vector_operand_chains[2];
+                    }
                     if (!environment.issue_vector(uop, 2048)) {
                         return false;
                     }
@@ -245,8 +255,8 @@ bool MixedScenario::run_concurrent_windows()
                 }
                 break;
             case 3:
-                for (const auto &uop : vector_store_uops) {
-                    if (!environment.issue_vector(uop, 2048)) {
+                for (const unsigned index : vector_uop_issue_order(vector_store_uops, random)) {
+                    if (!environment.issue_vector(vector_store_uops[index], 2048)) {
                         return false;
                     }
                 }
@@ -357,8 +367,11 @@ bool MixedScenario::run_concurrent_windows()
         }
         auto vector_readback_uops = vector_store_uops;
         const std::uint64_t vector_readback_rob = rob_offset++;
+        const auto vector_readback_pdest = random_destination_block(
+            random, memblock::kVectorPhysicalRegisters, vector_readback_uops.size());
         for (auto &uop : vector_readback_uops) {
             uop.store = false;
+            uop.pdest = static_cast<std::uint8_t>(vector_readback_pdest + uop.vuop_idx);
             uop.rob = memblock::rob_pointer_value(vector_readback_rob);
             uop.rob_flag = memblock::rob_pointer_flag(vector_readback_rob);
             uop.lq = memblock::lq_pointer_value(lq_offset);
@@ -367,6 +380,8 @@ bool MixedScenario::run_concurrent_windows()
             uop.sq_flag = memblock::sq_pointer_flag(sq_offset);
             lq_offset += uop.flow_num;
         }
+        coverage.vector_operand_chains[0] += chain_indexed_vector_sources(
+            vector_readback_uops, environment.memory());
         if (!environment.set_rob_head(
                 vector_readback_uops.front().rob,
                 vector_readback_uops.front().rob_flag) ||

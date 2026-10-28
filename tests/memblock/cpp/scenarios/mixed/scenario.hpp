@@ -3,6 +3,7 @@
 #include "scalar_dependency.hpp"
 #include "unresolved_dependency.hpp"
 #include "vector_indices.hpp"
+#include "vector_operands.hpp"
 #include "translation_permutation.hpp"
 
 namespace memblock::scenarios::mixed {

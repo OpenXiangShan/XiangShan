@@ -267,17 +267,14 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
     const std::uint8_t vlmul = static_cast<std::uint8_t>(
         shape.lmul_log2 < 0
             ? shape.lmul_log2 + 8 : shape.lmul_log2);
-    const std::uint8_t first_pdest = static_cast<std::uint8_t>(
-        1U + random() % (256U - uop_count));
+    const std::uint8_t first_pdest = random_destination_block(
+        random, memblock::kVectorPhysicalRegisters, uop_count);
     const unsigned index_bytes = 1U << shape.eew;
     const unsigned index_group_bytes_per_uop = shape.emul_log2 < 0
         ? 16U >> static_cast<unsigned>(-shape.emul_log2)
         : 16U;
     const unsigned index_elements_per_vreg =
         index_group_bytes_per_uop >> shape.eew;
-    const bool special_indexed =
-        indexed && shape.emul_log2 > shape.lmul_log2;
-
     const auto indices = indexed
         ? make_random_vector_indices(random, vlmax, index_bytes, data_bytes,
               1U, store, constraints.vector_index_repeat_per_mille)
@@ -289,10 +286,6 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
     std::vector<memblock::VectorMemoryTransaction> uops;
     uops.reserve(uop_count);
     for (unsigned uop = 0; uop < uop_count; ++uop) {
-        const unsigned vd_index = special_indexed
-            ? uop >> static_cast<unsigned>(
-                         shape.emul_log2 - shape.lmul_log2)
-            : uop;
         const std::uint64_t lq_pointer =
             store ? lq_offset : queue_cursor;
         const std::uint64_t sq_pointer =
@@ -319,7 +312,8 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
             .lq_flag = memblock::lq_pointer_flag(lq_pointer),
             .sq = memblock::sq_pointer_value(sq_pointer),
             .sq_flag = memblock::sq_pointer_flag(sq_pointer),
-            .pdest = static_cast<std::uint8_t>(first_pdest + vd_index),
+            .pdest = store ? std::uint8_t{0}
+                : static_cast<std::uint8_t>(first_pdest + uop),
             .lane = uop % memblock::kVectorMemoryLanes,
             .flow_num = static_cast<std::uint8_t>(flow_num),
             .ftq_ptr = random() & 0x3fU,
@@ -342,6 +336,8 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
         }
         queue_cursor += flow_num;
     }
+    coverage.vector_operand_chains[store ? 1U : 0U] +=
+        chain_indexed_vector_sources(uops, environment.memory());
     return uops;
 }
 
@@ -391,9 +387,6 @@ bool MixedScenario::issue_random_vector_instruction(
     const std::vector<memblock::VectorMemoryTransaction> &uops)
 {
     const bool store = uops.front().store;
-    const bool reverse_issue = uops.front().addressing ==
-            memblock::VectorAddressingMode::indexed_unordered &&
-        (random() & 1U) != 0;
     std::size_t begin = 0;
     while (begin < uops.size()) {
         std::size_t end = begin;
@@ -441,9 +434,16 @@ bool MixedScenario::issue_random_vector_instruction(
                 return false;
             }
         }
-        for (std::size_t offset = 0; offset < window.size(); ++offset) {
-            const std::size_t issue_index = reverse_issue
-                ? window.size() - offset - 1U : offset;
+        for (const unsigned issue_index : vector_uop_issue_order(window, random)) {
+            const std::size_t global_index = begin + issue_index;
+            if (global_index != 0 && vector_load_depends_on_previous(
+                    uops[global_index - 1U], uops[global_index])) {
+                if (!environment.run_until_vector_complete_with_replays(
+                        uops[global_index - 1U], constrained_completion_timeout)) {
+                    return false;
+                }
+                ++coverage.vector_operand_chains[2];
+            }
             if (!environment.issue_vector(
                     window[issue_index], constrained_completion_timeout)) {
                 return false;
@@ -565,8 +565,8 @@ bool MixedScenario::issue_random_vector_segment_fof(
     const std::uint64_t page_fault_writebacks_before =
         environment.vector_page_fault_writebacks();
     const std::uint64_t rob = rob_offset++;
-    const std::uint8_t first_pdest = static_cast<std::uint8_t>(
-        1U + random() % (256U - data_uops_count - 1U));
+    const std::uint8_t first_pdest = random_destination_block(
+        random, memblock::kVectorPhysicalRegisters, data_uops_count);
     std::vector<memblock::VectorMemoryTransaction> data_uops;
     data_uops.reserve(data_uops_count);
     for (unsigned uop = 0; uop < data_uops_count; ++uop) {
@@ -649,8 +649,8 @@ bool MixedScenario::issue_random_vector_segment_fof(
     }
 
     auto fix_vl_uop = data_uops.front();
-    fix_vl_uop.pdest =
-        static_cast<std::uint8_t>(first_pdest + data_uops_count);
+    fix_vl_uop.pdest = random_destination_block(
+        random, memblock::kVlPhysicalRegisters, 1U);
     fix_vl_uop.expected_exception_mask = 0;
     fix_vl_uop.allowed_additional_exception_mask = 0;
     fix_vl_uop.expected_trigger =

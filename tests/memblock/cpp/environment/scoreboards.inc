@@ -813,8 +813,10 @@ public:
                 transaction.expected_debug_is_mmio,
                 transaction.expected_debug_is_ncio,
                 transaction.expected_debug_is_perf_cnt,
-                transaction.vma,
-                transaction.vta,
+                // RVV 1.0 element definitions: a no-op preserves every
+                // destination element, including tail/agnostic elements.
+                transaction.vma && transaction.vstart < vector_effective_vl(transaction),
+                transaction.vta && transaction.vstart < vector_effective_vl(transaction),
                 transaction.address,
                 transaction.addressing,
                 transaction.stride,
@@ -938,6 +940,15 @@ public:
         expected_.erase(it);
     }
 
+    bool pending(const VectorMemoryTransaction &transaction) const
+    {
+        const auto range = expected_.equal_range(
+            rob_identity(transaction.rob, transaction.rob_flag));
+        return std::any_of(range.first, range.second, [&](const auto &entry) {
+            return entry.second.vuop_idx == transaction.vuop_idx &&
+                entry.second.pdest == transaction.pdest;
+        });
+    }
     bool done() const { return expected_.empty(); }
     std::size_t pending() const { return expected_.size(); }
     std::size_t pending_loads() const

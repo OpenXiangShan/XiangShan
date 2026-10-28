@@ -109,7 +109,8 @@ memblock::VectorMemoryTransaction MixedScenario::make_vector(bool store, std::ui
         .lq_flag = memblock::lq_pointer_flag(lq),
         .sq = memblock::sq_pointer_value(sq),
         .sq_flag = memblock::sq_pointer_flag(sq),
-        .pdest = static_cast<std::uint8_t>(1 + random() % 255),
+        .pdest = store ? std::uint8_t{0} : random_destination_block(
+            random, memblock::kVectorPhysicalRegisters, 1U),
         .lane = lane,
         .flow_num = flow_num,
     };

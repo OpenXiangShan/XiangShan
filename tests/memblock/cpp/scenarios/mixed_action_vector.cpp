@@ -67,7 +67,8 @@ bool MixedScenario::execute_vector_memory(ActionWindow &window)
             .lq_flag = memblock::lq_pointer_flag(lq),
             .sq = memblock::sq_pointer_value(sq_offset),
             .sq_flag = memblock::sq_pointer_flag(sq_offset),
-            .pdest = static_cast<std::uint8_t>(1U + random() % 254U),
+            .pdest = random_destination_block(
+                random, memblock::kVectorPhysicalRegisters, 1U),
             .lane = 0,
             .flow_num = 2,
             .expected_exception_mask = vector_fof_first_fault
@@ -134,8 +135,8 @@ bool MixedScenario::execute_vector_memory(ActionWindow &window)
             return false;
         }
         auto fix_vl_uop = data_uop;
-        fix_vl_uop.pdest =
-            static_cast<std::uint8_t>(data_uop.pdest + 1U);
+        fix_vl_uop.pdest = random_destination_block(
+            random, memblock::kVlPhysicalRegisters, 1U);
         fix_vl_uop.expected_exception_mask = 0;
         fix_vl_uop.expected_vl = vector_fof_first_fault ? 2U : 1U;
         fix_vl_uop.vuop_idx = 1;
@@ -325,8 +326,8 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
                     << (relative % 64);
             }
         }
-        const std::uint8_t first_pdest = static_cast<std::uint8_t>(
-            1 + random() % (256 - uop_count));
+        const std::uint8_t first_pdest = random_destination_block(
+            random, memblock::kVectorPhysicalRegisters, data_uops);
         const std::uint8_t vlmul = static_cast<std::uint8_t>(
             shape.lmul_log2 < 0
                 ? shape.lmul_log2 + 8 : shape.lmul_log2);
@@ -367,7 +368,7 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
                 .lq_flag = memblock::lq_pointer_flag(lq_offset),
                 .sq = memblock::sq_pointer_value(sq_offset),
                 .sq_flag = memblock::sq_pointer_flag(sq_offset),
-                .pdest = vector_segment_store
+                .pdest = vector_segment_store || uop >= data_uops
                     ? std::uint8_t{0}
                     : static_cast<std::uint8_t>(first_pdest + uop),
                 .lane = 0,

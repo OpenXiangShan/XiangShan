@@ -3281,6 +3281,8 @@ struct MixedCoverage {
     std::uint64_t redirect_recovery = 0;
     std::uint64_t dirty_pressure = 0;
     std::uint64_t max_outstanding = 0;
+    // Repeated-logical-Vd load source edges/store source reuses/checked waits.
+    std::array<std::uint64_t, 3> vector_operand_chains{};
     std::array<std::uint64_t, kConcurrentClasses> concurrent_ops{};
     std::uint64_t concurrent_windows = 0;
     std::uint64_t concurrent_actions = 0;
@@ -3597,7 +3599,10 @@ struct MixedCoverage {
                std::to_string(tlb_reuse) + " redirects=" +
                std::to_string(redirect_recovery) + " dirty=" +
                std::to_string(dirty_pressure) + " max_outstanding=" +
-               std::to_string(max_outstanding) + " concurrent_ops=" +
+               std::to_string(max_outstanding) + " vector_operand_chains=" +
+               std::to_string(vector_operand_chains[0]) + ',' +
+               std::to_string(vector_operand_chains[1]) + ',' +
+               std::to_string(vector_operand_chains[2]) + " concurrent_ops=" +
                std::to_string(concurrent_ops[0]) + ',' +
                std::to_string(concurrent_ops[1]) + ',' +
                std::to_string(concurrent_ops[2]) + ',' +

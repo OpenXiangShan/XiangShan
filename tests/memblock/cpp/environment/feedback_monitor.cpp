@@ -244,6 +244,9 @@ void FeedbackMonitor::reset_observations()
 std::optional<VectorReplayRequest> FeedbackMonitor::take_replay_for(
     const VectorMemoryTransaction &transaction)
 {
+    // Only vector-store slow feedback creates these requests. LQ is a
+    // snapshot, not the identity of an independently replaying vector load.
+    if (!transaction.store) return std::nullopt;
     const auto replay_it = std::find_if(
         vector_replay_requests_.begin(), vector_replay_requests_.end(),
         [&](const VectorReplayRequest &request) {

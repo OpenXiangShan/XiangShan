@@ -18,6 +18,19 @@ None.
 
 ## Current Changes Qualified Below
 
+- Canonical vector-data writing uops now select distinct destinations in 1..127;
+  FOF fix-VL independently selects 1..31, and nonwriting uops drive zero.
+  Repeated logical Vd in EMUL>LMUL indexed loads uses independently computed
+  prior source bytes and the external backend's agnostic producer policy.
+  Stores reuse unchanged source bytes. Unordered indexed issue samples ready
+  dependency vertices; exact predecessor waits retain unissued siblings and
+  cannot consume store replay feedback through a load's LQ snapshot. The raw
+  vector comparator requires every old-destination byte unchanged for no-op
+  instructions (`vstart >= vl`), including `vl=0`; ordinary body/agnostic rules
+  remain separate. A scheduling-only sample contains 453 distinct legal orders
+  out of 512 draws for four independent two-uop chains. Full allocation history,
+  arbitrary simultaneous writing-instruction allocation and sliding retirement
+  remain unqualified.
 - Canonical ordinary, heterogeneous-window, SQ-dependency and unresolved/refetch
   loads now select integer or FLH/FLW/FLD formats from seeded class/width weights.
   Independent mapped bytes and older input-store overlays determine FP payloads
@@ -196,7 +209,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 324 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 330 tests pass | Unit checks do not establish DUT functional coverage |
+| Vector operands and oracle | Frozen runtime-v2: 18/18 finite seeds pass 5888 actions; all retained artifact verifiers accept | `build/memblock/vector-operands-20261029/qualification.json`; ordered/unordered indexed and agnostic controls, coverage/spec/corner, mixed and legal ordinary/segment FOF profiles. 1804 load source-chain edges and 1804 checked predecessor waits, 1450 store-source reuses, 146 heterogeneous windows and 10563/10563 final tracked words; development qualification, no closure claim |
+| Vector builder and mutation checks | Six production builder/source/scheduler/wait/scoreboard/accounting tests pass; 4992 builder cases, 192 no-op cases and 453/512 distinct dependency issue orders | Fresh non-author review detects eight private input/scheduler/replay mutations plus removal of the no-op comparator gate; 128 additional normal-body controls preserve active/mask/tail decisions. Helper/unit sensitivity, not RTL mutation coverage |
+| Vector adjacent directed checks | 13/13 selected scenarios pass through runtime-v2 | `build/memblock/vector-operands-20261029/directed-v2/results.json`; full vector-segment matrix (676 unit/strided and 676 indexed configurations), ordinary/split/FOF/addressing/issue/forwarding plus translation/faults, scalar/FP and coherence; selected set, not full catalog |
 | Canonical randomized FP | Frozen runtime-v1: 30/30 finite random/control seeds pass 6656 actions; all retained artifact verifiers accept | `build/memblock/fp-random-20261029/qualification.json`; focused ordinary/dependency/unresolved, coverage/spec/corner, mixed, integer-only, single-width and aligned injected-error controls. 2023 FP checker executions (649 FLH, 700 FLW, 674 FLD), 146 heterogeneous windows, 2281/2281 final tracked words; development qualification, no closure claim |
 | FP oracle and structural sensitivity | Six production helper/factory/scoreboard/accounting tests pass; 509/512 unique FP dependency topologies | Literal narrow/64-bit payloads, discontinuous pages, older-store/refetch versions and destination domains; fresh non-author review detects private no-boxing, wrong-domain and wrong-class mutations. These are helper/unit mutations, not RTL mutation coverage |
 | FP adjacent directed checks | 13/13 selected scenarios pass through runtime-v1 | `build/memblock/fp-random-20261029/directed/results.json`; scalar/FP, misalignment, forwarding/recovery, translation/alias/faults, atomic and coherence; selected set, not full catalog. Exceptional misaligned FP enable semantics remain unqualified |
@@ -280,33 +296,43 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
-Fresh-context non-author review approves canonical randomized FP formats,
-independent byte/boxing and older-store expectations, class/destination domains,
-strict refetch and schema-59 accounting within the four implemented builders.
-The reviewer independently passes six FP and four dependency/recovery tests,
-detects private no-boxing/wrong-domain/wrong-class mutations, and reruns the
-three focused retained-artifact verifier commands. The low documentation finding
-is resolved: adjacent destination descriptions now use the class-appropriate
-domains and retain integer auxiliary roles. Only documentation and source
-comments changed after the reviewed functional snapshot; disposition and evidence
-are `build/memblock/fp-random-20261029/{review.txt,review-disposition.json}`.
+Fresh-context non-author review approves the vector destination/source-chain,
+dependency-preserving issue, exact predecessor-wait, replay attribution and
+schema-60 accounting changes. It independently detects eight private mutations,
+including removal of the production builder's chain construction. Its P2
+finding exposed a raw no-op comparator false negative: tail-agnostic corruption
+was accepted despite `vstart >= vl`. The corrected decision requires all old
+bytes unchanged. Re-review passes six vector operand and twelve scoreboard
+tests, detects removal of the new gates, and checks 128 ordinary-body controls.
+The finding is resolved in
+`build/memblock/vector-operands-20261029/review-disposition.json`; verdict and
+source snapshot are `review-v3.txt` and `review-v3.hashes.json` in that directory.
 No CPU RTL bug is confirmed.
 
-Fresh-context review also approves the PA/alias manager and grouped
-release-version oracle within the drained static-map scope. It independently
-checks 5408 complete-line candidates across 96 update histories; all findings are
-dispositioned in
+Fresh-context review also approves canonical randomized FP formats within the
+four implemented builders and the checkpointed static-map PA/alias manager.
+Their scoped evidence and dispositions remain
+`build/memblock/fp-random-20261029/review-disposition.json` and
 `build/memblock/alias-manager-20261029/review-disposition.json`.
 
-The structural generator audit finds real local variation in dependency graphs,
-vector shapes, indexed operands and page maps, but fixed global scheduling:
-five-producer windows precede serial helpers and drain between windows. Canonical
-FP formats now vary across ordinary, heterogeneous, dependency and unresolved
-loads. Multiple unresolved stores and variable producer counts/ages with sliding
-admission are the next normal-workload priorities. The source review and 509/512
-FP topology sample do not establish unique complete-run schedules or guarantee a
-design bug. Full rename history, exceptional misaligned FP enable semantics,
-uncheckpointed current-reference release fallback, pre-notification segment
-releases, long version histories, simultaneous synonym/CMO/error ownership and
-native-model full source provenance remain explicit limits. Source audit:
+The generator has local variation in dependency graphs, vector shapes, index
+operands, page maps and dependency-preserving indexed issue orders. Global
+scheduling still fixes five-producer windows before serial helpers and drains
+between them. Multiple unresolved stores and variable producer counts/ages with
+sliding admission remain the next normal-workload priorities. Source samples do
+not establish unique complete-run schedules or guarantee a design bug.
+
+The pinned CPU-path audit identifies prerequisites before sliding admission:
+retain the actual oldest pending ROB identity; preserve dispatch-time opposite-
+queue snapshots; replace global scalar-store replay waits with exact identities;
+and model vector retirement without scalar `scommit` pulses. LQ dequeue alone
+cannot advance the ROB head, and a vector store may drain completed uops before
+its instruction finishes. These are remaining harness/integration boundaries,
+not CPU bug claims. Source evidence:
+`build/memblock/mixed-scheduler-20261029/contract-audit.txt`.
+
+Full rename history, exceptional misaligned FP enables, uncheckpointed release
+fallback, pre-notification segment releases, long version histories,
+simultaneous synonym/CMO/error ownership and native-model full source provenance
+remain explicit limits. The structural audit is
 `build/memblock/alias-manager-20261029/random-structure-audit.txt`.

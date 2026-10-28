@@ -1488,7 +1488,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4412,6 +4412,15 @@ def _check_mixed_coverage(
         )
 
 
+def _check_vector_operand_accounting(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 60:
+        return
+    loads, stores, waits = _csv_counts(result, "vector_operand_chains", 3)
+    vector_loads, vector_stores = _csv_counts(result, "vector", 2)
+    _require(loads == waits and loads <= vector_loads and stores <= vector_stores,
+             "vector operand source chains and checked predecessor waits disagree")
+
+
 def _check_scalar_fp_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 59:
         return
@@ -4738,6 +4747,7 @@ def _check_result(
         _check_permuted_translation_accounting(result)
         _check_alias_recall_accounting(result)
         _check_scalar_fp_accounting(result)
+        _check_vector_operand_accounting(result)
         if require_coverage:
             try:
                 _check_mixed_coverage(result, require_backpressure)

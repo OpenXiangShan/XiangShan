@@ -1,9 +1,11 @@
 // This file is included inside memblock_env.hpp's memblock namespace.
 
 constexpr unsigned kScalarLoadLanes = 3;
-// Parameters.scala's generated default intPreg/fpPreg entry counts.
+// Parameters.scala's generated default register-file entry counts.
 constexpr unsigned kIntegerPhysicalRegisters = 224;
 constexpr unsigned kFpPhysicalRegisters = 192;
+constexpr unsigned kVectorPhysicalRegisters = 128;
+constexpr unsigned kVlPhysicalRegisters = 32;
 static_assert(generated::kScalarLoadFeedbackLanes == kScalarLoadLanes);
 static_assert(generated::kIfetchPrefetchLanes == kScalarLoadLanes);
 constexpr unsigned kScalarStoreLanes = 2;

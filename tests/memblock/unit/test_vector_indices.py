@@ -15,6 +15,7 @@ import verify_regression
 CPP = r'''
 #include "scenarios/mixed/state.hpp"
 #include "scenarios/mixed/vector_indices.hpp"
+#include "scenarios/mixed/vector_operands.hpp"
 #include <set>
 using namespace memblock::scenarios;
 namespace memblock::scenarios::mixed {
@@ -23,6 +24,7 @@ public:
     RandomConstraints constraints = RandomConstraints::preset("coverage");
     ConstraintCoverage constraint_coverage;
     MixedCoverage coverage;
+    struct { memblock::SparseMemory image; memblock::SparseMemory &memory() { return image; } } environment;
     std::mt19937_64 random{17};
     std::uint64_t rob_offset=0, sq_offset=0, lq_offset=0;
     std::shared_ptr<const memblock::ReferencePageMap> reference_pages_for(std::uint64_t) const { return {}; }

@@ -147,7 +147,7 @@ auto Environment::Impl::run_until_vector_complete_with_replays(const VectorMemor
         }
     };
     const std::uint64_t deadline = cycle() + timeout;
-    while (!vector_scoreboard_.done() && cycle() < deadline) {
+    while (vector_scoreboard_.pending(transaction) && cycle() < deadline) {
         const auto pending = feedback_.take_replay_for(transaction);
         if (!pending) {
             tick();
@@ -178,7 +178,7 @@ auto Environment::Impl::run_until_vector_complete_with_replays(const VectorMemor
         }
     }
     clear_pending_store();
-    if (!vector_scoreboard_.done()) {
+    if (vector_scoreboard_.pending(transaction)) {
         std::ostringstream message;
         message << "timed out waiting for vector memory writeback after replay"
                 << " store=" << transaction.store
@@ -225,8 +225,10 @@ auto Environment::Impl::run_until_vector_complete_with_replays(const std::vector
 {
     const auto matches = [](const VectorMemoryTransaction &transaction,
                             const VectorReplayRequest &request) {
-        const unsigned entries = transaction.store
-            ? kStoreQueueEntries : kVirtualLoadQueueEntries;
+        // The monitored slow replay channel is vector-store-only. An LQ
+        // snapshot in that request must never match a load with the same index.
+        if (!transaction.store) return false;
+        const unsigned entries = kStoreQueueEntries;
         const unsigned value = transaction.store
             ? request.sq_value : request.lq_value;
         const bool flag = transaction.store

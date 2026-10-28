@@ -222,6 +222,21 @@ register count and EEW. Active elements use global element position, VL,
 `vstart`, `vm` and mask bits. Expected successful load data starts with the
 supplied old destination and replaces active bytes with reference memory.
 
+Canonical vector writing uops use distinct numeric destinations 1..127; FOF
+fix-VL uses the separate VL domain 1..31. Nonwriting store/segment uops drive zero.
+Repeated logical Vd in EMUL>LMUL indexed loads is a chain of distinct renames.
+Before issue, its old-destination input is independently assembled from prior
+input bytes and reference memory, including the external backend's all-ones
+agnostic producer policy (with no changes when `vstart >= vl`). The raw MemBlock
+comparison remains input/reference based and accepts both legal agnostic values;
+the producer model does not derive expected bytes from observed DUT data.
+Repeated-Vd stores reuse an unchanged source. Unordered indexed issue samples
+ready vertices and waits on each exact dependent predecessor, while independent
+chains can interleave. The transaction-specific replay wait tests only that
+ROB/flag/uop/destination obligation and retains unissued sibling expectations.
+Vector-store replay feedback cannot match a load by its LQ snapshot. Complete
+allocation history and general sliding retirement remain outside this model.
+
 The common indexed generator now supplies permuted, irregularly spaced and
 optionally repeated load indices. The reference decodes unsigned operand bytes
 and adds the architectural base plus segment field offset. Offset generation
@@ -233,7 +248,11 @@ data for ordinary and segment loads while retaining response metadata.
 
 The successful load comparator accepts old data or all-ones for each
 individually mask/tail-agnostic element; active and undisturbed elements must
-match exactly. Explicit `fof_unspecified_elements` may exclude only active
+match exactly. RVV 1.0, "Prestart, Active, Inactive, Body, and Tail Element
+Definitions," requires all destination elements to remain unchanged when
+`vstart >= vl`, including `vl=0`. The comparator disables both agnostic
+allowances for those no-op instructions; all raw old-destination bytes remain
+checked because the external backend also preserves them. Explicit `fof_unspecified_elements` may exclude only active
 elements of a FOF load and qualify both data and mask. Additional optional
 vector exceptions are restricted to FOF faults or to page/access faults on a
 non-last uop of a legal segment; the segment scenario must separately require

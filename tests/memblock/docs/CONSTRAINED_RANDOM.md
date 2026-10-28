@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=59`.
+`constraint_schema=60`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -495,6 +495,7 @@ Array order and sampling code are authoritative in
 | `actual_translation`, `actual_stage1_mode`, `actual_vs_mode`, `actual_g_mode`, `actual_nested_pairs`, `actual_*leaf*`, `actual_fences` | Sampled regime/mode/leaf/fence observations; not an arbitrary page-table or address-remapping inventory. |
 | `actual_atomic_*`, `actual_hypervisor_*`, `actual_cmo_*`, `actual_ptw_error_*`, `actual_uncache_*` | Sampled family, width, privilege, memory-type, error, and helper-specific manager observations. |
 | `actual_load_merge_*`, `actual_bank_conflict_*`, `actual_set_pressure_*`, `actual_miss_burst_*` | Compound-action shapes, manager/terminal counts, and pressure observations. Same-bank stimulus does not require a particular RTL replay policy. |
+| `vector_operand_chains` | Repeated-logical-Vd load-source edges, store-source reuses and completed predecessor waits. Generated load edges must equal completed waits in a passing run; this is a driver obligation, not a physical-register-file monitor. |
 | `concurrent_ops` | Five producer counts: scalar load, vector load, scalar store, vector store, prefetch. |
 | `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
@@ -661,6 +662,37 @@ proof of active-element coverage. A topology-only 512-plan unit sample has 512
 distinct offset vectors without using address bases, payloads or issue timing.
 The production ordinary builder is also checked across all 78 indexed shapes
 for shared-register consistency and disjoint store elements.
+
+## Vector Destination And Source Legality
+
+Canonical vector-data builders use the default 128-entry vector file, selecting
+nonzero writing destinations 1..127. Every writing uop has a distinct destination
+within its instruction, including EMUL>LMUL indexed splits that revisit the same
+logical Vd. FOF fix-VL uops independently select 1..31 in the separate 32-entry VL
+file. Stores and operand-only segment uops have no writing destination and drive
+zero. These are bounded allocation witnesses; complete rename/free-list history
+and arbitrary concurrent writing-instruction allocation remain unmodeled.
+
+For EMUL>LMUL indexed loads, each repeated-Vd uop consumes the preceding rename's
+old-destination value. The driver computes it from prior input operands and
+independent memory bytes, then applies the external backend producer's all-ones
+mask/tail-agnostic policy. A no-op (`vstart >= vl`) retains its input. This models
+the CPU producer outside MemBlock; it does not strengthen the MemBlock output
+oracle or use a DUT result as an expected value. The existing comparator still
+accepts preserved or all-ones agnostic output elements while an instruction has
+a body. For a no-op it requires every old-destination byte unchanged, following
+RVV 1.0 element definitions. Repeated-Vd stores instead
+reuse the same unchanged source bytes. Generated values retain full payload,
+mask, index, width and page-map variation.
+
+Unordered indexed issue samples ready uops from a dependency graph, permitting
+independent Vd chains to interleave while keeping each load predecessor first.
+The dependent successor waits for that exact ROB/flag/uop/destination completion;
+registered expectations for unissued siblings remain live. Ordered indexed uops
+retain architectural order. The monitored vector slow-replay channel is store
+only: its LQ snapshot must never attribute a replay to a vector load. Ordinary,
+heterogeneous and vector-store readback builders share these rules. This does not
+remove the fixed heterogeneous composition or its global drain boundaries.
 
 ## Ordinary Nonidentity Page Mappings
 
