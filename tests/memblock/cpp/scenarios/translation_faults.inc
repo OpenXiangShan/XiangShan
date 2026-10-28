@@ -1381,6 +1381,8 @@ int run_translation_faults(int argc, char **argv)
     unsigned pmp_vector_load_faults = 0;
     unsigned pmp_masked_vector_load_faults = 0;
     unsigned pmp_cross_page_vector_load_faults = 0;
+    unsigned pmp_cross_page_vector_load_request_checks = 0;
+    unsigned pmp_cross_page_vector_load_controls = 0;
     unsigned vector_masked_later_load_controls = 0;
     std::uint64_t vector_all_masked_ptw_requests = 0;
     std::uint64_t vector_all_masked_dcache_requests = 0;
@@ -4879,13 +4881,15 @@ int run_translation_faults(int argc, char **argv)
             .expected_exception_mask =
                 memblock::kExceptionLoadAccessFault,
             .expected_writeback_vstart = 1,
-            .vlmul = 1,
+            .vlmul = 0,
             .vuop_idx = 0,
             .last_uop = true,
             .expected_debug_is_mmio = false,
             .expected_debug_is_ncio = false,
             .expected_debug_is_perf_cnt = false,
         };
+        const std::uint64_t dcache_before =
+            pmp_cross_load.tilelink_requests();
         const std::uint64_t uncache_before =
             pmp_cross_load.uncache_requests();
         pmp_cross_load.expect_vector(load);
@@ -4913,7 +4917,7 @@ int run_translation_faults(int argc, char **argv)
              !pmp_cross_load.account_lq_cancellation(
                  static_cast<unsigned>(
                      pmp_cross_load.lq_allocated() - retired))) ||
-            !pmp_cross_load.redirect_after(load.rob, load.rob_flag, true) ||
+            !pmp_cross_load.redirect_after(load.rob, load.rob_flag, true, true) ||
             !pmp_cross_load.run_cycles(16)) {
             std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
                       << pmp_cross_load.cycle()
@@ -4923,7 +4927,74 @@ int run_translation_faults(int argc, char **argv)
                       << pmp_cross_load.lq_allocated() << '\n';
             return 1;
         }
+        // Inspect accepted external requests through redirect recovery, not
+        // just the terminal exception. Only the readable element's cache line
+        // may produce a CPU-demand Acquire; independent prefetch is allowed.
+        const char *request_error =
+            pmp_cross_load.dcache_faulting_load_requests_error_since(
+                load.address & ~std::uint64_t{63}, true, dcache_before);
+        if (request_error != nullptr ||
+            pmp_cross_load.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_cross_load.cycle()
+                      << " phase=pmp-cross-load-forbidden-request reason="
+                      << (request_error ? request_error : "uncache request")
+                      << " requests="
+                      << pmp_cross_load.dcache_request_summary_since(
+                             dcache_before)
+                      << '\n';
+            return 1;
+        }
+        ++pmp_cross_page_vector_load_request_checks;
         ++pmp_cross_page_vector_load_faults;
+
+        // A cold, both-readable control proves the second element can reach
+        // the demand interface with this same shape, rather than passing a
+        // suppression check because the element is never issued.
+        memblock::Environment pmp_cross_control(argc, argv);
+        pmp_cross_control.memory().fill_incrementing(
+            load_base + 0xff8, 8, 0x81);
+        pmp_cross_control.memory().fill_incrementing(load_high, 0x20, 0xe2);
+        pmp_cross_control.configure_backpressure(
+            0x452821e638d01377ULL, true);
+        if (!pmp_cross_control.reset() ||
+            !pmp_cross_control.activate_bare() ||
+            !pmp_cross_control.configure_pmp(
+                {napot_address(load_base, 0x1000),
+                 napot_address(load_high, 0x1000)},
+                {pmp_napot_read, pmp_napot_read})) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_cross_control.cycle()
+                      << " phase=pmp-cross-load-control-configuration reason="
+                      << pmp_cross_control.error() << '\n';
+            return 1;
+        }
+        auto control = load;
+        control.expected_exception_mask = 0;
+        control.expected_writeback_vstart = 0;
+        const std::uint64_t control_dcache_before =
+            pmp_cross_control.tilelink_requests();
+        pmp_cross_control.expect_vector(control);
+        if (!pmp_cross_control.set_rob_head(control.rob, control.rob_flag) ||
+            !pmp_cross_control.enqueue_vector(control) ||
+            !pmp_cross_control.issue_vector(control, 1024) ||
+            !pmp_cross_control.run_until_vector_complete_with_replays(
+                control, 32768) ||
+            !pmp_cross_control.run_until_lq_retired(4096) ||
+            pmp_cross_control.dcache_requests_from_source_covering_since(
+                2, load_high, control_dcache_before) == 0 ||
+            pmp_cross_control.uncache_requests() != 0) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL cycle="
+                      << pmp_cross_control.cycle()
+                      << " phase=pmp-cross-load-control reason="
+                      << pmp_cross_control.error()
+                      << " requests="
+                      << pmp_cross_control.dcache_request_summary_since(
+                             control_dcache_before)
+                      << '\n';
+            return 1;
+        }
+        ++pmp_cross_page_vector_load_controls;
     }
 
     // A vector load with no active element must not fault even when its base
@@ -5052,6 +5123,10 @@ int run_translation_faults(int argc, char **argv)
               << pmp_masked_vector_load_faults
               << " pmp_cross_page_vector_load_faults="
               << pmp_cross_page_vector_load_faults
+              << " pmp_cross_page_vector_load_request_checks="
+              << pmp_cross_page_vector_load_request_checks
+              << " pmp_cross_page_vector_load_controls="
+              << pmp_cross_page_vector_load_controls
               << " vector_first_element_store_fault_readbacks="
               << vector_first_element_store_fault_readbacks
               << " vector_masked_later_load_controls="

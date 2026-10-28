@@ -151,7 +151,10 @@ Priority work, each requiring executable stimulus and an independent check:
    fault while the run observes no PTW/DCache request. The intra-uop
    page-crossing faults also publish the exact faulting-element address after
    the vector feedback settles. Extend this to broader exceptional `vstart`,
-   fault address attribution, and forbidden-demand attribution.
+   fault address attribution, and forbidden-demand attribution. The directed
+   PMP page-crossing load now checks accepted demand through redirect recovery,
+   allowing only its readable prefix line and independent prefetch; a cold
+   both-readable control observes the second page and checks its returned data.
 2. Preserve the accepted-B-before-C probe provenance now implemented; add
    complete C multibeat identity checking. Retain the DCache E first-D/sink and
    PTW/Uncache source-lifetime checks.

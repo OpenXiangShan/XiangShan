@@ -18,6 +18,11 @@ None.
 
 ## Current Changes Qualified Below
 
+- The PMP page-crossing vector load now checks accepted external requests
+  through its vector-exception redirect recovery and includes a cold
+  both-readable data/demand control. The single-uop shape uses LMUL1.
+  `translation-faults` passes with one fault, one request-history check and
+  one permissive control in `build/memblock/pmp-cross-load-20261028/directed-v3`.
 - Regression and benchmark sidecars use `coverage-reports/<run_id>/`; both
   aggregate and per-case documents record the campaign ID. Concurrent
   controllers cannot overwrite each other's sidecars if a parent is shared,
@@ -126,6 +131,7 @@ The current qualification is:
 | Check | Current result | Scope limit |
 | --- | --- | --- |
 | Infrastructure unit | 294 tests pass | Unit checks do not establish DUT functional coverage |
+| Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
 | Campaign report isolation | Concurrent two-regression/one-benchmark fixture and aggregate rerun pass | Fresh run-ID directory and matching document ID; previous sidecar bytes retained; artifact `build/memblock/report-namespace-20261028/check-unit.log` |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Restored-original directed | 90/90 pass | Every catalogued directed test through the corrected harness and runtime from RTL `43b971f2`; artifact `build/memblock/verify-restored-rtl-20261028/directed` |
@@ -147,7 +153,7 @@ The current qualification is:
 | High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
 | Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1` and exact faulting-element addresses; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; the partially masked load with an inactive unmapped element completes on the mapped element; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | Broader fault-element/FOF progress remains open |
 | Vector segment store fault side effect | `translation-faults` segment-store cases pass: field-1 fault with exact `vstart=0` and unchanged read-only page; element-1 fault with exact `vstart=1`, exact element-1 field-0 address, and unchanged read-only element page; first-field fault with `vstart=0` and both the read-only field-0 page and following writable field-1 page unchanged; writable earlier fields may be partially written | Three `nf=1` unit-stride segment shapes; other field/element combinations remain open |
-| Vector PMP load fault | `translation-faults` PMP load cases pass: a vector load from a PMP no-access page raises load access fault at the element address, issues no DCache/uncache request, and retires without a data writeback; the masked variant activates only element 1, faults at element 1 with `vstart=1`, and issues no request | Bare direct-map; multi-element PMP loads remain open |
+| Vector PMP load fault | Single-element and masked no-access-page cases check the fault metadata and no requests. The page-crossing load requires exact element-1 access fault/VA/`vstart=1`; accepted request history through redirect recovery allows only the readable prefix line plus independent prefetch, with no uncache request. Its cold both-readable control checks both data elements and second-page demand. | Bare direct-map; wider shapes and concurrent PMP reconfiguration remain open |
 | Vector PMP store fault side effect | `translation-faults` PMP cases pass: a vector store to a PMP read-only page raises store access fault at the element address, issues no DCache/uncache request, and the page reads back unchanged; the masked variant activates only element 1, faults at element 1 with `vstart=1`, and both element addresses read back unchanged; the cross-page variant faults at element 1 when element 0 is in a read/write page and element 1 in a read-only page, with the read-only page unchanged; the segment variant faults at field 1 with `vstart=0`, no request and the read-only field page unchanged; the first-field segment variant faults at field 0 and leaves the following writable field page unchanged; EEW 1 and EEW 2 single-element stores also fault with no request and unchanged page | Bare direct-map; wider segment field/element PMP shapes remain open |
 | Vector store fault side effect | `translation-faults` unmasked vector-store case passes with exact `vstart=1` and fault address; its read-only target page word is unchanged. The masked variant activates only element 1 and leaves both the inactive writable page and the read-only page unchanged. The first-element variant passes with exact `vstart=0` and both pages unchanged | Writable first-element visibility and other fault-path targets remain partial |
 | Permission-fault store side effects | `translation-permissions` passes with 10/10 fault-store readbacks (readable mapping or Bare fallback); `pmp-contracts` adds one PMP-denied store readback | Device fault paths still need another observation route |
@@ -190,6 +196,13 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+The PMP load request-oracle review approves the final diff after correcting
+its inherited single-uop LMUL2 shape to LMUL1 and supplying the full-CPU vector
+exception redirect classification. Both findings are resolved and the corrected
+runtime passes. This checks accepted requests within a bounded recovery window;
+cache-internal access and arbitrarily delayed requests are outside the claim.
+Review artifact: `build/memblock/pmp-cross-load-20261028/review.txt`.
 
 The campaign report namespace change has a fresh-context, non-author APPROVE
 review with no findings. The review checks both controller call sites, run-ID

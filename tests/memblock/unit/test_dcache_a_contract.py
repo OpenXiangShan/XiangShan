@@ -266,6 +266,12 @@ static void faulting_load_requests() {
     }
     r = acquire(); r.address += 64;
     verify(r, true, false);  // unrelated demand
+    // A readable prefix and a denied second page must never be collapsed
+    // into one allowed range by a page-crossing vector fault oracle.
+    r = acquire(); r.address += 0x1000;
+    verify(r, true, false);  // denied page cannot borrow prefix permission
+    r = acquire(); r.request_source = 4;
+    verify(r, true, false);  // atomic class cannot impersonate a read
     r = acquire(); r.request_source = 3;
     verify(r, true, false);  // store class cannot impersonate a read
     r = acquire(); r.opcode = 12;

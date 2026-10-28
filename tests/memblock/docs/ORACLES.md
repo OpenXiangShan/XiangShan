@@ -212,7 +212,15 @@ vector load must raise load access fault at the element address, issue no
 DCache/uncache request, and retire the load-queue entry without a data
 writeback. A masked variant activates only element 1 in the PMP-denied page;
 it must fault at element 1 with `vstart=1`, not at the masked-off element 0,
-and issue no manager request.
+and issue no manager request. A page-crossing load puts element 0 in a
+readable PMP page and element 1 in a no-access page; it must fault at element 1
+with exact `vstart=1` and fault address. The accepted-DCache-request history is
+checked through redirect recovery: only CPU-demand Acquires for element 0's
+line and independent background prefetch are allowed, with no uncache request.
+A separate cold control enables reads on both pages, requires both elements'
+data through the normal vector scoreboard and observes a demand request for
+the second page. A passing fault without checking the request history does
+not establish suppression of the denied element.
 Sampling immediately after the writeback would read the previous buffer value
 and is a testbench timing error, not a DUT result. For
 exceptional vector completions generally, default `vstart` checking is still
