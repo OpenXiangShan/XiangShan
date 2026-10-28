@@ -1,6 +1,7 @@
 #pragma once
 #include "state.hpp"
 #include "scalar_dependency.hpp"
+#include "vector_indices.hpp"
 
 namespace memblock::scenarios::mixed {
 
@@ -103,7 +104,7 @@ private:
         std::uint64_t operand);
     std::array<unsigned char, 16> overlay_vector_store(const memblock::VectorMemoryTransaction &store,
         const memblock::VectorMemoryTransaction &load);
-    void randomize_vector_addressing(memblock::VectorMemoryTransaction &transaction);
+
     memblock::ReferencePageMode page_mode(unsigned index);
     bool map_stage_page(unsigned mode, std::uint64_t root,
         std::uint64_t virtual_address,

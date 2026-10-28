@@ -1488,7 +1488,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4411,6 +4411,25 @@ def _check_mixed_coverage(
         )
 
 
+def _check_vector_index_accounting(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 55:
+        return
+    rate = result.get("target_vector_index_repeat")
+    _require(type(rate) is int and 0 <= rate <= 1000,
+             "invalid target_vector_index_repeat rate")
+    counts = _csv_counts(result, "vector_indices", 8)
+    instructions = sum(counts[:4])
+    elements, repeats, descents, maximum = counts[4:]
+    _require(instructions <= elements <= 128 * instructions,
+             "indexed operand element counts disagree with instruction bounds")
+    _require(repeats <= elements - instructions and descents <= elements - instructions,
+             "indexed operand repeat/descent counts exceed element bounds")
+    _require(maximum < 2048 and (instructions != 0 or maximum == 0),
+             "indexed operand offset exceeds its mapped arena")
+    if rate == 0 or counts[0] + counts[2] == 0:
+        _require(repeats == 0, "nonrepeating indexed operands contain repeats")
+
+
 def _check_scalar_dependency_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 54:
         return
@@ -4611,6 +4630,7 @@ def _check_result(
         )
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
         _check_scalar_dependency_accounting(result)
+        _check_vector_index_accounting(result)
         if require_coverage:
             try:
                 _check_mixed_coverage(result, require_backpressure)

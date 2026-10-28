@@ -59,6 +59,9 @@ class VectorScoreboardTest(unittest.TestCase):
                                 text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_permuted_repeated_indices_reject_wrong_data_routing(self) -> None:
+        self.check_case("permuted-indices")
+
     def test_high_mask_bits_and_vstart_classification(self) -> None:
         self.check_case("high-mask")
 

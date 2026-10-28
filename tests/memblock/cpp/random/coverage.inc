@@ -3133,6 +3133,27 @@ private:
 };
 
 struct MixedCoverage {
+    // Operand-pattern observations, once per architectural indexed instruction.
+    // These include inactive offsets and do not claim memory requests occurred.
+    std::array<std::uint64_t, 4> indexed_instructions{};
+    std::uint64_t indexed_elements = 0;
+    std::uint64_t indexed_repeats = 0;
+    std::uint64_t indexed_descents = 0;
+    std::uint64_t indexed_max_offset = 0;
+
+    void sample_vector_indices(const std::vector<std::uint64_t> &offsets,
+        unsigned kind)
+    {
+        ++indexed_instructions.at(kind);
+        indexed_elements += offsets.size();
+        for (unsigned element = 0; element < offsets.size(); ++element) {
+            indexed_max_offset = std::max(indexed_max_offset, offsets[element]);
+            indexed_descents += element != 0 && offsets[element] < offsets[element - 1];
+            indexed_repeats += std::find(offsets.begin(), offsets.begin() + element,
+                offsets[element]) != offsets.begin() + element;
+        }
+    }
+
     std::uint64_t scalar_dependency_windows = 0;
     std::uint64_t scalar_dependency_stores = 0;
     std::uint64_t scalar_dependency_loads = 0;
@@ -3404,7 +3425,15 @@ struct MixedCoverage {
                std::to_string(nonzero_vstart) + " vl=" +
                std::to_string(full_vl) + ',' + std::to_string(partial_vl) +
                " align=" + std::to_string(aligned) + ',' +
-               std::to_string(split) + " scalar_dependency=" +
+               std::to_string(split) + " vector_indices=" +
+               std::to_string(indexed_instructions[0]) + ',' +
+               std::to_string(indexed_instructions[1]) + ',' +
+               std::to_string(indexed_instructions[2]) + ',' +
+               std::to_string(indexed_instructions[3]) + ',' +
+               std::to_string(indexed_elements) + ',' +
+               std::to_string(indexed_repeats) + ',' +
+               std::to_string(indexed_descents) + ',' +
+               std::to_string(indexed_max_offset) + " scalar_dependency=" +
                std::to_string(scalar_dependency_windows) + ',' +
                std::to_string(scalar_dependency_stores) + ',' +
                std::to_string(scalar_dependency_loads) + ',' +

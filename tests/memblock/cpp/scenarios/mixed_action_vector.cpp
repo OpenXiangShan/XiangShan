@@ -335,18 +335,15 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
                          -(indexed ? shape.lmul_log2 : shape.emul_log2))
             : 16U;
         const unsigned flow_num = bytes_per_data_uop >> data_eew;
-        std::array<unsigned char, 128> index_group{};
+        const auto indices = indexed
+            ? make_random_vector_indices(random, vlmax, 1U << shape.eew,
+                  data_bytes, fields, vector_segment_store,
+                  constraints.vector_index_repeat_per_mille)
+            : RandomVectorIndices{};
+        const auto &index_group = indices.bytes;
         if (indexed) {
-            const unsigned index_bytes = 1U << shape.eew;
-            for (unsigned element = 0; element < vlmax; ++element) {
-                const std::uint64_t offset =
-                    static_cast<std::uint64_t>(element) * data_bytes *
-                    (fields + 1U);
-                for (unsigned byte = 0; byte < index_bytes; ++byte) {
-                    index_group[element * index_bytes + byte] =
-                        static_cast<unsigned char>(offset >> (8 * byte));
-                }
-            }
+            coverage.sample_vector_indices(indices.offsets,
+                vector_segment_store ? 3U : 2U);
         }
         const auto segment_loads_before = environment.vector_load_writebacks();
         const auto segment_stores_before = environment.vector_store_writebacks();

@@ -278,6 +278,14 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
     const bool special_indexed =
         indexed && shape.emul_log2 > shape.lmul_log2;
 
+    const auto indices = indexed
+        ? make_random_vector_indices(random, vlmax, index_bytes, data_bytes,
+              1U, store, constraints.vector_index_repeat_per_mille)
+        : RandomVectorIndices{};
+    if (indexed) {
+        coverage.sample_vector_indices(indices.offsets, store ? 1U : 0U);
+    }
+
     std::vector<memblock::VectorMemoryTransaction> uops;
     uops.reserve(uop_count);
     for (unsigned uop = 0; uop < uop_count; ++uop) {
@@ -328,17 +336,8 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
             const unsigned index_register_base =
                 global_first / index_elements_per_vreg *
                 index_elements_per_vreg;
-            for (unsigned element = 0;
-                 element < index_elements_per_vreg; ++element) {
-                const std::uint64_t offset =
-                    static_cast<std::uint64_t>(
-                        index_register_base + element) *
-                    data_bytes * 2U;
-                for (unsigned byte = 0; byte < index_bytes; ++byte) {
-                    transaction.index[element * index_bytes + byte] =
-                        static_cast<unsigned char>(offset >> (8 * byte));
-                }
-            }
+            std::copy_n(indices.bytes.begin() + index_register_base * index_bytes,
+                index_group_bytes_per_uop, transaction.index.begin());
         }
         queue_cursor += flow_num;
     }

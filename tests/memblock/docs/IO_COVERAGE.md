@@ -24,7 +24,7 @@ vector-segment-noncanonical and translation-alias are catalogued but not
 benchmark-selected. This
 is registration, not passing-run or coverage evidence. MixedScenario implements
 the canonical constrained-random catalog entry. Constraint input/output uses
-constraint_schema=54. The legal field definitions and per-run observed counters
+constraint_schema=55. The legal field definitions and per-run observed counters
 are in [CONSTRAINED_RANDOM.md](CONSTRAINED_RANDOM.md), not duplicated here.
 
 ## Generated interface inventory
@@ -148,7 +148,8 @@ MixedScenario composes existing transaction APIs. Its implementation is in
 [mixed_scheduler.cpp](../cpp/scenarios/mixed_scheduler.cpp),
 [mixed/scenario.hpp](../cpp/scenarios/mixed/scenario.hpp), the mixed action/policy
 files and [constraints.inc](../cpp/random/constraints.inc). Profiles constrain
-operations, address locality/boundaries, dependencies, vector shape, translation,
+operations, address locality/boundaries, dependencies, vector shape and bounded
+index permutations/repeated gathers with disjoint scatter spans, translation,
 protection, errors, probes and independent response latency. A sampled field is
 not evidence that its intended state was reached; per-seed observations and
 report identifiers are defined in [CONSTRAINED_RANDOM.md](CONSTRAINED_RANDOM.md).

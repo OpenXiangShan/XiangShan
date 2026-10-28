@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=54`.
+`constraint_schema=55`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -135,6 +135,7 @@ they do not imply arbitrary numeric suffix support.
 | `vector-fof`, `vector-fof-first-fault` | Rates for unit-stride VLEFF among serial vector loads and conditional first-element fault; otherwise element1 faults after mapped element0. |
 | `vector-masked`, `vector-vma`, `vector-vta`, `vector-partial-vl`, `vector-nonzero-vstart` | Ordinary vector rates for vm=0, VMA, VTA, VL below VLMAX, and nonzero vstart. These are not segment-policy knobs. |
 | `vector-unit-stride`, `vector-strided`, `vector-indexed-unordered`, `vector-indexed-ordered` | Relative ordinary addressing weights, in this order. |
+| `vector-index-repeat` | Per-mille chance that each indexed load element after element0 reuses an earlier offset; shared by ordinary and segment loads. Default 250 in all presets. Zero yields distinct offsets; 1000 repeats element0 throughout. Stores always use disjoint whole-field spans. |
 | `vector-eew8/16/32/64`, `vector-sew8/16/32/64` | Relative ordinary EEW/SEW weights. For indexed operations EEW is index width; data width is SEW. |
 | `vector-lmul-mf8/mf4/mf2/m1/m2/m4/m8`, `vector-emul-mf8/mf4/mf2/m1/m2/m4/m8` | Relative ordinary LMUL and derived EMUL weights. |
 | `vector-segment-unit-stride`, `vector-segment-strided`, `vector-segment-indexed-unordered`, `vector-segment-indexed-ordered` | Relative segment addressing weights, in this order. |
@@ -527,16 +528,45 @@ bus writes. This removes representative +256-byte and +16-KiB repeated-pattern
 blind spots. It does not make every individual byte unique or randomize the
 remaining fault/device setup pools.
 
+## Random Indexed Operands
+
+Ordinary and non-FOF segment indexed instructions generate one architectural
+index operand before uop packing. Each instruction chooses an eligible arena
+from 64, 256, 1024 and 2048 bytes, capped at 256 bytes for EEW8 indices.
+It samples and shuffles aligned slots across that arena. Each slot contains one
+complete `data_bytes * fields` group (one field for ordinary accesses).
+Index values are unsigned byte offsets encoded at the selected index EEW;
+all addressed field bytes stay within the selected mapped pool's margin.
+
+Stores draw distinct groups. Loads initially draw distinct groups and may
+reuse any earlier offset according to `vector-index-repeat`. This varies
+permutation, spacing, locality and repeated gathers without imposing an
+execution order on overlapping stores. Uops sharing a VS2 register receive the
+same complete operand slice. Segment input uops receive successive VS2 chunks;
+the reference model retains the complete instruction operand. Expected load
+bytes and committed scatter bytes come from the input offsets and independent
+architectural memory; ordinary final readback observes tracked cacheable words.
+
+`vector_indices` reports ordinary loads/stores, segment loads/stores, total
+index elements, repeated elements, adjacent descending offsets and maximum byte
+offset. Each instruction is sampled once, including inactive elements: these
+are generated operand observations, not accepted-memory-request counts or a
+proof of active-element coverage. A topology-only 512-plan unit sample has 512
+distinct offset vectors without using address bases, payloads or issue timing.
+The production ordinary builder is also checked across all 78 indexed shapes
+for shared-register consistency and disjoint store elements.
+
 ## Explicit Stimulus And Oracle Gaps
 
 - Ordinary random vector traffic explores legal EEW/SEW/LMUL/EMUL and addressing
   tuples and draws mask bits 0..127 when `vm=0`; a shape tuple or nonzero
   high-mask draw still does not establish every mask/element/vector-length
-  combination. Ordinary indexed offsets are unique and fixed-spaced (`element
-  * data_bytes * 2`); segment indexed offsets use `element * data_bytes * (NF +
-  1)`. Duplicate, overlapping, permuted, or arbitrary index vectors are not
-  random dimensions here. Ordered encoding on ordinary memory does not prove
-  architecturally observable order at a side-effecting target.
+  combination. Ordinary and segment indices now vary offsets, permutation
+  and repeated load groups, but stay within a bounded arena with alignment to
+  complete field groups. Partial byte overlap, overlapping stores and arbitrary
+  full-width index values remain outside this direction. Ordered encoding on
+  ordinary memory does not prove architecturally observable order at a
+  side-effecting target.
 - Ordinary random cacheable translation is predominantly identity-mapped,
   including nested contexts; dedicated aliases exist for high-VA, hypervisor,
   PBMT, FOF, and error helpers. Mode/leaf counters do not prove arbitrary

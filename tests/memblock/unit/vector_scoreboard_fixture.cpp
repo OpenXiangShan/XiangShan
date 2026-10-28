@@ -293,11 +293,76 @@ static void check_high_mask()
             "vm=true reported masked-off elements");
 }
 
+static void check_permuted_indices()
+{
+    for (bool segment : {false, true}) {
+        const std::array<unsigned, 4> offsets{{200, 8, 200, 72}};
+        memblock::SparseMemory memory;
+        memblock::VectorMemoryTransaction t;
+        t.address = 0x80001000;
+        t.addressing = memblock::VectorAddressingMode::indexed_unordered;
+        t.eew = 2;
+        t.vsew = 2;
+        t.vl = 4;
+        t.flow_num = 4;
+        t.segment = segment;
+        t.nf = segment ? 1 : 0;
+        std::array<unsigned char, 128> group{};
+        for (unsigned e = 0; e < 4; ++e) {
+            for (unsigned b = 0; b < 4; ++b) {
+                t.index[e * 4 + b] = offsets[e] >> (8 * b);
+                group[e * 4 + b] = t.index[e * 4 + b];
+            }
+        }
+        if (segment) t.oracle_index_group = group;
+        for (unsigned field = 0; field < (segment ? 2U : 1U); ++field) {
+            t.vuop_idx = field;
+            t.last_uop = !segment || field == 1;
+            std::array<unsigned char, 16> expected{};
+            for (unsigned e = 0; e < 4; ++e) {
+                const auto physical = t.address + offsets[e] + field * 4;
+                for (unsigned b = 0; b < 4; ++b) {
+                    const unsigned char value = (offsets[e] + field * 4 + b) ^ 0xa5U;
+                    memory.write_byte(physical + b, value);
+                    expected[e * 4 + b] = value;
+                }
+            }
+            require(memory.expected_vector_load(t) == expected,
+                    "permuted/repeated index address oracle mismatch");
+            auto wb = completion(t, 0);
+            wb.data.assign(expected.begin(), expected.end());
+            memblock::VectorMemoryScoreboard good;
+            good.expect(t, expected);
+            good.observe(0, wb);
+            require(good.ok() && good.done(), good.error());
+            // Mutate only data routing: preserve masks, identity and all sidebands.
+            // Sorting indices or dropping a repeated element must both fail.
+            for (unsigned mutation = 0; mutation < 2; ++mutation) {
+                auto bad_wb = wb;
+                if (mutation == 0) {
+                    std::swap_ranges(bad_wb.data.begin(), bad_wb.data.begin() + 4,
+                                    bad_wb.data.begin() + 4);
+                } else {
+                    std::fill_n(bad_wb.data.begin() + 8, 4, 0);
+                }
+                memblock::VectorMemoryScoreboard bad;
+                bad.expect(t, expected);
+                bad.observe(0, bad_wb);
+                require(!bad.ok(), "incorrect indexed element routing accepted");
+            }
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     try {
         require(argc == 2, "one case name required");
         const std::string name = argv[1];
+        if (name == "permuted-indices") {
+            check_permuted_indices();
+            return 0;
+        }
         if (name == "scalar-reset") {
             check_scalar_reset_cancellation();
             return 0;

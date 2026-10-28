@@ -236,6 +236,7 @@ struct RandomConstraints {
     // is decided by the ordinary architectural load/queue scoreboards.
     unsigned bank_conflict_per_mille = 0;
     unsigned scalar_dependency_per_mille = 200;
+    unsigned vector_index_repeat_per_mille = 250;
     memblock::ResponseLatencyProfiles response_latency{};
 
     static RandomConstraints preset(std::string_view name)
@@ -1154,6 +1155,8 @@ struct RandomConstraints {
             uncache_load_error_denied_per_mille = parsed;
         } else if (key == "stride-stream") {
             stride_stream_per_mille = parsed;
+        } else if (key == "vector-index-repeat") {
+            vector_index_repeat_per_mille = parsed;
         } else if (key == "scalar-dependency") {
             scalar_dependency_per_mille = parsed;
         } else if (key == "bank-conflict") {
@@ -1771,7 +1774,8 @@ struct RandomConstraints {
             uncache_load_error_denied_per_mille > 1000 ||
             stride_stream_per_mille > 1000 ||
             bank_conflict_per_mille > 1000 ||
-            scalar_dependency_per_mille > 1000) {
+            scalar_dependency_per_mille > 1000 ||
+            vector_index_repeat_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
         }
@@ -2944,7 +2948,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=54 constraints=" << name
+        stream << "constraint_schema=55 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3121,6 +3125,7 @@ struct RandomConstraints {
                << " target_stride_stream=" << stride_stream_per_mille
                << " target_bank_conflict=" << bank_conflict_per_mille
                << " target_scalar_dependency=" << scalar_dependency_per_mille
+               << " target_vector_index_repeat=" << vector_index_repeat_per_mille
                << " target_latency=" << latency_name(response_latency.dcache)
                << ',' << latency_name(response_latency.ptw) << ','
                << latency_name(response_latency.uncache);

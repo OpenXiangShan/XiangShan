@@ -18,6 +18,16 @@ None.
 
 ## Current Changes Qualified Below
 
+- Ordinary and segment indexed operands now vary bounded offset spacing,
+  permutation and repeated gathers. Each instruction generates one complete
+  architectural index vector before CPU-compatible uop slicing. Scatters use
+  disjoint whole-field groups, so reference byte expectations remain exact.
+  `vector-index-repeat` selects the load reuse rate, with strict endpoint
+  controls; generated operand counters include inactive elements explicitly.
+  A topology-only sample has 512 distinct offset vectors out of 512 plans.
+  Production builder checks cover all 78 ordinary indexed shapes, and vector
+  scoreboard mutations reject swapped/missing repeated-element data for
+  ordinary and segment loads.
 - The scalar alias-refetch oracle requires a simultaneous, fully identified
   flush-itself request before discarding data, preserves all non-data checks,
   returns the isolated backend redirect after two registered stages, and
@@ -150,8 +160,12 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 302 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 305 tests pass | Unit checks do not establish DUT functional coverage |
 | Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
+| Random indexed operands | 4/4 focused seeds 861..864 pass at 128 actions each; repeat endpoints 0/1000 pass 2 seeds each | Frozen runtime `build/memblock/vector-indices-20261029/runtime`; ordinary/segment directions, repeats and descending offsets observed. All tracked final words read back; finite accounting verifiers accept. Overlapping scatter/device ordering remain excluded |
+| Indexed mixed development | Custom mixed seed897 passes 1024 actions with 46 heterogeneous windows and 1313/1313 final words | Artifact `build/memblock/vector-indices-20261029/mixed`; 208 indexed instructions, 327 generated repeated offsets, 1172 descents; these operand counts include inactive elements |
+| Indexed broad development | Seed891 passes 4608 coverage actions; finite artifact verifier accepts | `build/memblock/vector-indices-20261029/coverage-replay`; 32 heterogeneous windows, 113 dependency windows, 488 indexed instructions and 2325/2325 final words. Exact runtime/seed replay completes in 687 seconds after a 300-second budget timeout; no closure claim |
+| Indexed profile compatibility | 2/2 spec and 2/2 corner seeds pass at 512 actions with compact latency; seed892 passes 512 with default spec timing | Artifacts `build/memblock/vector-indices-20261029/{spec,corner,spec-timing}`; seeds871/872 have zero indexed instructions and establish compatibility only. Seed892 executes one indexed load/store pair; corner seeds exercise both ordinary/segment directions. Strict coverage rejects unrelated sparse prefetch/probe bins; no closure claim |
 | Ordinary dependency direction | Corrected runtime: 4/4 focused seeds 811..814 pass at 128 actions each; 453 windows | 243 younger-store exclusion controls and 122 multiple-older-store-source loads; final observed/registered words match; `build/memblock/scalar-dependency-20261028/focused-v2` |
 | Ordinary mixed development | Corrected generator seed821 passes 4608 actions with `latency=compact`; artifact verifier accepts | 32 heterogeneous windows, 101 dependency windows and 2068/2068 final observed/registered words; `build/memblock/scalar-dependency-20261028/coverage-v2`; no closure claim |
 | Refetch-oracle regression | Revised scoreboard: seed851 compact and seed852 default `spec` timing each pass 512 actions; 3/3 scalar directed cases pass | Separate frozen runtime under `build/memblock/alias-refetch-20261029`; artifact verifiers accept; isolated alias refetch also passes |
@@ -221,6 +235,16 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
+A fresh-context independent review approves the bounded random indexed-operand
+change with no blocking findings. It checks the actual diff, CPU VS2 sharing and
+segment decomposition, disjoint scatter spans, independent byte expectations,
+structural randomness, schema accounting and documented limits. Independently
+rerun index and scoreboard suites pass 2/2 and 11/11 respectively. The source
+qualification has 305 passing unit tests plus check-rtl; 15 retained passing
+seeds total 9216 actions. The broad exact replay and the custom mixed run
+exercise heterogeneous windows. Review artifact:
+`build/memblock/vector-indices-20261029/review.txt`.
+
 A fresh-context independent review approves the scalar alias-refetch correction
 with no blocking findings. It traces the full CPU alias-mismatch, registered
 redirect and queue-recovery chain and checks the actual scoreboard/driver diff.
@@ -234,9 +258,9 @@ DUT qualification. Review artifact:
 The constrained-random audit identified genuine value/choice variation but
 serialized scalar dependencies, fixed heterogeneous composition and repeating
 initial-data blind spots. The new dependency direction and seed/address initial
-data address those two ordinary-workload gaps. Unresolved-address replay,
-arbitrary heterogeneous composition and ordinary indexed-offset variation remain
-open. Fresh-context reviews approve the memory and dependency changes. The
+data address those two ordinary-workload gaps. Bounded ordinary and segment
+indexed-offset variation is also implemented and reviewed. Unresolved-address
+replay and arbitrary heterogeneous composition remain open. Fresh-context reviews approve the memory and dependency changes. The
 latter resolved paired store lanes, valid/distinct dependency destinations and
 a topology metric that had included timing variation. All 302 unit tests and
 check-rtl pass; corrected-runtime development artifacts above pass their effect,

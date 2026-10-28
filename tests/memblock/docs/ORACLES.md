@@ -169,6 +169,15 @@ register count and EEW. Active elements use global element position, VL,
 `vstart`, `vm` and mask bits. Expected successful load data starts with the
 supplied old destination and replaces active bytes with reference memory.
 
+The common indexed generator now supplies permuted, irregularly spaced and
+optionally repeated load indices. The reference decodes unsigned operand bytes
+and adds the architectural base plus segment field offset. Offset generation
+is separate from that address model. Stores use nonoverlapping whole-field
+groups, so commit order cannot choose an implementation-dependent expected
+winner. Ordinary stores participate in final dirty-word readback. Production
+scoreboard mutation tests reject swapped elements and missing repeated-element
+data for ordinary and segment loads while retaining response metadata.
+
 The successful load comparator accepts old data or all-ones for each
 individually mask/tail-agnostic element; active and undisturbed elements must
 match exactly. Explicit `fof_unspecified_elements` may exclude only active
