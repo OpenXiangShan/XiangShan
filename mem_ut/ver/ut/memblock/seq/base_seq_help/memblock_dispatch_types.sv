@@ -432,6 +432,52 @@ typedef enum bit [1:0] {
     MEMBLOCK_TLB_LOOKUP_MISS_BUILD = 2'd2
 } memblock_tlb_lookup_result_e;
 
+typedef enum bit {
+    PBMT_RF_SLOT_B = 1'b0,
+    PBMT_RF_SLOT_C = 1'b1
+} memblock_pbmt_rf_slot_kind_e;
+
+typedef enum bit {
+    PBMT_RF_REQ_STORE = 1'b0,
+    PBMT_RF_REQ_LOAD  = 1'b1
+} memblock_pbmt_rf_requestor_kind_e;
+
+typedef struct {
+    bit                                 valid;
+    memblock_pbmt_rf_slot_kind_e        slot;
+    memblock_uid_t                      uid;
+    memblock_pbmt_rf_requestor_kind_e   requestor;
+    longint unsigned                    request_token;
+    bit [37:0]                          request_vpn;
+    bit [1:0]                           s2xlate;
+    memblock_tlb_lookup_result_e        lookup_kind;
+    memblock_tlb_lookup_key_t           request_key;
+    memblock_tlb_lookup_key_t           anchor_key;
+    longint unsigned                    entry_generation;
+    longint unsigned                    accept_dut_sample_seq;
+    longint unsigned                    accept_csr_history_sample_seq;
+    bit                                 accept_m_pbmt_en;
+    bit                                 accept_h_pbmt_en;
+    bit                                 complete_valid;
+    longint unsigned                    complete_dut_sample_seq;
+    longint unsigned                    complete_csr_history_sample_seq;
+    bit                                 complete_m_pbmt_en;
+    bit                                 complete_h_pbmt_en;
+    bit                                 raw_s1_pf;
+    bit                                 raw_s1_af;
+    bit                                 raw_s2_gpf;
+    bit                                 raw_s2_gaf;
+    bit                                 effective_s1_pf;
+    bit                                 effective_s1_af;
+    bit                                 effective_s2_gpf;
+    bit                                 effective_s2_gaf;
+    bit                                 pma_af;
+    bit                                 forced_s1_pf;
+    bit                                 forced_s2_gpf;
+    bit                                 canceled;
+    string                              cancel_reason;
+} memblock_pbmt_rf_audit_slot_t;
+
 // 中文注释：枚举值表示DUT raw-hit的实际地址覆盖范围，由小到大单调排列。
 // live表不允许多个coverage同时命中；该值只用于索引、约束和非法重叠诊断。
 typedef enum int unsigned {

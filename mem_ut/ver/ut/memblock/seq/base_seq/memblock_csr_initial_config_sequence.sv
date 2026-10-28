@@ -58,7 +58,7 @@ class memblock_csr_initial_config_sequence extends uvm_sequence #(csr_ctrl_agent
         end
         for (int unsigned wait_count = 0;
              ; wait_count++) begin
-            data.service_csr_pmp_pma_write_observations();
+            if (!data.service_csr_pmp_pma_write_observations()) return;
             if (data.csr_pmp_pma_writes_observed(expected_count) &&
                 plan.model_matches(data.pma_pmp_model, profile)) break;
             #1;

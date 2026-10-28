@@ -51,6 +51,368 @@ package memblock_sync_pkg;
     // 受限 level-hold 路径，任何普通 testcase 均保持 0 并沿用原 driver idle 行为。
     bit csr_special_sequence_active = 1'b0;
 
+    // PBMT response-fault directed scenario state.  This package-level state
+    // is intentionally value-only so the CSR monitor, issue scheduler and
+    // responder can share readiness facts without owning sequence objects.
+    typedef enum int unsigned {
+        PBMT_RF_RESET = 0,
+        PBMT_RF_ANCHOR_PUBLISHED,
+        PBMT_RF_B_RUNTIME_READY,
+        PBMT_RF_B_ACCEPTED,
+        PBMT_RF_B_COMPLETED,
+        PBMT_RF_B_TERMINAL,
+        PBMT_RF_C_ENABLE_MONITORED,
+        PBMT_RF_C_C2_READY_ACK,
+        PBMT_RF_C_ACCEPTED,
+        PBMT_RF_C_COMPLETED,
+        PBMT_RF_C_TERMINAL,
+        PBMT_RF_AUDIT_READY,
+        PBMT_RF_AUDIT_PASSED
+    } memblock_pbmt_rf_phase_e;
+
+    localparam bit [11:0] PBMT_RF_PMPADDR0_CSR_ADDR = 12'h3b0;
+    localparam bit [11:0] PBMT_RF_PMPCFG0_CSR_ADDR  = 12'h3a0;
+    localparam bit [63:0] PBMT_RF_PMPADDR0_TOR_TOP  = 64'h0000_3fff_ffff_ffff;
+    localparam bit [63:0] PBMT_RF_PMPCFG0_TOR_RWX   = 64'h0000_0000_0000_000f;
+
+    bit pbmt_rf_scenario_active = 1'b0;
+    string pbmt_rf_scenario_owner = "";
+    uvm_object pbmt_rf_scenario_owner_handle = null;
+    uvm_object pbmt_rf_main_owner_handle = null;
+    uvm_object pbmt_rf_responder_owner_handle = null;
+    uvm_object pbmt_rf_csr_owner_handle = null;
+    uvm_object pbmt_rf_pmp_observer_owner_handle = null;
+    memblock_pbmt_rf_phase_e pbmt_rf_phase = PBMT_RF_RESET;
+    string pbmt_rf_phase_owner = "";
+    longint unsigned pbmt_rf_pmpaddr0_observed_sample = 0;
+    longint unsigned pbmt_rf_pmpcfg0_observed_sample = 0;
+    longint unsigned pbmt_rf_b_ready_sample = 0;
+    longint unsigned pbmt_rf_c_ready_sample = 0;
+
+    typedef struct {
+        bit active;
+        bit csr_hold;
+        memblock_pbmt_rf_phase_e phase;
+        string scenario_owner;
+        string main_owner;
+        string responder_owner;
+        string csr_owner;
+        string pmp_observer_owner;
+        string phase_owner;
+        longint unsigned pmpaddr0_sample;
+        longint unsigned pmpcfg0_sample;
+        longint unsigned b_ready_sample;
+        longint unsigned c_ready_sample;
+    } memblock_pbmt_rf_shared_snapshot_t;
+
+    function bit reset_pbmt_rf_shared_state(input uvm_object owner);
+        if (owner == null || pbmt_rf_scenario_active || csr_special_sequence_active) begin
+            `uvm_fatal("PBMT_RF_PHASE",
+                       $sformatf("cannot reset active scenario phase=%0d owner=%s csr_hold=%0d",
+                                 pbmt_rf_phase, pbmt_rf_scenario_owner,
+                                 csr_special_sequence_active))
+            return 1'b0;
+        end
+        pbmt_rf_phase = PBMT_RF_RESET;
+        pbmt_rf_scenario_owner = "";
+        pbmt_rf_scenario_owner_handle = null;
+        pbmt_rf_main_owner_handle = null;
+        pbmt_rf_responder_owner_handle = null;
+        pbmt_rf_csr_owner_handle = null;
+        pbmt_rf_pmp_observer_owner_handle = null;
+        pbmt_rf_phase_owner = owner.get_full_name();
+        pbmt_rf_pmpaddr0_observed_sample = 0;
+        pbmt_rf_pmpcfg0_observed_sample = 0;
+        pbmt_rf_b_ready_sample = 0;
+        pbmt_rf_c_ready_sample = 0;
+        return 1'b1;
+    endfunction:reset_pbmt_rf_shared_state
+
+    function bit activate_pbmt_rf_scenario(
+        input uvm_object owner,
+        input uvm_object main_owner,
+        input uvm_object responder_owner,
+        input uvm_object csr_owner);
+        if (owner == null || main_owner == null || responder_owner == null ||
+            csr_owner == null || owner == main_owner || owner == responder_owner ||
+            owner == csr_owner || main_owner == responder_owner ||
+            main_owner == csr_owner || responder_owner == csr_owner ||
+            pbmt_rf_scenario_active ||
+            pbmt_rf_phase != PBMT_RF_RESET || csr_special_sequence_active) begin
+            `uvm_fatal("PBMT_RF_PHASE",
+                       $sformatf("invalid activation active=%0d phase=%0d csr_hold=%0d owner=%s",
+                                 pbmt_rf_scenario_active, pbmt_rf_phase,
+                                 csr_special_sequence_active,
+                                 owner == null ? "<null>" : owner.get_full_name()))
+            return 1'b0;
+        end
+        pbmt_rf_scenario_active = 1'b1;
+        pbmt_rf_scenario_owner_handle = owner;
+        pbmt_rf_main_owner_handle = main_owner;
+        pbmt_rf_responder_owner_handle = responder_owner;
+        pbmt_rf_csr_owner_handle = csr_owner;
+        pbmt_rf_scenario_owner = owner.get_full_name();
+        pbmt_rf_phase_owner = owner.get_full_name();
+        csr_special_sequence_active = 1'b1;
+        return 1'b1;
+    endfunction:activate_pbmt_rf_scenario
+
+    // A caught fatal/failed final checker must not leave the CSR driver in the
+    // dedicated hold path.  This releases only driver ownership; it deliberately
+    // preserves PBMT phase/audit state for failure diagnosis.
+    function bit release_pbmt_rf_csr_level_hold(input uvm_object owner);
+        if (!pbmt_rf_scenario_active || !csr_special_sequence_active ||
+            owner == null || owner != pbmt_rf_scenario_owner_handle) begin
+            `uvm_fatal("PBMT_RF_PHASE",
+                       $sformatf("invalid CSR hold release active=%0d hold=%0d owner=%s expected=%s",
+                                 pbmt_rf_scenario_active,
+                                 csr_special_sequence_active,
+                                 owner == null ? "<null>" : owner.get_full_name(),
+                                 pbmt_rf_scenario_owner))
+            return 1'b0;
+        end
+        csr_special_sequence_active = 1'b0;
+        return 1'b1;
+    endfunction:release_pbmt_rf_csr_level_hold
+
+    function bit is_pbmt_rf_scenario_active();
+        return pbmt_rf_scenario_active;
+    endfunction:is_pbmt_rf_scenario_active
+
+    function memblock_pbmt_rf_phase_e get_pbmt_rf_phase();
+        return pbmt_rf_phase;
+    endfunction:get_pbmt_rf_phase
+
+    function void get_pbmt_rf_shared_snapshot(
+        output memblock_pbmt_rf_shared_snapshot_t snapshot);
+        snapshot.active = pbmt_rf_scenario_active;
+        snapshot.csr_hold = csr_special_sequence_active;
+        snapshot.phase = pbmt_rf_phase;
+        snapshot.scenario_owner = pbmt_rf_scenario_owner;
+        snapshot.main_owner = pbmt_rf_main_owner_handle == null ? "" :
+                              pbmt_rf_main_owner_handle.get_full_name();
+        snapshot.responder_owner = pbmt_rf_responder_owner_handle == null ? "" :
+                                   pbmt_rf_responder_owner_handle.get_full_name();
+        snapshot.csr_owner = pbmt_rf_csr_owner_handle == null ? "" :
+                             pbmt_rf_csr_owner_handle.get_full_name();
+        snapshot.pmp_observer_owner = pbmt_rf_pmp_observer_owner_handle == null ? "" :
+                                      pbmt_rf_pmp_observer_owner_handle.get_full_name();
+        snapshot.phase_owner = pbmt_rf_phase_owner;
+        snapshot.pmpaddr0_sample = pbmt_rf_pmpaddr0_observed_sample;
+        snapshot.pmpcfg0_sample = pbmt_rf_pmpcfg0_observed_sample;
+        snapshot.b_ready_sample = pbmt_rf_b_ready_sample;
+        snapshot.c_ready_sample = pbmt_rf_c_ready_sample;
+    endfunction:get_pbmt_rf_shared_snapshot
+
+    function uvm_object get_pbmt_rf_expected_owner(
+        input memblock_pbmt_rf_phase_e next_phase);
+        case (next_phase)
+            PBMT_RF_ANCHOR_PUBLISHED,
+            PBMT_RF_C_TERMINAL: return pbmt_rf_main_owner_handle;
+            PBMT_RF_B_RUNTIME_READY,
+            PBMT_RF_B_ACCEPTED,
+            PBMT_RF_B_COMPLETED,
+            PBMT_RF_C_C2_READY_ACK,
+            PBMT_RF_C_ACCEPTED,
+            PBMT_RF_C_COMPLETED: return pbmt_rf_responder_owner_handle;
+            PBMT_RF_B_TERMINAL,
+            PBMT_RF_C_ENABLE_MONITORED: return pbmt_rf_csr_owner_handle;
+            PBMT_RF_AUDIT_READY,
+            PBMT_RF_AUDIT_PASSED: return pbmt_rf_scenario_owner_handle;
+            default: return null;
+        endcase
+    endfunction:get_pbmt_rf_expected_owner
+
+    function bit can_publish_pbmt_rf_phase(
+        input memblock_pbmt_rf_phase_e expected_previous,
+        input memblock_pbmt_rf_phase_e next_phase,
+        input uvm_object owner);
+        uvm_object expected_owner;
+
+        expected_owner = get_pbmt_rf_expected_owner(next_phase);
+        return pbmt_rf_scenario_active && owner != null &&
+               expected_owner != null && owner == expected_owner &&
+               pbmt_rf_phase == expected_previous &&
+               next_phase == memblock_pbmt_rf_phase_e'(expected_previous + 1);
+    endfunction:can_publish_pbmt_rf_phase
+
+    function void commit_pbmt_rf_phase_prechecked(
+        input memblock_pbmt_rf_phase_e expected_previous,
+        input memblock_pbmt_rf_phase_e next_phase,
+        input uvm_object owner);
+        pbmt_rf_phase = next_phase;
+        pbmt_rf_phase_owner = owner.get_full_name();
+        `uvm_info("PBMT_RF_PHASE",
+                  $sformatf("phase %0d -> %0d owner=%s time=%0t",
+                            expected_previous, next_phase,
+                            owner.get_full_name(), $time),
+                  UVM_LOW)
+    endfunction:commit_pbmt_rf_phase_prechecked
+
+    function bit publish_pbmt_rf_phase(
+        input memblock_pbmt_rf_phase_e expected_previous,
+        input memblock_pbmt_rf_phase_e next_phase,
+        input uvm_object owner
+    );
+        if (!can_publish_pbmt_rf_phase(expected_previous, next_phase, owner)) begin
+            `uvm_fatal("PBMT_RF_PHASE",
+                       $sformatf("illegal phase transition active=%0d current=%0d expected=%0d next=%0d owner=%s previous_owner=%s",
+                                 pbmt_rf_scenario_active, pbmt_rf_phase,
+                                 expected_previous, next_phase,
+                                 owner == null ? "<null>" : owner.get_full_name(),
+                                 pbmt_rf_phase_owner))
+            return 1'b0;
+        end
+        commit_pbmt_rf_phase_prechecked(expected_previous, next_phase, owner);
+        return 1'b1;
+    endfunction:publish_pbmt_rf_phase
+
+    function bit publish_pbmt_rf_pmp_write_observation(
+        input bit [11:0] addr,
+        input bit [63:0] data,
+        input longint unsigned sample_seq,
+        input uvm_object owner
+    );
+        if (!pbmt_rf_scenario_active) begin
+            return 1'b1;
+        end
+        if (sample_seq == 0 || owner == null) begin
+            `uvm_fatal("PBMT_RF_PMP", "PMP observation requires non-zero sample and owner")
+            return 1'b0;
+        end
+        if (pbmt_rf_pmp_observer_owner_handle != null &&
+            owner != pbmt_rf_pmp_observer_owner_handle) begin
+            `uvm_fatal("PBMT_RF_PMP",
+                       $sformatf("PMP observation owner mismatch owner=%s expected=%s",
+                                 owner.get_full_name(),
+                                 pbmt_rf_pmp_observer_owner_handle.get_full_name()))
+            return 1'b0;
+        end
+        if (addr == PBMT_RF_PMPADDR0_CSR_ADDR) begin
+            if (data != PBMT_RF_PMPADDR0_TOR_TOP ||
+                pbmt_rf_pmpaddr0_observed_sample != 0) begin
+                `uvm_fatal("PBMT_RF_PMP",
+                           $sformatf("invalid pmpaddr0 observation data=0x%0h sample=%0d previous=%0d",
+                                     data, sample_seq,
+                                     pbmt_rf_pmpaddr0_observed_sample))
+                return 1'b0;
+            end
+            if (pbmt_rf_pmp_observer_owner_handle == null)
+                pbmt_rf_pmp_observer_owner_handle = owner;
+            pbmt_rf_pmpaddr0_observed_sample = sample_seq;
+        end
+        else if (addr == PBMT_RF_PMPCFG0_CSR_ADDR) begin
+            if (data != PBMT_RF_PMPCFG0_TOR_RWX ||
+                pbmt_rf_pmpcfg0_observed_sample != 0 ||
+                pbmt_rf_pmpaddr0_observed_sample == 0 ||
+                sample_seq <= pbmt_rf_pmpaddr0_observed_sample) begin
+                `uvm_fatal("PBMT_RF_PMP",
+                           $sformatf("invalid pmpcfg0 observation data=0x%0h sample=%0d addr_sample=%0d previous=%0d",
+                                     data, sample_seq,
+                                     pbmt_rf_pmpaddr0_observed_sample,
+                                     pbmt_rf_pmpcfg0_observed_sample))
+                return 1'b0;
+            end
+            if (pbmt_rf_pmp_observer_owner_handle == null)
+                pbmt_rf_pmp_observer_owner_handle = owner;
+            pbmt_rf_pmpcfg0_observed_sample = sample_seq;
+        end
+        return 1'b1;
+    endfunction:publish_pbmt_rf_pmp_write_observation
+
+    function bit get_pbmt_rf_pmp_write_observations(
+        output longint unsigned pmpaddr0_sample,
+        output longint unsigned pmpcfg0_sample
+    );
+        pmpaddr0_sample = pbmt_rf_pmpaddr0_observed_sample;
+        pmpcfg0_sample = pbmt_rf_pmpcfg0_observed_sample;
+        return pbmt_rf_scenario_active && pmpaddr0_sample != 0 &&
+               pmpcfg0_sample > pmpaddr0_sample;
+    endfunction:get_pbmt_rf_pmp_write_observations
+
+    function bit publish_pbmt_rf_b_runtime_ready(
+        input longint unsigned sample_seq,
+        input uvm_object owner
+    );
+        if (sample_seq == 0 || pbmt_rf_b_ready_sample != 0 ||
+            !can_publish_pbmt_rf_phase(PBMT_RF_ANCHOR_PUBLISHED,
+                                       PBMT_RF_B_RUNTIME_READY, owner)) begin
+            `uvm_fatal("PBMT_RF_PHASE", "invalid B runtime-ready sample")
+            return 1'b0;
+        end
+        pbmt_rf_b_ready_sample = sample_seq;
+        commit_pbmt_rf_phase_prechecked(PBMT_RF_ANCHOR_PUBLISHED,
+                                        PBMT_RF_B_RUNTIME_READY, owner);
+        return 1'b1;
+    endfunction:publish_pbmt_rf_b_runtime_ready
+
+    function bit publish_pbmt_rf_c_c2_ready(
+        input longint unsigned sample_seq,
+        input uvm_object owner
+    );
+        if (sample_seq == 0 || pbmt_rf_c_ready_sample != 0 ||
+            !can_publish_pbmt_rf_phase(PBMT_RF_C_ENABLE_MONITORED,
+                                       PBMT_RF_C_C2_READY_ACK, owner)) begin
+            `uvm_fatal("PBMT_RF_PHASE", "invalid C C-2 ready sample")
+            return 1'b0;
+        end
+        pbmt_rf_c_ready_sample = sample_seq;
+        commit_pbmt_rf_phase_prechecked(PBMT_RF_C_ENABLE_MONITORED,
+                                        PBMT_RF_C_C2_READY_ACK, owner);
+        return 1'b1;
+    endfunction:publish_pbmt_rf_c_c2_ready
+
+    function longint unsigned get_pbmt_rf_b_ready_sample();
+        return pbmt_rf_b_ready_sample;
+    endfunction:get_pbmt_rf_b_ready_sample
+
+    function longint unsigned get_pbmt_rf_c_ready_sample();
+        return pbmt_rf_c_ready_sample;
+    endfunction:get_pbmt_rf_c_ready_sample
+
+    function bit pbmt_rf_issue_gate(input int unsigned uid);
+        if (!pbmt_rf_scenario_active) begin
+            return 1'b1;
+        end
+        case (uid)
+            0: return pbmt_rf_phase >= PBMT_RF_B_RUNTIME_READY;
+            1: return pbmt_rf_phase >= PBMT_RF_C_C2_READY_ACK;
+            default: begin
+                `uvm_fatal("PBMT_RF_PHASE",
+                           $sformatf("unexpected directed UID=%0d phase=%0d",
+                                     uid, pbmt_rf_phase))
+                return 1'b0;
+            end
+        endcase
+    endfunction:pbmt_rf_issue_gate
+
+    function bit cleanup_pbmt_rf_shared_state(input uvm_object owner);
+        if (!pbmt_rf_scenario_active || pbmt_rf_phase != PBMT_RF_AUDIT_PASSED ||
+            owner == null || owner != pbmt_rf_scenario_owner_handle) begin
+            `uvm_fatal("PBMT_RF_PHASE",
+                       $sformatf("cleanup before audit pass active=%0d phase=%0d owner=%s expected=%s",
+                                 pbmt_rf_scenario_active, pbmt_rf_phase,
+                                 owner == null ? "<null>" : owner.get_full_name(),
+                                 pbmt_rf_scenario_owner))
+            return 1'b0;
+        end
+        pbmt_rf_scenario_active = 1'b0;
+        pbmt_rf_scenario_owner = "";
+        pbmt_rf_scenario_owner_handle = null;
+        pbmt_rf_main_owner_handle = null;
+        pbmt_rf_responder_owner_handle = null;
+        pbmt_rf_csr_owner_handle = null;
+        pbmt_rf_pmp_observer_owner_handle = null;
+        pbmt_rf_phase = PBMT_RF_RESET;
+        pbmt_rf_phase_owner = owner.get_full_name();
+        pbmt_rf_pmpaddr0_observed_sample = 0;
+        pbmt_rf_pmpcfg0_observed_sample = 0;
+        pbmt_rf_b_ready_sample = 0;
+        pbmt_rf_c_ready_sample = 0;
+        csr_special_sequence_active = 1'b0;
+        return 1'b1;
+    endfunction:cleanup_pbmt_rf_shared_state
+
     // 中文注释：当前 active-control runtime 的 CSR 基线许可。CSR monitor 在四路
     // reset ack 完成后的首个 sample 写入；service 只有看到同一 epoch 的 valid
     // baseline 后才能创建 CSR/L2 action，避免读取建表或 reset 前的 latest snapshot。
@@ -2771,7 +3133,7 @@ package memblock_sync_pkg;
                pma_pmp_csr_revision_can_advance(raw_pma_pmp_csr_write_revision);
     endfunction:precheck_raw_pma_pmp_csr_write_push
 
-    function void push_raw_pma_pmp_csr_write(
+    function bit push_raw_pma_pmp_csr_write(
         input dispatch_raw_pma_pmp_csr_write_t item
     );
         if (!precheck_raw_pma_pmp_csr_write_push(item)) begin
@@ -2782,12 +3144,42 @@ package memblock_sync_pkg;
                 l2tlb_testcase_lifecycle_initialized, l2tlb_runtime_reset_active,
                 raw_pma_pmp_csr_write_produced_count,
                 raw_pma_pmp_csr_write_revision))
-            return;
+            return 1'b0;
         end
         raw_pma_pmp_csr_write_q.push_back(item);
         raw_pma_pmp_csr_write_produced_count++;
         bump_raw_pma_pmp_csr_write_revision();
+        return 1'b1;
     endfunction:push_raw_pma_pmp_csr_write
+
+    // 抽象职责：CSR monitor 对一笔真实 CSR write 先完成场景 owner/watermark
+    // 校验，再原子发布 generic PMA/PMP replay event。前置校验失败时不得入队。
+    function bit publish_raw_pma_pmp_csr_write_observation(
+        input bit [11:0] addr,
+        input bit [63:0] data,
+        input longint unsigned sample_seq,
+        input time sample_time,
+        input uvm_object owner
+    );
+        dispatch_raw_pma_pmp_csr_write_t item;
+
+        item = make_empty_raw_pma_pmp_csr_write();
+        item.valid = 1'b1;
+        item.addr = addr;
+        item.data = data;
+        item.sample_seq = sample_seq;
+        item.sample_time = sample_time;
+        item.reset_epoch = get_l2tlb_current_reset_epoch();
+        if (!precheck_raw_pma_pmp_csr_write_push(item)) begin
+            `uvm_fatal("MEMBLOCK_SYNC", "PMA/PMP CSR observation failed generic FIFO precheck")
+            return 1'b0;
+        end
+        if (!publish_pbmt_rf_pmp_write_observation(
+                addr, data, sample_seq, owner)) begin
+            return 1'b0;
+        end
+        return push_raw_pma_pmp_csr_write(item);
+    endfunction:publish_raw_pma_pmp_csr_write_observation
 
     function bit peek_raw_pma_pmp_csr_write(
         output dispatch_raw_pma_pmp_csr_write_t item
@@ -2797,7 +3189,7 @@ package memblock_sync_pkg;
             return 1'b0;
         end
         item = raw_pma_pmp_csr_write_q[0];
-        return item.valid;
+        return 1'b1;
     endfunction:peek_raw_pma_pmp_csr_write
 
     function bit pop_raw_pma_pmp_csr_write(

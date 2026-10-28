@@ -512,19 +512,12 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             memblock_sync_pkg::publish_l2tlb_csr_history(raw_csr,
                                                          current_sample_seq);
             if (io_ooo_to_mem_csrCtrl_distribute_csr_w_valid === 1'b1) begin
-                raw_pma_pmp_csr_write =
-                    memblock_sync_pkg::make_empty_raw_pma_pmp_csr_write();
-                raw_pma_pmp_csr_write.valid = 1'b1;
-                raw_pma_pmp_csr_write.addr =
-                    io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr;
-                raw_pma_pmp_csr_write.data =
-                    io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data;
-                raw_pma_pmp_csr_write.sample_seq = current_sample_seq;
-                raw_pma_pmp_csr_write.sample_time = $time;
-                raw_pma_pmp_csr_write.reset_epoch =
-                    memblock_sync_pkg::get_l2tlb_current_reset_epoch();
-                memblock_sync_pkg::push_raw_pma_pmp_csr_write(
-                    raw_pma_pmp_csr_write);
+                if (!memblock_sync_pkg::publish_raw_pma_pmp_csr_write_observation(
+                        io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr,
+                        io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data,
+                        current_sample_seq, $time, this)) begin
+                    continue;
+                end
             end
             // 中文注释：SFENCE/HFENCE 的 stage 解释必须使用该 fence 同拍的
             // CSR，而不能在 adapter drain 时读取 latest。该发布独立于 semantic

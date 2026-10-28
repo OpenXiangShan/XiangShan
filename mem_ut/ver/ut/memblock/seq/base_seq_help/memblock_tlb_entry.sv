@@ -524,6 +524,34 @@ class memblock_uid_tlb_record extends uvm_object;
         clear_issue_hit_snapshot();
     endfunction:init_context
 
+    function void commit_context_prechecked(
+        input memblock_uid_tlb_record planned_record);
+        uid = planned_record.uid;
+        record_valid = planned_record.record_valid;
+        pte_valid = planned_record.pte_valid;
+        vpn = planned_record.vpn;
+        s2xlate = planned_record.s2xlate;
+        is_hypervisor_inst = planned_record.is_hypervisor_inst;
+        csr_snapshot.copy_from(planned_record.csr_snapshot);
+        lookup_key = planned_record.lookup_key;
+        uid_tlb_wait_epoch = planned_record.uid_tlb_wait_epoch;
+        uid_tlb_wait_state = planned_record.uid_tlb_wait_state;
+        uid_wait_start_sample_seq = planned_record.uid_wait_start_sample_seq;
+        uid_tlb_first_request_fire_sample_seq =
+            planned_record.uid_tlb_first_request_fire_sample_seq;
+        pte_update_cycle = planned_record.pte_update_cycle;
+        issue_hit_snapshot_valid = planned_record.issue_hit_snapshot_valid;
+        issue_hit_response_token = planned_record.issue_hit_response_token;
+        issue_hit_response_sample_seq =
+            planned_record.issue_hit_response_sample_seq;
+        issue_hit_entry_generation = planned_record.issue_hit_entry_generation;
+        issue_hit_payload.copy_from(planned_record.issue_hit_payload);
+        request_derived_valid = planned_record.request_derived_valid;
+        request_s1_resolved_ppn = planned_record.request_s1_resolved_ppn;
+        request_s2_resolved_ppn = planned_record.request_s2_resolved_ppn;
+        request_gvpn = planned_record.request_gvpn;
+    endfunction:commit_context_prechecked
+
     function void clear_issue_hit_snapshot();
         issue_hit_snapshot_valid = 1'b0;
         issue_hit_response_token = 0;
@@ -572,6 +600,19 @@ class memblock_uid_tlb_record extends uvm_object;
         request_s2_resolved_ppn = '0;
         request_gvpn = '0;
     endfunction:mark_request_fire
+
+    function void commit_request_fire_prechecked(input longint unsigned sample_seq_i);
+        uid_tlb_first_request_fire_sample_seq = sample_seq_i;
+        issue_hit_snapshot_valid = 1'b0;
+        issue_hit_response_token = 0;
+        issue_hit_response_sample_seq = 0;
+        issue_hit_entry_generation = 0;
+        if (issue_hit_payload != null) issue_hit_payload.reset();
+        request_derived_valid = 1'b0;
+        request_s1_resolved_ppn = '0;
+        request_s2_resolved_ppn = '0;
+        request_gvpn = '0;
+    endfunction:commit_request_fire_prechecked
 
     function void mark_completed();
         if (!is_waiting()) `uvm_fatal("UID_TLB_RECORD", "only WAITING record can complete")

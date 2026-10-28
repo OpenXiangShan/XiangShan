@@ -1,39 +1,12 @@
 //=========================================================
 //File name    : memblock_l2tlb_pbmt_toggle_csr_sequence.sv
 //Module name  : memblock_l2tlb_pbmt_toggle_csr_sequence
-//Discribution : unique dynamic PBMTE CSR producer for real DUT smoke
+//Discribution : unique PBMT response-fault CSR producer
 //=========================================================
 `ifndef MEMBLOCK_L2TLB_PBMT_TOGGLE_CSR_SEQUENCE__SV
 `define MEMBLOCK_L2TLB_PBMT_TOGGLE_CSR_SEQUENCE__SV
 
-typedef enum int unsigned {
-    // A 建表期间保持 mPBMTE=1，允许固定 nonzero PBMT 进入 raw live entry。
-    MEMBLOCK_PBMT_TOGGLE_ENABLE_A,
-    // A terminal 后保持 mPBMTE=0，B 的 response-visible C-2 context 应产生 PF。
-    MEMBLOCK_PBMT_TOGGLE_DISABLE_B,
-    // B terminal 后重新打开 mPBMTE，C 用来验证没有继承 B 的 token-local fault。
-    MEMBLOCK_PBMT_TOGGLE_ENABLE_C
-} memblock_pbmt_toggle_state_e;
-
-// 中文注释：该 sequence 是 PBMT real-DUT directed 场景在 csr_ctrl_sqr 上的唯一 producer。
-// 每拍持续驱动完整 Sv39/U baseline，仅切换 mPBMTE，所有 satp/vsatp/hgatp/priv change
-// pulse 保持 0，因此不会把 PBMT 语义检查变成 TLB flush 或进程切换测试。
 class memblock_l2tlb_pbmt_toggle_csr_sequence extends memblock_mmu_sv39_csr_sequence;
-
-    // 中文注释：该 directed U 态 Sv39 场景必须显式建立一个覆盖 48-bit PA 的 PMP
-    // TOR+RWX entry；否则 reset 后全零 PMP 表会先把 A 判为 access fault，遮蔽 PBMT
-    // response 行为。两笔 distribute CSR write 只用于该 smoke 的 DUT 前置条件。
-    localparam bit [11:0] PBMT_PMPADDR0_CSR_ADDR = 12'h3b0;
-    localparam bit [11:0] PBMT_PMPCFG0_CSR_ADDR  = 12'h3a0;
-    // 中文注释：`pmpaddr0` 仅保存 PA[47:2] 的 46 bit；数学上的 2^46 端点
-    // 会被硬件截断为零，因此用最大可表示值覆盖本场景的低端物理地址窗口。
-    localparam bit [63:0] PBMT_PMPADDR0_TOR_TOP  = 64'h0000_3fff_ffff_ffff;
-    localparam bit [63:0] PBMT_PMPCFG0_TOR_RWX   = 64'h0000_0000_0000_000f;
-
-    memblock_pbmt_toggle_state_e toggle_state;
-    bit                          saw_disable;
-    bit                          saw_reenable;
-
     `uvm_object_utils(memblock_l2tlb_pbmt_toggle_csr_sequence)
 
     extern function new(string name = "memblock_l2tlb_pbmt_toggle_csr_sequence");
@@ -42,118 +15,156 @@ class memblock_l2tlb_pbmt_toggle_csr_sequence extends memblock_mmu_sv39_csr_sequ
     extern virtual function void configure_toggle_xaction(
         input bit [43:0] root_ppn,
         input int unsigned item_index,
-        input memblock_pbmt_toggle_state_e state,
-        output csr_ctrl_agent_agent_xaction tr
-    );
-
+        input bit m_pbmt_en,
+        output csr_ctrl_agent_agent_xaction tr);
 endclass:memblock_l2tlb_pbmt_toggle_csr_sequence
 
 function memblock_l2tlb_pbmt_toggle_csr_sequence::new(
-    string name = "memblock_l2tlb_pbmt_toggle_csr_sequence"
-);
+    string name = "memblock_l2tlb_pbmt_toggle_csr_sequence");
     super.new(name);
-    toggle_state = MEMBLOCK_PBMT_TOGGLE_ENABLE_A;
-    saw_disable = 1'b0;
-    saw_reenable = 1'b0;
 endfunction:new
 
-// 抽象职责：在主表完成后持续提交完整 CSR payload，并仅在 A/B 已经 terminal retire 的
-// 边界转换 PBMTE state。L2TLB response 是指令执行和 terminal retire 的前置条件；Store
-// fault replay 可能为同一 UID 建立新的等待 epoch，不能再用瞬时 pte_valid 代表历史
-// response 是否完成。它不读取或修改 live entry，也不承担 response 检查；转换结果由
-// 同一拍及之后的 CSR C-2 history 提供给 responder。
 task memblock_l2tlb_pbmt_toggle_csr_sequence::body();
     bit [43:0] root_ppn;
     int unsigned item_index;
+    int unsigned enable_baseline_seq;
+    int unsigned latest_seq;
+    int unsigned terminal_wait_count;
+    bit enabled;
+    bit b_terminal_published;
     csr_ctrl_agent_agent_xaction tr;
+    memblock_sync_pkg::dispatch_raw_csr_t latest_csr;
 
     seq_csr_common::init();
     data = common_data_transaction::get();
-    if (data == null) begin
-        `uvm_fatal(get_type_name(), "failed to get common_data_transaction")
+    if (data == null || memblock_sync_pkg::uses_control_barrier_topology()) begin
+        `uvm_fatal(get_type_name(), "PBMT RF CSR producer has invalid context/topology")
+        return;
     end
-    if (memblock_sync_pkg::uses_control_barrier_topology()) begin
-        `uvm_fatal(get_type_name(),
-                   "PBMT toggle CSR sequence requires disabled control topology")
-    end
-
     wait_for_main_table_or_stop();
     if (data.is_global_stop_requested()) begin
+        return;
+    end
+    while (!data.is_global_stop_requested() &&
+           memblock_sync_pkg::get_pbmt_rf_phase() == memblock_sync_pkg::PBMT_RF_RESET) begin
+        #1;
+    end
+    if (data.is_global_stop_requested()) begin
+        return;
+    end
+    if (memblock_sync_pkg::get_pbmt_rf_phase() !=
+            memblock_sync_pkg::PBMT_RF_ANCHOR_PUBLISHED) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("PBMT RF CSR bootstrap entered at invalid phase=%0d",
+                             memblock_sync_pkg::get_pbmt_rf_phase()))
         return;
     end
 
     root_ppn = get_sv39_root_ppn();
     item_index = 0;
+    enabled = 1'b0;
+    b_terminal_published = 1'b0;
+    enable_baseline_seq = 0;
+    terminal_wait_count = 0;
     while (!data.is_global_stop_requested()) begin
-        if (toggle_state == MEMBLOCK_PBMT_TOGGLE_ENABLE_A &&
+        if (!b_terminal_published &&
+            memblock_sync_pkg::get_pbmt_rf_phase() == memblock_sync_pkg::PBMT_RF_B_COMPLETED &&
             uid_terminal_retired(0)) begin
-            toggle_state = MEMBLOCK_PBMT_TOGGLE_DISABLE_B;
-            saw_disable = 1'b1;
-            `uvm_info(get_type_name(), "A terminal retire: drive mPBMTE=0 for B", UVM_LOW)
-        end
-        else if (toggle_state == MEMBLOCK_PBMT_TOGGLE_DISABLE_B &&
-                 uid_terminal_retired(1)) begin
-            toggle_state = MEMBLOCK_PBMT_TOGGLE_ENABLE_C;
-            saw_reenable = 1'b1;
-            `uvm_info(get_type_name(), "B terminal retire: drive mPBMTE=1 for C", UVM_LOW)
+            if (!memblock_sync_pkg::publish_pbmt_rf_phase(
+                    memblock_sync_pkg::PBMT_RF_B_COMPLETED,
+                    memblock_sync_pkg::PBMT_RF_B_TERMINAL, this)) return;
+            if (memblock_sync_pkg::get_latest_runtime_csr_snapshot(
+                    latest_csr, enable_baseline_seq)) begin
+                // sequence number is the only required pre-enable watermark.
+            end else begin
+                enable_baseline_seq = 0;
+            end
+            enabled = 1'b1;
+            b_terminal_published = 1'b1;
         end
 
-        configure_toggle_xaction(root_ppn, item_index, toggle_state, tr);
+        configure_toggle_xaction(root_ppn, item_index, enabled, tr);
         start_item(tr);
         finish_item(tr);
         item_index++;
+        // Keep scenario polling time-consuming even if a driver implementation
+        // completes an item in the same delta cycle.
+        #1;
+
+        if (enabled &&
+            memblock_sync_pkg::get_pbmt_rf_phase() == memblock_sync_pkg::PBMT_RF_B_TERMINAL &&
+            memblock_sync_pkg::get_latest_runtime_csr_snapshot(
+                latest_csr, latest_seq) && latest_seq > enable_baseline_seq &&
+            latest_csr.valid && latest_csr.m_pbmt_en && !latest_csr.h_pbmt_en) begin
+            if (!memblock_sync_pkg::publish_pbmt_rf_phase(
+                    memblock_sync_pkg::PBMT_RF_B_TERMINAL,
+                    memblock_sync_pkg::PBMT_RF_C_ENABLE_MONITORED,
+                    this)) return;
+        end
     end
 
-    if (!saw_disable || !saw_reenable ||
-        toggle_state != MEMBLOCK_PBMT_TOGGLE_ENABLE_C) begin
-        `uvm_fatal(get_type_name(), "PBMT toggle CSR sequence stopped before completing A/B/C states")
+    // Global stop can become visible before the main-sequence owner returns
+    // from responder drain and publishes C_TERMINAL.  Stop producing CSR items,
+    // but keep this child alive for that one-way phase acknowledgement.
+    while (memblock_sync_pkg::get_pbmt_rf_phase() ==
+               memblock_sync_pkg::PBMT_RF_C_COMPLETED &&
+           terminal_wait_count <=
+               seq_csr_common::get_active_seq_no_progress_warn_cycles()) begin
+        #1;
+        terminal_wait_count++;
+    end
+    if (memblock_sync_pkg::get_pbmt_rf_phase() < memblock_sync_pkg::PBMT_RF_C_TERMINAL) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("PBMT RF CSR producer stopped early phase=%0d items=%0d terminal_wait=%0d",
+                             memblock_sync_pkg::get_pbmt_rf_phase(), item_index,
+                             terminal_wait_count))
+        return;
     end
 endtask:body
 
 function bit memblock_l2tlb_pbmt_toggle_csr_sequence::uid_terminal_retired(
-    input memblock_uid_t uid
-);
-    if (data == null || !data.is_valid_uid(uid)) begin
-        return 1'b0;
-    end
-    return data.get_status(uid).terminal_done;
+    input memblock_uid_t uid);
+    return data != null && data.is_valid_uid(uid) &&
+           data.get_status(uid).terminal_done;
 endfunction:uid_terminal_retired
 
-// 抽象职责：复用静态 Sv39/U CSR payload，并按当前 directed state 覆盖 mPBMTE。
-// 前两笔 item 额外写入 PMP bootstrap；其余 item 不产生 generic CSR write 或 change
-// pulse，因此 PBMT 切换不删除 entry、不触发 SFENCE barrier。
 function void memblock_l2tlb_pbmt_toggle_csr_sequence::configure_toggle_xaction(
     input bit [43:0] root_ppn,
     input int unsigned item_index,
-    input memblock_pbmt_toggle_state_e state,
-    output csr_ctrl_agent_agent_xaction tr
-);
+    input bit m_pbmt_en,
+    output csr_ctrl_agent_agent_xaction tr);
     configure_static_sv39_xaction(root_ppn, item_index, tr);
     if (tr == null) begin
-        `uvm_fatal(get_type_name(), "failed to build PBMT toggle CSR xaction")
+        `uvm_fatal(get_type_name(), "failed to build PBMT RF CSR xaction")
+        return;
     end
-    tr.io_ooo_to_mem_tlbCsr_mPBMTE =
-        state != MEMBLOCK_PBMT_TOGGLE_DISABLE_B;
+    // Item0/1 are the two monitored PMP bootstrap writes.  Starting with item2,
+    // bypass the common 64-item Bare settle and hold a stable Sv39/U baseline;
+    // B readiness still requires the responder to consume that exact history.
+    tr.io_ooo_to_mem_tlbCsr_satp_mode =
+        item_index < 2 ? MEMBLOCK_SATP_MODE_BARE : MEMBLOCK_SATP_MODE_SV39;
+    tr.io_ooo_to_mem_tlbCsr_priv_imode = MEMBLOCK_PRIV_MODE_U;
+    tr.io_ooo_to_mem_tlbCsr_priv_dmode = MEMBLOCK_PRIV_MODE_U;
+    tr.io_ooo_to_mem_tlbCsr_mPBMTE = m_pbmt_en;
     tr.io_ooo_to_mem_tlbCsr_hPBMTE = 1'b0;
     tr.io_ooo_to_mem_tlbCsr_satp_changed = 1'b0;
     tr.io_ooo_to_mem_tlbCsr_vsatp_changed = 1'b0;
     tr.io_ooo_to_mem_tlbCsr_hgatp_changed = 1'b0;
     tr.io_ooo_to_mem_tlbCsr_priv_virt_changed = 1'b0;
-
     case (item_index)
         0: begin
             tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b1;
             tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr =
-                PBMT_PMPADDR0_CSR_ADDR;
+                memblock_sync_pkg::PBMT_RF_PMPADDR0_CSR_ADDR;
             tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data =
-                PBMT_PMPADDR0_TOR_TOP;
+                memblock_sync_pkg::PBMT_RF_PMPADDR0_TOR_TOP;
         end
         1: begin
             tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b1;
             tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr =
-                PBMT_PMPCFG0_CSR_ADDR;
+                memblock_sync_pkg::PBMT_RF_PMPCFG0_CSR_ADDR;
             tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data =
-                PBMT_PMPCFG0_TOR_RWX;
+                memblock_sync_pkg::PBMT_RF_PMPCFG0_TOR_RWX;
         end
         default: begin
             tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b0;

@@ -175,6 +175,11 @@ class common_data_transaction extends uvm_object;
     longint unsigned pma_pmp_csr_replay_reset_epoch;
     longint unsigned pma_pmp_csr_replay_service_revision;
     longint unsigned pma_pmp_csr_applied_count;
+    pma_pmp_entry_t          pbmt_rf_pmp_baseline[32];
+    pma_pmp_entry_t          pbmt_rf_pma_baseline[32];
+    longint unsigned         pbmt_rf_pmp_generation_baseline;
+    longint unsigned         pbmt_rf_pma_generation_baseline;
+    bit                      pbmt_rf_pma_pmp_baseline_valid;
     memblock_issue_q_item_t  load_issue_q[$];
     memblock_issue_q_item_t  sta_issue_q[$];
     memblock_issue_q_item_t  std_issue_q[$];
@@ -363,6 +368,9 @@ class common_data_transaction extends uvm_object;
         pma_pmp_csr_replay_reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
         pma_pmp_csr_replay_service_revision = 1;
         pma_pmp_csr_applied_count = 0;
+        pbmt_rf_pmp_generation_baseline = 0;
+        pbmt_rf_pma_generation_baseline = 0;
+        pbmt_rf_pma_pmp_baseline_valid = 1'b0;
         next_tlb_entry_generation = 0;
         parent_lookup_count = 0;
         parent_block_64k_count = 0;
@@ -550,6 +558,9 @@ class common_data_transaction extends uvm_object;
         pma_pmp_csr_replay_reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
         pma_pmp_csr_replay_service_revision = 1;
         pma_pmp_csr_applied_count = 0;
+        pbmt_rf_pmp_generation_baseline = 0;
+        pbmt_rf_pma_generation_baseline = 0;
+        pbmt_rf_pma_pmp_baseline_valid = 1'b0;
         for (uid = 0; uid < main_trans_num_i; uid++) begin
             status_by_uid[uid] = status_transaction::type_id::create($sformatf("status_uid_%0d", uid));
             status_by_uid[uid].reset(uid);
@@ -630,7 +641,7 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA", "special CSR completion has no staged dynamic candidate")
         if (!memblock_control_owner_equal(csr_dynamic_candidate_owner, owner))
             `uvm_fatal("COMMON_DATA", "special CSR completion owner does not match staged candidate")
-        service_csr_pmp_pma_write_observations();
+        if (!service_csr_pmp_pma_write_observations()) return 1'b0;
         if (!csr_pmp_pma_writes_observed(csr_dynamic_candidate_expected_write_count)) begin
             return 1'b0;
         end
@@ -740,22 +751,101 @@ class common_data_transaction extends uvm_object;
     endfunction:reset_pma_pmp_csr_replay_for_runtime_epoch
 
 
-    function void service_csr_pmp_pma_write_observations();
+    function bit service_csr_pmp_pma_write_observations();
         memblock_pma_pmp_replay_ticket ticket;
         longint unsigned published;
-        if (memblock_sync_pkg::l2tlb_reset_active()) return;
+        if (memblock_sync_pkg::l2tlb_reset_active()) return 1'b1;
         published = memblock_sync_pkg::get_l2tlb_lifecycle_event_published_seq();
-        if (published == 0 || memblock_sync_pkg::raw_pma_pmp_csr_write_size() == 0) return;
+        if (published == 0 || memblock_sync_pkg::raw_pma_pmp_csr_write_size() == 0) return 1'b1;
         if (!prepare_pma_pmp_csr_replay(published, ticket)) begin
             `uvm_fatal("COMMON_DATA", "PMA/PMP CSR replay prepare failed")
-            return;
+            return 1'b0;
         end
-        if (ticket.events.size() == 0) return;
+        if (ticket.events.size() == 0) return 1'b1;
         if (!commit_pma_pmp_csr_replay(ticket)) begin
             `uvm_fatal("COMMON_DATA", "PMA/PMP CSR replay commit precheck failed")
-            return;
+            return 1'b0;
         end
+        return 1'b1;
     endfunction:service_csr_pmp_pma_write_observations
+
+    function longint unsigned get_pma_pmp_last_applied_csr_sample();
+        return pma_pmp_last_applied_csr_sample;
+    endfunction:get_pma_pmp_last_applied_csr_sample
+
+    function void capture_pbmt_rf_pma_pmp_baseline();
+        if (!memblock_sync_pkg::is_pbmt_rf_scenario_active() ||
+            pma_pmp_model == null || !pma_pmp_model.is_ready()) begin
+            `uvm_fatal("COMMON_DATA",
+                       "PBMT RF baseline capture requires active scenario and ready model")
+        end
+        if (pbmt_rf_pma_pmp_baseline_valid) begin
+            `uvm_fatal("COMMON_DATA", "PBMT RF PMA/PMP baseline captured twice")
+        end
+        for (int unsigned idx = 0; idx < 32; idx++) begin
+            if (!pma_pmp_model.read_entry(1'b0, idx,
+                                          pbmt_rf_pmp_baseline[idx]) ||
+                !pma_pmp_model.read_entry(1'b1, idx,
+                                          pbmt_rf_pma_baseline[idx])) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("failed to capture PBMT RF PMA/PMP baseline idx=%0d",
+                                     idx))
+            end
+        end
+        pma_pmp_model.read_generations(pbmt_rf_pmp_generation_baseline,
+                                       pbmt_rf_pma_generation_baseline);
+        pbmt_rf_pma_pmp_baseline_valid = 1'b1;
+    endfunction:capture_pbmt_rf_pma_pmp_baseline
+
+    function bit pbmt_rf_bootstrap_matches();
+        pma_pmp_entry_t pmp_entry;
+        pma_pmp_entry_t pma_entry;
+        longint unsigned pmp_generation;
+        longint unsigned pma_generation;
+
+        if (!pbmt_rf_pma_pmp_baseline_valid || pma_pmp_model == null) begin
+            return 1'b0;
+        end
+        pma_pmp_model.read_generations(pmp_generation, pma_generation);
+        if (pmp_generation != pbmt_rf_pmp_generation_baseline + 2 ||
+            pma_generation != pbmt_rf_pma_generation_baseline) begin
+            return 1'b0;
+        end
+        for (int unsigned idx = 0; idx < 32; idx++) begin
+            if (!pma_pmp_model.read_entry(1'b0, idx, pmp_entry) ||
+                !pma_pmp_model.read_entry(1'b1, idx, pma_entry)) begin
+                return 1'b0;
+            end
+            if (pma_entry != pbmt_rf_pma_baseline[idx]) begin
+                return 1'b0;
+            end
+            if (idx == 0) begin
+                if (!pmp_entry.valid || pmp_entry.index != 0 ||
+                    pmp_entry.lock || pmp_entry.c || pmp_entry.atomic ||
+                    pmp_entry.a != PMA_PMP_A_TOR ||
+                    !pmp_entry.x || !pmp_entry.w || !pmp_entry.r ||
+                    pmp_entry.addr_raw !=
+                        memblock_sync_pkg::PBMT_RF_PMPADDR0_TOR_TOP[45:0] ||
+                    pmp_entry.origin != 2'd2) begin
+                    return 1'b0;
+                end
+            end
+            else if (idx < 8) begin
+                if (pmp_entry.valid || pmp_entry.index != idx ||
+                    pmp_entry.lock || pmp_entry.c || pmp_entry.atomic ||
+                    pmp_entry.a != PMA_PMP_A_OFF ||
+                    pmp_entry.x || pmp_entry.w || pmp_entry.r ||
+                    pmp_entry.addr_raw != pbmt_rf_pmp_baseline[idx].addr_raw ||
+                    pmp_entry.origin != 2'd2) begin
+                    return 1'b0;
+                end
+            end
+            else if (pmp_entry != pbmt_rf_pmp_baseline[idx]) begin
+                return 1'b0;
+            end
+        end
+        return 1'b1;
+    endfunction:pbmt_rf_bootstrap_matches
 
     function memblock_uid_t alloc_uid();
         memblock_uid_t uid;
@@ -2614,17 +2704,34 @@ class common_data_transaction extends uvm_object;
         return 1'b0;
     endfunction:get_status_field
 
+    // 保留给专项直接构造历史issue epoch；正式scheduler使用
+    // mark_issue_snapshot()在全部precheck成功后分配epoch。
     function int unsigned alloc_issue_epoch();
         global_issue_epoch++;
         return global_issue_epoch;
     endfunction:alloc_issue_epoch
 
-    function void mark_issue_snapshot(input memblock_uid_t uid,
-                                      input memblock_issue_target_e issue_target,
-                                      input int unsigned issue_epoch);
+    function bit mark_issue_snapshot(input memblock_uid_t uid,
+                                     input memblock_issue_target_e issue_target,
+                                     output int unsigned issue_epoch);
         status_transaction status;
 
-        ensure_status_exists(uid, "mark_issue_snapshot");
+        issue_epoch = 0;
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null ||
+            !(issue_target inside {MEMBLOCK_ISSUE_TARGET_LOAD,
+                                   MEMBLOCK_ISSUE_TARGET_STA,
+                                   MEMBLOCK_ISSUE_TARGET_STD}) ||
+            global_issue_epoch == '1) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("mark_issue_snapshot precheck failed uid=%0d target=%0d epoch=%0d",
+                                 uid, issue_target, global_issue_epoch))
+            return 1'b0;
+        end
+        if (!register_uid_tlb_record_on_issue(uid)) begin
+            return 1'b0;
+        end
+        global_issue_epoch++;
+        issue_epoch = global_issue_epoch;
         status = status_by_uid[uid];
         status.set_target_issue_epoch(issue_target, issue_epoch);
         status.set_target_instance_flush_epoch(
@@ -2632,7 +2739,7 @@ class common_data_transaction extends uvm_object;
             memblock_sync_pkg::dispatch_flush_epoch
         );
         status.issue_killed = 1'b0;
-        register_uid_tlb_record_on_issue(uid);
+        return 1'b1;
     endfunction:mark_issue_snapshot
 
     function memblock_status_field_e target_writeback_field(input memblock_issue_target_e target);
@@ -7235,6 +7342,39 @@ class common_data_transaction extends uvm_object;
         return 1'b0;
     endfunction:find_tlb_range_hit_by_req
 
+    function bit find_existing_l2tlb_entry_by_req_with_snapshot(
+        input bit [37:0] vpn,
+        input bit [1:0] s2xlate,
+        input mmu_csr_runtime_state csr_snapshot,
+        output memblock_tlb_lookup_key_t request_key,
+        output memblock_tlb_lookup_key_t entry_anchor_key,
+        output memblock_tlb_lookup_result_e lookup_result,
+        output memblock_tlb_entry entry);
+        request_key = '{default:'0};
+        entry_anchor_key = '{default:'0};
+        lookup_result = MEMBLOCK_TLB_LOOKUP_MISS_BUILD;
+        entry = null;
+        if (csr_snapshot == null) begin
+            return 1'b0;
+        end
+        request_key = csr_snapshot.make_lookup_key({26'b0, vpn}, s2xlate);
+        if (has_tlb_entry(request_key)) begin
+            entry = tlb_entry_by_key[request_key];
+            if (entry == null || entry.range_index_keys.size() == 0) begin
+                return 1'b0;
+            end
+            entry_anchor_key = request_key;
+            lookup_result = MEMBLOCK_TLB_LOOKUP_EXACT_HIT;
+            return 1'b1;
+        end
+        if (find_tlb_range_hit_by_req(request_key, csr_snapshot,
+                                      entry_anchor_key, entry)) begin
+            lookup_result = MEMBLOCK_TLB_LOOKUP_RANGE_HIT;
+            return entry != null;
+        end
+        return 1'b0;
+    endfunction:find_existing_l2tlb_entry_by_req_with_snapshot
+
     function void unregister_completed_tlb_range_index(
         input memblock_tlb_lookup_key_t anchor_key,
         input memblock_tlb_entry entry);
@@ -8265,7 +8405,7 @@ class common_data_transaction extends uvm_object;
 
     // UID registration is sealed when the owner has requested release, before
     // the later driver-side transport cutoff confirms admission closed.
-    function void check_l2tlb_uid_registration_open(input string caller);
+    function bit check_l2tlb_uid_registration_open(input string caller);
         if (memblock_sync_pkg::l2tlb_release_admission_close_requested ||
             memblock_sync_pkg::l2tlb_release_admission_closed ||
             memblock_sync_pkg::l2tlb_release_closing) begin
@@ -8275,7 +8415,9 @@ class common_data_transaction extends uvm_object;
                                  memblock_sync_pkg::l2tlb_release_admission_close_requested,
                                  memblock_sync_pkg::l2tlb_release_admission_closed,
                                  memblock_sync_pkg::l2tlb_release_closing))
+            return 1'b0;
         end
+        return 1'b1;
     endfunction:check_l2tlb_uid_registration_open
 
     // This bounded cleanup never changes a valid WAITING record.  It only
@@ -8463,31 +8605,70 @@ class common_data_transaction extends uvm_object;
                record.csr_snapshot.update_seq == csr_snapshot.update_seq;
     endfunction:uid_tlb_waiting_context_matches
 
-    function void register_uid_tlb_record_on_issue(input memblock_uid_t uid);
+    function bit register_uid_tlb_record_on_issue(input memblock_uid_t uid);
         main_control_transaction main_tr;
         status_transaction       status;
         mmu_csr_runtime_state    snapshot;
+        memblock_uid_tlb_record  planned_record;
+        bit                      record_needs_commit;
+        pma_pmp_uid_context_plan_t context_plan;
         bit [51:0]               vpn;
         bit [1:0]                s2xlate;
         bit                      is_hypervisor_inst;
         longint unsigned         current_sample;
 
-        check_uid(uid, "register_uid_tlb_record_on_issue");
-        check_l2tlb_uid_registration_open("register_uid_tlb_record_on_issue");
+        if (!is_valid_uid(uid)) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("register_uid_tlb_record_on_issue got invalid uid=%0d main_trans_num=%0d",
+                                 uid, main_trans_num))
+            return 1'b0;
+        end
+        if (!check_l2tlb_uid_registration_open(
+                "register_uid_tlb_record_on_issue")) begin
+            return 1'b0;
+        end
         current_sample = memblock_sync_pkg::peek_current_dut_global_sample();
         if (current_sample == 0) begin
             `uvm_fatal("COMMON_DATA",
                        "UID TLB registration requires a published DUT global sample")
+            return 1'b0;
         end
-        main_tr = get_main_transaction(uid);
-        status = get_status(uid);
-        get_mmu_csr_snapshot(snapshot);
+        if (main_table_by_uid[uid] == null || status_by_uid[uid] == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("issue registration missing transaction/status uid=%0d",
+                                 uid))
+            return 1'b0;
+        end
+        main_tr = main_table_by_uid[uid];
+        status = status_by_uid[uid];
+        if (mmu_csr_state == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       "issue registration requires initialized MMU CSR state")
+            return 1'b0;
+        end
+        snapshot = mmu_csr_runtime_state::type_id::create(
+            $sformatf("issue_csr_snapshot_uid_%0d", uid));
+        if (snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "failed to allocate issue CSR snapshot")
+            return 1'b0;
+        end
+        snapshot.copy_from(mmu_csr_state);
+        vpn = {14'b0, main_tr.vaddr[49:12]};
+        is_hypervisor_inst = is_hypervisor_tlb_inst(main_tr);
+        s2xlate = snapshot.expected_s2xlate(is_hypervisor_inst);
+        if (!plan_uid_tlb_record_context(uid, vpn, s2xlate,
+                                         is_hypervisor_inst, snapshot,
+                                         planned_record,
+                                         record_needs_commit)) begin
+            return 1'b0;
+        end
         // 中文注释：PMA/PMP context 必须在首次真实 issue 边界冻结。TLB hit
         // 可能没有 L2TLB request-fire，因此不能只在 responder 回调中建立该快照。
         // 先回放严格早于本 sample 的 CSR 写，再用当前 dynamic_epoch 保存表代数。
-        if (seq_csr_common::get_pma_pmp_model_en()) begin
+        if (seq_csr_common::get_pma_pmp_model_en() &&
+            !memblock_sync_pkg::is_pbmt_rf_scenario_active()) begin
             if (pma_pmp_model == null ||
-                !pma_pmp_model.capture_uid_context(
+                !pma_pmp_model.plan_uid_context_capture(
                     uid,
                     status.dynamic_epoch,
                     snapshot.priv_dmode,
@@ -8496,94 +8677,236 @@ class common_data_transaction extends uvm_object;
                     1'b0,
                     '0,
                     snapshot.update_seq,
-                    current_sample)) begin
+                    current_sample,
+                    context_plan)) begin
                 `uvm_fatal("COMMON_DATA",
-                           $sformatf("failed to freeze PMA/PMP issue context uid=%0d epoch=%0d sample=%0d",
+                           $sformatf("failed to plan PMA/PMP issue context uid=%0d epoch=%0d sample=%0d",
                                      uid, status.dynamic_epoch, current_sample))
+                return 1'b0;
+            end
+            if (!apply_pma_pmp_csr_writes_before_request(current_sample)) return 1'b0;
+            // Replay may change the generation frozen in the context, so
+            // rebuild the plan after the replay and before any commit.
+            if (!pma_pmp_model.plan_uid_context_capture(
+                    uid, status.dynamic_epoch,
+                    snapshot.priv_dmode, snapshot.priv_debug,
+                    1'b0, 1'b0, '0, snapshot.update_seq,
+                    current_sample, context_plan)) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("failed to finalize PMA/PMP issue context uid=%0d epoch=%0d sample=%0d",
+                                     uid, status.dynamic_epoch, current_sample))
+                return 1'b0;
             end
         end
-        vpn = {14'b0, main_tr.vaddr[49:12]};
-        is_hypervisor_inst = is_hypervisor_tlb_inst(main_tr);
-        s2xlate = snapshot.expected_s2xlate(is_hypervisor_inst);
-        update_uid_tlb_record_context(uid, vpn, s2xlate, is_hypervisor_inst, snapshot);
+        if (record_needs_commit) begin
+            commit_uid_tlb_record_context_prechecked(uid, planned_record);
+        end
+        if (seq_csr_common::get_pma_pmp_model_en() &&
+            !memblock_sync_pkg::is_pbmt_rf_scenario_active()) begin
+            pma_pmp_model.commit_uid_context_plan_prechecked(context_plan);
+        end
+        return 1'b1;
     endfunction:register_uid_tlb_record_on_issue
 
-    function void update_uid_tlb_record_context(input memblock_uid_t uid,
-                                                input bit [51:0] vpn,
-                                                input bit [1:0] s2xlate,
-                                                input bit is_hypervisor_inst,
-                                                input mmu_csr_runtime_state csr_snapshot);
+    function bit plan_uid_tlb_record_context(
+        input memblock_uid_t uid,
+        input bit [51:0] vpn,
+        input bit [1:0] s2xlate,
+        input bit is_hypervisor_inst,
+        input mmu_csr_runtime_state csr_snapshot,
+        output memblock_uid_tlb_record planned_record,
+        output bit record_needs_commit);
         memblock_uid_tlb_record record;
-        longint unsigned        current_sample;
+        memblock_uid_t candidate_uid;
+        memblock_uid_tlb_record candidate_record;
+        memblock_uid_tlb_wait_shape_key_t shape_key;
+        longint unsigned current_sample;
+        int unsigned member_count;
 
-        check_uid(uid, "update_uid_tlb_record_context");
-        check_l2tlb_uid_registration_open("update_uid_tlb_record_context");
+        planned_record = null;
+        record_needs_commit = 1'b0;
+        if (!is_valid_uid(uid)) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("plan_uid_tlb_record_context invalid uid=%0d main_trans_num=%0d",
+                                 uid, main_trans_num))
+            return 1'b0;
+        end
+        if (!check_l2tlb_uid_registration_open(
+                "plan_uid_tlb_record_context")) return 1'b0;
         if (csr_snapshot == null) begin
-            `uvm_fatal("COMMON_DATA", "update_uid_tlb_record_context got null csr_snapshot")
+            `uvm_fatal("COMMON_DATA",
+                       "plan_uid_tlb_record_context got null CSR snapshot")
+            return 1'b0;
         end
         current_sample = memblock_sync_pkg::peek_current_dut_global_sample();
         if (current_sample == 0) begin
             `uvm_fatal("COMMON_DATA",
-                       "update_uid_tlb_record_context requires a published DUT global sample")
+                       "plan_uid_tlb_record_context requires a published DUT sample")
+            return 1'b0;
         end
-        if (!uid_tlb_record_by_uid.exists(uid) || uid_tlb_record_by_uid[uid] == null) begin
-            record = memblock_uid_tlb_record::type_id::create($sformatf("uid_tlb_record_%0d", uid));
-            uid_tlb_record_by_uid[uid] = record;
-        end else begin
-            record = uid_tlb_record_by_uid[uid];
-        end
-        if (record.record_valid) begin
+        record = null;
+        if (uid_tlb_record_by_uid.exists(uid)) record = uid_tlb_record_by_uid[uid];
+        if (record != null && record.record_valid) begin
             case (record.uid_tlb_wait_state)
                 memblock_uid_tlb_record::MEMBLOCK_UID_TLB_WAITING: begin
-                    if (record.csr_snapshot == null) begin
+                    if (record.csr_snapshot == null ||
+                        !uid_tlb_waiting_context_matches(
+                            uid, record, vpn, s2xlate,
+                            is_hypervisor_inst, csr_snapshot)) begin
                         `uvm_fatal("COMMON_DATA",
-                                   $sformatf("WAITING uid=%0d has null CSR snapshot", uid))
+                                   $sformatf("uid=%0d attempts to replace active L2TLB WAITING instance",
+                                             uid))
+                        return 1'b0;
                     end
-                    if (uid_tlb_waiting_context_matches(uid, record, vpn, s2xlate,
-                                                        is_hypervisor_inst,
-                                                        csr_snapshot)) begin
-                        check_waiting_uid_index_membership(
-                            uid, record, "update_uid_tlb_record_context");
-                        return;
+                    shape_key = make_uid_tlb_wait_shape_key(record.vpn,
+                                                             record.s2xlate);
+                    member_count = 0;
+                    if (uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+                        foreach (uid_waiting_by_vpn_s2xlate[shape_key][idx]) begin
+                            candidate_uid = uid_waiting_by_vpn_s2xlate[shape_key][idx];
+                            if (!uid_tlb_record_by_uid.exists(candidate_uid) ||
+                                uid_tlb_record_by_uid[candidate_uid] == null ||
+                                !uid_tlb_record_by_uid[candidate_uid].record_valid ||
+                                !uid_tlb_record_by_uid[candidate_uid].is_waiting()) begin
+                                `uvm_fatal("COMMON_DATA",
+                                           "stale WAITING index during issue planning")
+                                return 1'b0;
+                            end
+                            candidate_record = uid_tlb_record_by_uid[candidate_uid];
+                            if (make_uid_tlb_wait_shape_key(candidate_record.vpn,
+                                                           candidate_record.s2xlate) !=
+                                shape_key) begin
+                                `uvm_fatal("COMMON_DATA",
+                                           "WAITING index shape mismatch during issue planning")
+                                return 1'b0;
+                            end
+                            if (candidate_uid == uid) member_count++;
+                        end
                     end
-                    `uvm_fatal("COMMON_DATA",
-                               $sformatf("uid=%0d attempts to replace an active L2TLB WAITING instance old_vpn=0x%0h old_asid=0x%0h old_vmid=0x%0h old_s2xlate=%0d old_csr_seq=%0d new_vpn=0x%0h new_s2xlate=%0d new_csr_seq=%0d",
-                                         uid,
-                                         record.lookup_key.vpn,
-                                         record.lookup_key.asid,
-                                         record.lookup_key.vmid,
-                                         record.lookup_key.s2xlate,
-                                         record.csr_snapshot.update_seq,
-                                         vpn,
-                                         s2xlate,
-                                         csr_snapshot.update_seq))
+                    if (member_count != 1) begin
+                        `uvm_fatal("COMMON_DATA",
+                                   $sformatf("expected one WAITING index member uid=%0d got=%0d",
+                                             uid, member_count))
+                        return 1'b0;
+                    end
+                    planned_record = record;
+                    return 1'b1;
                 end
                 memblock_uid_tlb_record::MEMBLOCK_UID_TLB_COMPLETED: begin
                     if (!record.pte_valid) begin
                         `uvm_fatal("COMMON_DATA",
                                    $sformatf("COMPLETED uid=%0d has pte_valid=0", uid))
+                        return 1'b0;
                     end
-                    // A real reissue starts a fresh WAITING epoch below.
-                    // init_context() resets only the new-attempt context and
-                    // derived fields; record.payload remains historical data.
                 end
                 memblock_uid_tlb_record::MEMBLOCK_UID_TLB_CANCELED: begin
                     if (record.pte_valid) begin
                         `uvm_fatal("COMMON_DATA",
                                    $sformatf("CANCELED uid=%0d has pte_valid=1", uid))
+                        return 1'b0;
                     end
                 end
                 default: begin
                     `uvm_fatal("COMMON_DATA",
-                               $sformatf("uid=%0d has invalid L2TLB wait state=%0d",
+                               $sformatf("uid=%0d invalid L2TLB wait state=%0d",
                                          uid, record.uid_tlb_wait_state))
+                    return 1'b0;
                 end
             endcase
         end
-        record.init_context(uid, vpn, s2xlate, is_hypervisor_inst, csr_snapshot,
-                            current_sample);
-        add_waiting_uid_to_index(uid, record);
-        void'(capture_uid_issue_hit_snapshot(record));
+        if (record != null && record.uid_tlb_wait_epoch == '1) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("uid=%0d L2TLB wait epoch overflow", uid))
+            return 1'b0;
+        end
+        shape_key = make_uid_tlb_wait_shape_key(vpn, s2xlate);
+        member_count = 0;
+        if (uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+            foreach (uid_waiting_by_vpn_s2xlate[shape_key][idx]) begin
+                candidate_uid = uid_waiting_by_vpn_s2xlate[shape_key][idx];
+                if (!uid_tlb_record_by_uid.exists(candidate_uid) ||
+                    uid_tlb_record_by_uid[candidate_uid] == null ||
+                    !uid_tlb_record_by_uid[candidate_uid].record_valid ||
+                    !uid_tlb_record_by_uid[candidate_uid].is_waiting()) begin
+                    `uvm_fatal("COMMON_DATA",
+                               "stale WAITING index during context planning")
+                    return 1'b0;
+                end
+                candidate_record = uid_tlb_record_by_uid[candidate_uid];
+                if (make_uid_tlb_wait_shape_key(candidate_record.vpn,
+                                                candidate_record.s2xlate) !=
+                    shape_key) begin
+                    `uvm_fatal("COMMON_DATA",
+                               "WAITING index shape mismatch during context planning")
+                    return 1'b0;
+                end
+                if (candidate_uid == uid) member_count++;
+            end
+            if (member_count != 0 ||
+                uid_waiting_by_vpn_s2xlate[shape_key].size() >=
+                    MEMBLOCK_ROB_SIZE) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("cannot add WAITING index uid=%0d members=%0d size=%0d",
+                                     uid, member_count,
+                                     uid_waiting_by_vpn_s2xlate[shape_key].size()))
+                return 1'b0;
+            end
+        end
+        planned_record = memblock_uid_tlb_record::type_id::create(
+            $sformatf("planned_uid_tlb_record_%0d", uid));
+        if (planned_record == null) begin
+            `uvm_fatal("COMMON_DATA", "failed to allocate planned UID TLB record")
+            return 1'b0;
+        end
+        if (record != null) planned_record.uid_tlb_wait_epoch =
+            record.uid_tlb_wait_epoch;
+        planned_record.init_context(uid, vpn, s2xlate, is_hypervisor_inst,
+                                    csr_snapshot, current_sample);
+        if (!capture_uid_issue_hit_snapshot(planned_record) &&
+            planned_record.issue_hit_snapshot_valid) begin
+            `uvm_fatal("COMMON_DATA", "invalid planned issue-hit snapshot state")
+            return 1'b0;
+        end
+        record_needs_commit = 1'b1;
+        return 1'b1;
+    endfunction:plan_uid_tlb_record_context
+
+    function void commit_uid_tlb_record_context_prechecked(
+        input memblock_uid_t uid,
+        input memblock_uid_tlb_record planned_record);
+        memblock_uid_tlb_record record;
+        memblock_uid_tlb_wait_shape_key_t shape_key;
+
+        if (!uid_tlb_record_by_uid.exists(uid) ||
+            uid_tlb_record_by_uid[uid] == null) begin
+            record = planned_record;
+            uid_tlb_record_by_uid[uid] = record;
+        end else begin
+            record = uid_tlb_record_by_uid[uid];
+            record.commit_context_prechecked(planned_record);
+        end
+        shape_key = make_uid_tlb_wait_shape_key(record.vpn, record.s2xlate);
+        uid_waiting_by_vpn_s2xlate[shape_key].push_back(uid);
+    endfunction:commit_uid_tlb_record_context_prechecked
+
+    function bit update_uid_tlb_record_context(input memblock_uid_t uid,
+                                               input bit [51:0] vpn,
+                                               input bit [1:0] s2xlate,
+                                               input bit is_hypervisor_inst,
+                                               input mmu_csr_runtime_state csr_snapshot);
+        memblock_uid_tlb_record planned_record;
+        bit record_needs_commit;
+
+        if (!plan_uid_tlb_record_context(uid, vpn, s2xlate,
+                                         is_hypervisor_inst, csr_snapshot,
+                                         planned_record,
+                                         record_needs_commit)) begin
+            return 1'b0;
+        end
+        if (record_needs_commit) begin
+            commit_uid_tlb_record_context_prechecked(uid, planned_record);
+        end
+        return 1'b1;
     endfunction:update_uid_tlb_record_context
 
     // 抽象职责：回放严格早于 request-fire 的 CSR write，使该 request 使用与
@@ -8662,6 +8985,23 @@ class common_data_transaction extends uvm_object;
         return 1'b1;
     endfunction:commit_pma_pmp_csr_replay
 
+    function bit apply_pma_pmp_csr_writes_before_request(
+        input longint unsigned request_sample_seq
+    );
+        memblock_pma_pmp_replay_ticket ticket;
+        if (request_sample_seq == 0 ||
+            !prepare_pma_pmp_csr_replay(request_sample_seq, ticket)) begin
+            `uvm_fatal("COMMON_DATA", "PMA/PMP request-bound replay prepare failed")
+            return 1'b0;
+        end
+        if (ticket.events.size() == 0) return 1'b1;
+        if (!commit_pma_pmp_csr_replay(ticket)) begin
+            `uvm_fatal("COMMON_DATA", "PMA/PMP request-bound replay commit failed")
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:apply_pma_pmp_csr_writes_before_request
+
     // 抽象职责：向 readonly façade 提供 UID 在真实 request-fire 时冻结的
     // PMA/PMP context。该 helper 不创建 singleton、也不补写缺失 context。
     function bit read_pma_pmp_uid_context(
@@ -8723,12 +9063,13 @@ class common_data_transaction extends uvm_object;
     // Abstract responsibility: use the bounded shape index after a real
     // DTLB->L2TLB request fire.  It records only fire provenance and does not
     // create a token-to-UID ownership relation.
-    function int unsigned mark_waiting_uid_records_on_request_fire(
+    function bit mark_waiting_uid_records_on_request_fire(
         input memblock_tlb_lookup_key_t key,
-        input longint unsigned sample_seq);
-        int unsigned marked_count;
+        input longint unsigned sample_seq,
+        output int unsigned marked_count);
         int          idx;
         memblock_uid_t uid;
+        memblock_uid_t candidate_uids[$];
         memblock_uid_tlb_record record;
         memblock_uid_tlb_wait_shape_key_t shape_key;
         memblock_tlb_lookup_key_t request_key;
@@ -8736,12 +9077,22 @@ class common_data_transaction extends uvm_object;
         memblock_tlb_lookup_key_t candidate_key;
         memblock_sync_pkg::dispatch_raw_csr_t request_raw_csr;
         mmu_csr_runtime_state request_csr_snapshot;
+        pma_pmp_uid_context_plan_t context_plans[$];
+        pma_pmp_uid_context_plan_t context_plan;
+        longint unsigned reserved_access_seq;
 
-        check_l2tlb_uid_registration_open(
-            "mark_waiting_uid_records_on_request_fire");
+        marked_count = 0;
+        if (memblock_sync_pkg::l2tlb_release_admission_close_requested ||
+            memblock_sync_pkg::l2tlb_release_admission_closed ||
+            memblock_sync_pkg::l2tlb_release_closing) begin
+            `uvm_fatal("COMMON_DATA",
+                       "mark_waiting_uid_records_on_request_fire called after L2TLB release seal")
+            return 1'b0;
+        end
         if (sample_seq == 0) begin
             `uvm_fatal("COMMON_DATA",
                        "mark_waiting_uid_records_on_request_fire requires non-zero sample_seq")
+            return 1'b0;
         end
         if (sample_seq > memblock_sync_pkg::peek_current_dut_global_sample()) begin
             `uvm_fatal("COMMON_DATA",
@@ -8749,6 +9100,7 @@ class common_data_transaction extends uvm_object;
                                  sample_seq,
                                  memblock_sync_pkg::peek_current_dut_global_sample(),
                                  key.vpn, key.asid, key.vmid, key.s2xlate))
+            return 1'b0;
         end
 
         // Rebuild the exact C-2 request context rather than consulting the
@@ -8760,12 +9112,14 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA",
                        $sformatf("missing valid L2TLB request C-2 CSR for request-fire sample=%0d",
                                  sample_seq))
+            return 1'b0;
         end
         request_csr_snapshot = mmu_csr_runtime_state::type_id::create(
             $sformatf("uid_request_fire_csr_%0d", sample_seq));
         if (request_csr_snapshot == null) begin
             `uvm_fatal("COMMON_DATA",
                        "failed to allocate L2TLB request-fire C-2 CSR snapshot")
+            return 1'b0;
         end
         request_csr_snapshot.reset();
         request_csr_snapshot.update_from_raw_csr(request_raw_csr);
@@ -8777,12 +9131,13 @@ class common_data_transaction extends uvm_object;
                                  sample_seq, key.vpn, key.asid, key.vmid,
                                  key.s2xlate, request_key.asid,
                                  request_key.vmid))
+            return 1'b0;
         end
 
+        if (!apply_pma_pmp_csr_writes_before_request(sample_seq)) return 1'b0;
+
+        reserved_access_seq = pma_pmp_model.next_access_seq;
         shape_key = make_uid_tlb_wait_shape_key(key.vpn, key.s2xlate);
-        prune_uid_waiting_index_bucket(
-            shape_key, "mark_waiting_uid_records_on_request_fire");
-        marked_count = 0;
         if (uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
             for (idx = 0; idx < int'(uid_waiting_by_vpn_s2xlate[shape_key].size());
                  idx++) begin
@@ -8794,6 +9149,7 @@ class common_data_transaction extends uvm_object;
                     `uvm_fatal("COMMON_DATA",
                                $sformatf("L2TLB WAITING index changed during request-fire marking uid=%0d",
                                          uid))
+                    return 1'b0;
                 end
                 record = uid_tlb_record_by_uid[uid];
                 if (record.uid != uid || record.vpn != key.vpn ||
@@ -8801,11 +9157,13 @@ class common_data_transaction extends uvm_object;
                     `uvm_fatal("COMMON_DATA",
                                $sformatf("L2TLB WAITING index shape mismatch uid=%0d",
                                          uid))
+                    return 1'b0;
                 end
                 if (record.csr_snapshot == null) begin
                     `uvm_fatal("COMMON_DATA",
                                $sformatf("WAITING uid=%0d has null request CSR snapshot",
                                          uid))
+                    return 1'b0;
                 end
                 // The ROB-bounded logical-UID bucket is only a candidate
                 // filter. First
@@ -8819,27 +9177,35 @@ class common_data_transaction extends uvm_object;
                     continue;
                 end
                 if (record.uid_tlb_first_request_fire_sample_seq == 0) begin
-                    // One request fire may mark several waiting UIDs.  The
-                    // record remains independent of this request token.
-                    record.mark_request_fire(sample_seq);
-                    if (status_by_uid[uid] == null ||
-                        !pma_pmp_model.capture_uid_context(
-                            uid,
-                            status_by_uid[uid].dynamic_epoch,
+                    if (status_by_uid[uid] == null || pma_pmp_model == null ||
+                        !pma_pmp_model.plan_uid_context_capture_at_seq(
+                            uid, status_by_uid[uid].dynamic_epoch,
                             request_csr_snapshot.priv_dmode,
                             request_csr_snapshot.priv_debug,
-                            1'b0,
-                            1'b0,
-                            '0,
-                            request_csr_snapshot.update_seq,
-                            sample_seq)) begin
+                            1'b0, 1'b0, '0,
+                            request_csr_snapshot.update_seq, sample_seq,
+                            reserved_access_seq, context_plan)) begin
                         `uvm_fatal("COMMON_DATA",
-                                   $sformatf("failed to freeze PMA/PMP context uid=%0d sample=%0d",
+                                   $sformatf("cannot freeze PMA/PMP context uid=%0d sample=%0d",
                                              uid, sample_seq))
+                        return 1'b0;
                     end
-                    marked_count++;
+                    candidate_uids.push_back(uid);
+                    context_plans.push_back(context_plan);
+                    reserved_access_seq = context_plan.next_access_seq_after;
                 end
             end
+        end
+
+        // Mutation commit begins only after every candidate can freeze its
+        // PMA/PMP context. No fatal-capable validation remains below.
+        foreach (candidate_uids[candidate_idx]) begin
+            uid = candidate_uids[candidate_idx];
+            record = uid_tlb_record_by_uid[uid];
+            record.mark_request_fire(sample_seq);
+            pma_pmp_model.commit_uid_context_plan_prechecked(
+                context_plans[candidate_idx]);
+            marked_count++;
         end
 
         if (marked_count == 0) begin
@@ -8848,16 +9214,152 @@ class common_data_transaction extends uvm_object;
                                 key.vpn, key.asid, key.vmid, key.s2xlate, sample_seq),
                       UVM_LOW)
         end
-        return marked_count;
+        return 1'b1;
     endfunction:mark_waiting_uid_records_on_request_fire
 
     // Compatibility API for the existing responder call site.  key is frozen
     // from that request's C-2 CSR snapshot before this helper is invoked.
-    function int unsigned mark_uid_tlb_record_request_fire(
+    function bit mark_uid_tlb_record_request_fire(
         input memblock_tlb_lookup_key_t key,
-        input longint unsigned sample_seq);
-        return mark_waiting_uid_records_on_request_fire(key, sample_seq);
+        input longint unsigned sample_seq,
+        output int unsigned marked_count);
+        return mark_waiting_uid_records_on_request_fire(
+            key, sample_seq, marked_count);
     endfunction:mark_uid_tlb_record_request_fire
+
+    function bit resolve_and_plan_pbmt_rf_request_fire(
+        input memblock_tlb_lookup_key_t key,
+        input longint unsigned sample_seq,
+        input memblock_pbmt_rf_audit_slot_t prepared_slot,
+        ref memblock_pbmt_rf_audit_slot_t audit[2],
+        output memblock_uid_t resolved_uid,
+        output mmu_csr_runtime_state request_csr_snapshot,
+        output memblock_uid_tlb_record resolved_record,
+        output pma_pmp_uid_context_plan_t context_plan);
+        memblock_uid_t candidates[$];
+        memblock_uid_t uid;
+        memblock_uid_t expected_uid;
+        memblock_uid_tlb_record record;
+        memblock_uid_tlb_wait_shape_key_t shape_key;
+        memblock_tlb_lookup_key_t request_key;
+        memblock_tlb_lookup_key_t candidate_key;
+        memblock_sync_pkg::dispatch_raw_csr_t request_raw_csr;
+        status_transaction status;
+        main_control_transaction main_tr;
+        int slot_index;
+
+        resolved_uid = '0;
+        request_csr_snapshot = null;
+        resolved_record = null;
+        context_plan = '{default:'0};
+        if (!memblock_sync_pkg::is_pbmt_rf_scenario_active() ||
+            sample_seq == 0 || !prepared_slot.valid) begin
+            return 1'b0;
+        end
+        if (!memblock_sync_pkg::get_l2tlb_request_csr_history(
+                sample_seq, request_raw_csr) || !request_raw_csr.valid) begin
+            return 1'b0;
+        end
+        request_csr_snapshot = mmu_csr_runtime_state::type_id::create(
+            $sformatf("pbmt_rf_request_csr_%0d", sample_seq));
+        if (request_csr_snapshot == null) begin
+            return 1'b0;
+        end
+        request_csr_snapshot.reset();
+        request_csr_snapshot.update_from_raw_csr(request_raw_csr);
+        request_key = request_csr_snapshot.make_lookup_key({12'b0, key.vpn},
+                                                            key.s2xlate);
+        if (request_key != key) begin
+            return 1'b0;
+        end
+
+        shape_key = make_uid_tlb_wait_shape_key(key.vpn, key.s2xlate);
+        if (uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+            foreach (uid_waiting_by_vpn_s2xlate[shape_key][idx]) begin
+                uid = uid_waiting_by_vpn_s2xlate[shape_key][idx];
+                if (!uid_tlb_record_by_uid.exists(uid) ||
+                    uid_tlb_record_by_uid[uid] == null) begin
+                    continue;
+                end
+                record = uid_tlb_record_by_uid[uid];
+                if (!record.record_valid || !record.is_waiting() ||
+                    record.uid != uid || record.vpn != key.vpn ||
+                    record.s2xlate != key.s2xlate ||
+                    record.uid_tlb_first_request_fire_sample_seq != 0 ||
+                    record.csr_snapshot == null) begin
+                    continue;
+                end
+                candidate_key = record.csr_snapshot.make_lookup_key(
+                    record.vpn, record.s2xlate);
+                if (candidate_key == key) begin
+                    candidates.push_back(uid);
+                end
+            end
+        end
+        if (candidates.size() != 1) begin
+            `uvm_fatal("PBMT_RF_BIND",
+                       $sformatf("strict request-fire expected one UID key vpn=0x%0h sample=%0d candidates=%0d",
+                                 key.vpn, sample_seq, candidates.size()))
+            return 1'b0;
+        end
+
+        resolved_uid = candidates[0];
+        expected_uid = prepared_slot.slot == PBMT_RF_SLOT_B ? 0 : 1;
+        slot_index = int'(prepared_slot.slot);
+        record = uid_tlb_record_by_uid[resolved_uid];
+        status = get_status(resolved_uid);
+        main_tr = get_main_transaction(resolved_uid);
+        if (resolved_uid != expected_uid || prepared_slot.uid != expected_uid ||
+            prepared_slot.request_key != key || audit[slot_index].valid ||
+            !status.active || status.terminal_done ||
+            !pma_pmp_model.can_capture_uid_context(resolved_uid,
+                                                    status.dynamic_epoch)) begin
+            return 1'b0;
+        end
+        if ((prepared_slot.slot == PBMT_RF_SLOT_B &&
+             (main_tr.op_class != MEMBLOCK_OP_CLASS_STORE ||
+              memblock_sync_pkg::get_pbmt_rf_phase() != memblock_sync_pkg::PBMT_RF_B_RUNTIME_READY ||
+              sample_seq < memblock_sync_pkg::get_pbmt_rf_b_ready_sample())) ||
+            (prepared_slot.slot == PBMT_RF_SLOT_C &&
+             (main_tr.op_class != MEMBLOCK_OP_CLASS_INT_LOAD ||
+              memblock_sync_pkg::get_pbmt_rf_phase() != memblock_sync_pkg::PBMT_RF_C_C2_READY_ACK ||
+              sample_seq <= memblock_sync_pkg::get_pbmt_rf_c_ready_sample()))) begin
+            return 1'b0;
+        end
+        for (int idx = 0; idx < 2; idx++) begin
+            if (audit[idx].valid &&
+                (audit[idx].uid == resolved_uid ||
+                 audit[idx].request_token == prepared_slot.request_token)) begin
+                return 1'b0;
+            end
+        end
+
+        if (record != uid_tlb_record_by_uid[resolved_uid] ||
+            !record.is_waiting() ||
+            record.uid_tlb_first_request_fire_sample_seq != 0 ||
+            !pma_pmp_model.plan_uid_context_capture(
+                resolved_uid, status.dynamic_epoch,
+                request_csr_snapshot.priv_dmode,
+                request_csr_snapshot.priv_debug,
+                1'b0, 1'b0, '0,
+                request_csr_snapshot.update_seq, sample_seq,
+                context_plan)) begin
+            return 1'b0;
+        end
+        resolved_record = record;
+        return 1'b1;
+    endfunction:resolve_and_plan_pbmt_rf_request_fire
+
+    function void commit_pbmt_rf_request_fire_prechecked(
+        input memblock_uid_tlb_record resolved_record,
+        input longint unsigned sample_seq,
+        input pma_pmp_uid_context_plan_t context_plan,
+        input memblock_pbmt_rf_audit_slot_t prepared_slot,
+        ref memblock_pbmt_rf_audit_slot_t audit[2]);
+        resolved_record.commit_request_fire_prechecked(sample_seq);
+        pma_pmp_model.commit_uid_context_plan_prechecked(context_plan);
+        audit[int'(prepared_slot.slot)] = prepared_slot;
+    endfunction:commit_pbmt_rf_request_fire_prechecked
 
     function int unsigned cancel_waiting_uid_tlb_record_for_uid(input memblock_uid_t uid,
                                                                 input string reason = "");

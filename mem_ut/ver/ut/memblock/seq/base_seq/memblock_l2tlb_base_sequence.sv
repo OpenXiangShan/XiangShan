@@ -136,6 +136,10 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     longint unsigned flush_canceled_count;
     longint unsigned reset_canceled_count;
     longint unsigned next_request_token;
+    memblock_pbmt_rf_audit_slot_t pbmt_rf_audit[2];
+    bit                           pbmt_rf_audit_final_read;
+    int unsigned                  pbmt_rf_readiness_wait_samples;
+    memblock_sync_pkg::memblock_pbmt_rf_phase_e pbmt_rf_readiness_wait_phase;
 
     // 中文注释：本地sample/flush/hold状态只由当前lifecycle owner维护。
     // acceptance_opened_since_reset置位后，新flush event必须来自当前sample。
@@ -208,9 +212,40 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     extern function void drain_csr_runtime_events();
     extern function bit request_fire();
     extern function int unsigned outstanding_count();
-    extern function void check_l2tlb_lifecycle_accounting(input string audit_context);
+    extern function bit check_l2tlb_lifecycle_accounting(input string audit_context);
+    extern function void reset_pbmt_rf_audit_ledger();
+    extern function bit get_pbmt_rf_audit_slot(
+        input memblock_pbmt_rf_slot_kind_e slot,
+        output memblock_pbmt_rf_audit_slot_t slot_copy);
+    extern function void cleanup_pbmt_rf_audit_ledger_after_final_read();
+    extern function void service_pbmt_rf_readiness(
+        input longint unsigned current_sample_seq,
+        input memblock_sync_pkg::dispatch_raw_csr_t request_csr_raw);
+    extern function void mark_pbmt_rf_audit_canceled(
+        input longint unsigned request_token,
+        input string reason);
+    extern function bit capture_pbmt_rf_complete(
+        input memblock_l2tlb_pending_req pending,
+        input mmu_csr_runtime_state actual_response_csr_snapshot);
+    extern function longint unsigned get_l2tlb_accepted_count();
+    extern function longint unsigned get_l2tlb_completed_count();
+    extern function longint unsigned get_l2tlb_canceled_count();
     extern function void cancel_outstanding_by_reset();
     extern function memblock_l2tlb_pending_req capture_fired_request();
+    extern function bit precheck_pbmt_rf_request_fire_commit(
+        input memblock_l2tlb_pending_req pending,
+        input memblock_uid_tlb_record resolved_record,
+        input pma_pmp_uid_context_plan_t context_plan,
+        input memblock_pbmt_rf_audit_slot_t prepared_slot,
+        input memblock_sync_pkg::memblock_pbmt_rf_phase_e expected_phase,
+        input memblock_sync_pkg::memblock_pbmt_rf_phase_e accepted_phase);
+    extern function void commit_pbmt_rf_request_fire_prechecked(
+        input memblock_l2tlb_pending_req pending,
+        input memblock_uid_tlb_record resolved_record,
+        input pma_pmp_uid_context_plan_t context_plan,
+        input memblock_pbmt_rf_audit_slot_t prepared_slot,
+        input memblock_sync_pkg::memblock_pbmt_rf_phase_e expected_phase,
+        input memblock_sync_pkg::memblock_pbmt_rf_phase_e accepted_phase);
     extern function int unsigned handle_l2tlb_flush_event(
         input memblock_sync_pkg::memblock_l2tlb_event_record_t event_record);
     extern function int unsigned apply_due_l2tlb_flush_barriers(
@@ -241,6 +276,9 @@ endclass:memblock_l2tlb_base_sequence
 
 function memblock_l2tlb_base_sequence::new(string name = "memblock_l2tlb_base_sequence");
     super.new(name);
+    reset_pbmt_rf_audit_ledger();
+    pbmt_rf_readiness_wait_samples = 0;
+    pbmt_rf_readiness_wait_phase = memblock_sync_pkg::PBMT_RF_RESET;
     enable = 1'b0;
     max_outstanding = 8;
     resp_reorder_en = 1'b0;
@@ -320,7 +358,7 @@ task memblock_l2tlb_base_sequence::body();
               UVM_LOW)
 
     drive_l2tlb_loop();
-    check_l2tlb_lifecycle_accounting("owner_release");
+    void'(check_l2tlb_lifecycle_accounting("owner_release"));
     if (memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("L2TLB sequence exited with owner still claimed: %s",
@@ -594,6 +632,7 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
         send_l2tlb_item(cycle_tr);
         return;
     end
+    service_pbmt_rf_readiness(sample_seq, request_csr_raw);
 
     // Establish the owner-start baseline before interpreting old history.
     // Startup alignment must not silently inherit transport or semantic work
@@ -692,6 +731,7 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
             `uvm_fatal(get_type_name(),
                        $sformatf("L2TLB response would fire on filter due sample=%0d",
                                  sample_seq))
+            return;
         end
         complete_driving_response();
         has_progress = 1'b1;
@@ -701,6 +741,7 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
             `uvm_fatal(get_type_name(),
                        $sformatf("L2TLB response remains driving at filter due sample=%0d",
                                  sample_seq))
+            return;
         end
         // Keep the selected response visible until the frozen transport sample
         // proves that the DUT observed its valid pulse.
@@ -709,6 +750,7 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
     else if (!driving_valid && sampled_resp_valid) begin
         `uvm_fatal(get_type_name(),
                    "L2TLB response valid observed without a driving response token")
+        return;
     end
 
     // C0 request fire is real DUT admission and must always get a token,
@@ -1054,7 +1096,7 @@ function bit memblock_l2tlb_base_sequence::get_csr_snapshot_for_sample(
     return 1'b1;
 endfunction:get_csr_snapshot_for_sample
 
-function void memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting(input string audit_context);
+function bit memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting(input string audit_context);
     longint unsigned accounted_count;
 
     accounted_count = completed_count + flush_canceled_count +
@@ -1065,6 +1107,7 @@ function void memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting(inp
                              audit_context, accepted_count, completed_count,
                              flush_canceled_count, reset_canceled_count,
                              pending_q.size(), driving_valid, accounted_count))
+        return 1'b0;
     end
     if (audit_context == "owner_release" &&
         (barrier_q.size() != 0 ||
@@ -1073,13 +1116,253 @@ function void memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting(inp
                    $sformatf("L2TLB lifecycle release is not quiescent barrier_count=%0d waiting_uid=%0d",
                              barrier_q.size(),
                              (data != null) ? data.has_waiting_uid_tlb_record() : 1'b0))
+        return 1'b0;
     end
+    return 1'b1;
 endfunction:check_l2tlb_lifecycle_accounting
+
+function void memblock_l2tlb_base_sequence::reset_pbmt_rf_audit_ledger();
+    for (int idx = 0; idx < 2; idx++) begin
+        pbmt_rf_audit[idx] = '{default:'0};
+        pbmt_rf_audit[idx].slot = memblock_pbmt_rf_slot_kind_e'(idx);
+        pbmt_rf_audit[idx].cancel_reason = "";
+    end
+    pbmt_rf_audit_final_read = 1'b0;
+endfunction:reset_pbmt_rf_audit_ledger
+
+function bit memblock_l2tlb_base_sequence::get_pbmt_rf_audit_slot(
+    input memblock_pbmt_rf_slot_kind_e slot,
+    output memblock_pbmt_rf_audit_slot_t slot_copy);
+    slot_copy = pbmt_rf_audit[int'(slot)];
+    pbmt_rf_audit_final_read = 1'b1;
+    return slot_copy.valid;
+endfunction:get_pbmt_rf_audit_slot
+
+function void memblock_l2tlb_base_sequence::cleanup_pbmt_rf_audit_ledger_after_final_read();
+    if (memblock_sync_pkg::get_pbmt_rf_phase() != memblock_sync_pkg::PBMT_RF_AUDIT_PASSED ||
+        !pbmt_rf_audit_final_read) begin
+        `uvm_fatal(get_type_name(), "PBMT RF ledger cleanup before successful final read")
+        return;
+    end
+    reset_pbmt_rf_audit_ledger();
+endfunction:cleanup_pbmt_rf_audit_ledger_after_final_read
+
+function longint unsigned memblock_l2tlb_base_sequence::get_l2tlb_accepted_count();
+    return accepted_count;
+endfunction:get_l2tlb_accepted_count
+
+function longint unsigned memblock_l2tlb_base_sequence::get_l2tlb_completed_count();
+    return completed_count;
+endfunction:get_l2tlb_completed_count
+
+function longint unsigned memblock_l2tlb_base_sequence::get_l2tlb_canceled_count();
+    return flush_canceled_count + reset_canceled_count;
+endfunction:get_l2tlb_canceled_count
+
+function void memblock_l2tlb_base_sequence::service_pbmt_rf_readiness(
+    input longint unsigned current_sample_seq,
+    input memblock_sync_pkg::dispatch_raw_csr_t request_csr_raw);
+    longint unsigned pmpaddr0_sample;
+    longint unsigned pmpcfg0_sample;
+    longint unsigned applied_sample;
+    int unsigned latest_runtime_csr_seq;
+    bit bootstrap_matches;
+    bit pmp_observations_ready;
+    memblock_sync_pkg::dispatch_raw_csr_t latest_runtime_csr;
+    memblock_sync_pkg::memblock_pbmt_rf_phase_e phase;
+
+    if (!memblock_sync_pkg::is_pbmt_rf_scenario_active()) begin
+        return;
+    end
+    phase = memblock_sync_pkg::get_pbmt_rf_phase();
+    if (phase != pbmt_rf_readiness_wait_phase) begin
+        pbmt_rf_readiness_wait_phase = phase;
+        pbmt_rf_readiness_wait_samples = 0;
+        `uvm_info("PBMT_RF_READY",
+                  $sformatf("enter readiness phase=%0d sample=%0d history_published=%0d",
+                            phase, current_sample_seq,
+                            memblock_sync_pkg::csr_history_published_seq),
+                  UVM_LOW)
+    end
+    if (phase == memblock_sync_pkg::PBMT_RF_ANCHOR_PUBLISHED) begin
+        if (!data.service_csr_pmp_pma_write_observations()) return;
+        applied_sample = data.get_pma_pmp_last_applied_csr_sample();
+        pmp_observations_ready =
+            memblock_sync_pkg::get_pbmt_rf_pmp_write_observations(
+                pmpaddr0_sample, pmpcfg0_sample);
+        bootstrap_matches = data.pbmt_rf_bootstrap_matches();
+        void'(memblock_sync_pkg::get_latest_runtime_csr_snapshot(
+            latest_runtime_csr, latest_runtime_csr_seq));
+        if (pmp_observations_ready &&
+            applied_sample >= pmpcfg0_sample &&
+            bootstrap_matches &&
+            request_csr_raw.valid && request_csr_raw.satp_mode == 4'd8 &&
+            request_csr_raw.priv_dmode == 2'd0 && !request_csr_raw.priv_virt &&
+            !request_csr_raw.m_pbmt_en && !request_csr_raw.h_pbmt_en) begin
+            if (!memblock_sync_pkg::publish_pbmt_rf_b_runtime_ready(
+                    current_sample_seq, this)) return;
+            pbmt_rf_readiness_wait_samples = 0;
+        end else begin
+            pbmt_rf_readiness_wait_samples++;
+            if (pbmt_rf_readiness_wait_samples == 1 ||
+                (pbmt_rf_readiness_wait_samples % 1000) == 0) begin
+                `uvm_info("PBMT_RF_READY",
+                          $sformatf("B wait=%0d sample=%0d observed=%0d addr_sample=%0d cfg_sample=%0d applied=%0d bootstrap=%0d request(valid/mode/dmode/virt/m/h)=%0d/%0h/%0d/%0d/%0d/%0d runtime_seq=%0d history_published=%0d",
+                                    pbmt_rf_readiness_wait_samples,
+                                    current_sample_seq,
+                                    pmp_observations_ready,
+                                    pmpaddr0_sample, pmpcfg0_sample,
+                                    applied_sample, bootstrap_matches,
+                                    request_csr_raw.valid,
+                                    request_csr_raw.satp_mode,
+                                    request_csr_raw.priv_dmode,
+                                    request_csr_raw.priv_virt,
+                                    request_csr_raw.m_pbmt_en,
+                                    request_csr_raw.h_pbmt_en,
+                                    latest_runtime_csr_seq,
+                                    memblock_sync_pkg::csr_history_published_seq),
+                          UVM_LOW)
+            end
+            if (pbmt_rf_readiness_wait_samples >
+                seq_csr_common::get_active_seq_no_progress_warn_cycles()) begin
+                `uvm_fatal("PBMT_RF_READY", "B_RUNTIME_READY watchdog expired")
+                return;
+            end
+        end
+    end
+    else if (phase == memblock_sync_pkg::PBMT_RF_C_ENABLE_MONITORED &&
+             request_csr_raw.valid && request_csr_raw.satp_mode == 4'd8 &&
+             request_csr_raw.priv_dmode == 2'd0 && !request_csr_raw.priv_virt &&
+             request_csr_raw.m_pbmt_en && !request_csr_raw.h_pbmt_en) begin
+        if (!memblock_sync_pkg::publish_pbmt_rf_c_c2_ready(
+                current_sample_seq, this)) return;
+        pbmt_rf_readiness_wait_samples = 0;
+    end
+    else if (phase == memblock_sync_pkg::PBMT_RF_C_ENABLE_MONITORED) begin
+        pbmt_rf_readiness_wait_samples++;
+        if (pbmt_rf_readiness_wait_samples == 1 ||
+            (pbmt_rf_readiness_wait_samples % 1000) == 0) begin
+            `uvm_info("PBMT_RF_READY",
+                      $sformatf("C wait=%0d sample=%0d request(valid/mode/dmode/virt/m/h)=%0d/%0h/%0d/%0d/%0d/%0d history_published=%0d",
+                                pbmt_rf_readiness_wait_samples,
+                                current_sample_seq,
+                                request_csr_raw.valid,
+                                request_csr_raw.satp_mode,
+                                request_csr_raw.priv_dmode,
+                                request_csr_raw.priv_virt,
+                                request_csr_raw.m_pbmt_en,
+                                request_csr_raw.h_pbmt_en,
+                                memblock_sync_pkg::csr_history_published_seq),
+                      UVM_LOW)
+        end
+        if (pbmt_rf_readiness_wait_samples >
+            seq_csr_common::get_active_seq_no_progress_warn_cycles()) begin
+            `uvm_fatal("PBMT_RF_READY", "C_C2_READY_ACK watchdog expired")
+            return;
+        end
+    end
+endfunction:service_pbmt_rf_readiness
+
+function void memblock_l2tlb_base_sequence::mark_pbmt_rf_audit_canceled(
+    input longint unsigned request_token,
+    input string reason);
+    if (!memblock_sync_pkg::is_pbmt_rf_scenario_active()) begin
+        return;
+    end
+    for (int idx = 0; idx < 2; idx++) begin
+        if (pbmt_rf_audit[idx].valid &&
+            pbmt_rf_audit[idx].request_token == request_token) begin
+            if (pbmt_rf_audit[idx].complete_valid || pbmt_rf_audit[idx].canceled) begin
+                `uvm_fatal(get_type_name(), "PBMT RF token canceled after terminal ledger state")
+                return;
+            end
+            pbmt_rf_audit[idx].canceled = 1'b1;
+            pbmt_rf_audit[idx].cancel_reason = reason;
+            return;
+        end
+    end
+    `uvm_fatal(get_type_name(),
+               $sformatf("PBMT RF cancellation has no ledger token=%0d reason=%s",
+                         request_token, reason))
+endfunction:mark_pbmt_rf_audit_canceled
+
+function bit memblock_l2tlb_base_sequence::capture_pbmt_rf_complete(
+    input memblock_l2tlb_pending_req pending,
+    input mmu_csr_runtime_state actual_response_csr_snapshot);
+    int match_index;
+    int match_count;
+    memblock_sync_pkg::memblock_pbmt_rf_phase_e expected_phase;
+    memblock_sync_pkg::memblock_pbmt_rf_phase_e completed_phase;
+
+    if (!memblock_sync_pkg::is_pbmt_rf_scenario_active()) begin
+        return 1'b1;
+    end
+    if (pending == null || actual_response_csr_snapshot == null) begin
+        return 1'b0;
+    end
+    match_index = -1;
+    match_count = 0;
+    for (int idx = 0; idx < 2; idx++) begin
+        if (pbmt_rf_audit[idx].valid &&
+            pbmt_rf_audit[idx].request_token == pending.request_token) begin
+            match_index = idx;
+            match_count++;
+        end
+    end
+    if (match_count != 1 || pbmt_rf_audit[match_index].canceled ||
+        pbmt_rf_audit[match_index].complete_valid ||
+        pending.response_visible_sample_seq != sample_seq) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("PBMT RF completion ledger mismatch token=%0d matches=%0d sample=%0d visible=%0d",
+                             pending.request_token, match_count, sample_seq,
+                             pending.response_visible_sample_seq))
+        return 1'b0;
+    end
+    expected_phase = match_index == int'(PBMT_RF_SLOT_B) ?
+                         memblock_sync_pkg::PBMT_RF_B_ACCEPTED :
+                         memblock_sync_pkg::PBMT_RF_C_ACCEPTED;
+    completed_phase = match_index == int'(PBMT_RF_SLOT_B) ?
+                          memblock_sync_pkg::PBMT_RF_B_COMPLETED :
+                          memblock_sync_pkg::PBMT_RF_C_COMPLETED;
+    if (!memblock_sync_pkg::can_publish_pbmt_rf_phase(
+            expected_phase, completed_phase, this)) begin
+        `uvm_fatal(get_type_name(), "PBMT RF completion phase/owner precheck failed")
+        return 1'b0;
+    end
+    // Completion commit is one non-failing mutation block after all checks.
+    pbmt_rf_audit[match_index].complete_valid = 1'b1;
+    pbmt_rf_audit[match_index].complete_dut_sample_seq = sample_seq;
+    pbmt_rf_audit[match_index].complete_csr_history_sample_seq = sample_seq;
+    pbmt_rf_audit[match_index].complete_m_pbmt_en = actual_response_csr_snapshot.m_pbmt_en;
+    pbmt_rf_audit[match_index].complete_h_pbmt_en = actual_response_csr_snapshot.h_pbmt_en;
+    pbmt_rf_audit[match_index].raw_s1_pf = pending.entry_snapshot.fault_raw_s1_pf;
+    pbmt_rf_audit[match_index].raw_s1_af = pending.entry_snapshot.fault_raw_s1_af;
+    pbmt_rf_audit[match_index].raw_s2_gpf = pending.entry_snapshot.fault_raw_s2_gpf;
+    pbmt_rf_audit[match_index].raw_s2_gaf = pending.entry_snapshot.fault_raw_s2_gaf;
+    pbmt_rf_audit[match_index].effective_s1_pf = pending.entry_snapshot.fault_effective_s1_pf;
+    pbmt_rf_audit[match_index].effective_s1_af = pending.entry_snapshot.fault_effective_s1_af;
+    pbmt_rf_audit[match_index].effective_s2_gpf = pending.entry_snapshot.fault_effective_s2_gpf;
+    pbmt_rf_audit[match_index].effective_s2_gaf = pending.entry_snapshot.fault_effective_s2_gaf;
+    pbmt_rf_audit[match_index].pma_af = pending.entry_snapshot.pmaAF;
+    pbmt_rf_audit[match_index].forced_s1_pf = pending.response_pbmt_forced_s1_pf;
+    pbmt_rf_audit[match_index].forced_s2_gpf = pending.response_pbmt_forced_s2_gpf;
+    memblock_sync_pkg::commit_pbmt_rf_phase_prechecked(
+        expected_phase, completed_phase, this);
+    return 1'b1;
+endfunction:capture_pbmt_rf_complete
 
 function void memblock_l2tlb_base_sequence::cancel_outstanding_by_reset();
     int unsigned canceled_count;
 
     canceled_count = outstanding_count();
+    foreach (pending_q[idx]) begin
+        mark_pbmt_rf_audit_canceled(pending_q[idx].request_token,
+                                    "l2tlb_runtime_reset");
+    end
+    if (driving_valid && driving_req != null) begin
+        mark_pbmt_rf_audit_canceled(driving_req.request_token,
+                                    "l2tlb_runtime_reset");
+    end
     reset_canceled_count += canceled_count;
     void'(data.cancel_waiting_uid_tlb_records("l2tlb_runtime_reset"));
     data.cancel_all_later_split_tlb_records("l2tlb_runtime_reset");
@@ -1094,93 +1377,179 @@ function void memblock_l2tlb_base_sequence::cancel_outstanding_by_reset();
                             canceled_count, sample_seq),
                   UVM_LOW)
     end
-    check_l2tlb_lifecycle_accounting("reset_cancel");
+    void'(check_l2tlb_lifecycle_accounting("reset_cancel"));
 endfunction:cancel_outstanding_by_reset
+
+// Abstract responsibility: validate the complete PBMT request-fire commit set
+// without changing UID, PMA/PMP, ledger, queue, token, counters, or phase.  The
+// caller may safely catch the fatal and compare an exact before/after snapshot.
+function bit memblock_l2tlb_base_sequence::precheck_pbmt_rf_request_fire_commit(
+    input memblock_l2tlb_pending_req pending,
+    input memblock_uid_tlb_record resolved_record,
+    input pma_pmp_uid_context_plan_t context_plan,
+    input memblock_pbmt_rf_audit_slot_t prepared_slot,
+    input memblock_sync_pkg::memblock_pbmt_rf_phase_e expected_phase,
+    input memblock_sync_pkg::memblock_pbmt_rf_phase_e accepted_phase);
+    int slot_index;
+
+    slot_index = int'(prepared_slot.slot);
+    if (pending == null || resolved_record == null || !context_plan.valid ||
+        !prepared_slot.valid || slot_index < 0 || slot_index >= 2 ||
+        pending.request_token != next_request_token ||
+        prepared_slot.request_token != pending.request_token ||
+        prepared_slot.request_key != pending.request_lookup_key ||
+        prepared_slot.request_vpn != pending.vpn ||
+        prepared_slot.s2xlate != pending.s2xlate ||
+        resolved_record.uid != prepared_slot.uid ||
+        !resolved_record.is_waiting() ||
+        resolved_record.uid_tlb_first_request_fire_sample_seq != 0 ||
+        context_plan.context.uid != prepared_slot.uid ||
+        pending_q.size() + (driving_valid ? 1 : 0) >= max_outstanding ||
+        accepted_count != completed_count + flush_canceled_count +
+                          reset_canceled_count + outstanding_count() ||
+        pbmt_rf_audit[slot_index].valid ||
+        !memblock_sync_pkg::can_publish_pbmt_rf_phase(
+            expected_phase, accepted_phase, this)) begin
+        `uvm_fatal("PBMT_RF_COMMIT",
+                   $sformatf("request-fire commit precheck failed pending=%0d record=%0d plan=%0d slot_valid=%0d slot=%0d token=%0d next=%0d pending_q=%0d driving=%0d max=%0d accepted=%0d completed=%0d",
+                             pending != null, resolved_record != null,
+                             context_plan.valid, prepared_slot.valid, slot_index,
+                             pending == null ? 0 : pending.request_token,
+                             next_request_token, pending_q.size(), driving_valid,
+                             max_outstanding, accepted_count, completed_count))
+        return 1'b0;
+    end
+    for (int idx = 0; idx < 2; idx++) begin
+        if (idx != slot_index && pbmt_rf_audit[idx].valid &&
+            (pbmt_rf_audit[idx].uid == prepared_slot.uid ||
+             pbmt_rf_audit[idx].request_token == prepared_slot.request_token)) begin
+            `uvm_fatal("PBMT_RF_COMMIT",
+                       $sformatf("request-fire commit duplicate provenance slot=%0d other=%0d uid=%0d token=%0d",
+                                 slot_index, idx, prepared_slot.uid,
+                                 prepared_slot.request_token))
+            return 1'b0;
+        end
+    end
+    return 1'b1;
+endfunction:precheck_pbmt_rf_request_fire_commit
+
+// Abstract responsibility: perform the already-proven PBMT request-fire state
+// transition as one mutation-only block.  No allocation, lookup, report, or
+// fatal-capable helper is allowed below this point.
+function void memblock_l2tlb_base_sequence::commit_pbmt_rf_request_fire_prechecked(
+    input memblock_l2tlb_pending_req pending,
+    input memblock_uid_tlb_record resolved_record,
+    input pma_pmp_uid_context_plan_t context_plan,
+    input memblock_pbmt_rf_audit_slot_t prepared_slot,
+    input memblock_sync_pkg::memblock_pbmt_rf_phase_e expected_phase,
+    input memblock_sync_pkg::memblock_pbmt_rf_phase_e accepted_phase);
+    data.commit_pbmt_rf_request_fire_prechecked(
+        resolved_record, sample_seq, context_plan,
+        prepared_slot, pbmt_rf_audit);
+    pending_q.push_back(pending);
+    next_request_token++;
+    accepted_count++;
+    memblock_sync_pkg::commit_pbmt_rf_phase_prechecked(
+        expected_phase, accepted_phase, this);
+endfunction:commit_pbmt_rf_request_fire_prechecked
 
 function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_request();
     memblock_l2tlb_pending_req pending;
     memblock_tlb_entry live_entry;
     bit created;
+    bit scenario_active;
+    memblock_uid_t resolved_uid;
+    memblock_uid_tlb_record resolved_record;
+    mmu_csr_runtime_state strict_request_csr;
+    pma_pmp_uid_context_plan_t context_plan;
+    memblock_pbmt_rf_audit_slot_t prepared_slot;
+    memblock_pbmt_rf_slot_kind_e expected_slot;
+    memblock_sync_pkg::memblock_pbmt_rf_phase_e expected_phase;
+    memblock_sync_pkg::memblock_pbmt_rf_phase_e accepted_phase;
+    int unsigned legacy_marked_count;
 
-    // A real fire is still accepted before the same-sample stop path seals
-    // admission.  Once the local or shared cutoff is visible, reject the
-    // fire before allocating a token, pending record, or UID marker.
+    scenario_active = memblock_sync_pkg::is_pbmt_rf_scenario_active();
     if (release_close_requested) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("L2TLB request fired after local admission cutoff sample=%0d vpn=0x%0h s2xlate=%0d",
                              sample_seq, sampled_req_vpn, sampled_req_s2xlate))
+        return null;
     end
-    data.check_l2tlb_uid_registration_open("capture_fired_request");
+    if (memblock_sync_pkg::l2tlb_release_admission_close_requested ||
+        memblock_sync_pkg::l2tlb_release_admission_closed ||
+        memblock_sync_pkg::l2tlb_release_closing) begin
+        `uvm_fatal(get_type_name(), "L2TLB request fired after shared admission seal")
+        return null;
+    end
     if (outstanding_count() >= max_outstanding) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("L2TLB request fired at full queue: outstanding=%0d max=%0d",
                              outstanding_count(), max_outstanding))
+        return null;
     end
+
+    // Planning phase: allocate and derive every object before any UID, context,
+    // ledger, phase, token, queue, or lifecycle counter mutation.
     pending = memblock_l2tlb_pending_req::type_id::create(
         $sformatf("l2tlb_pending_%0d", next_request_token));
     if (pending == null) begin
         `uvm_fatal(get_type_name(), "failed to create L2TLB pending record")
+        return null;
     end
     pending.request_token = next_request_token;
-    next_request_token++;
     pending.vpn = sampled_req_vpn;
     pending.s2xlate = sampled_req_s2xlate;
-    if (!get_csr_snapshot_for_sample(sample_seq, pending.csr_snapshot)) begin
+    if (!get_csr_snapshot_for_sample(sample_seq, pending.csr_snapshot) ||
+        pending.csr_snapshot == null) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("missing V2 C-2 CSR history for request sample=%0d",
                              sample_seq))
-        pending.csr_snapshot = null;
-    end
-    if (pending.csr_snapshot == null) begin
-        `uvm_fatal(get_type_name(), "failed to capture request-time CSR snapshot")
+        return null;
     end
     pending.request_lookup_key = pending.csr_snapshot.make_lookup_key(
         {26'b0, pending.vpn}, pending.s2xlate);
-    if (!data.get_or_create_l2tlb_entry_by_req_with_snapshot(pending.vpn,
-                                                              pending.s2xlate,
-                                                              pending.csr_snapshot,
-                                                              ppn_reuse_en,
-                                                              ppn_reuse_wt,
-                                                              pending.request_lookup_key,
-                                                              pending.entry_anchor_key,
-                                                              pending.lookup_result,
-                                                              live_entry,
-                                                              created) ||
-        live_entry == null) begin
+    created = 1'b0;
+    if (scenario_active) begin
+        if (!data.find_existing_l2tlb_entry_by_req_with_snapshot(
+                pending.vpn, pending.s2xlate, pending.csr_snapshot,
+                pending.request_lookup_key, pending.entry_anchor_key,
+                pending.lookup_result, live_entry) || live_entry == null) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("PBMT RF request did not hit canonical entry vpn=0x%0h s2xlate=%0d",
+                                 pending.vpn, pending.s2xlate))
+            return null;
+        end
+    end else if (!data.get_or_create_l2tlb_entry_by_req_with_snapshot(
+                     pending.vpn, pending.s2xlate, pending.csr_snapshot,
+                     ppn_reuse_en, ppn_reuse_wt,
+                     pending.request_lookup_key, pending.entry_anchor_key,
+                     pending.lookup_result, live_entry, created) ||
+                 live_entry == null) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("failed to get/create L2TLB entry vpn=0x%0h s2xlate=%0d",
                              pending.vpn, pending.s2xlate))
+        return null;
     end
     if (pending.request_lookup_key !=
         pending.csr_snapshot.make_lookup_key({26'b0, pending.vpn},
-                                              pending.s2xlate)) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("request-time L2TLB key drift token=%0d snapshot_vpn=0x%0h request_vpn=0x%0h",
-                             pending.request_token,
-                             pending.vpn,
-                             pending.request_lookup_key.vpn))
-    end
-    if (live_entry.lookup_key != pending.entry_anchor_key ||
+                                              pending.s2xlate) ||
+        live_entry.lookup_key != pending.entry_anchor_key ||
         live_entry.entry_generation == 0) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("L2TLB canonical anchor mismatch token=%0d request_vpn=0x%0h anchor_vpn=0x%0h",
-                             pending.request_token,
-                             pending.request_lookup_key.vpn,
-                             pending.entry_anchor_key.vpn))
+        `uvm_fatal(get_type_name(), "L2TLB request planning canonical/key mismatch")
+        return null;
     end
-    // The UID ledger records only a real DTLB/L2TLB request fire.  It is not
-    // inferred from issue time or from a later response lookup.
-    void'(data.mark_uid_tlb_record_request_fire(pending.request_lookup_key, sample_seq));
     pending.entry_snapshot = memblock_tlb_entry::type_id::create(
         $sformatf("l2tlb_entry_snapshot_%0d", pending.request_token));
     if (pending.entry_snapshot == null) begin
         `uvm_fatal(get_type_name(), "failed to create request-time L2TLB entry snapshot")
+        return null;
     end
     pending.entry_snapshot.copy_from(live_entry);
     pending.pending_entry_generation = pending.entry_snapshot.entry_generation;
     if (pending.pending_entry_generation == 0 ||
         pending.pending_entry_generation != live_entry.entry_generation) begin
-        `uvm_fatal(get_type_name(), "L2TLB pending entry generation is not frozen from live entry")
+        `uvm_fatal(get_type_name(), "L2TLB pending entry generation planning mismatch")
+        return null;
     end
     pending.later_split_owner = data.bind_later_split_l2_request_token(
         pending.request_lookup_key, pending.request_token, sample_seq);
@@ -1189,28 +1558,88 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     // raw-hit a different waiting VPN; derive it from that request's frozen
     // VPN/GVPN and the request-visible CSR snapshot.
     data.derive_tlb_request_fields(
-        pending.entry_snapshot,
-        {14'b0, pending.vpn},
-        pending.s2xlate,
-        pending.csr_snapshot,
-        pending.request_derived_valid,
-        pending.request_s1_resolved_ppn,
-        pending.request_s2_resolved_ppn,
+        pending.entry_snapshot, {14'b0, pending.vpn}, pending.s2xlate,
+        pending.csr_snapshot, pending.request_derived_valid,
+        pending.request_s1_resolved_ppn, pending.request_s2_resolved_ppn,
         pending.request_gvpn);
     pending.resp_tr = create_l2tlb_xaction(
         $sformatf("l2tlb_resp_token_%0d", pending.request_token));
+    if (pending.resp_tr == null) return null;
     pending.resp_tr.io_ptw_req_0_valid = 1'b1;
     pending.resp_tr.io_ptw_req_0_bits_vpn = pending.vpn;
     pending.resp_tr.io_ptw_req_0_bits_s2xlate = pending.s2xlate;
-    pending.min_latency = choose_latency(pending.latency_bucket);
+    if (scenario_active) begin
+        pending.latency_bucket = L2TLB_LATENCY_1C;
+        pending.min_latency = 1;
+    end else begin
+        pending.min_latency = choose_latency(pending.latency_bucket);
+    end
     pending.accept_sample_seq = sample_seq;
     pending.due_sample_seq = sample_seq + pending.min_latency;
-    // A request firing in the same sample as a new event belongs to the
-    // pre-event visibility window; C4 cancellation compares against this
-    // cursor, not the event just observed at C0.
     pending.accept_flush_event_seq = fire_visible_event_seq;
-    pending_q.push_back(pending);
-    accepted_count++;
+
+    if (scenario_active) begin
+        prepared_slot = '{default:'0};
+        expected_slot = memblock_sync_pkg::get_pbmt_rf_phase() ==
+                            memblock_sync_pkg::PBMT_RF_B_RUNTIME_READY ?
+                            PBMT_RF_SLOT_B : PBMT_RF_SLOT_C;
+        expected_phase = expected_slot == PBMT_RF_SLOT_B ?
+                             memblock_sync_pkg::PBMT_RF_B_RUNTIME_READY :
+                             memblock_sync_pkg::PBMT_RF_C_C2_READY_ACK;
+        accepted_phase = expected_slot == PBMT_RF_SLOT_B ?
+                             memblock_sync_pkg::PBMT_RF_B_ACCEPTED :
+                             memblock_sync_pkg::PBMT_RF_C_ACCEPTED;
+        prepared_slot.valid = 1'b1;
+        prepared_slot.slot = expected_slot;
+        prepared_slot.uid = expected_slot == PBMT_RF_SLOT_B ? 0 : 1;
+        prepared_slot.requestor = expected_slot == PBMT_RF_SLOT_B ?
+                                      PBMT_RF_REQ_STORE : PBMT_RF_REQ_LOAD;
+        prepared_slot.request_token = pending.request_token;
+        prepared_slot.request_vpn = pending.vpn;
+        prepared_slot.s2xlate = pending.s2xlate;
+        prepared_slot.lookup_kind = pending.lookup_result;
+        prepared_slot.request_key = pending.request_lookup_key;
+        prepared_slot.anchor_key = pending.entry_anchor_key;
+        prepared_slot.entry_generation = live_entry.entry_generation;
+        prepared_slot.accept_dut_sample_seq = sample_seq;
+        prepared_slot.accept_csr_history_sample_seq = sample_seq;
+        prepared_slot.accept_m_pbmt_en = pending.csr_snapshot.m_pbmt_en;
+        prepared_slot.accept_h_pbmt_en = pending.csr_snapshot.h_pbmt_en;
+        prepared_slot.cancel_reason = "";
+        if (!data.resolve_and_plan_pbmt_rf_request_fire(
+                pending.request_lookup_key, sample_seq, prepared_slot,
+                pbmt_rf_audit, resolved_uid, strict_request_csr,
+                resolved_record, context_plan) ||
+            strict_request_csr == null || resolved_record == null ||
+            strict_request_csr.make_lookup_key({26'b0, pending.vpn},
+                                                pending.s2xlate) !=
+                pending.request_lookup_key ||
+            !precheck_pbmt_rf_request_fire_commit(
+                pending, resolved_record, context_plan, prepared_slot,
+                expected_phase, accepted_phase)) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("PBMT RF strict request-fire planning failed token=%0d sample=%0d vpn=0x%0h",
+                                 pending.request_token, sample_seq,
+                                 pending.request_lookup_key.vpn))
+            return null;
+        end
+
+        // Single mutation commit: every operation below is prechecked and has
+        // no fatal-capable helper call or allocation.
+        commit_pbmt_rf_request_fire_prechecked(
+            pending, resolved_record, context_plan, prepared_slot,
+            expected_phase, accepted_phase);
+    end else begin
+        if (!data.mark_uid_tlb_record_request_fire(
+                pending.request_lookup_key, sample_seq,
+                legacy_marked_count)) begin
+            return null;
+        end
+        next_request_token++;
+        pending_q.push_back(pending);
+        accepted_count++;
+    end
+
     `uvm_info(get_type_name(),
               $sformatf("accept L2TLB token=%0d vpn=0x%0h s2xlate=%0d lookup=%0d anchor_vpn=0x%0h created=%0d due=%0d bucket=%0d outstanding=%0d",
                         pending.request_token, pending.vpn, pending.s2xlate,
@@ -1218,7 +1647,7 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
                         created, pending.due_sample_seq,
                         pending.latency_bucket, outstanding_count()),
               UVM_LOW)
-    check_l2tlb_lifecycle_accounting("request_accept");
+    void'(check_l2tlb_lifecycle_accounting("request_accept"));
     return pending;
 endfunction:capture_fired_request
 
@@ -1266,6 +1695,9 @@ function int unsigned memblock_l2tlb_base_sequence::apply_due_l2tlb_flush_barrie
                 data.cancel_later_split_l2_token(
                     pending_q[idx].request_token,
                     $sformatf("l2tlb_flush_event_%0d", barrier.event_seq));
+                mark_pbmt_rf_audit_canceled(
+                    pending_q[idx].request_token,
+                    $sformatf("l2tlb_flush_due_event_%0d", barrier.event_seq));
                 pending_q.delete(idx);
                 barrier_cancel_count++;
             end
@@ -1288,7 +1720,7 @@ function int unsigned memblock_l2tlb_base_sequence::apply_due_l2tlb_flush_barrie
                   UVM_LOW)
     end
     if (due_count != 0) begin
-        check_l2tlb_lifecycle_accounting("due_flush");
+        void'(check_l2tlb_lifecycle_accounting("due_flush"));
     end
     return due_count;
 endfunction:apply_due_l2tlb_flush_barriers
@@ -1366,7 +1798,7 @@ function bit memblock_l2tlb_base_sequence::select_due_response(
     if (cycle_tr == null) begin
         `uvm_fatal(get_type_name(), "selected L2TLB pending record has null response transaction")
     end
-    check_l2tlb_lifecycle_accounting("response_select");
+    void'(check_l2tlb_lifecycle_accounting("response_select"));
     return 1'b1;
 endfunction:select_due_response
 
@@ -1377,6 +1809,7 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
 
     if (!driving_valid || driving_req == null) begin
         `uvm_fatal(get_type_name(), "complete_driving_response got invalid driving slot")
+        return;
     end
     complete_sample_seq = sample_seq;
     if (complete_sample_seq < driving_req.due_sample_seq) begin
@@ -1386,11 +1819,13 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
                              driving_req.accept_sample_seq,
                              driving_req.due_sample_seq,
                              complete_sample_seq))
+        return;
     end
     if (!driving_req.response_payload_frozen) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("L2TLB response completed before payload freeze token=%0d",
                              driving_req.request_token))
+        return;
     end
     if (driving_req.response_visible_sample_seq != complete_sample_seq) begin
         `uvm_fatal(get_type_name(),
@@ -1398,6 +1833,7 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
                              driving_req.request_token,
                              driving_req.response_visible_sample_seq,
                              complete_sample_seq))
+        return;
     end
     if (!get_csr_snapshot_for_sample(complete_sample_seq,
                                      actual_response_csr_snapshot) ||
@@ -1405,6 +1841,7 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
         `uvm_fatal(get_type_name(),
                    $sformatf("missing response-visible C-2 CSR for L2TLB response sample=%0d",
                              complete_sample_seq))
+        return;
     end
     if (actual_response_csr_snapshot.m_pbmt_en != driving_req.response_m_pbmt_en ||
         actual_response_csr_snapshot.h_pbmt_en != driving_req.response_h_pbmt_en) begin
@@ -1416,6 +1853,11 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
                              actual_response_csr_snapshot.m_pbmt_en,
                              actual_response_csr_snapshot.h_pbmt_en,
                              complete_sample_seq))
+        return;
+    end
+    if (!capture_pbmt_rf_complete(driving_req,
+                                  actual_response_csr_snapshot)) begin
+        return;
     end
     if (ppn_reuse_en) begin
         // 中文注释：只在 sampled_resp_valid 已确认的 completion 边界入队；
@@ -1464,7 +1906,7 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
     driving_req = null;
     driving_valid = 1'b0;
     completed_count++;
-    check_l2tlb_lifecycle_accounting("response_complete");
+    void'(check_l2tlb_lifecycle_accounting("response_complete"));
 endfunction:complete_driving_response
 
 // 中文注释：response select 前依据目标 sample 的 C-2 CSR，在 token 私有 entry

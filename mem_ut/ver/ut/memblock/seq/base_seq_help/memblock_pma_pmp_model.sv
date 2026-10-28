@@ -59,6 +59,13 @@ typedef struct packed {
     longint unsigned     capture_sample;
 } pma_pmp_uid_context_t;
 
+typedef struct {
+    bit                       valid;
+    bit                       needs_insert;
+    pma_pmp_access_key_t      access_key;
+    pma_pmp_uid_context_t     context;
+    longint unsigned          next_access_seq_after;
+} pma_pmp_uid_context_plan_t;
 
 typedef struct packed {
     bit                  valid;
@@ -290,6 +297,39 @@ class memblock_pma_pmp_model extends uvm_object;
         output longint unsigned pmp_generation_o,
         output longint unsigned pma_generation_o
     );
+    extern function bit can_capture_uid_context(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch
+    );
+    extern function bit plan_uid_context_capture(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch,
+        input bit [1:0] priv_mode,
+        input bit debug,
+        input bit keyid_enable,
+        input bit cmode,
+        input bit [7:0] keyid,
+        input int unsigned csr_update_seq,
+        input longint unsigned sample,
+        output pma_pmp_uid_context_plan_t plan);
+    extern function bit plan_uid_context_capture_at_seq(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch,
+        input bit [1:0] priv_mode,
+        input bit debug,
+        input bit keyid_enable,
+        input bit cmode,
+        input bit [7:0] keyid,
+        input int unsigned csr_update_seq,
+        input longint unsigned sample,
+        input longint unsigned reserved_access_seq,
+        output pma_pmp_uid_context_plan_t plan);
+    extern function void commit_uid_context_plan_prechecked(
+        input pma_pmp_uid_context_plan_t plan);
+    extern function void read_generations(
+        output longint unsigned pmp_generation_value,
+        output longint unsigned pma_generation_value
+    );
     extern function bit read_uid_context(
         input memblock_uid_t uid,
         output pma_pmp_uid_context_t context_view
@@ -487,12 +527,11 @@ function void memblock_pma_pmp_model::save_table_snapshot(input bit is_pma);
     pma_pmp_table_snapshot snapshot;
     longint unsigned generation;
 
-    snapshot = pma_pmp_table_snapshot::type_id::create(
-        is_pma ? $sformatf("pma_snapshot_%0d", pma_generation) :
-                 $sformatf("pmp_snapshot_%0d", pmp_generation));
-    if (snapshot == null) begin
-        `uvm_fatal(get_type_name(), "failed to allocate PMA/PMP table snapshot")
-    end
+    // This is a value-history implementation detail, not an extension point.
+    // Direct construction keeps CSR replay commit free of factory-null fatal
+    // paths after the model entries and generation have started mutating.
+    snapshot = new(is_pma ? $sformatf("pma_snapshot_%0d", pma_generation) :
+                            $sformatf("pmp_snapshot_%0d", pmp_generation));
     if (is_pma) begin
         generation = pma_generation;
         snapshot.copy_entries(pma_entries);
@@ -981,42 +1020,116 @@ function bit memblock_pma_pmp_model::capture_uid_context(
     input int unsigned csr_update_seq,
     input longint unsigned sample
 );
-    pma_pmp_uid_context_t uid_context;
-    pma_pmp_access_key_t access_key;
+    pma_pmp_uid_context_plan_t plan;
 
-    if (!ready) return 1'b0;
-    if (latest_context_key_by_uid.exists(uid) &&
-        latest_context_key_by_uid[uid].dynamic_epoch == dynamic_epoch &&
-        uid_context_by_access_key.exists(latest_context_key_by_uid[uid])) begin
-        // 同一动态实例可能因 DTLB replay 再次命中该 helper。PMPChecker 的 request
-        // context 必须保持首次 fire 的 generation，不能被后续 CSR 写重采样。
-        return 1'b1;
+    if (!plan_uid_context_capture(uid, dynamic_epoch, priv_mode, debug,
+                                  keyid_enable, cmode, keyid,
+                                  csr_update_seq, sample, plan)) begin
+        return 1'b0;
     end
-    if (next_access_seq == 0) begin
-        `uvm_fatal(get_type_name(), "PMA/PMP access sequence wrapped to zero")
-    end
-    access_key.uid = uid;
-    access_key.dynamic_epoch = dynamic_epoch;
-    access_key.access_seq = next_access_seq;
-    next_access_seq++;
-    uid_context = '{default:'0};
-    uid_context.valid = 1'b1;
-    uid_context.uid = uid;
-    uid_context.dynamic_epoch = dynamic_epoch;
-    uid_context.access_seq = access_key.access_seq;
-    uid_context.priv_mode = priv_mode;
-    uid_context.debug = debug;
-    uid_context.keyid_enable = keyid_enable;
-    uid_context.cmode = cmode;
-    uid_context.keyid = keyid;
-    uid_context.csr_update_seq = csr_update_seq;
-    uid_context.pmp_generation = pmp_generation;
-    uid_context.pma_generation = pma_generation;
-    uid_context.capture_sample = sample;
-    uid_context_by_access_key[access_key] = uid_context;
-    latest_context_key_by_uid[uid] = access_key;
+    commit_uid_context_plan_prechecked(plan);
     return 1'b1;
 endfunction:capture_uid_context
+
+function bit memblock_pma_pmp_model::can_capture_uid_context(
+    input memblock_uid_t uid,
+    input int unsigned dynamic_epoch
+);
+    if (!ready || next_access_seq == 0) begin
+        return 1'b0;
+    end
+    if (latest_context_key_by_uid.exists(uid) &&
+        latest_context_key_by_uid[uid].dynamic_epoch == dynamic_epoch) begin
+        return uid_context_by_access_key.exists(latest_context_key_by_uid[uid]);
+    end
+    return (next_access_seq + 1) != 0;
+endfunction:can_capture_uid_context
+
+function bit memblock_pma_pmp_model::plan_uid_context_capture(
+    input memblock_uid_t uid,
+    input int unsigned dynamic_epoch,
+    input bit [1:0] priv_mode,
+    input bit debug,
+    input bit keyid_enable,
+    input bit cmode,
+    input bit [7:0] keyid,
+    input int unsigned csr_update_seq,
+    input longint unsigned sample,
+    output pma_pmp_uid_context_plan_t plan);
+    return plan_uid_context_capture_at_seq(
+        uid, dynamic_epoch, priv_mode, debug, keyid_enable, cmode, keyid,
+        csr_update_seq, sample, next_access_seq, plan);
+endfunction:plan_uid_context_capture
+
+// Batch planners pass a reserved sequence so every candidate can be validated
+// before any context is committed. Existing contexts consume no new sequence.
+function bit memblock_pma_pmp_model::plan_uid_context_capture_at_seq(
+    input memblock_uid_t uid,
+    input int unsigned dynamic_epoch,
+    input bit [1:0] priv_mode,
+    input bit debug,
+    input bit keyid_enable,
+    input bit cmode,
+    input bit [7:0] keyid,
+    input int unsigned csr_update_seq,
+    input longint unsigned sample,
+    input longint unsigned reserved_access_seq,
+    output pma_pmp_uid_context_plan_t plan);
+    pma_pmp_access_key_t existing_key;
+
+    plan = '{default:'0};
+    if (!ready || reserved_access_seq == 0 || sample == 0) return 1'b0;
+    if (latest_context_key_by_uid.exists(uid) &&
+        latest_context_key_by_uid[uid].dynamic_epoch == dynamic_epoch) begin
+        existing_key = latest_context_key_by_uid[uid];
+        if (!uid_context_by_access_key.exists(existing_key) ||
+            !uid_context_by_access_key[existing_key].valid) return 1'b0;
+        plan.valid = 1'b1;
+        plan.needs_insert = 1'b0;
+        plan.access_key = existing_key;
+        plan.context = uid_context_by_access_key[existing_key];
+        plan.next_access_seq_after = reserved_access_seq;
+        return 1'b1;
+    end
+    plan.valid = 1'b1;
+    plan.needs_insert = 1'b1;
+    plan.access_key.uid = uid;
+    plan.access_key.dynamic_epoch = dynamic_epoch;
+    plan.access_key.access_seq = reserved_access_seq;
+    plan.context = '{default:'0};
+    plan.context.valid = 1'b1;
+    plan.context.uid = uid;
+    plan.context.dynamic_epoch = dynamic_epoch;
+    plan.context.access_seq = reserved_access_seq;
+    plan.context.priv_mode = priv_mode;
+    plan.context.debug = debug;
+    plan.context.keyid_enable = keyid_enable;
+    plan.context.cmode = cmode;
+    plan.context.keyid = keyid;
+    plan.context.csr_update_seq = csr_update_seq;
+    plan.context.pmp_generation = pmp_generation;
+    plan.context.pma_generation = pma_generation;
+    plan.context.capture_sample = sample;
+    plan.next_access_seq_after = reserved_access_seq + 1;
+    return plan.next_access_seq_after != 0;
+endfunction:plan_uid_context_capture_at_seq
+
+function void memblock_pma_pmp_model::commit_uid_context_plan_prechecked(
+    input pma_pmp_uid_context_plan_t plan);
+    if (plan.needs_insert) begin
+        uid_context_by_access_key[plan.access_key] = plan.context;
+        latest_context_key_by_uid[plan.context.uid] = plan.access_key;
+        next_access_seq = plan.next_access_seq_after;
+    end
+endfunction:commit_uid_context_plan_prechecked
+
+function void memblock_pma_pmp_model::read_generations(
+    output longint unsigned pmp_generation_value,
+    output longint unsigned pma_generation_value
+);
+    pmp_generation_value = pmp_generation;
+    pma_generation_value = pma_generation;
+endfunction:read_generations
 
 function void memblock_pma_pmp_model::get_current_generations(
     output longint unsigned pmp_generation_o,

@@ -134,6 +134,9 @@ class issue_queue_scheduler extends uvm_object;
         if (data.issue_blocked_by_global_flush()) begin
             return 1'b0;
         end
+        if (!memblock_sync_pkg::pbmt_rf_issue_gate(uid)) begin
+            return 1'b0;
+        end
         status = data.get_status(uid);
         if (status.active &&
             status.enq &&
@@ -672,8 +675,9 @@ class issue_queue_scheduler extends uvm_object;
         if (!is_issue_item_eligible(item)) begin
             return 1'b0;
         end
-        issue_epoch = data.alloc_issue_epoch();
-        data.mark_issue_snapshot(item.uid, item.target, issue_epoch);
+        if (!data.mark_issue_snapshot(item.uid, item.target, issue_epoch)) begin
+            return 1'b0;
+        end
         data.delete_issue_queue_entry(item.target, item.uid, item.replay_seq, 1'b1);
         set_target_queued(item.uid, item.target, 1'b0);
         set_target_dispatched(item.uid, item.target, 1'b1);
@@ -689,8 +693,9 @@ class issue_queue_scheduler extends uvm_object;
         if (!is_issue_item_state_eligible(item)) begin
             return 1'b0;
         end
-        issue_epoch = data.alloc_issue_epoch();
-        data.mark_issue_snapshot(item.uid, item.target, issue_epoch);
+        if (!data.mark_issue_snapshot(item.uid, item.target, issue_epoch)) begin
+            return 1'b0;
+        end
         data.delete_issue_queue_entry(item.target, item.uid, item.replay_seq, 1'b1);
         set_target_queued(item.uid, item.target, 1'b0);
         set_target_dispatched(item.uid, item.target, 1'b1);
@@ -769,8 +774,9 @@ class issue_queue_scheduler extends uvm_object;
         if (!is_frozen_issue_item_fire_acceptable(item)) begin
             return 1'b0;
         end
-        issue_epoch = data.alloc_issue_epoch();
-        data.mark_issue_snapshot(item.uid, item.target, issue_epoch);
+        if (!data.mark_issue_snapshot(item.uid, item.target, issue_epoch)) begin
+            return 1'b0;
+        end
         data.delete_issue_queue_entry(item.target, item.uid, item.replay_seq, 1'b1);
         set_target_queued(item.uid, item.target, 1'b0);
         set_target_dispatched(item.uid, item.target, 1'b1);
