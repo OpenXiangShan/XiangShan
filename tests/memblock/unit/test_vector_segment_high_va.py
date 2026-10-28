@@ -60,7 +60,7 @@ static void presets() {
         assert(c.vector_segment_high_va_per_mille == rate);
         assert(c.enabled_vector_segment_high_va_crosses() == 24);
         assert(!c.vector_segment_high_va_cross_enabled(24));
-        assert(c.summary().find("constraint_schema=58") != std::string::npos);
+        assert(c.summary().find("constraint_schema=59") != std::string::npos);
         assert(c.summary().find(" target_vector_segment_high_va=" +
                                std::to_string(rate)) != std::string::npos);
         const auto reserved = c.minimum_serial_actions();
@@ -317,8 +317,9 @@ class CompiledHighVaTest(unittest.TestCase):
         )
         source = root / "high_va.cpp"
         source.write_text(
-            "\n".join(includes)
+            "\n".join(includes) + '\n#include "scenarios/mixed/scalar_load.hpp"\n'
             + "\n#include <cassert>\n#include <limits>\n#include <numeric>\n"
+            + "namespace mixed = memblock::scenarios::mixed;\n"
             + "namespace memblock::generated {\n"
             + "\n".join(constants)
             + '\n}\nnamespace memblock {\n#include "environment/model.inc"\n}\n'

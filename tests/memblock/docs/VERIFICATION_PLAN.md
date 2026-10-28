@@ -64,7 +64,7 @@ combinations have occurred or establishes a coverage percentage.
 
 | Domain | Executable subset and source | Remaining scope |
 | --- | --- | --- |
-| Scalar/FP loads | Width/sign/lane/immediate, FP boxing/destination, data/errors; load_feedback.inc, scoreboards | Wider timing/error interactions |
+| Scalar/FP loads | Canonical integer/FLH/FLW/FLD format selection in ordinary/concurrent/SQ-dependency/unresolved graphs, byte-wise memory and older-store overlay boxing, payload sign bins, class/destination bounds and strict correct-data refetch; directed selected NC/MMIO/fault cases | Complete rename allocation history, other helper formats and exceptional misaligned FP enable semantics; wider timing/error interactions |
 | Stores/forwarding | Random 1..4 older-store/1..3 younger-load chains with shuffled operand arrival, partial byte overlays and optional younger-store exclusion; address/data order, masks, commit, cross-producer forwarding, directed readback, constrained-random final word readback for cacheable identity-mapped and declared permuted-page commits and same-context hypervisor readback for permitted/aligned cacheable stores | Output-only pulses, remaining aliased/non-cacheable/fault-path final state. A naturally aligned cross-page scalar store is not modeled as one legal top-level uop; the backend split is absent, so cross-page scalar split-store fault effects are untested and a single-uop completion is not an RTL claim. |
 | Vector addressing | Unit/strided/indexed/segment/whole-register shapes, bounded random index spacing/permutation and repeated gathers with disjoint scatter spans, data/identity/policy, full 128-bit mask operand with directed high-element load/store/indexed cases; cache_queue.inc, vector_memory.inc | Ordered side-effect targets, all concurrent shapes, and reserved/illegal mask-shape combinations remain |
 | Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA, single-uop later-element/masked `vstart=1` faults with exact faulting-element addresses, legal two-uop segment noncanonical loads/stores whose later uop must expose the fault with no forbidden traffic, masked, unmasked, first-element, segment (field-1, element-1 and first-field) PMP-denied masked/unmasked vector loads, and PMP-denied (including masked, cross-page, both segment field orders and EEW 1/2) vector store faults whose inactive/read-only/writable target pages are read back unchanged, a partially masked load with an inactive unmapped element, and an all-masked unmapped control that observes no PTW/DCache traffic | Default exceptional vstart skip for other shapes, arbitrary restart/progress, broader fault-address attribution, and canonical-alias sensitivity. Per-uop success order is not an architectural oracle when a later uop of the same instruction exposes the fault before commit. |
@@ -170,9 +170,10 @@ segment operations; partial byte overlap and overlapping scatters remain open.
 A pinned source review finds meaningful local structural randomization but a
 fixed global schedule: five-producer heterogeneous windows all run before serial
 helpers and drain between windows. Next ordinary-workload work should vary
-producer counts/ages with bounded sliding admission, add legal FP destinations
-and independent value/boxing expectations to canonical loads, and interleave
-multiple unresolved store identities with younger loads. Existing dependency
+producer counts/ages with bounded sliding admission and interleave multiple
+unresolved store identities with younger loads. Canonical FP formats now share
+ordinary/concurrent/dependency/unresolved builders with independent value/boxing
+checks; broader FP helper/error combinations remain explicit gaps. Existing dependency
 windows finish all store operands before their loads. These gaps take priority
 over expanding rare error/protection crosses; structural uniqueness alone cannot
 guarantee a CPU bug.
@@ -180,8 +181,8 @@ guarantee a CPU bug.
 Priority work, each requiring executable stimulus and an independent check:
 
 1. Vary ordinary mixed producer counts/ages with bounded sliding admission;
-   add legal FP loads with independent value/boxing checks and multiple unresolved
-   store identities with interleaved operand arrival. Extend final observation beyond cacheable
+   add multiple unresolved store identities with interleaved operand arrival,
+   and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable
    identity-mapped and declared permuted-page commits to remaining legal aliases, non-cacheable/device effects and
    fault-path side-effect checks; one cross-alias path is now directed, but
    the first-access alias mismatch now requires its exact flush-itself request,

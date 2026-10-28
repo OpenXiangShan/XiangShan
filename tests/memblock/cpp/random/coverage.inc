@@ -3193,6 +3193,34 @@ struct MixedCoverage {
         }
     }
 
+    std::array<std::uint64_t, 8> scalar_format_choices{}; // origin x integer/FP
+    std::array<std::uint64_t, 3> scalar_fp{}; // checked executions by width
+    std::array<std::uint64_t, 6> scalar_fp_sign{}; // width x payload sign
+    std::array<std::uint64_t, 4> scalar_fp_origin{}; // ordinary/window/SQ/unresolved
+    std::array<std::uint64_t, 3> scalar_fp_faults{};
+    std::array<std::uint64_t, 2> scalar_fp_overlay{}; // older-store/snapshot bytes
+    std::uint64_t scalar_fp_misaligned = 0;
+
+    void sample_scalar_format_choice(unsigned origin, bool fp)
+    {
+        ++scalar_format_choices.at(origin * 2U + unsigned(fp));
+    }
+
+    void sample_fp_load(const memblock::LoadTransaction &transaction,
+        std::uint64_t expected, unsigned origin,
+        unsigned forwarded_bytes = 0, unsigned snapshot_bytes = 0)
+    {
+        if (!transaction.fp_wen) return;
+        const unsigned width = static_cast<unsigned>(transaction.op) - 1U;
+        ++scalar_fp_origin.at(origin);
+        if (transaction.expected_exception_mask == 0) {
+            const unsigned sign_bit = (1U << (width + 1U)) * 8U - 1U;
+            ++scalar_fp_sign.at(width * 2U + ((expected >> sign_bit) & 1U));
+        }
+        scalar_fp_overlay[0] += forwarded_bytes;
+        scalar_fp_overlay[1] += snapshot_bytes;
+    }
+
     std::uint64_t scalar_dependency_windows = 0;
     std::uint64_t scalar_dependency_stores = 0;
     std::uint64_t scalar_dependency_loads = 0;
@@ -3276,6 +3304,12 @@ struct MixedCoverage {
     void sample(const memblock::LoadTransaction &transaction)
     {
         ++scalar_loads;
+        if (transaction.fp_wen) {
+            const unsigned width = static_cast<unsigned>(transaction.op) - 1U;
+            ++scalar_fp.at(width);
+            scalar_fp_faults.at(width) += transaction.expected_exception_mask != 0;
+            scalar_fp_misaligned += (transaction.address & ((1U << (width + 1U)) - 1U)) != 0;
+        }
         ++load_ops.at(static_cast<unsigned>(transaction.op) & 7U);
         ++load_lanes.at(transaction.lane);
         ++(transaction.predecode_rvc ? rvc : non_rvc);
@@ -3425,6 +3459,12 @@ struct MixedCoverage {
 
     std::string summary() const
     {
+        const auto csv = [](const auto &values) {
+            std::ostringstream stream;
+            for (unsigned index = 0; index < values.size(); ++index)
+                stream << (index == 0 ? "" : ",") << values[index];
+            return stream.str();
+        };
         return "dispatch_widths=" + std::to_string(dispatch_widths[0]) + ',' +
                std::to_string(dispatch_widths[1]) + ',' +
                std::to_string(dispatch_widths[2]) + ',' +
@@ -3512,7 +3552,12 @@ struct MixedCoverage {
                std::to_string(permuted_kinds[3]) + " permuted_pages=" +
                std::to_string(permuted_pages.size()) + " permuted_cross_page_uops=" +
                std::to_string(permuted_cross_page_uops) + " permuted_split_elements=" +
-               std::to_string(permuted_split_elements) + " scalar_unresolved=" +
+               std::to_string(permuted_split_elements) + " scalar_format_choices=" + csv(scalar_format_choices) +
+               " scalar_fp=" + csv(scalar_fp) + " scalar_fp_sign=" + csv(scalar_fp_sign) +
+               " scalar_fp_origin=" + csv(scalar_fp_origin) +
+               " scalar_fp_faults=" + csv(scalar_fp_faults) +
+               " scalar_fp_overlay=" + csv(scalar_fp_overlay) +
+               " scalar_fp_misaligned=" + std::to_string(scalar_fp_misaligned) + " scalar_unresolved=" +
                std::to_string(scalar_unresolved_windows) + ',' +
                std::to_string(scalar_unresolved_conflicts) + ',' +
                std::to_string(scalar_unresolved_controls) + ',' +

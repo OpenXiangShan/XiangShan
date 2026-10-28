@@ -3,7 +3,7 @@
 namespace memblock::scenarios::mixed {
 
 memblock::LoadTransaction MixedScenario::make_load(std::uint64_t address, memblock::LoadOp op,
-    unsigned lane)
+    unsigned lane, bool fp)
 {
     const std::uint64_t rob = rob_offset++;
     const std::uint64_t lq = lq_offset++;
@@ -17,8 +17,11 @@ memblock::LoadTransaction MixedScenario::make_load(std::uint64_t address, memblo
         .lq_flag = memblock::lq_pointer_flag(lq),
         .sq = memblock::sq_pointer_value(sq_offset),
         .sq_flag = memblock::sq_pointer_flag(sq_offset),
-        .pdest = static_cast<std::uint8_t>(1 + random() % 223),
+        .pdest = static_cast<std::uint8_t>(1 + random() %
+            ((fp ? memblock::kFpPhysicalRegisters : memblock::kIntegerPhysicalRegisters) - 1U)),
         .lane = lane,
+        .rf_wen = !fp,
+        .fp_wen = fp,
     };
     transaction.predecode_rvc = (rob % 4U) == 0 || (random() & 3U) == 0;
     transaction.ftq_ptr = random() & 0x3fU;
@@ -282,6 +285,8 @@ bool MixedScenario::issue_load(const memblock::LoadTransaction &transaction,
     std::optional<std::uint64_t> expected,
     bool count_action)
 {
+    const auto predicted = transaction.fp_wen && transaction.expected_exception_mask == 0
+        ? (expected ? *expected : environment.memory().expected_load(transaction)) : 0;
     if (expected) {
         environment.expect_load_data(transaction, *expected);
     } else {
@@ -294,6 +299,7 @@ bool MixedScenario::issue_load(const memblock::LoadTransaction &transaction,
     }
     if (count_action) {
         coverage.sample(transaction);
+        coverage.sample_fp_load(transaction, predicted, 0);
         ++actions;
     }
     return true;

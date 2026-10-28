@@ -18,6 +18,17 @@ None.
 
 ## Current Changes Qualified Below
 
+- Canonical ordinary, heterogeneous-window, SQ-dependency and unresolved/refetch
+  loads now select integer or FLH/FLW/FLD formats from seeded class/width weights.
+  Independent mapped bytes and older input-store overlays determine FP payloads
+  and NaN boxing; the scoreboard checks class, destination, identity and data.
+  Integer/FP numeric destination domains are 1..223/1..191, with distinct live
+  roles and the restored original destination on refetch. Format choices,
+  execution epochs, payload signs, declared faults, misalignment and semantic
+  byte sources have conserved counters. A topology-only FP dependency sample
+  contains 509 distinct plans out of 512, excluding payload and timing/order.
+  Complete rename history, FP physical-zero selection, auxiliary helper formats
+  and exceptional misaligned FP destination-enable semantics remain unqualified.
 - `translation-permuted` shuffles all 132 pages for ordinary host/VS/G traffic,
   allowing different VA/PA cache colours. A single-client PA/alias directory
   recalls the old alias and waits for final C before capturing replacement grant
@@ -63,7 +74,7 @@ None.
   overlap, width/sign, operand arrival, issue order and delays. Expected bytes
   come from a pre-window snapshot overlaid only by older store inputs. The common
   ordinary-store factory preserves STA/STD lane pairing; simultaneous dependency
-  loads have distinct valid integer destinations. A topology-only unit sample
+  loads have distinct valid destinations within their integer/FP domains. A topology-only unit sample
   (excluding data and timing/order) contains 510 distinct plans out of 512.
 - Ordinary random bare/cache/atomic/NAPOT and merge/miss/bank pools use lazy
   seed-and-physical-address initial words. Reference and manager images share
@@ -185,7 +196,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 318 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 324 tests pass | Unit checks do not establish DUT functional coverage |
+| Canonical randomized FP | Frozen runtime-v1: 30/30 finite random/control seeds pass 6656 actions; all retained artifact verifiers accept | `build/memblock/fp-random-20261029/qualification.json`; focused ordinary/dependency/unresolved, coverage/spec/corner, mixed, integer-only, single-width and aligned injected-error controls. 2023 FP checker executions (649 FLH, 700 FLW, 674 FLD), 146 heterogeneous windows, 2281/2281 final tracked words; development qualification, no closure claim |
+| FP oracle and structural sensitivity | Six production helper/factory/scoreboard/accounting tests pass; 509/512 unique FP dependency topologies | Literal narrow/64-bit payloads, discontinuous pages, older-store/refetch versions and destination domains; fresh non-author review detects private no-boxing, wrong-domain and wrong-class mutations. These are helper/unit mutations, not RTL mutation coverage |
+| FP adjacent directed checks | 13/13 selected scenarios pass through runtime-v1 | `build/memblock/fp-random-20261029/directed/results.json`; scalar/FP, misalignment, forwarding/recovery, translation/alias/faults, atomic and coherence; selected set, not full catalog. Exceptional misaligned FP enable semantics remain unqualified |
 | Ordinary nonidentity maps | Runtime-v3: 15/15 seeds pass 6403 actions; 4408 mapped samples across all six contexts/four kinds, 1138/1138 automatic recalls, 74 cross-page uops, 4182/4182 tracked final words | `build/memblock/alias-manager-20261029/{qualification-v3.json,runtime-v3}`; diverse, coverage/spec/corner, identity controls, mixed and one-store diagnostic; finite artifact verifiers accept. Static maps and drained context transitions only; zero runtime intra-element splits; no closure claim |
 | Nonidentity oracle mechanics | Six map/oracle tests plus two production-manager tests pass; 128 seeded topologies/768 context maps; 24 manager lifecycle/version cases and 32 independently enumerated complete-line candidates | Wrong-page/contiguous-PA substitutions, old dirty alias data, D/E ordering, release races and torn/reordered/late versions are checked. Fresh review independently checks 5408 images across 96 update histories; uncheckpointed fallback and long histories remain unqualified |
 | Nonidentity adjacent directed checks | 19/19 selected scenarios pass | Runtime-v3, native commands/logs at `build/memblock/alias-manager-20261029/directed-native-v3`; scalar/FP, forwarding/misalignment, full vector/segment, translation/alias/faults, CBO.ZERO, atomic, coherence/release and CMO; selected set, not full catalog |
@@ -266,25 +280,33 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
-Fresh-context non-author review approves the PA/alias manager and grouped
-release-version oracle within the drained static-map scope. The independent
-review checks 5408 complete-line candidates across 96 update histories, including
-partial/full overlap, value collisions and corruption. Production tests retain
-pending-store and midbeat cases, whole-update tearing/order controls and exact
-explicit/drained recall expectations. Three private manager mutations are detected:
-PA-derived B alias, disabled recall byte comparison and grant before recall.
-All review findings are dispositioned in
-`build/memblock/alias-manager-20261029/review-disposition.json`; detailed verdict
-and source snapshot are `patch-review-v2.txt` and `review-v2.hashes.json`.
+Fresh-context non-author review approves canonical randomized FP formats,
+independent byte/boxing and older-store expectations, class/destination domains,
+strict refetch and schema-59 accounting within the four implemented builders.
+The reviewer independently passes six FP and four dependency/recovery tests,
+detects private no-boxing/wrong-domain/wrong-class mutations, and reruns the
+three focused retained-artifact verifier commands. The low documentation finding
+is resolved: adjacent destination descriptions now use the class-appropriate
+domains and retain integer auxiliary roles. Only documentation and source
+comments changed after the reviewed functional snapshot; disposition and evidence
+are `build/memblock/fp-random-20261029/{review.txt,review-disposition.json}`.
 No CPU RTL bug is confirmed.
 
-A pinned structural generator audit finds real local variation in dependency
-graphs, vector shapes, indexed operands and page maps, but fixed global scheduling:
-five-producer windows precede serial helpers and drain between windows. Ordinary
-FP destination selection, multiple unresolved stores and variable producer counts/
-ages with sliding admission are the next priorities. The present source review
-does not establish unique complete-run schedules or guarantee a design bug.
-Uncheckpointed current-reference release fallback, pre-notification segment
+Fresh-context review also approves the PA/alias manager and grouped
+release-version oracle within the drained static-map scope. It independently
+checks 5408 complete-line candidates across 96 update histories; all findings are
+dispositioned in
+`build/memblock/alias-manager-20261029/review-disposition.json`.
+
+The structural generator audit finds real local variation in dependency graphs,
+vector shapes, indexed operands and page maps, but fixed global scheduling:
+five-producer windows precede serial helpers and drain between windows. Canonical
+FP formats now vary across ordinary, heterogeneous, dependency and unresolved
+loads. Multiple unresolved stores and variable producer counts/ages with sliding
+admission are the next normal-workload priorities. The source review and 509/512
+FP topology sample do not establish unique complete-run schedules or guarantee a
+design bug. Full rename history, exceptional misaligned FP enable semantics,
+uncheckpointed current-reference release fallback, pre-notification segment
 releases, long version histories, simultaneous synonym/CMO/error ownership and
-native-model full source provenance remain explicit limits. Source audit artifact:
+native-model full source provenance remain explicit limits. Source audit:
 `build/memblock/alias-manager-20261029/random-structure-audit.txt`.

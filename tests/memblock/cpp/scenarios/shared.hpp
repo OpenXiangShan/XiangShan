@@ -1,6 +1,7 @@
 #pragma once
 
 #include "memblock_env.hpp"
+#include "mixed/scalar_load.hpp"
 
 #include <algorithm>
 #include <array>

@@ -65,7 +65,7 @@ private:
     std::string raw_load_feedback_summary();
     unsigned long total_ifetch_prefetches();
     memblock::LoadTransaction make_load(std::uint64_t address, memblock::LoadOp op,
-        unsigned lane);
+        unsigned lane, bool fp = false);
     memblock::StoreTransaction make_store(std::uint64_t address, std::uint64_t data,
         memblock::StoreOp op, unsigned address_lane);
     memblock::PrefetchTransaction make_prefetch(std::uint64_t address, memblock::PrefetchOp op,

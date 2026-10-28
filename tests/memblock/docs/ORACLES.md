@@ -59,7 +59,7 @@ case and its observed result, not every execution of a similar instruction.
 
 | Path | Implemented comparison | Limit |
 | --- | --- | --- |
-| FP loads | `run_fp_loads` independently NaN-boxes FLH/FLW, preserves FLD bits, and uses the scalar scoreboard to check the FP destination and suppress integer writes; selected fault cases check cause, queue retirement and request suppression. | The common byte-load helper does not calculate FP boxing by itself. See [load_feedback.inc](../cpp/scenarios/load_feedback.inc). |
+| FP loads | `SparseMemory::expected_load(transaction)` assembles independent byte addresses and NaN-boxes FLH/FLW to 64 bits; FLD preserves every payload bit. Canonical ordinary/concurrent/dependency/unresolved builders use this rule, with older-store byte overlays before formatting and separate strict provisional/refetch images. The scoreboard checks exclusive FP class, destination, identity and successful data. Directed `run_fp_loads` retains selected NC/MMIO/fault checks. | Integer-address overloads stay integer-valued; explicit values remain producer-owned. Broader FP helper combinations and exceptional misaligned destination-enable semantics are unqualified. See [model.inc](../cpp/environment/model.inc) and [load_feedback.inc](../cpp/scenarios/load_feedback.inc). |
 | Triggers | `run_trigger_contracts` declares action/cause and selected vector fault `vstart`, checks selected DCache request suppression/prefixes, and drives trigger enable/match/action/chain controls. | Triggered-store reference-image unchanged checks alone are not DUT readback. There is no complete common trigger interpreter. See [load_feedback.inc](../cpp/scenarios/load_feedback.inc). |
 | RAW/RAR redirect | Directed conflict/nonoverlap and candidate-age cases compare pulse count and RVC/ROB/FTQ/level metadata chosen from independent input identities. | General feedback sampling has no such expected conflict model; broader source/concurrency combinations remain. See `run_memory_violation` and RAR cases in [load_feedback.inc](../cpp/scenarios/load_feedback.inc). |
 | Fault range and exception selection | Byte-walked selected canonical/GPA boundary cases compare exact fault address, cause, observed queue recovery and control/survivor data. Directed competing-exception cases select expected output from independently supplied identities. `translation-permissions` also reads the target word back after a permission-fault store, using a readable mapping or Bare identity fallback, to prove no bytes leaked; `pmp-contracts` does the same after a PMP-denied store by re-enabling read access. | Isolated/selected cases do not establish a general simultaneous exception ledger. Device fault paths still need another observation route. See [mixed_boundaries.cpp](../cpp/scenarios/mixed_boundaries.cpp), [translation_faults.inc](../cpp/scenarios/translation_faults.inc), [translation_permissions.inc](../cpp/scenarios/translation_permissions.inc). |
@@ -92,10 +92,13 @@ alias semantics remain unchanged.
 
 `SparseMemory` reads little-endian bytes, returns zero for unspecified storage,
 and supports lazily described repeating incrementing regions. `expected_load`
-derives byte width from the low operation bits and sign/zero extension from the
-load encoding. It is not a complete scalar instruction interpreter. Explicit
+derives integer width and sign/zero extension from the load encoding. The
+transaction overload additionally uses `fp_wen` to NaN-box FLH/FLW and preserve
+FLD bits with `scalar_load_value`; unsupported FP widths or simultaneous RF/FP
+class selection are rejected. The address/opcode overload remains integer-valued.
+This is not a complete scalar instruction interpreter. Explicit
 `expect_load_data` values are used where a scenario owns a different result
-calculation, such as atomic return values or FP boxing. The scoreboard does not
+calculation, such as atomic return values or an older-store byte overlay. The scoreboard does not
 independently validate how an explicit expected value was calculated.
 
 `commit_store`, `commit_vector_store`, `record_committed_store`,
@@ -126,8 +129,10 @@ Retirement stays behind an older non-memory ROB head until load completion,
 then stores commit in age order. Final word readback observes committed bytes.
 Known store operands precede load issue in that direction. Store halves retain
 their CPU scheduler lane pairing;
-these simultaneous loads have distinct valid integer destinations. Semantic byte-source counters do not require any
-particular internal forwarding path.
+these simultaneous loads have distinct physical destinations within the selected
+integer/FP domains. A window containing FP uses the smaller common 1..191 domain;
+an integer-only window uses 1..223. Semantic byte-source counters do not require
+any particular internal forwarding path.
 
 The separate `scalar-unresolved` direction deliberately withholds an older
 store address while a younger, nonpredicted load completes. Its initial strict
@@ -150,14 +155,16 @@ provisional WB alone cannot discharge this architectural obligation. The control
 must produce no redirect during its bounded quiet/terminal observation. Both
 initial and refetch epochs retain data/identity/sideband checks; the same-cycle
 alias data exception is unused. This is one unresolved store/load, not a general
-speculative execution or commit reference engine. Three distinct integer
-destinations preserve live warm, provisional/refetch and readback mappings.
+speculative execution or commit reference engine. Distinct numeric destinations
+preserve live warm, provisional/refetch and readback mappings. Warm/readback loads
+remain integer; provisional/refetch loads use the selected integer or FP class.
+FP windows reserve all three indices within 1..191, integer-only windows in 1..223.
 The mixed tail's general cancellation fixture also uses a distinct older
 non-memory branch ROB anchor after completed memory traffic; it does not assign
 a branch redirect to a completed store. Its refetch retains the canceled ROB
 and pdest and rewinds only independently observed LQ cancellation. Ordinary
-scalar load/atomic factories and final-readback destinations use the configured
-nonzero integer register domain 1..223.
+integer load/atomic factories and final-readback destinations use the configured
+nonzero integer register domain 1..223; FP loads use the 1..191 FP domain.
 The isolated redirect restores the free-list candidate, so refetch reuses its
 original pdest with a new strict expectation. Conflict data differs from the
 provisional value; stale provisional data must fail. Execution completion does
@@ -189,7 +196,9 @@ replay producer.
 exception: both are suppressed when a fault is expected. Required exception
 bits must be present and bits outside the required plus allowed-additional
 mask must be absent. Data comparison follows the expected exception, not a
-DUT-decided exception. Disabling normal data checking is accepted only for a
+DUT-decided exception. The fault-enable gate is the current UT boundary contract;
+exceptional misaligned FP source passthrough differs from the main load path and
+needs a full-CPU architectural disposition before qualification. Disabling normal data checking is accepted only for a
 declared DebugMode trigger; exceptional data is skipped separately by the
 default fault policy.
 

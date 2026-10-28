@@ -135,7 +135,8 @@ bool MixedScenario::execute_scalar_load(ActionWindow &window)
         ++actions;
         coverage.cacheable += depth;
     } else {
-        const auto op = static_cast<memblock::LoadOp>(random() % 7);
+        const auto shape = constraints.scalar_load_policy().choose(random);
+        const auto op = static_cast<memblock::LoadOp>(shape.op);
         const unsigned size =
             1U << (static_cast<unsigned>(op) & 3U);
         const bool error_response =
@@ -165,7 +166,7 @@ bool MixedScenario::execute_scalar_load(ActionWindow &window)
             address = action_cacheable_address(window, size);
         }
         auto transaction = make_load(
-            address, op, random() % 3);
+            address, op, random() % 3, shape.fp);
         if (stride_shaped) {
             const std::uint64_t epoch =
                 stride_stream_loads / random_stride_slots;
@@ -289,6 +290,7 @@ bool MixedScenario::execute_scalar_load(ActionWindow &window)
             constraint_coverage.sample_dcache_load(std::nullopt);
         }
         ++coverage.cacheable;
+        coverage.sample_scalar_format_choice(0, shape.fp);
     }
 
     return true;
@@ -506,7 +508,7 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
         snapshot[byte] = environment.memory().read_byte(pages
             ? pages->physical_address(base + byte) : base + byte);
     }
-    auto plan = make_scalar_dependency_plan(random);
+    auto plan = make_scalar_dependency_plan(random, constraints.scalar_load_policy());
     if (plan.younger) {
         // Make the age-exclusion control distinguishable in at least one byte.
         const auto expected = scalar_dependency_expected(
@@ -538,13 +540,16 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
             return false;
         }
     }
-    // Parameters.scala allocates 224 integer physical registers. Keep these
-    // simultaneous destinations distinct and within the nonzero register set.
-    const unsigned first_pdest = 1U + random() % (224U - plan.loads.size());
+    // Keep simultaneous destinations distinct. Mixed-class windows use the
+    // smaller FP domain so every selected class has a valid physical index.
+    const unsigned register_count = std::any_of(plan.loads.begin(), plan.loads.end(),
+        [](const auto &load) { return load.fp; })
+        ? memblock::kFpPhysicalRegisters : memblock::kIntegerPhysicalRegisters;
+    const unsigned first_pdest = 1U + random() % (register_count - plan.loads.size());
     for (const auto &item : plan.loads) {
         loads.push_back(make_load(base + item.offset,
             static_cast<memblock::LoadOp>(item.op),
-            random() % memblock::kScalarLoadLanes));
+            random() % memblock::kScalarLoadLanes, item.fp));
         loads.back().pdest = static_cast<std::uint8_t>(
             first_pdest + loads.size() - 1U);
         environment.expect_load_data(loads.back(),
@@ -612,8 +617,20 @@ bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
         !environment.run_until_queues_retired(timeout)) {
         return false;
     }
-    for (const auto &load : loads) {
+    for (unsigned index = 0; index < loads.size(); ++index) {
+        const auto &load = loads[index];
+        const auto &item = plan.loads[index];
         coverage.sample(load);
+        unsigned forwarded = 0;
+        for (unsigned byte = 0; byte < item.width(); ++byte) {
+            forwarded += std::any_of(plan.older.begin(), plan.older.end(), [&](const auto &store) {
+                return item.offset + byte >= store.offset &&
+                    item.offset + byte - store.offset < store.width;
+            });
+        }
+        coverage.sample_fp_load(load, scalar_dependency_expected(snapshot, plan.older, item),
+            2, forwarded, item.width() - forwarded);
+        coverage.sample_scalar_format_choice(2, item.fp);
     }
     ++coverage.scalar_dependency_windows;
     coverage.scalar_dependency_stores += stores.size();
@@ -655,7 +672,7 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
         !environment.run_until_queues_retired(timeout)) return false;
     const auto base = action_cacheable_address(window, 64, false) & ~std::uint64_t{63};
     auto plan = make_unresolved_dependency_plan(
-        random, constraints.scalar_unresolved_conflict_per_mille);
+        random, constraints.scalar_unresolved_conflict_per_mille, constraints.scalar_load_policy());
     std::array<unsigned char, 64> snapshot{};
     for (unsigned byte = 0; byte < snapshot.size(); ++byte) {
         const auto pages = reference_pages_for(base);
@@ -677,7 +694,8 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
     }
     // Warm the line and translation before allocating the unresolved store.
     // This is a reachability aid; no correctness decision requires a cache hit.
-    const auto pdests = unresolved_load_destinations(random);
+    const auto pdests = unresolved_load_destinations(random, plan.load.fp
+        ? memblock::kFpPhysicalRegisters : memblock::kIntegerPhysicalRegisters);
     auto warm = make_load(base, memblock::LoadOp::ld, random() % memblock::kScalarLoadLanes);
     warm.pdest = pdests[0];
     if (!environment.set_rob_head(warm.rob, warm.rob_flag) ||
@@ -691,7 +709,8 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
         static_cast<memblock::StoreOp>(std::countr_zero(plan.store.width)),
         random() % memblock::kScalarStoreLanes);
     auto load = make_load(base + plan.load.offset,
-        static_cast<memblock::LoadOp>(plan.load.op), random() % memblock::kScalarLoadLanes);
+        static_cast<memblock::LoadOp>(plan.load.op), random() % memblock::kScalarLoadLanes,
+        plan.load.fp);
     load.pdest = pdests[1];
     // A legal untrained predictor tuple permits independent younger speculation.
     load.store_set_hit = load.load_wait_bit = load.load_wait_strict = false;
@@ -761,6 +780,9 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
             return false;
         }
         coverage.sample(replay);
+        const unsigned forwarded = std::min(plan.store.offset + plan.store.width,
+            plan.load.offset + plan.load.width()) - std::max(plan.store.offset, plan.load.offset);
+        coverage.sample_fp_load(replay, final, 3, forwarded, plan.load.width() - forwarded);
     } else {
         if (!environment.run_until_store_complete(timeout) || !environment.run_cycles(32) ||
             environment.memory_violation_stats().count != violations_before ||
@@ -790,6 +812,8 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
     }
     coverage.sample(store, true);
     coverage.sample(load);
+    coverage.sample_fp_load(load, initial, 3, 0, plan.load.width());
+    coverage.sample_scalar_format_choice(3, plan.load.fp);
     coverage.sample(readback);
     ++coverage.scalar_unresolved_windows;
     coverage.scalar_unresolved_conflicts += plan.conflict;

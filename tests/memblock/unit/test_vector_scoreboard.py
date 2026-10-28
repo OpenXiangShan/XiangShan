@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import re
 import subprocess
 import tempfile
 import unittest
@@ -20,33 +19,11 @@ class VectorScoreboardTest(unittest.TestCase):
         cls.addClassCleanup(cls.workspace.cleanup)
         root = Path(cls.workspace.name)
         cls.binary = root / "vector_scoreboard"
-        generated = (MEMBLOCK_ROOT / "cpp/generated_interface_types.hpp").read_text()
-        # Use the real generated response types without instantiating the DUT.
-        declarations = []
-        for name in ("ScalarLoadWriteback", "ScalarStoreWriteback",
-                     "VectorMemoryWriteback", "MemoryViolation"):
-            match = re.search(rf"^struct {name} \{{.*?^\}};", generated,
-                              re.MULTILINE | re.DOTALL)
-            if match is None:
-                raise AssertionError(f"missing generated writeback type {name}")
-            declarations.append(match.group())
-        for name in ("kScalarLoadFeedbackLanes", "kIfetchPrefetchLanes"):
-            match = re.search(rf"^inline constexpr unsigned {name} = .*?;",
-                              generated, re.MULTILINE)
-            if match is None:
-                raise AssertionError(f"missing generated constant {name}")
-            declarations.append(match.group())
-        facade = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        includes = re.findall(r"^#include <[^>]+>$", facade, re.MULTILINE)
         source = root / "scoreboard.cpp"
         source.write_text(
-            '\n#include "failure.hpp"\n' + "\n".join(includes)
-            + "\nnamespace memblock::generated {\n"
-            + "\n".join(declarations)
-            + '\n}\nnamespace memblock {\n'
-            + '#include "environment/model.inc"\n'
-            + '#include "environment/scoreboards.inc"\n}\n'
-            + '#include "vector_scoreboard_fixture.cpp"\n'
+            '#include "memblock_env.hpp"\nnamespace memblock {\n'
+            '#include "environment/scoreboards.inc"\n}\n'
+            '#include "vector_scoreboard_fixture.cpp"\n'
         )
         subprocess.run(
             ["c++", "-std=c++20", "-O0", "-I", str(MEMBLOCK_ROOT / "cpp"),

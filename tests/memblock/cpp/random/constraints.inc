@@ -240,7 +240,14 @@ struct RandomConstraints {
     unsigned scalar_unresolved_per_mille = 100;
     unsigned scalar_unresolved_conflict_per_mille = 500;
     unsigned translation_permuted_per_mille = 500;
+    unsigned scalar_fp_per_mille = 200;
+    std::array<unsigned, 3> scalar_fp_width_weights{0, 1, 1};
     memblock::ResponseLatencyProfiles response_latency{};
+
+    mixed::ScalarLoadPolicy scalar_load_policy() const
+    {
+        return {scalar_fp_per_mille, scalar_fp_width_weights};
+    }
 
     static RandomConstraints preset(std::string_view name)
     {
@@ -340,6 +347,8 @@ struct RandomConstraints {
                 .scalar_dependency_per_mille = 0,
                 .scalar_unresolved_per_mille = 0,
                 .translation_permuted_per_mille = 0,
+                .scalar_fp_per_mille = 0,
+                .scalar_fp_width_weights = {1, 1, 1},
                 .response_latency = {},
             };
         }
@@ -439,6 +448,8 @@ struct RandomConstraints {
                 .bank_conflict_per_mille = 500,
                 .scalar_dependency_per_mille = 350,
                 .scalar_unresolved_per_mille = 200,
+                .scalar_fp_per_mille = 250,
+                .scalar_fp_width_weights = {1, 1, 1},
                 .response_latency = {},
             };
         }
@@ -543,6 +554,8 @@ struct RandomConstraints {
                 .bank_conflict_per_mille = 250,
                 .scalar_dependency_per_mille = 200,
                 .scalar_unresolved_per_mille = 100,
+                .scalar_fp_per_mille = 200,
+                .scalar_fp_width_weights = {0, 1, 1},
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
                     memblock::ResponseLatencyProfile::spec,
@@ -645,6 +658,8 @@ struct RandomConstraints {
                 .bank_conflict_per_mille = 750,
                 .scalar_dependency_per_mille = 500,
                 .scalar_unresolved_per_mille = 300,
+                .scalar_fp_per_mille = 500,
+                .scalar_fp_width_weights = {1, 1, 1},
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
                     memblock::ResponseLatencyProfile::spec,
@@ -1173,6 +1188,14 @@ struct RandomConstraints {
             scalar_unresolved_per_mille = parsed;
         } else if (key == "scalar-unresolved-conflict") {
             scalar_unresolved_conflict_per_mille = parsed;
+        } else if (key == "scalar-fp") {
+            scalar_fp_per_mille = parsed;
+        } else if (key == "scalar-fp16") {
+            scalar_fp_width_weights[0] = parsed;
+        } else if (key == "scalar-fp32") {
+            scalar_fp_width_weights[1] = parsed;
+        } else if (key == "scalar-fp64") {
+            scalar_fp_width_weights[2] = parsed;
         } else if (key == "scalar-dependency") {
             scalar_dependency_per_mille = parsed;
         } else if (key == "bank-conflict") {
@@ -1185,6 +1208,7 @@ struct RandomConstraints {
 
     void validate() const
     {
+        scalar_load_policy().validate();
         if (std::accumulate(
                 operation_weights.begin(), operation_weights.end(), 0ULL) == 0) {
             throw std::invalid_argument(
@@ -2967,7 +2991,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=58 constraints=" << name
+        stream << "constraint_schema=59 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3143,6 +3167,9 @@ struct RandomConstraints {
                << uncache_load_error_denied_per_mille
                << " target_stride_stream=" << stride_stream_per_mille
                << " target_bank_conflict=" << bank_conflict_per_mille
+               << " target_scalar_fp=" << scalar_fp_per_mille
+               << " target_scalar_fp_widths=" << scalar_fp_width_weights[0] << ','
+               << scalar_fp_width_weights[1] << ',' << scalar_fp_width_weights[2]
                << " target_scalar_dependency=" << scalar_dependency_per_mille
                << " target_vector_index_repeat=" << vector_index_repeat_per_mille
                << " target_scalar_unresolved=" << scalar_unresolved_per_mille

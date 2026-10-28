@@ -15,13 +15,15 @@ struct UnresolvedDependencyPlan {
 };
 
 inline UnresolvedDependencyPlan make_unresolved_dependency_plan(
-    std::mt19937_64 &random, unsigned conflict_per_mille)
+    std::mt19937_64 &random, unsigned conflict_per_mille,
+    const ScalarLoadPolicy &load_policy = {})
 {
     if (conflict_per_mille > 1000) {
         throw std::invalid_argument("unresolved conflict rate exceeds 1000");
     }
     const unsigned store_width = 1U << (random() % 4U);
-    const unsigned load_op = random() % 7U;
+    const auto load_shape = load_policy.choose(random);
+    const unsigned load_op = load_shape.op;
     const unsigned load_width = 1U << (load_op & 3U);
     const bool conflict = random() % 1000U < conflict_per_mille;
     // Keep both operands in one 16-byte comparison region. The disjoint
@@ -36,17 +38,20 @@ inline UnresolvedDependencyPlan make_unresolved_dependency_plan(
     const auto [store_offset, load_offset] = candidates[random() % candidates.size()];
     const unsigned cell = (random() % 4U) * 16U;
     return {{cell + store_offset, store_width, random()},
-        {cell + load_offset, load_op}, conflict, (random() & 1U) != 0,
+        {cell + load_offset, load_op, load_shape.fp}, conflict, (random() & 1U) != 0,
         static_cast<unsigned>(random() % 8U)};
 }
 
-inline std::array<std::uint8_t, 3> unresolved_load_destinations(std::mt19937_64 &random)
+inline std::array<std::uint8_t, 3> unresolved_load_destinations(std::mt19937_64 &random,
+    unsigned physical_registers = memblock::kIntegerPhysicalRegisters)
 {
     // The warm load's mapping remains live across the held anchor, and the
     // terminal load's mapping remains live at readback. Refetch restores the
     // original free-list head, reusing the provisional destination. Reserve
     // distinct registers for warm, provisional/refetch, and readback roles.
-    const unsigned first = 1U + random() % 221U;
+    if (physical_registers < 4 || physical_registers > 256)
+        throw std::invalid_argument("invalid unresolved load destination domain");
+    const unsigned first = 1U + random() % (physical_registers - 3U);
     return {static_cast<std::uint8_t>(first), static_cast<std::uint8_t>(first + 1U),
         static_cast<std::uint8_t>(first + 2U)};
 }

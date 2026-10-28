@@ -59,13 +59,13 @@ bool MixedScenario::run_concurrent_windows()
             0U, concurrent_vector_load_flow_limit, true);
         const auto &vector_store_shape = choose_vector_shape(
             1U, concurrent_vector_store_flow_limit, true);
-        const auto scalar_op =
-            static_cast<memblock::LoadOp>(random() % 7);
+        const auto scalar_shape = constraints.scalar_load_policy().choose(random);
+        const auto scalar_op = static_cast<memblock::LoadOp>(scalar_shape.op);
         auto scalar = make_load(
             constrained_window_address(
                 window_base,
                 1U << (static_cast<unsigned>(scalar_op) & 3U)),
-            scalar_op, random() % 3);
+            scalar_op, random() % 3, scalar_shape.fp);
         auto vector_load_uops = make_random_vector_uops(
             false, window_base + 32, vector_load_shape, vector_corner);
         const auto scalar_store_op =
@@ -141,6 +141,7 @@ bool MixedScenario::run_concurrent_windows()
         if (special_load) {
             environment.expect_load(*special_load);
         }
+        const auto scalar_expected = environment.memory().expected_load(scalar);
         environment.expect_load(scalar);
         environment.expect_store(scalar_store);
         environment.expect_prefetch(prefetch);
@@ -286,6 +287,8 @@ bool MixedScenario::run_concurrent_windows()
             }
         }
         coverage.sample(scalar);
+        coverage.sample_fp_load(scalar, scalar_expected, 1);
+        coverage.sample_scalar_format_choice(1, scalar.fp_wen);
         coverage.sample(scalar_store, scalar_store_data_first);
         for (const auto &uop : vector_load_uops) {
             coverage.sample(uop);

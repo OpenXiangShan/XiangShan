@@ -1488,7 +1488,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4412,6 +4412,45 @@ def _check_mixed_coverage(
         )
 
 
+def _check_scalar_fp_accounting(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 59:
+        return
+    rate = result.get("target_scalar_fp")
+    _require(type(rate) is int and 0 <= rate <= 1000, "invalid target_scalar_fp")
+    weights = _csv_counts(result, "target_scalar_fp_widths", 3)
+    _require(rate == 0 or sum(weights) > 0, "enabled FP loads have no width")
+    choices = _csv_counts(result, "scalar_format_choices", 8)
+    widths = _csv_counts(result, "scalar_fp", 3)
+    signs = _csv_counts(result, "scalar_fp_sign", 6)
+    origins = _csv_counts(result, "scalar_fp_origin", 4)
+    faults = _csv_counts(result, "scalar_fp_faults", 3)
+    overlay = _csv_counts(result, "scalar_fp_overlay", 2)
+    load_ops = _csv_counts(result, "load_ops", 7)
+    scalar = _csv_counts(result, "scalar", 2)
+    _require(sum(widths) == sum(origins) and sum(choices) <= scalar[0],
+             "FP format/origin/choice counts disagree")
+    for origin in range(4):
+        selected = choices[origin * 2 + 1]
+        _require((selected <= origins[origin] <= 2 * selected) if origin == 3
+                 else origins[origin] == selected,
+                 "FP checked executions disagree with selected origins")
+    for width in range(3):
+        _require(signs[2*width] + signs[2*width+1] + faults[width] == widths[width]
+                 and widths[width] <= load_ops[width + 1]
+                 and (weights[width] != 0 or widths[width] == 0),
+                 "FP width/sign/fault/opcode counts disagree")
+    misaligned = result.get("scalar_fp_misaligned")
+    _require(type(misaligned) is int and 0 <= misaligned <= sum(widths),
+             "invalid scalar_fp_misaligned count")
+    _require(sum(overlay) <= 8 * (origins[2] + origins[3]),
+             "FP overlay bytes exceed dependency/refetch work")
+    if rate == 0:
+        _require(sum(choices[1::2]) == sum(widths) == 0,
+                 "disabled FP direction generated FP work")
+    if rate == 1000:
+        _require(sum(choices[::2]) == 0, "forced FP direction selected integer work")
+
+
 def _check_alias_recall_accounting(result: dict[str, Any]) -> int:
     if result.get("constraint_schema", 0) < 58:
         return 0
@@ -4698,6 +4737,7 @@ def _check_result(
         _check_scalar_unresolved_accounting(result)
         _check_permuted_translation_accounting(result)
         _check_alias_recall_accounting(result)
+        _check_scalar_fp_accounting(result)
         if require_coverage:
             try:
                 _check_mixed_coverage(result, require_backpressure)

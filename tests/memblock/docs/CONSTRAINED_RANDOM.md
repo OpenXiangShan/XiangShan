@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=58`.
+`constraint_schema=59`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -81,6 +81,8 @@ they do not imply arbitrary numeric suffix support.
 | `misaligned` | Misalignment rate where width, operation, and legal address class permit it. |
 | `stride-stream` | Rate selecting a fixed-PC, 128-byte-stride cold scalar-load stream. |
 | `bank-conflict` | Rate replacing an eligible clean scalar-load action with a two- or three-load same-bank resident wave; banks are derived from request addresses. |
+| `scalar-fp` | FP format rate for eligible ordinary scalar loads, heterogeneous-window scalar loads, dependency-window younger loads and unresolved provisional/refetch instructions. Defaults coverage/spec/corner/cmo-stress: 250/200/500/0. Zero selects integer formats and 1000 selects FP formats at these sites; auxiliary loads retain their own contracts. |
+| `scalar-fp16`, `scalar-fp32`, `scalar-fp64` | Relative FLH/FLW/FLD width weights when FP is selected. Coverage/corner use 1/1/1, spec uses 0/1/1, and cmo-stress uses 1/1/1 with FP disabled. Enabled FP requires a nonzero sum; zero disables that FP width. |
 | `scalar-unresolved` | Rate replacing an eligible ordinary scalar-store action with a delayed-address window, before the `scalar-dependency` selection. Defaults coverage/spec/corner/cmo-stress: 200/100/300/0. |
 | `scalar-unresolved-conflict` | Conditional byte-overlap rate in that window; default 500 in all presets. Zero forces disjoint-byte controls and 1000 forces conflicts. |
 | `scalar-dependency` | Rate replacing a remaining eligible ordinary scalar-store action with a randomized dependency window: 1..4 older stores, 1..3 younger loads, and an optional store younger than those loads. Widths, byte overlap, payloads, lanes, operand arrival, issue order and 0..7-cycle gaps vary. Defaults coverage/spec/corner/cmo-stress: 350/200/500/0. |
@@ -504,6 +506,51 @@ Array order and sampling code are authoritative in
 | `probe_source_space`, `probe_source_lifecycle`, `probe_max_outstanding` | Available manager source IDs, unique/reuse/wrap counts, and maximum outstanding Probes. |
 | `load_wakeups`, `load_cancels`, `raw_load_*` | Feedback diagnostics; they do not define independent expected memory values. |
 
+## Ordinary FP Load Formats
+
+`ScalarLoadPolicy` chooses destination class and width before address alignment
+and dependency construction. Integer choices retain LB/LH/LW/LD/LBU/LHU/LWU;
+FP choices use FLH/FLW/FLD with exclusive FP write enable. Existing address,
+translation, misalignment, payload, operand-order and scheduler choices still
+apply. FP formats enter ordinary loads, the scalar member of heterogeneous
+windows, randomized SQ dependency graphs and unresolved provisional/refetch
+instructions. Auxiliary warmups/readbacks, bank/merge/pressure helpers,
+atomics, H/NC/MMIO helpers and final physical observation retain their existing
+formats. The directed FP scenario separately covers selected NC/MMIO/fault paths.
+
+The common model assembles declared physical bytes and NaN-boxes FLH/FLW to
+FLEN=64, preserving all low payload bits; FLD preserves all 64 bits, including
+NaN payloads. Dependency expectations apply older input-store byte overlays
+before the same format rule. Unresolved executions use the pre-store image,
+then the program-order image after identified recovery; refetch preserves FP
+class and reuses its restored destination. No DUT data/address determines an
+expected result. The ordinary factory samples integer destinations 1..223 and
+FP destinations 1..191, within the generated 224/192-entry files. Simultaneous
+dependency destinations and unresolved warm/provisional/readback roles remain
+distinct; selecting a legal numeric domain does not model a complete rename
+free-list history. FP physical zero is writable but is not selected here.
+
+`scalar_format_choices` contains four integer/FP pairs in ordinary,
+heterogeneous-window, SQ-dependency and unresolved-instruction order. These are
+architectural selections, counted once even when an unresolved load refetches.
+`scalar_fp` counts sampled checker executions by FLH/FLW/FLD width;
+`scalar_fp_origin` splits them into the same four origins. A refetch adds a
+separate execution epoch. `scalar_fp_sign` contains two low-payload sign bins
+per width; declared faults instead contribute to `scalar_fp_faults` by width.
+These are scenario/checker observations in successful runs, not independent
+physical-register-file monitors. `scalar_fp_overlay` counts independently
+expected older-store/snapshot bytes in dependency and unresolved executions;
+it does not count internal forwarding events. `scalar_fp_misaligned` counts
+sampled unaligned FP addresses. Accounting checks conserve choices, origins,
+widths, signs/faults and endpoint/zero-width controls without requiring positive
+bins. Fault data follows the existing declared-exception policy.
+
+Exceptional misaligned FP destination-enable semantics remain unqualified:
+the main load path gates both enables on fault, while the misalignment source
+copies FP enable. A complete CPU-path disposition is required before treating
+that difference as an externally visible functional violation. This does not
+restrict ordinary successful misaligned FP traffic.
+
 ## Ordinary Scalar Dependency Windows
 
 The common generator's `scalar-dependency` direction retains the selected
@@ -512,8 +559,9 @@ contained in one cache line. It allocates ROB/LSQ identities in program order,
 holds retirement behind an older non-memory instruction, and shuffles store
 address/data arrival independently of age. The common ordinary-store factory
 uses one paired STA/STD lane as the CPU scheduler does. Simultaneous dependency
-loads use distinct integer destinations in the implemented 1..223 range. All store operands are known before
-loads issue; an optional younger store is already present but excluded from each
+loads have distinct numeric destinations within their class domains: a window
+containing FP reserves indices in 1..191 and an integer-only window in 1..223.
+All store operands are known before loads issue; an optional younger store is already present but excluded from each
 load's SQ snapshot. No store may dequeue before those loads complete. Stores
 then commit in architectural order, and every touched word joins final readback.
 
@@ -552,7 +600,9 @@ one byte of the load. A preliminary ordinary load warms the line and load TLB;
 the store's separate TLB can still miss and uses legal same-allocation STA
 reissue until its hit feedback. The load uses an untrained nonwaiting predictor
 tuple so its independent execution is legal. Warm, provisional/refetch and
-readback roles reserve three distinct physical destinations in 1..223; a completed
+readback roles reserve three distinct numeric destinations in 1..191 for an FP
+window or 1..223 for an integer-only window. Warm/readback remain integer and the
+provisional/refetch use the selected class; a completed
 load's architectural mapping can remain live across the following anchor.
 Refetch restores the rename free-list head and reuses the provisional pdest.
 
@@ -737,9 +787,10 @@ The highest remaining ordinary-workload limitations are the fixed five-producer
 composition of heterogeneous windows, all such windows preceding serial work,
 and a drain between windows. Dependency windows vary counts and operand order
 but place all store operands before their loads; unresolved-address windows have
-one store/load pair. Canonical scalar loads currently select integer destinations
-only, despite directed FP support. Prioritize bounded sliding admission with
-variable producer counts/ages, legal FP loads with independent value/boxing
-checks, and multiple unresolved store identities with interleaved operand arrival.
+one store/load pair. Canonical FP formats now participate in ordinary,
+heterogeneous, SQ dependency and unresolved/refetch traffic with independent
+boxing/data checks. Prioritize bounded sliding admission with variable producer
+counts/ages and multiple unresolved store identities with interleaved operand
+arrival; broader FP helper and exceptional-misalignment combinations remain open.
 Broader temporal locality/dependent-address streams and scalar/vector SQ
 forwarding follow these. Rare error/protection/CMO crosses remain secondary.

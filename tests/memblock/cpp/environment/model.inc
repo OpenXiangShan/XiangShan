@@ -1,6 +1,9 @@
 // This file is included inside memblock_env.hpp's memblock namespace.
 
 constexpr unsigned kScalarLoadLanes = 3;
+// Parameters.scala's generated default intPreg/fpPreg entry counts.
+constexpr unsigned kIntegerPhysicalRegisters = 224;
+constexpr unsigned kFpPhysicalRegisters = 192;
 static_assert(generated::kScalarLoadFeedbackLanes == kScalarLoadLanes);
 static_assert(generated::kIfetchPrefetchLanes == kScalarLoadLanes);
 constexpr unsigned kScalarStoreLanes = 2;
@@ -997,6 +1000,21 @@ inline RobIdentity rob_identity(std::uint8_t value, bool flag)
     return RobIdentity{value, flag};
 }
 
+// Architectural register contents from independent little-endian payload bits.
+// FLH/FLW fill every upper FLEN=64 bit with one, regardless of payload sign.
+inline std::uint64_t scalar_load_value(LoadOp op, bool fp, std::uint64_t value)
+{
+    const unsigned encoding = static_cast<unsigned>(op);
+    if (fp) {
+        if (op == LoadOp::lh) return 0xffffffffffff0000ULL | (value & 0xffffULL);
+        if (op == LoadOp::lw) return 0xffffffff00000000ULL | (value & 0xffffffffULL);
+        if (op == LoadOp::ld) return value;
+        throw std::invalid_argument("unsupported floating-point load width/opcode");
+    }
+    const unsigned bits = (1U << (encoding & 3U)) * 8U;
+    return (encoding & 4U) != 0 ? value : sign_extend(value, bits);
+}
+
 class SparseMemory {
 public:
     explicit SparseMemory(SparseMemory *write_mirror = nullptr)
@@ -1149,7 +1167,9 @@ public:
             value |= std::uint64_t{read_byte(reference_byte_address(
                 transaction, transaction.address + byte))} << (8 * byte);
         }
-        return (encoding & 4U) != 0 ? value : sign_extend(value, size * 8);
+        if (transaction.fp_wen && transaction.rf_wen)
+            throw std::invalid_argument("scalar load selects both integer and FP destinations");
+        return scalar_load_value(transaction.op, transaction.fp_wen, value);
     }
 
     std::array<unsigned char, 16> expected_vector_load(

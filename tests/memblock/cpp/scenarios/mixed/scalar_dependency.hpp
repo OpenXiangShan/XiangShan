@@ -1,5 +1,7 @@
 #pragma once
 
+#include "memblock_env.hpp"
+#include "scalar_load.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -19,6 +21,7 @@ struct DependencyStore {
 struct DependencyLoad {
     unsigned offset;
     unsigned op;
+    bool fp = false;
 
     unsigned width() const { return 1U << (op & 3U); }
 };
@@ -34,7 +37,8 @@ struct ScalarDependencyPlan {
     std::vector<unsigned> event_delays;
 };
 
-inline ScalarDependencyPlan make_scalar_dependency_plan(std::mt19937_64 &random)
+inline ScalarDependencyPlan make_scalar_dependency_plan(std::mt19937_64 &random,
+    const ScalarLoadPolicy &load_policy = {})
 {
     ScalarDependencyPlan plan;
     const unsigned stores = 1U + random() % 4U;
@@ -49,12 +53,13 @@ inline ScalarDependencyPlan make_scalar_dependency_plan(std::mt19937_64 &random)
         plan.older.push_back({offset, width, random()});
     }
     for (unsigned index = 0; index < loads; ++index) {
-        const unsigned op = random() % 7U;
+        const auto shape = load_policy.choose(random);
+        const unsigned op = shape.op;
         const unsigned width = 1U << (op & 3U);
         const unsigned offset = random() % 3U == 0
             ? (random() % (32U / width)) * width
             : plan.older[random() % stores].offset & ~(width - 1U);
-        plan.loads.push_back({offset, op});
+        plan.loads.push_back({offset, op, shape.fp});
         plan.load_order.push_back(index);
     }
     if ((random() & 1U) != 0) {
@@ -89,11 +94,7 @@ inline std::uint64_t scalar_dependency_expected(
         }
         value |= std::uint64_t{expected} << (8U * byte);
     }
-    const unsigned bits = load.width() * 8U;
-    if (load.op < 3U && (value & (std::uint64_t{1} << (bits - 1U))) != 0) {
-        value |= ~((std::uint64_t{1} << bits) - 1U);
-    }
-    return value;
+    return memblock::scalar_load_value(static_cast<memblock::LoadOp>(load.op), load.fp, value);
 }
 
 } // namespace memblock::scenarios::mixed
