@@ -2099,11 +2099,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, scoreboard)
         self.assertIn("scalar_load_canceled_observed()", environment)
-        self.assertIn("scoreboard_.observe(lane, writeback, canceled)", feedback)
+        self.assertIn("scoreboard_.observe(lane, writeback, memory_violation)", feedback)
         for contract in (
             ".tolerate_canceled_result = true",
             "scalar_load_canceled_observed()",
-            "account_lq_cancellation(1)",
+            "lq_redirect_canceled_observed()",
+            "phase=first-access-refetch",
             "MEMBLOCK_TRANSLATION_ALIAS_FIRST_ACCESS",
         ):
             self.assertIn(contract, scenario)

@@ -24,7 +24,7 @@ class VectorScoreboardTest(unittest.TestCase):
         # Use the real generated response types without instantiating the DUT.
         declarations = []
         for name in ("ScalarLoadWriteback", "ScalarStoreWriteback",
-                     "VectorMemoryWriteback"):
+                     "VectorMemoryWriteback", "MemoryViolation"):
             match = re.search(rf"^struct {name} \{{.*?^\}};", generated,
                               re.MULTILINE | re.DOTALL)
             if match is None:

@@ -119,28 +119,94 @@ static void check_canceled_result()
     writeback.trigger = transaction.expected_trigger;
     writeback.data = 0xdeadbeefcafef00dULL;
 
+    memblock::generated::MemoryViolation redirect{};
+    redirect.valid = true;
+    redirect.level = true;
+    redirect.rob_value = transaction.rob;
+    redirect.rob_flag = transaction.rob_flag;
+    redirect.ftq_value = transaction.ftq_ptr;
+    redirect.ftq_offset = transaction.ftq_offset;
+    redirect.is_rvc = transaction.predecode_rvc;
+
     auto tolerated = transaction;
     tolerated.tolerate_canceled_result = true;
+    tolerated.expected_debug_is_mmio = false;
+    tolerated.expected_debug_is_ncio = false;
+    tolerated.expected_debug_is_perf_cnt = false;
     memblock::LoadScoreboard accepted;
     accepted.expect(tolerated, 0x1122334455667788ULL);
-    accepted.observe(0, writeback, true);
+    accepted.observe(0, writeback, redirect);
     require(accepted.ok() && accepted.done() &&
             accepted.canceled_observed() == 1,
             "opt-in canceled result was not accepted as a legal cancellation");
 
+    for (unsigned field = 0; field < 10; ++field) {
+        auto wrong = writeback;
+        if (field == 0) ++wrong.pdest;
+        if (field == 1) wrong.rf_wen = false;
+        if (field == 2) wrong.fp_wen = true;
+        if (field == 3) wrong.flush_pipe = true;
+        if (field == 4) ++wrong.trigger;
+        if (field == 5) wrong.replay = true;
+        if (field == 6) wrong.debug_is_mmio = true;
+        if (field == 7) wrong.debug_is_ncio = true;
+        if (field == 8) wrong.debug_is_perf_cnt = true;
+        if (field == 9) wrong.exception_mask = memblock::kExceptionLoadPageFault;
+        memblock::LoadScoreboard metadata;
+        metadata.expect(tolerated, 0x1122334455667788ULL);
+        metadata.observe(0, wrong, redirect);
+        require(!metadata.ok() && !metadata.done() &&
+                metadata.canceled_observed() == 0,
+                "canceled wrong-data pulse hid invalid metadata");
+    }
+
     memblock::LoadScoreboard not_opted_in;
     not_opted_in.expect(transaction, 0x1122334455667788ULL);
-    not_opted_in.observe(0, writeback, true);
+    not_opted_in.observe(0, writeback, redirect);
     require(!not_opted_in.ok() && !not_opted_in.done() &&
             not_opted_in.canceled_observed() == 0,
             "canceled result was accepted without opt-in");
 
+    for (unsigned field = 0; field < 8; ++field) {
+        auto wrong = redirect;
+        if (field == 0) wrong.valid = false;
+        if (field == 1) wrong.level = false;
+        if (field == 2) ++wrong.rob_value;
+        if (field == 3) wrong.rob_flag = !wrong.rob_flag;
+        if (field == 4) wrong.ftq_flag = true;
+        if (field == 5) ++wrong.ftq_value;
+        if (field == 6) ++wrong.ftq_offset;
+        if (field == 7) wrong.is_rvc = !wrong.is_rvc;
+        memblock::LoadScoreboard mismatch;
+        mismatch.expect(tolerated, 0x1122334455667788ULL);
+        mismatch.observe(0, writeback, wrong);
+        require(!mismatch.ok() && !mismatch.done() &&
+                mismatch.canceled_observed() == 0,
+                "unmatched redirect hid wrong data");
+    }
+
+    memblock::LoadScoreboard epoch;
+    epoch.expect(tolerated, 0x1122334455667788ULL);
+    epoch.observe(0, writeback, redirect);
+    auto fresh = tolerated;
+    ++fresh.pdest;
+    fresh.tolerate_canceled_result = false;
+    epoch.expect(fresh, 0x1122334455667788ULL);
+    auto correct = writeback;
+    correct.pdest = fresh.pdest;
+    correct.data = 0x1122334455667788ULL;
+    epoch.observe(0, correct);
+    require(epoch.ok() && epoch.done() && epoch.canceled_observed() == 1 &&
+            epoch.observed() == 1, "refetch epoch did not complete exactly once");
+    epoch.observe(0, correct);
+    require(!epoch.ok(), "duplicate refetch completion was accepted");
+
     memblock::LoadScoreboard no_cancel;
     no_cancel.expect(tolerated, 0x1122334455667788ULL);
-    no_cancel.observe(0, writeback, false);
+    no_cancel.observe(0, writeback);
     require(!no_cancel.ok() && !no_cancel.done() &&
             no_cancel.canceled_observed() == 0,
-            "wrong data without ld2Cancel was accepted");
+            "wrong data without matching refetch redirect was accepted");
 }
 
 static void check_index(

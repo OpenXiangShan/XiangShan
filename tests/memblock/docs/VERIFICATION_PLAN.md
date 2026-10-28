@@ -161,8 +161,12 @@ Priority work, each requiring executable stimulus and an independent check:
 1. Extend final observation beyond cacheable identity-mapped commits to the
    remaining legal aliased translations, non-cacheable/device effects and
    fault-path side-effect checks; one cross-alias path is now directed, but
-   first-access cancellation is detected and LQ-accounted, but the backend replay that follows it is still not modeled. Keep the CMO
-   exclusion explicit. Single-uop later-element and masked page faults now
+   the first-access alias mismatch now requires its exact flush-itself request,
+   observed queue recovery and correct-data frontend refetch. Its retained DUT
+   case dequeues both LQ epochs with zero cancellations; nonzero-cancellation
+   alias refetch still needs qualification. General IQ/LQ replay and arbitrary
+   refetch overlaps remain open. Keep the CMO exclusion
+   explicit. Single-uop later-element and masked page faults now
    require `vstart=1`, and an all-masked unmapped load must complete without a
    fault while the run observes no PTW/DCache request. The intra-uop
    page-crossing faults also publish the exact faulting-element address after

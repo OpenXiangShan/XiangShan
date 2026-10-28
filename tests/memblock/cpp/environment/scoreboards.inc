@@ -21,6 +21,9 @@ public:
         std::uint64_t address;
         std::uint16_t op;
         bool tolerate_canceled_result;
+        std::uint8_t ftq_value = 0;
+        std::uint8_t ftq_offset = 0;
+        bool is_rvc = false;
     };
 
     void expect(const LoadTransaction &transaction, std::uint64_t data)
@@ -53,6 +56,9 @@ public:
                 transaction.address,
                 static_cast<std::uint16_t>(transaction.op),
                 transaction.tolerate_canceled_result,
+                static_cast<std::uint8_t>(transaction.ftq_ptr),
+                transaction.ftq_offset,
+                transaction.predecode_rvc,
             });
         if (!inserted && error_.empty()) {
             std::ostringstream message;
@@ -84,7 +90,7 @@ public:
     }
 
     void observe(unsigned lane, const generated::ScalarLoadWriteback &writeback,
-                 bool canceled = false)
+                 const generated::MemoryViolation &refetch = {})
     {
         if (!writeback.valid) {
             return;
@@ -119,14 +125,16 @@ public:
             expected_.erase(it);
             return;
         }
-        if (canceled && it->second.tolerate_canceled_result &&
+        const bool canceled_data = it->second.tolerate_canceled_result &&
+            refetch.valid && refetch.level && !refetch.ftq_flag &&
+            refetch.rob_value == writeback.rob_value &&
+            refetch.rob_flag == it->second.rob_flag &&
+            refetch.ftq_value == it->second.ftq_value &&
+            refetch.ftq_offset == it->second.ftq_offset &&
+            refetch.is_rvc == it->second.is_rvc &&
             it->second.exception_mask == 0 && writeback.exception_mask == 0 &&
-            !writeback.replay && writeback.data != it->second.data) {
-            ++canceled_observed_;
-            expected_.erase(it);
-            return;
-        }
-        ++observed_;
+            !writeback.replay && writeback.data != it->second.data;
+        if (!canceled_data) ++observed_;
         const std::uint32_t missing_exception =
             it->second.exception_mask & ~writeback.exception_mask;
         const std::uint32_t unexpected_exception = writeback.exception_mask &
@@ -146,13 +154,14 @@ public:
             optional_mismatch(
                 writeback.debug_is_perf_cnt,
                 it->second.debug_is_perf_cnt) ||
-            (it->second.check_data &&
+            (it->second.check_data && !canceled_data &&
              (it->second.exception_mask == 0 ||
               it->second.check_data_on_exception) &&
              writeback.data != it->second.data)) {
             fail("mismatched load writeback", lane, writeback, &it->second);
             return;
         }
+        if (canceled_data) ++canceled_observed_;
         expected_.erase(it);
     }
 

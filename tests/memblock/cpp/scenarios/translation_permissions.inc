@@ -2712,10 +2712,9 @@ int run_translation_alias(int argc, char **argv)
 
 
     // First access to the second alias while the older store is still in the
-    // SBuffer pipeline.  The DUT may legally cancel this attempt through
-    // ld2Cancel; the opt-in expectation accepts exactly one canceled data
-    // pulse and the scenario accounts the LQ cancellation.  A wrong-data
-    // completion without ld2Cancel still fails.
+    // SBuffer pipeline. A virtual/physical forwarding-tag mismatch requests
+    // flush-itself and frontend refetch. ld2Cancel only cancels speculative
+    // wakeups; it cannot excuse a missing redirect or eventual correct data.
     {
         memblock::Environment canceled_alias(argc, argv);
         constexpr std::uint64_t cancel_store_virtual = 0x60000000ULL;
@@ -2778,11 +2777,16 @@ int run_translation_alias(int argc, char **argv)
             .sq = 1,
             .pdest = 160,
             .lane = 0,
+            .predecode_rvc = true,
+            .ftq_ptr = 17,
+            .ftq_offset = 3,
             .expected_debug_is_mmio = false,
             .expected_debug_is_ncio = false,
             .expected_debug_is_perf_cnt = false,
             .tolerate_canceled_result = true,
         };
+        const auto violations_before =
+            canceled_alias.memory_violation_stats().count;
         canceled_alias.expect_load_data(first_access_load, cancel_data);
         if (!canceled_alias.set_rob_head(
                 first_access_load.rob, first_access_load.rob_flag) ||
@@ -2805,18 +2809,90 @@ int run_translation_alias(int argc, char **argv)
                       << " canceled=" << canceled_count << '\n';
             return 1;
         }
-        if (canceled_count == 1 &&
-            !canceled_alias.account_lq_cancellation(1)) {
+        for (unsigned cycle = 0;
+             cycle < 16 && canceled_alias.memory_violation_stats().count ==
+                 violations_before; ++cycle) {
+            if (!canceled_alias.run_cycles(1)) return 1;
+        }
+        const auto violation = canceled_alias.memory_violation_stats();
+        const bool refetch = violation.count == violations_before + 1;
+        if (violation.count > violations_before + 1 ||
+            (canceled_count != 0 && !refetch) ||
+            (refetch && (!violation.last.valid || !violation.last.level ||
+                violation.last.rob_value != first_access_load.rob ||
+                violation.last.rob_flag != first_access_load.rob_flag ||
+                violation.last.ftq_flag ||
+                violation.last.ftq_value != first_access_load.ftq_ptr ||
+                violation.last.ftq_offset != first_access_load.ftq_offset ||
+                violation.last.is_rvc != first_access_load.predecode_rvc))) {
             std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
                       << canceled_alias.cycle()
-                      << " phase=first-access-cancellation reason="
+                      << " phase=first-access-redirect-evidence canceled="
+                      << canceled_count << " violations=" << violation.count
+                      << " level=" << violation.last.level << " rob="
+                      << unsigned(violation.last.rob_value) << ':'
+                      << violation.last.rob_flag << '\n';
+            return 1;
+        }
+        if (refetch) {
+            // CtrlBlock registers memoryViolation and RedirectGenerator adds
+            // another register before Backend returns the redirect to MemBlock.
+            const auto return_cycle = violation.last_cycle + 2;
+            if (canceled_alias.cycle() > return_cycle ||
+                !canceled_alias.run_cycles(static_cast<unsigned>(
+                    return_cycle - canceled_alias.cycle())) ||
+                !canceled_alias.redirect_after(
+                    violation.last.rob_value, violation.last.rob_flag, true) ||
+                !canceled_alias.run_until_queues_retired(4096) ||
+                !canceled_alias.run_until_sbuffer_empty(4096) ||
+                !canceled_alias.run_cycles(8)) {
+                std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                          << canceled_alias.cycle()
+                          << " phase=first-access-redirect-recovery reason="
+                          << canceled_alias.error() << '\n';
+                return 1;
+            }
+            auto replay = first_access_load;
+            // Flush-itself restores this ROB identity. The LQ entry may have
+            // dequeued already; rewind the dispatch cursor only by observed
+            // redirect cancellation, never by the wakeup-cancel pulse.
+            const auto next_lq = canceled_alias.lq_allocated() -
+                canceled_alias.lq_redirect_canceled_observed();
+            replay.lq = memblock::lq_pointer_value(next_lq);
+            replay.lq_flag = memblock::lq_pointer_flag(next_lq);
+            replay.pdest = 161;
+            replay.tolerate_canceled_result = false;
+            canceled_alias.expect_load_data(replay, cancel_data);
+            if (!canceled_alias.set_rob_head(replay.rob, replay.rob_flag) ||
+                !canceled_alias.enqueue_load(replay) ||
+                !canceled_alias.issue_load(replay, 4096) ||
+                !canceled_alias.run_until_complete(16384)) {
+                std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                          << canceled_alias.cycle()
+                          << " phase=first-access-refetch reason="
+                          << canceled_alias.error() << '\n';
+                return 1;
+            }
+        }
+        if (!canceled_alias.run_until_queues_retired(4096) ||
+            canceled_alias.lq_dequeued() + canceled_alias.lq_canceled() !=
+                canceled_alias.lq_allocated() ||
+            canceled_alias.lq_canceled_unobserved() != 0 ||
+            canceled_alias.scalar_load_canceled_observed() != canceled_count ||
+            canceled_alias.memory_violation_stats().count != violation.count) {
+            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
+                      << canceled_alias.cycle()
+                      << " phase=first-access-terminal-accounting reason="
                       << canceled_alias.error() << '\n';
             return 1;
         }
         std::cout << "MEMBLOCK_TRANSLATION_ALIAS_FIRST_ACCESS"
                   << " cycle=" << canceled_alias.cycle()
                   << " canceled=" << canceled_count
-                  << " completed=" << (canceled_count == 0 ? 1 : 0)
+                  << " refetched=" << refetch << " completed=1"
+                  << " lq=" << canceled_alias.lq_dequeued() << '+'
+                  << canceled_alias.lq_canceled() << '/'
+                  << canceled_alias.lq_allocated()
                   << '\n';
     }
 

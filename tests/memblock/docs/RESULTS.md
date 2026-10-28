@@ -18,6 +18,12 @@ None.
 
 ## Current Changes Qualified Below
 
+- The scalar alias-refetch oracle requires a simultaneous, fully identified
+  flush-itself request before discarding data, preserves all non-data checks,
+  returns the isolated backend redirect after two registered stages, and
+  requires a fresh correct-data completion. The directed case reports
+  `canceled=1 refetched=1 completed=1 lq=2+0/2`: one data pulse discarded,
+  both LQ entries dequeued, no fabricated LQ cancellation.
 - The canonical generator includes `scalar-dependency`: 1..4 older stores,
   1..3 younger loads and optional younger-store exclusion, with randomized byte
   overlap, width/sign, operand arrival, issue order and delays. Expected bytes
@@ -110,9 +116,9 @@ None.
 - `translation-alias` maps two Sv39 virtual pages to one physical page and
   proves a committed store through one VA is visible through the other, both
   after drain and with SBuffer non-empty at an in-flight load issue. A cold
-  first access that raises `ld2Cancel` is recognized as an opt-in legal
-  canceled attempt and its LQ cancellation is accounted; exact replay remains
-  outside the UT.
+  first access that requests flush-itself must match ROB/FTQ/RVC metadata,
+  recover with actual queue deq/cancel observations, and refetch to exact correct
+  data. No LQ cancellation is inferred from `ld2Cancel`.
 - Mixed finish also checks every committed non-cacheable store/atomic word
   against the manager bus image after drain. This observes the bytes carried by
   accepted A requests; it is not a DUT uncache readback, and device/CMO
@@ -147,6 +153,8 @@ The current qualification is:
 | Infrastructure unit | 302 tests pass | Unit checks do not establish DUT functional coverage |
 | Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
 | Ordinary dependency direction | Corrected runtime: 4/4 focused seeds 811..814 pass at 128 actions each; 453 windows | 243 younger-store exclusion controls and 122 multiple-older-store-source loads; final observed/registered words match; `build/memblock/scalar-dependency-20261028/focused-v2` |
+| Ordinary mixed development | Corrected generator seed821 passes 4608 actions with `latency=compact`; artifact verifier accepts | 32 heterogeneous windows, 101 dependency windows and 2068/2068 final observed/registered words; `build/memblock/scalar-dependency-20261028/coverage-v2`; no closure claim |
+| Refetch-oracle regression | Revised scoreboard: seed851 compact and seed852 default `spec` timing each pass 512 actions; 3/3 scalar directed cases pass | Separate frozen runtime under `build/memblock/alias-refetch-20261029`; artifact verifiers accept; isolated alias refetch also passes |
 | Ordinary-profile development | Corrected runtime: 2/2 spec and 2/2 corner seeds pass at 512 actions each, all with `latency=compact`; artifact verifiers accept | 53/27 dependency windows; short runs have zero heterogeneous windows because of the serial reservation; `build/memblock/scalar-dependency-20261028/{spec-v2,corner-v2}`; no closure claim |
 | Campaign report isolation | Concurrent two-regression/one-benchmark fixture and aggregate rerun pass | Fresh run-ID directory and matching document ID; previous sidecar bytes retained; artifact `build/memblock/report-namespace-20261028/check-unit.log` |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
@@ -162,7 +170,7 @@ The current qualification is:
 | Deep probe window | `dcache-coherence` passes with 8 accepted B probes, 8 C responses and `deep_probe_depth=8` | Directed eight-line window; four resident clean lines report permission 2 and four absent lines report the DUT's no-permission encoding 5; the report values are scenario-owned, not an architectural permission oracle |
 | Same-address B/C attribution | Two simultaneous probes to one resident line cannot be uniquely matched by address/opcode/report; a data-less C with report 5 appeared while the accepted expectation expected report 2, and C was observed before the manager's second B acceptance | C's client-owned source is not tied to B; this is an oracle gap, not a confirmed RTL violation. Source/ownership attribution remains open |
 | Accepted-B probe gate | 1/1 1024-action mixed seed passes with 407 probes, plus directed coherence/release/atomic | Seed 207; artifact `agent-campaign-17`; no dedicated counter for pre-B C because an illegal C fails immediately |
-| Cross-alias store/load | `translation-alias` passes at cycle 447 and also observes a first-access `ld2Cancel` (`canceled=1`), log in `agent-campaign-17/translation-alias.log` | One PA, two Sv39 VAs; after-drain and an in-flight store with SBuffer non-empty at load issue. The canceled attempt is LQ-accounted but not replayed by the UT; exact backend replay remains outside |
+| Cross-alias store/load | `translation-alias` passes after-drain/in-flight visibility and identified correct-data frontend refetch; `refetched=1 completed=1 lq=2+0/2` | One PA, two Sv39 VAs; zero-cancellation refetch observed. Nonzero LQ cancellation, arbitrary IQ/LQ replay and redirect arbitration remain unqualified; `build/memblock/alias-refetch-20261029/alias.log` |
 | CBO.ZERO ordering | Corrected sequence passes on both restored-original and latest-overlay RTL with `sequential_zero=2 consecutive_zero=2 following_store=1`, repeated same-line and three-line consecutive zero cases, both zero/store age directions, a dirty-line zero and an early younger load | CBO.ZERO remains the ROB head until deferred SBuffer completion; no simultaneous CBO completion window is legal or claimed |
 | Segment noncanonical fault | Corrected legal two-uop `nf=1` segment load/store cases pass on both restored-original and latest-overlay RTL; the later uop exposes the exact page fault with no DCache/Uncache request or SBuffer side effect | The first data uop may defer the fault and is not an independent architectural oracle |
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
@@ -192,8 +200,8 @@ attribution and complete C multibeat identity, wider same-line CBO.ZERO
 forward-timing variants beyond the older-store/younger-zero/younger-load case,
 and independent verifier schema/backpressure checks.
 The accepted-B-before-C gate, full 128-bit mask operand and explicit
-first-access cross-alias cancellation accounting are implemented, but the UT
-does not model the backend replay that follows `ld2Cancel`.
+first-access cross-alias redirect/refetch recovery are implemented. General IQ/LQ
+replay, concurrent refetch epochs and backend redirect arbitration remain open.
 Boundary faults, concurrency and reset/protection crosses also remain partial. PBMT=NC `CBO.ZERO` was probed and the DUT reports a store access fault
 before an uncache request; the architecture leaves CBO behavior for
 non-cacheable memory unspecified, so neither behavior is claimed. Four-state/
@@ -212,6 +220,16 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+A fresh-context independent review approves the scalar alias-refetch correction
+with no blocking findings. It traces the full CPU alias-mismatch, registered
+redirect and queue-recovery chain and checks the actual scoreboard/driver diff.
+Independent production scoreboard validation passes 10/10, including negative
+redirect/sideband cases and duplicate completion rejection. The retained DUT
+case proves the zero-LQ-cancellation refetch path; nonzero cancellation and
+correct-first-data redirect paths have source/contract evidence rather than
+DUT qualification. Review artifact:
+`build/memblock/alias-refetch-20261029/review.txt`.
 
 The constrained-random audit identified genuine value/choice variation but
 serialized scalar dependencies, fixed heterogeneous composition and repeating
@@ -264,5 +282,5 @@ by base and is a documented residual limitation.
 This qualification confirms the stated capability and limitations; it does not
 establish verification closure or clean RTL elaboration provenance. The oracle,
 protocol lifecycle, remaining alias/non-cacheable final-byte observation,
-first-access replay, vector-fault metadata and integration gaps described in the
+wider replay/refetch, vector-fault metadata and integration gaps described in the
 current documents remain open.

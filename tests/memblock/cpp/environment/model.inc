@@ -313,8 +313,10 @@ struct LoadTransaction {
     std::optional<bool> expected_debug_is_mmio;
     std::optional<bool> expected_debug_is_ncio;
     std::optional<bool> expected_debug_is_perf_cnt;
-    // Opt-in for a load whose ld2Cancel pulse makes a non-replay data pulse a
-    // legal canceled attempt.  The scenario must account the cancellation.
+    // Permit a non-replay wrong-data pulse only with a matching top-level
+    // flush-itself redirect, retaining identity/sideband checks. The scenario
+    // must perform recovery and eventual correct-data refetch. ld2Cancel
+    // alone is not an instruction or LQ cancellation.
     bool tolerate_canceled_result = false;
 };
 

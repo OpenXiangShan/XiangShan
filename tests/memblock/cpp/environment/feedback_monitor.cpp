@@ -78,7 +78,7 @@ void FeedbackMonitor::sample_before_edge(DutAdapter &dut_, std::uint64_t sample_
         const auto writeback =
             dut_.sample_scalar_load_writeback(lane);
         if (trace) trace(lane, writeback);
-        scoreboard_.observe(lane, writeback, canceled);
+        scoreboard_.observe(lane, writeback, memory_violation);
     }
     const auto hardware_prefetch =
         dut_.sample_hardware_prefetch_outputs();
