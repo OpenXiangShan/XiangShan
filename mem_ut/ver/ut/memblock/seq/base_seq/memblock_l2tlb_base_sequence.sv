@@ -32,6 +32,7 @@ class memblock_l2tlb_pending_req extends uvm_object;
     memblock_tlb_lookup_key_t entry_anchor_key;
     memblock_tlb_lookup_result_e lookup_result;
     memblock_tlb_entry entry_snapshot;
+    memblock_later_split_tlb_record later_split_owner;
     // 中文注释：该 generation 与 snapshot 同源，标识本 token 命中的 live entry 时代。
     // response 完成、flush 或 driver 重试都不能从 live table 重新读取或改写它。
     longint unsigned pending_entry_generation;
@@ -71,6 +72,7 @@ class memblock_l2tlb_pending_req extends uvm_object;
         entry_anchor_key = '{default:'0};
         lookup_result = MEMBLOCK_TLB_LOOKUP_MISS_BUILD;
         entry_snapshot = null;
+        later_split_owner = null;
         pending_entry_generation = 0;
         resp_tr = null;
         response_visible_sample_seq = 0;
@@ -405,7 +407,8 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
 
     // The reset epoch belongs to the frozen transport sample. A sample that
     // was published before a later reset may still occupy the one-slot
-    // mailbox, but it must never create token/UID work in the new epoch.
+    // mailbox, but it must never create or advance later-split ledger state.
+    // All transport epoch/reset gates therefore precede the observer.
     if (sample.sampled_reset_epoch <
             memblock_sync_pkg::get_l2tlb_current_reset_epoch()) begin
         drop_stale_l2tlb_transport_sample(sample);
@@ -419,6 +422,7 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
                              sample.sampled_reset_epoch,
                              memblock_sync_pkg::get_l2tlb_current_reset_epoch(),
                              sample.transport_sample_seq))
+        return;
     end
 
     if (sample.sampled_reset_active) begin
@@ -653,6 +657,35 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
 
     due_barrier_this_sample =
         apply_due_l2tlb_flush_barriers(sample_seq) != 0;
+
+    // Only mutate split provenance after the sample anchor, producer
+    // watermarks, CSR history, and same-sample lifecycle events are settled.
+    data.observe_later_split_tlb_sample(
+        sample.sampled_split_load_req_fire &&
+            !sample.sampled_split_load_req_misalign_need_wakeup,
+        '{flag: sample.sampled_split_load_req_rob_flag,
+          value: sample.sampled_split_load_req_rob_value},
+        sample.sampled_split_load_req_fullva,
+        sample.sampled_lu1_tlb_req_valid,
+        sample.sampled_lu1_tlb_req_frm_mabuf,
+        sample.sampled_lu1_tlb_req_kill,
+        '{flag: sample.sampled_lu1_tlb_req_rob_flag,
+          value: sample.sampled_lu1_tlb_req_rob_value},
+        sample.sampled_lu1_tlb_req_fullva,
+        sample.sampled_lu1_ptw_req_valid,
+        sample.sampled_lu1_ptw_req_vpn,
+        sample.sampled_lu1_ptw_req_s2xlate,
+        sample_seq);
+    data.observe_later_split_load_response_sample(
+        sample.sampled_split_load_resp_valid &&
+            !sample.sampled_split_load_resp_misalign_need_wakeup,
+        '{flag: sample.sampled_split_load_resp_rob_flag,
+          value: sample.sampled_split_load_resp_rob_value},
+        sample.sampled_split_load_resp_vaddr,
+        sample.sampled_split_load_resp_nc,
+        sample.sampled_split_load_resp_mmio,
+        sample.sampled_split_load_resp_need_replay,
+        sample_seq);
 
     if (driving_valid && sampled_resp_valid) begin
         if (due_barrier_this_sample) begin
@@ -1049,6 +1082,7 @@ function void memblock_l2tlb_base_sequence::cancel_outstanding_by_reset();
     canceled_count = outstanding_count();
     reset_canceled_count += canceled_count;
     void'(data.cancel_waiting_uid_tlb_records("l2tlb_runtime_reset"));
+    data.cancel_all_later_split_tlb_records("l2tlb_runtime_reset");
     pending_q.delete();
     barrier_q.delete();
     driving_req = null;
@@ -1148,6 +1182,8 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
         pending.pending_entry_generation != live_entry.entry_generation) begin
         `uvm_fatal(get_type_name(), "L2TLB pending entry generation is not frozen from live entry")
     end
+    pending.later_split_owner = data.bind_later_split_l2_request_token(
+        pending.request_lookup_key, pending.request_token, sample_seq);
     // Derived addresses belong to this request, not to the first lookup that
     // created the live entry.  In particular, a superpage/NAPOT response may
     // raw-hit a different waiting VPN; derive it from that request's frozen
@@ -1227,6 +1263,9 @@ function int unsigned memblock_l2tlb_base_sequence::apply_due_l2tlb_flush_barrie
         // before completion; only still-pending tokens are canceled here.
         for (int idx = int'(pending_q.size()) - 1; idx >= 0; idx--) begin
             if (pending_q[idx].accept_flush_event_seq < barrier.event_seq) begin
+                data.cancel_later_split_l2_token(
+                    pending_q[idx].request_token,
+                    $sformatf("l2tlb_flush_event_%0d", barrier.event_seq));
                 pending_q.delete(idx);
                 barrier_cancel_count++;
             end
@@ -1397,6 +1436,16 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
         driving_req.entry_snapshot,
         driving_req.request_token,
         complete_sample_seq);
+    if (driving_req.later_split_owner != null) begin
+        data.complete_later_split_l2_response(
+            driving_req.later_split_owner,
+            driving_req.request_token,
+            driving_req.request_lookup_key,
+            driving_req.entry_anchor_key,
+            driving_req.pending_entry_generation,
+            driving_req.entry_snapshot,
+            complete_sample_seq);
+    end
     record_update_count = data.complete_waiting_uid_records_by_response(
         driving_req.entry_snapshot,
         actual_response_csr_snapshot);

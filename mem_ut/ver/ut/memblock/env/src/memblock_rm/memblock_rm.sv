@@ -367,6 +367,10 @@ function bit memblock_rm::observer_build_commit_item(
     memblock_rm_readonly_api ro;
     memblock_rm_readonly_api::tlb_request_context_view_t tlb_context;
     memblock_rm_readonly_api::tlb_entry_view_t entry;
+    memblock_rm_readonly_api::tlb_entry_view_t response_entry;
+    memblock_rm_readonly_api::tlb_response_provenance_view_t response_provenance;
+    memblock_rm_readonly_api::later_split_load_response_view_t
+        later_split_load_response;
     memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t pma_pmp_view;
     pma_pmp_cmd_e pma_pmp_cmd;
     bit translation_access_fault;
@@ -376,6 +380,20 @@ function bit memblock_rm::observer_build_commit_item(
     bit entry_stage_one_fault;
     bit entry_stage_two_fault;
     bit entry_translation_fault;
+    bit entry_target_translation_fault;
+    bit first_byte_translation_fault;
+    bit later_split_translation_fault;
+    bit later_split_response_proven;
+    bit later_split_response_is_nc;
+    bit later_split_l2_completion_proven;
+    bit later_split_fault_stage_one;
+    bit later_split_fault_stage_two;
+    bit later_split_fault_s1_af_or_s2_gaf;
+    bit later_split_uncache_override;
+    bit response_stage_one_fault;
+    bit response_stage_two_fault;
+    bit response_target_translation_fault;
+    bit [1:0] response_effective_pbmt;
     bit dut_stops_after_first_page;
     bit first_byte_is_pma_mmio;
     bit first_byte_pma_known;
@@ -396,6 +414,7 @@ function bit memblock_rm::observer_build_commit_item(
     bit s2_active;
     bit bare_identity;
     bit [63:0] byte_va;
+    bit [51:0] first_vpn;
     bit [43:0] final_ppn;
     bit [3:0] expected_s1_mode;
     int unsigned bad_byte_index;
@@ -520,6 +539,15 @@ function bit memblock_rm::observer_build_commit_item(
     pma_pmp_access_fault = 1'b0;
     stage_one_fault = 1'b0;
     stage_two_fault = 1'b0;
+    first_byte_translation_fault = 1'b0;
+    later_split_translation_fault = 1'b0;
+    later_split_response_proven = 1'b0;
+    later_split_response_is_nc = 1'b0;
+    later_split_fault_stage_one = 1'b0;
+    later_split_fault_stage_two = 1'b0;
+    later_split_fault_s1_af_or_s2_gaf = 1'b0;
+    later_split_uncache_override = 1'b0;
+    first_vpn = item.computed_vaddr[63:12];
     if (bare_identity) begin
         if (!item.set_bare_identity_geometry(bad_byte_index)) begin
             ls_model.set_error(RM_LS_ERR_BARE_PA_OUT_OF_RANGE,
@@ -607,6 +635,83 @@ function bit memblock_rm::observer_build_commit_item(
                                      observer_stage_permission_fault(entry, tlb_context,
                                                                      store_access, 1'b0)) ||
                                     pbmt_force_s2_gpf;
+            entry_target_translation_fault =
+                entry.fault_effective_s1_af ||
+                entry.fault_effective_s2_gaf ||
+                entry_stage_one_fault ||
+                entry_stage_two_fault;
+            if (byte_index == 0 && entry_target_translation_fault) begin
+                first_byte_translation_fault = 1'b1;
+            end
+            if (byte_index > 0 && byte_va[63:12] != first_vpn &&
+                !first_byte_translation_fault &&
+                entry_target_translation_fault) begin
+                later_split_translation_fault = 1'b1;
+                later_split_fault_stage_one = entry_stage_one_fault;
+                later_split_fault_stage_two = entry_stage_two_fault;
+                later_split_fault_s1_af_or_s2_gaf =
+                    entry.fault_effective_s1_af ||
+                    entry.fault_effective_s2_gaf;
+                response_provenance = '{default:'0};
+                response_entry = '{default:'0};
+                response_effective_pbmt = 2'd0;
+                response_stage_one_fault = 1'b0;
+                response_stage_two_fault = 1'b0;
+                response_target_translation_fault = 1'b0;
+                later_split_load_response = '{default:'0};
+                later_split_l2_completion_proven = 1'b0;
+                if (ro.try_read_later_split_load_response_for_rm(
+                        item.uid, item.dynamic_epoch,
+                        '{flag: main_view.rob_idx_flag,
+                          value: main_view.rob_idx_value},
+                        byte_va[63:12], later_split_load_response) &&
+                    later_split_load_response.valid) begin
+                    later_split_response_proven = 1'b1;
+                    later_split_response_is_nc =
+                        later_split_load_response.nc ||
+                        later_split_load_response.mmio;
+                end
+                if (ro.try_read_completed_later_split_response_for_rm(
+                        item.uid, item.dynamic_epoch,
+                        '{flag: main_view.rob_idx_flag,
+                          value: main_view.rob_idx_value},
+                        byte_va[63:12], tlb_context.s2xlate,
+                        response_provenance, response_entry) &&
+                    response_provenance.valid && response_entry.valid &&
+                    response_provenance.entry_generation ==
+                        entry.entry_generation &&
+                    observer_get_effective_pbmt(
+                        response_entry, tlb_context, s1_active, s2_active,
+                        response_effective_pbmt)) begin
+                    response_stage_one_fault =
+                        response_entry.fault_effective_s1_pf ||
+                        ((!response_entry.fault_effective_s1_pf &&
+                          !response_entry.fault_effective_s1_af) &&
+                         observer_stage_permission_fault(
+                             response_entry, tlb_context,
+                             store_access, 1'b1));
+                    response_stage_two_fault =
+                        response_entry.fault_effective_s2_gpf ||
+                        ((!response_entry.fault_effective_s2_gpf &&
+                          !response_entry.fault_effective_s2_gaf) &&
+                         observer_stage_permission_fault(
+                             response_entry, tlb_context,
+                             store_access, 1'b0));
+                    response_target_translation_fault =
+                        response_entry.fault_effective_s1_af ||
+                        response_entry.fault_effective_s2_gaf ||
+                        response_stage_one_fault ||
+                        response_stage_two_fault;
+                    later_split_l2_completion_proven =
+                        response_target_translation_fault &&
+                        response_provenance.request_key.vpn == byte_va[63:12] &&
+                        response_provenance.request_key.s2xlate == tlb_context.s2xlate;
+                    // L2 completion is retained as translation provenance.
+                    // The architectural mabuf priority is decided only by the
+                    // actual splitLoadResp NC/MMIO bits above, which also cover
+                    // a resident TLB hit with no new L2 request.
+                end
+            end
             stage_one_fault |= entry_stage_one_fault;
             stage_two_fault |= entry_stage_two_fault;
             if (!entry.fault && !entry.pma_af &&
@@ -770,22 +875,52 @@ function bit memblock_rm::observer_build_commit_item(
     // 抑制 address-misaligned；S2 PMA/PMP AF 则是翻译成功后的独立异常。
     // LoadUnit 允许它与 PBMT-NC misaligned 共存，StoreUnit 用 AF 抑制
     // storeAddrMisaligned。两类 AF 不能共用一个互斥门控。
-    if (translation_access_fault)
-        item.expected_exception[store_access ? 7 : 5] = 1'b1;
-    if (stage_one_fault) item.expected_exception[store_access ? 15 : 13] = 1'b1;
-    if (stage_two_fault) item.expected_exception[store_access ? 23 : 21] = 1'b1;
-    if (!translation_access_fault && !stage_one_fault && !stage_two_fault) begin
-        if (pma_pmp_access_fault || misaligned_maps_to_access_fault) begin
+    later_split_uncache_override =
+        item.kind == RM_LS_KIND_LOAD &&
+        misaligned &&
+        !first_byte_translation_fault &&
+        later_split_translation_fault &&
+        later_split_response_proven &&
+        later_split_response_is_nc &&
+        (!later_split_load_response.l2_request_observed ||
+         (later_split_l2_completion_proven &&
+          response_provenance.response_token ==
+              later_split_load_response.response_token &&
+          response_provenance.response_sample_seq >
+              later_split_load_response.l2_request_sample_seq));
+    if (later_split_uncache_override) begin
+        item.expected_exception = '0;
+        item.expected_exception[4] = 1'b1;
+        `uvm_info("RM_LS_LATER_SPLIT_UNCACHE",
+                  $sformatf("uid=%0d va=0x%0h later_s1=%0d later_s2=%0d later_af=%0d token=%0d response_sample=%0d generation=%0d pbmt=%0d expected_exception=0x%0h",
+                            item.uid, item.computed_vaddr,
+                            later_split_fault_stage_one,
+                            later_split_fault_stage_two,
+                            later_split_fault_s1_af_or_s2_gaf,
+                            response_provenance.response_token,
+                            later_split_load_response.sample_seq,
+                            response_provenance.entry_generation,
+                            response_effective_pbmt,
+                            item.expected_exception),
+                  UVM_LOW)
+    end else begin
+        if (translation_access_fault)
             item.expected_exception[store_access ? 7 : 5] = 1'b1;
-        end
-        if (!misaligned_maps_to_access_fault &&
-            (!pma_pmp_access_fault ||
-             (!store_access && first_effective_pbmt_valid &&
-              first_effective_pbmt == 2'd1)) &&
-            observer_should_expect_addr_misaligned(
-                misaligned, store_access, tlb_context,
-                all_bytes_pma_pbmt)) begin
-            item.expected_exception[store_access ? 6 : 4] = 1'b1;
+        if (stage_one_fault) item.expected_exception[store_access ? 15 : 13] = 1'b1;
+        if (stage_two_fault) item.expected_exception[store_access ? 23 : 21] = 1'b1;
+        if (!translation_access_fault && !stage_one_fault && !stage_two_fault) begin
+            if (pma_pmp_access_fault || misaligned_maps_to_access_fault) begin
+                item.expected_exception[store_access ? 7 : 5] = 1'b1;
+            end
+            if (!misaligned_maps_to_access_fault &&
+                (!pma_pmp_access_fault ||
+                 (!store_access && first_effective_pbmt_valid &&
+                  first_effective_pbmt == 2'd1)) &&
+                observer_should_expect_addr_misaligned(
+                    misaligned, store_access, tlb_context,
+                    all_bytes_pma_pbmt)) begin
+                item.expected_exception[store_access ? 6 : 4] = 1'b1;
+            end
         end
     end
     if (item.expected_exception == '0 &&

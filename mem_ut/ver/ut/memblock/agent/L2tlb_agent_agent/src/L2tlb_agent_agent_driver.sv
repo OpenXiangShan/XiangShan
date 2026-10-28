@@ -296,6 +296,51 @@ task L2tlb_agent_agent_driver::sample_previous_vif(
     sample.sampled_req_fire =
         (sample.sampled_req_valid === 1'b1) &&
         (sample.sampled_req_ready === 1'b1);
+    sample.sampled_split_load_req_fire =
+        (this.vif.mon_mp.mon_cb.split_load_req_valid === 1'b1) &&
+        (this.vif.mon_mp.mon_cb.split_load_req_ready === 1'b1);
+    sample.sampled_split_load_req_rob_flag =
+        this.vif.mon_mp.mon_cb.split_load_req_rob_flag;
+    sample.sampled_split_load_req_rob_value =
+        this.vif.mon_mp.mon_cb.split_load_req_rob_value;
+    sample.sampled_split_load_req_fullva =
+        this.vif.mon_mp.mon_cb.split_load_req_fullva;
+    sample.sampled_split_load_req_misalign_need_wakeup =
+        this.vif.mon_mp.mon_cb.split_load_req_misalign_need_wakeup;
+    sample.sampled_split_load_resp_valid =
+        this.vif.mon_mp.mon_cb.split_load_resp_valid;
+    sample.sampled_split_load_resp_rob_flag =
+        this.vif.mon_mp.mon_cb.split_load_resp_rob_flag;
+    sample.sampled_split_load_resp_rob_value =
+        this.vif.mon_mp.mon_cb.split_load_resp_rob_value;
+    sample.sampled_split_load_resp_vaddr =
+        this.vif.mon_mp.mon_cb.split_load_resp_vaddr;
+    sample.sampled_split_load_resp_nc =
+        this.vif.mon_mp.mon_cb.split_load_resp_nc;
+    sample.sampled_split_load_resp_mmio =
+        this.vif.mon_mp.mon_cb.split_load_resp_mmio;
+    sample.sampled_split_load_resp_need_replay =
+        this.vif.mon_mp.mon_cb.split_load_resp_need_replay;
+    sample.sampled_split_load_resp_misalign_need_wakeup =
+        this.vif.mon_mp.mon_cb.split_load_resp_misalign_need_wakeup;
+    sample.sampled_lu1_tlb_req_valid =
+        this.vif.mon_mp.mon_cb.lu1_tlb_req_valid;
+    sample.sampled_lu1_tlb_req_fullva =
+        this.vif.mon_mp.mon_cb.lu1_tlb_req_fullva;
+    sample.sampled_lu1_tlb_req_frm_mabuf =
+        this.vif.mon_mp.mon_cb.lu1_tlb_req_frm_mabuf;
+    sample.sampled_lu1_tlb_req_rob_flag =
+        this.vif.mon_mp.mon_cb.lu1_tlb_req_rob_flag;
+    sample.sampled_lu1_tlb_req_rob_value =
+        this.vif.mon_mp.mon_cb.lu1_tlb_req_rob_value;
+    sample.sampled_lu1_tlb_req_kill =
+        this.vif.mon_mp.mon_cb.lu1_tlb_req_kill;
+    sample.sampled_lu1_ptw_req_valid =
+        this.vif.mon_mp.mon_cb.lu1_ptw_req_valid;
+    sample.sampled_lu1_ptw_req_vpn =
+        this.vif.mon_mp.mon_cb.lu1_ptw_req_vpn;
+    sample.sampled_lu1_ptw_req_s2xlate =
+        this.vif.mon_mp.mon_cb.lu1_ptw_req_s2xlate;
     sample.sampled_resp_bits_s2xlate = this.vif.mon_mp.mon_cb.io_ptw_resp_bits_s2xlate;
     sample.sampled_resp_bits_s1_entry_tag = this.vif.mon_mp.mon_cb.io_ptw_resp_bits_s1_entry_tag;
     sample.sampled_resp_bits_s1_entry_asid = this.vif.mon_mp.mon_cb.io_ptw_resp_bits_s1_entry_asid;

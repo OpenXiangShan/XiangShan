@@ -368,6 +368,76 @@ class memblock_tlb_entry extends uvm_object;
 
 endclass:memblock_tlb_entry
 
+class memblock_later_split_tlb_record extends uvm_object;
+    typedef enum int unsigned {
+        MEMBLOCK_LATER_SPLIT_WAIT_LU1_REQUEST = 0,
+        MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW = 1,
+        MEMBLOCK_LATER_SPLIT_WAIT_L2_TOKEN = 2,
+        MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE = 3,
+        MEMBLOCK_LATER_SPLIT_COMPLETED = 4,
+        MEMBLOCK_LATER_SPLIT_CANCELED = 5
+    } memblock_later_split_state_e;
+
+    memblock_uid_t uid;
+    int unsigned dynamic_epoch;
+    memblock_rob_key_t rob_key;
+    bit [63:0] split_vaddr;
+    bit [51:0] split_vpn;
+    bit [1:0] s2xlate;
+    memblock_tlb_lookup_key_t request_lookup_key;
+    memblock_tlb_lookup_key_t entry_anchor_key;
+    longint unsigned split_fire_sample_seq;
+    longint unsigned lu1_request_sample_seq;
+    longint unsigned lu1_ptw_sample_seq;
+    longint unsigned l2_request_sample_seq;
+    longint unsigned response_token;
+    longint unsigned response_sample_seq;
+    longint unsigned entry_generation;
+    longint unsigned mabuf_response_sample_seq;
+    bit [63:0] mabuf_response_vaddr;
+    bit mabuf_response_nc;
+    bit mabuf_response_mmio;
+    bit mabuf_response_need_replay;
+    memblock_later_split_state_e state;
+    memblock_tlb_entry payload;
+
+    `uvm_object_utils(memblock_later_split_tlb_record)
+
+    function new(string name = "memblock_later_split_tlb_record");
+        super.new(name);
+        payload = memblock_tlb_entry::type_id::create({name, "_payload"});
+        reset();
+    endfunction:new
+
+    function void reset();
+        uid = 0;
+        dynamic_epoch = 0;
+        rob_key = '{default:'0};
+        split_vaddr = '0;
+        split_vpn = '0;
+        s2xlate = '0;
+        request_lookup_key = '{default:'0};
+        entry_anchor_key = '{default:'0};
+        split_fire_sample_seq = 0;
+        lu1_request_sample_seq = 0;
+        lu1_ptw_sample_seq = 0;
+        l2_request_sample_seq = 0;
+        response_token = 0;
+        response_sample_seq = 0;
+        entry_generation = 0;
+        mabuf_response_sample_seq = 0;
+        mabuf_response_vaddr = '0;
+        mabuf_response_nc = 1'b0;
+        mabuf_response_mmio = 1'b0;
+        mabuf_response_need_replay = 1'b0;
+        state = MEMBLOCK_LATER_SPLIT_CANCELED;
+        if (payload == null)
+            payload = memblock_tlb_entry::type_id::create("later_split_payload");
+        payload.reset();
+    endfunction:reset
+
+endclass:memblock_later_split_tlb_record
+
 class memblock_uid_tlb_record extends uvm_object;
     typedef enum int unsigned {
         MEMBLOCK_UID_TLB_WAITING   = 0,

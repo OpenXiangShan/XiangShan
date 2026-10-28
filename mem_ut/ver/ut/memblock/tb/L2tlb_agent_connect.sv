@@ -87,6 +87,40 @@
             force U_IF_NAME.io_ptw_req_0_valid = RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_valid; \
             force U_IF_NAME.io_ptw_req_0_bits_vpn = RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_bits_vpn; \
             force U_IF_NAME.io_ptw_req_0_bits_s2xlate = RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_bits_s2xlate; \
+            force U_IF_NAME.split_load_req_valid = RTL_PATH._inner_loadMisalignBuffer_io_splitLoadReq_valid; \
+            force U_IF_NAME.split_load_req_ready = RTL_PATH._inner_LoadUnit_1_io_misalign_ldin_ready; \
+            force U_IF_NAME.split_load_req_rob_flag = RTL_PATH._inner_loadMisalignBuffer_io_splitLoadReq_bits_uop_robIdx_flag; \
+            force U_IF_NAME.split_load_req_rob_value = RTL_PATH._inner_loadMisalignBuffer_io_splitLoadReq_bits_uop_robIdx_value; \
+            force U_IF_NAME.split_load_req_fullva = {{14{RTL_PATH._inner_loadMisalignBuffer_io_splitLoadReq_bits_vaddr[49]}}, RTL_PATH._inner_loadMisalignBuffer_io_splitLoadReq_bits_vaddr}; \
+            force U_IF_NAME.split_load_req_misalign_need_wakeup = RTL_PATH._inner_loadMisalignBuffer_io_splitLoadReq_bits_misalignNeedWakeUp; \
+            force U_IF_NAME.split_load_resp_valid = RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_valid; \
+            force U_IF_NAME.split_load_resp_rob_flag = RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_uop_robIdx_flag; \
+            force U_IF_NAME.split_load_resp_rob_value = RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_uop_robIdx_value; \
+            force U_IF_NAME.split_load_resp_vaddr = {{14{RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_vaddr[49]}}, RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_vaddr}; \
+            force U_IF_NAME.split_load_resp_nc = RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_nc; \
+            force U_IF_NAME.split_load_resp_mmio = RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_mmio; \
+            force U_IF_NAME.split_load_resp_need_replay = \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_0 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_1 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_2 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_3 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_4 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_5 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_6 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_7 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_8 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_9 | \
+                RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_rep_info_cause_10; \
+            force U_IF_NAME.split_load_resp_misalign_need_wakeup = RTL_PATH._inner_LoadUnit_1_io_misalign_ldout_bits_misalignNeedWakeUp; \
+            force U_IF_NAME.lu1_tlb_req_valid = RTL_PATH._inner_LoadUnit_1_io_tlb_req_valid; \
+            force U_IF_NAME.lu1_tlb_req_fullva = {{14{RTL_PATH._inner_LoadUnit_1_io_tlb_req_bits_vaddr[49]}}, RTL_PATH._inner_LoadUnit_1_io_tlb_req_bits_vaddr}; \
+            force U_IF_NAME.lu1_tlb_req_frm_mabuf = RTL_PATH._inner_LoadUnit_1_io_tlb_req_bits_frm_mabuf; \
+            force U_IF_NAME.lu1_tlb_req_rob_flag = RTL_PATH._inner_LoadUnit_1_io_tlb_req_bits_debug_robIdx_flag; \
+            force U_IF_NAME.lu1_tlb_req_rob_value = RTL_PATH._inner_LoadUnit_1_io_tlb_req_bits_debug_robIdx_value; \
+            force U_IF_NAME.lu1_tlb_req_kill = RTL_PATH._inner_LoadUnit_1_io_tlb_req_bits_kill; \
+            force U_IF_NAME.lu1_ptw_req_valid = RTL_PATH._inner_dtlb_ld_tlb_ld_io_ptw_req_1_valid; \
+            force U_IF_NAME.lu1_ptw_req_vpn = RTL_PATH._inner_dtlb_ld_tlb_ld_io_ptw_req_1_bits_vpn; \
+            force U_IF_NAME.lu1_ptw_req_s2xlate = RTL_PATH._inner_dtlb_ld_tlb_ld_io_ptw_req_1_bits_s2xlate; \
             force RTL_PATH._inner_ptw_io_tlb_1_req_0_ready = U_IF_NAME.io_ptw_req_0_ready; \
             force RTL_PATH._inner_ptw_io_tlb_1_resp_valid = U_IF_NAME.io_ptw_resp_valid; \
             force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2xlate = U_IF_NAME.io_ptw_resp_bits_s2xlate; \
@@ -151,6 +185,28 @@
             force U_IF_NAME.io_ptw_req_0_valid = '0; \
             force U_IF_NAME.io_ptw_req_0_bits_vpn = '0; \
             force U_IF_NAME.io_ptw_req_0_bits_s2xlate = '0; \
+            force U_IF_NAME.split_load_req_valid = '0; \
+            force U_IF_NAME.split_load_req_ready = '0; \
+            force U_IF_NAME.split_load_req_rob_flag = '0; \
+            force U_IF_NAME.split_load_req_rob_value = '0; \
+            force U_IF_NAME.split_load_req_fullva = '0; \
+            force U_IF_NAME.split_load_req_misalign_need_wakeup = '0; \
+            force U_IF_NAME.split_load_resp_valid = '0; \
+            force U_IF_NAME.split_load_resp_rob_flag = '0; \
+            force U_IF_NAME.split_load_resp_rob_value = '0; \
+            force U_IF_NAME.split_load_resp_vaddr = '0; \
+            force U_IF_NAME.split_load_resp_nc = '0; \
+            force U_IF_NAME.split_load_resp_mmio = '0; \
+            force U_IF_NAME.split_load_resp_misalign_need_wakeup = '0; \
+            force U_IF_NAME.lu1_tlb_req_valid = '0; \
+            force U_IF_NAME.lu1_tlb_req_fullva = '0; \
+            force U_IF_NAME.lu1_tlb_req_frm_mabuf = '0; \
+            force U_IF_NAME.lu1_tlb_req_rob_flag = '0; \
+            force U_IF_NAME.lu1_tlb_req_rob_value = '0; \
+            force U_IF_NAME.lu1_tlb_req_kill = '0; \
+            force U_IF_NAME.lu1_ptw_req_valid = '0; \
+            force U_IF_NAME.lu1_ptw_req_vpn = '0; \
+            force U_IF_NAME.lu1_ptw_req_s2xlate = '0; \
             force U_IF_NAME.io_ptw_req_0_ready = '0; \
             force U_IF_NAME.io_ptw_resp_valid = '0; \
             force U_IF_NAME.io_ptw_resp_bits_s2xlate = '0; \

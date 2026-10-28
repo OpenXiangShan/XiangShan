@@ -257,6 +257,33 @@ class memblock_rm_readonly_api extends uvm_object;
         int unsigned         csr_update_seq;
     } tlb_request_context_view_t;
 
+    // A value-only proof that a matching L2TLB response was sampled by the
+    // DUT-facing transport.  This is intentionally separate from the live
+    // canonical entry, which can exist before any response is completed.
+    typedef struct packed {
+        bit                  valid;
+        memblock_tlb_lookup_key_t request_key;
+        memblock_tlb_lookup_key_t entry_key;
+        bit                  range_hit;
+        longint unsigned     response_token;
+        longint unsigned     response_sample_seq;
+        longint unsigned     entry_generation;
+    } tlb_response_provenance_view_t;
+
+    typedef struct packed {
+        bit              valid;
+        memblock_uid_t   uid;
+        int unsigned     dynamic_epoch;
+        memblock_rob_key_t rob_key;
+        bit [63:0]       vaddr;
+        bit              nc;
+        bit              mmio;
+        bit              l2_request_observed;
+        longint unsigned l2_request_sample_seq;
+        longint unsigned response_token;
+        longint unsigned sample_seq;
+    } later_split_load_response_view_t;
+
     typedef struct packed {
         bit                  valid;
         memblock_uid_t       uid;
@@ -440,6 +467,22 @@ class memblock_rm_readonly_api extends uvm_object;
         input  bit [51:0] request_vpn,
         output tlb_request_context_view_t context_view,
         output tlb_entry_view_t entry_view
+    );
+    extern function bit try_read_completed_later_split_response_for_rm(
+        input  memblock_uid_t uid,
+        input  int unsigned dynamic_epoch,
+        input  memblock_rob_key_t rob_key,
+        input  bit [51:0] request_vpn,
+        input  bit [1:0] request_s2xlate,
+        output tlb_response_provenance_view_t provenance_view,
+        output tlb_entry_view_t entry_view
+    );
+    extern function bit try_read_later_split_load_response_for_rm(
+        input  memblock_uid_t uid,
+        input  int unsigned dynamic_epoch,
+        input  memblock_rob_key_t rob_key,
+        input  bit [51:0] request_vpn,
+        output later_split_load_response_view_t response_view
     );
     // 中文注释：RM 与 software-only 检查共用的纯值 PBMT/PBMTE 语义入口。
     // 只消费 readonly view，不访问 common_data owner，也不修改任何 entry。
@@ -1222,6 +1265,100 @@ function bit memblock_rm_readonly_api::resolve_tlb_entry_for_rm(
     end
     return read_tlb_entry_for_rm(context_view.entry_key, entry_view);
 endfunction:resolve_tlb_entry_for_rm
+
+function bit memblock_rm_readonly_api::try_read_completed_later_split_response_for_rm(
+    input  memblock_uid_t uid,
+    input  int unsigned dynamic_epoch,
+    input  memblock_rob_key_t rob_key,
+    input  bit [51:0] request_vpn,
+    input  bit [1:0] request_s2xlate,
+    output tlb_response_provenance_view_t provenance_view,
+    output tlb_entry_view_t entry_view
+);
+    common_data_transaction data;
+    memblock_later_split_tlb_record record;
+
+    provenance_view = '{default:'0};
+    entry_view = '{default:'0};
+    if (!try_get_common_data(data) ||
+        !data.later_split_tlb_record_by_uid.exists(uid) ||
+        data.later_split_tlb_record_by_uid[uid] == null) begin
+        return 1'b0;
+    end
+    record = data.later_split_tlb_record_by_uid[uid];
+    if (record.uid != uid || record.dynamic_epoch != dynamic_epoch ||
+        record.rob_key != rob_key ||
+        record.split_vpn != request_vpn ||
+        record.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED ||
+        record.split_fire_sample_seq == 0 ||
+        record.lu1_request_sample_seq == 0 ||
+        record.lu1_ptw_sample_seq == 0 ||
+        record.l2_request_sample_seq == 0 ||
+        record.response_sample_seq == 0 ||
+        record.payload == null ||
+        record.request_lookup_key.vpn != request_vpn ||
+        record.s2xlate != request_s2xlate ||
+        record.request_lookup_key.s2xlate != request_s2xlate ||
+        record.payload.lookup_key != record.entry_anchor_key ||
+        record.entry_generation == 0 ||
+        record.entry_generation != record.payload.entry_generation ||
+        record.response_sample_seq <= record.l2_request_sample_seq) begin
+        return 1'b0;
+    end
+    copy_tlb_entry(record.payload, entry_view);
+    provenance_view.valid = 1'b1;
+    provenance_view.request_key = record.request_lookup_key;
+    provenance_view.entry_key = record.entry_anchor_key;
+    provenance_view.range_hit =
+        record.request_lookup_key != record.entry_anchor_key;
+    provenance_view.response_token = record.response_token;
+    provenance_view.response_sample_seq = record.response_sample_seq;
+    provenance_view.entry_generation = record.entry_generation;
+    return 1'b1;
+endfunction:try_read_completed_later_split_response_for_rm
+
+function bit memblock_rm_readonly_api::try_read_later_split_load_response_for_rm(
+    input  memblock_uid_t uid,
+    input  int unsigned dynamic_epoch,
+    input  memblock_rob_key_t rob_key,
+    input  bit [51:0] request_vpn,
+    output later_split_load_response_view_t response_view
+);
+    common_data_transaction data;
+    memblock_later_split_tlb_record record;
+
+    response_view = '{default:'0};
+    if (!try_get_common_data(data) ||
+        !data.later_split_tlb_record_by_uid.exists(uid) ||
+        data.later_split_tlb_record_by_uid[uid] == null) begin
+        return 1'b0;
+    end
+    record = data.later_split_tlb_record_by_uid[uid];
+    if (record.uid != uid || record.dynamic_epoch != dynamic_epoch ||
+        record.rob_key != rob_key || record.split_vpn != request_vpn ||
+        record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED ||
+        record.split_fire_sample_seq == 0 ||
+        record.lu1_request_sample_seq == 0 ||
+        record.mabuf_response_sample_seq == 0 ||
+        record.mabuf_response_sample_seq < record.lu1_request_sample_seq ||
+        record.mabuf_response_vaddr != record.split_vaddr ||
+        (record.mabuf_response_need_replay &&
+         !record.mabuf_response_nc && !record.mabuf_response_mmio)) begin
+        return 1'b0;
+    end
+    response_view.valid = 1'b1;
+    response_view.uid = record.uid;
+    response_view.dynamic_epoch = record.dynamic_epoch;
+    response_view.rob_key = record.rob_key;
+    response_view.vaddr = record.mabuf_response_vaddr;
+    response_view.nc = record.mabuf_response_nc;
+    response_view.mmio = record.mabuf_response_mmio;
+    response_view.l2_request_observed = record.l2_request_sample_seq != 0;
+    response_view.l2_request_sample_seq = record.l2_request_sample_seq;
+    response_view.response_token = record.response_token;
+    response_view.sample_seq = record.mabuf_response_sample_seq;
+    return 1'b1;
+endfunction:try_read_later_split_load_response_for_rm
 
 function bit memblock_rm_readonly_api::read_uid_tlb_for_rm(
     input  memblock_uid_t uid,

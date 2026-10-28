@@ -134,6 +134,11 @@ class common_data_transaction extends uvm_object;
     // 中文注释：live entry 的单调身份；普通 reset/flush 只清 table，不回退该计数器。
     longint unsigned         next_tlb_entry_generation;
     memblock_uid_tlb_record  uid_tlb_record_by_uid[memblock_uid_t];
+    // Later-page scalar Load split provenance is owned by the architectural
+    // UID instance, not by a reusable translation key.  A completed record is
+    // retained through RM commit and invalidated on redirect/reset.
+    memblock_later_split_tlb_record
+        later_split_tlb_record_by_uid[memblock_uid_t];
     // WAITING UID 的 request-fire 候选索引。key 只包含 DTLB request 可见的
     // vpn/s2xlate；每个 bucket 受 DTLB filter 物理容量限制。
     memblock_uid_t uid_waiting_by_vpn_s2xlate[memblock_uid_tlb_wait_shape_key_t][$];
@@ -506,6 +511,7 @@ class common_data_transaction extends uvm_object;
         sfence_invalidate_pending_q.delete();
         l2tlb_ppn_history_q.delete();
         uid_tlb_record_by_uid.delete();
+        later_split_tlb_record_by_uid.delete();
         clear_issue_queues();
         clear_feedback_events();
         clear_redirect_drive_queue();
@@ -4717,6 +4723,8 @@ class common_data_transaction extends uvm_object;
         // active map 后，迟到 deq 只能从这份单代身份恢复。
         capture_redirect_deleted_owner(uid, memblock_sync_pkg::dispatch_flush_epoch);
         note_lsq_cancel_for_uid(uid, memblock_sync_pkg::dispatch_flush_epoch);
+        cancel_later_split_tlb_record_for_uid(uid, old_dynamic_epoch,
+                                              "redirect_reissue");
         cancel_waiting_uid_tlb_record_for_uid(uid, "redirect_flush");
         // redirect命中的旧动态实例不再等待writeback/commit；pending fault 未 commit 时
         // 必须完整清理 fault 证据与所有 target 状态，之后从同一 UID 重新 admission。
@@ -5343,6 +5351,518 @@ class common_data_transaction extends uvm_object;
         end
         return 1'b1;
     endfunction:lookup_active_uid_by_rob
+
+    function void cancel_later_split_tlb_record_for_uid(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch,
+        input string reason = "");
+        memblock_later_split_tlb_record record;
+
+        if (!later_split_tlb_record_by_uid.exists(uid) ||
+            later_split_tlb_record_by_uid[uid] == null) begin
+            return;
+        end
+        record = later_split_tlb_record_by_uid[uid];
+        if (record.dynamic_epoch != dynamic_epoch ||
+            record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED) begin
+            return;
+        end
+        record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED;
+        `uvm_info("LATER_SPLIT_TLB",
+                  $sformatf("cancel uid=%0d dynamic_epoch=%0d vpn=0x%0h token=%0d reason=%s",
+                            uid, dynamic_epoch, record.split_vpn,
+                            record.response_token, reason), UVM_LOW)
+    endfunction:cancel_later_split_tlb_record_for_uid
+
+    function void cancel_all_later_split_tlb_records(input string reason = "");
+        foreach (later_split_tlb_record_by_uid[uid]) begin
+            memblock_later_split_tlb_record record;
+            record = later_split_tlb_record_by_uid[uid];
+            if (record != null &&
+                record.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED) begin
+                record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED;
+            end
+        end
+        later_split_tlb_record_by_uid.delete();
+        `uvm_info("LATER_SPLIT_TLB",
+                  $sformatf("clear all later-split records reason=%s", reason),
+                  UVM_LOW)
+    endfunction:cancel_all_later_split_tlb_records
+
+    function void observe_later_split_tlb_sample(
+        input bit split_fire,
+        input memblock_rob_key_t split_rob_key,
+        input bit [63:0] split_fullva,
+        input bit lu1_tlb_valid,
+        input bit lu1_frm_mabuf,
+        input bit lu1_kill,
+        input memblock_rob_key_t lu1_rob_key,
+        input bit [63:0] lu1_fullva,
+        input bit lu1_ptw_valid,
+        input bit [37:0] lu1_ptw_vpn,
+        input bit [1:0] lu1_ptw_s2xlate,
+        input longint unsigned sample_seq);
+        memblock_uid_t uid;
+        status_transaction status;
+        main_control_transaction main_tr;
+        memblock_later_split_tlb_record record;
+        memblock_uid_t candidate_uid;
+        int unsigned candidate_count;
+        bit split_is_later_page;
+        bit lu1_is_later_page;
+        bit retain_completed_owner;
+
+        if (sample_seq == 0) begin
+            `uvm_fatal("LATER_SPLIT_TLB", "sample sequence must be non-zero")
+            return;
+        end
+
+        // Phase 1: a cross-page misaligned load emits both its original-page
+        // split and its later-page split through this interface.  Only the
+        // later-page request needs a second translation response, so the
+        // original-page handshake is deliberately not a ledger owner.
+        if (split_fire) begin
+            retain_completed_owner = 1'b0;
+            if (!lookup_active_uid_by_rob(split_rob_key, uid)) begin
+                `uvm_fatal("LATER_SPLIT_TLB",
+                           $sformatf("split fire has no active UID sample=%0d rob=%0d/%0d",
+                                     sample_seq, split_rob_key.flag,
+                                     split_rob_key.value))
+                return;
+            end
+            status = get_status(uid);
+            main_tr = get_main_transaction(uid);
+            split_is_later_page =
+                split_fullva[63:12] != main_tr.vaddr[63:12];
+            if (split_is_later_page) begin
+                if (lu1_tlb_valid && lu1_frm_mabuf && !lu1_kill &&
+                    (split_rob_key != lu1_rob_key ||
+                     split_fullva != lu1_fullva)) begin
+                    `uvm_fatal("LATER_SPLIT_TLB",
+                               $sformatf("same-sample split/LU1 binding conflict sample=%0d split_rob=%0d/%0d lu1_rob=%0d/%0d split_va=0x%0h lu1_va=0x%0h",
+                                         sample_seq,
+                                         split_rob_key.flag, split_rob_key.value,
+                                         lu1_rob_key.flag, lu1_rob_key.value,
+                                         split_fullva, lu1_fullva))
+                    return;
+                end
+                if (later_split_tlb_record_by_uid.exists(uid) &&
+                    later_split_tlb_record_by_uid[uid] != null) begin
+                    record = later_split_tlb_record_by_uid[uid];
+                    if (record.dynamic_epoch == status.dynamic_epoch &&
+                        record.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED) begin
+                        if (record.state inside {
+                                memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW,
+                                memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_L2_TOKEN,
+                                memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE} &&
+                            record.rob_key == split_rob_key &&
+                            record.split_vaddr == split_fullva &&
+                            record.mabuf_response_sample_seq != 0 &&
+                            record.mabuf_response_sample_seq >= record.lu1_request_sample_seq &&
+                            record.mabuf_response_sample_seq < sample_seq &&
+                            record.mabuf_response_need_replay &&
+                            !record.mabuf_response_nc &&
+                            !record.mabuf_response_mmio) begin
+                            `uvm_info("LATER_SPLIT_TLB",
+                                      $sformatf("restart exact later-page split after replay response uid=%0d epoch=%0d rob=%0d/%0d va=0x%0h response_sample=%0d replay_split_sample=%0d",
+                                                uid, status.dynamic_epoch,
+                                                split_rob_key.flag,
+                                                split_rob_key.value,
+                                                split_fullva,
+                                                record.mabuf_response_sample_seq,
+                                                sample_seq), UVM_LOW)
+                        end else if (record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED &&
+                            record.rob_key == split_rob_key &&
+                            record.split_vaddr == split_fullva) begin
+                            `uvm_info("LATER_SPLIT_TLB",
+                                      $sformatf("retain completed later-page response across exact replay uid=%0d epoch=%0d rob=%0d/%0d va=0x%0h token=%0d response_sample=%0d replay_split_sample=%0d",
+                                                uid, status.dynamic_epoch,
+                                                split_rob_key.flag,
+                                                split_rob_key.value,
+                                                split_fullva,
+                                                record.response_token,
+                                                record.response_sample_seq,
+                                                sample_seq), UVM_LOW)
+                            retain_completed_owner = 1'b1;
+                        end else begin
+                            `uvm_fatal("LATER_SPLIT_TLB",
+                                       $sformatf("new later-page split conflicts with existing owner uid=%0d epoch=%0d state=%0d old_rob=%0d/%0d new_rob=%0d/%0d old_va=0x%0h new_va=0x%0h",
+                                                 uid, status.dynamic_epoch,
+                                                 record.state,
+                                                 record.rob_key.flag,
+                                                 record.rob_key.value,
+                                                 split_rob_key.flag,
+                                                 split_rob_key.value,
+                                                 record.split_vaddr,
+                                                 split_fullva))
+                            return;
+                        end
+                    end
+                end
+                if (!retain_completed_owner) begin
+                    record = memblock_later_split_tlb_record::type_id::create(
+                        $sformatf("later_split_uid_%0d_epoch_%0d", uid,
+                                  status.dynamic_epoch));
+                    if (record == null) begin
+                        `uvm_fatal("LATER_SPLIT_TLB", "failed to allocate split owner")
+                        return;
+                    end
+                    record.uid = uid;
+                    record.dynamic_epoch = status.dynamic_epoch;
+                    record.rob_key = split_rob_key;
+                    record.split_vaddr = split_fullva;
+                    record.split_vpn = split_fullva[63:12];
+                    record.split_fire_sample_seq = sample_seq;
+                    record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_REQUEST;
+                    later_split_tlb_record_by_uid[uid] = record;
+                    `uvm_info("LATER_SPLIT_TLB",
+                              $sformatf("capture split owner uid=%0d epoch=%0d rob=%0d/%0d va=0x%0h sample=%0d",
+                                        uid, status.dynamic_epoch,
+                                        split_rob_key.flag, split_rob_key.value,
+                                        split_fullva, sample_seq), UVM_LOW)
+                end
+            end
+        end
+
+        // Phase 2: only a non-killed LoadUnit1 request sourced from mabuf may
+        // advance the owner.  A request without a prior split owner is ignored;
+        // it is negative provenance, not a new owner source.
+        if (lu1_tlb_valid && lu1_frm_mabuf && !lu1_kill) begin
+            if (lookup_active_uid_by_rob(lu1_rob_key, uid)) begin
+                main_tr = get_main_transaction(uid);
+                lu1_is_later_page =
+                    lu1_fullva[63:12] != main_tr.vaddr[63:12];
+                if (lu1_is_later_page) begin
+                    if (!later_split_tlb_record_by_uid.exists(uid) ||
+                        later_split_tlb_record_by_uid[uid] == null) begin
+                        `uvm_fatal("LATER_SPLIT_TLB",
+                                   $sformatf("later-page LU1 frm_mabuf request has no prior split fire uid=%0d rob=%0d/%0d va=0x%0h sample=%0d",
+                                             uid, lu1_rob_key.flag,
+                                             lu1_rob_key.value, lu1_fullva,
+                                             sample_seq))
+                        return;
+                    end
+                    status = get_status(uid);
+                    record = later_split_tlb_record_by_uid[uid];
+                    if (record.dynamic_epoch == status.dynamic_epoch &&
+                        record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_REQUEST) begin
+                        if (record.rob_key != lu1_rob_key ||
+                            record.split_vaddr != lu1_fullva) begin
+                            `uvm_fatal("LATER_SPLIT_TLB",
+                                       $sformatf("split/LU1 binding conflict uid=%0d epoch=%0d split_rob=%0d/%0d lu1_rob=%0d/%0d split_va=0x%0h lu1_va=0x%0h",
+                                                 uid, status.dynamic_epoch,
+                                                 record.rob_key.flag,
+                                                 record.rob_key.value,
+                                                 lu1_rob_key.flag,
+                                                 lu1_rob_key.value,
+                                                 record.split_vaddr, lu1_fullva))
+                            return;
+                        end
+                        record.lu1_request_sample_seq = sample_seq;
+                        record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW;
+                        `uvm_info("LATER_SPLIT_TLB",
+                                  $sformatf("bind LU1 frm_mabuf uid=%0d epoch=%0d vpn=0x%0h sample=%0d",
+                                            uid, record.dynamic_epoch,
+                                            record.split_vpn, sample_seq), UVM_LOW)
+                    end
+                end
+            end
+        end
+
+        // Phase 3: direct requestor-1 PTW evidence is matched only against
+        // owners that already observed the exact LU1 frm_mabuf request.
+        if (!lu1_ptw_valid) begin
+            return;
+        end
+        candidate_count = 0;
+        candidate_uid = 0;
+        foreach (later_split_tlb_record_by_uid[scan_uid]) begin
+            record = later_split_tlb_record_by_uid[scan_uid];
+            if (record != null &&
+                record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_REQUEST &&
+                record.split_vpn[37:0] == lu1_ptw_vpn &&
+                status_by_uid[scan_uid] != null &&
+                status_by_uid[scan_uid].active &&
+                status_by_uid[scan_uid].dynamic_epoch == record.dynamic_epoch) begin
+                `uvm_fatal("LATER_SPLIT_TLB",
+                           $sformatf("LU1 PTW request arrived before frm_mabuf request uid=%0d epoch=%0d vpn=0x%0h sample=%0d",
+                                     scan_uid, record.dynamic_epoch,
+                                     lu1_ptw_vpn, sample_seq))
+                return;
+            end
+            if (record != null &&
+                record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_LU1_PTW &&
+                record.split_vpn[37:0] == lu1_ptw_vpn &&
+                status_by_uid[scan_uid] != null &&
+                status_by_uid[scan_uid].active &&
+                status_by_uid[scan_uid].dynamic_epoch == record.dynamic_epoch) begin
+                candidate_uid = scan_uid;
+                candidate_count++;
+            end
+        end
+        if (candidate_count > 1) begin
+            `uvm_fatal("LATER_SPLIT_TLB",
+                       $sformatf("LU1 PTW request has ambiguous split owners vpn=0x%0h s2xlate=%0d sample=%0d candidates=%0d",
+                                 lu1_ptw_vpn, lu1_ptw_s2xlate,
+                                 sample_seq, candidate_count))
+            return;
+        end
+        if (candidate_count == 0) begin
+            return;
+        end
+        record = later_split_tlb_record_by_uid[candidate_uid];
+        record.s2xlate = lu1_ptw_s2xlate;
+        record.lu1_ptw_sample_seq = sample_seq;
+        record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_L2_TOKEN;
+        `uvm_info("LATER_SPLIT_TLB",
+                  $sformatf("bind LU1 PTW owner uid=%0d epoch=%0d vpn=0x%0h s2xlate=%0d sample=%0d",
+                            candidate_uid, record.dynamic_epoch,
+                            lu1_ptw_vpn, lu1_ptw_s2xlate,
+                            sample_seq), UVM_LOW)
+    endfunction:observe_later_split_tlb_sample
+
+    function void observe_later_split_load_response_sample(
+        input bit response_valid,
+        input memblock_rob_key_t response_rob_key,
+        input bit [63:0] response_vaddr,
+        input bit response_nc,
+        input bit response_mmio,
+        input bit response_need_replay,
+        input longint unsigned sample_seq);
+        memblock_uid_t uid;
+        status_transaction status;
+        main_control_transaction main_tr;
+        memblock_later_split_tlb_record record;
+
+        if (!response_valid) begin
+            return;
+        end
+        if (sample_seq == 0) begin
+            `uvm_fatal("LATER_SPLIT_TLB", "mabuf response requires non-zero sample")
+            return;
+        end
+        if (!lookup_active_uid_by_rob(response_rob_key, uid)) begin
+            `uvm_fatal("LATER_SPLIT_TLB",
+                       $sformatf("mabuf response has no active UID sample=%0d rob=%0d/%0d va=0x%0h",
+                                 sample_seq, response_rob_key.flag,
+                                 response_rob_key.value, response_vaddr))
+            return;
+        end
+        status = get_status(uid);
+        main_tr = get_main_transaction(uid);
+        if (response_vaddr[63:12] == main_tr.vaddr[63:12]) begin
+            return;
+        end
+        if (!later_split_tlb_record_by_uid.exists(uid) ||
+            later_split_tlb_record_by_uid[uid] == null) begin
+            `uvm_fatal("LATER_SPLIT_TLB",
+                       $sformatf("later-page mabuf response has no split owner uid=%0d epoch=%0d rob=%0d/%0d va=0x%0h sample=%0d",
+                                 uid, status.dynamic_epoch,
+                                 response_rob_key.flag,
+                                 response_rob_key.value,
+                                 response_vaddr, sample_seq))
+            return;
+        end
+        record = later_split_tlb_record_by_uid[uid];
+        if (record.dynamic_epoch != status.dynamic_epoch ||
+            record.rob_key != response_rob_key ||
+            record.split_vaddr != response_vaddr ||
+            record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED) begin
+            `uvm_fatal("LATER_SPLIT_TLB",
+                       $sformatf("later-page mabuf response provenance mismatch uid=%0d epoch=%0d owner_epoch=%0d state=%0d owner_rob=%0d/%0d response_rob=%0d/%0d owner_va=0x%0h response_va=0x%0h sample=%0d",
+                                 uid, status.dynamic_epoch,
+                                 record.dynamic_epoch, record.state,
+                                 record.rob_key.flag, record.rob_key.value,
+                                 response_rob_key.flag, response_rob_key.value,
+                                 record.split_vaddr, response_vaddr,
+                                 sample_seq))
+            return;
+        end
+        record.mabuf_response_sample_seq = sample_seq;
+        record.mabuf_response_vaddr = response_vaddr;
+        record.mabuf_response_nc = response_nc;
+        record.mabuf_response_mmio = response_mmio;
+        record.mabuf_response_need_replay = response_need_replay;
+        `uvm_info("LATER_SPLIT_TLB",
+                  $sformatf("capture mabuf response uid=%0d epoch=%0d rob=%0d/%0d va=0x%0h nc=%0d mmio=%0d need_replay=%0d sample=%0d state=%0d",
+                            uid, status.dynamic_epoch,
+                            response_rob_key.flag, response_rob_key.value,
+                            response_vaddr, response_nc, response_mmio,
+                            response_need_replay,
+                            sample_seq, record.state), UVM_LOW)
+    endfunction:observe_later_split_load_response_sample
+
+    function memblock_later_split_tlb_record bind_later_split_l2_request_token(
+        input memblock_tlb_lookup_key_t request_key,
+        input longint unsigned request_token,
+        input longint unsigned sample_seq);
+        memblock_later_split_tlb_record record;
+        memblock_uid_t candidate_uid;
+        int unsigned candidate_count;
+
+        if (sample_seq == 0) begin
+            `uvm_fatal("LATER_SPLIT_TLB", "L2 token bind requires non-zero sample")
+            return null;
+        end
+        candidate_count = 0;
+        candidate_uid = 0;
+        foreach (later_split_tlb_record_by_uid[uid]) begin
+            record = later_split_tlb_record_by_uid[uid];
+            if (record != null &&
+                record.state inside {
+                    memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE,
+                    memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED} &&
+                record.response_token == request_token) begin
+                `uvm_fatal("LATER_SPLIT_TLB",
+                           $sformatf("L2 token=%0d already owned by uid=%0d epoch=%0d",
+                                     request_token, record.uid,
+                                     record.dynamic_epoch))
+                return null;
+            end
+            if (record != null &&
+                record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_L2_TOKEN &&
+                record.split_vpn == request_key.vpn &&
+                record.s2xlate == request_key.s2xlate &&
+                status_by_uid[uid] != null && status_by_uid[uid].active &&
+                status_by_uid[uid].dynamic_epoch == record.dynamic_epoch) begin
+                candidate_uid = uid;
+                candidate_count++;
+            end
+        end
+        if (candidate_count > 1) begin
+            `uvm_fatal("LATER_SPLIT_TLB",
+                       $sformatf("aggregate L2 request has ambiguous split owners vpn=0x%0h s2xlate=%0d token=%0d sample=%0d candidates=%0d",
+                                 request_key.vpn, request_key.s2xlate,
+                                 request_token, sample_seq, candidate_count))
+            return null;
+        end
+        if (candidate_count == 0) begin
+            return null;
+        end
+        record = later_split_tlb_record_by_uid[candidate_uid];
+        record.request_lookup_key = request_key;
+        record.response_token = request_token;
+        record.l2_request_sample_seq = sample_seq;
+        record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE;
+        `uvm_info("LATER_SPLIT_TLB",
+                  $sformatf("bind exact L2 token uid=%0d epoch=%0d vpn=0x%0h token=%0d sample=%0d",
+                            candidate_uid, record.dynamic_epoch,
+                            request_key.vpn, request_token, sample_seq), UVM_LOW)
+        return record;
+    endfunction:bind_later_split_l2_request_token
+
+    function void complete_later_split_l2_response(
+        input memblock_later_split_tlb_record owner,
+        input longint unsigned request_token,
+        input memblock_tlb_lookup_key_t request_key,
+        input memblock_tlb_lookup_key_t entry_anchor_key,
+        input longint unsigned pending_entry_generation,
+        input memblock_tlb_entry entry,
+        input longint unsigned complete_sample_seq);
+        memblock_later_split_tlb_record canonical;
+
+        if (owner == null || entry == null || complete_sample_seq == 0) begin
+            `uvm_fatal("LATER_SPLIT_TLB", "completion has invalid owner handle")
+            return;
+        end
+        if (owner.state ==
+                memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED &&
+            (!is_valid_uid(owner.uid) ||
+             status_by_uid[owner.uid] == null ||
+             !status_by_uid[owner.uid].active ||
+             status_by_uid[owner.uid].dynamic_epoch != owner.dynamic_epoch)) begin
+            `uvm_info("LATER_SPLIT_TLB",
+                      $sformatf("ignore canceled stale completion uid=%0d epoch=%0d token=%0d sample=%0d",
+                                owner.uid, owner.dynamic_epoch,
+                                request_token, complete_sample_seq), UVM_LOW)
+            return;
+        end
+        if (!later_split_tlb_record_by_uid.exists(owner.uid)) begin
+            `uvm_fatal("LATER_SPLIT_TLB", "completion owner is missing from canonical map")
+            return;
+        end
+        canonical = later_split_tlb_record_by_uid[owner.uid];
+        if (canonical != owner) begin
+            if (canonical != null &&
+                canonical.uid == owner.uid &&
+                canonical.dynamic_epoch == owner.dynamic_epoch &&
+                canonical.rob_key == owner.rob_key &&
+                canonical.split_vaddr == owner.split_vaddr &&
+                canonical.split_fire_sample_seq > owner.mabuf_response_sample_seq &&
+                owner.response_token == request_token &&
+                owner.request_lookup_key == request_key &&
+                owner.mabuf_response_sample_seq != 0 &&
+                owner.mabuf_response_sample_seq >= owner.lu1_request_sample_seq &&
+                owner.mabuf_response_need_replay &&
+                !owner.mabuf_response_nc && !owner.mabuf_response_mmio) begin
+                `uvm_info("LATER_SPLIT_TLB",
+                          $sformatf("ignore superseded replay-attempt completion uid=%0d epoch=%0d token=%0d old_split_sample=%0d replay_response_sample=%0d new_split_sample=%0d complete_sample=%0d",
+                                    owner.uid, owner.dynamic_epoch, request_token,
+                                    owner.split_fire_sample_seq,
+                                    owner.mabuf_response_sample_seq,
+                                    canonical.split_fire_sample_seq,
+                                    complete_sample_seq), UVM_LOW)
+                return;
+            end
+            `uvm_fatal("LATER_SPLIT_TLB", "completion has stale owner handle without replay provenance")
+            return;
+        end
+        if (canonical.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE ||
+            status_by_uid[canonical.uid] == null ||
+            !status_by_uid[canonical.uid].active ||
+            status_by_uid[canonical.uid].dynamic_epoch != canonical.dynamic_epoch ||
+            main_table_by_uid[canonical.uid] == null ||
+            main_table_by_uid[canonical.uid].get_rob_key() != canonical.rob_key ||
+            canonical.response_token != request_token ||
+            canonical.request_lookup_key != request_key ||
+            canonical.split_vpn != request_key.vpn ||
+            canonical.s2xlate != request_key.s2xlate ||
+            entry.lookup_key != entry_anchor_key ||
+            entry.entry_generation == 0 ||
+            pending_entry_generation != entry.entry_generation) begin
+            `uvm_fatal("LATER_SPLIT_TLB",
+                       $sformatf("completion provenance mismatch uid=%0d epoch=%0d state=%0d owner_token=%0d response_token=%0d owner_vpn=0x%0h request_vpn=0x%0h owner_s2=%0d request_s2=%0d pending_gen=%0d entry_gen=%0d",
+                                 canonical.uid, canonical.dynamic_epoch,
+                                 canonical.state, canonical.response_token,
+                                 request_token, canonical.split_vpn,
+                                 request_key.vpn, canonical.s2xlate,
+                                 request_key.s2xlate,
+                                 pending_entry_generation,
+                                 entry.entry_generation))
+            return;
+        end
+        canonical.entry_anchor_key = entry_anchor_key;
+        canonical.payload.copy_from(entry);
+        canonical.response_sample_seq = complete_sample_seq;
+        canonical.entry_generation = entry.entry_generation;
+        canonical.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_COMPLETED;
+        `uvm_info("LATER_SPLIT_TLB",
+                  $sformatf("complete exact owner uid=%0d epoch=%0d request_vpn=0x%0h anchor_vpn=0x%0h token=%0d sample=%0d generation=%0d",
+                            canonical.uid, canonical.dynamic_epoch,
+                            canonical.request_lookup_key.vpn,
+                            canonical.entry_anchor_key.vpn, request_token,
+                            complete_sample_seq,
+                            canonical.entry_generation), UVM_LOW)
+    endfunction:complete_later_split_l2_response
+
+    function void cancel_later_split_l2_token(
+        input longint unsigned request_token,
+        input string reason = "");
+        foreach (later_split_tlb_record_by_uid[uid]) begin
+            memblock_later_split_tlb_record record;
+            record = later_split_tlb_record_by_uid[uid];
+            if (record != null &&
+                record.state == memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE &&
+                record.response_token == request_token) begin
+                record.state = memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED;
+                `uvm_info("LATER_SPLIT_TLB",
+                          $sformatf("cancel token owner uid=%0d epoch=%0d token=%0d reason=%s",
+                                    uid, record.dynamic_epoch,
+                                    request_token, reason), UVM_LOW)
+                return;
+            end
+        end
+    endfunction:cancel_later_split_l2_token
 
     function bit lookup_active_uid_by_lq(input memblock_lq_key_t lq_key,
                                          output memblock_uid_t uid);
@@ -7507,6 +8027,7 @@ class common_data_transaction extends uvm_object;
     // entry/invalidate state at a runtime reset, while preserving the main
     // table and UID history owned by other dispatch flows.
     function void clear_dispatch_l2tlb_live_entries();
+        cancel_all_later_split_tlb_records("runtime_reset");
         sfence_invalidate_pending_q.delete();
         tlb_anchor_keys_by_range_key.delete();
         tlb_entry_by_key.delete();
