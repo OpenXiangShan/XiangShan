@@ -946,6 +946,11 @@ public:
         std::uint64_t address, std::uint64_t size,
         std::uint64_t period, std::uint8_t first)
     {
+        validate_repeating_incrementing_region(address, size, period);
+        if (write_mirror_ != nullptr) {
+            write_mirror_->validate_repeating_incrementing_region(
+                address, size, period);
+        }
         define_reference_repeating_incrementing(address, size, period, first);
         if (write_mirror_ != nullptr) {
             write_mirror_->define_reference_repeating_incrementing(
@@ -957,12 +962,31 @@ public:
         std::uint64_t address, std::uint64_t size,
         std::uint64_t period, std::uint8_t first)
     {
-        if (size == 0 || period == 0) {
-            throw std::invalid_argument(
-                "repeating incrementing memory region must be non-empty");
-        }
+        validate_repeating_incrementing_region(address, size, period);
         repeating_incrementing_.push_back(
             RepeatingIncrementingRegion{address, size, period, first});
+    }
+
+    void define_seeded_random(
+        std::uint64_t address, std::uint64_t size, std::uint64_t seed)
+    {
+        // Validate both images before either definition changes.  Mirror only
+        // once; later architectural reference writes remain independent.
+        validate_seeded_random_region(address, size);
+        if (write_mirror_ != nullptr) {
+            write_mirror_->validate_seeded_random_region(address, size);
+        }
+        define_reference_seeded_random(address, size, seed);
+        if (write_mirror_ != nullptr) {
+            write_mirror_->define_reference_seeded_random(address, size, seed);
+        }
+    }
+
+    void define_reference_seeded_random(
+        std::uint64_t address, std::uint64_t size, std::uint64_t seed)
+    {
+        validate_seeded_random_region(address, size);
+        seeded_random_.push_back(SeededRandomRegion{address, size, seed});
     }
 
     std::uint8_t read_byte(std::uint64_t address) const
@@ -970,6 +994,15 @@ public:
         const auto it = bytes_.find(address);
         if (it != bytes_.end()) {
             return it->second;
+        }
+        for (auto region = seeded_random_.rbegin();
+             region != seeded_random_.rend(); ++region) {
+            if (address >= region->address &&
+                address - region->address < region->size) {
+                const unsigned shift = static_cast<unsigned>(address & 7U) * 8;
+                return static_cast<std::uint8_t>(
+                    seeded_random_word(address, region->seed) >> shift);
+            }
         }
         for (auto region = repeating_incrementing_.rbegin();
              region != repeating_incrementing_.rend(); ++region) {
@@ -1060,9 +1093,69 @@ private:
         std::uint8_t first;
     };
 
+    struct SeededRandomRegion {
+        std::uint64_t address;
+        std::uint64_t size;
+        std::uint64_t seed;
+    };
+
+    static bool regions_overlap(std::uint64_t address, std::uint64_t size,
+        std::uint64_t other_address, std::uint64_t other_size)
+    {
+        return address <= other_address
+            ? other_address - address < size
+            : address - other_address < other_size;
+    }
+
+    void validate_seeded_random_region(
+        std::uint64_t address, std::uint64_t size) const
+    {
+        if (size == 0 || address > ~std::uint64_t{0} - (size - 1)) {
+            throw std::invalid_argument(
+                "seeded random memory region must be non-empty and not wrap");
+        }
+        // These lazy formats have separate lookup lists: reject mixed-format
+        // overlap in either definition order. Explicit byte writes always win;
+        // repeated definitions of the same format retain last-definition wins.
+        for (const auto &region : repeating_incrementing_) {
+            if (regions_overlap(address, size, region.address, region.size)) {
+                throw std::invalid_argument(
+                    "seeded and repeating memory regions must not overlap");
+            }
+        }
+    }
+
+    void validate_repeating_incrementing_region(std::uint64_t address,
+        std::uint64_t size, std::uint64_t period) const
+    {
+        if (size == 0 || period == 0) {
+            throw std::invalid_argument(
+                "repeating incrementing memory region must be non-empty");
+        }
+        for (const auto &region : seeded_random_) {
+            if (regions_overlap(address, size, region.address, region.size)) {
+                throw std::invalid_argument(
+                    "seeded and repeating memory regions must not overlap");
+            }
+        }
+    }
+
+    static std::uint64_t seeded_random_word(
+        std::uint64_t address, std::uint64_t seed)
+    {
+        // SplitMix64's stateless permutation gives each aligned absolute word
+        // an address-sensitive value, independent of read order or RNG state.
+        std::uint64_t value = (address & ~std::uint64_t{7}) ^ seed;
+        value += 0x9e3779b97f4a7c15ULL;
+        value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+        return value ^ (value >> 31);
+    }
+
     SparseMemory *write_mirror_;
     std::unordered_map<std::uint64_t, std::uint8_t> bytes_;
     std::vector<RepeatingIncrementingRegion> repeating_incrementing_;
+    std::vector<SeededRandomRegion> seeded_random_;
 };
 
 struct ReferenceStageWalkResult {

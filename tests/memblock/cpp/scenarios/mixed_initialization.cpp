@@ -40,9 +40,12 @@ void MixedScenario::initialize_memory()
             gstage_boundary_physical, 0x4000,
             static_cast<unsigned char>(options.seed ^ 0xb7U));
     }
-    environment.memory().fill_incrementing(bare_base, 0x20000, 0x19);
-    environment.memory().fill_incrementing(cache0_base, 0x90000, 0x43);
-    environment.memory().fill_incrementing(cache1_base, 0x10000, 0x71);
+    environment.memory().define_seeded_random(
+        bare_base, 0x20000, options.seed ^ 0x19U);
+    environment.memory().define_seeded_random(
+        cache0_base, 0x90000, options.seed ^ 0x43U);
+    environment.memory().define_seeded_random(
+        cache1_base, 0x10000, options.seed ^ 0x71U);
     for (unsigned pbmt = 0; pbmt < hypervisor_pbmt_mappings.size(); ++pbmt) {
         for (unsigned topology = 0; topology < 4; ++topology) {
             environment.memory().fill_incrementing(
@@ -65,8 +68,10 @@ void MixedScenario::initialize_memory()
     }
     environment.memory().fill_incrementing(nc_base, 0x1000, 0xa3);
     environment.memory().fill_incrementing(mmio_physical, 0x1000, 0xb7);
-    environment.memory().fill_incrementing(atomic_base, 0x1000, 0xd3);
-    environment.memory().fill_incrementing(stage1_napot_base, 0x40000, 0xe1);
+    environment.memory().define_seeded_random(
+        atomic_base, 0x1000, options.seed ^ 0xd3U);
+    environment.memory().define_seeded_random(
+        stage1_napot_base, 0x40000, options.seed ^ 0xe1U);
     environment.memory().fill_incrementing(
         vector_fof_physical_base, 0x1000, 0x95);
     environment.memory().fill_incrementing(
@@ -75,12 +80,12 @@ void MixedScenario::initialize_memory()
     // Establish pools that lack a per-line external freshness check before
     // any traffic. Hardware prefetch may legally fetch future lines, so a
     // later manager rewrite could diverge from an already resident line.
-    environment.memory().define_repeating_incrementing(
-        load_merge_base, load_merge_span, 64, 0x41);
-    environment.memory().define_repeating_incrementing(
-        miss_burst_base, miss_burst_span, 64, 0x61);
-    environment.memory().define_repeating_incrementing(
-        bank_conflict_base, bank_conflict_span, 64, 0x71);
+    environment.memory().define_seeded_random(
+        load_merge_base, load_merge_span, options.seed ^ 0x41U);
+    environment.memory().define_seeded_random(
+        miss_burst_base, miss_burst_span, options.seed ^ 0x61U);
+    environment.memory().define_seeded_random(
+        bank_conflict_base, bank_conflict_span, options.seed ^ 0x71U);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
 }

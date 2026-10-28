@@ -1681,19 +1681,24 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         execute = read_cpp_definition("scenarios/mixed_scheduler.cpp", "MixedScenario::execute")
 
         for contract in (
-            "define_repeating_incrementing(",
-            "define_reference_repeating_incrementing(",
-            "repeating_incrementing_",
-            "region->first + period_index + offset",
+            "define_seeded_random(",
+            "define_reference_seeded_random(",
+            "seeded_random_",
+            "seeded_random_word(address, region->seed)",
         ):
             self.assertIn(contract, environment)
         self.assertLess(run.index("initialize_memory();"), run.index("execute();"))
         self.assertLess(execute.index("initialize_run()"), execute.index("prepare_tail()"))
         self.assertIn("if (!environment.reset()", initialize_run)
         for definition in (
-            "load_merge_base, load_merge_span, 64, 0x41",
-            "miss_burst_base, miss_burst_span, 64, 0x61",
-            "bank_conflict_base, bank_conflict_span, 64, 0x71",
+            "bare_base, 0x20000, options.seed ^ 0x19U",
+            "cache0_base, 0x90000, options.seed ^ 0x43U",
+            "cache1_base, 0x10000, options.seed ^ 0x71U",
+            "atomic_base, 0x1000, options.seed ^ 0xd3U",
+            "stage1_napot_base, 0x40000, options.seed ^ 0xe1U",
+            "load_merge_base, load_merge_span, options.seed ^ 0x41U",
+            "miss_burst_base, miss_burst_span, options.seed ^ 0x61U",
+            "bank_conflict_base, bank_conflict_span, options.seed ^ 0x71U",
         ):
             self.assertIn(definition, initialize)
         load_merge = read_cpp_definition("scenarios/mixed_action_scalar.cpp", "MixedScenario::execute_load_merge")

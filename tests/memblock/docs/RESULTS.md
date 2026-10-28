@@ -18,6 +18,13 @@ None.
 
 ## Current Changes Qualified Below
 
+- Ordinary random bare/cache/atomic/NAPOT and merge/miss/bank pools use lazy
+  seed-and-physical-address initial words. Reference and manager images share
+  initialization while later writes remain independent. Six production-model
+  unit tests pass, including wrong-address data substitutions accepted by old
+  repeating patterns and rejected by the actual load scoreboard with new data.
+  Fresh-context independent review approves this scoped memory change with no
+  findings; artifact `build/memblock/scalar-dependency-20261028/memory-review.txt`.
 - The PMP page-crossing vector load now checks accepted external requests
   through its vector-exception redirect recovery and includes a cold
   both-readable data/demand control. The single-uop shape uses LMUL1.
