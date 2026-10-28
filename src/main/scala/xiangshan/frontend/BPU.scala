@@ -108,9 +108,15 @@ trait BPUUtils extends HasXSParameter {
   }
 
   def getFallThroughAddr(start: UInt, carry: Bool, pft: UInt) = {
-    val higher = SignExt(start, VAddrBits + 1)
-      .head(VAddrBits + 1 - log2Ceil(PredictWidth) - instOffsetBits)
-    Cat(Mux(carry, higher + 1.U, higher), pft, 0.U(instOffsetBits.W))
+    require(start.getWidth == VAddrBits + 1)
+    val lowBits = log2Ceil(PredictWidth) + instOffsetBits
+    val base    = Cat(start(VAddrBits, lowBits), pft, 0.U(instOffsetBits.W))
+    val carryOffset = Mux(
+      carry,
+      (1 << lowBits).U((VAddrBits + 1).W),
+      0.U((VAddrBits + 1).W)
+    )
+    (base +& carryOffset)(VAddrBits, 0)
   }
 
   def foldTag(tag: UInt, l: Int): UInt = {
@@ -123,7 +129,8 @@ trait BPUUtils extends HasXSParameter {
 class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUConst {
   def nInputs = 1
 
-  val s0_pc = Vec(numDup, UInt(VAddrBits.W))
+  val s0_pc       = Vec(numDup, UInt(VAddrBits.W))
+  val s0_pc_guard = Vec(numDup, Bool())
 
   val folded_hist    = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
   val s1_folded_hist = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
@@ -207,9 +214,20 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
     SegmentedAddrNext(s2_pc, s2_fire, Some("s3_pc"))
   }
 
-  io.out.s1.pc := s1_pc_dup.map(SignExt(_, VAddrBits + 1))
-  io.out.s2.pc := s2_pc_dup.map(pc => SignExt(pc.getAddr(), VAddrBits + 1))
-  io.out.s3.pc := s3_pc_dup.map(pc => SignExt(pc.getAddr(), VAddrBits + 1))
+  val s0_pc_guard_dup = WireInit(io.in.bits.s0_pc_guard)
+  val s1_pc_guard_dup = s0_pc_guard_dup.zip(io.s0_fire).map { case (guard, fire) =>
+    RegEnable(guard, false.B, fire)
+  }
+  val s2_pc_guard_dup = s1_pc_guard_dup.zip(io.s1_fire).map { case (guard, fire) =>
+    RegEnable(guard, false.B, fire)
+  }
+  val s3_pc_guard_dup = s2_pc_guard_dup.zip(io.s2_fire).map { case (guard, fire) =>
+    RegEnable(guard, false.B, fire)
+  }
+
+  io.out.s1.pc := s1_pc_dup.zip(s1_pc_guard_dup).map { case (pc, guard) => Cat(guard, pc) }
+  io.out.s2.pc := s2_pc_dup.zip(s2_pc_guard_dup).map { case (pc, guard) => Cat(guard, pc.getAddr()) }
+  io.out.s3.pc := s3_pc_dup.zip(s3_pc_guard_dup).map { case (pc, guard) => Cat(guard, pc.getAddr()) }
 
   val perfEvents: Seq[(String, UInt)] = Seq()
 
@@ -369,7 +387,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // predictors.io := DontCare
   predictors.io.in.valid               := s0_fire_dup(0)
-  predictors.io.in.bits.s0_pc          := s0_pc_dup
+  predictors.io.in.bits.s0_pc          := VecInit(s0_pc_dup.map(_(VAddrBits - 1, 0)))
+  predictors.io.in.bits.s0_pc_guard    := VecInit(s0_pc_dup.map(_(VAddrBits)))
   predictors.io.in.bits.ghist          := s0_ghist
   predictors.io.in.bits.folded_hist    := s0_folded_gh_dup
   predictors.io.in.bits.s1_folded_hist := s1_folded_gh_dup
@@ -918,6 +937,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     io.ftq_to_bpu.update.valid,
     Some("predictors_io_update_pc")
   ).getAddr()
+  predictors.io.update.bits.pcGuard := RegEnable(
+    io.ftq_to_bpu.update.bits.pcGuard,
+    false.B,
+    io.ftq_to_bpu.update.valid
+  )
 
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)

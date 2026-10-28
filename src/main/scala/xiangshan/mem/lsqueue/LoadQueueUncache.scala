@@ -572,7 +572,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
     redirect.bits.level       := RedirectLevel.flush
     redirect.bits.satpFlush   := false.B
-    redirect.bits.cfiUpdate.target := SignExt(reqSelUops(i).pc, VAddrBits + 1) // TODO: check if need pc
+    redirect.bits.cfiUpdate.target := DontCare
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
     redirect
   })
