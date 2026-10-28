@@ -95,13 +95,19 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
     rawHit && e.entry.position >= s1_readAlignedOffset && !read.req.crossPage
   })
 
-  // A fully-associative VBTB exposes only the earliest matching entry. The
-  // non-strict order makes a lower physical way win when positions are equal.
-  private val s1_readPositionMatrix = CompareMatrix(
-    VecInit(entries.map(_.entry.position)),
+  // Prefer locally predicted taken branches, then the earliest position.
+  // Unconditional jumps are always taken. If all candidates are not-taken,
+  // expose the earliest one so TAGE/SC can still correct its direction.
+  // The non-strict order makes a lower physical way win when keys are equal.
+  private val s1_readPriorityMatrix = CompareMatrix(
+    VecInit(entries.map { e =>
+      val baseTaken = e.entry.attribute.isDirect || e.entry.attribute.isIndirect ||
+        (e.entry.attribute.isConditional && e.counter.isPositive)
+      Cat(!baseTaken, e.entry.position)
+    }),
     order = (a: UInt, b: UInt) => a <= b
   )
-  private val s1_selectOH    = s1_readPositionMatrix.getLeastElementOH(s1_hitMask).asUInt
+  private val s1_selectOH    = s1_readPriorityMatrix.getLeastElementOH(s1_hitMask).asUInt
   private val s1_selectEntry = Mux1H(s1_selectOH, entries)
   private val s1_prediction  = Wire(Valid(new Prediction))
 
