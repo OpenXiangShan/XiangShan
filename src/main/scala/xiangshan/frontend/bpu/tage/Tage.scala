@@ -45,6 +45,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
   private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get else false.B
 
+  // Isolate external prediction data even when the source predictor is not flushed.
+  private val mbtbResult =
+    if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(io.fromMainBtb.result), io.fromMainBtb.result) else io.fromMainBtb.result
+  private val mbtbPositions =
+    if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(io.fromMainBtb.s1_positions), io.fromMainBtb.s1_positions) else io.fromMainBtb.s1_positions
+
   /* *** submodules *** */
   private val tables = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
 
@@ -106,7 +112,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
 
   // Vec[NumBtbResultEntries][NumTables]
-  private val s1_tag = VecInit(io.fromMainBtb.s1_positions.map { position =>
+  private val s1_tag = VecInit(mbtbPositions.map { position =>
     VecInit((tables zip s1_foldedHist).map { case (table, hist) =>
       table.getTag(s1_startPc, hist.forTag, position)
     })
@@ -141,7 +147,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     }
   }
 
-  private val s2_branches = io.fromMainBtb.result
+  private val s2_branches = mbtbResult
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
     val position      = branch.bits.cfiPosition

@@ -77,6 +77,20 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   }
   io.trainReady    := true.B
 
+  // Isolate external prediction data even when the source predictor is not flushed.
+  private val specIn = if (HasBpuFlush) {
+    val neutral = WireInit(0.U.asTypeOf(io.specIn))
+    neutral.attribute := BranchAttribute.None
+    Mux(bpuFlushing, neutral, io.specIn)
+  } else io.specIn
+  private val overrideBits = if (HasBpuFlush) {
+    val neutral = WireInit(0.U.asTypeOf(io.overrideData.bits))
+    neutral.attribute := BranchAttribute.None
+    Mux(bpuFlushing, neutral, io.overrideData.bits)
+  } else io.overrideData.bits
+  private val fullRetAddr =
+    if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(io.fullRetAddr), io.fullRetAddr) else io.fullRetAddr
+
   // Track whether S2/S3 stages contain pending push/pop operations
   private val s2_hasPush = RegInit(false.B)
   private val s2_hasPop  = RegInit(false.B)
@@ -92,18 +106,18 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   private val topRetAddr = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
 
   // Decode speculative operation from S1 input
-  private val specPush = io.specIn.attribute.isCall
-  private val specPop  = io.specIn.attribute.isReturn
+  private val specPush = specIn.attribute.isCall
+  private val specPop  = specIn.attribute.isReturn
   // Compute return address for a CALL
-  private val specPushAddr = getCfiPcFromPosition(io.specIn.startPc, io.specIn.cfiPosition) + 2.U
+  private val specPushAddr = getCfiPcFromPosition(specIn.startPc, specIn.cfiPosition) + 2.U
 
   // One-cycle delayed version of redirect; used to detect RAS recovery state
   private val redirectDelay1 = RegNext(io.hasRedirect, init = false.B)
   private val hasOverride    = io.overrideData.valid
-  private val s3_realPush    = io.overrideData.bits.attribute.isCall
-  private val s3_realPop     = io.overrideData.bits.attribute.isReturn
+  private val s3_realPush    = overrideBits.attribute.isCall
+  private val s3_realPop     = overrideBits.attribute.isReturn
   private val s3_realPushAddr =
-    getCfiPcFromPosition(io.overrideData.bits.startPc, io.overrideData.bits.cfiPosition) + 2.U
+    getCfiPcFromPosition(overrideBits.startPc, overrideBits.cfiPosition) + 2.U
 
   // -------------------------------
   // Pipeline control for S2 stage
@@ -159,10 +173,10 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     // Only S3’s operation affects the RAS state seen by the next S1:
     // - If S3 pops, the main RAS top changes → prediction invalid.
     // - If S3 pushes, the new top is s3_retAddr.
-    // - If S3 does nothing, the top remains io.fullRetAddr (main RAS).
+    // - If S3 does nothing, the top remains fullRetAddr (main RAS).
     isCanUse := !s3_realPop // Without popping, stack top data can be fetched from s3 or Main RAS.
     topRetAddr :=
-      Mux(s3_realPop, 0.U.asTypeOf(PrunedAddr(VAddrBits)), Mux(s3_realPush, s3_realPushAddr, io.fullRetAddr))
+      Mux(s3_realPop, 0.U.asTypeOf(PrunedAddr(VAddrBits)), Mux(s3_realPush, s3_realPushAddr, fullRetAddr))
   }.elsewhen(io.stageCtrl.s1_fire && specPush) {
     // S1 sees a CALL → next cycle’s RAS top will be the return address of this CALL.
     isCanUse   := true.B
@@ -175,9 +189,9 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
       // But S3 may still modify the stack:
       // - If S3 pushes → new top is s3_retAddr.
       // - If S3 pops → stack depth decreases unpredictably → invalid.
-      // - Otherwise → top reverts to main RAS (io.fullRetAddr).
+      // - Otherwise → top reverts to main RAS (fullRetAddr).
       isCanUse   := Mux(s3_hasPush, true.B, Mux(s3_hasPop, false.B, true.B))
-      topRetAddr := Mux(s3_hasPush, s3_retAddr, Mux(s3_hasPop, 0.U.asTypeOf(PrunedAddr(VAddrBits)), io.fullRetAddr))
+      topRetAddr := Mux(s3_hasPush, s3_retAddr, Mux(s3_hasPop, 0.U.asTypeOf(PrunedAddr(VAddrBits)), fullRetAddr))
     }.elsewhen(s2_hasPop) {
       // S2 also pops → stack underflow or unknown state → prediction invalid.
       isCanUse := false.B
@@ -185,7 +199,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
       // S2 neutral, but S3 pushes → S1 pop pairs with S3 push.
       // Thus, the effective top remains the current main RAS top.
       isCanUse   := true.B
-      topRetAddr := io.fullRetAddr
+      topRetAddr := fullRetAddr
     }.otherwise {
       // No pairing possible; main RAS will be popped → unknown new top.
       isCanUse := false.B
@@ -201,7 +215,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
       // S2 pop → main RAS will be popped.
       // Only safe if S3 pushes (which cancels the pop effect).
       isCanUse   := Mux(s3_hasPush, true.B, false.B)
-      topRetAddr := Mux(s3_hasPush, io.fullRetAddr, 0.U.asTypeOf(PrunedAddr(VAddrBits)))
+      topRetAddr := Mux(s3_hasPush, fullRetAddr, 0.U.asTypeOf(PrunedAddr(VAddrBits)))
     }.elsewhen(s3_hasPop) {
       // S2 neutral, but S3 pops → main RAS changes unpredictably.
       isCanUse := false.B
@@ -212,7 +226,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     }.otherwise {
       // No pending ops → top is main RAS, unless RAS is recovering from redirect.
       isCanUse   := Mux(redirectDelay1, false.B, true.B)
-      topRetAddr := Mux(redirectDelay1, 0.U.asTypeOf(PrunedAddr(VAddrBits)), io.fullRetAddr)
+      topRetAddr := Mux(redirectDelay1, 0.U.asTypeOf(PrunedAddr(VAddrBits)), fullRetAddr)
     }
   }
 

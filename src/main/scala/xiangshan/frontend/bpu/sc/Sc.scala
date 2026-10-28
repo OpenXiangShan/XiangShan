@@ -57,6 +57,12 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
   private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
 
+  // Isolate external prediction data even when the source predictor is not flushed.
+  private val mbtbResult =
+    if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(io.mbtbResult), io.mbtbResult) else io.mbtbResult
+  private val providerTakenCtrs =
+    if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(io.providerTakenCtrs), io.providerTakenCtrs) else io.providerTakenCtrs
+
   /*
    * stage control signals
    */
@@ -258,10 +264,10 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_mergePercsum = Seq(s2_pathPercsum, s2_globalPercsum, s2_bwPercsum, s2_imliPercsum)
   private val s2_sumPercsum   = VecInit.tabulate(NumWays)(j => ParallelSingedExpandingAdd(s2_mergePercsum.map(_(j))))
 
-  private val s2_mbtbResult        = io.mbtbResult
-  private val s2_providerTakenMask = VecInit(io.providerTakenCtrs.map(_.bits.isPositive))
-  private val s2_providerValid     = VecInit(io.providerTakenCtrs.map(_.valid))
-  private val s2_providerCtr       = VecInit(io.providerTakenCtrs.map(_.bits))
+  private val s2_mbtbResult        = mbtbResult
+  private val s2_providerTakenMask = VecInit(providerTakenCtrs.map(_.bits.isPositive))
+  private val s2_providerValid     = VecInit(providerTakenCtrs.map(_.valid))
+  private val s2_providerCtr       = VecInit(providerTakenCtrs.map(_.bits))
 
   private val s2_hitMask = VecInit(s2_mbtbResult.map { mbtbResult =>
     mbtbResult.valid && mbtbResult.bits.attribute.isConditional

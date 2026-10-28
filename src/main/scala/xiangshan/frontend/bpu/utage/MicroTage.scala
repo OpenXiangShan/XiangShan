@@ -62,6 +62,12 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
   private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
 
+  // Isolate external prediction data even when the source predictor is not flushed.
+  private val abtbPrediction =
+    if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(io.abtbPrediction), io.abtbPrediction) else io.abtbPrediction
+  private val abtbPosVec =
+    if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(io.abtbPosVec), io.abtbPosVec) else io.abtbPosVec
+
   // Ahead pipeline implementation. Advantage: get data one cycle earlier.
   // Disadvantage: multi-position competition for the same entry.
   // Problem scenario: the same entry accessed by different branches in different cycles.
@@ -132,7 +138,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a1_posHitVec = Wire(Vec(NumAheadBtbPredictionEntries, Vec(NumTables, Bool())))
   for (i <- 0 until NumAheadBtbPredictionEntries) {
     for (j <- 0 until NumTables) {
-      a1_posHitVec(i)(j) := a1_predEntries(j).valid && (a1_predEntries(j).cfiPosition === io.abtbPosVec(i))
+      a1_posHitVec(i)(j) := a1_predEntries(j).valid && (a1_predEntries(j).cfiPosition === abtbPosVec(i))
     }
   }
   // Get finally selected Table ID for each branch instruction of abtb.
@@ -195,7 +201,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     RegEnable(Mux(overrideValid, a3_posHitVec, a1_posHitVec), 0.U.asTypeOf(a1_posHitVec), a1_fire)
   private val a2_foldedPathHist =
     RegEnable(Mux(overrideValid, io.overridePathHist, io.s1PathHist), a1_fire)
-  private val a2_fromAbtbPos = RegEnable(io.abtbPosVec, a1_fire)
+  private val a2_fromAbtbPos = RegEnable(abtbPosVec, a1_fire)
   private val a2_abtbUseTableIDVec =
     RegEnable(Mux(overrideValid, a3_abtbTableIDVec, a1_abtbTableIDVec), 0.U.asTypeOf(a1_abtbTableIDVec), a1_fire)
   private val a2_abtbTakenVec =
@@ -231,13 +237,13 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     // On the cycle following a redirect, MicroTage provides no prediction;
     // therefore, this cycle is excluded from training.
     s1_predMeta.bits.abtbResult(i).valid :=
-      io.abtbPrediction(i).valid && io.abtbPrediction(i).bits.attribute.isConditional && RegNext(!redirectValid)
-    s1_predMeta.bits.abtbResult(i).baseTaken        := io.abtbPrediction(i).bits.taken
-    s1_predMeta.bits.abtbResult(i).hit              := a2_abtbHitVec(i) && io.abtbPrediction(i).valid
+      abtbPrediction(i).valid && abtbPrediction(i).bits.attribute.isConditional && RegNext(!redirectValid)
+    s1_predMeta.bits.abtbResult(i).baseTaken        := abtbPrediction(i).bits.taken
+    s1_predMeta.bits.abtbResult(i).hit              := a2_abtbHitVec(i) && abtbPrediction(i).valid
     s1_predMeta.bits.abtbResult(i).predTaken        := a2_abtbTakenVec(i)
     s1_predMeta.bits.abtbResult(i).tableId          := a2_abtbUseTableIDVec(i)
-    s1_predMeta.bits.abtbResult(i).cfiPosition      := a2_fromAbtbPos(i) // io.abtbPrediction(i).bits.cfiPosition
-    s1_predMeta.bits.abtbResult(i).baseIsStrongBias := io.abtbPrediction(i).bits.isStrongBias
+    s1_predMeta.bits.abtbResult(i).cfiPosition      := a2_fromAbtbPos(i) // abtbPrediction(i).bits.cfiPosition
+    s1_predMeta.bits.abtbResult(i).baseIsStrongBias := abtbPrediction(i).bits.isStrongBias
     s1_predMeta.bits.abtbResult(i).takenCtr         := a2_abtbTakenCtrVec(i)
   }
 
