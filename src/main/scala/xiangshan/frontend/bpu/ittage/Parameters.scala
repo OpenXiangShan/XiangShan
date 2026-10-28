@@ -23,9 +23,9 @@ case class IttageParameters(
     TableInfos: Seq[IttageTableInfo] = Seq(
       new IttageTableInfo(256, 4),
       new IttageTableInfo(256, 8),
-      new IttageTableInfo(512, 13),
-      new IttageTableInfo(512, 16),
-      new IttageTableInfo(512, 32)
+      new IttageTableInfo(512, 17),
+      new IttageTableInfo(512, 31),
+      new IttageTableInfo(512, 64)
     ),
     NumBanks:           Int = 2,
     TagWidth:           Int = 9,
