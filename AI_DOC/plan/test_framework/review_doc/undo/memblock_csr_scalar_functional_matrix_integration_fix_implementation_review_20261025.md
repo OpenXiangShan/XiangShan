@@ -338,6 +338,24 @@ security、regression、test 或 documentation findings；Zeno 与 Mendel 的全
 包括两个生产脚本 `bash -n`、30 个现有 cfg 全量 dry-run、plus-file 安全负向矩阵、功能矩阵 profile 与
 路径穿越测试、identity-race controller fake matrix，以及相对基线 `045011bf6b` 的 `git diff --check`。
 
+## 13. 2026-10-28 真实 EDA 门禁补充
+
+后续为四个 CSR scalar profile 补做真实 EDA smoke。编译成功，但四项均在 `0.000ns` 报
+`SEQ_CSR_CFG: LEVEL_WEIGHT_EN requires MAIN_MEM_RANGES_EN=0`。原 dry-run 只证明 cfg 选择、冻结和
+参数路由正确，未执行 sequence 配置合法性检查，因此不能替代真实运行门禁。
+
+根因是四个 profile 使用独立 `--plus-file` 目录，不会与 `seq/plus_cfg/default.cfg` 合并；profile 已显式
+设置 `MEMBLOCK_MAIN_MEM_RANGES_EN=1` 和 `MEMBLOCK_PMA_PMP_MODEL_EN=1`，却遗漏显式设置
+`MEMBLOCK_L2TLB_LEVEL_WEIGHT_EN=0`。该问题按 W44 测试框架 Bug 单独记录并修复，原矩阵功能提交
+`e888e5c43` 不改写。配置 Bug 的独立 gate 是四个 cfg 的 dry-run 三项组合断言全部通过，并由一个代表性
+原始 seed 真实运行越过 `0.000ns` 配置检查。四个完整 10k 原始 seed 改为配置 commit 与独立 prefix
+Bug 均合入母任务分支后的联合回归门禁。
+
+首个原始 seed `1684208666` 的修复后真实复测已证明配置 gate 修复生效：仿真越过 `0.000ns`，完成
+`6930` 次 RM compare PASS。随后在 `553888.000ns` 命中独立 `ROB_ADMISSION_PREFIX` fatal，属于
+redirect/admission prefix 生命周期问题，不是 cfg 参数组合回归。该独立 Bug 将按用户要求在母任务
+worktree 中顺序修复；其余三个 scalar 原 seed 和 load seed 的完整 10k PASS 在该 Bug 合并后继续执行。
+
 新增负向测试覆盖 canonical path 换行、cfg 命令注入、重复 key 和 malformed 行，并断言注入 marker 未被
 创建；另增加正式 key override 兼容测试。全目录兼容扫描发现既有 cfg 合法设置 `VSEQ_MAIN`，因此取消
 首版 validator 对正式 key 的禁止，只保留语法安全与重复 key 检查。修正后 `bash -n`、plus-file dry-run

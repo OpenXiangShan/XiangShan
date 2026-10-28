@@ -49,6 +49,9 @@ for cfg in tc_csr_scalar_load_10k tc_csr_scalar_store_10k tc_csr_scalar_mixed_10
     assert_eq "$(read_config "$out/config.txt" cfg_sha256)" \
         "$(sha256sum "$out/frozen_plus_cfg/$cfg.cfg" | awk '{print $1}')"
     assert_contains "$out/effective_plusargs.txt" "+MEMBLOCK_MAIN_TRANS_NUM=${expected[$cfg]}"
+    assert_contains "$out/effective_plusargs.txt" '+MEMBLOCK_MAIN_MEM_RANGES_EN=1'
+    assert_contains "$out/effective_plusargs.txt" '+MEMBLOCK_PMA_PMP_MODEL_EN=1'
+    assert_contains "$out/effective_plusargs.txt" '+MEMBLOCK_L2TLB_LEVEL_WEIGHT_EN=0'
     [[ "$(grep -o '+MEMBLOCK_MAIN_TRANS_NUM=[^ ]*' "$out/effective_plusargs.txt" | wc -l)" -eq 1 ]] \
         || fail "$cfg has duplicate effective transaction count"
     assert_eq "$(sha256sum "$SCALAR_DIR/$cfg.cfg" | awk '{print $1}')" "$before"
