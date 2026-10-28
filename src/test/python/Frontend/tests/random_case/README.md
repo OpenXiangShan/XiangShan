@@ -85,3 +85,32 @@ explicitly unmeasured until their evidence is available. Final native counts alo
 cannot establish saturation or a bug-finding advantage. The report is diagnostic;
 semantic probe review and canonical HIT decisions remain with the proper owner.
 No replay, corpus generation or DUT is invoked, and the fresh output is exclusive.
+
+## IBuffer exploration audit (offline)
+
+`ibuffer_exploration_audit.py` supplements the growth report with logged stimulus
+combinations for `ibuffer_pressure_cross`. It uses the same CLI inputs as the
+growth tool (`--campaign`, `--binding-index`, `--binding-index-sha256`, `--scope`,
+`--scope-sha256`, `--output`), with an explicitly reviewed IBuffer bin scope.
+
+It requires original case qualification, native evidence admission, hash-bound
+ProgramMap/scenario/realization, and a complete matching frozen timing plan. The runner records
+`scenario_realization_sha256` for future results, including failed runs. Older
+manifests without this pin remain unready for the audit; no hashes are inserted
+retroactively and no original qualification is upgraded. Queued and driven redirect records
+must match unambiguously. Repeated indistinguishable redirects remain unresolved.
+
+Combination axes use actual linked CFI kind/width/32B/64B position, pressure
+duration band, driven redirect's logged phase in the window, and response beat /
+logged timing relation. Equal log cycles are labeled `same_log_cycle`; they do
+not prove same-edge RTL overlap. The report preserves zero-new-combination runs
+and pressure costs, and retains exact sites separately from combination keys.
+No Cartesian-product coverage percentage is inferred from these axes.
+
+Current IBuffer defaults choose 4–8 long windows of 1200–1500 cycles triggered by
+queued redirects. Short/medium-duration cells are not explored by that recipe.
+Requested `cfi_offset` is padding before instruction preludes, not necessarily the
+actual CFI position. Use linked ProgramMap PCs; seeds or metadata alone cannot
+prove the desired layout or interaction. These limits are reported, not silently
+changed by this audit. Actual fullness, held payload stability, flush/recovery,
+wall time and within-run bin growth remain unmeasured without proper evidence.

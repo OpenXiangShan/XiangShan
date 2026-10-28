@@ -342,6 +342,9 @@ def test_failed_dut_run_still_preserves_verified_program_map(
     assert result["program_map_status"] == "valid"
     assert result["scenario_realization_status"] == "FAIL"
     assert result["qualification_pass"] is False
+    realization_path = Path(result["scenario_realization_path"])
+    assert result["scenario_realization_sha256"] == campaign_runner._sha256(realization_path)
+    assert json.loads(realization_path.read_text())["status"] == "FAIL"
 
 
 @pytest.mark.skipif(

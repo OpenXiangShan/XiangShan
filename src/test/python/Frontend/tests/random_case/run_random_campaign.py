@@ -849,6 +849,7 @@ def _case_record_after_run(
             str(trace_analysis_path.resolve()) if trace_analysis else "unavailable"
         ),
         "scenario_realization_path": str(realization_path.resolve()),
+        "scenario_realization_sha256": _sha256(realization_path),
         "scenario_realization_status": realization.status,
         "scenario_timeline_path": (
             str(timeline_path.resolve()) if timeline_path.is_file() else "unavailable"
