@@ -251,6 +251,7 @@ int main(int argc, char **argv)
                 fault.segment = true;
                 fault.store = store;
                 fault.nf = 1;
+                fault.last_uop = false;
                 fault.expected_exception_mask = store
                     ? memblock::kExceptionStorePageFault
                     : memblock::kExceptionLoadPageFault;
@@ -311,7 +312,9 @@ int main(int argc, char **argv)
             transaction.vuop_idx = 3; // Field1, second data register.
             check_index(transaction, 1);
             transaction.vuop_idx = 2; // Field1 resets the register index.
+            transaction.last_uop = false;
             check_index(transaction, 0);
+            transaction.last_uop = true;
             transaction.addressing =
                 memblock::VectorAddressingMode::indexed_ordered;
             transaction.eew = 1;
@@ -356,7 +359,9 @@ int main(int argc, char **argv)
             check_index(transaction, 6, false);
             transaction.segment = true;
             transaction.nf = 1;
-            check_index(transaction, 6, false);
+            transaction.vuop_idx = 1;
+            transaction.last_uop = true;
+            check_index(transaction, 2, false);
         } else {
             throw std::runtime_error("unknown test case");
         }

@@ -2149,11 +2149,18 @@ int run_vector_segment_noncanonical(int argc, char **argv)
             .pdest = static_cast<std::uint8_t>(150 + index),
             .lane = 0,
             .flow_num = 2,
-            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+            // A legal nf=1 segment has two data uops.  The first uop may
+            // either report the page fault immediately or complete without a
+            // side effect while the later uop corrects the shared mask and
+            // reports the fault.  The final architectural outcome is checked
+            // after both uops complete.
+            .allowed_additional_exception_mask =
+                memblock::kExceptionLoadPageFault,
             .expected_trigger = memblock::kVectorWritebackTriggerNone,
             .vuop_idx = 0,
             .last_uop = false,
             .nf = 1,
+            .exception_may_defer = true,
         };
         for (unsigned byte = 0; byte < uop.data.size(); ++byte) {
             uop.data[byte] = static_cast<unsigned char>(0xe0 + byte);
@@ -2169,31 +2176,30 @@ int run_vector_segment_noncanonical(int argc, char **argv)
                       << index << " reason=" << environment.error() << '\n';
             return 1;
         }
-        if (environment.exception_vaddr() != address ||
-            environment.vector_load_writebacks() != loads_before + 1 ||
+        if (environment.vector_load_writebacks() != loads_before + 1 ||
             environment.tilelink_requests() != 0) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
                       << environment.cycle() << " phase=fault-metadata index="
-                      << index << " fault_vaddr=0x" << std::hex
-                      << environment.exception_vaddr() << " expected=0x"
-                      << address << std::dec << " dcache="
+                      << index << " dcache="
                       << environment.tilelink_requests() << '\n';
             return 1;
         }
         auto fix = uop;
         fix.pdest = static_cast<std::uint8_t>(160 + index);
-        // The segment's fault stays on the following uop of the same
-        // instruction; only the fault-only-first fix-VL path clears it.
-        // Both exceptional uops count as load completions; neither is a
-        // successful FOF fix-VL completion.
+        // The final data uop uses the corrected shared mask and must expose
+        // the page fault.  Both uops count as completions of the same vector
+        // instruction; neither is a successful FOF fix-VL completion.
         fix.expected_exception_mask = memblock::kExceptionLoadPageFault;
+        fix.allowed_additional_exception_mask = 0;
         fix.expected_vl = 2;
         fix.vuop_idx = 1;
         fix.last_uop = true;
         fix.vl_wen = true;
+        fix.exception_may_defer = false;
         environment.expect_vector_data(fix, {});
         if (!environment.issue_vector(fix, 1024) ||
             !environment.run_until_vector_complete(4096) ||
+            environment.exception_vaddr() != address ||
             environment.vector_load_writebacks() != loads_before + 2 ||
             environment.lq_dequeued() != environment.lq_allocated()) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
@@ -2210,6 +2216,8 @@ int run_vector_segment_noncanonical(int argc, char **argv)
     for (unsigned index = 0; index < addresses.size(); ++index) {
         const std::uint64_t address = addresses[index];
         const auto stores_before = environment.vector_store_writebacks();
+        const auto dcache_before = environment.tilelink_requests();
+        const auto uncache_before = environment.uncache_requests();
         memblock::VectorMemoryTransaction store_uop{
             .store = true,
             .segment = true,
@@ -2221,11 +2229,13 @@ int run_vector_segment_noncanonical(int argc, char **argv)
             .pdest = 0,
             .lane = 0,
             .flow_num = 2,
-            .expected_exception_mask = memblock::kExceptionStorePageFault,
+            .allowed_additional_exception_mask =
+                memblock::kExceptionStorePageFault,
             .expected_trigger = memblock::kVectorWritebackTriggerNone,
             .vuop_idx = 0,
             .last_uop = false,
             .nf = 1,
+            .exception_may_defer = true,
         };
         for (unsigned byte = 0; byte < store_uop.data.size(); ++byte) {
             store_uop.data[byte] = static_cast<unsigned char>(0xf0 + byte);
@@ -2236,10 +2246,10 @@ int run_vector_segment_noncanonical(int argc, char **argv)
             !environment.issue_vector(store_uop, 2048) ||
             !environment.run_until_vector_complete_with_replays(
                 store_uop, 16384) ||
-            environment.exception_vaddr() != address ||
+            !environment.run_until_sbuffer_empty(4096) ||
             environment.vector_store_writebacks() != stores_before + 1 ||
-            environment.tilelink_requests() != 0 ||
-            !environment.run_until_sbuffer_empty(4096)) {
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
                       << environment.cycle() << " phase=store-first-fault index="
                       << index << " reason=" << environment.error()
@@ -2251,14 +2261,20 @@ int run_vector_segment_noncanonical(int argc, char **argv)
         }
         auto store_fix = store_uop;
         store_fix.expected_exception_mask = memblock::kExceptionStorePageFault;
+        store_fix.allowed_additional_exception_mask = 0;
         store_fix.expected_vl = 2;
         store_fix.vuop_idx = 1;
         store_fix.last_uop = true;
         store_fix.vl_wen = true;
+        store_fix.exception_may_defer = false;
         environment.expect_vector_data(store_fix, {});
         if (!environment.issue_vector(store_fix, 1024) ||
             !environment.run_until_vector_complete(4096) ||
+            !environment.run_until_sbuffer_empty(4096) ||
+            environment.exception_vaddr() != address ||
             environment.vector_store_writebacks() != stores_before + 2 ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before ||
             environment.sq_dequeued() != environment.sq_allocated()) {
             std::cerr << "MEMBLOCK_VECTOR_SEGMENT_NONCANONICAL_FAIL cycle="
                       << environment.cycle() << " phase=store-fix-vl index="

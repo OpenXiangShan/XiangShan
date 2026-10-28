@@ -3053,11 +3053,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "invalid DCache Release identity",
         ):
             self.assertIn(contract, environment + driver)
-        store_queue = (
-            REPO_ROOT
-            / "src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala"
-        ).read_text()
-        self.assertIn("cboZeroDeqBlockPrefix", store_queue)
         for skipped in (
             "transaction.cacheable = false;",
             "transaction.cacheable = !(final_nc || final_io);",

@@ -77,9 +77,11 @@ From XiangShan root:
     build/memblock/picker/UT_MemBlock/build/UTMemBlock_example --list-tests
 
 The sentinel checks a current split guest-fault success signature; its target
-name does not imply an open RTL defect. Segment noncanonical counts both
-exceptional data/fix completions in their direction. Its lack of permissive
-canonical-alias controls remains an oracle limitation.
+name does not imply an open RTL defect. Segment noncanonical uses a legal
+two-uop `nf=1` instruction and checks the instruction-level fault, forbidden
+traffic and final memory state; the later uop may be the first one to expose
+the fault. Its lack of permissive canonical-alias controls remains an oracle
+limitation.
 
 ## Constrained Random And Regression
 

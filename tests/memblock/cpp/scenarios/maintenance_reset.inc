@@ -1566,7 +1566,7 @@ int run_mmio_contracts(int argc, char **argv)
 int run_cbo_zero_contracts(int argc, char **argv)
 {
     unsigned same_line_double_zeros = 0;
-    unsigned three_line_zeros = 0;
+    unsigned three_consecutive_zeros = 0;
     unsigned older_store_zero_loads = 0;
     unsigned zero_older_store_loads = 0;
     memblock::Environment environment(argc, argv);
@@ -1613,9 +1613,9 @@ int run_cbo_zero_contracts(int argc, char **argv)
         !environment.run_cycles(256) ||
         !environment.issue_store_address(cbo_zero, 2048) ||
         !environment.issue_store_data(cbo_zero, 2048) ||
-        !environment.commit_stores_through(cbo_zero, 1) ||
         !environment.run_until_store_complete(16384) ||
-        !environment.run_until_sq_dequeued(sq_target, 16384)) {
+        !environment.run_until_sq_dequeued(sq_target, 16384) ||
+        !environment.commit_stores_through(cbo_zero, 1)) {
         std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                   << environment.cycle() << " phase=zero-store reason="
                   << environment.error() << " dcache_requests="
@@ -1668,7 +1668,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
     // Sequential control: two CBO.ZEROs to different lines, with the first
     // fully drained before the second is committed.  This proves the harness
     // can complete two independent zero operations before testing the
-    // back-to-back window.
+    // consecutive retirement control below.
     const std::uint64_t sequential_sq_target =
         environment.sq_dequeued() + 2;
     memblock::StoreTransaction cbo_sequential_a{
@@ -1710,10 +1710,10 @@ int run_cbo_zero_contracts(int argc, char **argv)
     environment.expect_store(cbo_sequential_a);
     if (!environment.issue_store_address(cbo_sequential_a, 2048) ||
         !environment.issue_store_data(cbo_sequential_a, 2048) ||
-        !environment.commit_stores_through(cbo_sequential_a, 1) ||
         !environment.run_until_store_complete(16384) ||
         !environment.run_until_sq_dequeued(
-            sequential_sq_target - 1, 16384)) {
+            sequential_sq_target - 1, 16384) ||
+        !environment.commit_stores_through(cbo_sequential_a, 1)) {
         std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                   << environment.cycle()
                   << " phase=sequential-first reason="
@@ -1727,10 +1727,10 @@ int run_cbo_zero_contracts(int argc, char **argv)
             cbo_sequential_b.rob, cbo_sequential_b.rob_flag) ||
         !environment.issue_store_address(cbo_sequential_b, 2048) ||
         !environment.issue_store_data(cbo_sequential_b, 2048) ||
-        !environment.commit_stores_through(cbo_sequential_b, 1) ||
         !environment.run_until_store_complete(16384) ||
         !environment.run_until_sq_dequeued(
-            sequential_sq_target, 16384)) {
+            sequential_sq_target, 16384) ||
+        !environment.commit_stores_through(cbo_sequential_b, 1)) {
         std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                   << environment.cycle()
                   << " phase=sequential-second reason="
@@ -1768,12 +1768,14 @@ int run_cbo_zero_contracts(int argc, char **argv)
     environment.record_committed_store(cbo_sequential_a);
     environment.record_committed_store(cbo_sequential_b);
 
-    // Two independent CBO.ZEROs must each produce one store completion and
-    // must not collapse into the single CBO.ZERO completion slot.  Use two
-    // still-nonzero lines so a lost second completion is visible both in the
-    // scoreboard and in the readback bytes.
-    const std::uint64_t back_to_back_sq_target =
-        environment.sq_dequeued() + 3;
+    // Consecutive CBO.ZEROs still retire through ROB in program order.  The
+    // first CBO's address-side completion is cboZeroStout, which is produced
+    // only after its SBuffer line drains; ROB cannot advance its head to the
+    // second CBO before that completion.  Keep enough work in flight to check
+    // younger enqueue and ordering, but issue and retire each earlier CBO only
+    // after its deferred completion.
+    const std::uint64_t consecutive_zero_sq_base =
+        environment.sq_dequeued();
     memblock::StoreTransaction cbo_zero_a{
         .address = virtual_base + 0x1a0,
         .oracle_address = physical_base + 0x180,
@@ -1814,33 +1816,52 @@ int run_cbo_zero_contracts(int argc, char **argv)
         .expected_debug_is_ncio = false,
     };
     environment.expect_store(cbo_zero_a);
-    environment.expect_store(cbo_zero_b);
-    environment.expect_store(following_store);
     if (!environment.set_rob_head(cbo_zero_a.rob, cbo_zero_a.rob_flag) ||
         !environment.enqueue_store(cbo_zero_a, 0) ||
         !environment.enqueue_store(cbo_zero_b, 0) ||
         !environment.enqueue_store(following_store, 0) ||
-        !environment.issue_store_address_batch(
-            {cbo_zero_a, cbo_zero_b}, 4096) ||
-        !environment.issue_store_address(following_store, 4096) ||
+        !environment.issue_store_address(cbo_zero_a, 4096) ||
         !environment.issue_store_data(cbo_zero_a, 2048) ||
+        !environment.run_until_store_complete(32768) ||
+        !environment.run_until_sq_dequeued(
+            consecutive_zero_sq_base + 1, 32768) ||
+        !environment.commit_stores_through(cbo_zero_a, 1)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=consecutive-zero-first reason="
+                  << environment.error() << " sq="
+                  << environment.sq_dequeued() << '/'
+                  << environment.sq_allocated() << '\n';
+        return 1;
+    }
+    environment.expect_store(cbo_zero_b);
+    if (!environment.set_rob_head(cbo_zero_b.rob, cbo_zero_b.rob_flag) ||
+        !environment.issue_store_address(cbo_zero_b, 4096) ||
         !environment.issue_store_data(cbo_zero_b, 2048) ||
+        !environment.run_until_store_complete(32768) ||
+        !environment.run_until_sq_dequeued(
+            consecutive_zero_sq_base + 2, 32768) ||
+        !environment.commit_stores_through(cbo_zero_b, 1)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=consecutive-zero-second reason="
+                  << environment.error() << " sq="
+                  << environment.sq_dequeued() << '/'
+                  << environment.sq_allocated() << '\n';
+        return 1;
+    }
+    environment.expect_store(following_store);
+    if (!environment.set_rob_head(
+            following_store.rob, following_store.rob_flag) ||
+        !environment.issue_store_address(following_store, 4096) ||
         !environment.issue_store_data(following_store, 2048) ||
-        // Pulse scommit once per store so each store's commit eligibility is
-        // established independently.  The contract under test is the
-        // back-to-back Sbuffer admission window followed by a non-CBO store,
-        // not a multi-store scommit.
-        !environment.commit_stores_through(cbo_zero_a, 1) ||
-        !environment.run_cycles(1) ||
-        !environment.commit_stores_through(cbo_zero_b, 1) ||
-        !environment.run_cycles(1) ||
         !environment.commit_stores_through(following_store, 1) ||
         !environment.run_until_store_complete(32768) ||
         !environment.run_until_sq_dequeued(
-            back_to_back_sq_target, 32768)) {
+            consecutive_zero_sq_base + 3, 32768)) {
         std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                   << environment.cycle()
-                  << " phase=back-to-back-zero reason="
+                  << " phase=consecutive-zero-following reason="
                   << environment.error() << " sq="
                   << environment.sq_dequeued() << '/'
                   << environment.sq_allocated()
@@ -1872,7 +1893,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
             !environment.run_until_lq_retired(2048)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << environment.cycle()
-                      << " phase=back-to-back-readback line=" << line
+                      << " phase=consecutive-zero-readback line=" << line
                       << " reason=" << environment.error() << '\n';
             return 1;
         }
@@ -1907,7 +1928,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
 
 
     // Same-line ordering between CBO.ZERO and an ordinary store exercises
-    // SBuffer merge/wline behavior that the different-line back-to-back case
+    // SBuffer merge/wline behavior that the different-line consecutive case
     // does not cover.  The zero is older, so bytes outside the following
     // 8-byte store must finish as zero and the stored bytes must survive.
     {
@@ -1948,16 +1969,26 @@ int run_cbo_zero_contracts(int argc, char **argv)
         };
         const std::uint64_t same_sq_target = same_line.sq_dequeued() + 2;
         same_line.expect_store(same_zero);
-        same_line.expect_store(same_store);
         if (!same_line.set_rob_head(same_zero.rob, same_zero.rob_flag) ||
             !same_line.enqueue_store(same_zero, 0) ||
             !same_line.enqueue_store(same_store, 0) ||
-            !same_line.issue_store_address_batch(
-                {same_zero, same_store}, 4096) ||
+            !same_line.issue_store_address(same_zero, 4096) ||
             !same_line.issue_store_data(same_zero, 4096) ||
+            !same_line.run_until_store_complete(32768) ||
+            !same_line.run_until_sq_dequeued(same_sq_target - 1, 32768) ||
+            !same_line.commit_stores_through(same_zero, 1)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << same_line.cycle()
+                      << " phase=same-line-zero reason="
+                      << same_line.error() << " sq="
+                      << same_line.sq_dequeued() << '/'
+                      << same_line.sq_allocated() << '\n';
+            return 1;
+        }
+        same_line.expect_store(same_store);
+        if (!same_line.set_rob_head(same_store.rob, same_store.rob_flag) ||
+            !same_line.issue_store_address(same_store, 4096) ||
             !same_line.issue_store_data(same_store, 4096) ||
-            !same_line.commit_stores_through(same_zero, 1) ||
-            !same_line.run_cycles(1) ||
             !same_line.commit_stores_through(same_store, 1) ||
             !same_line.run_until_store_complete(32768) ||
             !same_line.run_until_sq_dequeued(same_sq_target, 32768)) {
@@ -2059,9 +2090,11 @@ int run_cbo_zero_contracts(int argc, char **argv)
             !zero_last.issue_store_data(younger_zero, 4096) ||
             !zero_last.commit_stores_through(older_store, 1) ||
             !zero_last.run_cycles(1) ||
-            !zero_last.commit_stores_through(younger_zero, 1) ||
+            !zero_last.set_rob_head(
+                younger_zero.rob, younger_zero.rob_flag) ||
             !zero_last.run_until_store_complete(32768) ||
-            !zero_last.run_until_sq_dequeued(zero_sq_target, 32768)) {
+            !zero_last.run_until_sq_dequeued(zero_sq_target, 32768) ||
+            !zero_last.commit_stores_through(younger_zero, 1)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << zero_last.cycle()
                       << " phase=zero-last-store reason="
@@ -2136,8 +2169,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
         if (!early_load.set_rob_head(early_zero.rob, early_zero.rob_flag) ||
             !early_load.enqueue_store(early_zero, 0) ||
             !early_load.issue_store_address(early_zero, 4096) ||
-            !early_load.issue_store_data(early_zero, 4096) ||
-            !early_load.commit_store(early_zero, 16384)) {
+            !early_load.issue_store_data(early_zero, 4096)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << early_load.cycle()
                       << " phase=early-load-store reason="
@@ -2157,12 +2189,13 @@ int run_cbo_zero_contracts(int argc, char **argv)
             .expected_debug_is_perf_cnt = false,
         };
         early_load.expect_load_data(early_readback, 0);
-        if (!early_load.set_rob_head(
-                early_readback.rob, early_readback.rob_flag) ||
-            !early_load.enqueue_load(early_readback) ||
+        if (!early_load.enqueue_load(early_readback) ||
             !early_load.issue_load(early_readback, 4096) ||
             !early_load.run_until_complete(16384) ||
-            !early_load.run_until_lq_retired(4096)) {
+            !early_load.run_until_lq_retired(4096) ||
+            !early_load.run_until_store_complete(32768) ||
+            !early_load.run_until_sq_dequeued(1, 32768) ||
+            !early_load.commit_stores_through(early_zero, 1)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << early_load.cycle()
                       << " phase=early-load-readback reason="
@@ -2227,7 +2260,8 @@ int run_cbo_zero_contracts(int argc, char **argv)
             !forward_window.issue_store_data(younger_zero, 4096) ||
             !forward_window.commit_stores_through(older_store, 1) ||
             !forward_window.run_cycles(1) ||
-            !forward_window.commit_stores_through(younger_zero, 1)) {
+            !forward_window.set_rob_head(
+                younger_zero.rob, younger_zero.rob_flag)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << forward_window.cycle()
                       << " phase=forward-window-store reason="
@@ -2247,8 +2281,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
             .expected_debug_is_perf_cnt = false,
         };
         forward_window.expect_load_data(readback, 0);
-        if (!forward_window.set_rob_head(readback.rob, readback.rob_flag) ||
-            !forward_window.enqueue_load(readback) ||
+        if (!forward_window.enqueue_load(readback) ||
             !forward_window.issue_load(readback, 4096) ||
             !forward_window.run_until_complete(16384) ||
             !forward_window.run_until_lq_retired(4096)) {
@@ -2259,7 +2292,8 @@ int run_cbo_zero_contracts(int argc, char **argv)
             return 1;
         }
         if (!forward_window.run_until_store_complete(32768) ||
-            !forward_window.run_until_sq_dequeued(2, 32768)) {
+            !forward_window.run_until_sq_dequeued(2, 32768) ||
+            !forward_window.commit_stores_through(younger_zero, 1)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << forward_window.cycle()
                       << " phase=forward-window-drain reason="
@@ -2313,23 +2347,48 @@ int run_cbo_zero_contracts(int argc, char **argv)
             .expected_debug_is_mmio = false,
             .expected_debug_is_ncio = false,
         };
+        const std::uint64_t zero_store_sq_target =
+            zero_store.sq_dequeued() + 2;
         zero_store.expect_store(older_zero);
-        zero_store.expect_store(younger_store);
         if (!zero_store.set_rob_head(
                 older_zero.rob, older_zero.rob_flag) ||
             !zero_store.enqueue_store(older_zero, 0) ||
             !zero_store.enqueue_store(younger_store, 0) ||
-            !zero_store.issue_store_address_batch(
-                {older_zero, younger_store}, 4096) ||
-            !zero_store.issue_store_data(older_zero, 4096) ||
-            !zero_store.issue_store_data(younger_store, 4096) ||
-            !zero_store.commit_stores_through(older_zero, 1) ||
-            !zero_store.run_cycles(1) ||
-            !zero_store.commit_stores_through(younger_store, 1)) {
+            !zero_store.issue_store_address(older_zero, 4096) ||
+            !zero_store.issue_store_data(older_zero, 4096)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << zero_store.cycle()
+                      << " phase=zero-store-load-setup reason="
+                      << zero_store.error() << '\n';
+            return 1;
+        }
+        if (!zero_store.run_until_store_complete(32768) ||
+            !zero_store.run_until_sq_dequeued(
+                zero_store_sq_target - 1, 32768) ||
+            !zero_store.commit_stores_through(older_zero, 1)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << zero_store.cycle()
                       << " phase=zero-store-load-store reason="
-                      << zero_store.error() << '\n';
+                      << zero_store.error() << " sq="
+                      << zero_store.sq_dequeued() << '/'
+                      << zero_store.sq_allocated() << '\n';
+            return 1;
+        }
+        zero_store.expect_store(younger_store);
+        if (!zero_store.set_rob_head(
+                younger_store.rob, younger_store.rob_flag) ||
+            !zero_store.issue_store_address(younger_store, 4096) ||
+            !zero_store.issue_store_data(younger_store, 4096) ||
+            !zero_store.commit_stores_through(younger_store, 1) ||
+            !zero_store.run_until_store_complete(32768) ||
+            !zero_store.run_until_sq_dequeued(
+                zero_store_sq_target, 32768)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << zero_store.cycle()
+                      << " phase=zero-store-load-younger-store reason="
+                      << zero_store.error() << " sq="
+                      << zero_store.sq_dequeued() << '/'
+                      << zero_store.sq_allocated() << '\n';
             return 1;
         }
         const memblock::LoadTransaction readback{
@@ -2517,6 +2576,8 @@ int run_cbo_zero_contracts(int argc, char **argv)
             !younger_zero.issue_load(older_load, 4096) ||
             !younger_zero.run_until_complete(16384) ||
             !younger_zero.run_until_lq_retired(4096) ||
+            !younger_zero.set_rob_head(
+                younger_cbo.rob, younger_cbo.rob_flag) ||
             !younger_zero.issue_store_address(younger_cbo, 4096) ||
             !younger_zero.issue_store_data(younger_cbo, 4096) ||
             !younger_zero.commit_store(younger_cbo, 16384) ||
@@ -2555,10 +2616,9 @@ int run_cbo_zero_contracts(int argc, char **argv)
         }
     }
 
-    // Two CBO.ZEROs to the same line, still back-to-back before the first
-    // SBuffer line drains.  This exercises the single-completion slot together
-    // with the SBuffer merge path for a repeated wline zero: each operation
-    // must complete exactly once and the final line must be zero.
+    // Two CBO.ZEROs to the same line remain consecutive in program order, but
+    // ROB must advance its head only after the first CBO's SBuffer completion.
+    // Each operation must still complete exactly once and the final line zero.
     {
         memblock::Environment double_zero(argc, argv);
         constexpr std::uint64_t same_base =
@@ -2594,19 +2654,29 @@ int run_cbo_zero_contracts(int argc, char **argv)
         zero_b.data_lane = 1;
         const std::uint64_t sq_target = double_zero.sq_dequeued() + 2;
         double_zero.expect_store(zero_a);
-        double_zero.expect_store(zero_b);
         if (!double_zero.set_rob_head(zero_a.rob, zero_a.rob_flag) ||
             !double_zero.enqueue_store(zero_a, 0) ||
             !double_zero.enqueue_store(zero_b, 0) ||
-            !double_zero.issue_store_address_batch(
-                {zero_a, zero_b}, 4096) ||
+            !double_zero.issue_store_address(zero_a, 4096) ||
             !double_zero.issue_store_data(zero_a, 4096) ||
-            !double_zero.issue_store_data(zero_b, 4096) ||
-            !double_zero.commit_stores_through(zero_a, 1) ||
-            !double_zero.run_cycles(1) ||
-            !double_zero.commit_stores_through(zero_b, 1) ||
             !double_zero.run_until_store_complete(32768) ||
-            !double_zero.run_until_sq_dequeued(sq_target, 32768)) {
+            !double_zero.run_until_sq_dequeued(sq_target - 1, 32768) ||
+            !double_zero.commit_stores_through(zero_a, 1)) {
+            std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                      << double_zero.cycle()
+                      << " phase=same-line-double-zero-first reason="
+                      << double_zero.error() << " sq="
+                      << double_zero.sq_dequeued() << '/'
+                      << double_zero.sq_allocated() << '\n';
+            return 1;
+        }
+        double_zero.expect_store(zero_b);
+        if (!double_zero.set_rob_head(zero_b.rob, zero_b.rob_flag) ||
+            !double_zero.issue_store_address(zero_b, 4096) ||
+            !double_zero.issue_store_data(zero_b, 4096) ||
+            !double_zero.run_until_store_complete(32768) ||
+            !double_zero.run_until_sq_dequeued(sq_target, 32768) ||
+            !double_zero.commit_stores_through(zero_b, 1)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << double_zero.cycle()
                       << " phase=same-line-double-zero-store reason="
@@ -2653,10 +2723,9 @@ int run_cbo_zero_contracts(int argc, char **argv)
         ++same_line_double_zeros;
     }
 
-    // Three independent CBO.ZEROs to distinct lines, committed before the
-    // first SBuffer line drains.  This is a longer regression for the single
-    // completion slot than the two-zero case: every operation must complete
-    // exactly once and all three lines must end as zero.
+    // Three consecutive CBO.ZEROs to distinct lines retain program-order ROB
+    // retirement.  Every operation must complete exactly once before the next
+    // CBO becomes the ROB head, and all three lines must end as zero.
     {
         memblock::Environment triple_zero(argc, argv);
         constexpr std::uint64_t triple_base =
@@ -2666,7 +2735,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
         if (!triple_zero.reset()) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << triple_zero.cycle()
-                      << " phase=three-line-zero-reset reason="
+                      << " phase=three-consecutive-zero-reset reason="
                       << triple_zero.error() << '\n';
             return 1;
         }
@@ -2688,35 +2757,39 @@ int run_cbo_zero_contracts(int argc, char **argv)
             };
         }
         const std::uint64_t sq_target = triple_zero.sq_dequeued() + 3;
-        for (const auto &zero : zeros) {
-            triple_zero.expect_store(zero);
-        }
         if (!triple_zero.set_rob_head(zeros[0].rob, zeros[0].rob_flag)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << triple_zero.cycle()
-                      << " phase=three-line-zero-head reason="
+                      << " phase=three-consecutive-zero-head reason="
                       << triple_zero.error() << '\n';
             return 1;
         }
         for (unsigned index = 0; index < zeros.size(); ++index) {
-            if (!triple_zero.enqueue_store(zeros[index], 0) ||
-                !triple_zero.issue_store_address(zeros[index], 4096) ||
-                !triple_zero.issue_store_data(zeros[index], 4096)) {
+            if (!triple_zero.enqueue_store(zeros[index], 0)) {
                 std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                           << triple_zero.cycle()
-                          << " phase=three-line-zero-issue index=" << index
+                          << " phase=three-consecutive-zero-enqueue index=" << index
                           << " reason=" << triple_zero.error() << '\n';
                 return 1;
             }
         }
         for (unsigned index = 0; index < zeros.size(); ++index) {
-            if (!triple_zero.commit_stores_through(zeros[index], 1) ||
-                (index + 1 < zeros.size() &&
-                 !triple_zero.run_cycles(1))) {
+            triple_zero.expect_store(zeros[index]);
+            if ((index != 0 &&
+                 !triple_zero.set_rob_head(
+                     zeros[index].rob, zeros[index].rob_flag)) ||
+                !triple_zero.issue_store_address(zeros[index], 4096) ||
+                !triple_zero.issue_store_data(zeros[index], 4096) ||
+                !triple_zero.run_until_store_complete(32768) ||
+                !triple_zero.run_until_sq_dequeued(
+                    sq_target - zeros.size() + index + 1, 32768) ||
+                !triple_zero.commit_stores_through(zeros[index], 1)) {
                 std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                           << triple_zero.cycle()
-                          << " phase=three-line-zero-commit index=" << index
-                          << " reason=" << triple_zero.error() << '\n';
+                          << " phase=three-consecutive-zero-commit index=" << index
+                          << " reason=" << triple_zero.error() << " sq="
+                          << triple_zero.sq_dequeued() << '/'
+                          << triple_zero.sq_allocated() << '\n';
                 return 1;
             }
         }
@@ -2724,7 +2797,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
             !triple_zero.run_until_sq_dequeued(sq_target, 32768)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << triple_zero.cycle()
-                      << " phase=three-line-zero-store reason="
+                      << " phase=three-consecutive-zero-store reason="
                       << triple_zero.error() << " sq="
                       << triple_zero.sq_dequeued() << '/'
                       << triple_zero.sq_allocated() << '\n';
@@ -2755,25 +2828,25 @@ int run_cbo_zero_contracts(int argc, char **argv)
             !triple_zero.run_until_lq_retired(4096)) {
             std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
                       << triple_zero.cycle()
-                      << " phase=three-line-zero-readback reason="
+                      << " phase=three-consecutive-zero-readback reason="
                       << triple_zero.error() << '\n';
             return 1;
         }
         for (const auto &zero : zeros) {
             triple_zero.record_committed_store(zero);
         }
-        ++three_line_zeros;
+        ++three_consecutive_zeros;
     }
 
     std::cout << "MEMBLOCK_CBO_ZERO_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " cbo_zero_line=1"
               << " sequential_zero=2"
-              << " back_to_back_zero=2"
+              << " consecutive_zero=2"
               << " following_store=1"
               << " same_line_zero=1"
               << " same_line_double_zero=" << same_line_double_zeros
-              << " three_line_zero=" << three_line_zeros
+              << " three_consecutive_zero=" << three_consecutive_zeros
               << " older_store_zero_load=" << older_store_zero_loads
               << " zero_older_store_load=" << zero_older_store_loads
               << " zero_last=1"

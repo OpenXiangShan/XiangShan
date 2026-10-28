@@ -1368,9 +1368,9 @@ int run_pointer_masking_contracts(int argc, char **argv)
             !environment.enqueue_store(cbo_zero, 0) ||
             !environment.issue_store_address(cbo_zero, 4096) ||
             !environment.issue_store_data(cbo_zero, 4096) ||
-            !environment.commit_stores_through(cbo_zero, 1) ||
             !environment.run_until_store_complete(32768) ||
-            !environment.run_until_sq_dequeued(sq_target, 16384)) {
+            !environment.run_until_sq_dequeued(sq_target, 16384) ||
+            !environment.commit_stores_through(cbo_zero, 1)) {
             std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=cbo-zero reason="
                       << environment.error() << '\n';

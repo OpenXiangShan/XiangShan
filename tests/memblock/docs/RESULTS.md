@@ -12,14 +12,9 @@ The default benchmark selects 85; six additional directed contracts require
 explicit execution. All claimed behavior remains limited by IO_COVERAGE.md
 and ORACLES.md. There is no defensible overall functional-coverage percentage.
 
-## Confirmed CPU Bug Records
+## CPU Bug Records
 
-- [CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md](CPU_BUG_VECTOR_SEGMENT_NONCANONICAL.md):
-  one-uop vector segment with a noncanonical VA failed to fault; fixed by
-  `d7d096e6e`, covered by the extra `vector-segment-noncanonical` contract.
-- [CPU_BUG_CBO_ZERO_BACK_TO_BACK.md](CPU_BUG_CBO_ZERO_BACK_TO_BACK.md):
-  back-to-back cacheable `CBO.ZERO` lost one store completion; fixed by
-  `f0e5ba75b`, covered by `cbo-zero-contracts`.
+None.
 
 ## Current Changes Qualified Below
 
@@ -30,10 +25,6 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
   that same cycle), with sink lifetime tracked through E.
 - PTW and Uncache reject source reuse before final D and D completion of an
   inactive source; same-cycle final-D/source reuse is allowed.
-- Back-to-back cacheable `CBO.ZERO` no longer loses a store completion,
-  including a following ordinary store behind a blocked zero. This is a
-  confirmed RTL bug, documented and fixed in
-  [CPU_BUG_CBO_ZERO_BACK_TO_BACK.md](CPU_BUG_CBO_ZERO_BACK_TO_BACK.md).
 - Successful CBO.CLEAN/FLUSH lines stay in the final readback; only CBO.INVAL
   and errored CMO lines are excluded. The observed-word count is incremented
   per completed batch and gated against the registered count.
@@ -46,12 +37,12 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
   subset 0..2. `corrupt` is per-beat and not a data-less Release validity field;
   TileLink user/echo fields are DUT-specific, not stability fields.
 - First-element FOF completions now carry an explicit exceptional `vstart`
-  expectation. `cbo-zero-contracts` also contains sequential and back-to-back
-  zero controls, a same-line repeated CBO.ZERO pair, a three-line
-  back-to-back zero burst, both same-line CBO.ZERO/ordinary-store orders, a
-  dirty-line zero, a younger load issued
-  while the zero is still in the SBuffer pipeline, and an
-  older-load/younger-store/CBO age-direction control.
+  expectation. `cbo-zero-contracts` also contains sequential, same-line
+  repeated and three-line consecutive CBO.ZERO retirement, both same-line
+  CBO.ZERO/ordinary-store orders, a dirty-line zero, a younger load issued
+  while the zero is still completing, and an
+  older-load/younger-store/CBO age-direction control. Each driver advances the
+  ROB pending pointer only after the preceding deferred CBO completion.
 - Vector transactions model and drive mask bits 0..127 (`mask_bits` plus
   `mask_high`). `vector-addressing` checks high-element unit-stride load/store,
   readback, LMUL8 full-range masks, and ordinary/special indexed shifts; mixed
@@ -86,6 +77,10 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
   following writable page written. A partially masked load with only element
   0 active must complete even though inactive element 1 points into an
   unmapped page.
+- `vector-segment-noncanonical` issues a legal `nf=1` two-uop segment. It
+  permits the first data uop to complete before the fault but requires the later
+  uop of the same instruction to expose the exact noncanonical-address page
+  fault, with no DCache/Uncache request or SBuffer side effect.
 - `translation-alias` maps two Sv39 virtual pages to one physical page and
   proves a committed store through one VA is visible through the other, both
   after drain and with SBuffer non-empty at an in-flight load issue. A cold
@@ -107,64 +102,39 @@ and ORACLES.md. There is no defensible overall functional-coverage percentage.
 
 The current qualification commands are:
 
-- make -C tests/memblock unit
-- make -C tests/memblock check-rtl
-- make -C tests/memblock picker-harness JOBS=16
-- A frozen-runtime benchmark with all 85 selected entries and 256 random actions.
-- Explicit execution of all six default-benchmark exclusions, including
-  `translation-alias`.
-- Finite coverage and corner campaigns with 4608 actions per seed.
-- Full-mask directed and mixed campaigns described below.
-- A current-tree `translation-faults` run with the single-uop/masked
-  later-element faults and the all-masked control.
-- An 8-seed spec confidence run with 16384 actions per seed.
-- The configured 8-seed, 16384-action coverage regression.
+- `make -C tests/memblock prepare-rtl check-ports check-rtl unit`
+- `make -C tests/memblock picker-harness JOBS=8`
+- All 90 directed catalog entries through the rebuilt harness
+- A `coverage` constrained-random seed with 4608 actions
 
-The qualification artifacts are local under
-`build/memblock/agent-campaign-12` through `agent-campaign-20` (not guaranteed
-by a clean clone). The full 6x4608/4x4608 campaigns are from
-`agent-campaign-12`; the older frozen benchmark is `agent-campaign-16`; the
-8x16384 spec and coverage runs are from `agent-campaign-13` and
-`agent-campaign-14`. The full-mask and accepted-B logs are in
-`agent-campaign-17`; the earlier current-tree benchmark, private runtime,
-`translation-faults` log and vector fault evidence are in
-`agent-campaign-18`; the post-change benchmark and private runtime are in
-`agent-campaign-20`.
-The runtime was frozen after
-a fresh root `build/rtl` generation, `prepare-rtl`, and Picker/model rebuild for
-the `StoreQueue.scala` fix; the previous model was not reused.
+RTL generation and model rebuild were run after overlaying the current source
+with public `origin/kunminghu-v2` revision
+`a4eeaabb4c12349259094a8b55f3ba1c03a9d993`. The working tree also retains the
+current branch's later MemBlock fixes. Artifacts are local under
+`build/memblock/verify-kunminghu-v2-a4eeaabb4` and are not guaranteed by a clean
+clone. Runtime metadata records layout, not source-to-model identity.
 
 The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 290 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 292 tests pass | Unit checks do not establish DUT functional coverage |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
-| Selected benchmark | 85/85 pass, 377.7 s | Seed 1; random budget 256; catalog-specific action overrides retained; `agent-campaign-16` |
-| Current selected benchmark | 85/85 pass, 437.96 s | Seed 1; random budget 256; private runtime; artifact `agent-campaign-18/benchmark.json`; run before the four-cycle vector-feedback settle, with the settled `translation-faults` case passing separately; run alongside six CMO-stress seeds, so wall time is not a clean solo measurement |
-| Post-change selected benchmark | 85/85 pass, 390.75 s | Seed 1; random budget 256; current harness and private runtime; artifact `agent-campaign-20/benchmark.json`; solo run after the vector-fault, CBO-ordering, deep-probe and strict-verifier changes |
-| Extra directed contracts | 6/6 pass | cmo-store-flush, redirect-store-flush, tag-ecc-ways, vector-fof-high, vector-segment-noncanonical, translation-alias |
-| All directed scenarios | 90/90 pass | Current-tree sweep of every catalogued directed test (constrained-random excluded); artifact `agent-campaign-17/directed-logs` |
-| Coverage campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 101..106; artifact `agent-campaign-12`; 1029.0 s; capability only |
-| Corner campaign | 4/4 seeds pass, 4608 actions each (18432 actions) | Seeds 101..104; artifact `agent-campaign-12`; 1985.0 s; capability only |
-| CMO stress campaign | 6/6 seeds pass, 4608 actions each (27648 actions) | Seeds 401..406; artifact `agent-campaign-18/cmo`; the binary predates later directed-only test additions, which do not change the constrained-random CMO path; capability only |
-| Current 4x4608 corner | 4/4 seeds pass, 4608 actions each (18432 actions) | Seeds 501..504; artifact `agent-campaign-19/corner`; directed-only additions after launch do not change the constrained-random path; capability only |
+| Restored-original directed | 90/90 pass | Every catalogued directed test through the corrected harness and runtime from RTL `43b971f2`; artifact `build/memblock/verify-restored-rtl-20261028/directed` |
+| Restored-original random | 4/4 seeds pass, 4608 actions each | `coverage` profile; artifact `build/memblock/verify-restored-rtl-20261028/random-4x4608`; development validation, not closure |
+| Latest-RTL directed | 90/90 pass | `origin/kunminghu-v2` `a4eeaabb4` overlaid on the current branch, regenerated and rebuilt; artifact `build/memblock/verify-kunminghu-v2-a4eeaabb4/final2-directed` |
+| Latest-RTL random | 1/1 seed passes, 4608 actions | `coverage` profile; artifact `build/memblock/verify-kunminghu-v2-a4eeaabb4/final2-random-1x4608`; development validation, not closure |
 | Strict coverage audit | 2/2 seeds functionally pass, but strict coverage rejects the campaign | 2×4608 coverage, seeds 1..2; artifact `build/memblock/strict-coverage-results.json`; enabled probe-depth classes 4..7 were unobserved (`actual_probe_depth=[4,1,1,1,0,0,0,0]`); this is a sparse-coverage finding, not a functional failure |
 | Strict coverage 16384 audit | 1/1 seed functionally passes at 16384 actions, but strict coverage still rejects | Seed 1; artifact `build/memblock/agent-campaign-20/strict-16384.json`; only 6 standalone probe sequences occurred (`actual_probe_depth=[2,2,0,0,0,0,0,2]`), so increasing action count alone does not select the enabled depth classes; a probe-weight override is the focused lever |
 | Probe-heavy strict audit | 1/1 seed functionally passes at 4608 actions with `probe=500`; all eight probe-depth classes occur, but strict coverage still rejects | Artifact `build/memblock/agent-campaign-21/probe-strict-4608.json`; `actual_probe_sequences=150`, `actual_probe_depth=[82,33,6,4,6,11,4,4]`; strict now fails on enabled `actual_probe_cross` classes with zero observations, so the next lever is more probe sequences or a focused cross distribution |
 | Balanced strict audit | 1/1 seed functionally passes at 4608 actions with `probe=1000 canonical-boundary=500`; vector canonical-boundary class 0 is now covered, but probe-cross classes re-sparsify | Artifact `build/memblock/agent-campaign-23/balanced-4608.json`; `actual_probe_sequences=168`; strict rejects enabled probe-cross bins at indices 13,14,18,21; demonstrates a distribution trade-off rather than a depth-only gap |
 | Probe=1000 strict audit | 1/1 seed functionally passes at 4608 actions; all probe depth and probe-cross classes occur, but strict coverage rejects a vector canonical-boundary cross | Artifact `build/memblock/agent-campaign-22/probe1000-4608.json`; `actual_probe_sequences=317`, `actual_probe_depth=[149,75,15,15,17,18,14,14]`, all 32 probe-cross bins nonzero; the remaining gap is `actual_vector_canonical_boundary_cross` class (invalid_first=0, mode=0, addressing=1, eew=1). That behavior is already exercised by the directed `translation-faults` canonical-range vector-store cases (Sv39 strided eew=1 with a valid first byte); the strict rejection is a mixed-generator sparse-bin issue, not absent directed coverage |
 | Deep probe window | `dcache-coherence` passes with 8 accepted B probes, 8 C responses and `deep_probe_depth=8` | Directed eight-line window; four resident clean lines report permission 2 and four absent lines report the DUT's no-permission encoding 5; the report values are scenario-owned, not an architectural permission oracle |
-| Regression acceptance | 8/8 seeds pass, 16384 actions each (131072 actions) | Seeds 1..8; artifact `agent-campaign-14`; 1003.2 s; default coverage profile |
-| Current 8x16384 coverage | 8/8 seeds pass, 16384 actions each (131072 actions); per-seed high_mask 1436..1916 | Seeds 301..308; artifact `agent-campaign-17`; current mixed generator; not the 48h final campaign |
-| Spec confidence run | 8/8 seeds pass, 16384 actions each (131072 actions) | Seeds 1..8; artifact `agent-campaign-13`; 845.6 s; spec latency |
-| Data-less Release check | 2/2 coverage and 2/2 corner seeds pass, 4608 actions each | Seeds 121..122; artifact `agent-campaign-15`; final C-release monitor |
-| Full high-mask campaign | 4/4 coverage seeds pass, 4608 actions each (18432 actions); directed LMUL8 full-range case passes; seed 215 reports 432 masked uops with an enabled element >=16 | Seeds 201..204; artifact `agent-campaign-17`; the first four use a binary that predates the accepted-B probe gate |
-| Current full-mask + probe gate | 2/2 coverage seeds pass, 4608 actions each (9216 actions) | Seeds 205..206; artifact `agent-campaign-17`; current tree |
 | Same-address B/C attribution | Two simultaneous probes to one resident line cannot be uniquely matched by address/opcode/report; a data-less C with report 5 appeared while the accepted expectation expected report 2, and C was observed before the manager's second B acceptance | C's client-owned source is not tied to B; this is an oracle gap, not a confirmed RTL violation. Source/ownership attribution remains open |
 | Accepted-B probe gate | 1/1 1024-action mixed seed passes with 407 probes, plus directed coherence/release/atomic | Seed 207; artifact `agent-campaign-17`; no dedicated counter for pre-B C because an illegal C fails immediately |
 | Cross-alias store/load | `translation-alias` passes at cycle 447 and also observes a first-access `ld2Cancel` (`canceled=1`), log in `agent-campaign-17/translation-alias.log` | One PA, two Sv39 VAs; after-drain and an in-flight store with SBuffer non-empty at load issue. The canceled attempt is LQ-accounted but not replayed by the UT; exact backend replay remains outside |
-| CBO.ZERO ordering | Fixed model passes; pre-fix frozen model fails deterministically; same-line repeated zero, a three-line back-to-back zero burst, same-line zero/store both orders, an older-store/younger-zero/younger-load forward window, a zero/younger-store/younger-load age control, a dirty-line zero, an early younger load and an older-load/younger-zero age control pass; log at `agent-campaign-18/cbo-zero-contracts.log` | Directed `cbo-zero-contracts`; see CPU bug document |
+| CBO.ZERO ordering | Corrected sequence passes on both restored-original and latest-overlay RTL with `sequential_zero=2 consecutive_zero=2 following_store=1`, repeated same-line and three-line consecutive zero cases, both zero/store age directions, a dirty-line zero and an early younger load | CBO.ZERO remains the ROB head until deferred SBuffer completion; no simultaneous CBO completion window is legal or claimed |
+| Segment noncanonical fault | Corrected legal two-uop `nf=1` segment load/store cases pass on both restored-original and latest-overlay RTL; the later uop exposes the exact page fault with no DCache/Uncache request or SBuffer side effect | The first data uop may defer the fault and is not an independent architectural oracle |
 | Final word readback | observed words equal registered words in every passing mixed case | Cacheable identity path; aliases and CBO.INVAL/errored CMO lines excluded; successful CLEAN/FLUSH retained |
 | High-mask driver mutation | Zeroing `src(3)` bytes 2..15 makes `vector-addressing` fail at `phase=high-mask-load`; the restored driver passes | Harness mutation only; it demonstrates directed-test sensitivity, not RTL mutation coverage |
 | Vector fault vstart | Two-uop e16/LMUL2 page fault passes with `vstart=8` and exact fault VA. Two single-uop page-crossing faults pass with exact `vstart=1` and exact faulting-element addresses; the all-masked unmapped control passes and observes zero PTW and zero DCache requests; the partially masked load with an inactive unmapped element completes on the mapped element; `translation-faults` PASS log at `agent-campaign-18/translation-faults.log` | Broader fault-element/FOF progress remains open |
@@ -175,20 +145,6 @@ The current qualification is:
 | Permission-fault store side effects | `translation-permissions` passes with 10/10 fault-store readbacks (readable mapping or Bare fallback); `pmp-contracts` adds one PMP-denied store readback | Device fault paths still need another observation route |
 | Non-cacheable final effects | committed NC store/atomic words match the manager bus image in passing mixed runs; 2/2 4608-action seeds (210/211) check 141/142 words, seed 215 checks 146, and smaller seeds cover the uncache-drain path | Manager bus image, not a DUT uncache read; device side effects, aliases and CMO remain outside |
 | Atomic dirty-line persistence | `atomic-contracts` passes; ProbeAckData carries the updated line and updates the manager image | AMO target only; cross-hart/concurrent eviction not covered |
-
-Rows through `agent-campaign-16` were produced before the current harness-only
-full-mask, accepted-B, cross-alias and fault-store changes.  `agent-campaign-17`
-qualifies those new checks on the current tree, including a fresh 8x16384
-coverage regression (seeds 301..308).  `agent-campaign-18` reruns the selected
-85-entry benchmark on the current harness and records the new single-uop/masked
-vector fault cases; it is not the 48-hour final acceptance campaign.
-
-The CBO.ZERO pre-fix replay fails at cycle 33333 with
-`timed out waiting for scalar store writebacks sq=3/6
-store_writebacks=5 sbuffer_empty=0`; the fixed directed case passes at cycle
-676 with `sequential_zero=2 back_to_back_zero=2 following_store=1`. This is
-externally visible, deterministic and independent of testbench reference-state
-errors.
 
 Queue accounting is exact in the mixed results, the observed-word count equals
 the registered count, and per-case report commands and summaries agree with the
@@ -219,38 +175,35 @@ because enabled probe-depth classes 4..7 were not observed, even though both
 seeds pass functionally and the default accounting verifier accepts them. This
 confirms that
 the strict gate is active and that 4608 actions is not a closure-scale coverage
-budget. The configured 8-seed, 16384-action coverage regression is completed in
-this snapshot. Configured 48-hour breadth and million-action endurance targets are
-not completed. Their current budgets and automated-check limitations are defined in
-VERIFICATION_PLAN.md. No closure claim follows from a short capability run or a
-controller/verifier return code alone.
+budget. The current 4×4608 run is a development validation, not the configured
+8×16384 regression. Configured 48-hour breadth and million-action endurance
+targets are not completed. Their current budgets and automated-check limitations
+are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
+capability run or a controller/verifier return code alone.
 
 ## Current Review
 
-A fresh-context review rejected the first per-lane CBO.ZERO gate because it
-could let a following store bypass a blocked lane of the
-`DatamoduleResultBuffer` prefix FIFO. The fix now propagates the block as a
-prefix, and `cbo-zero-contracts` exercises CBO.ZERO, CBO.ZERO, ordinary store.
-The final re-review verdict is approve-with-findings for the code logic:
-F1/F2 are fixed and directly evidenced, and the campaign-artifact finding is
-closed by the completed `agent-campaign-12` coverage/corner artifacts. The sole
-remaining finding is documentation-only: the CLEAN/FLUSH sentence now states
-that retention observes a stale/corrupted visible data byte, not post-CMO
-clean/dirty state or persistence of a dirty cache-resident line. The later
-`atomic-contracts` dirty-line `ProbeAckData` persistence addition was
-independently reviewed and approved; its only request was a comment cleanup,
-which is applied. The corrected C multibeat source/param/size/raw-address
-monitor was also approved; same-address ProbeAck lookup remains by base and is
-documented as a residual limitation. The data-less Release full-line/shrink
-check was corrected to ignore `corrupt` and approved.
+Temporary CPU-bug classifications for CBO.ZERO and noncanonical vector
+segments were withdrawn after full-CPU ordering review. The CBO reproducer
+advanced the ROB pending head while the first deferred completion was still
+outstanding; the directed driver now follows actual ROB retirement order.
+The segment reproducer now models a legal two-uop `nf=1` segment and permits
+the later uop to expose the instruction-level fault instead of requiring the
+first data uop to report it independently. Both cases are treated as UT
+stimulus/oracle corrections, not CPU RTL bugs.
 
-The later non-cacheable bus-image final check, the opt-in `ld2Cancel` canceled
-attempt handling, the same-line CBO/LMUL8 directed additions, and the
-single-uop/masked later-element vector fault additions were not part of that
-independent review; they are self-reviewed for this snapshot. The earlier
-unattributed intra-uop exception-address observation was root-caused to
-sampling before the vector feedback reached the LqExceptionBuffer; the
-four-cycle settle now checks the exact address and the DUT payload is correct.
+A fresh-context independent review rejected earlier revisions for remaining
+CBO pre-completion commits, an impossible m2 segment uop sequence, a stale
+oracle statement, incomplete store forbidden-traffic observation, and a
+segment-decomposition guard gap. After those findings were fixed, the final
+review verdict is approve with no remaining findings. The review covered the
+actual diff, ROB/pending-head timing, complete-CPU segment decomposition and
+the terminal fault/no-side-effect contract.
+
+The independent atomic dirty-line `ProbeAckData` persistence review, corrected
+C multibeat source/param/size/raw-address monitor and data-less Release
+full-line/shrink check remain approved. Same-address ProbeAck lookup remains
+by base and is a documented residual limitation.
 
 This qualification confirms the stated capability and limitations; it does not
 establish verification closure or clean RTL elaboration provenance. The oracle,

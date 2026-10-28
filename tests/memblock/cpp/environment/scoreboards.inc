@@ -676,6 +676,7 @@ public:
         std::uint16_t tail_elements;
         std::uint16_t mask_inactive_elements;
         std::uint16_t fof_unspecified_elements;
+        bool exception_may_defer;
     };
 
     void expect(
@@ -698,14 +699,54 @@ public:
             }
             return;
         }
+        const std::uint32_t optional_fault =
+            transaction.store
+                ? (kExceptionStorePageFault | kExceptionStoreAccessFault)
+                : (kExceptionLoadPageFault | kExceptionLoadAccessFault);
         if (transaction.allowed_additional_exception_mask != 0 &&
-            (transaction.store || !transaction.fault_only_first ||
+            ((!transaction.fault_only_first &&
+              (!transaction.segment || transaction.last_uop)) ||
              (transaction.allowed_additional_exception_mask &
-              ~kExceptionLoadPageFault) != 0)) {
+              ~optional_fault) != 0)) {
             if (error_.empty()) {
-                error_.record("optional vector exceptions are restricted to FOF load page faults");
+                error_.record(
+                    "optional vector exceptions are restricted to FOF or "
+                    "non-last segment page/access faults in the operation "
+                    "direction");
             }
             return;
+        }
+        if (transaction.exception_may_defer &&
+            (!transaction.segment || transaction.last_uop ||
+             transaction.expected_exception_mask != 0 ||
+             transaction.allowed_additional_exception_mask == 0)) {
+            if (error_.empty()) {
+                error_.record(
+                    "deferred segment fault is only valid on a non-last uop "
+                    "with a declared later page fault");
+            }
+            return;
+        }
+        if (transaction.segment && transaction.nf == 0) {
+            if (error_.empty()) {
+                error_.record(
+                    "segment transactions require at least two fields");
+            }
+            return;
+        }
+        if (transaction.segment && !transaction.fault_only_first) {
+            const unsigned uop_count = vector_segment_uop_count(transaction);
+            const bool terminal = static_cast<unsigned>(
+                transaction.vuop_idx) + 1U == uop_count;
+            if (static_cast<unsigned>(transaction.vuop_idx) >= uop_count ||
+                terminal != transaction.last_uop) {
+                if (error_.empty()) {
+                    error_.record(
+                        "segment uop index/last-uop disagrees with the "
+                        "full-CPU decomposition");
+                }
+                return;
+            }
         }
         auto output_transaction = transaction;
         output_transaction.vl = transaction.expected_vl.value_or(
@@ -773,6 +814,7 @@ public:
                 vector_tail_elements(output_transaction),
                 vector_mask_inactive_elements(output_transaction),
                 transaction.fof_unspecified_elements,
+                transaction.exception_may_defer,
             });
     }
 
@@ -863,12 +905,14 @@ public:
                      &expected);
                 return;
             }
+            const bool data_mismatch = !expected.exception_may_defer &&
+                ((expected.check_data &&
+                  !matches_load_data(writeback.data, expected)) ||
+                 !matches_active_mask(
+                     writeback.vmask, expected.active_elements,
+                     expected.fof_unspecified_elements));
             if (!writeback.vec_wen || writeback.pdest != expected.pdest ||
-                (expected.check_data &&
-                 !matches_load_data(writeback.data, expected)) ||
-                !matches_active_mask(
-                    writeback.vmask, expected.active_elements,
-                    expected.fof_unspecified_elements)) {
+                data_mismatch) {
                 fail("mismatched vector load data", lane, writeback, &expected);
                 return;
             }
@@ -1020,6 +1064,7 @@ private:
                 << " flush_pipe=" << actual.flush_pipe
                 << " trigger=" << static_cast<unsigned>(actual.trigger)
                 << " vec_wen=" << actual.vec_wen
+                << " vl_wen=" << actual.vl_wen
                 << " pdest=" << static_cast<unsigned>(actual.pdest)
                 << " uop=" << static_cast<unsigned>(actual.vuop_idx)
                 << " vd_index_in_field="

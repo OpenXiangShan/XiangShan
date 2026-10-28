@@ -495,17 +495,24 @@ auto Environment::Impl::commit_store(const StoreTransaction &transaction,
         return false;
     }
     const std::uint64_t target = *target_it;
+    const bool deferred_cbo_zero = is_cbo_zero(transaction.op);
+    // A cacheable CBO.ZERO reaches cboZeroStout only after its SBuffer line
+    // drains.  ROB therefore cannot retire it before the SQ completion.
+    if (deferred_cbo_zero &&
+        (!run_until_sq_dequeued(target, timeout) ||
+         !commit_stores_through(transaction, 1))) {
+        return false;
+    }
     // A misaligned store at the ROB head can leave the SQ while another
     // outstanding class is still draining.  Do not turn that completed
-    // store into a wait for the following SQ entry.
-    // CMO may leave the externally monitored SQ before architectural
-    // commit, but StoreQueue's shared CMO/MMIO state machine still needs
-    // the backend scommit pulse to leave s_wait and accept another CMO.
-    if ((is_cmo(transaction.op) || queues_.sq_dequeued() < target) &&
+    // store into a wait for the following SQ entry.  Other CMO/MMIO state
+    // machines still need the backend scommit pulse before their final wait.
+    if (!deferred_cbo_zero &&
+        (is_cmo(transaction.op) || queues_.sq_dequeued() < target) &&
         !commit_stores_through(transaction, 1)) {
         return false;
     }
-    if (!run_until_sq_dequeued(target, timeout)) {
+    if (!deferred_cbo_zero && !run_until_sq_dequeued(target, timeout)) {
         std::ostringstream message;
         message << error_ << " rob=" << static_cast<unsigned>(transaction.rob)
                 << " rob_flag=" << transaction.rob_flag

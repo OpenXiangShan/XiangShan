@@ -491,6 +491,11 @@ struct VectorMemoryTransaction {
     // element and the remainder below the original VL after FOF truncation.
     // These bits qualify both returned data and the corresponding write mask.
     std::uint16_t fof_unspecified_elements = 0;
+    // A legal multi-uop segment may defer an instruction-level page fault to
+    // a later data uop. The earlier prefix completion is then non-architectural
+    // and must still be paired with an explicit later fault and side-effect
+    // check by the scenario.
+    bool exception_may_defer = false;
 };
 
 inline std::uint8_t vector_vsew(
@@ -575,6 +580,20 @@ inline unsigned vector_segment_uops_per_field(
 {
     const int data_mul_log2 = vector_segment_data_mul_log2(transaction);
     return 1U << static_cast<unsigned>(std::max(data_mul_log2, 0));
+}
+
+inline unsigned vector_segment_uop_count(
+    const VectorMemoryTransaction &transaction)
+{
+    const unsigned fields = static_cast<unsigned>(transaction.nf) + 1U;
+    if (vector_is_indexed(transaction)) {
+        const unsigned lmul_uops = fields << static_cast<unsigned>(
+            std::max(vector_lmul_log2(transaction), 0));
+        const unsigned emul_uops = 1U << static_cast<unsigned>(
+            std::max(vector_emul_log2(transaction), 0));
+        return std::max(lmul_uops, emul_uops);
+    }
+    return fields * vector_segment_uops_per_field(transaction);
 }
 
 inline unsigned vector_segment_field_index(

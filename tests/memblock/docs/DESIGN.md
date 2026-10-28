@@ -88,6 +88,13 @@ flushSb, the CMO path, atomics and segments feed the store-buffer/uncache flush
 logic. sbIsEmpty reports the registered combination of those drain states.
 CBO.ZERO and cache block management are distinct operations: the former writes
 zero bytes; the latter uses the cache-management path and external response.
+For a cacheable CBO.ZERO, StoreUnit suppresses the ordinary address-side
+writeback and StoreQueue reports completion only through cboZeroStout after the
+Sbuffer line has drained. ROB therefore keeps the first CBO.ZERO at its head and
+cannot move pendingPtr to a following instruction, including another
+CBO.ZERO, before that completion. The UT may issue younger work early, but it
+must not manufacture a later pending-head value while this deferred completion
+is outstanding.
 
 ### Vector transaction
 
@@ -99,6 +106,14 @@ load/store merge buffers. Segment operations select VSegmentUnit from the head
 issue lane and return on vector lane 0. Fault-only-first processing can produce
 both data and a separate fix-VL writeback; it is not one completion per input
 instruction regardless of uop shape.
+
+A legal segment instruction has two through eight fields, and its data-uop count
+is at least two. The first segment uop may complete before the instruction-level
+exception is exposed; a later uop recomputes the shared mask and must report the
+eventual fault before architectural commit. Consequently, a test may check the
+instruction-level fault, forbidden side effects and eventual completion, but it
+must not require the first data uop alone to report every exception unless the
+full-CPU producer contract establishes that behavior.
 
 vstuIqFeedback can request a partial replay with queue identity, replay mask and
 merge-buffer index. The UT must reissue the corresponding transaction, preserving
@@ -209,8 +224,9 @@ only.
 
 Present limits matter when interpreting a pass: manager D-input readback is not
 an independent proof that the DUT consumed the response correctly; protocol
-lifecycle checks are incomplete; the vector transaction model has only a 16-bit
-global element mask; exceptional VSTART is checked only when explicitly
-expected; and the mixed generator has no comprehensive final readback of every
-modified store location. See [IO_COVERAGE.md](IO_COVERAGE.md#unimplemented-or-incomplete-stimulus-and-checks)
+lifecycle checks are incomplete; the vector scoreboard checks a 16-bit local
+writeback mask while the transaction model carries global mask bits 0..127;
+exceptional VSTART is checked only when explicitly expected; and the mixed
+generator has no comprehensive final readback of every modified store location.
+See [IO_COVERAGE.md](IO_COVERAGE.md#unimplemented-or-incomplete-stimulus-and-checks)
 and [ORACLES.md](ORACLES.md) before making a coverage claim.

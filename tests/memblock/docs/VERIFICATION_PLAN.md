@@ -67,13 +67,13 @@ combinations have occurred or establishes a coverage percentage.
 | Scalar/FP loads | Width/sign/lane/immediate, FP boxing/destination, data/errors; load_feedback.inc, scoreboards | Wider timing/error interactions |
 | Stores/forwarding | Address/data order, masks, commit, cross-producer forwarding, directed readback, constrained-random final word readback for cacheable identity-mapped commits and same-context hypervisor readback for permitted/aligned cacheable stores | Output-only pulses, remaining aliased/non-cacheable/fault-path final state. A naturally aligned cross-page scalar store is not modeled as one legal top-level uop; the backend split is absent, so cross-page scalar split-store fault effects are untested and a single-uop completion is not an RTL claim. |
 | Vector addressing | Unit/strided/indexed/segment/whole-register shapes, data/identity/policy, full 128-bit mask operand with directed high-element load/store/indexed cases; cache_queue.inc, vector_memory.inc | Ordered side-effect targets, all concurrent shapes, and reserved/illegal mask-shape combinations remain |
-| Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA, single-uop later-element/masked `vstart=1` faults with exact faulting-element addresses, masked, unmasked, first-element, segment (field-1, element-1 and first-field) PMP-denied masked/unmasked vector loads, and PMP-denied (including masked, cross-page, both segment field orders and EEW 1/2) vector store faults whose inactive/read-only/writable target pages are read back unchanged, a partially masked load with an inactive unmapped element, and an all-masked unmapped control that observes no PTW/DCache traffic | Default exceptional vstart skip for other shapes, arbitrary restart/progress, broader fault-address attribution, and canonical-alias sensitivity |
+| Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA, single-uop later-element/masked `vstart=1` faults with exact faulting-element addresses, legal two-uop segment noncanonical loads/stores whose later uop must expose the fault with no forbidden traffic, masked, unmasked, first-element, segment (field-1, element-1 and first-field) PMP-denied masked/unmasked vector loads, and PMP-denied (including masked, cross-page, both segment field orders and EEW 1/2) vector store faults whose inactive/read-only/writable target pages are read back unchanged, a partially masked load with an inactive unmapped element, and an all-masked unmapped control that observes no PTW/DCache traffic | Default exceptional vstart skip for other shapes, arbitrary restart/progress, broader fault-address attribution, and canonical-alias sensitivity. Per-uop success order is not an architectural oracle when a later uop of the same instruction exposes the fault before commit. |
 | Translation | Mode pairs, permissions, leaf sizes, encoding/PPN/range, PBMT/NAPOT, permission-fault and PMP-denied store readback (readable mapping, Bare fallback, or re-enabled PMP region) | Uniform fault-side-effect checks for unreadable/device mappings, nested boundaries/GPA wrap/A-D races |
 | Protection/H | PMP TOR/NAPOT/lock/edges, HLV/HLVX/HSV; protection.inc | Instruction PMP and broader PMA/PMP/H/misalignment crosses |
 | Refill/MLP | Critical beat, merge, distinct misses, held/reversed D, capacity-plus-one, DCache/PTW/Uncache source lifetime | Broader error/interleaving and malformed response lifecycle |
 | Coherence/replacement | Clean/dirty Probes, an eight-deep probe window, Releases/data, replacement plus selected Probe/CMO/atomic, E first-D/sink lifetime, accepted-B-before-C provenance, fixed C multibeat source/param/size/raw address, DUT full-line data-less Release size/alignment/shrink param | TileLink user/echo C fields are DUT-specific; data-less Release corrupt is ignored; same-address B/C attribution remains missing: a two-probe experiment cannot be uniquely matched by address/opcode/report, and C's client-owned source is not tied to B; broader ordering remains |
 | Atomics | W/D AMO/CAS/LRSC, alignment/errors, reservation Probe, directed readback, successful cacheable final word readback, and forced dirty-line ProbeAckData persistence | Aliased/error-path final writes not forced observable, cross-hart/wider concurrency. Atomic-then-store/CBO ordering is not yet executable: the current single-atomic harness leaves the younger store in Sbuffer without a writeback, so no RTL claim is made. |
-| CBO/CMO | ZERO/CLEAN/FLUSH/INVAL, clean/dirty/error, delayed ack, younger cancellation, single/sequential/back-to-back/same-line-repeated/three-line CBO.ZERO completion, same-line zero/store both orders, an older-store/younger-zero/younger-load forward window, a zero/younger-store/younger-load age control and an early younger load (see CPU bug doc) | Multiple sources/classes, dirty persistence/reset, PBMT=NC behavior unspecified, wider same-line forward-timing variants |
+| CBO/CMO | ZERO/CLEAN/FLUSH/INVAL, clean/dirty/error, delayed ack, younger cancellation, single/sequential/same-line-repeated/three-line consecutive CBO.ZERO completion, same-line zero/store both orders, an older-store/younger-zero/younger-load forward window, a zero/younger-store/younger-load age control and an early younger load | A cacheable CBO.ZERO remains the ROB head until cboZeroStout after SBuffer drain; two CBO.ZEROs cannot legally occupy the same deferred-completion window. Multiple sources/classes, dirty persistence/reset, PBMT=NC behavior unspecified, wider same-line forward-timing variants remain |
 | Uncache/MMIO | Width/mask/data, device side effects, errors, serialization | Source credit and malformed manager inputs |
 | ECC | Selected tag/data masks, banks/ways, reports/survivors | Wider masks, persistent/delayed events and concurrency |
 | LSQ/ROB/redirect | Six-lane enqueue, aggregate retire/cancel, wrap/stale suppression | Full per-retirement attribution and output-only pulse identity |
@@ -127,8 +127,12 @@ Legal stimulus respects decoded opcodes, consistent ROB/LSQ identities,
 valid-payload stability, architectural age/commit order, translation context,
 legal vector shapes and finite manager responses. AMOs execute at the backend
 non-speculative point; redirect-canceling an executing AMO is illegal. Segment
-serialization is an upstream assumption. Younger stores cannot become ROB
-head/commit while an older operation must retire first.
+serialization is an upstream assumption. A legal segment has at least two data
+uops; the UT may allow the later uop to expose the instruction-level fault but
+must not claim an impossible one-data-uop shape. Younger instructions cannot
+become the ROB pending head while an older operation must retire first. In
+particular, a younger CBO.ZERO cannot become head while the older CBO.ZERO is
+waiting for cboZeroStout and SBuffer drain.
 
 pin-space drives raw patterns under primary reset. It proves connectivity,
 not semantics. Exported pins are configuration-specific; pruned Scala bundle
@@ -177,6 +181,14 @@ Material oracle/monitor/distribution/coverage/plan changes receive fresh-context
 non-author review before closure-scale regression. Review uses the actual diff
 and source contracts, dispositions every finding, and records only current
 verdict/scope in RESULTS.md. Author conclusions are not fixed reviewer inputs.
+
+Every CPU RTL bug claim additionally requires a fresh-context independent review
+of the complete CPU path that can produce the UT input. The review must prove
+that instruction/uop decomposition, ROB commit and pending-head movement,
+queue completion, and reset/redirect/cancellation timing can all occur as the
+stimulus drives them. A deterministic UT failure caused by directly forcing a
+state or ordering the full CPU cannot produce is a stimulus/driver defect and
+must not receive a `CPU_BUG_*` document or confirmed-bug wording.
 
 If a reachable class is absent, inspect eligibility/probability/scheduling and
 observation before extending runtime. If capability does not improve over a
