@@ -29,8 +29,8 @@ class BpuFlushCtrlIO(numPredictors: Int) extends Bundle {
   val activeFlushMask = Output(UInt(numPredictors.W)) // mask latched for this transaction
 }
 
-class BpuFlushCtrl(numPredictors: Int) extends Module {
-  require(numPredictors > 0)
+class BpuFlushCtrl(numPredictors: Int, minWindow: Int) extends Module {
+  require(numPredictors > 0 && minWindow >= 2)
   val io = IO(new BpuFlushCtrlIO(numPredictors))
 
   val s_idle :: s_waiting :: s_flushing :: s_done :: Nil = Enum(4)
@@ -43,13 +43,24 @@ class BpuFlushCtrl(numPredictors: Int) extends Module {
   }
   io.activeFlushMask := activeFlushMask
 
+  // Count only s_flushing cycles, excluding the contextFlush trigger cycle.
+  // At T+j the counter is j-1; with minWindow=256, the earliest exit is T+257.
+  // Saturate while waiting for slower tables, and restart on each contextFlush.
+  val windowCnt = RegInit(0.U(log2Ceil(minWindow).W))
+  val windowMet = windowCnt === (minWindow - 1).U
+  when(io.contextFlush) {
+    windowCnt := 0.U
+  }.elsewhen(flushState === s_flushing && !windowMet) {
+    windowCnt := windowCnt + 1.U
+  }
+
   // state transitions
   when(acceptFlush) {
     flushState := s_waiting
   }.elsewhen(flushState === s_waiting && io.redirectEn) {
     flushState := s_flushing   // contextFlush is high in this cycle, next cycle enters flushing
-  }.elsewhen(flushState === s_flushing && io.resetDone) {
-    flushState := s_done       // aggregated resetDone asserted, this transaction completes
+  }.elsewhen(flushState === s_flushing && io.resetDone && windowMet) {
+    flushState := s_done       // all selected tables are done and the minimum window has elapsed
   }.elsewhen(flushState === s_done) {
     flushState := s_idle       // stays for 1 cycle only, reserved for future completion handling
   }

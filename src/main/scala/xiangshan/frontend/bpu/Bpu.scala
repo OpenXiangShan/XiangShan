@@ -228,7 +228,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
     }
 
-    val fc = Module(new BpuFlushCtrl(predictors.length))
+    // Drain budget for ResolveQueue plus trainCache, including train backpressure.
+    // Four cycles per packet and 32 boundary cycles are engineering margins (SPEC 01 §5.2.3).
+    // Round up to a power of two: defaults (16 + 1) * (8 + 4) + 32 = 236 -> 256.
+    val ftqParams = frontendParameters.ftqParameters
+    val drainBudget = (ftqParams.ResolveQueueSize + 1) * (ftqParams.BpTrainStallLimit + 4) + 32
+    val bpuFlushMinWindow = 1 << log2Ceil(drainBudget)
+    val fc = Module(new BpuFlushCtrl(predictors.length, bpuFlushMinWindow))
     fc.io.flush      := io.flush.get
     fc.io.redirectEn := io.fromFtq.redirect.valid
     fc.io.bpuFlushEn := ctrl.bpuFlushEn.get
