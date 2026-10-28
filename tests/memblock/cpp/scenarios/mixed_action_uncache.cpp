@@ -65,7 +65,7 @@ bool MixedScenario::execute_noncacheable(ActionWindow &window)
         phase = "random-nc-store";
         auto transaction = make_store(
             nc_base + offset, random(), memblock::StoreOp::sd,
-            random() % 2, random() % 2);
+            random() % 2);
         transaction.cacheable = false;
         transaction.expected_debug_is_mmio = false;
         transaction.expected_debug_is_ncio = false;
@@ -249,7 +249,7 @@ bool MixedScenario::execute_mmio(ActionWindow &window)
         auto transaction = make_store(
             mmio_access_address() + offset, random(),
             memblock::StoreOp::sd,
-            random() % 2, random() % 2);
+            random() % 2);
         transaction.expected_address_writeback_lane = 0;
         transaction.oracle_address = mmio_physical + offset;
         transaction.cacheable = false;

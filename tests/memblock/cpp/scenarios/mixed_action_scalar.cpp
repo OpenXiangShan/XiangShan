@@ -464,12 +464,16 @@ bool MixedScenario::execute_load_merge(ActionWindow &window)
 bool MixedScenario::execute_scalar_store(ActionWindow &window)
 {
     auto &probe_candidate = window.probe_candidate;
+    if (constraints.scalar_dependency_per_mille != 0 &&
+        random() % 1000U < constraints.scalar_dependency_per_mille) {
+        return execute_scalar_dependency(window);
+    }
 
     const auto op = static_cast<memblock::StoreOp>(random() % 4);
     const unsigned size = 1U << static_cast<unsigned>(op);
     const auto transaction = make_store(
         action_cacheable_address(window, size), random(), op,
-        random() % 2, random() % 2);
+        random() % 2);
     if (!issue_store(transaction, (random() & 1U) != 0) ||
         !environment.commit_store(transaction, 8192) ||
         !environment.run_until_queues_retired(8192)) {
@@ -478,6 +482,160 @@ bool MixedScenario::execute_scalar_store(ActionWindow &window)
     probe_candidate = transaction.address & ~std::uint64_t{63};
     ++coverage.cacheable;
 
+    return true;
+}
+
+bool MixedScenario::execute_scalar_dependency(ActionWindow &window)
+{
+    phase = "random-scalar-dependency";
+    const unsigned timeout = constrained_completion_timeout;
+    if (!environment.run_until_all_complete(timeout) ||
+        !environment.run_until_queues_retired(timeout)) {
+        return false;
+    }
+    const std::uint64_t base = action_cacheable_address(window, 64, false) &
+        ~std::uint64_t{63};
+    std::array<unsigned char, 64> snapshot{};
+    for (unsigned byte = 0; byte < snapshot.size(); ++byte) {
+        snapshot[byte] = environment.memory().read_byte(base + byte);
+    }
+    auto plan = make_scalar_dependency_plan(random);
+    if (plan.younger) {
+        // Make the age-exclusion control distinguishable in at least one byte.
+        const auto expected = scalar_dependency_expected(
+            snapshot, plan.older, plan.loads.front());
+        if (static_cast<unsigned char>(plan.younger->data) ==
+            static_cast<unsigned char>(expected)) {
+            plan.younger->data ^= 1U;
+        }
+    }
+    // An older non-memory instruction can hold retirement while ordinary
+    // cacheable stores execute. No store is the pending ROB head yet.
+    const std::uint64_t anchor = rob_offset++;
+    if (!environment.set_rob_head(
+            memblock::rob_pointer_value(anchor),
+            memblock::rob_pointer_flag(anchor))) {
+        return false;
+    }
+    const auto sq_before = environment.sq_dequeued();
+    std::vector<memblock::StoreTransaction> stores;
+    std::vector<memblock::LoadTransaction> loads;
+    for (const auto &item : plan.older) {
+        stores.push_back(make_store(
+            base + item.offset, item.data,
+            static_cast<memblock::StoreOp>(std::countr_zero(item.width)),
+            random() % memblock::kScalarStoreLanes));
+        environment.expect_store(stores.back());
+        if (!environment.enqueue_store(
+                stores.back(), memblock::lq_pointer_value(lq_offset))) {
+            return false;
+        }
+    }
+    // Parameters.scala allocates 224 integer physical registers. Keep these
+    // simultaneous destinations distinct and within the nonzero register set.
+    const unsigned first_pdest = 1U + random() % (224U - plan.loads.size());
+    for (const auto &item : plan.loads) {
+        loads.push_back(make_load(base + item.offset,
+            static_cast<memblock::LoadOp>(item.op),
+            random() % memblock::kScalarLoadLanes));
+        loads.back().pdest = static_cast<std::uint8_t>(
+            first_pdest + loads.size() - 1U);
+        environment.expect_load_data(loads.back(),
+            scalar_dependency_expected(snapshot, plan.older, item));
+        if (!environment.enqueue_load(loads.back())) {
+            return false;
+        }
+    }
+    if (plan.younger) {
+        stores.push_back(make_store(
+            base + plan.younger->offset, plan.younger->data,
+            static_cast<memblock::StoreOp>(std::countr_zero(plan.younger->width)),
+            random() % memblock::kScalarStoreLanes));
+        environment.expect_store(stores.back());
+        if (!environment.enqueue_store(
+                stores.back(), memblock::lq_pointer_value(lq_offset))) {
+            return false;
+        }
+    }
+    std::vector<bool> seen_address(stores.size(), false);
+    std::vector<bool> data_first(stores.size(), false);
+    for (unsigned index = 0; index < plan.store_events.size(); ++index) {
+        const unsigned event = plan.store_events[index];
+        const unsigned store = event / 2U;
+        bool issued = false;
+        if ((event & 1U) == 0) {
+            seen_address[store] = true;
+            issued = environment.issue_store_address_until_tlb_hit(
+                stores[store], timeout);
+        } else {
+            data_first[store] = !seen_address[store];
+            issued = environment.issue_store_data(stores[store], timeout);
+        }
+        if (!issued || !environment.run_cycles(plan.event_delays[index])) {
+            return false;
+        }
+    }
+    if (!environment.run_until_store_complete(timeout) ||
+        environment.sq_dequeued() != sq_before) {
+        phase += ":premature-store-retirement";
+        return false;
+    }
+    // Every older address and data operand is known, so the expected value
+    // is independent of whether hardware forwards all, some or no bytes.
+    for (unsigned index : plan.load_order) {
+        if (!environment.issue_load(loads[index], timeout) ||
+            !environment.run_cycles(random() % 8U)) {
+            return false;
+        }
+    }
+    if (!environment.run_until_all_complete(timeout) ||
+        environment.sq_dequeued() != sq_before) {
+        phase += ":load-completion";
+        return false;
+    }
+    for (unsigned index = 0; index < stores.size(); ++index) {
+        if (!environment.commit_store(stores[index], timeout)) {
+            return false;
+        }
+        coverage.sample(stores[index], data_first[index]);
+    }
+    if (!environment.set_rob_head(
+            memblock::rob_pointer_value(rob_offset - 1U),
+            memblock::rob_pointer_flag(rob_offset - 1U)) ||
+        !environment.run_until_queues_retired(timeout)) {
+        return false;
+    }
+    for (const auto &load : loads) {
+        coverage.sample(load);
+    }
+    ++coverage.scalar_dependency_windows;
+    coverage.scalar_dependency_stores += stores.size();
+    coverage.scalar_dependency_loads += loads.size();
+    coverage.scalar_dependency_younger += plan.younger.has_value();
+    for (const auto &load : plan.loads) {
+        std::array<bool, 4> sources{};
+        for (unsigned byte = 0; byte < load.width(); ++byte) {
+            std::optional<unsigned> source;
+            for (unsigned store = 0; store < plan.older.size(); ++store) {
+                const auto &item = plan.older[store];
+                if (load.offset + byte >= item.offset &&
+                    load.offset + byte - item.offset < item.width) {
+                    source = store;
+                }
+            }
+            if (source) {
+                ++coverage.scalar_dependency_forwarded_bytes;
+                sources[*source] = true;
+            } else {
+                ++coverage.scalar_dependency_memory_bytes;
+            }
+        }
+        coverage.scalar_dependency_multiple_sources +=
+            std::count(sources.begin(), sources.end(), true) > 1;
+    }
+    coverage.cacheable += stores.size() + loads.size();
+    window.probe_candidate = base;
+    ++actions; // One compound action; all accepted uops remain accounted.
     return true;
 }
 

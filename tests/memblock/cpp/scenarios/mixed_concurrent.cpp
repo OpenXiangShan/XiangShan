@@ -81,7 +81,7 @@ bool MixedScenario::run_concurrent_windows()
         }
         auto scalar_store = make_store(
             scalar_store_address, random(), scalar_store_op,
-            random() % 2, random() % 2);
+            random() % 2);
         // This window uses legal cacheable stores with hardware
         // misalignment enabled.  A crossing of the 16-byte beat is
         // completed by the shared store misalignment output.

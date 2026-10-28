@@ -109,6 +109,24 @@ not a general reference memory-ordering engine: the
 [mixed transaction helpers](../cpp/scenarios/mixed_transactions.cpp) own their
 particular age, byte-overlay, and issue arrangement.
 
+The canonical `scalar-dependency` direction snapshots initial line bytes and
+overlays only older store operands in architectural order for each expected
+load. It varies counts, overlap, sizes, signs, operand arrival and issue order;
+an optional younger store must be excluded even when its operands arrive first.
+Retirement stays behind an older non-memory ROB head until load completion,
+then stores commit in age order. Final word readback observes committed bytes.
+Known store operands precede load issue; unresolved-address speculation is not
+covered by this direction. Store halves retain their CPU scheduler lane pairing;
+these simultaneous loads have distinct valid integer destinations. Semantic byte-source counters do not require any
+particular internal forwarding path.
+
+Ordinary constrained-random initial-data pools use stateless seed-and-physical-
+word-address values, defined in both images before traffic. Explicit writes
+override those lazy bytes, and reference-only commits still do not update the
+manager image. Production load-scoreboard mutation tests show representative
+wrong-address substitutions formerly hidden by repeating initialization are
+rejected. Individual-byte collisions and unchanged special-case pools remain.
+
 ### Scalar completion details
 
 `LoadScoreboard::expect` computes expected RF/FP enables from the *expected*

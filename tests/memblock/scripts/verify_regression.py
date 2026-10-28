@@ -1488,7 +1488,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4411,6 +4411,27 @@ def _check_mixed_coverage(
         )
 
 
+def _check_scalar_dependency_accounting(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 54:
+        return
+    rate = result.get("target_scalar_dependency")
+    _require(type(rate) is int and 0 <= rate <= 1000,
+             "invalid target_scalar_dependency rate")
+    windows, stores, loads, younger, forwarded, memory, multiple = _csv_counts(
+        result, "scalar_dependency", 7
+    )
+    _require(younger <= windows and multiple <= loads,
+             "scalar dependency control/source counts exceed their windows/loads")
+    _require(windows + younger <= stores <= 4 * windows + younger,
+             "scalar dependency store count disagrees with window bounds")
+    _require(windows <= loads <= 3 * windows,
+             "scalar dependency load count disagrees with window bounds")
+    _require(loads <= forwarded + memory <= 8 * loads,
+             "scalar dependency byte counts disagree with load widths")
+    if rate == 0:
+        _require(windows == 0, "disabled scalar dependency generated windows")
+
+
 def _check_mixed_accounting(result: dict[str, Any]) -> None:
     """Validate queue/LSQ accounting, not coverage completeness.
 
@@ -4589,6 +4610,7 @@ def _check_result(
             f"{prefix} DCache grants and GrantAcks are not conserved",
         )
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
+        _check_scalar_dependency_accounting(result)
         if require_coverage:
             try:
                 _check_mixed_coverage(result, require_backpressure)

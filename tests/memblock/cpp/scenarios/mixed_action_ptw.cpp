@@ -133,7 +133,6 @@ bool MixedScenario::execute_ptw_error(ActionWindow &window)
     if (ptw_error_store) {
         auto transaction = make_store(
             address, random(), memblock::StoreOp::sd,
-            random() % memblock::kScalarStoreLanes,
             random() % memblock::kScalarStoreLanes);
         transaction.expected_exception_mask =
             memblock::kExceptionStoreAccessFault;

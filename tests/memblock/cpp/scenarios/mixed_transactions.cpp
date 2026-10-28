@@ -38,8 +38,7 @@ memblock::LoadTransaction MixedScenario::make_load(std::uint64_t address, memblo
 }
 
 memblock::StoreTransaction MixedScenario::make_store(std::uint64_t address, std::uint64_t data,
-    memblock::StoreOp op, unsigned address_lane,
-    unsigned data_lane)
+    memblock::StoreOp op, unsigned address_lane)
 {
     const std::uint64_t rob = rob_offset++;
     const std::uint64_t sq = sq_offset++;
@@ -52,7 +51,7 @@ memblock::StoreTransaction MixedScenario::make_store(std::uint64_t address, std:
         .sq = memblock::sq_pointer_value(sq),
         .sq_flag = memblock::sq_pointer_flag(sq),
         .address_lane = address_lane,
-        .data_lane = data_lane,
+        .data_lane = address_lane,
     };
     return transaction;
 }

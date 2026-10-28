@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=53`.
+`constraint_schema=54`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -14,6 +14,13 @@ This document defines the implemented constraint interface and observations.
 regression acceptance; [ORACLES.md](ORACLES.md) owns expected behavior.
 The parser, presets, validation, and target serialization are in
 [RandomConstraints](../cpp/random/constraints.inc).
+
+Normal workload correctness has priority: ordinary scalar/FP and vector data,
+store-to-load dependencies, cache/TLB overlap and final byte visibility precede
+additional exotic error/protection combinations. This is workload-style block
+stimulus, not execution of a SPEC CPU program. Seeds vary transaction values
+and choices; fixed producer compositions and serialized helper boundaries remain
+explicit below. More constraints or longer runs do not guarantee an RTL bug.
 
 Choose the profile with `--constraints PROFILE`. Repeat `--constraint key=value`
 to override individual fields after the profile; later assignments to the same
@@ -74,6 +81,7 @@ they do not imply arbitrary numeric suffix support.
 | `misaligned` | Misalignment rate where width, operation, and legal address class permit it. |
 | `stride-stream` | Rate selecting a fixed-PC, 128-byte-stride cold scalar-load stream. |
 | `bank-conflict` | Rate replacing an eligible clean scalar-load action with a two- or three-load same-bank resident wave; banks are derived from request addresses. |
+| `scalar-dependency` | Rate replacing an eligible ordinary scalar-store action with a randomized dependency window: 1..4 older stores, 1..3 younger loads, and an optional store younger than those loads. Widths, byte overlap, payloads, lanes, operand arrival, issue order and 0..7-cycle gaps vary. Defaults coverage/spec/corner/cmo-stress: 350/200/500/0. |
 | `latency` | `compact` or `spec`, applied to all three managers. |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | `compact` or `spec`, applied to one manager. |
 
@@ -247,6 +255,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | `uncache-load-error-denied` | 500 | 500 | 500 | 500 |
 | `stride-stream` | 500 | 100 | 750 | 0 |
 | `bank-conflict` | 500 | 250 | 750 | 0 |
+| `scalar-dependency` | 350 | 200 | 500 | 0 |
 | Latency DCache/PTW/Uncache | compact/compact/compact | spec/spec/spec | spec/spec/spec | compact/compact/compact |
 
 Profiles specify directions, not measured workload fidelity or observed coverage.
@@ -486,6 +495,38 @@ Array order and sampling code are authoritative in
 | `probe_source_space`, `probe_source_lifecycle`, `probe_max_outstanding` | Available manager source IDs, unique/reuse/wrap counts, and maximum outstanding Probes. |
 | `load_wakeups`, `load_cancels`, `raw_load_*` | Feedback diagnostics; they do not define independent expected memory values. |
 
+## Ordinary Scalar Dependency Windows
+
+The common generator's `scalar-dependency` direction retains the selected
+cacheable context and address pool. All accesses are naturally aligned and
+contained in one cache line. It allocates ROB/LSQ identities in program order,
+holds retirement behind an older non-memory instruction, and shuffles store
+address/data arrival independently of age. The common ordinary-store factory
+uses one paired STA/STD lane as the CPU scheduler does. Simultaneous dependency
+loads use distinct integer destinations in the implemented 1..223 range. All store operands are known before
+loads issue; an optional younger store is already present but excluded from each
+load's SQ snapshot. No store may dequeue before those loads complete. Stores
+then commit in architectural order, and every touched word joins final readback.
+
+Each expected load comes from a pre-window byte snapshot overlaid with only
+older store inputs in program order. This checks youngest-older-store selection,
+partial cache/store byte assembly, signed/unsigned widths and younger-store
+exclusion without depending on the DUT's forwarding or replay choices.
+`scalar_dependency` reports windows, stores, loads, younger-store controls,
+bytes supplied by older stores, bytes supplied by the initial image, and loads
+whose final bytes come from multiple older stores. These are semantic source
+counts, not assertions that a particular internal bypass was taken. A window is
+one compound action; its uops still participate in ordinary completion and queue
+accounting. A short run may have no windows when eligible stores are not drawn.
+
+Ordinary bare/cache0/cache1, atomic and stage1-NAPOT pools, plus merge/miss/bank
+pools, now use lazy bytes calculated from the seed and full physical word
+address before traffic. Read order consumes no random state. Manager and
+reference images start equal; architectural commit writes remain independent of
+bus writes. This removes representative +256-byte and +16-KiB repeated-pattern
+blind spots. It does not make every individual byte unique or randomize the
+remaining fault/device setup pools.
+
 ## Explicit Stimulus And Oracle Gaps
 
 - Ordinary random vector traffic explores legal EEW/SEW/LMUL/EMUL and addressing
@@ -509,8 +550,9 @@ Array order and sampling code are authoritative in
 - Heterogeneous windows have a fixed five-producer composition, optional clean
   NC/MMIO load, bounded queue flow, dependent ordered-index issue, and a drain
   between windows. Serial helpers supply local Probe/refill/pressure overlaps.
-  Broad arbitrary outstanding instruction mixtures, multiple CMO/atomic
-  ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
+  The scalar dependency direction adds variable ordinary store/load chains,
+  but unresolved-store-address recovery is not generated there. Broad arbitrary
+  outstanding instruction mixtures, multiple CMO/atomic ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
   injection are not provided by these constraints.
 - The final readback forces cacheable identity-mapped store/atomic effects, but
   does not observe aliased address translations, non-cacheable/device effects,

@@ -852,8 +852,6 @@ bool MixedScenario::execute_set_pressure(ActionWindow &window)
                     line + offset, data,
                     static_cast<memblock::StoreOp>(set_pressure_width),
                     (index + set_pressure_set) %
-                        memblock::kScalarStoreLanes,
-                    (index + set_pressure_set + 1U) %
                         memblock::kScalarStoreLanes));
                 const auto &store = pressure_stores.back();
                 environment.expect_release_line(line, expected_line);

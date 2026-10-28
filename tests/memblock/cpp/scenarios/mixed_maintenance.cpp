@@ -50,7 +50,6 @@ bool MixedScenario::issue_random_cmo(
         phase = "random-cmo-dirty";
         const auto dirty_store = make_store(
             address, random(), memblock::StoreOp::sd,
-            random() % memblock::kScalarStoreLanes,
             random() % memblock::kScalarStoreLanes);
         environment.expect_store(dirty_store);
         if (!environment.set_rob_head(
@@ -119,7 +118,6 @@ bool MixedScenario::issue_random_cmo(
         }};
     auto cmo_transaction = make_store(
         line + random() % 64, random(), cmo_ops[operation],
-        random() % memblock::kScalarStoreLanes,
         random() % memblock::kScalarStoreLanes);
     cmo_transaction.expected_address_writeback_lane = 0;
     cmo_transaction.oracle_address = line;

@@ -3133,6 +3133,13 @@ private:
 };
 
 struct MixedCoverage {
+    std::uint64_t scalar_dependency_windows = 0;
+    std::uint64_t scalar_dependency_stores = 0;
+    std::uint64_t scalar_dependency_loads = 0;
+    std::uint64_t scalar_dependency_younger = 0;
+    std::uint64_t scalar_dependency_forwarded_bytes = 0;
+    std::uint64_t scalar_dependency_memory_bytes = 0;
+    std::uint64_t scalar_dependency_multiple_sources = 0;
     static constexpr unsigned kConcurrentClasses = 5;
     std::array<std::uint64_t, memblock::generated::kLsqEnqueueLanes>
         dispatch_widths{};
@@ -3397,7 +3404,15 @@ struct MixedCoverage {
                std::to_string(nonzero_vstart) + " vl=" +
                std::to_string(full_vl) + ',' + std::to_string(partial_vl) +
                " align=" + std::to_string(aligned) + ',' +
-               std::to_string(split) + " scalar_misaligned=" +
+               std::to_string(split) + " scalar_dependency=" +
+               std::to_string(scalar_dependency_windows) + ',' +
+               std::to_string(scalar_dependency_stores) + ',' +
+               std::to_string(scalar_dependency_loads) + ',' +
+               std::to_string(scalar_dependency_younger) + ',' +
+               std::to_string(scalar_dependency_forwarded_bytes) + ',' +
+               std::to_string(scalar_dependency_memory_bytes) + ',' +
+               std::to_string(scalar_dependency_multiple_sources) +
+               " scalar_misaligned=" +
                std::to_string(scalar_misaligned) + " store_misaligned=" +
                std::to_string(scalar_store_misaligned) + ',' +
                std::to_string(vector_store_misaligned) + " store_order=" +

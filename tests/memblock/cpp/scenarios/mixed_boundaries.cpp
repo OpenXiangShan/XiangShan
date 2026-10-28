@@ -161,7 +161,6 @@ bool MixedScenario::issue_canonical_boundary(unsigned cross)
     if (store) {
         auto fault = make_store(
             address, random(), static_cast<memblock::StoreOp>(eew),
-            random() % memblock::kScalarStoreLanes,
             random() % memblock::kScalarStoreLanes);
         fault.expected_exception_mask = memblock::kExceptionStorePageFault;
         fault_rob = fault.rob;
@@ -401,7 +400,6 @@ bool MixedScenario::issue_vector_canonical_boundary(unsigned cross)
     // retire useful work after the fault, using the observed cursor.
     auto survivor = make_store(
         high_base + 0x100U, random(), memblock::StoreOp::sd,
-        random() % memblock::kScalarStoreLanes,
         random() % memblock::kScalarStoreLanes);
     survivor.oracle_address =
         canonical_boundary_physical + mode * 0x2000U + 0x1100U;
@@ -602,7 +600,6 @@ bool MixedScenario::issue_gstage_boundary(unsigned cross, bool vector)
     } else if (store) {
         auto fault = make_store(
             element_address, random(), static_cast<memblock::StoreOp>(eew),
-            random() % memblock::kScalarStoreLanes,
             random() % memblock::kScalarStoreLanes);
         fault.expected_exception_mask = memblock::kExceptionStoreGuestPageFault;
         if (!check_range(fault.address)) {
@@ -685,7 +682,6 @@ bool MixedScenario::issue_gstage_boundary(unsigned cross, bool vector)
     environment.select_store_exception_address(false);
     auto survivor = make_store(
         0x100U, random(), memblock::StoreOp::sd,
-        random() % memblock::kScalarStoreLanes,
         random() % memblock::kScalarStoreLanes);
     survivor.oracle_address = control_physical[1] + 0x100U;
     const auto survivor_walk = walk_access(survivor.address, true);

@@ -150,7 +150,7 @@ bool MixedScenario::execute_hypervisor(ActionWindow &window)
         }
         auto transaction = make_store(
             address,
-            random(), op, random() % 2, random() % 2);
+            random(), op, random() % 2);
         transaction.oracle_address = reference.physical_address;
         transaction.cacheable = !(final_nc || final_io);
         transaction.expected_debug_is_mmio = hypervisor_pma_device;

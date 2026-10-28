@@ -1,5 +1,6 @@
 #pragma once
 #include "state.hpp"
+#include "scalar_dependency.hpp"
 
 namespace memblock::scenarios::mixed {
 
@@ -62,8 +63,7 @@ private:
     memblock::LoadTransaction make_load(std::uint64_t address, memblock::LoadOp op,
         unsigned lane);
     memblock::StoreTransaction make_store(std::uint64_t address, std::uint64_t data,
-        memblock::StoreOp op, unsigned address_lane,
-        unsigned data_lane);
+        memblock::StoreOp op, unsigned address_lane);
     memblock::PrefetchTransaction make_prefetch(std::uint64_t address, memblock::PrefetchOp op,
         unsigned lane);
     memblock::VectorMemoryTransaction make_vector(bool store, std::uint64_t address, unsigned eew,
@@ -225,6 +225,7 @@ private:
     bool execute_set_pressure(ActionWindow &window);
     bool execute_miss_burst(ActionWindow &window);
     bool execute_scalar_store(ActionWindow &window);
+    bool execute_scalar_dependency(ActionWindow &window);
     bool execute_ptw_error(ActionWindow &window);
     bool execute_vector_memory(ActionWindow &window);
     bool execute_vector_segment(ActionWindow &window);

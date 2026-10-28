@@ -18,6 +18,13 @@ None.
 
 ## Current Changes Qualified Below
 
+- The canonical generator includes `scalar-dependency`: 1..4 older stores,
+  1..3 younger loads and optional younger-store exclusion, with randomized byte
+  overlap, width/sign, operand arrival, issue order and delays. Expected bytes
+  come from a pre-window snapshot overlaid only by older store inputs. The common
+  ordinary-store factory preserves STA/STD lane pairing; simultaneous dependency
+  loads have distinct valid integer destinations. A topology-only unit sample
+  (excluding data and timing/order) contains 510 distinct plans out of 512.
 - Ordinary random bare/cache/atomic/NAPOT and merge/miss/bank pools use lazy
   seed-and-physical-address initial words. Reference and manager images share
   initialization while later writes remain independent. Six production-model
@@ -137,8 +144,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 294 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 302 tests pass | Unit checks do not establish DUT functional coverage |
 | Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
+| Ordinary dependency direction | Corrected runtime: 4/4 focused seeds 811..814 pass at 128 actions each; 453 windows | 243 younger-store exclusion controls and 122 multiple-older-store-source loads; final observed/registered words match; `build/memblock/scalar-dependency-20261028/focused-v2` |
+| Ordinary-profile development | Corrected runtime: 2/2 spec and 2/2 corner seeds pass at 512 actions each, all with `latency=compact`; artifact verifiers accept | 53/27 dependency windows; short runs have zero heterogeneous windows because of the serial reservation; `build/memblock/scalar-dependency-20261028/{spec-v2,corner-v2}`; no closure claim |
 | Campaign report isolation | Concurrent two-regression/one-benchmark fixture and aggregate rerun pass | Fresh run-ID directory and matching document ID; previous sidecar bytes retained; artifact `build/memblock/report-namespace-20261028/check-unit.log` |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Restored-original directed | 90/90 pass | Every catalogued directed test through the corrected harness and runtime from RTL `43b971f2`; artifact `build/memblock/verify-restored-rtl-20261028/directed` |
@@ -203,6 +212,18 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+The constrained-random audit identified genuine value/choice variation but
+serialized scalar dependencies, fixed heterogeneous composition and repeating
+initial-data blind spots. The new dependency direction and seed/address initial
+data address those two ordinary-workload gaps. Unresolved-address replay,
+arbitrary heterogeneous composition and ordinary indexed-offset variation remain
+open. Fresh-context reviews approve the memory and dependency changes. The
+latter resolved paired store lanes, valid/distinct dependency destinations and
+a topology metric that had included timing variation. All 302 unit tests and
+check-rtl pass; corrected-runtime development artifacts above pass their effect,
+queue and schema-accounting checks. Review artifacts are
+`build/memblock/scalar-dependency-20261028/{memory-review,scalar-review}.txt`.
 
 The PMP load request-oracle review approves the final diff after correcting
 its inherited single-uop LMUL2 shape to LMUL1 and supplying the full-CPU vector
