@@ -362,16 +362,13 @@ shifted by that element offset. Such a payload cannot be attributed to an
 arbitrary newer writeback in a mixed fault window.
 
 Ordinary constrained-random 4-KiB translation additionally uses seed-specific
-host and composed VS/G page permutations over 132 pages, shuffled within four
-cache colours of 33 pages each. VA[13:12] equals PA[13:12], because the current
-manager has no alias directory to recall dirty data before granting the same PA
-under another cache colour. A second-alias grant from stale backing memory is a
-manager error, not an RTL memory-corruption claim. Setup walks independently
-validate declared PA and permissions at both page edges; active vector-byte walks
-also check translation before issue. Root/mode changes reuse fixed ASID/VMID
-values and issue global covering fences. With this direction enabled, context
-entry drains SBuffer to keep cross-root alias recovery outside the general
-scheduler. These static mappings do not cover PTE mutation races or arbitrary
+host and composed VS/G unrestricted page permutations over 132 pages. A second
+cache-colour Acquire must recall the prior owner before taking backing-memory
+data for its grant. Setup walks independently validate declared PA and permissions
+at both page edges; active vector-byte walks also check translation before issue.
+Root/mode changes reuse fixed ASID/VMID values and issue global covering fences.
+Context entry drains SBuffer and D/E, freezes independent old-owner line images,
+and enables the automatic recall byte checks described below. These static mappings do not cover PTE mutation races or arbitrary
 root/identifier churn.
 
 Side-effect checks are not universal. The
@@ -451,12 +448,12 @@ forbidden operation.
 | --- | --- | --- |
 | Accepted A legality | [dcache_a_contract.inc](../cpp/environment/dcache_a_contract.inc) validates supported opcode, size and corruption. Acquires require full-line alignment/size/mask, miss-source range, legal grow and request-source classes, and VA alias/page-offset consistency. Get checks param, alignment, mask and source range. CMO checks line size/alignment and the dedicated source. | Get user fields and CMO unspecified fields are intentionally unconstrained. Opcode legality does not by itself match an instruction to an A request. |
 | A source credit | [update_after_tick](../cpp/environment/dcache_agent.inc) rejects reuse while the source is active, activates on A acceptance, frees on final corresponding D; same-edge D completion is processed before new A. | Credit is not retained through GrantAck. It is separate from E-sink lifetime. |
-| Cross-colour alias ownership | Ordinary permuted-page stimulus preserves VA[13:12] = PA[13:12], and context changes drain SBuffer. | The manager has no directory tracking dirty ownership per PA/alias. It cannot legally serve a second cache colour from backing memory while another alias owns dirty data; automatic alias Probes, data recovery, and broader synonym traffic remain unimplemented. `request_probe` derives its B alias from PA, so standalone Probes also require matching VA/PA colour. |
+| Cross-colour alias ownership | PA-line directory stores granted VA alias/maximum permission. Acquires queue per line until prior final D and E, same-line Probes and active ReleaseData complete; unrelated lines can progress. An alias change sends forced-data toN to the stored old alias and constructs GrantData only after complete recovery. | Automatic recall requires an independent drained reference checkpoint; unsupported uncheckpointed simultaneous synonyms fail as a manager-contract limitation. Error-grant and synonym CMO ownership are unqualified. |
 | D response | The manager constructs response beats from captured A and backing memory, then compares its driven handshake fields/data to queued beats. GrantData supports keyword beat order; denied is fixed and implies corrupt on data beats; independent corrupt injection can select first/last/all beats. | This is a manager/adapter consistency check of manager-owned output, not an independent DUT response scoreboard or malformed-response campaign. |
 | E GrantAck | Sink must match a queued expectation; matching consumes exactly one entry. An E is accepted only after the first corresponding Grant/GrantData D beat, or in that same cycle, and every sink stays busy from first D acceptance until E. Drains check expected E entries separately from D response queues. | The expectation entry is still created when `respond` constructs Grant/GrantData; the first-D/sink-busy check supplies the causal eligibility gate. A same-cycle D/E is accepted. A sink's A source may still be reused only after its final D, which is separately checked. |
-| Probe lifecycle | `request_probe` allocates rotating 6-bit B sources and rejects reuse while a response expectation exists; a directed window holds C until eight B requests are accepted and checks eight ProbeAck identities. Accepted B counts, source reuse/wrap, and accepted outstanding depth are observed. Accepted B is matched by source to its expectation, marks that expectation eligible for C, and duplicate acceptance of one expectation fails. | The expectation is queued before B fires; the accepted-B flag is the causal gate for ProbeAck. Same-address B/C attribution and broader alias/ownership interleavings remain incomplete. |
-| ProbeAck/Data | Requires an accepted B expectation at the same address (C's client-owned source is not tied to B source), then matches address to expectation; check opcode, permission report, line size/address, corrupt clear, exact expected data beats, and stable multibeat C `source`; TileLink user/echo fields are DUT-specific here and are not required stable. | Address+opcode+report lookup does not disambiguate multiple same-address expectations: a directed two-probe experiment returned a data-less C with report 5 while the accepted expectation expected report 2, and C was observed before the manager's second B acceptance. C's client-owned source cannot be tied to B, so source/ownership attribution is still missing; this is an oracle gap, not a confirmed RTL violation. |
-| Release/Data | Data-less Release validates this DUT's full-line size, 64-byte line-aligned raw address and shrink `param` subset 0..2 before acknowledgement; `corrupt` is ignored because it is not a data-less Release validity field. ReleaseData verifies each byte against an immutable declared line or reference memory before changing backing memory, then emits ReleaseAck. Raw address, base, size, source, param and beat-count consistency reject interleaved/inconsistent data streams. | `corrupt` is per-beat and not a ReleaseData stability field; TileLink user/echo fields are DUT-specific and not required stable. Data-less Release user fields are not validated. |
+| Probe lifecycle | Rotating 6-bit B sources, accepted-B provenance and source reuse/wrap/depth accounting. Same-PA B presentation is serialized through final matching C and waits for prior final D plus E. Standalone and automatic Probes use the recorded old VA alias. | This is a single-client manager schedule; broad manager reordering remains outside the current direction. |
+| ProbeAck/Data | Match one accepted same-PA B; C source is client-owned and fixed across beats. Exact scenario-owned expectations remain exact. Forced-data automatic toN accepts present TtoN/BtoN with full data or absent NtoN without data, rejects a B-to-T report, and checks all data bytes against the frozen independent owner image. Size/address/report/opcode/corrupt and multibeat identity are checked. | C user/echo fields do not carry reliable alias identity. NtoN does not remove an unobserved voluntary Release obligation. Arbitrary in-flight versioned data images are not modeled. |
+| Release/Data | Full-line Release validates size/alignment/shrink param before ReleaseAck. ReleaseData compares explicit declared bytes, else validates a complete independent owner version, else compares architectural reference. Backing bytes change only after complete validation. Stable raw address/size/source/param/beat count are checked. Completed shrink updates ownership; a racing release is acked without waiting for its outstanding Probe. | Versioned images exist only for checkpointed mapped traffic. The first C freezes baseline and eligible whole-update records; independent same-alias transaction bytes add aligned store/element updates, while other-alias commits leave them unchanged. C user/echo fields are not used as identity. Uncheckpointed owners retain the current-reference fallback; pre-notification segment releases and long update-history search cost remain unqualified. |
 | C under stall | A snapshot includes all sampled C fields and data. Dropped valid or a changed payload after a stalled cycle fails. Target release windows count attributed stalls and comparisons. | Stability between stalled cycles is distinct from multibeat identity across accepted beats. The latter is incomplete. |
 
 All DCache lifecycle details above come from
@@ -464,6 +461,28 @@ All DCache lifecycle details above come from
 `capture_before_tick`, `update_after_tick`, `respond`, `request_probe`,
 `accept_probe_response`, `accept_release`, and the idle predicates. A manager
 response drain does not imply cache-byte observation or coherence closure.
+
+The reference checkpoint follows producer retirement, an explicit SBuffer flush
+and an idle D/E link. It reads only independent architectural reference bytes.
+Store-reference notifications use declared mapped PA/VA and input data. They
+retain the baseline plus grouped update records rather than overwriting its
+bytes: voluntary eviction may precede pending SBuffer propagation. A backwards
+whole-line feasibility check permits subsets of known updates, preserves atomic
+aligned store/element groups and requires older overlapping updates before later
+ones. Disjoint updates may propagate independently; misaligned byte pieces need
+not be atomic. Candidates freeze at first C acceptance, so later reference writes
+cannot change a multibeat decision. Automatic alias recalls require a refreshed
+drain checkpoint and stay exact. Received
+C bytes update operational backing memory only; they never change architectural
+expectations. Final Bare word readback remains an independent end-to-end check.
+A new-colour store may commit its reference bytes before its Acquire; comparing
+the old owner's response with that newer global image would be a false oracle.
+
+C-source attribution follows TileLink 1.9.3 section 6.4's explicit independent
+client C namespace rule, consistent with the connected DCache WBQ and the existing
+UT contract. The ProbeAck summary tables in sections 9.3.5/9.3.6 instead describe
+copying B.source; that inconsistent table text is not used to strengthen this
+interface. PA serialization disambiguates responses without such a source echo.
 
 For D/E timing, the checked-in
 [TileLink monitor `legalizeDESink`](../../../rocket-chip/src/main/scala/tilelink/Monitor.scala)
@@ -534,7 +553,7 @@ before their absence can be removed from the catalog.
 | Exceptional vector state | Populate independently derived fault `vstart` where required; identify which exceptional metadata/data fields have a stable boundary contract. | Explicit checks now cover `vstart=8` in a two-uop page fault, `vstart=1` for single-uop later-element and masked page faults, and an all-masked unmapped control that observes no manager traffic. Default exceptional paths still skip `vstart`; the intra-uop page-crossing faulting-VA payload is now checked after the feedback settles. |
 | Accepted-work identity | Match accepted scalar/vector issue, terminal completion and legal cancellation using a complete per-operation ledger. | Load/vector scoreboards register declarations; store issue is partly tracked; queue cancellation is aggregate. |
 | Store-data pulse attribution | Distinguish unsolicited, stale and duplicate bare data pulses by an observable acceptance epoch/identity. | Unmatched data pulses are currently ignored. |
-| B/C causal lifecycle and C multibeat identity | Prove ProbeAck follows accepted B and preserve every required accepted multibeat field. | E first-D/sink lifetime is now checked; B/C acceptance provenance and complete C multibeat-field comparison remain incomplete. A two-probe same-address experiment could not be uniquely matched by address/opcode/report, confirming that source/ownership attribution is still missing. |
+| B/C causal lifecycle and C multibeat identity | Accepted B precedes C; same-PA B is serialized through final C. Source/opcode/report/size/raw address remain fixed across data beats. E first-D/sink lifetime and final-D-plus-E recall ordering are checked. | General response-order permutations, reset epochs and arbitrary synonym versioning remain partial. |
 | PTW/Uncache malformed response campaigns | Add bounded legal/illegal duplicate, early, late and malformed response campaigns. | Per-source credit/lifetime and queued legal response construction exist. |
 | Fault side-effect policy | Unify request class/address attribution and legal early demand across fault scenarios; prove forbidden committed bytes remain unchanged with sufficient external observation. | Hypervisor store suppression now attributes CPUStoreData requests; helper-based exemptions and mixed total-request policies still coexist elsewhere. |
 | Full vector masks and ordered effects | Model all mask bits of larger register groups and observe ordered indexed transactions to a side-effecting translated target. | Bits 0..127 are modeled and driven, including directed high-bit load/store/indexed cases; ordered device effects and every reserved shape remain outside the claim. |

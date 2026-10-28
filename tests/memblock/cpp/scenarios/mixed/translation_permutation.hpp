@@ -21,35 +21,15 @@ struct OrdinaryPageMappings {
     OrdinaryPageMappings(std::uint64_t seed, std::uint64_t physical_base)
     {
         std::mt19937_64 mapping_random(seed ^ 0x8f6c2d9137a4b5e0ULL);
-        // The current manager has no directory for cross-colour synonyms.
-        // Preserve VA[13:12] == PA[13:12] so it can legally serve these pages
-        // without granting stale backing bytes to a second cache alias.
-        // Shuffle all 33 pages within each of the four colours independently.
-        static_assert(page_count % 4U == 0);
-        const auto shuffle = [&](auto &permutation,
-                                 std::uint64_t source_base,
-                                 std::uint64_t target_base) {
+        const auto shuffle = [&](auto &permutation) {
             permutation.resize(page_count);
-            for (unsigned colour = 0; colour < 4; ++colour) {
-                std::vector<unsigned> targets;
-                for (unsigned page = 0; page < page_count; ++page) {
-                    if (((target_base >> 12U) + page) % 4U == colour) {
-                        targets.push_back(page);
-                    }
-                }
-                std::shuffle(targets.begin(), targets.end(), mapping_random);
-                unsigned next = 0;
-                for (unsigned page = 0; page < page_count; ++page) {
-                    if (((source_base >> 12U) + page) % 4U == colour) {
-                        permutation[page] = targets.at(next++);
-                    }
-                }
-            }
+            for (unsigned page = 0; page < page_count; ++page) permutation[page] = page;
+            std::shuffle(permutation.begin(), permutation.end(), mapping_random);
         };
         for (unsigned mode = 0; mode < 2; ++mode) {
-            shuffle(host[mode], virtual_base, physical_base);
-            shuffle(vs[mode], virtual_base, guest_base);
-            shuffle(g[mode], guest_base, physical_base);
+            shuffle(host[mode]);
+            shuffle(vs[mode]);
+            shuffle(g[mode]);
             std::vector<std::uint64_t> pages;
             for (const auto page : host[mode]) {
                 pages.push_back(physical_base + page * 0x1000ULL);

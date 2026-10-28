@@ -669,3 +669,23 @@ auto Environment::Impl::run_until_sbuffer_empty(unsigned timeout)  -> bool
 }
 
 } // namespace memblock
+
+namespace memblock {
+auto Environment::Impl::checkpoint_dcache_alias_reference(std::uint64_t base,
+    std::uint64_t bytes) -> bool
+{
+    if (!sbuffer_empty()) {
+        error_.record("DCache alias checkpoint requires an empty SBuffer");
+        return false;
+    }
+    return memory_agent_.checkpoint_alias_reference(base, bytes);
+}
+auto Environment::Impl::dcache_alias_recalls() const -> std::uint64_t
+{
+    return memory_agent_.alias_recalls();
+}
+auto Environment::Impl::dcache_alias_recall_responses() const -> std::uint64_t
+{
+    return memory_agent_.alias_recall_responses();
+}
+} // namespace memblock

@@ -131,6 +131,8 @@ bool MixedScenario::observe_final_writes()
     phase = "final-write-observation-drain";
     if (!environment.run_until_sbuffer_empty(timeout) ||
         !environment.run_until_dcache_idle(timeout) ||
+        !environment.checkpoint_dcache_alias_reference(
+            permuted_physical_base, OrdinaryPageMappings::span) ||
         !environment.run_until_all_complete(timeout) ||
         !environment.run_until_queues_retired(timeout) ||
         !environment.run_until_uncache_drained(
@@ -285,6 +287,7 @@ bool MixedScenario::finish()
         : (probe_requests - 1U) / memblock::kDcacheProbeSourceCount;
     if (actions != options.transactions ||
         !environment.dcache_grants_drained() ||
+        environment.dcache_alias_recalls() != environment.dcache_alias_recall_responses() ||
         environment.lq_dequeued() + environment.lq_canceled() !=
             environment.lq_allocated() ||
         environment.sq_dequeued() + environment.sq_canceled() !=
@@ -401,6 +404,8 @@ int MixedScenario::run()
               << " dcache_refills=" << environment.dcache_refills()
               << " dcache_acquire_perms="
               << environment.dcache_acquire_perms()
+              << " alias_recalls=" << environment.dcache_alias_recalls()
+              << " alias_recall_responses=" << environment.dcache_alias_recall_responses()
               << " probes=" << environment.dcache_probes()
               << " grant_acks=" << environment.dcache_grant_acks()
               << " release_data=" << environment.tilelink_release_data()

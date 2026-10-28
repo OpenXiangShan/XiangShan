@@ -212,6 +212,8 @@ public:
     std::uint64_t tilelink_release_data() const;
     std::uint64_t tilelink_release_data_verified() const;
     std::uint64_t tilelink_expected_release_data_verified() const;
+    std::uint64_t dcache_alias_recalls() const;
+    std::uint64_t dcache_alias_recall_responses() const;
     std::uint64_t dcache_probes() const;
     std::uint64_t dcache_probe_responses() const;
     std::uint64_t dcache_probe_data() const;
@@ -908,6 +910,7 @@ public:
         std::uint64_t target, unsigned timeout = 4096);
 
     bool run_until_dcache_idle(unsigned timeout = 4096);
+    bool checkpoint_dcache_alias_reference(std::uint64_t base, std::uint64_t bytes);
 
     bool run_until_dcache_release_idle(unsigned timeout = 4096);
 

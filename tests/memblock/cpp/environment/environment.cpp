@@ -2102,3 +2102,19 @@ std::string Environment::failure_report() const
 }
 
 } // namespace memblock
+
+namespace memblock {
+auto Environment::checkpoint_dcache_alias_reference(std::uint64_t base,
+    std::uint64_t bytes) -> bool
+{
+    return impl_->checkpoint_dcache_alias_reference(base, bytes);
+}
+auto Environment::dcache_alias_recalls() const -> std::uint64_t
+{
+    return impl_->dcache_alias_recalls();
+}
+auto Environment::dcache_alias_recall_responses() const -> std::uint64_t
+{
+    return impl_->dcache_alias_recall_responses();
+}
+} // namespace memblock

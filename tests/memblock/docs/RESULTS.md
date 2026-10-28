@@ -18,18 +18,18 @@ None.
 
 ## Current Changes Qualified Below
 
-- `translation-permuted` adds structural host/VS/G page randomization to the
-  canonical ordinary scalar/vector builders. Each seed permutes 132 pages
-  within four cache colours; nested expectations compose declared VS/G maps.
-  Per-byte expectations, store reference updates and physical final-word
-  registration support discontinuous adjacent physical pages. Global fences
-  cover root/mode reuse, and context entry drains SBuffer. The manager's missing
-  cross-colour alias directory/dirty-data recall is an explicit input boundary.
-  The mixed tail now uses a distinct non-memory branch ROB anchor, observed
-  cancellation and same-pdest refetch; scalar/atomic and readback integer
-  destinations stay in 1..223. Six standalone oracle tests check replay,
-  structural diversity, wrong-page/contiguous-PA substitutions and extracted
-  record paths; runtime evidence is required for commit/issue integration.
+- `translation-permuted` shuffles all 132 pages for ordinary host/VS/G traffic,
+  allowing different VA/PA cache colours. A single-client PA/alias directory
+  recalls the old alias and waits for final C before capturing replacement grant
+  data. Prior final D and E, same-PA B serialization and racing ReleaseAck are
+  modeled separately. Context/final-observation drains freeze independent owner
+  images. Voluntary releases use grouped independent update histories so pending
+  SBuffer stores do not force a newer cache image; aligned update atomicity and
+  overlapping order remain checked. Automatic drained recalls and final physical
+  readbacks stay exact. Immutable per-byte page maps support discontinuous pages;
+  root-reuse fences, legal tail branch/refetch and integer destination bounds
+  remain enforced. Arbitrary simultaneous synonyms and CMO/error-grant ownership
+  remain outside this direction.
 - `scalar-unresolved` adds randomized one-store/one-load delayed-address
   windows with partial byte conflicts and same-region disjoint controls.
   Strict provisional loads use the pre-store snapshot; conflicts require the
@@ -120,8 +120,8 @@ None.
 - DCache ProbeAck requires an accepted B expectation for the same probe
   address; a C before B, a B without an expectation, and duplicate B
   acceptance fail. C's client-owned source is not tied to B source, so
-  same-address attribution remains address-keyed. Directed coherence, release,
-  atomic and a mixed run exercise the checker.
+  same-address attribution uses serialized B presentation through final C.
+  The client-owned C source stays fixed across beats; it need not echo B source.
 - `translation-faults` adds a two-uop vector page fault: uop0 reads the mapped
   tail of a page, uop1 faults at the next page with `vstart=8`. The exceptional
   writeback is checked for exact `vstart=8` and fault address `page+0x1000`.
@@ -185,10 +185,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 315 tests pass | Unit checks do not establish DUT functional coverage |
-| Ordinary nonidentity maps | Runtime-v4: 14/14 seeds pass 6400 actions; 4407 mapped samples across all six contexts/four kinds, 74 cross-page uops, 72 heterogeneous windows, 4180/4180 tracked final words | `build/memblock/nonidentity-20261029/{qualification-v4.json,runtime-v4}`; diverse, coverage/spec/corner, identity controls and reduced-shape mixed profiles; finite artifact verifiers accept. Four cache colours are preserved; zero runtime intra-element page splits, no dynamic PTE or cross-colour alias claim |
-| Nonidentity oracle mechanics | Six standalone tests pass; 128/128 seeded topologies and 768 distinct context maps sampled; wrong-page and contiguous-PA scalar/vector substitutions rejected | Production model/scoreboards plus extracted record-only paths; byte-crossing mechanics do not establish DUT crossing coverage. Full unit count is 315 |
-| Nonidentity adjacent directed checks | 16/16 selected scalar/FP, forwarding, misalignment, vector/segment, translation/fault, CBO.ZERO and atomic scenarios pass | Runtime-v4, native command/log evidence at `build/memblock/nonidentity-20261029/directed-v4`; this is a selected set, not the full catalog |
+| Infrastructure unit | 318 tests pass | Unit checks do not establish DUT functional coverage |
+| Ordinary nonidentity maps | Runtime-v3: 15/15 seeds pass 6403 actions; 4408 mapped samples across all six contexts/four kinds, 1138/1138 automatic recalls, 74 cross-page uops, 4182/4182 tracked final words | `build/memblock/alias-manager-20261029/{qualification-v3.json,runtime-v3}`; diverse, coverage/spec/corner, identity controls, mixed and one-store diagnostic; finite artifact verifiers accept. Static maps and drained context transitions only; zero runtime intra-element splits; no closure claim |
+| Nonidentity oracle mechanics | Six map/oracle tests plus two production-manager tests pass; 128 seeded topologies/768 context maps; 24 manager lifecycle/version cases and 32 independently enumerated complete-line candidates | Wrong-page/contiguous-PA substitutions, old dirty alias data, D/E ordering, release races and torn/reordered/late versions are checked. Fresh review independently checks 5408 images across 96 update histories; uncheckpointed fallback and long histories remain unqualified |
+| Nonidentity adjacent directed checks | 19/19 selected scenarios pass | Runtime-v3, native commands/logs at `build/memblock/alias-manager-20261029/directed-native-v3`; scalar/FP, forwarding/misalignment, full vector/segment, translation/alias/faults, CBO.ZERO, atomic, coherence/release and CMO; selected set, not full catalog |
 | Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
 | Unresolved-address focused | Corrected runtime-v4: 4/4 seeds 901..904 pass 128 actions each, with 504 windows and 260 correct-data refetches | `build/memblock/scalar-unresolved-20261029/focused-v4`; 244 disjoint-byte controls, all 504 committed store readbacks; zero observed LQ cancellations |
 | Unresolved-address controls | Conflict rate 0 and 1000 each pass 2×128 actions | `build/memblock/scalar-unresolved-20261029/{controls-v4,conflicts-v4}`; 252 disjoint controls and 252 matching redirect/return/refetch obligations; finite artifact verifiers accept |
@@ -213,7 +213,7 @@ The current qualification is:
 | Balanced strict audit | 1/1 seed functionally passes at 4608 actions with `probe=1000 canonical-boundary=500`; vector canonical-boundary class 0 is now covered, but probe-cross classes re-sparsify | Artifact `build/memblock/agent-campaign-23/balanced-4608.json`; `actual_probe_sequences=168`; strict rejects enabled probe-cross bins at indices 13,14,18,21; demonstrates a distribution trade-off rather than a depth-only gap |
 | Probe=1000 strict audit | 1/1 seed functionally passes at 4608 actions; all probe depth and probe-cross classes occur, but strict coverage rejects a vector canonical-boundary cross | Artifact `build/memblock/agent-campaign-22/probe1000-4608.json`; `actual_probe_sequences=317`, `actual_probe_depth=[149,75,15,15,17,18,14,14]`, all 32 probe-cross bins nonzero; the remaining gap is `actual_vector_canonical_boundary_cross` class (invalid_first=0, mode=0, addressing=1, eew=1). That behavior is already exercised by the directed `translation-faults` canonical-range vector-store cases (Sv39 strided eew=1 with a valid first byte); the strict rejection is a mixed-generator sparse-bin issue, not absent directed coverage |
 | Deep probe window | `dcache-coherence` passes with 8 accepted B probes, 8 C responses and `deep_probe_depth=8` | Directed eight-line window; four resident clean lines report permission 2 and four absent lines report the DUT's no-permission encoding 5; the report values are scenario-owned, not an architectural permission oracle |
-| Same-address B/C attribution | Two simultaneous probes to one resident line cannot be uniquely matched by address/opcode/report; a data-less C with report 5 appeared while the accepted expectation expected report 2, and C was observed before the manager's second B acceptance | C's client-owned source is not tied to B; this is an oracle gap, not a confirmed RTL violation. Source/ownership attribution remains open |
+| Same-address B/C attribution | B presentation to a PA waits for previous final C, final D and E; accepted C is matched to that one eligible PA expectation | Client C sources are independent of B sources and fixed across data beats; manager fixture and selected coherence/release/atomic/CMO DUT checks pass |
 | Accepted-B probe gate | 1/1 1024-action mixed seed passes with 407 probes, plus directed coherence/release/atomic | Seed 207; artifact `agent-campaign-17`; no dedicated counter for pre-B C because an illegal C fails immediately |
 | Cross-alias store/load | `translation-alias` passes after-drain/in-flight visibility and identified correct-data frontend refetch; `refetched=1 completed=1 lq=2+0/2` | One PA, two Sv39 VAs; zero-cancellation refetch observed. Nonzero LQ cancellation, arbitrary IQ/LQ replay and redirect arbitration remain unqualified; `build/memblock/scalar-unresolved-20261029/directed-v4/translation-alias.log` |
 | CBO.ZERO ordering | Corrected sequence passes on both restored-original and latest-overlay RTL with `sequential_zero=2 consecutive_zero=2 following_store=1`, repeated same-line and three-line consecutive zero cases, both zero/store age directions, a dirty-line zero and an early younger load | CBO.ZERO remains the ROB head until deferred SBuffer completion; no simultaneous CBO completion window is legal or claimed |
@@ -240,8 +240,8 @@ combinations or missing oracle coverage.
 Readiness is partial. Functional PASS means active checks accepted generated
 traffic, not all legal classes occurred or every external effect was checked.
 Current missing rules include remaining aliased/device final-byte observation,
-uniform fault forbidden-demand checks, same-address B/C
-attribution and complete C multibeat identity, wider same-line CBO.ZERO
+uniform fault forbidden-demand checks, arbitrary simultaneous synonym/version
+handling and broader C lifecycle/reset combinations, wider same-line CBO.ZERO
 forward-timing variants beyond the older-store/younger-zero/younger-load case,
 and independent verifier schema/backpressure checks.
 The accepted-B-before-C gate, full 128-bit mask operand and explicit
@@ -266,100 +266,25 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
-A fresh-context non-author review approves the bounded page-permutation
-implementation and the corrected tail branch/refetch/register-domain follow-up,
-with no blocking findings. The byte model uses immutable declared maps, and
-colour preservation holds for host and composed nested translations. A separate
-full-CPU/manager audit classifies an unqualified cross-colour stale refill as a
-manager ownership gap: the real L2 must Probe the old alias and use its returned
-data before granting another alias, while this UT manager directly serves
-backing memory. The scoped generator preserves colour and documents that limit;
-no CPU bug is claimed. The audit's redirect-producer and scalar-destination
-findings are resolved by the separate branch anchor and integer-domain bounds.
-Initial focused evidence had no runtime crossings; the retained current-runtime
-diverse campaign supplies crossing evidence, while intra-element page splits
-remain unit-only. Review artifacts:
-`build/memblock/nonidentity-20261029/{direction-review,store-legality-review}.txt`.
+Fresh-context non-author review approves the PA/alias manager and grouped
+release-version oracle within the drained static-map scope. The independent
+review checks 5408 complete-line candidates across 96 update histories, including
+partial/full overlap, value collisions and corruption. Production tests retain
+pending-store and midbeat cases, whole-update tearing/order controls and exact
+explicit/drained recall expectations. Three private manager mutations are detected:
+PA-derived B alias, disabled recall byte comparison and grant before recall.
+All review findings are dispositioned in
+`build/memblock/alias-manager-20261029/review-disposition.json`; detailed verdict
+and source snapshot are `patch-review-v2.txt` and `review-v2.hashes.json`.
+No CPU RTL bug is confirmed.
 
-A fresh-context non-author review approves the unresolved-address change after
-disposition of live-mapping reuse and free-list recovery findings. Warm and
-terminal mappings remain distinct, and refetch restores the original load
-pdest rather than inventing another allocation. Both alias and late-RAW unit
-cases explicitly require a fresh same-pdest strict expectation and reject stale
-wrong data/duplicate completion. The compressed non-memory ROB-group head has a
-source-level producer/aggregate-completion witness; full-CPU timing across every
-random PTW delay is unqualified. Review also checks lane pairing, store-TLB miss
-reissue before RAW, two-stage redirect return, observed cancellation-only cursor
-rewind, uncommitted-store forwarding, committed readback and balanced accounting.
-All 308 units and check-rtl pass; independent focused suites pass 2+12. Corrected
-runtime-v4's 14 seeds/5120 actions and 3 directed checks pass. All retained RAW
-refetches have zero LQ cancellations; cancellation=1, trained prediction, multiple
-unresolved producers and general redirect arbitration remain unqualified. The
-alias correct-first-data redirect branch has source/unit evidence but no retained
-native qualification; its observed native case discards wrong first data.
-Review artifact: `build/memblock/scalar-unresolved-20261029/review.txt`.
-
-A fresh-context independent review approves the bounded random indexed-operand
-change with no blocking findings. It checks the actual diff, CPU VS2 sharing and
-segment decomposition, disjoint scatter spans, independent byte expectations,
-structural randomness, schema accounting and documented limits. Independently
-rerun index and scoreboard suites pass 2/2 and 11/11 respectively. The source
-qualification has 305 passing unit tests plus check-rtl; 15 retained passing
-seeds total 9216 actions. The broad exact replay and the custom mixed run
-exercise heterogeneous windows. Review artifact:
-`build/memblock/vector-indices-20261029/review.txt`.
-
-The constrained-random audit identified genuine value/choice variation but
-serialized scalar dependencies, fixed heterogeneous composition and repeating
-initial-data blind spots. The new dependency direction and seed/address initial
-data address those two ordinary-workload gaps. Bounded ordinary and segment
-indexed-offset variation is also implemented and reviewed. Bounded one-store/
-one-load unresolved-address replay now has strict terminal data/readback checks;
-multiple unresolved producers and arbitrary heterogeneous composition remain open. Fresh-context reviews approve the memory and dependency changes. The
-latter resolved paired store lanes, valid/distinct dependency destinations and
-a topology metric that had included timing variation. All 302 unit tests and
-check-rtl pass; corrected-runtime development artifacts above pass their effect,
-queue and schema-accounting checks. Review artifacts are
-`build/memblock/scalar-dependency-20261028/{memory-review,scalar-review}.txt`.
-
-The PMP load request-oracle review approves the final diff after correcting
-its inherited single-uop LMUL2 shape to LMUL1 and supplying the full-CPU vector
-exception redirect classification. Both findings are resolved and the corrected
-runtime passes. This checks accepted requests within a bounded recovery window;
-cache-internal access and arbitrarily delayed requests are outside the claim.
-Review artifact: `build/memblock/pmp-cross-load-20261028/review.txt`.
-
-The campaign report namespace change has a fresh-context, non-author APPROVE
-review with no findings. The review checks both controller call sites, run-ID
-propagation, the subprocess collision/rerun test and preservation of the
-unique-parent operational rule. Independent focused rerun: 19 unit tests pass;
-full local infrastructure qualification: 294 tests and `check-rtl` pass.
-Review artifact: `build/memblock/report-namespace-20261028/review.txt`.
-
-Temporary CPU-bug classifications for CBO.ZERO and noncanonical vector
-segments were withdrawn after full-CPU ordering review. The CBO reproducer
-advanced the ROB pending head while the first deferred completion was still
-outstanding; the directed driver now follows actual ROB retirement order.
-The segment reproducer now models a legal two-uop `nf=1` segment and permits
-the later uop to expose the instruction-level fault instead of requiring the
-first data uop to report it independently. Both cases are treated as UT
-stimulus/oracle corrections, not CPU RTL bugs.
-
-A fresh-context independent review rejected earlier revisions for remaining
-CBO pre-completion commits, an impossible m2 segment uop sequence, a stale
-oracle statement, incomplete store forbidden-traffic observation, and a
-segment-decomposition guard gap. After those findings were fixed, the final
-review verdict is approve with no remaining findings. The review covered the
-actual diff, ROB/pending-head timing, complete-CPU segment decomposition and
-the terminal fault/no-side-effect contract.
-
-The independent atomic dirty-line `ProbeAckData` persistence review, corrected
-C multibeat source/param/size/raw-address monitor and data-less Release
-full-line/shrink check remain approved. Same-address ProbeAck lookup remains
-by base and is a documented residual limitation.
-
-This qualification confirms the stated capability and limitations; it does not
-establish verification closure or clean RTL elaboration provenance. The oracle,
-protocol lifecycle, remaining alias/non-cacheable final-byte observation,
-wider replay/refetch, vector-fault metadata and integration gaps described in the
-current documents remain open.
+A pinned structural generator audit finds real local variation in dependency
+graphs, vector shapes, indexed operands and page maps, but fixed global scheduling:
+five-producer windows precede serial helpers and drain between windows. Ordinary
+FP destination selection, multiple unresolved stores and variable producer counts/
+ages with sliding admission are the next priorities. The present source review
+does not establish unique complete-run schedules or guarantee a design bug.
+Uncheckpointed current-reference release fallback, pre-notification segment
+releases, long version histories, simultaneous synonym/CMO/error ownership and
+native-model full source provenance remain explicit limits. Source audit artifact:
+`build/memblock/alias-manager-20261029/random-structure-audit.txt`.

@@ -240,6 +240,9 @@ public:
     void reset_link_state()
     {
         b_beats_.clear();
+        owners_.clear();
+        pending_acquires_.clear();
+        grants_.clear();
         d_beats_.clear();
         held_responses_.clear();
         probe_responses_.clear();
@@ -305,7 +308,7 @@ public:
         dut.dcache.a.ready.set(accept_a);
         dut.dcache.c.ready.set(accept_c);
         dut.dcache.e.ready.set(accept_e);
-        if (b_beats_.empty()) {
+        if (b_beats_.empty() || !probe_can_present(b_beats_.front())) {
             dut.dcache.b.valid.set(std::uint64_t{0});
         } else {
             const BBeat &beat = b_beats_.front();
@@ -596,6 +599,12 @@ public:
                     --outstanding_requests_;
                 }
             }
+            if ((response.opcode == 4 || response.opcode == 5) &&
+                response.last_beat) {
+                for (auto &grant : grants_) {
+                    if (grant.sink == response.sink) grant.final_d = true;
+                }
+            }
             d_beats_.pop_front();
             d_presenting_ = false;
             d_gap_ = d_beats_.empty() ? 0 : d_beats_.front().delay_before;
@@ -613,7 +622,11 @@ public:
             last_request_address_ = captured_a_->address;
             request_history_.push_back(*captured_a_);
             ++request_classes_[request_class(*captured_a_)];
-            respond(*captured_a_);
+            if (captured_a_->opcode == 6 || captured_a_->opcode == 7) {
+                pending_acquires_.push_back({*captured_a_, false});
+            } else {
+                respond(*captured_a_);
+            }
             ++request_count_;
         }
         if (c_fire_ && captured_c_) {
@@ -630,9 +643,16 @@ public:
             if (expected->first < sink_busy_.size()) {
                 sink_busy_[expected->first] = false;
             }
+            for (auto &grant : grants_) {
+                if (grant.sink == expected->first) grant.e = true;
+            }
             expected_grant_acks_.erase(expected);
             ++grant_ack_count_;
         }
+        std::erase_if(grants_, [](const auto &grant) {
+            return grant.final_d && grant.e;
+        });
+        service_acquires();
         const bool probe_hold = hold_c_until_probe_requests_ &&
             probe_request_count_ < *hold_c_until_probe_requests_;
         const bool release_idle_sample = !c_valid_sampled_ &&
@@ -937,11 +957,73 @@ public:
             (!expected_data.empty() && expected_data.size() != kLineBytes)) {
             error_.record("invalid DCache Probe request or expectation");
             return false;
-        }        std::vector<unsigned char> data(kBeatBytes, 0);
-        // XiangShan carries the virtual-index alias in B.data[2:1] and the
-        // manager's data request in B.data[0]. Bare mappings use PA == VA.
-        data[0] = static_cast<unsigned char>(
-            (need_data ? 1U : 0U) | ((address >> 11) & 0x6U));
+        }
+        const auto owner = owners_.find(address);
+        const std::uint8_t alias = owner == owners_.end()
+            ? static_cast<std::uint8_t>((address >> 12U) & 3U)
+            : owner->second.alias;
+        return enqueue_probe(address, cap, need_data, expected_report,
+            expected_data, alias, false, 0);
+    }
+
+    // The caller has retired producers, drained SBuffer and all D/E traffic.
+    // Freeze only independent architectural bytes, before the next context's
+    // stores can advance the global reference beyond the old cache owner.
+    bool checkpoint_alias_reference(std::uint64_t base, std::uint64_t bytes)
+    {
+        if (!responses_idle() || !grant_acks_idle() || !probes_idle()) {
+            error_.record("DCache alias checkpoint requires an idle link");
+            return false;
+        }
+        for (auto &[line, owner] : owners_) {
+            if (line >= base && line - base < bytes && owner.present) {
+                owner.expected_data = reference_memory_.read_beat(line, kLineBytes);
+                owner.updates.clear();
+            }
+        }
+        return true;
+    }
+
+    // These are independent committed inputs, not sampled cache contents.
+    // Keep the drained baseline fixed: a voluntary eviction may precede a
+    // committed same-alias store still propagating through SBuffer.
+    void note_reference_store(std::uint64_t physical, std::uint64_t virtual_address,
+                              const std::vector<unsigned char> &bytes)
+    {
+        const auto line = physical & ~(kLineBytes - 1U);
+        const auto owner = owners_.find(line);
+        if (owner == owners_.end() || !owner->second.present ||
+            owner->second.alias != ((virtual_address >> 12U) & 3U) ||
+            owner->second.expected_data.empty()) return;
+        if (bytes.empty() || bytes.size() > kLineBytes - (physical - line)) {
+            error_.record("mapped reference update crosses a cache line");
+            return;
+        }
+        OwnerUpdate update{};
+        for (unsigned b = 0; b < bytes.size(); ++b) {
+            const unsigned offset = physical - line + b;
+            update.mask |= std::uint64_t{1} << offset;
+            update.bytes[offset] = bytes[b];
+        }
+        owner->second.updates.push_back(update);
+    }
+
+    void note_reference_write(std::uint64_t physical, std::uint64_t virtual_address,
+                              unsigned char value)
+    {
+        note_reference_store(physical, virtual_address, {value});
+    }
+
+    std::uint64_t alias_recalls() const { return alias_recall_count_; }
+    std::uint64_t alias_recall_responses() const { return alias_recall_response_count_; }
+
+private:
+    bool enqueue_probe(std::uint64_t address, std::uint8_t cap, bool need_data,
+        std::uint8_t expected_report, const std::vector<unsigned char> &expected_data,
+        std::uint8_t alias, bool automatic, std::uint8_t permission)
+    {
+        std::vector<unsigned char> data(kBeatBytes, 0);
+        data[0] = static_cast<unsigned char>((need_data ? 1U : 0U) | (alias << 1U));
         const std::uint8_t source = next_probe_source_;
         if (std::any_of(
                 probe_responses_.begin(), probe_responses_.end(),
@@ -958,10 +1040,12 @@ public:
             6, cap, 6, source, address, 0xffffffffU,
             std::move(data), false});
         probe_responses_.push_back(ProbeResponseState{
-            source, address, expected_report, expected_data, 0});
+            source, address, expected_report, expected_data, 0,
+            0, false, automatic, permission});
         return true;
     }
 
+public:
     bool probes_idle() const
     {
         return b_beats_.empty() && probe_responses_.empty();
@@ -980,7 +1064,7 @@ public:
     }
     bool responses_idle() const
     {
-        return d_beats_.empty() && held_responses_.empty() &&
+        return pending_acquires_.empty() && d_beats_.empty() && held_responses_.empty() &&
             pending_held_response_addresses_.empty() &&
             !hold_next_response_address_ && !building_held_response_address_ &&
             !scheduled_held_response_release_ &&
@@ -1135,6 +1219,11 @@ private:
         std::uint64_t stall_cycles;
     };
 
+    struct OwnerUpdate {
+        std::uint64_t mask = 0;
+        std::array<unsigned char, 64> bytes{};
+    };
+
     struct ReleaseDataState {
         std::uint64_t base;
         std::uint64_t address;
@@ -1143,6 +1232,9 @@ private:
         std::uint8_t param;
         std::size_t beats;
         std::size_t received = 0;
+        std::vector<unsigned char> baseline;
+        std::vector<OwnerUpdate> updates;
+        std::vector<unsigned char> actual;
     };
 
     struct ProbeResponseState {
@@ -1153,7 +1245,91 @@ private:
         std::size_t received;
         std::uint8_t source = 0;
         bool b_accepted = false;
+        bool automatic = false;
+        std::uint8_t permission = 0; // granted maximum: T=0, B=1
+        std::uint8_t response_opcode = 0;
+        std::uint8_t response_report = 0;
     };
+
+    struct Owner {
+        std::uint8_t alias;
+        std::uint8_t permission;
+        bool present = true;
+        std::vector<unsigned char> expected_data;
+        std::vector<OwnerUpdate> updates;
+    };
+    struct PendingAcquire { ARequest request; bool recall_started; };
+    struct GrantLifetime {
+        std::uint64_t line;
+        std::uint16_t sink;
+        bool final_d = false;
+        bool e = false;
+    };
+
+    bool line_grant_busy(std::uint64_t line) const
+    {
+        return std::any_of(grants_.begin(), grants_.end(),
+            [line](const auto &grant) { return grant.line == line; });
+    }
+
+    bool probe_can_present(const BBeat &beat) const
+    {
+        return !line_grant_busy(beat.address) &&
+            std::none_of(probe_responses_.begin(), probe_responses_.end(),
+                [&](const auto &probe) {
+                    return probe.base == beat.address && probe.b_accepted;
+                });
+    }
+
+    void service_acquires()
+    {
+        std::set<std::uint64_t> earlier_lines;
+        for (auto it = pending_acquires_.begin(); it != pending_acquires_.end();) {
+            const auto &request = it->request;
+            const auto line = request.address & ~(kLineBytes - 1U);
+            const auto sink = static_cast<std::uint16_t>(1U + request.source);
+            if (!earlier_lines.insert(line).second || line_grant_busy(line) ||
+                (release_data_ && release_data_->base == line) ||
+                std::any_of(expected_grant_acks_.begin(), expected_grant_acks_.end(),
+                    [sink](const auto &ack) { return ack.first == sink; }) ||
+                std::any_of(probe_responses_.begin(), probe_responses_.end(),
+                    [line](const auto &probe) { return probe.base == line; })) {
+                ++it;
+                continue;
+            }
+            auto owner = owners_.find(line);
+            const bool different_alias = owner != owners_.end() &&
+                owner->second.present && owner->second.alias != request.alias;
+            if (different_alias) {
+                if (!it->recall_started) {
+                    if (owner->second.expected_data.empty() || !owner->second.updates.empty()) {
+                        error_.record("DCache cross-alias Acquire requires a drained reference checkpoint");
+                        return;
+                    }
+                    if (!enqueue_probe(line, 2, true, 0,
+                            owner->second.expected_data, owner->second.alias,
+                            true, owner->second.permission)) return;
+                    it->recall_started = true;
+                    ++alias_recall_count_;
+                }
+                // NtoN can overtake an evicted line's voluntary ReleaseData.
+                // Retain the old ownership obligation until that C completes.
+                ++it;
+                continue;
+            }
+            respond(request); // Capture backing bytes only after completed recall.
+            it = pending_acquires_.erase(it);
+        }
+    }
+
+    void shrink_owner(std::uint64_t line, std::uint8_t report)
+    {
+        const auto owner = owners_.find(line);
+        if (owner == owners_.end()) return;
+        if (report == 0 || report == 4) owner->second.permission = 1;
+        if (report == 1 || report == 2) owner->second.present = false;
+        // NtoN alone cannot retire a voluntary Release still queued at client.
+    }
 
     void respond(const ARequest &request)
     {
@@ -1226,6 +1402,16 @@ private:
                 }, beat == 0);
             }
             expected_grant_acks_.emplace_back(sink, denied || corrupt);
+            grants_.push_back({request_line, sink});
+            if (!denied && !corrupt) {
+                auto owner = owners_.find(request_line);
+                if (owner == owners_.end() || !owner->second.present ||
+                    owner->second.alias != request.alias) {
+                    owners_[request_line] = Owner{request.alias, cap, true, {}, {}};
+                } else {
+                    owner->second.permission = cap;
+                }
+            }
             break;
         }
         case 7: { // AcquirePerm -> Grant
@@ -1242,6 +1428,13 @@ private:
                 denied, false,
             }, true);
             expected_grant_acks_.emplace_back(sink, denied);
+            grants_.push_back({request_line, sink});
+            if (!denied) {
+                auto &owner = owners_[request_line];
+                owner.alias = request.alias;
+                owner.permission = 0;
+                owner.present = true;
+            }
             break;
         }
         case 12: // CBOClean -> CBOAck
@@ -1317,9 +1510,21 @@ private:
             error_.record(message.str());
             return;
         }
-        const bool with_data = !expected.expected_data.empty();
+        const bool with_data = expected.automatic ? response.opcode == 5
+            : !expected.expected_data.empty();
         const std::uint8_t expected_opcode = with_data ? 5 : 4;
-        if (response.opcode != expected_opcode || response.param != expected.report ||
+        // Forced-data toN: a surviving T/B returns its full line; an evicted
+        // copy may answer NtoN without data. Never accept a permission upgrade.
+        const bool automatic_report = expected.automatic &&
+            ((response.opcode == 4 && response.param == 5) ||
+             (response.opcode == 5 &&
+                (response.param == 2 ||
+                 (response.param == 1 && expected.permission == 0))));
+        if ((expected.automatic ? !automatic_report :
+                response.opcode != expected_opcode || response.param != expected.report) ||
+            (expected.received != 0 &&
+                (response.opcode != expected.response_opcode ||
+                 response.param != expected.response_report)) ||
             response.size != 6 || response.address != expected.base ||
             response.corrupt) {
             std::ostringstream message;
@@ -1341,6 +1546,8 @@ private:
             error_.record(message.str());
             return;
         }
+        expected.response_opcode = response.opcode;
+        expected.response_report = response.param;
         if (with_data) {
             const std::size_t offset = expected.received * kBeatBytes;
             if (offset + kBeatBytes > expected.expected_data.size()) {
@@ -1365,9 +1572,45 @@ private:
             }
             ++probe_data_count_;
         }
+        shrink_owner(expected.base, response.param);
+        alias_recall_response_count_ += expected.automatic;
         probe_responses_.erase(expected_it);
         ++probe_response_count_;
         complete_release_ready_window_transaction();
+    }
+
+    // A cache-line eviction may observe a subset of still-propagating stores.
+    // Each naturally aligned update is indivisible. If a later selected update
+    // overlaps an older one, the older update must also have taken effect.
+    // Disjoint updates may propagate independently. Payloads are input-derived.
+    static bool permitted_release_image(const ReleaseDataState &state)
+    {
+        std::set<std::pair<std::size_t, std::uint64_t>> rejected;
+        const auto search = [&](auto &&self, std::size_t count,
+                                std::uint64_t resolved) -> bool {
+            if (count == 0) {
+                for (unsigned b = 0; b < kLineBytes; ++b) {
+                    if (((resolved >> b) & 1U) == 0 &&
+                        state.actual[b] != state.baseline[b]) return false;
+                }
+                return true;
+            }
+            const auto key = std::make_pair(count, resolved);
+            if (rejected.contains(key)) return false;
+            const auto &update = state.updates[count - 1U];
+            const bool required = (update.mask & resolved) != 0;
+            bool matches = true;
+            for (unsigned b = 0; b < kLineBytes; ++b) {
+                if (((update.mask & ~resolved) >> b) & 1U) {
+                    matches &= state.actual[b] == update.bytes[b];
+                }
+            }
+            if (matches && self(self, count - 1U, resolved | update.mask)) return true;
+            if (!required && self(self, count - 1U, resolved)) return true;
+            rejected.insert(key);
+            return false;
+        };
+        return search(search, state.updates.size(), 0);
     }
 
     void accept_release(const CRequest &request)
@@ -1400,6 +1643,7 @@ private:
                 observed_release_index_.record(
                     request.opcode, request.size, request.address);
             }
+            shrink_owner(request.address, request.param);
             complete_release_ready_window_transaction();
             ++release_count_;
             return;
@@ -1419,7 +1663,13 @@ private:
         if (!release_data_) {
             release_data_ = ReleaseDataState{
                 base, request.address, request.size, request.source,
-                request.param, beats, 0};
+                request.param, beats, 0, {}, {}, {}};
+            const auto owner = owners_.find(base);
+            if (!expected_release_lines_.contains(base) && owner != owners_.end() &&
+                !owner->second.expected_data.empty()) {
+                release_data_->baseline = owner->second.expected_data;
+                release_data_->updates = owner->second.updates;
+            }
         }
         if (release_data_->base != base ||
             release_data_->address != request.address ||
@@ -1441,7 +1691,7 @@ private:
             const unsigned char expected_byte = has_expected_line
                 ? expected->second[offset + byte]
                 : reference_memory_.read_byte(base + offset + byte);
-            if (request.data.at(byte) != expected_byte) {
+            if (release_data_->baseline.empty() && request.data.at(byte) != expected_byte) {
                 std::ostringstream message;
                 message << "ReleaseData byte mismatch base=0x" << std::hex
                         << base << " beat=" << std::dec
@@ -1454,17 +1704,24 @@ private:
                 return;
             }
         }
-        for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
-            memory_.write_byte(
-                base + release_data_->received * kBeatBytes + byte,
-                request.data.at(byte));
-        }
+        release_data_->actual.insert(release_data_->actual.end(),
+            request.data.begin(), request.data.end());
         ++release_data_->received;
         if (release_data_->received == release_data_->beats) {
+            if (!release_data_->baseline.empty() &&
+                (release_data_->actual.size() != kLineBytes ||
+                 !permitted_release_image(*release_data_))) {
+                error_.record("ReleaseData is not a permitted independent owner image");
+                return;
+            }
+            for (unsigned byte = 0; byte < release_data_->actual.size(); ++byte) {
+                memory_.write_byte(base + byte, release_data_->actual[byte]);
+            }
             push_response(DBeat{
                 6, 0, request.size, request.source, 0, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
             }, true);
+            shrink_owner(base, request.param);
             release_data_.reset();
             ++release_data_verified_count_;
             if (has_expected_line) {
@@ -1607,6 +1864,11 @@ private:
 
     SparseMemory &memory_;
     const SparseMemory &reference_memory_;
+    std::unordered_map<std::uint64_t, Owner> owners_;
+    std::deque<PendingAcquire> pending_acquires_;
+    std::vector<GrantLifetime> grants_;
+    std::uint64_t alias_recall_count_ = 0;
+    std::uint64_t alias_recall_response_count_ = 0;
     std::deque<BBeat> b_beats_;
     std::deque<DBeat> d_beats_;
     std::deque<HeldResponse> held_responses_;

@@ -25,6 +25,11 @@ void trace_reference_store(const SparseMemory &, const char *, std::uint64_t,
 struct StoreFixture {
     SparseMemory bus_memory_;
     SparseMemory memory_{&bus_memory_};
+    struct {
+        void note_reference_write(std::uint64_t, std::uint64_t, unsigned char) {}
+        void note_reference_store(std::uint64_t, std::uint64_t, const std::vector<unsigned char> &) {}
+    }
+        memory_agent_;
     bool final_observation_tracking_ = true;
     std::set<std::uint64_t> final_observation_words_;
     std::set<std::uint64_t> final_observation_nc_words_;
@@ -121,6 +126,7 @@ void permutations()
                 : relocated.nested_maps[(context-2)/2][(context-2)%2];
             require(map->context()==context, "translation context identity changed");
             std::ostringstream fingerprint;
+            unsigned changed_colours=0;
             for (unsigned page=0; page<132; ++page) {
                 // These stage arrays are the scenario-declared relations;
                 // no PTEs, walk result or DUT translation are consulted.
@@ -132,12 +138,12 @@ void permutations()
                     const auto expected=pa+physical_page*4096ULL+offset;
                     require(map->physical_address(address)==expected,
                         "host or composed nested page differs from declared mapping");
-                    require(((address ^ expected) & 0x3000U)==0,
-                        "ordinary permutation exceeds manager cache-colour contract");
+                    changed_colours += ((address ^ expected) & 0x3000U)!=0;
                     require(relocated_map->physical_address(address)==expected+0x200000,
                         "relocated map changed a page relation");
                 }
             }
+            require(changed_colours>250, "mapping lacks cross-colour diversity");
             require(context_topologies.insert(fingerprint.str()).second,
                 "translation contexts repeat a sampled topology");
         }

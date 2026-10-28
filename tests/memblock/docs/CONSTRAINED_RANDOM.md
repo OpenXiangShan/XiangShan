@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=57`.
+`constraint_schema=58`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -616,16 +616,14 @@ for shared-register consistency and disjoint store elements.
 
 `translation-permuted` changes ordinary address relationships rather than
 selecting a separate fixed transaction template. A mapping-only RNG derived
-from the seed shuffles 132 pages within four cache colours independently for host Sv39/Sv48, VS Sv39/Sv48
-and G Sv39x4/Sv48x4. Each nested reference map composes the independently declared
-VS and G permutations for its mode pair. The VA window at `0x2000000000` and
-GPA window at `0x2400000000` map into a dedicated cacheable physical pool,
-initialized with seed-and-physical-address bytes before traffic. Each colour
-contains 33 pages. Host, VS and G mappings preserve the low two page-number bits
-across their absolute address bases, so final VA[13:12] equals PA[13:12]. The
-current manager lacks a directory that recalls dirty data before granting a
-second cache colour for the same PA. Arbitrary cross-colour synonyms therefore
-remain excluded; this is a manager legality boundary, not an RTL failure.
+from the seed shuffles all 132 pages independently for host Sv39/Sv48,
+VS Sv39/Sv48 and G Sv39x4/Sv48x4. Each nested reference map composes the
+independently declared VS and G permutations for its mode pair. The VA window at
+`0x2000000000` and GPA window at `0x2400000000` map into a dedicated cacheable
+physical pool, initialized with seed-and-physical-address bytes before traffic.
+VA and PA cache colours may differ. The manager records the granted VA alias per
+physical line, recalls the old alias to Nothing before replacing it, checks the
+returned bytes, and constructs the new grant only after complete data recovery.
 Identity controls
 and all six translated contexts share the ordinary scalar dependency, unresolved,
 vector/segment and heterogeneous-window builders; dedicated helper pools remain
@@ -642,9 +640,19 @@ make a cross-page scalar store legal as one backend uop.
 
 Root/mode activation reuses fixed ASID/VMID values and therefore issues covering
 global SFENCE.VMA or HFENCE.VVMA/HFENCE.GVMA before further traffic. When this
-direction is enabled, translation-context entry also drains SBuffer; the common
-physical pool could otherwise introduce a cross-alias recovery obligation across
-roots that the general scheduler does not model. The separate directed alias test
+direction is enabled, translation-context entry also drains SBuffer and D/E,
+then freezes an independent reference image for each resident pool line. Mapped
+store commits record independent grouped updates only for the same owner alias; a later alias's
+commit cannot overwrite the drained old image used to check recall. Voluntary
+ReleaseData freezes the baseline and known updates at its first accepted beat,
+then checks a complete line consistent with whole aligned scalar-store/vector-
+element updates and overlapping update order; disjoint updates may propagate
+independently. Misaligned bytes may tear. A new-alias recall requires a refreshed
+drain checkpoint with no pending owner updates. Final
+physical observation takes the same checkpoint before its Bare readbacks. This
+is a bounded quiescent context transition contract: arbitrary simultaneous
+synonym stores, error-grant ownership and synonym CMO remain unqualified.
+The separate directed alias test
 owns its in-flight redirect/refetch contract. Context fences are reported separately
 from randomly selected fence coverage.
 
@@ -656,7 +664,10 @@ samples touching more than one virtual page, and `permuted_split_elements` count
 vector elements whose bytes cross a page. These are semantic helper observations,
 not cache-demand counts or exhaustive permutation coverage; all-masked uops add
 no page work. `context_fences` reports activation fences in SFENCE/VVMA/GVMA order.
-The artifact verifier checks field conservation and bounds without requiring
+`alias_recalls` counts automatic recall requests separately from selected
+standalone/cleanup/overlap/CMO/atomic probes; `alias_recall_responses` counts
+complete matching C transactions. Both use the ordinary B-source allocator and
+are included in total Probe lifecycle conservation. The artifact verifier checks field conservation and bounds without requiring
 positive bins in a sparse run. Unit substitution tests exercise wrong-page and
 contiguous-PA results against production scoreboards.
 
@@ -673,8 +684,9 @@ contiguous-PA results against production scoreboards.
   side-effecting target.
 - Ordinary 4-KiB translations now include seeded host and nested page
   permutations, with byte-wise data checks and physical final readback. The
-  bounded 132-page maps preserve cache colour and remain static. The manager
-  still needs alias-directory/probe handling for cross-colour synonyms.
+  bounded 132-page maps are static and may change cache colour. The manager's
+  automatic recalls use drained context checkpoints for independent old-owner
+  byte checks; general simultaneous synonym writes are not generated.
   NAPOT/special helper pools retain their
   own mappings, and context transitions drain SBuffer. Arbitrary root/ASID/VMID
   churn, dynamic PTE mutation/invalidation races and general in-flight
@@ -712,3 +724,22 @@ A material distribution, oracle, or coverage-claim change needs the independent
 review specified in
 [VERIFICATION_PLAN.md](VERIFICATION_PLAN.md#independent-review-and-no-progress-audits).
 No new field should introduce a hidden coverage-completeness PASS gate.
+
+## Structural Randomness Review
+
+The canonical generator varies dependency graph sizes and byte overlap, store
+operand event permutations, vector uop/flow shapes, index vectors, masks and
+page mappings. Dedicated seed samples exclude payload and timing when measuring
+structural uniqueness. Such samples establish those builders' variation, not
+unique full-run schedules or an assurance that a design bug exists.
+
+The highest remaining ordinary-workload limitations are the fixed five-producer
+composition of heterogeneous windows, all such windows preceding serial work,
+and a drain between windows. Dependency windows vary counts and operand order
+but place all store operands before their loads; unresolved-address windows have
+one store/load pair. Canonical scalar loads currently select integer destinations
+only, despite directed FP support. Prioritize bounded sliding admission with
+variable producer counts/ages, legal FP loads with independent value/boxing
+checks, and multiple unresolved store identities with interleaved operand arrival.
+Broader temporal locality/dependent-address streams and scalar/vector SQ
+forwarding follow these. Rare error/protection/CMO crosses remain secondary.

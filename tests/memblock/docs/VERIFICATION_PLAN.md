@@ -68,10 +68,10 @@ combinations have occurred or establishes a coverage percentage.
 | Stores/forwarding | Random 1..4 older-store/1..3 younger-load chains with shuffled operand arrival, partial byte overlays and optional younger-store exclusion; address/data order, masks, commit, cross-producer forwarding, directed readback, constrained-random final word readback for cacheable identity-mapped and declared permuted-page commits and same-context hypervisor readback for permitted/aligned cacheable stores | Output-only pulses, remaining aliased/non-cacheable/fault-path final state. A naturally aligned cross-page scalar store is not modeled as one legal top-level uop; the backend split is absent, so cross-page scalar split-store fault effects are untested and a single-uop completion is not an RTL claim. |
 | Vector addressing | Unit/strided/indexed/segment/whole-register shapes, bounded random index spacing/permutation and repeated gathers with disjoint scatter spans, data/identity/policy, full 128-bit mask operand with directed high-element load/store/indexed cases; cache_queue.inc, vector_memory.inc | Ordered side-effect targets, all concurrent shapes, and reserved/illegal mask-shape combinations remain |
 | Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA, single-uop later-element/masked `vstart=1` faults with exact faulting-element addresses, legal two-uop segment noncanonical loads/stores whose later uop must expose the fault with no forbidden traffic, masked, unmasked, first-element, segment (field-1, element-1 and first-field) PMP-denied masked/unmasked vector loads, and PMP-denied (including masked, cross-page, both segment field orders and EEW 1/2) vector store faults whose inactive/read-only/writable target pages are read back unchanged, a partially masked load with an inactive unmapped element, and an all-masked unmapped control that observes no PTW/DCache traffic | Default exceptional vstart skip for other shapes, arbitrary restart/progress, broader fault-address attribution, and canonical-alias sensitivity. Per-uop success order is not an architectural oracle when a later uop of the same instruction exposes the fault before commit. |
-| Translation | Seeded ordinary host/composed VS/G 4-KiB page permutations within four cache colours, immutable per-byte data maps and physical final readback; covering root-reuse fences; mode pairs, permissions, leaf sizes, encoding/PPN/range, PBMT/NAPOT, permission-fault and PMP-denied store readback (readable mapping, Bare fallback, or re-enabled PMP region) | Cross-colour aliases require manager directory/dirty-data recall; static maps do not cover arbitrary PTE/root/identifier churn. Uniform fault-side-effect checks for unreadable/device mappings, nested boundaries/GPA wrap/A-D races |
+| Translation | Seeded ordinary host/composed VS/G 4-KiB unrestricted page permutations, immutable per-byte data maps and physical final readback; covering root-reuse fences; mode pairs, permissions, leaf sizes, encoding/PPN/range, PBMT/NAPOT, permission-fault and PMP-denied store readback (readable mapping, Bare fallback, or re-enabled PMP region) | Cross-colour grants use old-owner recall and independent drained checkpoints; arbitrary simultaneous synonym writes and PTE/root/identifier churn remain outside static maps. Uniform fault-side-effect checks for unreadable/device mappings, nested boundaries/GPA wrap/A-D races |
 | Protection/H | PMP TOR/NAPOT/lock/edges, HLV/HLVX/HSV; protection.inc | Instruction PMP and broader PMA/PMP/H/misalignment crosses |
 | Refill/MLP | Critical beat, merge, distinct misses, held/reversed D, capacity-plus-one, DCache/PTW/Uncache source lifetime | Broader error/interleaving and malformed response lifecycle |
-| Coherence/replacement | Clean/dirty Probes, an eight-deep probe window, Releases/data, replacement plus selected Probe/CMO/atomic, E first-D/sink lifetime, accepted-B-before-C provenance, fixed C multibeat source/param/size/raw address, DUT full-line data-less Release size/alignment/shrink param | TileLink user/echo C fields are DUT-specific; data-less Release corrupt is ignored; the manager lacks a PA/alias directory and dirty-data recall before a cross-colour grant; same-address B/C attribution remains missing: a two-probe experiment cannot be uniquely matched by address/opcode/report, and C's client-owned source is not tied to B; broader ordering remains |
+| Coherence/replacement | Clean/dirty Probes, an eight-deep probe window, Releases/data, replacement plus selected Probe/CMO/atomic, E first-D/sink lifetime, accepted-B-before-C provenance, fixed C multibeat source/param/size/raw address, DUT full-line data-less Release size/alignment/shrink param | TileLink user/echo C fields are DUT-specific; data-less Release corrupt is ignored; PA/VA-alias directory, deferred grants and old-owner data recall use drained reference checkpoints; same-PA B is serialized through final C without B/C source equality; arbitrary simultaneous synonyms/error-grant/CMO ownership and broader ordering remain |
 | Atomics | W/D AMO/CAS/LRSC, alignment/errors, reservation Probe, directed readback, successful cacheable final word readback, and forced dirty-line ProbeAckData persistence | Aliased/error-path final writes not forced observable, cross-hart/wider concurrency. Atomic-then-store/CBO ordering is not yet executable: the current single-atomic harness leaves the younger store in Sbuffer without a writeback, so no RTL claim is made. |
 | CBO/CMO | ZERO/CLEAN/FLUSH/INVAL, clean/dirty/error, delayed ack, younger cancellation, single/sequential/same-line-repeated/three-line consecutive CBO.ZERO completion, same-line zero/store both orders, an older-store/younger-zero/younger-load forward window, a zero/younger-store/younger-load age control and an early younger load | A cacheable CBO.ZERO remains the ROB head until cboZeroStout after SBuffer drain; two CBO.ZEROs cannot legally occupy the same deferred-completion window. Multiple sources/classes, dirty persistence/reset, PBMT=NC behavior unspecified, wider same-line forward-timing variants remain |
 | Uncache/MMIO | Width/mask/data, device side effects, errors, serialization | Source credit and malformed manager inputs |
@@ -157,18 +157,31 @@ gaps include multiple unresolved-address dependencies, varied heterogeneous
 producer composition and dynamic mapping/invalidation overlap. Ordinary static
 4-KiB nonidentity mappings now use seeded host/VS/G page permutations with
 byte-wise load/store expectations, covering root-reuse fences and physical final
-readback. Permutations preserve four cache colours: the manager still lacks a
-PA/alias directory and dirty-data recall before a cross-colour grant. Context changes drain SBuffer while general cross-alias recovery stays
-outside this direction. A bounded one-store/
+readback. Permutations may change cache colour; the manager recalls the stored
+old alias and checks its data against an independent drained reference checkpoint
+before constructing the replacement grant. Context changes drain SBuffer/D/E;
+general simultaneous synonym writes and cross-alias replay stay outside this
+direction. A bounded one-store/
 one-load direction now checks provisional execution, late RAW recovery,
 uncommitted-store refetch data and disjoint byte-mask controls. Bounded random indexed vectors
 now vary offset spacing/permutation and repeated gathers for ordinary and
 segment operations; partial byte overlap and overlapping scatters remain open.
 
+A pinned source review finds meaningful local structural randomization but a
+fixed global schedule: five-producer heterogeneous windows all run before serial
+helpers and drain between windows. Next ordinary-workload work should vary
+producer counts/ages with bounded sliding admission, add legal FP destinations
+and independent value/boxing expectations to canonical loads, and interleave
+multiple unresolved store identities with younger loads. Existing dependency
+windows finish all store operands before their loads. These gaps take priority
+over expanding rare error/protection crosses; structural uniqueness alone cannot
+guarantee a CPU bug.
+
 Priority work, each requiring executable stimulus and an independent check:
 
-1. Add the manager PA/alias directory and dirty-data recall before granting
-   another cache colour, then extend final observation beyond cacheable
+1. Vary ordinary mixed producer counts/ages with bounded sliding admission;
+   add legal FP loads with independent value/boxing checks and multiple unresolved
+   store identities with interleaved operand arrival. Extend final observation beyond cacheable
    identity-mapped and declared permuted-page commits to remaining legal aliases, non-cacheable/device effects and
    fault-path side-effect checks; one cross-alias path is now directed, but
    the first-access alias mismatch now requires its exact flush-itself request,
@@ -186,9 +199,10 @@ Priority work, each requiring executable stimulus and an independent check:
    PMP page-crossing load now checks accepted demand through redirect recovery,
    allowing only its readable prefix line and independent prefetch; a cold
    both-readable control observes the second page and checks its returned data.
-2. Preserve the accepted-B-before-C probe provenance now implemented; add
-   complete C multibeat identity checking. Retain the DCache E first-D/sink and
-   PTW/Uncache source-lifetime checks.
+2. Preserve accepted-B provenance, same-PA serialization, C multibeat identity,
+   DCache E first-D/sink and PTW/Uncache source-lifetime checks. Broaden legal
+   ordering/reset qualification and independent owner-version handling beyond
+   the checkpointed pool.
 3. Repair verifier schema/backpressure/statistic validation. Regression and
    benchmark sidecars now use distinct campaign run-ID namespaces, including
    reruns that replace an aggregate file; the unique-parent controller-isolation

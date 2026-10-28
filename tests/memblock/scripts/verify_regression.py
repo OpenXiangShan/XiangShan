@@ -1488,7 +1488,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -1946,10 +1946,11 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 if schema >= 32
                 else actual_probe_overlap[1]
             )
+            alias_recalls = _check_alias_recall_accounting(result)
             _require(
                 isinstance(probes, int) and not isinstance(probes, bool)
                 and probes == actual_sequences + actual_caps[1]
-                + cmo_probe_count + atomic_probe_count + auxiliary_probes,
+                + cmo_probe_count + atomic_probe_count + auxiliary_probes + alias_recalls,
                 "manager Probe count does not match constrained/overlap/CMO "
                 "accounting including atomic composition",
             )
@@ -4411,6 +4412,18 @@ def _check_mixed_coverage(
         )
 
 
+def _check_alias_recall_accounting(result: dict[str, Any]) -> int:
+    if result.get("constraint_schema", 0) < 58:
+        return 0
+    requested = result.get("alias_recalls")
+    completed = result.get("alias_recall_responses")
+    probes = result.get("probes")
+    _require(type(requested) is int and type(completed) is int
+             and type(probes) is int and 0 <= requested == completed <= probes,
+             "automatic alias recall lifecycle is incomplete")
+    return requested
+
+
 def _check_permuted_translation_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 57:
         return
@@ -4684,6 +4697,7 @@ def _check_result(
         _check_vector_index_accounting(result)
         _check_scalar_unresolved_accounting(result)
         _check_permuted_translation_accounting(result)
+        _check_alias_recall_accounting(result)
         if require_coverage:
             try:
                 _check_mixed_coverage(result, require_backpressure)

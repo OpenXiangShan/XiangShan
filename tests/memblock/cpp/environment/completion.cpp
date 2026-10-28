@@ -555,6 +555,16 @@ auto Environment::Impl::commit_store(const StoreTransaction &transaction,
                 ? 0
                 : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
         if (transaction.reference_pages) {
+            if (bytes <= 8U && (transaction.address & (bytes - 1U)) == 0) {
+                if (byte == 0) {
+                    std::vector<unsigned char> update(bytes);
+                    for (unsigned b = 0; b < bytes; ++b) update[b] = transaction.data >> (8U * b);
+                    memory_agent_.note_reference_store(physical, transaction.address, update);
+                }
+            } else {
+                memory_agent_.note_reference_write(physical, transaction.address + byte,
+                    memory_.read_byte(physical));
+            }
             track_final_observation_bytes(physical, 1U, transaction.cacheable, true);
         }
     }
@@ -618,6 +628,19 @@ auto Environment::Impl::commit_vector_store(const VectorMemoryTransaction &trans
             memory_.write_reference_byte(
                 vector_byte_address(transaction, element, byte),
                 transaction.data[element * element_bytes + byte]);
+            if (transaction.reference_pages) {
+                const auto virtual_address = vector_element_virtual_address(transaction, element);
+                if ((virtual_address & (element_bytes - 1U)) == 0) {
+                    if (byte == 0) memory_agent_.note_reference_store(
+                        vector_byte_address(transaction, element, 0), virtual_address,
+                        std::vector<unsigned char>(transaction.data.begin() + element * element_bytes,
+                            transaction.data.begin() + (element + 1U) * element_bytes));
+                } else {
+                    memory_agent_.note_reference_write(
+                        vector_byte_address(transaction, element, byte), virtual_address + byte,
+                        transaction.data[element * element_bytes + byte]);
+                }
+            }
         }
         std::ostringstream extra;
         extra << "vector=true eew=" << vector_data_eew(transaction)
@@ -676,6 +699,16 @@ auto Environment::Impl::record_committed_store(const StoreTransaction &transacti
                 ? 0
                 : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
         if (transaction.reference_pages) {
+            if (bytes <= 8U && (transaction.address & (bytes - 1U)) == 0) {
+                if (byte == 0) {
+                    std::vector<unsigned char> update(bytes);
+                    for (unsigned b = 0; b < bytes; ++b) update[b] = transaction.data >> (8U * b);
+                    memory_agent_.note_reference_store(physical, transaction.address, update);
+                }
+            } else {
+                memory_agent_.note_reference_write(physical, transaction.address + byte,
+                    memory_.read_byte(physical));
+            }
             track_final_observation_bytes(physical, 1U, transaction.cacheable, true);
         }
     }
@@ -718,6 +751,19 @@ auto Environment::Impl::record_committed_vector_store(const VectorMemoryTransact
             memory_.write_reference_byte(
                 vector_byte_address(transaction, element, byte),
                 transaction.data[element * element_bytes + byte]);
+            if (transaction.reference_pages) {
+                const auto virtual_address = vector_element_virtual_address(transaction, element);
+                if ((virtual_address & (element_bytes - 1U)) == 0) {
+                    if (byte == 0) memory_agent_.note_reference_store(
+                        vector_byte_address(transaction, element, 0), virtual_address,
+                        std::vector<unsigned char>(transaction.data.begin() + element * element_bytes,
+                            transaction.data.begin() + (element + 1U) * element_bytes));
+                } else {
+                    memory_agent_.note_reference_write(
+                        vector_byte_address(transaction, element, byte), virtual_address + byte,
+                        transaction.data[element * element_bytes + byte]);
+                }
+            }
         }
         std::uint64_t element_data = 0;
         for (unsigned byte = 0; byte < element_bytes; ++byte) {

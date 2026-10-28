@@ -265,7 +265,10 @@ bool MixedScenario::enter_translation_context(const TranslationContext &context)
         // arbitration remains a separate verification direction.
         (constraints.translation_permuted_per_mille != 0 &&
             (!environment.pulse_sbuffer_flush() ||
-             !environment.run_until_sbuffer_empty(constrained_completion_timeout))) ||
+             !environment.run_until_sbuffer_empty(constrained_completion_timeout) ||
+             !environment.run_until_dcache_idle(constrained_completion_timeout) ||
+             !environment.checkpoint_dcache_alias_reference(
+                 permuted_physical_base, OrdinaryPageMappings::span))) ||
         !flush_pending_translation_fences() ||
         !activate_translation_context(context)) {
         return false;
