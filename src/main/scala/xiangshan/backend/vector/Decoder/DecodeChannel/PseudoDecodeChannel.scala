@@ -92,7 +92,7 @@ class PseudoDecodeChannel(
   out.bits.lsrc1 := instBitFields.RS1
   out.bits.lsrc2 := instBitFields.RS2
   out.bits.ldest := instBitFields.RD
-  out.bits.gpWen := bundle(gpWenField)
+  out.bits.gpWen := bundle(gpWenField) && instBitFields.RD =/= 0.U
   out.bits.fpWen := bundle(fpWenField)
   out.bits.noSpec := bundle(noSpecField)
   out.bits.blockBack := bundle(blockBackField)
