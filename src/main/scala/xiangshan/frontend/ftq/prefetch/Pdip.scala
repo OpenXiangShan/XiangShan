@@ -27,61 +27,10 @@ import utility.ReplacementPolicy
 import utility.ValidHold
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
-import utils.AddrField
 import xiangshan.frontend.FecCandidateInfo
 import xiangshan.frontend.Pc
-import xiangshan.frontend.PcInit
 import xiangshan.frontend.ftq.FtqModule
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.ftq.HasFtqParameters
-import xiangshan.frontend.ftq.PrefetchQueueEntry
-import xiangshan.frontend.icache.PrefetchSource
-
-case class PdipParameters(
-    NumSet:      Int = 512,
-    NumWay:      Int = 2,
-    TagWidth:    Int = 10,
-    NumAdjacent: Int = 2
-) {
-  require(isPow2(NumSet), "NumSet must is power of 2")
-  require(NumWay >= 1, "NumWay must >= 1")
-  require(TagWidth >= 1, "TagWidth must >= 1")
-  require(NumAdjacent >= 1, "NumAdjacent must >= 1")
-}
-
-trait HasPdipParameters extends HasFtqParameters {
-  def pdipParameters: PdipParameters = ftqParameters.pdipParameters
-
-  def BlockOffsetWidth: Int = log2Ceil(frontendParameters.icacheParameters.blockBytes)
-
-  def NumSet:      Int = pdipParameters.NumSet
-  def SetIdxWidth: Int = log2Ceil(NumSet)
-  def NumWay:      Int = pdipParameters.NumWay
-  def TagWidth:    Int = pdipParameters.TagWidth
-  def NumAdjacent: Int = pdipParameters.NumAdjacent
-
-  def BlockVAddrWidth: Int = VAddrBits - BlockOffsetWidth
-
-  val addrFields = AddrField(
-    Seq(
-      ("blockOffset", BlockOffsetWidth),
-      ("setIdx", SetIdxWidth),
-      ("tag", TagWidth)
-    ),
-    maxWidth = Option(VAddrBits),
-    extraFields = Seq(
-      ("blockVAddr", BlockOffsetWidth, BlockVAddrWidth)
-    )
-  )
-
-  def getSetIdx(pc: Pc): UInt = addrFields.extract("setIdx", pc)
-
-  def getTag(pc: Pc): UInt = addrFields.extract("tag", pc)
-
-  def getBlockVAddr(pc: Pc): UInt = addrFields.extract("blockVAddr", pc)
-
-  def getPc(blockVAddr: UInt): Pc = PcInit(Cat(blockVAddr, 0.U(BlockOffsetWidth.W)))
-}
 
 class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
   class PdipIO extends Bundle {

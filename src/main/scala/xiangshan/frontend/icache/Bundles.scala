@@ -29,6 +29,7 @@ import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.ftq.prefetch.PrefetchSource
 
 /* ***
  * Naming:
@@ -213,26 +214,6 @@ class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** MainPipe ***** */
 // ICache(MainPipe) -> IFU
-class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val startVAddr:         Pc            = Pc()
-  val data:               UInt          = UInt(blockBits.W)
-  val maybeRvcMap:        UInt          = UInt(MaxInstNumPerBlock.W)
-  val pAddr:              PrunedAddr    = PrunedAddr(PAddrBits)
-  val exception:          ExceptionType = new ExceptionType
-  val pmpMmio:            Bool          = Bool()
-  val itlbPbmt:           UInt          = UInt(Pbmt.width.W)
-  val isBackendException: Bool          = Bool()
-  val perf_isCrossLine:   Bool          = Bool()
-  /* NOTE: GPAddrBits(=50bit) is not enough for gpAddr here, refer to PR#3795
-   * Sv48*4 only allows 50bit gpAddr, when software violates this requirement
-   * it needs to fill the mtval2 register with the full XLEN(=64bit) gpAddr,
-   * PAddrBitsMax(=56bit currently) is required for the frontend datapath due to the itlb ppn length limitation
-   * (cases 56<x<=64 are handled by the backend datapath)
-   */
-  val gpAddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
-  val isForVSnonLeafPTE: Bool       = Bool()
-}
-
 class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
   val exception:          ExceptionType = new ExceptionType
   val pmpMmio:            Bool          = Bool()
@@ -285,35 +266,6 @@ class MainPipeToWayLookupBundle(implicit p: Parameters) extends ICacheBundle {
 }
 
 /* ***** PrefetchPipe ***** */
-class PrefetchSource extends Bundle {
-  val value: UInt = PrefetchSource.Value()
-
-  def isFdip: Bool = value === PrefetchSource.Value.Fdip
-  def isSw:   Bool = value === PrefetchSource.Value.Sw
-
-  def inStream: Bool = isFdip // in instruction stream, i.e. should be sent to mainPipe\ifu\backend
-
-  def getValidSeq: Seq[(String, Bool)] = PrefetchSource.Value.getValidSeq(value)
-}
-
-object PrefetchSource {
-  object Value extends EnumUInt(3) {
-    def Fdip: UInt = 0.U(width.W) // Fetch-directed instruction prefetch
-    def Sw:   UInt = 1.U(width.W) // Zicbop prefetch.i
-    def Pdip: UInt = 2.U(width.W) // Priority-directed instruction prefetch
-  }
-
-  def apply(that: UInt): PrefetchSource = {
-    val source = Wire(new PrefetchSource)
-    source.value := that
-    source
-  }
-
-  def Fdip: PrefetchSource = apply(Value.Fdip)
-  def Sw:   PrefetchSource = apply(Value.Sw)
-  def Pdip: PrefetchSource = apply(Value.Pdip)
-}
-
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val startVAddr:       GuardedPc      = GuardedPc()
   val nextLineVAddr:    GuardedPc      = GuardedPc()
