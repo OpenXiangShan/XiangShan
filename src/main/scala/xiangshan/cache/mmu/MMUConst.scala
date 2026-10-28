@@ -321,8 +321,12 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = if (HasBitmapCheck) 2 * (l2tlbParams.llptwsize + 1 + 1) else if (HasMptCheck) ((l2tlbParams.llptwsize + 3))
+  val LegacyMemReqWidth = if (HasBitmapCheck) 2 * (l2tlbParams.llptwsize + 1 + 1) else if (HasMptCheck) ((l2tlbParams.llptwsize + 3))
   else (l2tlbParams.llptwsize + 1 + 1)
+
+  // Append the new walker after the existing bitmap/MPT source ranges.
+  val ParallelFsmReqID = LegacyMemReqWidth
+  val MemReqWidth = LegacyMemReqWidth + 1
 
   val mptcMemReqID = l2tlbParams.llptwsize + 2
   val HptwReqId = l2tlbParams.llptwsize + 1
