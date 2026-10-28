@@ -175,6 +175,14 @@ oracles, analyzed observed bins/crosses, meaningful mutation sensitivity,
 reproducible completed campaigns and no unclassified failure. Partial/missing
 rows remain visible. These are review obligations, not all active script gates.
 
+Git tracks Chisel RTL sources and UT source/documentation, not generated
+`build/rtl`, Picker/Verilator models, runtimes, traces, coverage sidecars, or
+campaign artifacts. When a change creates useful or visible progress and the
+focused validation appropriate to its risk passes, commit and push it in a
+focused logical unit without waiting for overall closure. Do not commit a
+failing, transient, unattributed, or generated intermediate state. The commit
+must identify the relevant verification or review evidence.
+
 ## Independent Review and No-Progress Audits
 
 Material oracle/monitor/distribution/coverage/plan changes receive fresh-context
