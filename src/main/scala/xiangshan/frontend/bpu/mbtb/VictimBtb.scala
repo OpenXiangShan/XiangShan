@@ -95,13 +95,15 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
     rawHit && e.entry.position >= s1_readAlignedOffset && !read.req.crossPage
   })
 
-  // A fully-associative VBTB exposes only the earliest matching entry. The
-  // non-strict order makes a lower physical way win when positions are equal.
-  private val s1_readPositionMatrix = CompareMatrix(
-    VecInit(entries.map(_.entry.position)),
+  // Writes keep unconditional-jump counters positive, so the counter sign
+  // alone encodes taken priority. Prefer taken entries, then the earliest
+  // position; if all are not-taken, expose the earliest one for TAGE/SC.
+  // The non-strict order makes a lower physical way win when keys are equal.
+  private val s1_readPriorityMatrix = CompareMatrix(
+    VecInit(entries.map(e => Cat(!e.counter.isPositive, e.entry.position))),
     order = (a: UInt, b: UInt) => a <= b
   )
-  private val s1_selectOH    = s1_readPositionMatrix.getLeastElementOH(s1_hitMask).asUInt
+  private val s1_selectOH    = s1_readPriorityMatrix.getLeastElementOH(s1_hitMask).asUInt
   private val s1_selectEntry = Mux1H(s1_selectOH, entries)
   private val s1_prediction  = Wire(Valid(new Prediction))
 
@@ -202,12 +204,24 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
   // - counterWayMask updates the taken counter for conditional branches.
   // This allows a VBTB hit to be repaired in place without allocating MainBtb.
   for (w <- 0 until NumVictimBtbWays) {
+    // Use the updated attribute when payload and counter are trained together.
+    val trainAttribute = Mux(
+      trainEntry.req.bits.entryWayMask(w),
+      trainEntry.req.bits.entry.attribute,
+      entries(w).entry.attribute
+    )
     when(trainEntry.req.valid) {
       when(trainEntry.req.bits.counterWayMask(w)) {
         entries(w).counter := trainEntry.req.bits.counters(w)
       }
       when(trainEntry.req.bits.entryWayMask(w)) {
         entries(w).entry := trainEntry.req.bits.entry
+      }
+      // A counter-only update must not make an unconditional jump not-taken.
+      // Payload-only changes to a jump must establish the same invariant.
+      when((trainEntry.req.bits.entryWayMask(w) || trainEntry.req.bits.counterWayMask(w)) &&
+        !trainAttribute.isConditional) {
+        entries(w).counter := TakenCounter.WeakPositive
       }
     }
 
@@ -225,7 +239,11 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
       entries(w).entry           := snapshot.req.bits.evicted
       entries(w).setIdx          := snapshot.req.bits.setIdx
       entries(w).internalBankIdx := snapshot.req.bits.internalBankIdx
-      entries(w).counter         := TakenCounter.WeakPositive
+      entries(w).counter := Mux(
+        snapshot.req.bits.evicted.attribute.isConditional,
+        TakenCounter.WeakNegative,
+        TakenCounter.WeakPositive
+      )
     }
   }
 
