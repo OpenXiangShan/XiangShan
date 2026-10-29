@@ -4,7 +4,7 @@
 
 - Worktree: `.codex_mother_integration_20261028`
 - Branch: `codex/memblock-csr-prefix-fix-20261025`
-- 当前生产源码：`c9763bd7d`叠加本文件同提交的B1母集成；源单Bug提交`5a4dc2df4d`。
+- 当前生产源码提交：`60dcca7c6`（B1母集成），源单Bug提交`5a4dc2df4d`；保留c976及更早修复。
 - 当前执行状态：旧WIP审计/必要修复/专项及独立最终review通过，随本提交关闭门禁；接下来恢复非strict-NC矩阵。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
@@ -32,6 +32,14 @@
   下一步组8–12，跳过strict-NC组7；随后其他非strict-NC组及最终统一覆盖率。
 - source保持证据存档，不表示仍有应合未合Bug。后续修改只在mother顺序完成；仿真可并行。
   当前唯一远端为公共上游origin，未指定任务推送目标前只本地提交。
+
+### 门禁后批量恢复
+
+母集成提交`60dcca7c6`已落地，旧WIP门禁关闭；现从组8启动新coverage mode
+`mother_post_wip_cov_20261029`，原10 seed并发、MAIN1000/CHECK_TRIGGER0/timeout1000000000ns。
+结果根目录：`mem_ut/ver/ut/memblock/sim/mother_post_wip_cov_20261029_results`；
+`campaign_state.tsv`逐组维护，组7仍延期不运行。新coverage编译已PASS，组8原10 seed全部运行中，
+当前组8为RUNNING，未提前增加PASS数。
 
 后续继续母任务时，直接进入以下 worktree，不创建新的 Bug worktree：
 
@@ -108,7 +116,7 @@ strict-NC本组获得修复后的历史执行顺序（当前其他组恢复顺�
 
 | Commit | Bug | Mother verification | Source worktree |
 |---|---|---|---|
-| 本文件同提交；源`5a4dc2df4d` | CSR非虚拟映射切换真实HS全SFENCE及C4门禁 | fresh compile；原8+Sv39/PBMT/SFENCE各2共14/14严格PASS；协议/15运输负例单列；最终独立review PASS | 原source WIP保留存档，后续不在其编码 |
+| `60dcca7c6`；源`5a4dc2df4d` | CSR非虚拟映射切换真实HS全SFENCE及C4门禁 | fresh compile；原8+Sv39/PBMT/SFENCE各2共14/14严格PASS；协议/15运输负例单列；最终独立review PASS | 原source WIP保留存档，后续不在其编码 |
 | `91d403eb1` | PMA/PMP CSR raw FIFO continuous prefix service | integrated before this continuation; later PBMT integration preserved ticket/revision/prefix semantics | preserved WIP source worktree remains untouched |
 | `fb9f04abe` | L2TLB PPN reuse smoke determinism | specialized 22/22 plus adjacent Sv39 1/1 PASS | deleted; branch retained |
 | `a13d10814` | Sv39 later-split mabuf response provenance | compile; original1; known5+random30 35/35; closure10 10/10; adjacent2; review-fix5; post-commit original1, all strict PASS | deleted; branch retained |
@@ -188,7 +196,7 @@ worktree。2026-10-29 用户允许并发仿真加速：配置逐组推进，组�
 | 5 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | `PASS` | 10/10 |
 | 6 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | `PASS` | 10/10 |
 | 7 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_strict_nc_100k` | `FAIL/STOPPED_RTL_CONFIRMED` | 0/10 |
-| 8 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | `NOT_RUN` | 0/10 |
+| 8 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | `RUNNING` | 0/10 |
 | 9 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | `NOT_RUN` | 0/10 |
 | 10 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | `NOT_RUN` | 0/10 |
 | 11 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_10k` | `NOT_RUN` | 0/10 |

@@ -52,9 +52,9 @@ RTL/Scala 不在本轮修改范围，strict-NC 不伪造 PASS；用户已明确�
 `basicTest / memblock_dispatch_real_smoke_vseq / tc_dispatch_real_mmu_sv39_strict_nc_100k`
 保持已知 RTL 未修复/延期，原 seed 和 ABORTED/NOT_RUN 名额保留，不从全量计划中删除。
 并发仿真不允许同 mode 多 controller；代码变化必须重新 compile；日志按 TEST_PASS/$finish、
-raw/final/caught/demoted 六项 ERROR/FATAL、controller 和 remote_unknown 严格验收。
+raw ERROR/FATAL及final/caught/demoted六项ERROR/FATAL、controller和remote_unknown严格验收。
 
-## 5. 本轮进展（历史过程，当前状态以5.5及5.6为准）
+## 5. 本轮进展（历史过程，关闭结论见5.10；逐文件处置见第6节；执行现状见最新status）
 
 - 已完成两工作区状态和分支确认、source 完整差异快照；尚无 source 生产代码修改。
 - 已启动两个只读独立审计：A1/A5 与 A2/A3/A4。主 agent 负责完整文件归类、基线诊断及后续串行执行。
