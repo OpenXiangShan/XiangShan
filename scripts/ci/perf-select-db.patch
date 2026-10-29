@@ -1,0 +1,55 @@
+--- a/perf_trigger/main.py
++++ b/perf_trigger/main.py
+@@ -734,6 +734,12 @@
+         help="Run emu with --dump-db and store simulator.db in each checkpoint result directory",
+     )
+ 
++    parser.add_argument(
++        "--dump-select-db",
++        type=str,
++        help="Space-separated ChiselDB table names to collect instead of all tables",
++    )
++
+     # report configs
+     parser.add_argument(
+         "--frequency",
+@@ -901,6 +907,7 @@
+                     threads=args.threads,
+                     cst_file=cst_file,
+                     dump_db=args.dump_db,
++                    dump_select_db=args.dump_select_db,
+                     dry_run=args.dry_run,
+                     max_cycles=args.max_cycles,
+                 ),
+--- a/perf_trigger/modules/types.py
++++ b/perf_trigger/modules/types.py
+@@ -22,6 +22,7 @@
+     dump_db: bool = False
+     dry_run: bool = False
+     max_cycles: int | None = None
++    dump_select_db: str | None = None
+ 
+ 
+ @dataclass
+--- a/perf_trigger/modules/server.py
++++ b/perf_trigger/modules/server.py
+@@ -364,12 +364,13 @@
+                     else []
+                 )
+                 + (
+-                    [
+-                        "--dump-db",
+-                        "--db-path",
+-                        shlex.quote(str(gcpt.db_path)),
+-                    ]
+-                    if emu_config.dump_db
++                    (
++                        ["--dump-select-db", shlex.quote(emu_config.dump_select_db)]
++                        if emu_config.dump_select_db
++                        else ["--dump-db"]
++                    )
++                    + ["--db-path", shlex.quote(str(gcpt.db_path))]
++                    if emu_config.dump_db or emu_config.dump_select_db
+                     else []
+                 )
+             )
