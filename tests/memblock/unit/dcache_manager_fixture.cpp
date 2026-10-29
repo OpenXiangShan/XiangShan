@@ -94,10 +94,10 @@ struct Fixture {
         step(); // Accept B
     }
     void c(unsigned opcode, unsigned report, unsigned beat=0, unsigned source=9,
-           const std::vector<unsigned char> *image=nullptr) {
+           const std::vector<unsigned char> *image=nullptr, std::uint64_t address=line) {
         auto &c = dut.dcache.c;
         c.valid.set(1); c.opcode.set(opcode); c.param.set(report); c.size.set(6);
-        c.source.set(source); c.address.set(line);
+        c.source.set(source); c.address.set(address);
         // C user fields deliberately carry no meaningful alias.
         c.user_alias.set(3); c.user_vaddr.set(0xdead);
         const auto &bytes = image ? *image : old_image;
@@ -310,24 +310,26 @@ void line_grants_lifecycle(const std::string &test)
 }
 
 
-static void input_owner(Fixture &f, bool initialize=true, unsigned alias=0) {
-    if (initialize) for(unsigned b=0;b<64;++b)f.bus.write_byte(line+b,f.old_image[b]);
-    f.acquire(alias);f.step();f.ack();f.ok();
+static void input_owner(Fixture &f, bool initialize=true, unsigned alias=0,
+    std::uint64_t address=line) {
+    if (initialize) for(unsigned b=0;b<64;++b)f.bus.write_byte(address+b,f.old_image[b]);
+    f.acquire(alias,0,1,address);f.step();f.ack();f.ok();
 }
 static void input_group(Fixture &f,std::uint64_t order,unsigned offset,unsigned count,
-    unsigned char value,bool authorize=true,unsigned alias=0) {
-    require(f.manager.register_release_store(order,line+offset,line+(alias<<12)+offset,
+    unsigned char value,bool authorize=true,unsigned alias=0,std::uint64_t address=line) {
+    require(f.manager.register_release_store(order,address+offset,address+(alias<<12)+offset,
         std::vector<unsigned char>(count,value)),f.manager.error());
     if(authorize)require(f.manager.authorize_release_store(order),f.manager.error());
 }
-static void input_release(Fixture &f,const std::vector<unsigned char> &image,bool accepted=true,unsigned report=1) {
-    const auto before=f.bus.read_beat(line,64);
-    f.c(7,report,0,9,&image);
-    require(f.bus.read_beat(line,64)==before,"partial C changed backing before whole-line validation");
-    f.c(7,report,1,9,&image);
+static void input_release(Fixture &f,const std::vector<unsigned char> &image,bool accepted=true,
+    unsigned report=1,std::uint64_t address=line) {
+    const auto before=f.bus.read_beat(address,64);
+    f.c(7,report,0,9,&image,address);
+    require(f.bus.read_beat(address,64)==before,"partial C changed backing before whole-line validation");
+    f.c(7,report,1,9,&image,address);
     require(f.manager.ok()==accepted,"ordinary input release decision incorrect: "+f.manager.error());
-    if(accepted){require(f.bus.read_beat(line,64)==image,"validated release did not update backing");f.step();f.ok();}
-    else require(f.bus.read_beat(line,64)==before,"rejected whole-line C changed backing");
+    if(accepted){require(f.bus.read_beat(address,64)==image,"validated release did not update backing");f.step();f.ok();}
+    else require(f.bus.read_beat(address,64)==before,"rejected whole-line C changed backing");
 }
 static void input_versions(const std::string &test) {
     Fixture f;
@@ -455,6 +457,147 @@ static void input_versions(const std::string &test) {
         input_group(f,20,8,8,0xa7);input_owner(f);input_release(f,updated);
     } else throw std::runtime_error("unknown input-version case");
 }
+// Manager-only redirect bookkeeping tests. The fixture certifies the external
+// cancellation boundary; it does not claim to reproduce legal full-CPU timing.
+static void input_cancellations(const std::string &test) {
+    Fixture f;input_owner(f);
+    const auto reference=f.reference.read_beat(line,64);
+    auto changed=f.old_image;std::fill(changed.begin()+8,changed.begin()+16,0xa7);
+    if(test=="empty") {
+        require(f.manager.cancel_release_stores({}),"empty cancellation failed");
+        input_group(f,10,8,8,0xa7,false);
+        require(f.manager.cancel_release_stores({}),"empty cancellation removed a live input");
+        require(f.manager.authorize_release_store(10),f.manager.error());
+        input_release(f,changed);
+    } else if(test=="canceled-bytes" || test=="removed-order" || test=="numeric-reuse") {
+        input_group(f,10,8,8,0xa7,false);
+        require(f.manager.cancel_release_stores({10}),f.manager.error());
+        require(f.bus.read_beat(line,64)==f.old_image,"cancellation changed operational backing");
+        if(test=="canceled-bytes")input_release(f,changed,false);
+        else if(test=="removed-order") {
+            require(!f.manager.authorize_release_store(10),"canceled order remained registered");
+            require(f.manager.error().find("no registered input")!=std::string::npos,
+                "canceled order rejection did not record a manager-contract error");
+        } else {
+            input_group(f,10,40,8,0xb8);
+            auto fresh=f.old_image;std::fill(fresh.begin()+40,fresh.begin()+48,0xb8);
+            input_release(f,fresh);
+        }
+    } else if(test=="unaffected") {
+        input_group(f,10,8,8,0xa7);
+        input_group(f,20,40,8,0xc9,false);
+        input_group(f,30,56,8,0xd0,false);
+        require(f.manager.cancel_release_stores({20}),f.manager.error());
+        require(f.manager.authorize_release_store(30),"cancellation removed an unselected input");
+        std::fill(changed.begin()+56,changed.end(),0xd0);input_release(f,changed);
+    } else if(test=="multiple-groups") {
+        input_group(f,10,8,8,0xa7,false);input_group(f,20,40,8,0xc9);
+        input_group(f,30,56,8,0xd0,false);
+        require(f.manager.cancel_release_stores({30,10}),f.manager.error());
+        input_group(f,10,8,8,0xe1);input_group(f,30,56,8,0xf2);
+        auto image=f.old_image;
+        std::fill(image.begin()+8,image.begin()+16,0xe1);
+        std::fill(image.begin()+40,image.begin()+48,0xc9);
+        std::fill(image.begin()+56,image.end(),0xf2);input_release(f,image);
+    } else if(test=="multiple-lines") {
+        for(unsigned byte=0;byte<64;++byte)f.reference.write_reference_byte(line+64+byte,f.old_image[byte]);
+        input_owner(f,true,0,line+64);
+        input_group(f,10,8,8,0xa7,false);
+        input_group(f,20,8,8,0xb8,false,0,line+64);
+        input_group(f,30,40,8,0xc9);
+        input_group(f,40,40,8,0xd0,true,0,line+64);
+        require(f.manager.cancel_release_stores({20,10}),f.manager.error());
+        input_group(f,10,8,8,0xe1);input_group(f,20,8,8,0xf2,true,0,line+64);
+        auto first=f.old_image,second=f.old_image;
+        std::fill(first.begin()+8,first.begin()+16,0xe1);
+        std::fill(first.begin()+40,first.begin()+48,0xc9);
+        std::fill(second.begin()+8,second.begin()+16,0xf2);
+        std::fill(second.begin()+40,second.begin()+48,0xd0);
+        input_release(f,first);input_release(f,second,true,1,line+64);
+    } else if(test=="frozen-first-c" || test=="frozen-forbidden") {
+        input_group(f,10,8,8,0xa7);input_group(f,20,40,8,0xc9,false);
+        const auto verified=f.manager.release_data_verified_count();
+        f.c(7,1,0,9,&changed);
+        require(f.manager.cancel_release_stores({20}),f.manager.error());
+        input_group(f,20,40,8,0xd0);
+        auto late=changed;std::fill(late.begin()+40,late.begin()+48,0xd0);
+        f.c(7,1,1,9,test=="frozen-forbidden"?&late:&changed);
+        require(f.manager.ok()==(test=="frozen-first-c"),"cancellation changed frozen first-C eligibility");
+        if(test=="frozen-first-c") {
+            require(f.manager.release_data_verified_count()==verified+1 && f.bus.read_beat(line,64)==changed,
+                "cancellation discarded the active first-C snapshot");
+            f.step();input_owner(f,false);input_release(f,late);
+        } else require(f.bus.read_beat(line,64)==f.old_image,"rejected frozen C changed backing");
+    } else if(test=="baseline" || test=="applied-floor" || test=="retired-set") {
+        input_group(f,10,8,8,0xa7);input_release(f,changed,true,0);
+        input_group(f,20,40,8,0xc9,false);
+        require(f.manager.cancel_release_stores({20}),f.manager.error());
+        if(test=="retired-set") {
+            require(!f.manager.register_release_store(10,line+48,line+48,{0xb8}),
+                "cancellation made an applied/retired order reusable");
+            require(f.manager.error().find("retired order")!=std::string::npos,
+                "retired order rejection did not record a manager-contract error");
+        } else if(test=="applied-floor") {
+            require(!f.manager.register_release_store(5,line+8,line+8,{0xb8}),
+                "cancellation erased the applied-order floor");
+            require(f.manager.error().find("observed same-byte progress")!=std::string::npos,
+                "applied floor rejection did not record a manager-contract error");
+        } else {
+            f.acquire(0,0,2,line,7);f.step();f.ack();f.ok();
+            input_release(f,f.old_image,false);
+        }
+    } else if(test=="older-unauthorized") {
+        input_group(f,10,8,8,0xa7,false);input_group(f,20,8,8,0xb8);
+        auto applied=f.old_image;std::fill(applied.begin()+8,applied.begin()+16,0xb8);
+        input_release(f,applied,true,0);
+        require(f.manager.cancel_release_stores({10}),"unapplied older group was mistaken for an applied group");
+        f.acquire(0,0,2,line,7);f.step();f.ack();f.ok();input_release(f,applied);
+    } else if(test=="legacy") {
+        require(f.manager.checkpoint_alias_reference(line,64),f.manager.error());
+        for(unsigned byte=8;byte<16;++byte)f.reference.write_reference_byte(line+byte,0xa7);
+        f.manager.note_reference_store(line+8,line+8,std::vector<unsigned char>(8,0xa7));
+        input_group(f,20,40,8,0xc9,false);
+        require(f.manager.cancel_release_stores({20}),f.manager.error());
+        input_release(f,changed);
+        return; // This case deliberately advanced independent legacy reference.
+    } else if(test=="epoch-end") {
+        require(f.manager.begin_release_input_epoch(),f.manager.error());
+        input_group(f,10,8,8,0xa7,false);
+        require(f.manager.cancel_release_stores({10}),f.manager.error());
+        require(f.manager.end_release_input_epoch(),f.manager.error());
+    } else if(test=="reject-duplicate" || test=="reject-unknown" ||
+              test=="reject-authorized" || test=="reject-retired") {
+        input_group(f,10,8,8,0xa7,false);
+        auto image=changed;
+        if(test=="reject-authorized" || test=="reject-retired") {
+            input_group(f,20,40,8,0xc9);
+            std::fill(image.begin()+40,image.begin()+48,0xc9);
+        }
+        if(test=="reject-retired") {
+            auto applied=f.old_image;std::fill(applied.begin()+40,applied.begin()+48,0xc9);
+            input_release(f,applied);input_owner(f,false);
+        }
+        const std::vector<std::uint64_t> orders=test=="reject-duplicate"?
+            std::vector<std::uint64_t>{10,10}:test=="reject-unknown"?
+            std::vector<std::uint64_t>{10,999}:std::vector<std::uint64_t>{10,20};
+        require(!f.manager.cancel_release_stores(orders),"invalid cancellation was accepted");
+        require(!f.manager.ok() && f.manager.error().find("ordinary ReleaseData cancellation")!=std::string::npos,
+            "invalid cancellation did not record a manager-contract error");
+        require(f.manager.failures().records().back().component=="dcache" &&
+            f.manager.failures().records().back().code=="manager-contract",
+            "cancellation failure was classified outside the manager contract");
+        require(!f.manager.register_release_store(10,line+8,line+8,{0xb8}),
+            "failed cancellation changed an earlier valid group");
+        require(f.manager.authorize_release_store(10),"failed cancellation removed an earlier valid group");
+        const auto verified=f.manager.release_data_verified_count();
+        f.c(7,1,0,9,&image);f.c(7,1,1,9,&image);
+        require(f.manager.release_data_verified_count()==verified+1 && f.bus.read_beat(line,64)==image,
+            "failed cancellation mutated the retained input journal");
+        if(test=="reject-retired")require(!f.manager.register_release_store(20,line+48,line+48,{0xb8}),
+            "failed cancellation made a retired order reusable");
+    } else throw std::runtime_error("unknown input cancellation case: "+test);
+    require(f.reference.read_beat(line,64)==reference,"cancellation changed architectural reference bytes");
+}
 static void exhaustive_input_versions() {
     struct Update {unsigned mask;unsigned char value;};
     std::uint64_t histories=0,transitions=0;
@@ -500,6 +643,7 @@ int main(int argc, char **argv)
 {
     try {
         const std::string test = argc>1 ? argv[1] : "dirty";
+        if (test.starts_with("release-cancel-")) {input_cancellations(test.substr(15));return 0;}
         if (test == "release-input-exhaustive") {exhaustive_input_versions();return 0;}
         if (test.starts_with("release-input-")) {input_versions(test.substr(14));return 0;}
         if (test == "release-version-exhaustive") {

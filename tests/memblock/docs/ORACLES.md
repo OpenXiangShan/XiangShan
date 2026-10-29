@@ -721,6 +721,15 @@ reference bytes. Unintegrated pre-notification legacy releases retain the gap
 above. The bounded implementation permits 1,048,576 groups per line and
 67,108,864 order IDs/solver work units; exhaustion fails as a manager limitation.
 
+`cancel_release_stores` removes only registered, still unauthorized input
+orders after the caller certifies a completed legal redirect boundary. It
+preflights the complete unique order list before changing any journal; unknown,
+authorized or applied/retired orders fail. Cancellation preserves other groups,
+line baselines, progress floors, legacy history and frozen first-C candidates.
+A canceled order may represent a fresh allocation later; applied/retired orders
+remain unavailable. This is a manager capability: ordinary mixed-suffix recovery
+has not integrated it, and the method does not establish CPU redirect legality.
+
 C-source attribution follows TileLink 1.9.3 section 6.4's explicit independent
 client C namespace rule, consistent with the connected DCache WBQ and the existing
 UT contract. The ProbeAck summary tables in sections 9.3.5/9.3.6 instead describe

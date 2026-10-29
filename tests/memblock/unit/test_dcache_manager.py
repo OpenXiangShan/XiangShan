@@ -70,6 +70,67 @@ class DcacheManagerTest(unittest.TestCase):
                 result = self.run_case("release-input-" + name)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_cancellation_removes_only_unapplied_groups_after_certified_redirect(self):
+        for name in ("empty", "canceled-bytes", "removed-order", "numeric-reuse", "unaffected",
+                     "multiple-groups", "multiple-lines", "frozen-first-c", "frozen-forbidden", "baseline",
+                     "applied-floor", "retired-set", "older-unauthorized", "legacy", "epoch-end",
+                     "reject-duplicate", "reject-unknown", "reject-authorized", "reject-retired"):
+            with self.subTest(case=name):
+                result = self.run_case("release-cancel-" + name)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_private_cancellation_faults_are_detected(self):
+        production = (ROOT / "cpp/environment/dcache_agent.inc").read_text()
+        fixture = (ROOT / "unit/dcache_manager_fixture.cpp").read_text()
+        erase = "std::erase_if(inputs, [&](const auto &input) { return selected.contains(input.order); });"
+        unindex = "for (const auto order : orders) release_input_orders_.erase(order);"
+        faults = (
+            ("cancel_drop_unselected", erase,
+             "for (const auto &input : inputs) release_input_orders_.erase(input.order); inputs.clear();",
+             "unaffected", "cancellation removed an unselected input"),
+            ("cancel_keep_order_index", unindex,
+             "/* private fault: keep canceled order indices */", "numeric-reuse", "immutable group"),
+            ("cancel_drop_baseline", erase,
+             erase + " release_input_lines_.at(line).baseline = reference_memory_.read_beat(line, kLineBytes);",
+             "baseline", "ordinary input release decision incorrect"),
+            ("cancel_drop_floor", erase,
+             erase + " release_input_lines_.at(line).applied_order_mask = 0;",
+             "applied-floor", "cancellation erased the applied-order floor"),
+            ("cancel_drop_retired", unindex,
+             unindex + " retired_release_input_orders_.clear();",
+             "retired-set", "cancellation made an applied/retired order reusable"),
+            ("cancel_drop_legacy", erase,
+             erase + " release_input_lines_.at(line).legacy_updates.clear();",
+             "legacy", "ordinary input release decision incorrect"),
+            ("cancel_reset_frozen", unindex,
+             unindex + " release_data_.reset();",
+             "frozen-first-c", "cancellation discarded the active first-C snapshot"),
+            ("cancel_allow_authorized", "input == inputs.end() || input->order != order || input->authorized",
+             "input == inputs.end() || input->order != order",
+             "reject-authorized", "invalid cancellation was accepted"),
+            ("cancel_partial_preflight", "            lines.insert(found->second);",
+             "            lines.insert(found->second); inputs.erase(input); release_input_orders_.erase(order);",
+             "reject-unknown", "failed cancellation changed an earlier valid group"),
+        )
+        for name, before, after, case, diagnostic in faults:
+            with self.subTest(fault=name):
+                self.assertEqual(production.count(before), 1, "fault anchor changed: " + name)
+                mutant = self.work / (name + ".inc")
+                # The private partial-preflight fault intentionally mutates this
+                # input vector; production keeps preflight access const.
+                changed = production.replace(before, after, 1)
+                if name == "cancel_partial_preflight":
+                    changed = changed.replace("const auto &inputs = tracked->second.inputs;",
+                                              "auto &inputs = tracked->second.inputs;", 1)
+                mutant.write_text(changed)
+                source = self.work / (name + ".cpp")
+                source.write_text(fixture.replace('#include "environment/dcache_agent.inc"',
+                                                 '#include "' + str(mutant) + '"'))
+                binary = self.compile(name, source)
+                result = self.run_case("release-cancel-" + case, binary=binary)
+                self.assertNotEqual(result.returncode, 0, "private fault escaped: " + name)
+                self.assertIn(diagnostic, result.stderr)
+
     def test_ordinary_input_compaction_matches_forward_histories(self):
         result = self.run_case("release-input-exhaustive", timeout=60)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

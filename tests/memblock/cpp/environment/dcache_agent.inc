@@ -1101,6 +1101,51 @@ public:
         return true;
     }
 
+    // The caller certifies that a legal redirect/cancellation boundary has
+    // completed and that these accepted groups never became head-eligible.
+    // This manager cannot establish full-CPU redirect reachability. Preflight
+    // every order before mutation; frozen first-C snapshots already exclude
+    // unauthorized inputs and are left untouched. A canceled order may name a
+    // fresh allocation later, while applied/retired orders remain unavailable.
+    bool cancel_release_stores(const std::vector<std::uint64_t> &orders)
+    {
+        std::set<std::uint64_t> selected, lines;
+        for (const auto order : orders) {
+            if (!selected.insert(order).second) {
+                error_.record("ordinary ReleaseData cancellation contains a duplicate order");
+                return false;
+            }
+            if (retired_release_input_orders_.contains(order)) {
+                error_.record("ordinary ReleaseData cancellation targets an applied/retired order");
+                return false;
+            }
+            const auto found = release_input_orders_.find(order);
+            if (found == release_input_orders_.end()) {
+                error_.record("ordinary ReleaseData cancellation has no registered input");
+                return false;
+            }
+            const auto tracked = release_input_lines_.find(found->second);
+            if (tracked == release_input_lines_.end()) {
+                error_.record("ordinary ReleaseData cancellation lost its input line");
+                return false;
+            }
+            const auto &inputs = tracked->second.inputs;
+            const auto input = std::lower_bound(inputs.begin(), inputs.end(), order,
+                [](const auto &candidate, auto value) { return candidate.order < value; });
+            if (input == inputs.end() || input->order != order || input->authorized) {
+                error_.record("ordinary ReleaseData cancellation requires a registered unauthorized input");
+                return false;
+            }
+            lines.insert(found->second);
+        }
+        for (const auto line : lines) {
+            auto &inputs = release_input_lines_.at(line).inputs;
+            std::erase_if(inputs, [&](const auto &input) { return selected.contains(input.order); });
+        }
+        for (const auto order : orders) release_input_orders_.erase(order);
+        return true;
+    }
+
     // The caller has retired producers, drained SBuffer and all D/E traffic.
     // Freeze only independent architectural bytes, before the next context's
     // stores can advance the global reference beyond the old cache owner.

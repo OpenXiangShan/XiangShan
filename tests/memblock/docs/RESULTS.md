@@ -335,6 +335,7 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 | --- | --- | --- |
 | Ordinary-input manager host contracts | Seven methods pass in isolation against the pre-change headers; 58 passing modes, 729 independent histories/10,193 two-release transitions, 524,288 input-group stress and 9/9 compiled private faults | `build/memblock/store-retirement-20261030/manager-checkpoint-isolated/unit.log`, `manager-audit/final-evidence.json`; independent non-author forward model matches 4,000 additional decisions and rejects the stale-legacy counterexample. Synthetic manager ports do not establish native integration or full coherence coverage |
 | Current alias diagnostic | `translation-alias` fails identically in pre-change and current frozen runtimes at cycle 365 with a load-byte mismatch | `build/memblock/store-retirement-20261030/alias-comparison/replay-k2l5u1ac/comparison.json`; same model and byte-for-byte identical output. Origin remains unclassified; no CPU RTL bug or current pass claim |
+| Ordinary-input cancellation manager | Nine manager host methods pass, including 19 focused cancellation cases; nine new private cancellation faults and nine retained input-version faults reject | `WORKSPACE_ROOT/build/memblock/store-retirement-20261030/release-cancel-checkpoint/{evidence.json,host-ao5gtuoq/summary.json}`; cancellation removes only unauthorized groups after a caller-certified boundary, preserves first-C snapshots/history/floors and permits fresh reuse of never-applied orders. Synthetic manager ports; no mixed-suffix/native recovery qualification |
 | Infrastructure unit | 533 tests pass | Unit checks do not establish DUT functional coverage |
 | Admission/ledger host contracts | 20 independent methods pass: 13 production C++ schedules, 20 compiled private faults detected, 50 ledger records; non-author review independently enumerates 4803 arithmetic cases | `build/memblock/enqueue-admission-20261030/independent-tests/{summary.txt,evidence.json,ledger-evidence.json}`, `review-v1/review.md`; exact credit/redirect boundaries, repeated highs, both watermarks, unmonitored ticks, immediate conservation, holey batches, cadence and schema 2 compatibility. Synthetic public ports/edges; no DUT mutation claim |
 | Ordinary enqueue/feedback DUT qualification | Frozen runtime-v1: 12/12 finite cases pass 22528 actions; six current-runtime artifact verifiers and one prior-monitor2 control pass; 9/9 adjacent directed scenarios pass | `build/memblock/enqueue-admission-20261030/qualification-v1.json`, `artifact-verifiers-v1.json`, `directed-v1/results.json`; spec/coverage/corner defaults, ordinary dependency streams, integrated recovery and store-only 641-instruction epochs. Whole-run cadence: 51092 enqueue edges, 8969 adjacent edges with older work, maximum run 19; this includes legacy/final readback and has no per-stream attribution. Stream-specific feedback overlap includes 315 admissions, 14 loads, 227 STA, 182 STD, 35 vector uops and 7 prefetches. 5478 ordinary hits, 715 misses/retries, maximum pending 2; 12303 stream retirements, 2748 full ROB identity reuses and 9929/9929 final words. Exact corner replays pass at 333.5/336.6s with 900s budget; initial 180s timeouts and malformed-constraint attempts are excluded. Functional/accounting development evidence, not closure |
@@ -441,6 +442,16 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Fresh-context non-author review accepts the cancellation extension as a
+manager-only source/host capability. Independent probes check cross-line
+cancellation and reuse during frozen C, retained progress floors and rejected
+batch atomicity against archived committed headers. The main-agent isolated
+nine-method suite also passes with only the manager changed across 95 archived
+C++ files. Evidence is under
+`WORKSPACE_ROOT/build/memblock/store-retirement-20261030/release-cancel-review-v1/`
+and `build/memblock/store-retirement-20261030/release-cancel-isolated/`.
+Native mixed-suffix recovery and CPU input reachability remain unqualified.
 
 Fresh-context non-author review accepts the ordinary-input manager source and
 host contracts for bounded development use. It independently compares 4,000

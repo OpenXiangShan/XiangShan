@@ -234,6 +234,24 @@ this known-address direction. These gaps take priority
 over expanding rare error/protection crosses; structural uniqueness alone cannot
 guarantee a CPU bug.
 
+Ordinary unaligned forwarding makes general replay recovery a functional
+prerequisite, not only an injected corner case. StoreQueue's older allocated
+unaligned entries can assert forwarding data-invalid with data already present;
+a misaligned LoadUnit return can request flush-self. Such recovery must preserve
+older committed SQ obligations and cancel every same-ROB vector uop plus younger
+mixed instructions. Public LQ/SQ cancellations count remaining physical entries,
+not every invalidated architectural uop. The selected backend return path samples
+MemBlock's redirect two edges after its public memoryViolation edge; a blocking
+helper must not postpone that return until the outer scheduler polls. Exact
+producer/commit ordering, old responses and independent strict refetch checks
+remain required. This mechanism alone is not evidence of an RTL defect.
+
+Ordinary U-mode load/store permissions with live mixed work remain a priority
+alongside recovery and producer density. Current ordinary S/VS contexts and
+permissive non-U mappings do not provide that relation; dedicated permission
+helpers do not substitute for it. Follow actual CSR/fence/redirect producer
+ordering before broadening contexts across outstanding work.
+
 Priority work, each requiring executable stimulus and an independent check:
 
 1. Allow independent ready producers to progress across stalled peers and form

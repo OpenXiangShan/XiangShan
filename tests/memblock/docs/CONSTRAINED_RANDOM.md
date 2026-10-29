@@ -1096,6 +1096,24 @@ FP helper and exceptional-misalignment combinations remain open.
 Broader temporal locality/dependent-address streams and scalar/vector SQ
 forwarding follow these. Rare error/protection/CMO crosses remain secondary.
 
+The ready-event scheduler still executes one blocking producer helper per turn.
+Same-cycle issue across different producer classes, or issue alongside admission,
+has no ordinary-stream path. Ordinary loads conservatively wait for older scalar
+addresses and complete older vector stores; unresolved scalar graphs provide a
+bounded exception. Ordinary U-mode permissions with live mixed work, general
+scalar/vector/store suffix cancellation and cross-page pointer chains remain
+absent. These are generation limits; more seeds or larger weights cannot reach
+those combinations. Distinct synthetic schedules establish variation within the
+implemented grammar, not DUT joint coverage or full-CPU input legality.
+
+An older allocated unaligned SQ entry can mark forwarding data unavailable even
+when its data is valid. A misaligned load can turn that condition into a public
+flush-self replay. Mixed recovery must therefore preserve committed pending SQ
+records, invalidate the whole killed vector instruction and younger mixed suffix,
+reconcile physical cancellation separately from architectural invalidation, and
+strictly check fresh execution. Queue drain before every such load would remove
+the overlap this direction needs to verify. General handling remains missing.
+
 ### Ordinary producer dependencies
 
 Schema 71 reports `stream_dependencies`: address edges, scalar-store data edges,
