@@ -4,12 +4,12 @@
 
 - Worktree: `.codex_mother_integration_20261028`
 - Branch: `codex/memblock-csr-prefix-fix-20261025`
-- 最近已提交实现：`3bd0e9934`（PBMT回归profile修复），该批已通过SV基线为`60dcca7c6`，源B1为5a4dc2df4d。
-  提交前HEAD为文档提交`eaddd5cb8`；新首段数据错误RM修复随本记录单Bug提交，2540项编译输入中仅计划内10个SV输入变化，RTL未变。
+- 最近已提交实现：`1343dbce3`（跨页Load首段数据错误RM修复，单Bug commit）；旧PBMT profile为`3bd0e9934`、旧已通过SV基线为`60dcca7c6`。
+  本次2540项编译输入中仅计划内10个SV输入变化，RTL未变；四项无关知识库脏文档未纳入提交。
 - 当前执行状态：旧WIP门禁已关闭；原矩阵非strict-NC共25组250/250通过，strict-NC10项延期；25组通过SV基线覆盖率已过滤合并。
   新fault3问题已独立确认为RM并通过方案review。r5 fresh compile及相同临时参数最小真实DUT用例严格PASS，
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
-  本BugTuring最终独立review PASS，随本记录单Bug提交；fault3跨轮1/100、剩余99项尚未恢复，提交后启动。
+  本BugTuring最终独立review PASS并已提交；fault3跨轮1/100、剩余99项已启动恢复；同源码25组250项独立mode重验已开始fresh compile。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -371,7 +371,7 @@ DUT层次`top_tb.U_MEMBLOCK`：line80.38%、condition59.51%、toggle37.90%、FSM
 
 | tc | ts | cfg | 请求数/seed数 | 状态 | 已验收/计划 |
 |---|---|---|---|---|---:|
-| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 每seed10000笔，原100seed | 原seed已PASS，最终review PASS，提交后恢复99 | 1/100 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 每seed10000笔，原100seed | 原seed已PASS，1343dbce3提交后恢复99运行中 | 1/100 |
 
 原seed来源：`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/mem_ut/ver/ut/memblock/sim/fault3_100seed_8e45befc1_20261019_results/seeds.txt`，
 SHA256=`c785d5cebc36b850aa31adc1b076ad11aad21a6f18e63afd7ef44a5b7bddd196`，无新增/替换seed。
@@ -421,5 +421,9 @@ Turing独立责任分类为`REVIEW_PASS`，已登记W44 RM周文件“跨页Load
 
 默认恢复并发20；提高并发的询问未获答复前不按80启动。没有新增worktree或并行修改。旧source仅保全证据，全部必要项已集成。
 恢复清单与逐名额替换映射：`mem_ut/ver/ut/memblock/sim/mother_fault3_recovery_plan_20261030`，
-含400份历史seed来源/hash、新99 seed清单及25组矩阵manifest；当前仅准备完毕，未把计划清单计作PASS。
+含400份历史seed来源/hash、新99 seed清单及25组矩阵manifest；已启动执行，未把计划清单计作PASS。
+恢复99结果：`mem_ut/ver/ut/memblock/sim/mother_fault3_recovery99_r5_20261030_results`，mode=`mother_first_split_pass_only_cov_20261030`。
+修复后25组矩阵：`mem_ut/ver/ut/memblock/sim/mother_stable_matrix_r5_20261030_results`，mode=`mother_stable_matrix_r5_20261030`；
+首组`basicTest / memblock_dispatch_manual_control_vseq / csr_sfence_check_store_manual_control` fresh compile中，后续组各10并发。
+两处`campaign_state.tsv`逐轮/逐组保留状态，原失败和旧250通过记录不覆盖；最终稳定版本当前仅根seed已验收1/350，专项邻接不替代计划矩阵名额。
 最终交付还需完成独立 fault3 100-seed、统一稳定源码的覆盖率数据库与合并报告、问题/方案总 review。

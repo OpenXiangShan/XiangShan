@@ -45,7 +45,7 @@ source只保留证据，不承接后续编码；2026-10-30重新核对快照四�
 | redirect遗漏later-split旧记录取消 | 集成helper未调用现有取消逻辑，旧完成可遗留 | redirect集成恢复旧epoch取消；先检查前置再修改公共状态 | `c9763bd7d` | 修前确定性FAIL，修后定向及真实39/39严格通过，独立review通过 |
 | CSR映射切换缺真实SFENCE完成 | target/PMP后直接进入candidate；CSR changed/inflight处理不等于DUT storage失效，未发送并等待真实全SFENCE；不混同未采用的A1删模型候选 | 限非虚拟special映射切换，目标CSR稳定后真实HS全SFENCE，等同owner/reset的C0/C4再放行 | `60dcca7c6` | 源12/12、母14/14严格通过及两类负向专项；独立最终review通过 |
 | PBMT矩阵请求数路由错误 | 统一MAIN1000覆盖当前两UID定向cfg，发送前合同检查fatal | 新增fixed_cfg路由，仅此组保留cfg2；不改SV/cfg/RM/checker | `3bd0e9934` | 原MAIN1000波形仍复现拒绝；单测/dry-run、原seed cfg2、恢复10/10严格通过 |
-| 跨页Load首段数据错误提前终止漏建模 | RM先要求全部页翻译，DUT首页corrupt合法取消高页时先query miss | 固定首段身份/实际S2与连续消费证明，跨页前按独立错误形成严格异常；不造高页、不改RTL | 随本记录单Bug提交 | 原seed10000笔及21/21真实DUT、四类软件专项PASS，Turing最终实现review PASS |
+| 跨页Load首段数据错误提前终止漏建模 | RM先要求全部页翻译，DUT首页corrupt合法取消高页时先query miss | 固定首段身份/实际S2与连续消费证明，跨页前按独立错误形成严格异常；不造高页、不改RTL | `1343dbce3` | 原seed10000笔及21/21真实DUT、四类软件专项PASS，Turing最终实现review PASS |
 
 主要专项review入口：
 
@@ -81,7 +81,7 @@ NC返回已进入输出暂存寄存器，redirect后旧返回未被取消，之�
 seed1992896882的UID2401在602001.1ns报第二页TLB查询缺失；原seed同时间同UID波形已复现，
 NPI事实提取/断言确认低段corrupt后取消高段，正式RM责任分类及多轮方案review均PASS，已登记W44 RM Buglist。
 修复在mother顺序完成r5 coding与fresh compile。原seed1992896882完整10000笔、原参数无临时覆盖严格PASS；
-真实DUT专项/邻接合计21/21，四类必要软件专项另计PASS，Turing最终独立实现review PASS；随本记录单Bug提交后才恢复100-seed批量。
+真实DUT专项/邻接合计21/21，四类必要软件专项另计PASS，Turing最终独立实现review PASS；单Bug提交`1343dbce3`后已恢复99项并独立重验矩阵250项。
 专项实现review入口：`AI_DOC/plan/rm_review_doc/undo/memblock_first_split_data_error_termination_implementation_review_20261030.md`。
 分析入口：`AI_DOC/analysis/framework_design/memblock_fault3_cross_page_query_miss_seed1992896882_20261030.md`。
 fault3跨轮当前1/100，原1FAIL/19ABORTED/80NOT_RUN历史保留；
