@@ -19,7 +19,15 @@ EnableCHIAsyncBridge: true
 
 LLC: OpenLLC
 
-L2CacheConfig: { size: 2 MB, ways: 8, inclusive: true, banks: 4, tp: false, enableFlush: false }
+L2CacheConfig:
+  size: 2 MB
+  ways: 8
+  banks: 4
+  mshrSize: 32
+  replacement: drrip
+  enableDataECC: true
+  dataECC: secded
+  enableFlush: false
 
 OpenLLCConfig: { size: 32 MB, ways: 16, banks: 4 }
 

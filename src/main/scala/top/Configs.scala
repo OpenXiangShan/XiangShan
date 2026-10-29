@@ -48,9 +48,7 @@ import xiangshan.backend.regfile._
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.EnableJtag
-import xscache.coupledL2._
-import xscache.coupledL2.prefetch._
-import xscache.common.DirtyField
+import xscache.coupledL2.{L2Param => OpenLLCClientParam}
 import xscache.oceanus.compactchi.{CCHIParameters, CCHIParametersKey}
 import oceanus.chi.{CHIParameters, CHIParametersKey, EnumCHIIssue}
 import oceanus.l2.{L2Params, L2ParamsKey}
@@ -68,6 +66,27 @@ private[top] object CacheSizeParser {
     case s"${m}MB" => (m.trim.toDouble * 1024 * 1024).toInt
     case s"${g}GB" => (g.trim.toDouble * 1024 * 1024 * 1024).toInt
     case bytes => bytes.trim.toInt
+  }
+}
+
+// OpenLLC still uses the legacy descriptor type for its client directory.
+// Translate only the geometry here; tile L2 configuration is Oceanus-native.
+private[top] object OpenLLCClientParameters {
+  def apply(tiles: Seq[XSCoreParameters]): Seq[OpenLLCClientParam] = {
+    val clientDirBytes = tiles.map { tile =>
+      tile.L2CacheParamsOpt.map { l2 =>
+        tile.L2NBanks * l2.sets * l2.ways * l2.blockBytes
+      }.getOrElse(0)
+    }.sum
+    tiles.map { tile =>
+      val l2 = tile.L2CacheParamsOpt.get
+      OpenLLCClientParam(
+        name = "L2",
+        sets = 2 * clientDirBytes / tile.L2NBanks / l2.ways / l2.blockBytes,
+        ways = l2.ways + 2,
+        blockBytes = l2.blockBytes
+      )
+    }
   }
 }
 
@@ -92,7 +111,11 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
   case DFTOptionsKey => DFTOptions()
-  case CCHIParametersKey => CCHIParameters()
+  // XSCoreParamsKey is bound per tile before its CCHI ports and L2 are created.
+  case L2ParamsKey => site(XSCoreParamsKey).L2CacheParamsOpt.getOrElse(L2Params())
+  case CCHIParametersKey => CCHIParameters(
+    WayIndex_Width = log2Ceil(site(L2ParamsKey).ways)
+  )
   case CHIParametersKey => CHIParameters(
     issue = EnumCHIIssue.E,
     nodeIdWidth = 11,
@@ -108,7 +131,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
 
 class MinimalConfig(n: Int = 1) extends Config(
   OpenLLCConfig("4MB", ways = 8, banks = 4)
-    ++ L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
+    ++ L2CacheConfig("128KB", banks = 1)
     ++ WithNKBL1D(32, ways = 4)
     ++ new BaseConfig(n).alter((site, here, up) => {
       case XSTileKey => up(XSTileKey).map(
@@ -281,16 +304,10 @@ class MinimalConfig(n: Int = 1) extends Config(
             l0ReservedBits = 0,
             spSize = 4,
           ),
-          L2CacheParamsOpt = Some(L2Param(
-            name = "L2",
+          L2CacheParamsOpt = Some(L2Params(
+            mshrSize = 32,
             ways = 8,
             sets = 128,
-            echoField = Seq(DirtyField()),
-            prefetch = Nil,
-            clientCaches = Seq(L1Param(
-              "dcache",
-              isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
-            )),
           )),
           L2NBanks = 2,
           prefetcher = Nil // if L2 pf_recv_node does not exist, disable SMS prefetcher
@@ -304,7 +321,7 @@ class MinimalConfig(n: Int = 1) extends Config(
             sets = 2048,
             banks = 4,
             fullAddressBits = 48,
-            clientCaches = Seq(L2Param())
+            clientCaches = OpenLLCClientParameters(site(XSTileKey))
           )),
           L3NBanks = 1
         )
@@ -338,75 +355,51 @@ case class L2CacheConfig
 (
   size: String,
   ways: Int = 8,
-  inclusive: Boolean = true,
   banks: Int = 1,
-  tp: Boolean = true,
-  nl: Boolean = false,
-  cdp: Boolean = true,
-  enablePC: Boolean = false, // Enable PC field for L1Param
+  mshrSize: Int = 32,
+  replacement: String = "drrip",
+  physicalAddrWidth: Int = 48,
+  blockBytes: Int = 64,
+  dataSRAMSplit: Int = 8,
+  enableDataECC: Boolean = true,
+  dataECC: Option[String] = Some("secded"),
+  enableDRRIPReleaseUpdate: Boolean = true,
+  enableDRRIPEntranceReleaseUpdate: Boolean = true,
+  // TODO: Forward this parameter to L2Params once Oceanus L2 implements flush support.
   enableFlush: Boolean = false
 ) extends Config((site, here, up) => {
   case XSTileKey =>
-    require(inclusive, "L2 must be inclusive")
-    val nKB = size.toUpperCase() match {
-      case s"${k}KB" => k.trim().toInt
-      case s"${m}MB" => (m.trim().toDouble * 1024).toInt
+    if (enableFlush) {
+      Console.err.println("WARNING: L2CacheConfig.enableFlush=true is currently ignored; Oceanus L2 flush support is not implemented.")
     }
-    val upParams = up(XSTileKey)
-    val l2sets = nKB * 1024 / banks / ways / 64
-    upParams.map(p => p.copy(
-      L2CacheParamsOpt = Some(L2Param(
-        name = "L2",
+    require(banks >= 1 && banks <= 4, "Oceanus L2 supports 1 to 4 slices")
+    require(ways > 0, "L2 ways must be positive")
+    require(blockBytes == 64, "The CCHI L1/L2 integration requires 64-byte cache lines")
+    require(physicalAddrWidth == 48, "The CCHI L1/L2 integration requires 48-bit physical addresses")
+    val sizeInBytes = CacheSizeParser.toBytes(size)
+    val bytesPerSet = banks * ways * blockBytes
+    require(sizeInBytes > 0 && sizeInBytes % bytesPerSet == 0,
+      "L2 size must be a positive multiple of banks * ways * blockBytes")
+    val l2sets = sizeInBytes / bytesPerSet
+    require(isPow2(l2sets), "L2 sets per slice must be a power of two")
+    up(XSTileKey).map(tile => tile.copy(
+      L2CacheParamsOpt = Some(L2Params(
+        physicalAddrWidth = physicalAddrWidth,
+        mshrSize = mshrSize,
         ways = ways,
         sets = l2sets,
-        clientCaches = Seq(L1Param(
-          "dcache",
-          sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
-          ways = p.dcacheParametersOpt.get.nWays + 2,
-          aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
-          vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
-          pcBitOpt = if (enablePC) Some(p.GPAddrBitsSv48x4) else None, // Enable PC field if needed
-          isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
-        )),
-        reqField = Seq(utility.ReqSourceField()),
-        echoField = Seq(DirtyField()),
-        tagECC = Some("secded"),
-        dataECC = Some("secded"),
-        enableTagECC = true,
-        enableDataECC = true,
-        dataCheck = Some("oddparity"),
-        enablePoison = true,
-        prefetch = Seq(BOPParameters()) ++
-          (if (tp) Seq(TPParameters()) else Nil) ++
-          (if (nl) Seq(NLParameters()) else Nil) ++
-          (if (cdp) Seq(CDPParameters()) else Nil) ++
-          (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
-        enableL2Flush = enableFlush,
-        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
-        enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
-        enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
-        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform,
+        blockBytes = blockBytes,
+        replacement = replacement,
+        dataSRAMSplit = dataSRAMSplit,
+        enableDataECC = enableDataECC,
+        dataECC = dataECC,
         hasMbist = site(DFTOptionsKey).EnableMbist,
         hasSramCtl = site(DFTOptionsKey).EnableSramCtl,
+        enableDRRIPReleaseUpdate = enableDRRIPReleaseUpdate,
+        enableDRRIPEntranceReleaseUpdate = enableDRRIPEntranceReleaseUpdate
       )),
       L2NBanks = banks
     ))
-  case L2ParamsKey =>
-    val l2p = site(XSTileKey).head.L2CacheParamsOpt.getOrElse(L2Param())
-    L2Params(
-      physicalAddrWidth = 48,
-      mshrSize = 32,
-      ways = l2p.ways,
-      sets = l2p.sets,
-      replacement = "drrip",
-      blockBytes = l2p.blockBytes,
-      enableDataECC = l2p.enableDataECC,
-      hasMbist = l2p.hasMbist,
-      hasSramCtl = l2p.hasSramCtl
-    )
-  case CCHIParametersKey => up(CCHIParametersKey).copy(
-    WayIndex_Width = log2Ceil(site(L2ParamsKey).ways)
-  )
 })
 
 case class OpenLLCConfig(size: String, ways: Int = 8, banks: Int = 1) extends Config((site, here, up) => {
@@ -414,9 +407,6 @@ case class OpenLLCConfig(size: String, ways: Int = 8, banks: Int = 1) extends Co
     val sizeInBytes = CacheSizeParser.toBytes(size)
     val sets = sizeInBytes / banks / ways / 64
     val tiles = site(XSTileKey)
-    val clientDirBytes = tiles.map { t =>
-      t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
-    }.sum
     up(SoCParamsKey).copy(
       L3NBanks = banks,
       OpenLLCParamsOpt = Some(OpenLLCParam(
@@ -425,13 +415,7 @@ case class OpenLLCConfig(size: String, ways: Int = 8, banks: Int = 1) extends Co
         sets = sets,
         banks = banks,
         fullAddressBits = 48,
-        clientCaches = tiles.map { core =>
-          val l2params = core.L2CacheParamsOpt.get
-          l2params.copy(
-            sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64,
-            ways = l2params.ways + 2
-          )
-        },
+        clientCaches = OpenLLCClientParameters(tiles),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       ))
@@ -447,15 +431,8 @@ case class LLCConfig(llc: String) extends Config((site, here, up) => {
     } else {
       soc
     }
-  case XSTileKey if LLCType.withName(llc) == LLCType.ZhuJiang =>
-    up(XSTileKey).map { tile =>
-      tile.copy(L2CacheParamsOpt = tile.L2CacheParamsOpt.map(_.copy(
-        dataCheck = None,
-        enablePoison = false,
-        bufferableNC = false,
-        endpointOrderNC = true
-      )))
-    }
+  case CHIParametersKey if LLCType.withName(llc) == LLCType.ZhuJiang =>
+    up(CHIParametersKey).copy(dataCheckPresent = false, poisonPresent = false)
 })
 
 case class ZhuJiangConfig(size: String, ways: Int = 16) extends Config((site, here, up) => {
@@ -488,13 +465,6 @@ class WithFuzzer extends Config((site, here, up) => {
       enablePerf = false,
     )),
   )
-  case XSTileKey => up(XSTileKey).zipWithIndex.map{ case (p, i) =>
-    p.copy(
-      L2CacheParamsOpt = Some(up(XSTileKey)(i).L2CacheParamsOpt.get.copy(
-        enablePerf = false,
-      )),
-    )
-  }
 })
 
 class FrontendDebugConfig(n: Int = 1) extends Config(
@@ -601,7 +571,7 @@ class CVMTestCompile extends Config((site, here, up) => {
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   OpenLLCConfig("512KB")
-    ++ L2CacheConfig("256KB", inclusive = true)
+    ++ L2CacheConfig("256KB")
     ++ WithNKBL1D(128)
     ++ new MinimalConfig(n)
 ) with DeprecatedConfigWarning
@@ -616,7 +586,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
-    ++ L2CacheConfig("2MB", ways = 8, inclusive = true, banks = 4, tp = false)
+    ++ L2CacheConfig("2MB", ways = 8, banks = 4)
     ++ WithNKBL1D(64, ways = 4, nCCHIChannels = 2)
     ++ new BaseConfig(n)
 )
@@ -663,7 +633,7 @@ class XSNoCDiffTopMinimalConfig(n: Int = 1) extends Config(
 
 class FpgaDefaultConfig(n: Int = 1) extends Config(
   (OpenLLCConfig("3MB", banks = 1, ways = 6)
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ L2CacheConfig("1MB", banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
@@ -675,7 +645,7 @@ class FpgaDefaultConfig(n: Int = 1) extends Config(
 
 class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
   (OpenLLCConfig("3MB", banks = 1, ways = 6)
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+    ++ L2CacheConfig("1MB", banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
