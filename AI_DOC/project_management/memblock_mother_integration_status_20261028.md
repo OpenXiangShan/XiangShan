@@ -4,8 +4,8 @@
 
 - Worktree: `.codex_mother_integration_20261028`
 - Branch: `codex/memblock-csr-prefix-fix-20261025`
-- Current HEAD: `4948d291e`
-- Worktree status: production source clean；本状态文件与 W43/W44 Buglist 为 documentation-only dirty，待本轮提交
+- 本轮已验收源码提交：`4948d291e`；CSR closure 文档提交：`201901c3d`。
+- 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
 ## Integrated Bug Commits
 
@@ -69,5 +69,36 @@ byte-identical to integrated commit `91d403eb1`; intermediate revisions were not
 ## Current Decision
 
 CSR prefix Bug 与 CSR scalar cfg Bug 已完成 mother 集成和原失败用例复测。后续不再创建或扩展 Bug
-worktree；从状态表中选择尚未运行的 mother regression 项，按单用例/单 cfg 串行执行。若发现新 Bug，直接在
-mother worktree 完成记录、方案、修改、专项验证和单 Bug commit；不修复无关 `soft_test`。
+worktree。2026-10-29 用户允许并发仿真加速：配置逐组推进，组内最多并发 10 个 seed，同一 mode 只运行
+一个 controller，保持 monitor/record 和首错联停。代码修改仍在 mother worktree 中逐个 Bug 顺序完成：
+记录、方案、修改、专项验证和单 Bug commit；不修复无关 `soft_test`。
+
+## BasicTest 原始矩阵逐组进度
+
+以下为源码 `4948d291e` 上的原始 12 组、120 个 seed 的核验台账；CSR scalar 四项属于额外专项，
+不计入这 120 项。每组 seed 和临时参数来自原始 `functional_cfg_cov_20261023_results/<cfg>/config.txt`
+及 `seeds.txt`；使用 mother 中已经修正的 cfg。历史其他源码的 PASS 不计入本表。
+
+| 序号 | tc | ts | cfg | 本轮状态 | 已验收/计划 |
+|---:|---|---|---|---|---:|
+| 1 | `basicTest` | `memblock_dispatch_manual_control_vseq` | `csr_sfence_check_store_manual_control` | `PASS` | 10/10 |
+| 2 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `csr_sfence_check_store_rob_control` | `NOT_RUN` | 0/10 |
+| 3 | `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | `NOT_RUN` | 0/10 |
+| 4 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | `NOT_RUN` | 0/10 |
+| 5 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | `NOT_RUN` | 0/10 |
+| 6 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | `NOT_RUN` | 0/10 |
+| 7 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_strict_nc_100k` | `NOT_RUN` | 0/10 |
+| 8 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | `NOT_RUN` | 0/10 |
+| 9 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | `NOT_RUN` | 0/10 |
+| 10 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | `NOT_RUN` | 0/10 |
+| 11 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_10k` | `NOT_RUN` | 0/10 |
+| 12 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_1k` | `NOT_RUN` | 0/10 |
+
+第 1 组结果目录：
+`mem_ut/ver/ut/memblock/sim/.eda_regression/basicTest_csr_sfence_check_store_manual_control_20261029_105234_2388929_29884`。
+controller 为 `planned=completed=pass=10`，所有失败/未完成分类为 0，`remote_unknown_jobs=0`。
+10 个 final log 均有一次 `TEST_PASS`、正常 `$finish`，raw/caught/demoted UVM ERROR/FATAL 六项均为 0。
+`seeds.txt` 与原始归档逐行一致；实际激励参数保留 `MAIN_TRANS_NUM=1000`、`CHECK_TRIGGER_EN=0`。
+
+其余 14 组 functional matrix、fault3 100-seed 专项和最终覆盖率尚未完成。当前 10/10 只关闭第一组，
+不能解释为母任务全部完成；发生源码修复后需要重新评估已通过组的相邻复测范围和最终统一版本验收。
