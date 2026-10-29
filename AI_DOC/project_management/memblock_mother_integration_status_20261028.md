@@ -424,6 +424,39 @@ Turing独立责任分类为`REVIEW_PASS`，已登记W44 RM周文件“跨页Load
 含400份历史seed来源/hash、新99 seed清单及25组矩阵manifest；已启动执行，未把计划清单计作PASS。
 恢复99结果：`mem_ut/ver/ut/memblock/sim/mother_fault3_recovery99_r5_20261030_results`，mode=`mother_first_split_pass_only_cov_20261030`。
 修复后25组矩阵：`mem_ut/ver/ut/memblock/sim/mother_stable_matrix_r5_20261030_results`，mode=`mother_stable_matrix_r5_20261030`；
-首组`basicTest / memblock_dispatch_manual_control_vseq / csr_sfence_check_store_manual_control` fresh compile中，后续组各10并发。
-两处`campaign_state.tsv`逐轮/逐组保留状态，原失败和旧250通过记录不覆盖；最终稳定版本当前仅根seed已验收1/350，专项邻接不替代计划矩阵名额。
+首组`basicTest / memblock_dispatch_manual_control_vseq / csr_sfence_check_store_manual_control` fresh compile PASS并10/10严格通过，后续组各10并发。
+两处`campaign_state.tsv`逐轮/逐组保留状态，原失败和旧250通过记录不覆盖；当前修复后矩阵50/250、fault3 1/100，合计51/350，专项邻接不替代计划矩阵名额。
+
+### 1343dbce3修复后矩阵逐组状态
+
+以下专门记录新SV版本，不覆盖旧250/250历史结果。每组结果目录为`mother_stable_matrix_r5_20261030_results/<cfg>`；
+最终以对应验收JSON及根`campaign_state.tsv`为准。新mode simv SHA256=`d9c0e87813abc6ad2aeeabb0fadaa5ecb3e8b0bf4af3633523f54dbf4b4019bc`。
+
+| tc | ts | cfg | 修复后状态 | 已验收/计划 |
+|---|---|---|---|---:|
+| `basicTest` | `memblock_dispatch_manual_control_vseq` | `csr_sfence_check_store_manual_control` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `csr_sfence_check_store_rob_control` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | 运行中 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 待执行 | 0/10 |
+| `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | 待执行 | 0/10 |
+| `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_10k` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_1k` | 待执行 | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `default` | 待执行 | 0/10 |
+| `tc_boundary_addr_reuse_gate` | `virtual_base_sequence` | `tc_boundary_addr_reuse_store_cross8_gate` | 待执行 | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_l2cache_model` | 待执行 | 0/10 |
+| `tc_dispatch_real_mixed_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_sta_wb_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_mixed_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_wb_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_multi_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_multi_store_wb_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke_flushsb` | 待执行 | 0/10 |
+| `tc_dispatch_real_store_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_store_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_sta_wb_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_wb_smoke` | 待执行 | 0/10 |
+| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_io` | 待执行 | 0/10 |
+| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_nc` | 待执行 | 0/10 |
+| `tc_l2tlb_ppn_reuse_smoke` | `virtual_base_sequence` | `tc_l2tlb_ppn_reuse_smoke` | 待执行 | 0/10 |
 最终交付还需完成独立 fault3 100-seed、统一稳定源码的覆盖率数据库与合并报告、问题/方案总 review。
