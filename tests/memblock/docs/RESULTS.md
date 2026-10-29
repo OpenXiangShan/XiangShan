@@ -91,18 +91,19 @@ None.
   root-reuse fences, legal tail branch/refetch and integer destination bounds
   remain enforced. Arbitrary simultaneous synonyms and CMO/error-grant ownership
   remain outside this direction.
-- `scalar-unresolved` adds randomized one-store/one-load delayed-address
-  windows with partial byte conflicts and same-region disjoint controls.
-  Strict provisional loads use the pre-store snapshot; conflicts require the
-  exact flush-itself identity, two-stage return and strict program-order refetch
-  while the older store remains uncommitted. Store commit/drain and DUT readback
-  complete the obligation. The separate store TLB uses legal miss reissue.
-  Warm, provisional/refetch and readback roles have distinct live destinations;
-  refetch reuses the free-list-restored original pdest with a new LQ/scoreboard
-  epoch. The same-pdest correction also applies to directed alias refetch.
-  The incomplete head is a non-memory ROB group, whose operand-producing member
-  can finish before an independent FP member; its source witness does not prove
-  cycle-accurate full-CPU timing for every manager delay.
+- `scalar-unresolved` draws 1..4 older stores and one provisional load with all
+  addresses withheld. Independent producer groups permit varied STA/STD-ready
+  events and out-of-age address resolution. On the first conflict, remaining
+  events pause for the exact flush-itself identity and two-stage return; later
+  older operands resolve only after recovery drains. Strict refetch uses the
+  youngest input writer per byte in program order, at the restored ROB/pdest and
+  a fresh LQ/scoreboard epoch, before stores commit. Every touched aligned word
+  receives a snapshot-plus-store readback after age-ordered commit/drain. Schema
+  63 checks store/event/peak/prefix/pair/word conservation and first-conflict
+  positions, including empty and endpoint configurations. The source witness
+  `A,S0,P1,S1,...,L` keeps a genuinely incomplete non-memory aggregate at the head;
+  it does not establish every randomized full-CPU FU/PTW cycle timing. Multiple
+  victims, repeated recovery and unresolved sliding admission remain open.
 - Ordinary and segment indexed operands now vary bounded offset spacing,
   permutation and repeated gathers. Each instruction generates one complete
   architectural index vector before CPU-compatible uop slicing. Scatters use
@@ -239,7 +240,7 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 369 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 381 tests pass | Unit checks do not establish DUT functional coverage |
 | Ordinary sliding mixed DUT qualification | Frozen runtime-v4: 10/10 accepted finite seeds pass 14336 actions; all five retained artifact verifiers accept; 8/8 adjacent directed cases pass | `build/memblock/sliding-mixed-20261029/qualification-v4.json`; translated indexed, broad vector shapes, legacy controls, clean special overlap and default spec. 117 epochs, 2360 retired stream instructions, 1467 accepted-overlap admissions, 1706 continued admissions, 378 replay issues, 99 legacy windows and 7259/7259 final words. Development qualification only; pending/unaccepted runs excluded |
 | Ordinary stream mechanisms | Nine compiled scheduler tests pass: 256 executor runs and 240 execute-budget runs; 65 distinct structural schedules, 12 exact seed replays; both private scheduling mutations detected | `build/memblock/sliding-mixed-20261029/scheduler-tests/verification.json`; schedule signatures omit address/payload/cycle/delay. Synthetic ports/completion times, bare translation and representative vector shapes; real replay helpers separately tested. Six byte-overlay tests and five schema-accounting tests pass |
 | Scalar dependency interleaving | Frozen runtime-v1: 10/10 finite seeds pass 4608 actions; all artifact verifiers accept | `build/memblock/dependency-interleave-20261029/qualification-v1.json`; focused/translated mixed/spec/corner. 759 dependency windows, 546 accepted early loads, 269 with overlapping older STD unissued, 35 with multiple, 146 heterogeneous windows and 5465/5465 final tracked words. Known older addresses; no arbitrary unresolved-address or closure claim |
@@ -256,14 +257,14 @@ The current qualification is:
 | Nonidentity oracle mechanics | Six map/oracle tests plus two production-manager tests pass; 128 seeded topologies/768 context maps; 24 manager lifecycle/version cases and 32 independently enumerated complete-line candidates | Wrong-page/contiguous-PA substitutions, old dirty alias data, D/E ordering, release races and torn/reordered/late versions are checked. Fresh review independently checks 5408 images across 96 update histories; uncheckpointed fallback and long histories remain unqualified |
 | Nonidentity adjacent directed checks | 19/19 selected scenarios pass | Runtime-v3, native commands/logs at `build/memblock/alias-manager-20261029/directed-native-v3`; scalar/FP, forwarding/misalignment, full vector/segment, translation/alias/faults, CBO.ZERO, atomic, coherence/release and CMO; selected set, not full catalog |
 | Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
-| Unresolved-address focused | Corrected runtime-v4: 4/4 seeds 901..904 pass 128 actions each, with 504 windows and 260 correct-data refetches | `build/memblock/scalar-unresolved-20261029/focused-v4`; 244 disjoint-byte controls, all 504 committed store readbacks; zero observed LQ cancellations |
-| Unresolved-address controls | Conflict rate 0 and 1000 each pass 2×128 actions | `build/memblock/scalar-unresolved-20261029/{controls-v4,conflicts-v4}`; 252 disjoint controls and 252 matching redirect/return/refetch obligations; finite artifact verifiers accept |
-| Unresolved-address mixed/profile | 14 random seeds pass 5120 actions in total; 1092 unresolved windows, 562 correct-data refetches, 530 controls and 1092 DUT store readbacks | Runtime-v4 only; default-timing spec 2×512, compact corner 2×512, coverage 1×1024 and custom mixed 1×1024; latter has 46 heterogeneous windows and 1204/1204 final words. No closure claim |
+| Multi-store unresolved DUT | Frozen runtime-v1: 15/15 finite seeds pass 11456 actions; all eight artifact verifiers accept | `build/memblock/multi-unresolved-20261029/qualification-v1.json`; 1361 windows, 3348 older stores, 999 multi-store windows, 695 strict refetches, 666 all-disjoint controls, 1853 touched-word readbacks and 5844/5844 final words. All four first-conflict positions occur; 63 mixed-stream epochs retire 1167 instructions. Integer/FP, conflict/control/disabled endpoints, translated permutations, mixed and default spec; no closure or nonzero-cancellation claim |
+| Multi-store unresolved mechanics | Four compiled planner tests and eight accounting tests pass; 4608 builder windows yield 4482 topologies and 1470 event schedules excluding payload/address/width/delay | `build/memblock/multi-unresolved-20261029/planner-tests/verification.json`; fixed two-store all-late bucket reaches all 24 event schedules, four stores reach all 24 STA orders. Literal youngest-writer, hidden-write, sign/boxing and destination tests reject six private mutants; accounting accepts 41370 explicitly realizable layouts. These are helper/source checks, not complete DUT schedules |
+| Multi-store oracle sensitivity | Two private C++ variants using the unchanged DUT model are rejected by strict data checks against matching passing golden cases | `build/memblock/multi-unresolved-20261029/dut-oracle-mutations/verification.json`; reversed-age refetch expectation and corrupted non-youngest STD bytes in disjoint controls. Testbench/port-data fault sensitivity, not RTL mutation or CPU bug evidence |
 | Random indexed operands | 4/4 focused seeds 861..864 pass at 128 actions each; repeat endpoints 0/1000 pass 2 seeds each | Frozen runtime `build/memblock/vector-indices-20261029/runtime`; ordinary/segment directions, repeats and descending offsets observed. All tracked final words read back; finite accounting verifiers accept. Overlapping scatter/device ordering remain excluded |
 | Indexed mixed development | Custom mixed seed897 passes 1024 actions with 46 heterogeneous windows and 1313/1313 final words | Artifact `build/memblock/vector-indices-20261029/mixed`; 208 indexed instructions, 327 generated repeated offsets, 1172 descents; these operand counts include inactive elements |
 | Indexed broad development | Seed891 passes 4608 coverage actions; finite artifact verifier accepts | `build/memblock/vector-indices-20261029/coverage-replay`; 32 heterogeneous windows, 113 dependency windows, 488 indexed instructions and 2325/2325 final words. Exact runtime/seed replay completes in 687 seconds after a 300-second budget timeout; no closure claim |
 | Indexed profile compatibility | 2/2 spec and 2/2 corner seeds pass at 512 actions with compact latency; seed892 passes 512 with default spec timing | Artifacts `build/memblock/vector-indices-20261029/{spec,corner,spec-timing}`; seeds871/872 have zero indexed instructions and establish compatibility only. Seed892 executes one indexed load/store pair; corner seeds exercise both ordinary/segment directions. Strict coverage rejects unrelated sparse prefetch/probe bins; no closure claim |
-| Refetch/forwarding regression | Corrected runtime-v4: translation-alias, memory-violation and store-forwarding each pass | `build/memblock/scalar-unresolved-20261029/directed-v4`; same-pdest alias refetch and CPU-paired STA/STD lanes; isolated scalar RAW directed coverage still checks source/metadata rather than general refetch arbitration |
+| Refetch/forwarding regression | Current multi-store runtime-v1: 6/6 adjacent directed cases pass | `build/memblock/multi-unresolved-20261029/{directed-v1,alias-v1}`; alias round trip, memory violation, forwarding, FP, store-TLB miss and scalar misalignment. Selected contracts, not general redirect arbitration or full catalog |
 | Campaign report isolation | Concurrent two-regression/one-benchmark fixture and aggregate rerun pass | Fresh run-ID directory and matching document ID; previous sidecar bytes retained; artifact `build/memblock/report-namespace-20261028/check-unit.log` |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Restored-original directed | 90/90 pass | Every catalogued directed test through the corrected harness and runtime from RTL `43b971f2`; artifact `build/memblock/verify-restored-rtl-20261028/directed` |
@@ -329,6 +330,21 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
+Fresh-context non-author review passes the bounded multi-store unresolved
+executor, byte oracle and schema-63 accounting after all findings are resolved.
+Peak/early/prefix/pair correlations, uint64 domains and action bounds now reject
+five saved impossible observations; independent enumeration accepts 74896
+realizable mixed populations. Documentation wording and implementation anchors
+are corrected. The reviewer passes 14 unresolved tests and a private extracted
+executor over 768 windows, detecting nine recovery/identity/readback/commit
+mutations, including omitted touched words and the one-LQ-cancel branch. Main
+qualification passes 381 unit tests, fifteen random seeds and six adjacent
+contracts. Evidence is `build/memblock/multi-unresolved-20261029/review-v1/independent-review.md`,
+with `review-v1a.hashes.json`, `review-disposition.json` and
+`qualification-v1.json` in its parent. Full-CPU timing, multiple victims,
+repeated recovery and unresolved sliding admission remain outside the approval;
+all DUT unresolved cases have zero observed LQ cancellation.
+
 Fresh-context non-author review approves the bounded ordinary mixed stream,
 byte-prefix oracle, replay/head helpers and schema-62 accounting against
 `review-v1c.hashes.json`, with no outstanding findings. Its test-scope finding
@@ -377,8 +393,10 @@ Their scoped evidence and dispositions remain
 The generator varies dependency graphs, vector shapes, index operands, page maps
 and dependency-preserving indexed issue orders. Ordinary stream epochs now also
 vary producer counts/ages and ready-event schedules, with sliding admission and
-random placement among serial helpers. Multiple speculative unresolved stores,
-epoch drains and broader address dependencies remain normal-workload priorities.
+random placement among serial helpers. The separate unresolved graph supports
+multiple older stores and one victim. Multiple victims/repeated recovery,
+unresolved sliding admission, epoch drains and broader address dependencies
+remain normal-workload priorities.
 Builder samples do not establish unique complete-run DUT schedules or guarantee
 a design bug.
 

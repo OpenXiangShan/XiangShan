@@ -3171,6 +3171,11 @@ struct MixedCoverage {
     std::uint64_t scalar_unresolved_data_before = 0;
     std::uint64_t scalar_unresolved_overlap_bytes = 0;
     std::uint64_t scalar_unresolved_lq_canceled = 0;
+    // Stores/multi-store windows/early STD/postprovisional operand events/
+    // address-age inversions/max unknown addresses/refetch-prefix stores/
+    // distinct touched words/overlapping older-store pairs.
+    std::array<std::uint64_t, 9> scalar_unresolved_graph{};
+    std::array<std::uint64_t, 4> scalar_unresolved_first_conflict{};
 
     // Operand-pattern observations, once per architectural indexed instruction.
     // These include inactive offsets and do not claim memory requests occurred.
@@ -3581,7 +3586,9 @@ struct MixedCoverage {
                std::to_string(scalar_unresolved_readbacks) + ',' +
                std::to_string(scalar_unresolved_data_before) + ',' +
                std::to_string(scalar_unresolved_overlap_bytes) + ',' +
-               std::to_string(scalar_unresolved_lq_canceled) + " scalar_dependency=" +
+               std::to_string(scalar_unresolved_lq_canceled) +
+               " scalar_unresolved_graph=" + csv(scalar_unresolved_graph) +
+               " scalar_unresolved_first_conflict=" + csv(scalar_unresolved_first_conflict) + " scalar_dependency=" +
                std::to_string(scalar_dependency_windows) + ',' +
                std::to_string(scalar_dependency_stores) + ',' +
                std::to_string(scalar_dependency_loads) + ',' +

@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4524,6 +4524,46 @@ def _check_scalar_unresolved_accounting(result: dict[str, Any]) -> None:
              "unresolved load redirect/refetch obligations are not conserved")
     _require(before <= windows and conflicts <= overlap <= 8 * conflicts and canceled <= conflicts,
              "unresolved load operand/overlap/cancellation counts exceed bounds")
+    if result.get("constraint_schema", 0) >= 63:
+        stores, multi, early, events, inversions, maximum, prefix, words, pairs = _csv_counts(
+            result, "scalar_unresolved_graph", 9)
+        first = _csv_counts(result, "scalar_unresolved_first_conflict", 4)
+        _require(all(value <= (1 << 64) - 1 for value in (
+            windows, conflicts, controls, provisional, redirects, returned, refetched,
+            readbacks, before, overlap, canceled, stores, multi, early, events,
+            inversions, maximum, prefix, words, pairs, *first)),
+            "unresolved observations exceed the uint64 counter domain")
+        transactions = result.get("transactions")
+        _require(type(transactions) is int and windows <= transactions <= (1 << 64) - 1,
+                 "unresolved windows exceed completed actions or invalid transactions")
+        _require(windows <= stores <= 4 * windows and multi <= windows and
+                 multi <= stores - windows <= 3 * multi,
+                 "unresolved graph store/window counts disagree")
+        pair_capacity = min(6 * multi, 2 * (stores - windows), maximum * (stores - windows) // 2)
+        _require(inversions <= pair_capacity and pairs <= pair_capacity,
+                 "unresolved graph age/byte pair counts exceed possible pairs")
+        _require((maximum == 0) == (windows == 0) and 0 <= maximum <= 4 and
+                 (maximum > 1) == (multi > 0) and
+                 (not multi or windows + multi + maximum - 2 <= stores <=
+                  windows + (maximum - 1) * multi),
+                 "unresolved graph unknown-address maximum disagrees with admissions")
+        # Every non-early window still owns at least one store, and every
+        # unselected multi-store window owns at least one extra store. Only
+        # the remaining extras can supply early STD in the selected windows.
+        early_capacity = before + min((maximum - 1) * min(before, multi),
+            stores - windows - max(0, multi - before))
+        _require(before <= early <= early_capacity and events == 2 * stores - early,
+                 "unresolved graph operand events are not conserved")
+        _require(conflicts + max(0, multi - controls) <= prefix <=
+                 conflicts + (maximum - 1) * min(conflicts, multi) and
+                 controls + max(0, multi - conflicts) <= stores - prefix <=
+                 controls + (maximum - 1) * min(controls, multi) and
+                 windows <= words <= min(2 * windows, stores),
+                 "unresolved graph surviving prefix/readback words are not conserved")
+        _require(sum(first) == conflicts and
+                 sum((rank + 1) * count for rank, count in enumerate(first)) <= prefix and
+                 not any(first[maximum:]),
+                 "unresolved graph first-conflict positions disagree with stores")
     if rate == 0:
         _require(windows == 0, "disabled unresolved load direction generated windows")
     if conflict_rate == 0:

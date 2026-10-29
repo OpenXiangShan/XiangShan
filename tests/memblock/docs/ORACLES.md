@@ -138,31 +138,43 @@ integer/FP domains. A window containing FP uses the smaller common 1..191 domain
 an integer-only window uses 1..223. Semantic byte-source counters do not require
 any particular internal forwarding path.
 
-The separate `scalar-unresolved` direction deliberately withholds an older
-store address while a younger, nonpredicted load completes. Its initial strict
-expectation is the pre-store snapshot; retirement stays behind an older
-incomplete non-memory ROB group, so that result is provisional. The group can
-contain completed integer operand producers and an unfinished independent FP
-DIV/SQRT operation: `CompressUnit` groups these last-uop instructions,
-`Rename` assigns their shared ROB identity and aggregate WB count, and ROB commit
-waits for the whole group. This avoids treating a completed scalar producer as
-an arbitrary retirement stall. These paths are in `backend/rename/CompressUnit.scala`,
-`backend/rename/Rename.scala` and `backend/rob/RobBundles.scala` under
-`src/main/scala/xiangshan`. The proof is source ordering, not a full-CPU timing
-run covering every injected delay. Input byte overlap
-independently selects conflict or same-region disjoint control. A conflict must
-produce the full exposed flush-itself identity and a two-stage backend return,
-then a fresh strict refetch of snapshot-plus-older-store bytes while the store
-is still uncommitted. Only observed redirect cancellations rewind the LQ cursor.
-After store commit/drain, a DUT word readback checks the predicted post-state;
-provisional WB alone cannot discharge this architectural obligation. The control
-must produce no redirect during its bounded quiet/terminal observation. Both
-initial and refetch epochs retain data/identity/sideband checks; the same-cycle
-alias data exception is unused. This is one unresolved store/load, not a general
-speculative execution or commit reference engine. Distinct numeric destinations
-preserve live warm, provisional/refetch and readback mappings. Warm/readback loads
-remain integer; provisional/refetch loads use the selected integer or FP class.
-FP windows reserve all three indices within 1..191, integer-only windows in 1..223.
+The separate `scalar-unresolved` direction withholds 1..4 older store addresses
+while one younger nonpredicted load completes. Its initial strict expectation
+is the pre-store snapshot; an older incomplete non-memory ROB group A holds
+retirement. A groups the first store's base/data producers with an independent
+unfinished FP DIV/SQRT member; later stores have distinct older producer groups
+Pi separated by their consuming stores: `A,S0,P1,S1,...,L`. Their independent
+operand-ready events permit out-of-age STA/STD arrival. Compression, aggregated
+WB counts and commit rules come from `backend/rename/CompressUnit.scala`,
+`Rename.scala` and `backend/rob/RobBundles.scala`. This is a unit-level
+partial-order premise, without cycle-accurate qualification of every FU/PTW or
+producer delay. A completed producer is never the artificial head.
+
+Input byte overlap independently selects conflict or all-disjoint control.
+Stop remaining operand events immediately at the first overlapping STA hit,
+require the full flush-itself victim identity, and return it through the two
+registered backend stages. Further STAs wait until cancellation filters drain;
+each overlapping STA could otherwise legitimately generate another request.
+Older SQ entries and dispatch snapshots survive, with no cancellation/dequeue.
+Only observed VirtualLQ cancellation rewinds its cursor; a completed VirtualLQ
+entry may already have dequeued while RAW still retains the provisional victim.
+Resolve all remaining older operands before allocating strict refetch at the
+same architectural ROB/pdest and a fresh LQ/scoreboard epoch. Program-order
+older input stores determine the youngest writer of each byte, independently
+of issue/feedback order. Distinguishability repair changes that youngest writer,
+so hidden older stores cannot make stale provisional data satisfy refetch.
+
+After correct refetch, finish A's remaining external component, retire the
+non-memory prefix and commit stores in age order. One or two strict touched-word
+readbacks use the original snapshot plus input stores after commit/drain; only
+then is the architectural obligation complete. Controls require no redirect
+through their quiet/terminal interval. Both execution epochs retain normal
+identity/data/sideband checks, with no alias data opt-out. Warm, provisional/
+refetch and each readback role have distinct numeric destinations in 1..191 for
+an FP window or 1..223 for integer-only traffic; refetch restores the original
+pdest. This bounded model covers multiple older unresolved addresses and one
+victim, not repeated recovery, trained prediction, a full rename/commit engine
+or general unresolved sliding traffic.
 The mixed tail's general cancellation fixture also uses a distinct older
 non-memory branch ROB anchor after completed memory traffic; it does not assign
 a branch redirect to a completed store. Its refetch retains the canceled ROB
