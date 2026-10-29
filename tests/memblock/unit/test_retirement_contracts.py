@@ -74,6 +74,7 @@ class RetirementContractsTest(unittest.TestCase):
                 'auto Environment::Impl::vector_memory_pending(',
             ),
             'cycle.cpp': (
+                'auto Environment::Impl::wait_for_enqueue_capacity(',
                 'auto Environment::Impl::scalar_store_key(',
                 'auto Environment::Impl::vector_store_key(',
             ),

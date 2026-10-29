@@ -32,13 +32,45 @@ void QueueAccounting::sample_before_edge(DutAdapter &dut_)
     }
     if (lsq_enqueue_width != 0) {
         ++lsq_enqueue_widths_observed_.at(lsq_enqueue_width - 1);
+        const bool older_lq = lq_allocated_ > lq_dequeued_ + lq_canceled_;
+        const bool older_sq = sq_allocated_ > sq_dequeued_ + sq_canceled_;
+        const bool adjacent = last_enqueue_edge_ &&
+            *last_enqueue_edge_ + 1 == completed_edges_;
+        ++lsq_enqueue_cadence_[0];
+        lsq_enqueue_cadence_[1] += adjacent;
+        lsq_enqueue_cadence_[2] += adjacent && (older_lq || older_sq);
+        lsq_enqueue_cadence_[3] += older_lq;
+        lsq_enqueue_cadence_[4] += older_sq;
+        enqueue_run_ = adjacent ? enqueue_run_ + 1 : 1;
+        lsq_enqueue_cadence_[5] = std::max(lsq_enqueue_cadence_[5], enqueue_run_);
+        last_enqueue_edge_ = completed_edges_;
     }
 }
 
-void QueueAccounting::sample_after_edge(DutAdapter &dut_)
+void QueueAccounting::stage_admission_credit(std::uint64_t lq, std::uint64_t sq)
 {
-    lq_dequeued_ += dut_.queues.retirement.lq_deq.value();
-    sq_dequeued_ += dut_.queues.retirement.sq_deq.value();
+    if (lq != 0 || sq != 0) {
+        admission_credits_.push_back({completed_edges_ + kLsqAdmissionCreditDelay, lq, sq});
+    }
+}
+
+void QueueAccounting::sample_after_edge(DutAdapter &dut_, bool redirect)
+{
+    ++completed_edges_;
+    const auto lq_dequeued = dut_.queues.retirement.lq_deq.value();
+    const auto sq_dequeued = dut_.queues.retirement.sq_deq.value();
+    lq_dequeued_ += lq_dequeued;
+    sq_dequeued_ += sq_dequeued;
+    stage_admission_credit(lq_dequeued, sq_dequeued);
+    while (!admission_credits_.empty() &&
+           admission_credits_.front().ready_edge <= completed_edges_) {
+        lq_admission_retired_ += admission_credits_.front().lq;
+        sq_admission_retired_ += admission_credits_.front().sq;
+        admission_credits_.pop_front();
+    }
+    if (redirect) {
+        admission_blocked_until_ = completed_edges_ + kLsqRedirectRecoveryEdges;
+    }
 }
 
 void QueueAccounting::check_driver_accounting()
@@ -63,9 +95,11 @@ std::optional<bool> QueueAccounting::has_capacity(unsigned lq_needed, unsigned s
         error_.record("LSQ software accounting moved past allocation");
         return std::nullopt;
     }
-    const std::uint64_t lq_outstanding = lq_allocated_ - lq_retired;
-    const std::uint64_t sq_outstanding = sq_allocated_ - sq_retired;
-    const bool capacity_ok =
+    // Correctness uses immediate retirement; admission only reuses matured
+    // public credits. This permits back-to-back inputs using existing space.
+    const std::uint64_t lq_outstanding = lq_allocated_ - lq_admission_retired_;
+    const std::uint64_t sq_outstanding = sq_allocated_ - sq_admission_retired_;
+    const bool capacity_ok = completed_edges_ >= admission_blocked_until_ &&
         lq_outstanding + lq_needed <=
             kVirtualLoadQueueEntries - kLqEnqueueHeadroom &&
         sq_outstanding + sq_needed <=
@@ -91,6 +125,7 @@ bool QueueAccounting::observe_redirect_cancellation(std::uint64_t lq_canceled, s
     sq_redirect_canceled_observed_ += sq_canceled;
     lq_canceled_ += lq_canceled;
     sq_canceled_ += sq_canceled;
+    stage_admission_credit(lq_canceled, sq_canceled);
     return true;
 }
 
@@ -102,6 +137,7 @@ auto QueueAccounting::account_lq_cancellation(unsigned count)  -> bool
     }
     lq_canceled_ += count;
     lq_canceled_unobserved_ += count;
+    stage_admission_credit(count, 0);
     return true;
 }
 
@@ -113,6 +149,7 @@ auto QueueAccounting::account_sq_cancellation(unsigned count)  -> bool
     }
     sq_canceled_ += count;
     sq_canceled_unobserved_ += count;
+    stage_admission_credit(0, count);
     return true;
 }
 

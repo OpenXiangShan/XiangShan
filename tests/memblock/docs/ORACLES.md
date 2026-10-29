@@ -630,7 +630,9 @@ only establishes the backing image at its sampling point.
 inputs before the clock edge; dequeue counts and slow replay feedback are
 sampled after it. Manager capture/update follows the same edge separation.
 `tick(false)` skips pre-edge scoreboards, enqueue sampling and bridge checks;
-it still advances managers and post-edge observations. Claims of continuous
+it still advances managers, the queue edge ordinal, admission guards and post-edge
+observations. Redirect valid is captured before the edge even in that mode.
+Claims of continuous
 monitoring apply only while the corresponding monitor is enabled.
 
 [BridgeMonitor](../cpp/environment/bridge_monitor.cpp) compares independently
@@ -742,7 +744,19 @@ assertion, not an independent expected architectural state. Both depend on an
 assertion-enabled build containing these binds.
 
 [QueueAccounting](../cpp/environment/queue_accounting.cpp) compares observed
-enqueue totals to driver allocation after public operations. Circular LQ/SQ/ROB
+enqueue totals to driver allocation after public operations. Its schema3 cadence
+ledger counts sampled nonempty input edges, adjacent edges with older queue work,
+per-queue older-work edges and longest run. Older work uses immediate software
+conservation before the current allocation; no enqueue ready/fire is observable.
+Admission independently preserves both post-admission headroom bounds (LQ66,
+SQ52), ages public dequeue/reconciled cancellation credits three further edges
+and blocks six further edges after each redirect-high sample. Repeated highs
+restart the guard. Queue correctness and store retirement targets continue using
+immediate totals. This is a conservative legal producer abstraction, not an
+architectural latency oracle or an exact full-CPU restart model. The focused
+pressure helper bypasses all normal admission guards (headroom, credit aging
+and redirect recovery) under its separate physical-capacity check.
+Circular LQ/SQ/ROB
 value/flag pairs are calculated from absolute cursors in
 [model.inc](../cpp/environment/model.inc); this is stimulus legality.
 Canonical scalar-store transactions freeze the opposite LQ cursor at dispatch,
@@ -827,7 +841,7 @@ limits are particularly important when reading PASS output.
 | Surface | Actual behavior | Unsupported inference |
 | --- | --- | --- |
 | Constrained-random result verifier | The default [verify_regression.py](../scripts/verify_regression.py) path calls `_check_mixed_accounting` for constrained-random results, checking queue balance and conditional LSQ/redirect accounting. `--require-coverage` instead invokes `_check_mixed_coverage` and `_check_constraint_coverage`. | The opt-in checker requires observed bins and the current constraint schema, but it remains observational; the strict-coverage target is not part of `final-acceptance`, and a nonzero bin is not a terminal data oracle. A 2×4608 coverage probe is rejected because enabled probe-depth classes 4..7 are unobserved. |
-| Schema presence | `_check_mixed_accounting` accepts absent `lsq_monitor_schema` as 0, as well as 1 or 2; observed enqueue/cancellation fields are required only for the corresponding schema. The strict mode requires the current constraint coverage schema and arrays. | The default result path still does not require the current constraint schema; a parsed PASS on that path does not prove current-schema coverage fields or passive cancellation evidence were present. |
+| Schema presence | `_check_mixed_accounting` accepts absent `lsq_monitor_schema` as 0, as well as 1, 2 or 3; observed enqueue/cancellation and schema3 cadence fields are required only for the corresponding schema. The strict mode requires the current constraint coverage schema and arrays. | The default result path still does not require the current constraint schema; a parsed PASS on that path does not prove current-schema coverage fields or passive cancellation evidence were present. |
 | Backpressure evidence | `--require-backpressure` alone checks campaign configuration. Combined with `--require-coverage`, `_check_mixed_coverage` also requires positive per-result backpressure bins. | The default path's configuration flag alone does not prove every requested stall/delay class occurred. |
 | Summary/record consistency | The verifier reparses simulator summary, compares recorded fields, command/seed/scenario/counts and grant totals, and validates campaign timing/runtime layout. | Artifact consistency is not independent observation of DUT semantics; provenance is not coverage. |
 | Coverage producers | [mixed_reporting.cpp](../cpp/scenarios/mixed_reporting.cpp) and [coverage.inc](../cpp/random/coverage.inc) combine generator selections and monitor statistics. | A generator-selected overlap/forwarding/shape or a passive pulse counter cannot substitute for a corresponding terminal/data/protocol comparison. |

@@ -647,6 +647,7 @@ public:
     const std::array<std::uint64_t, generated::kLsqEnqueueLanes> &
     lsq_enqueue_lanes_observed() const;
 
+    const std::array<std::uint64_t, 6> &lsq_enqueue_cadence() const;
     std::uint64_t writebacks() const;
 
     std::uint64_t prefetch_writebacks() const;

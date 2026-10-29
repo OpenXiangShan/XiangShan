@@ -181,12 +181,15 @@ Ordinary scalar streams return to event selection after an accepted STA rather
 than synchronously waiting for its slow feedback. One per-store attempt cursor
 matches lane/SQ value/wrap, preserves miss cooldown and suppresses retries after
 hit; independent ready work can progress meanwhile. `stream_sta` measures
-accepted admission and producer events during those waits. The fixed 16-cycle
-enqueue settle, blocking issue handshakes/retirement and synchronous unresolved
-graph operands still restrict density. Source audit finds no ordinary receiver
-minimum enqueue gap; removing that wait requires explicit retirement-credit
-maturity and redirect-rollback guards because acceptance is producer-owned and
-there is no generated ready pin. Same-cycle heterogeneous issue and decoupled
+accepted admission and producer events during those waits. Ordinary enqueue
+uses both queue post-admission watermarks without an unconditional quiet interval.
+Public retirement/cancellation credits mature after three further completed
+edges; every sampled redirect high blocks admission for six further edges,
+conservatively covering queue rollback and producer restart. Acceptance remains
+producer-owned because there is no generated ready pin. The passive schema3 LSQ
+monitor records consecutive valid-input edges, older outstanding queue work and
+longest run. Blocking issue handshakes/retirement and synchronous unresolved graph
+operands still restrict density. Same-cycle heterogeneous issue and decoupled
 commit/SQ lifecycle remain high priorities.
 
 Ordinary mixed streams vary producer counts and instruction ages, choose ready
@@ -233,14 +236,14 @@ guarantee a CPU bug.
 
 Priority work, each requiring executable stimulus and an independent check:
 
-1. Remove unconditional enqueue settling with independently tracked capacity,
-   mature producer retirement credits and redirect-rollback guards; allow
-   independent ready producers to progress across stalled peers and form legal
-   dense/same-cycle issue combinations. Separate architectural store retirement
-   from SQ dequeue where the CPU contract permits. Measure actual accepted port
-   sets, consecutive-cycle work and committed-but-still-queued stores. Ordinary
-   per-store STA feedback state removes one global wait; blocking handshake,
-   retirement and unresolved-operand paths remain explicit work.
+1. Allow independent ready producers to progress across stalled peers and form
+   legal dense/same-cycle issue combinations. Ordinary enqueue already replaces
+   unconditional settling with both capacity watermarks, matured public credits
+   and a redirect recovery guard; cadence counts actual sampled valid-input edges.
+   Separate architectural store retirement from SQ dequeue where the CPU contract
+   permits. Measure actual accepted issue-port sets and committed-but-still-queued
+   stores. Per-store STA feedback state removes another global wait; blocking
+   handshake, retirement and unresolved-operand paths remain explicit work.
 2. Extend unfinished cancellation beyond the bounded youngest cold role in
    isolated and integrated sliding graphs; add broader temporal/address dependencies,
    and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable

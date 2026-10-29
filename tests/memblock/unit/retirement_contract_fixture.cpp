@@ -131,10 +131,7 @@ public:
         tick();
         return check_components();
     }
-    bool wait_for_enqueue_capacity(unsigned lq, unsigned sq) {
-        const auto result = queues_.has_capacity(lq,sq);
-        return result && *result;
-    }
+    bool wait_for_enqueue_capacity(unsigned lq, unsigned sq, unsigned timeout = 2000);
     void track_final_observation_bytes(std::uint64_t, unsigned, bool, bool) {}
     static std::uint64_t scalar_store_key(const StoreTransaction &);
     static std::uint64_t vector_store_key(const VectorMemoryTransaction &);

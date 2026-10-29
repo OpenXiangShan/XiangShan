@@ -9,7 +9,7 @@ class QueueAccounting {
 public:
     explicit QueueAccounting(FailureState &error) : error_(error) {}
     void sample_before_edge(DutAdapter &dut_);
-    void sample_after_edge(DutAdapter &dut_);
+    void sample_after_edge(DutAdapter &dut_, bool redirect = false);
     void check_driver_accounting();
     std::optional<bool> has_capacity(unsigned lq_needed, unsigned sq_needed);
     void allocate_load(std::uint64_t count) { lq_allocated_ += count; }
@@ -35,10 +35,25 @@ public:
     std::uint64_t sq_redirect_canceled_observed() const { return sq_redirect_canceled_observed_; }
     std::uint64_t sq_canceled_unobserved() const { return sq_canceled_unobserved_; }
     std::uint64_t redirect_cancellation_events_observed() const { return redirect_cancellation_events_observed_; }
+    const auto &lsq_enqueue_cadence() const { return lsq_enqueue_cadence_; }
     const auto &lsq_enqueue_widths_observed() const { return lsq_enqueue_widths_observed_; }
     const auto &lsq_enqueue_lanes_observed() const { return lsq_enqueue_lanes_observed_; }
 private:
+    void stage_admission_credit(std::uint64_t lq, std::uint64_t sq);
+    struct AdmissionCredit {
+        std::uint64_t ready_edge, lq, sq;
+    };
     FailureState &error_;
+    std::deque<AdmissionCredit> admission_credits_;
+    std::uint64_t completed_edges_ = 0;
+    std::uint64_t admission_blocked_until_ = 0;
+    std::uint64_t lq_admission_retired_ = 0;
+    std::uint64_t sq_admission_retired_ = 0;
+    std::optional<std::uint64_t> last_enqueue_edge_;
+    std::uint64_t enqueue_run_ = 0;
+    // Edges, adjacent edges, adjacent with older work, older LQ, older SQ,
+    // longest adjacent run. These describe sampled inputs, not ready/fire.
+    std::array<std::uint64_t, 6> lsq_enqueue_cadence_{};
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_enqueued_observed_ = 0;
     std::uint64_t lq_dequeued_ = 0;

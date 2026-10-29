@@ -497,6 +497,11 @@ auto Environment::Impl::lsq_enqueue_lanes_observed() const -> const std::array<s
     return queues_.lsq_enqueue_lanes_observed();
 }
 
+auto Environment::Impl::lsq_enqueue_cadence() const -> const std::array<std::uint64_t, 6> &
+{
+    return queues_.lsq_enqueue_cadence();
+}
+
 auto Environment::Impl::writebacks() const -> std::uint64_t
 { return scoreboard_.observed(); }
 

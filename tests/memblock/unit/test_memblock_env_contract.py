@@ -2032,7 +2032,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn(
             "environment.lsq_enqueue_lanes_observed()", main
         )
-        self.assertIn("lsq_monitor_schema=2", main)
+        self.assertIn("lsq_monitor_schema=3", main)
         self.assertIn("redirect_cancels_observed=", main)
         self.assertIn("unobserved_cancels=", main)
 

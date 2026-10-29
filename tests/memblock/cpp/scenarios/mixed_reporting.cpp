@@ -312,6 +312,15 @@ bool MixedScenario::finish()
 
 int MixedScenario::run()
 {
+    const auto cadence_summary = [this]() {
+        std::ostringstream stream;
+        const auto &counts = environment.lsq_enqueue_cadence();
+        for (std::size_t index = 0; index < counts.size(); ++index) {
+            if (index != 0) stream << ',';
+            stream << counts[index];
+        }
+        return stream.str();
+    };
     report_progress();
     initialize_memory();
     const bool completed = execute();
@@ -332,7 +341,9 @@ int MixedScenario::run()
                   << " sq=" << environment.sq_dequeued() << '+'
                   << environment.sq_canceled() << '/'
                   << environment.sq_allocated()
-                  << " lsq_monitor_schema=2"
+                  << " lsq_monitor_schema=3"
+                  << " lsq_enqueue_cadence="
+                  << cadence_summary()
                   << " lsq_enqueued_observed="
                   << environment.lq_enqueued_observed() << ','
                   << environment.sq_enqueued_observed()
@@ -442,7 +453,9 @@ int MixedScenario::run()
               << " sq=" << environment.sq_dequeued() << '+'
               << environment.sq_canceled() << '/'
               << environment.sq_allocated()
-              << " lsq_monitor_schema=2"
+              << " lsq_monitor_schema=3"
+              << " lsq_enqueue_cadence="
+              << cadence_summary()
               << " lsq_enqueued_observed="
               << environment.lq_enqueued_observed() << ','
               << environment.sq_enqueued_observed()

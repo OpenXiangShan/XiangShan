@@ -865,6 +865,11 @@ auto Environment::lsq_enqueue_lanes_observed() const -> const std::array<std::ui
     return impl_->lsq_enqueue_lanes_observed();
 }
 
+auto Environment::lsq_enqueue_cadence() const -> const std::array<std::uint64_t, 6> &
+{
+    return impl_->lsq_enqueue_cadence();
+}
+
 auto Environment::writebacks() const -> std::uint64_t
 {
     return impl_->writebacks();

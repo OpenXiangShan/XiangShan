@@ -658,7 +658,8 @@ Array order and sampling code are authoritative in
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
 | `dcache_latency_*`, `ptw_latency_*`, `uncache_latency_*` | Manager response-latency samples, four bucket counts, total cycles, and maximum. These are observed responses, not architectural deadlines. |
 | `lq`, `sq` | Dequeued + legally canceled / allocated entries. Final-observation readbacks are included in LQ allocation/dequeue. |
-| `lsq_monitor_schema`, `lsq_enqueued_observed`, `redirect_cancels_observed`, `unobserved_cancels` | Independently observed enqueue/cancellation accounting and any unobserved cancellation residual. |
+| `lsq_monitor_schema`, `lsq_enqueued_observed`, `redirect_cancels_observed`, `unobserved_cancels` | Independently observed enqueue/cancellation accounting and any unobserved cancellation residual. Current LSQ monitor schema is 3, independent of constraint schema 73; schemas 0..2 retain compatibility. |
+| `lsq_enqueue_cadence` | Schema3: enqueue edges, consecutive enqueue edges, consecutive edges with older outstanding LQ/SQ work, enqueue edges with older LQ work, enqueue edges with older SQ work, longest consecutive run. These observe driven valid inputs before each monitored edge; no ready pin exists. Exact element totals and terminal checks remain separate. |
 | `final_observation_words`, `final_observation_observed_words`, `final_observation_bytes`, `final_observation_alias_skips` | Deduplicated 8-byte words registered for readback, words actually issued and retired by successful readback batches, committed cacheable bytes registered before CMO exclusion, and cacheable commits excluded because their physical and virtual forms differ. The finish gate requires the first two fields to be equal; a zero-word run is not behavioral evidence. |
 | `final_nc_words`, `final_nc_bytes` | Committed non-cacheable store/atomic words and bytes compared against the manager bus image after drain. A bus-image match is not a DUT uncache readback or a device side-effect oracle. |
 | `probe_source_space`, `probe_source_lifecycle`, `probe_max_outstanding` | Available manager source IDs, unique/reuse/wrap counts, and maximum outstanding Probes. |
@@ -1145,9 +1146,39 @@ arrive while a different blocking helper advances time; overlap reporting scans
 those actual sample cycles rather than counting every selected helper as
 concurrent. No fixed feedback latency is an expected CPU result.
 
-This removes one global scheduling barrier. Admission still waits the existing
-16 enqueue-settle cycles, issue handshakes and retirement helpers still advance
-time, and unresolved graph operand resolution still uses its focused blocking
-helper. Broad same-cycle heterogeneous issue, independent architectural commit
+This removes one global scheduling barrier. Ordinary admission uses the
+capacity and recovery guards below. Issue handshakes and retirement helpers
+still advance time, and unresolved graph operand resolution still uses its
+focused blocking helper. Broad same-cycle heterogeneous issue, independent architectural commit
 versus SQ dequeue, general recovery populations and an accepted-generation
 ledger remain gaps. More seeds cannot remove those control-flow restrictions.
+
+
+### Ordinary enqueue cadence
+
+Ordinary scalar/vector/prefetch admission may use consecutive boundary edges
+when existing space suffices. Both post-admission watermarks always apply:
+LQ occupancy plus requested flows <=66 and SQ occupancy plus requested flows
+<=52, including the opposite queue when its request count is zero. Actual
+allocation, dequeue and cancellation totals remain immediate correctness
+accounting. Only admission reuses a newly observed dequeue or reconciled
+cancellation after three further completed edges, conservatively representing
+the upstream counter/acceptance/request stages.
+
+Each redirect-high sampling edge restarts a six-edge admission guard. Queue
+rollback requires three subsequent boundary edges; the extra producer stages
+make this a conservative restart bound, not the earliest full-CPU restart claim.
+Cancellation credits must also mature. These guards replace a quiet interval
+after every unrelated admission. The focused pressure enqueue bypasses all normal admission guards and retains
+its separate physical-capacity contract.
+
+`lsq_enqueue_cadence` covers the entire run, including legacy and final-readback
+phases; it does not attribute consecutive edges to a stream producer.
+It counts nonempty sampled input edges, with older work measured
+from immediate allocated-minus-dequeued-minus-canceled state before the current
+edge. Lane holes and vector flow counts retain their existing prefix identities.
+`tick(false)` advances the edge ordinal and recovery/credit state without counting
+an enqueue sample, so an unmonitored edge breaks a reported consecutive run.
+The verifier checks width/edge conservation, feasible adjacent-run lengths and
+older-work intersection bounds. These observations do not establish simultaneous
+heterogeneous issue or independent store commit/SQ lifetimes.

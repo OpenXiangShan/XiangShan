@@ -18,7 +18,12 @@ constexpr unsigned kVectorUnitStrideMaxFlows = 2;
 // though the generated MemBlock top does not expose canAccept as an output.
 constexpr unsigned kLqEnqueueHeadroom = 6;
 constexpr unsigned kSqEnqueueHeadroom = 4;
-constexpr unsigned kEnqueueSettleCycles = 16;
+// Newly observed dequeue/cancellation is not an immediate dispatch credit.
+// Age it across the producer's counter, acceptance and request registers.
+constexpr unsigned kLsqAdmissionCreditDelay = 3;
+// Redirect pointer rollback needs three boundary edges. Conservatively allow
+// the same producer stages to restart afterwards; repeated highs restart this.
+constexpr unsigned kLsqRedirectRecoveryEdges = 6;
 constexpr unsigned kRobEntries = 160;
 constexpr unsigned kDcacheMissEntries = 16;
 constexpr unsigned kDcacheReleaseEntries = 18;

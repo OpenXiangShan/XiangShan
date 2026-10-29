@@ -4392,16 +4392,18 @@ def _check_mixed_coverage(
     sq_allocated, sq_canceled = _balanced_queue(result, "sq")
     lsq_monitor_schema = result.get("lsq_monitor_schema", 0)
     _require(
-        lsq_monitor_schema in (0, 1, 2),
+        lsq_monitor_schema in (0, 1, 2, 3),
         f"unknown LSQ enqueue monitor schema: {lsq_monitor_schema!r}",
     )
-    if lsq_monitor_schema in (1, 2):
+    if lsq_monitor_schema in (1, 2, 3):
         observed = _csv_counts(result, "lsq_enqueued_observed", 2)
         _require(
             observed == [lq_allocated, sq_allocated],
             "observed LSQ enqueue counts disagree with allocated queue totals",
         )
-    if lsq_monitor_schema == 2:
+    if lsq_monitor_schema >= 3:
+        _check_lsq_enqueue_cadence(result)
+    if lsq_monitor_schema >= 2:
         redirect_cancels = _csv_counts(
             result, "redirect_cancels_observed", 3
         )
@@ -4952,6 +4954,26 @@ def _check_stream_recovery_accounting(result: dict[str, Any]) -> None:
         _require(controls == 0, "conflict-only stream recovery generated controls")
 
 
+def _check_lsq_enqueue_cadence(result: dict[str, Any]) -> None:
+    edges, adjacent, live_adjacent, older_lq, older_sq, longest = _csv_counts(
+        result, "lsq_enqueue_cadence", 6
+    )
+    widths = _csv_counts(result, "dispatch_widths", 6)
+    _require(edges == sum(widths), "LSQ cadence edges disagree with observed widths")
+    _require(0 <= live_adjacent <= adjacent <= max(0, edges - 1),
+             "LSQ adjacent enqueue accounting is inconsistent")
+    _require(older_lq <= edges and older_sq <= edges
+             and live_adjacent <= older_lq + older_sq
+             and live_adjacent >= max(older_lq, older_sq) + adjacent - edges,
+             "LSQ older-work enqueue accounting is inconsistent")
+    _require((edges == 0 and longest == 0) or
+             (edges > 0 and 1 <= longest <= edges
+              and longest - 1 <= adjacent
+              and edges <= longest * (edges - adjacent)
+              and ((longest >= 2) == (adjacent > 0))),
+             "LSQ longest enqueue run is inconsistent")
+
+
 def _check_mixed_accounting(result: dict[str, Any]) -> None:
     """Validate queue/LSQ accounting, not coverage completeness.
 
@@ -4962,16 +4984,18 @@ def _check_mixed_accounting(result: dict[str, Any]) -> None:
     sq_allocated, sq_canceled = _balanced_queue(result, "sq")
     lsq_monitor_schema = result.get("lsq_monitor_schema", 0)
     _require(
-        lsq_monitor_schema in (0, 1, 2),
+        lsq_monitor_schema in (0, 1, 2, 3),
         f"unknown LSQ enqueue monitor schema: {lsq_monitor_schema!r}",
     )
-    if lsq_monitor_schema in (1, 2):
+    if lsq_monitor_schema in (1, 2, 3):
         observed = _csv_counts(result, "lsq_enqueued_observed", 2)
         _require(
             observed == [lq_allocated, sq_allocated],
             "observed LSQ enqueue counts disagree with allocated queue totals",
         )
-    if lsq_monitor_schema == 2:
+    if lsq_monitor_schema >= 3:
+        _check_lsq_enqueue_cadence(result)
+    if lsq_monitor_schema >= 2:
         redirect_cancels = _csv_counts(
             result, "redirect_cancels_observed", 3
         )

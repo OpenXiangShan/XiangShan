@@ -14,19 +14,7 @@ auto Environment::Impl::wait_for_enqueue_capacity(unsigned lq_needed,
     for (unsigned cycle = 0; cycle < timeout; ++cycle) {
         const auto capacity_ok = queues_.has_capacity(lq_needed, sq_needed);
         if (!capacity_ok) return false;
-        if (*capacity_ok) {
-            // canAccept and the queue counters are registered in
-            // LsqEnqCtrl. A short quiet interval avoids sampling the
-            // pre-retirement value after a commit/redirect transition.
-            for (unsigned settle = 0;
-                 settle < kEnqueueSettleCycles; ++settle) {
-                tick();
-                if (!check_components()) {
-                    return false;
-                }
-            }
-            return true;
-        }
+        if (*capacity_ok) return true;
         tick();
         if (!check_components()) {
             return false;
@@ -88,13 +76,14 @@ auto Environment::Impl::tick(bool monitor)  -> void
         );
     }
 
+    const bool redirect = dut_.queues.redirect.valid.boolean();
     dut_.step();
     set_failure_cycle();
     bridge_.advance_after_edge();
     memory_agent_.update_after_tick();
     ptw_agent_.update_after_tick();
     uncache_agent_.update_after_tick();
-    queues_.sample_after_edge(dut_);
+    queues_.sample_after_edge(dut_, redirect);
     feedback_.sample_after_edge(dut_, cycle());
 }
 
