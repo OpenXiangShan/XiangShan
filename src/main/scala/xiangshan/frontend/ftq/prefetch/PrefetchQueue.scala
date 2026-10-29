@@ -184,6 +184,7 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate("drop", PopCount(io.enq.map(port => port.valid && !port.ready)))
   XSPerfAccumulate("enq_total", PopCount(io.enq.map(_.fire)))
   XSPerfAccumulate("enq_sw", PopCount(io.enqFromSw.map(_.fire)))
+  XSPerfAccumulate("enq_pdip", PopCount(io.enqFromPdip.map(_.fire)))
 
   XSPerfSeqAccumulate(
     "2pf",
