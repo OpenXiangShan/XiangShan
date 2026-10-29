@@ -53,6 +53,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.reservations = []
         cls.recoveries = []
         cls.cold_recoveries = []
+        cls.profiles = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -141,6 +142,8 @@ class MixedStreamTest(unittest.TestCase):
                 'constraint_case': cls.constraint_case,
                 'reservations': cls.reservations,
                 'recovery_cases': cls.recoveries,
+                'validated_profile_cases': cls.profiles,
+                'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
                 'recovery_observations': {field: sum(run['result'][field] for run in cls.recoveries)
@@ -406,6 +409,19 @@ class MixedStreamTest(unittest.TestCase):
     def test_load_can_issue_after_older_address_before_older_scalar_data(self):
         results = [self.stream(seed, timing=0) for seed in range(1, 65)]
         self.assertGreater(sum(run['loads_before_older_std'] for run in results), 0)
+
+    def test_production_validated_stream_profiles_respect_every_operation_subset(self):
+        for mask in range(1, 32):
+            results = []
+            for seed in (1, 7, 29, 61):
+                for timing in (0, 1):
+                    result = self.run_fixture('profile', seed, timing, mask, 32)
+                    self.profiles.append(dict(seed=seed, timing=timing, mask=mask, result=result))
+                    results.append(result)
+                    self.assertTrue(all(mask & (1 << kind) for kind in result['kinds']))
+            observed = set().union(*(set(r['kinds']) for r in results))
+            self.assertEqual(observed, {kind for kind in range(5) if mask & (1 << kind)})
+            self.assertGreater(len({r['schedule'] for r in results}), 4)
 
     def test_obligations_hold_across_completion_patterns_and_operation_masks(self):
         for timing in (0, 1):

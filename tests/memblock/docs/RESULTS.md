@@ -18,6 +18,16 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema 70 separates legacy-window and sliding-stream eligibility. Legacy
+  windows retain their required five producer classes and reserved queue budgets;
+  stream-only profiles accept any nonempty ordinary scalar/FP, vector or prefetch
+  subset. Each enabled vector direction needs a full instruction fitting actual
+  stream queue headroom. Empty populations and non-fitting directions reject
+  before traffic. Sparse accounting rejects disabled stream classes and legacy
+  observations in stream-only mode. Expected bytes and completion/retirement
+  oracles stay unchanged. Longer producer/address dependencies and bounded
+  epoch/context drains remain ordinary-workload priorities.
+
 - Ordinary mixed streams sample variable scalar/FP load, vector load, scalar
   store, vector store and prefetch composition in 1..32-instruction epochs with
   2..8 live instructions. Ready events interleave independent STA/STD, vector
@@ -269,7 +279,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 459 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 472 tests pass | Unit checks do not establish DUT functional coverage |
+| Stream operation-subset qualification | Frozen runtime-v1: 34/34 finite DUT cases pass 10896 actions; all fourteen artifact verifiers accept | `build/memblock/stream-profiles-20261029/qualification-v2.json`; twenty-two newly legal subset cases, default spec/coverage/corner, legacy and serialized controls. 4657 retired stream instructions, 2599 accepted-overlap admissions, 3471 continued admissions, 1447 FP checks and 6344/6344 final words. Load-only indexed e8/LMUL4 instructions exercise 64-flow admission; a serialized 128-flow control completes in queue-bounded uop windows. Four CLI controls reject empty/segment-only populations and oversized stream directions before traffic. The 64-flow profiles have one live instruction at a time; capacity evidence does not prove inter-instruction overlap. Functional/accounting development qualification, not strict coverage or closure |
+| Stream endpoint and accounting contracts | Twelve independent host tests pass 344 validation and 224 accounting cases; production executor tests pass 248 cases over all 31 nonempty ordinary producer masks | `build/memblock/stream-profiles-20261029/constraint-tests/evidence.json`, `scheduler-tests/report-v2.json`; actual parser/validator, literal 32/64/128-flow instructions, executor boundaries, fitting-plus-oversized shape unions, disabled directions, malformed inputs and schema 69 compatibility. Synthetic executor checks retain distinct destinations, exactly-once issue/retirement and input-byte expectations; no full-CPU timing claim |
+| Default-profile compatibility | Eight default spec/coverage/corner cases match 393 parsed semantic fields per seed against the preceding frozen runtime | `build/memblock/stream-profiles-20261029/default-compatibility-v1.json`; schema/controller metadata excluded. This supports unchanged seeded behavior for sampled cases, not all seeds or profiles |
 | Ordinary sliding mixed DUT qualification | Frozen runtime-v1: 22/22 accepted finite seeds pass 11776 actions; all seven retained artifact verifiers accept; 8/8 adjacent directed cases pass | `build/memblock/ordinary-scheduling-20261029/qualification-v3.json`; unmodified short spec/coverage/corner plus stream-only and legacy controls. 138 epochs, 2584 retired stream instructions, 1569 accepted-overlap admissions, 1988 continued admissions, 809 replay issues, 959/1406 admission/producer choices with a completed head, 61 legacy windows and 5394/5394 final words. Development qualification only. Two CMO-stress controls lack terminal acceptance at 240s; previous-runtime seed 1 also times out with progress. Those controls remain excluded |
 | Ordinary stream mechanisms | Fourteen compiled scheduler tests pass: 384 executor runs and 288 execute-budget runs; fixed eight-load/eight-producer population has 64 distinct schedules in 64 seeds; 12 exact seed replays; three private scheduling faults detected | `build/memblock/ordinary-scheduling-20261029/scheduler-tests/report-v2.json`; signatures omit address/payload/cycle/delay. Synthetic ports/completion times, Bare translation and representative vector shapes. Six byte-overlay and eight schema-accounting tests pass; independent review additionally rejects premature retirement |
 | Retained-prefix stream recovery DUT | Frozen runtime-v2: 42/42 finite seed cases pass 16384 actions; ten artifact verifiers accept; 10/10 adjacent native directed cases pass | `build/memblock/unfinished-stream-20261029/qualification-v2.json`; forced/conflict/FP, disjoint, cold/parent-disabled, indexed prefixes and unmodified spec/coverage/corner. 385 episodes, 423 returned rounds, 671 strict suffix refetches and 164 observed LQ cancellations. All 109 held cold roles cancel explicitly and drain old responses, then strictly refetch 174 times; 43 cold roles are FP. Old-response phases retain one prefix producer selection and 25 prefix retirements. All 8336 tracked final words are observed. No fresh-line shortage sampled in DUT; unmodified short spec samples no cold role. Development qualification only |

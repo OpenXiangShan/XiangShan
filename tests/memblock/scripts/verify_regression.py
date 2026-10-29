@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4759,6 +4759,14 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
     _require(operations[1] <= vector_uops[0] <= 8 * operations[1] and
              operations[3] <= vector_uops[1] <= 8 * operations[3],
              "stream vector uop counts disagree with instructions")
+    if result.get("constraint_schema", 0) >= 70:
+        weights = _csv_counts(result, "target_ops", 15)
+        _require(all(weight != 0 or count == 0 for count, weight in
+                     zip(operations, (weights[0], weights[2], weights[1], weights[3], weights[5]))),
+                 "stream generated a disabled operation class")
+        if rate == 1000:
+            _require(not any(_csv_counts(result, "concurrent", 5) + _csv_counts(result, "concurrent_ops", 5)),
+                     "stream-only concurrency generated a legacy window")
     if epochs == 0:
         _require(not any(_csv_counts(result, "stream", 12) + operations + issues + vector_uops) and retries == 0,
                  "empty stream has nonzero observations")

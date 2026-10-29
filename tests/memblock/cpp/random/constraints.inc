@@ -1218,6 +1218,16 @@ struct RandomConstraints {
         }
     }
 
+    bool uses_legacy_concurrency() const
+    {
+        return concurrent_actions_per_mille != 0 && concurrent_stream_per_mille < 1000;
+    }
+
+    bool uses_stream_concurrency() const
+    {
+        return concurrent_actions_per_mille != 0 && concurrent_stream_per_mille != 0;
+    }
+
     void validate() const
     {
         scalar_load_policy().validate();
@@ -1557,7 +1567,7 @@ struct RandomConstraints {
             std::array<bool, 4> reachable_sew{};
             std::array<bool, 7> reachable_lmul{};
             std::array<bool, 7> reachable_emul{};
-            std::array<bool, 2> reachable_concurrent_direction{};
+            std::array<bool, 2> reachable_concurrent_direction{}, reachable_stream_direction{};
             bool reachable_shape = false;
             for (unsigned addressing = 0; addressing < 4; ++addressing) {
                 if (vector_addressing_weights[addressing] == 0) {
@@ -1614,6 +1624,10 @@ struct RandomConstraints {
                                     : 16U) >> (emul_log2 > lmul_log2
                                         ? eew : vsew);
                             }
+                            reachable_stream_direction[0] = reachable_stream_direction[0] ||
+                                uops * flows_per_uop <= memblock::kVirtualLoadQueueEntries - memblock::kLqEnqueueHeadroom;
+                            reachable_stream_direction[1] = reachable_stream_direction[1] ||
+                                uops * flows_per_uop <= memblock::kStoreQueueEntries - memblock::kSqEnqueueHeadroom;
                             reachable_concurrent_direction[0] =
                                 reachable_concurrent_direction[0] ||
                                 uops * flows_per_uop <=
@@ -1650,11 +1664,18 @@ struct RandomConstraints {
             require_reachable(vector_sew_weights, reachable_sew, "SEW");
             require_reachable(vector_lmul_weights, reachable_lmul, "LMUL");
             require_reachable(vector_emul_weights, reachable_emul, "EMUL");
-            if (concurrent_actions_per_mille != 0 &&
+            if (uses_legacy_concurrency() &&
                 (!reachable_concurrent_direction[0] ||
                  !reachable_concurrent_direction[1])) {
                 throw std::invalid_argument(
                     "enabled vector shapes do not fit the concurrent LSQ budget");
+            }
+            if (uses_stream_concurrency()) {
+                for (unsigned direction = 0; direction < 2; ++direction) {
+                    if (operation_weights[vector_load + direction] != 0 && !reachable_stream_direction[direction]) {
+                        throw std::invalid_argument("enabled vector direction has no shape that fits the stream LSQ budget");
+                    }
+                }
             }
         }
         if (operation_weights[vector_segment] != 0) {
@@ -1864,7 +1885,7 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "special-concurrent requires nc or mmio traffic");
         }
-        if (concurrent_actions_per_mille != 0) {
+        if (uses_legacy_concurrency()) {
             for (const unsigned operation : {
                      scalar_load, scalar_store, vector_load, vector_store,
                      prefetch}) {
@@ -1875,6 +1896,11 @@ struct RandomConstraints {
                         "weights");
                 }
             }
+        }
+        const std::array stream_operations{scalar_load, scalar_store, vector_load, vector_store, prefetch};
+        if (uses_stream_concurrency() && std::none_of(stream_operations.begin(), stream_operations.end(),
+                [&](unsigned operation) { return operation_weights[operation] != 0; })) {
+            throw std::invalid_argument("stream concurrency requires an enabled scalar-load, scalar-store, vector-load, vector-store, or prefetch operation");
         }
         if (probes_per_mille != 0 && operation_weights[scalar_store] == 0) {
             throw std::invalid_argument(
@@ -3021,7 +3047,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=69 constraints=" << name
+        stream << "constraint_schema=70 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];

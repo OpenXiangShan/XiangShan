@@ -619,19 +619,24 @@ public:
     MixedCoverage coverage;
     ConstraintCoverage constraint_coverage;
     static constexpr unsigned constrained_completion_timeout = 512;
-    explicit MixedScenario(std::uint64_t seed, unsigned timing, unsigned family)
-        : constraints(RandomConstraints::preset("coverage")), environment(timing), random(seed) {
+    explicit MixedScenario(std::uint64_t seed, unsigned timing, unsigned family, bool validated_profile = false)
+        : constraints(RandomConstraints::preset(validated_profile ? "cmo-stress" : "coverage")), environment(timing), random(seed) {
         rob_offset = 157; lq_offset = SyntheticEnvironment::initial_lq; sq_offset = SyntheticEnvironment::initial_sq;
         environment.actions = &actions;
         constraints.operation_weights.fill(0);
         const std::array<unsigned, 5> operations{{RandomConstraints::scalar_load, RandomConstraints::vector_load,
             RandomConstraints::scalar_store, RandomConstraints::vector_store, RandomConstraints::prefetch}};
         for (unsigned index = 0; index < operations.size(); ++index)
-            constraints.operation_weights[operations[index]] = family == 0 ? (index == 0 ? 7 : 3) : (family == index + 1 ? 1 : 0);
+            constraints.operation_weights[operations[index]] = validated_profile ? ((family >> index) & 1U) :
+                family == 0 ? (index == 0 ? 7 : 3) : (family == index + 1 ? 1 : 0);
         constraints.stream_unresolved_per_mille = 0;
         constraints.stream_unresolved_inflight_per_mille = 0;
         constraints.misaligned_per_mille = 450;
         constraints.scalar_fp_per_mille = 350;
+        if (validated_profile) {
+            constraints.concurrent_actions_per_mille = constraints.concurrent_stream_per_mille = 1000;
+            constraints.validate();
+        }
         // Decoder-legal representatives include ordinary, unordered, ordered,
         // multi-uop and repeated-Vd shapes. Shape generation is production code.
         vector_shapes = {{0, 0, 0, 0, 0, 1}, {0, 2, 2, 1, 1, 1},
@@ -750,9 +755,9 @@ int main(int argc, char **argv) {
             require(rejected == 2 * presets, "stream rate above 1000 was accepted");
             std::cout << "{\"presets\":" << presets << ",\"boundary_overrides\":" << boundaries
                 << ",\"out_of_range_rejections\":" << rejected << "}\n";
-        } else if (mode == "stream" || mode == "recovery") {
+        } else if (mode == "stream" || mode == "recovery" || mode == "profile") {
             require(argc == 6 || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
-            MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]));
+            MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
             if (mode == "recovery") {
                 fixture.environment.recovery_enabled = true;

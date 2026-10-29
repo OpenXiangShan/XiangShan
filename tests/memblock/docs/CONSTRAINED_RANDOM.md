@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=69`.
+`constraint_schema=70`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -294,9 +294,17 @@ rate to an endpoint can require disabling incompatible classes explicitly.
   tuples additionally fit at most eight data-register uops across NF fields.
   Enabled dimensions must each have a reachable legal tuple. Tuple selection
   uses the product of constituent weights over the legal set, not independent
-  unfiltered draws. Concurrent vectors must fit the reserved LQ/SQ flow budget.
-- Nonzero `concurrent` requires nonzero scalar-load, scalar-store, vector-load,
-  vector-store, and prefetch weights. `special-concurrent` requires nonzero
+  unfiltered draws. When legacy windows are reachable (`concurrent>0` and
+  `concurrent-stream<1000`), vectors must fit their reserved LQ/SQ flow budgets.
+  When streams are reachable (`concurrent>0` and `concurrent-stream>0`), each
+  enabled vector direction needs at least one full legal instruction fitting
+  the stream's actual queue capacity after enqueue headroom. This is 66 LQ or
+  52 SQ flows; legacy windows additionally reserve three LQ and one SQ entries.
+  Disabled directions impose no stream-fit requirement.
+- Reachable legacy windows require nonzero scalar-load, scalar-store, vector-load,
+  vector-store, and prefetch weights. At `concurrent-stream=1000`, any nonempty
+  subset of these five producer classes is legal. Segment, atomic, CMO, error or
+  device operations alone cannot satisfy the stream population requirement. `special-concurrent` requires nonzero
   `concurrent` and NC or MMIO. `probe` requires scalar stores; enabled deep,
   CMO, and atomic Probe groups require nonzero depth weights where used.
 - NC/MMIO require a translated PBMT context, and hypervisor traffic requires
@@ -378,6 +386,14 @@ pulse. This legacy helper drains before the next window. A requested concurrency
 simultaneity fraction; use the reported unresolved classes and samples as
 observations. See [run_concurrent_windows()](../cpp/scenarios/mixed_concurrent.cpp).
 
+At `concurrent-stream=1000`, only sliding streams consume the concurrency budget;
+serial helpers retain their reserved share. A single-class or subset profile uses
+the same generator and independent data oracles. For example, a scalar/FP stream
+profile starts from `cmo-stress` with `cmo=0 concurrent=1000
+concurrent-stream=1000 scalar-fp=200`; additional ordinary classes remain zero.
+Other profiles may require explicitly disabling unrelated feature prerequisites
+when removing their governing operation weights.
+
 The ordinary [stream executor](../cpp/scenarios/mixed_stream.cpp) draws an epoch
 of 8..32 architectural instructions, clipped to the remaining budget (so 1..7
 are legal), and a live depth of 2..8. It repeatedly samples from current legal
@@ -386,7 +402,9 @@ retirement events. Retirement competes with every other eligible event; it is
 not a greedy completed-prefix drain. Younger admissions and producer selections
 can therefore occur while an older complete instruction remains live. Producer counts
 are drawn from the five configured operation weights instead of a fixed count
-per class. Admission accounts for actual vector LQ/SQ flows and queue headroom;
+per class. Zero-weight classes cannot be admitted. Schema 70 accounting rejects
+a stream operation from a disabled class and any legacy-window observations in
+stream-only mode. Admission accounts for actual vector LQ/SQ flows and queue headroom;
 retired prefixes free capacity for new work while younger instructions remain
 live. Integer, FP and vector writing destinations are distinct within each live
 class. One architectural deque owns the oldest ROB head and held `pendingst`;
@@ -562,7 +580,11 @@ queue/LSQ accounting, plus available grant/ack accounting and requested campaign
 metadata checks. With `--require-coverage` it instead calls
 `_check_mixed_coverage`, which requires the constraint schema, complete coverage
 arrays and, when `--require-backpressure` is also set, nonzero per-result
-backpressure bins. `make -C tests/memblock strict-coverage-regression` generates
+backpressure bins. Its broad producer/mode requirements are not fully conditioned
+on subset profiles; finite subset campaigns establish functional/accounting
+evidence only. They do not satisfy strict coverage or the closure requirements in
+[VERIFICATION_PLAN.md](VERIFICATION_PLAN.md#regression-acceptance).
+`make -C tests/memblock strict-coverage-regression` generates
 a finite coverage campaign and runs that opt-in mode. `STRICT_CONSTRAINTS`
 selects the preset (default `coverage`) and repeatable `STRICT_CONSTRAINT`
 assignments override individual fields, e.g.

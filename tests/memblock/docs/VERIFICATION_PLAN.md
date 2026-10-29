@@ -148,7 +148,9 @@ Prioritize gaps that ordinary user workloads can reach: scalar/FP values and
 byte forwarding, older-store/younger-load dependencies, address translation,
 cache refill/replacement, overlapping queues and observable committed bytes.
 Use the canonical generator for new directions and measure actual structural
-variation. Rare PMP/H/error/CMO combinations follow these unless they block a
+variation. Stream-only profiles can select ordinary producer subsets, including
+scalar/FP dependency traffic and full-capacity vector loads without mandatory
+legacy producers; report the actual accepted class mix and queue activity. Rare PMP/H/error/CMO combinations follow these unless they block a
 correct oracle or reproducible failure. Neither a template count nor a larger
 constraint set guarantees a design bug.
 

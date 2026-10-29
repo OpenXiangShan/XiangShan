@@ -275,7 +275,11 @@ and all outstanding obligations. Scalar STA/STD acknowledgements and vector uop 
 scoreboards; prefetch queries require the prefetch class as well as ROB value
 and wrap. Exact vector replay service consumes only its matching feedback,
 rejects an already-completed target and preserves unrelated replay obligations.
-It does not move ROB head or emit scalar commit. These are bounded external
+It does not move ROB head or emit scalar commit. Stream populations use only
+nonzero configured scalar/FP, vector or prefetch classes; disabled classes cannot
+appear in `stream_ops`. Stream-only concurrency cannot generate legacy windows.
+Subset profiles retain the same data, identity, exactly-once and final-byte
+oracles. These are bounded external
 backend models: no general rename/cancellation ledger or full-CPU timing
 equivalence is claimed.
 
