@@ -36,7 +36,7 @@ on:
         type: boolean
         default: false
       enable_tea:
-        description: Enable TEA collection (requires a Constantin file enabling TEA)
+        description: Collect TEA tables only (TEA CST required); enable_db or enable_rolling requests full DB
         required: false
         type: boolean
         default: false
@@ -248,6 +248,15 @@ jobs:
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_ENV
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_OUTPUT
 
+      - name: Prepare TEA-only database runner
+        if: inputs.enable_tea && !inputs.enable_db && !inputs.enable_rolling
+        run: |
+          TEA_SCRIPTS_HOME="$RUNNER_TEMP/tea-env-scripts-${{ github.run_id }}"
+          mkdir -p "$TEA_SCRIPTS_HOME"
+          cp -r "$SCRIPTS_HOME/perf_trigger" "$TEA_SCRIPTS_HOME/perf_trigger"
+          patch -d "$TEA_SCRIPTS_HOME" -p1 < "$GITHUB_WORKSPACE/scripts/ci/perf-select-db.patch"
+          echo "SCRIPTS_HOME=$TEA_SCRIPTS_HOME" >> "$GITHUB_ENV"
+
       - name: Initialize submodules
         run: make init-force
 
@@ -280,6 +289,12 @@ jobs:
       - name: Run SPEC CPU checkpoints
         run: |
           cd $SCRIPTS_HOME/perf_trigger
+          DB_OPTS=()
+          if [[ "${{ inputs.enable_tea }}" == "true" && "${{ inputs.enable_db }}" != "true" && "${{ inputs.enable_rolling }}" != "true" ]]; then
+            DB_OPTS+=(--dump-select-db "Tea_0 TeaDelayedFinal_0")
+          elif [[ "${{ inputs.enable_db }}" == "true" || "${{ inputs.enable_rolling }}" == "true" ]]; then
+            DB_OPTS+=(--dump-db)
+          fi
           EXTRA_OPTS=()
           if [[ -n "${{ inputs.warmup }}" ]]; then
             EXTRA_OPTS+=(--warmup "${{ inputs.warmup }}")
@@ -300,7 +315,7 @@ jobs:
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
-            ${{ ( inputs.enable_db || inputs.enable_rolling || inputs.enable_tea ) && '--dump-db' || '' }} \
+            "${DB_OPTS[@]}" \
             --run \
             "${EXTRA_OPTS[@]}" \
             $CST_RUN_OPT

@@ -62,7 +62,7 @@ on:
         type: boolean
         default: false
       enable_tea:
-        description: Enable TEA collection (requires a Constantin file enabling TEA)
+        description: Collect TEA tables only (TEA CST required); enable_db or enable_rolling requests full DB
         required: false
         type: boolean
         default: false
