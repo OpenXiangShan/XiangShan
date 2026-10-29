@@ -816,6 +816,7 @@ package object xiangshan {
     val NoStall = Value("NoStall") // Base
     // frontend
     val OverrideBubble = Value("OverrideBubble")
+    val IfuFlushBubble = Value("IfuFlushBubble")
     val FtqUpdateBubble = Value("FtqUpdateBubble")
     // val ControlRedirectBubble = Value("ControlRedirectBubble")
     val TAGEMissBubble = Value("TAGEMissBubble")
