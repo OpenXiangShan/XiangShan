@@ -299,6 +299,10 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
 
         if (environment.memory_violation_stats().count != expected_violations) {
             const auto &violation = environment.memory_violation_stats();
+            if (violation.count != expected_violations + 1U) {
+                phase += ":multiple-unhandled-redirects";
+                return false;
+            }
             std::ostringstream detail;
             detail << ":redirect-recovery:cycle=" << violation.last_cycle
                 << ":rob=" << unsigned(violation.last.rob_value) << '/' << violation.last.rob_flag
