@@ -357,7 +357,8 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
         nodeId = coreParams.HartId,
         eSAM = true,
         slices = 0 until coreParams.L2NBanks,
-        upstream = cchiUpstream
+        upstream = cchiUpstream,
+        pfSrcID = 2
       )
       val oceanusL2 = Module(new L2Top(l2cfg))
 
