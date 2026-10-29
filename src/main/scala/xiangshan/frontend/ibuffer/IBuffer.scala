@@ -531,16 +531,20 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   private val deqValidCount = PopCount(io.out.map(_.valid))
   private val deqWasteCount = DecodeWidth.U - deqValidCount
-  private val hasBubbleReason = topdownStages.last.reasons.asUInt.orR
+  // Other must lose to every specific cause, even if its bit is injected upstream.
+  // Keep it out of the encoder and select it only as the final fallback below.
+  private val bubbleReasons = WireInit(topdownStages.last.reasons)
+  bubbleReasons(TopDownCounters.FrontendOtherCoreStall.id) := false.B
+  private val hasBubbleReason = bubbleReasons.asUInt.orR
   private val encodedBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
-    topdownStages.last.reasons.reverse
+    bubbleReasons.reverse
   )
-  // Other is a fallback, not a set bit: its larger enum ID must not mask
-  // a real cause such as OverrideBubble. Never use the encoder's zero-input result.
-  private val matchBubble = Mux(hasBubbleReason, encodedBubble,
-    Mux(deqValidCount === 0.U,
-      TopDownCounters.FrontendOtherCoreStall.id.U,
-      TopDownCounters.FetchFragBubble.id.U))
+  // Never use the encoder's zero-input result. Fetch fragmentation also outranks Other.
+  private val matchBubble = Mux(
+    hasBubbleReason,
+    encodedBubble,
+    Mux(deqValidCount === 0.U, TopDownCounters.FrontendOtherCoreStall.id.U, TopDownCounters.FetchFragBubble.id.U)
+  )
 
   io.stallReason.reason.foreach(_ := TopDownCounters.NoStall.id.U)
   for (i <- 0 until DecodeWidth) {
