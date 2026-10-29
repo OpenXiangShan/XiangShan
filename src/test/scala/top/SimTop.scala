@@ -33,6 +33,10 @@ import system.SoCParamsKey
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
   val debugOpts = p(DebugOptionsKey)
+  require(
+    !(debugOpts.UseDRAMSim && debugOpts.UseBaiyang),
+    "DRAMSim3 and Baiyang DDR memory backends are mutually exclusive"
+  )
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -62,7 +66,8 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
     l_soc.misc.memAXI4SlaveNode,
     debugOpts.SimMemSize,
     useBlackBox = true,
-    dynamicLatency = debugOpts.UseDRAMSim
+    dynamicLatency = debugOpts.UseDRAMSim,
+    useBaiyang = debugOpts.UseBaiyang
   )
   val simAXIMem = Module(l_simAXIMem.module)
   l_simAXIMem.io_axi4.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
