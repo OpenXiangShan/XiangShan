@@ -1,5 +1,17 @@
 // This file is included inside implementation.hpp's private memblock namespace.
 
+// The caller certifies that a returned redirect boundary has been reached.
+// ROB age is only meaningful within the bounded live window (< kRobEntries);
+// an opposite-flag equal value is not a legal live pair in that window.
+inline bool scoreboard_redirect_kills(
+    const RobIdentity &identity, unsigned rob, bool flag, bool flush_itself)
+{
+    const bool equal = identity.value == rob && identity.flag == flag;
+    const bool younger = identity.flag == flag
+        ? identity.value > rob : identity.value < rob;
+    return younger || (flush_itself && equal);
+}
+
 class LoadScoreboard {
 public:
     struct Expected {
@@ -226,6 +238,41 @@ public:
         ++redirect_canceled_;
         return true;
     }
+    // Cancel pending executions only. Completed entries have already left the
+    // map, and a later old writeback remains unexpected until a new strict
+    // expectation is explicitly registered by the caller. Return scalar-load
+    // and prefetch execution counts, respectively.
+    std::array<std::uint64_t, 2> cancel_pending_for_redirect(
+        unsigned rob, bool flag, bool flush_itself)
+    {
+        std::array<std::uint64_t, 2> canceled{};
+        if (!error_.empty()) return canceled;
+        if (rob >= kRobEntries) {
+            error_.record("bulk load redirect has an invalid ROB anchor");
+            return canceled;
+        }
+        for (const auto &[identity, expected] : expected_) {
+            if (identity.value >= kRobEntries || identity.flag != expected.rob_flag) {
+                error_.record("bulk load redirect has an invalid pending ROB identity");
+                return canceled;
+            }
+        }
+        for (auto it = expected_.begin(); it != expected_.end();) {
+            if (!scoreboard_redirect_kills(it->first, rob, flag, flush_itself)) {
+                ++it;
+                continue;
+            }
+            if (it->second.prefetch) {
+                ++canceled[1];
+                --pending_prefetch_;
+            } else {
+                ++canceled[0];
+                ++redirect_canceled_;
+            }
+            it = expected_.erase(it);
+        }
+        return canceled;
+    }
     std::uint64_t redirect_canceled() const { return redirect_canceled_; }
     std::uint64_t reset_canceled() const { return reset_canceled_; }
     std::size_t pending() const { return expected_.size(); }
@@ -399,6 +446,34 @@ public:
     }
 
     std::uint64_t reset_canceled() const { return reset_canceled_; }
+
+    // Address/data issue and partial completion do not change instruction age.
+    // The certified redirect cancels every still-pending killed execution.
+    std::uint64_t cancel_pending_for_redirect(
+        unsigned rob, bool flag, bool flush_itself)
+    {
+        std::uint64_t canceled = 0;
+        if (!error_.empty()) return canceled;
+        if (rob >= kRobEntries) {
+            error_.record("bulk store redirect has an invalid ROB anchor");
+            return canceled;
+        }
+        for (const auto &[identity, expected] : expected_) {
+            if (identity.value >= kRobEntries || identity.flag != expected.rob_flag) {
+                error_.record("bulk store redirect has an invalid pending ROB identity");
+                return canceled;
+            }
+        }
+        for (auto it = expected_.begin(); it != expected_.end();) {
+            if (!scoreboard_redirect_kills(it->first, rob, flag, flush_itself)) {
+                ++it;
+                continue;
+            }
+            ++canceled;
+            it = expected_.erase(it);
+        }
+        return canceled;
+    }
 
     void observe_address(
         unsigned lane, const generated::ScalarStoreWriteback &writeback,
@@ -985,6 +1060,35 @@ public:
         page_fault_observed_ +=
             (writeback.exception_mask & kExceptionLoadPageFault) != 0;
         expected_.erase(it);
+    }
+
+    // ROB identity names the instruction: flush-self cancels all remaining
+    // sibling uops, regardless of their vuop index or earlier sibling outputs.
+    // Return load and store uop execution counts, respectively.
+    std::array<std::uint64_t, 2> cancel_pending_for_redirect(
+        unsigned rob, bool flag, bool flush_itself)
+    {
+        std::array<std::uint64_t, 2> canceled{};
+        if (!error_.empty()) return canceled;
+        if (rob >= kRobEntries) {
+            error_.record("bulk vector redirect has an invalid ROB anchor");
+            return canceled;
+        }
+        for (const auto &[identity, expected] : expected_) {
+            if (identity.value >= kRobEntries || identity.flag != expected.rob_flag) {
+                error_.record("bulk vector redirect has an invalid pending ROB identity");
+                return canceled;
+            }
+        }
+        for (auto it = expected_.begin(); it != expected_.end();) {
+            if (!scoreboard_redirect_kills(it->first, rob, flag, flush_itself)) {
+                ++it;
+                continue;
+            }
+            ++canceled[it->second.store ? 1 : 0];
+            it = expected_.erase(it);
+        }
+        return canceled;
     }
 
     bool pending(const VectorMemoryTransaction &transaction) const
