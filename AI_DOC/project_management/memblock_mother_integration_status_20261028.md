@@ -8,6 +8,78 @@
 - 当前执行状态：`STOPPED_RTL_CONFIRMED`；strict-NC RTL Bug 等待 coding 授权，无活动仿真，母任务未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
+## 续接入口（2026-10-29）
+
+后续继续母任务时，直接进入以下 worktree，不创建新的 Bug worktree：
+
+```bash
+cd /nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_mother_integration_20261028
+git status --short
+git log -1 --oneline
+```
+
+本次续接记录写入前 HEAD 为 `027a35355`；生产源码基线仍为 `c9763bd7d`。写入前 worktree 干净，
+本次仅补充文档，没有启动仿真。前轮已确认 controller/远端任务收敛。源码修改必须在本 mother worktree 中逐个问题顺序完成；不同 cfg
+或 seed 的仿真可以并发，但同一 `mode` 只能有一个 controller。
+
+当前暂停点是：
+
+```text
+status=STOPPED_RTL_CONFIRMED
+bug=NC 返回跨 redirect 后仍产生旧 LDA 写回
+tc=basicTest
+ts=memblock_dispatch_real_smoke_vseq
+cfg=tc_dispatch_real_mmu_sv39_strict_nc_100k
+root_seed=846339364
+error=787.300ns INT_WB_ATTACH no active uid for ROB key=0/14
+```
+
+该问题已经完成两轮责任 review、Buglist 登记和方案 review，但**尚未取得 RTL coding 授权，未修改 RTL，
+不能把“继续”理解为 RTL 授权，也不能绕过该失败恢复回归**。授权或接收 RTL owner 修复后，按 RTL 生成规则处理
+`src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala` 的 NC 输出 staging，重新生成 RTL，
+使用新 `mode` 编译；不能复用旧的 `mother_strict_nc_wb_debug_20261029` simv。
+
+修复后的固定执行顺序：
+
+1. 原始 seed `846339364` 专项编译仿真，严格确认通过。
+2. 重新执行第 7 组恢复批次：原 `ABORTED` seed
+   `874181294,2113203111,202201584,1595761652,203579979` 必须重跑；原 `NOT_RUN`
+   seed `1733858606,1807727296,1728147241,1940125520` 不重跑，重新构造 4 个不重复随机 seed。
+3. 第 7 组 10/10 收敛后，按第 8–12 组顺序推进 BasicTest，每组原始 10 seed 并发执行。
+4. BasicTest 12 组全部收敛后，执行其余 14 组 functional matrix，再执行 fault3 100-seed 专项。
+5. 在最终稳定源码上重新编译 coverage 版本，收集并合并覆盖率，完成总问题/方案 review。
+
+上述 BasicTest 原始矩阵批次固定保留：`--tc basicTest`、对应 `--ts/--cfg`、`--monitor --record`、
+`--timeout-ns 1000000000`、`+MEMBLOCK_MAIN_TRANS_NUM=1000`、`+MEMBLOCK_CHECK_TRIGGER_EN=0`。
+其余 14 组必须使用下表各自的 tc/ts/cfg 和原始归档参数，不能全部改成 basicTest；fault3 也需先核对原专项记录。
+恢复时必须为新空结果目录，使用显式 `--seeds`；保留每轮 `campaign_state.tsv`，不得直接使用
+`failed_seeds.txt` 混合恢复。完整 Bug 证据和源码级方案见：
+
+- `AI_DOC/buglist/rtl/v2/rtl_buglist_2026-W44_20261026.md`
+- `AI_DOC/analysis/source_sv/dispatch_framework_sv/strict_nc_redirect_late_lda_seed846339364_analysis_20261029.md`
+- `AI_DOC/plan/test_framework/plan/do/memblock_redirect_later_split_cancel_integration_plan_20261029.md`
+
+不修复无关 `soft_test`；不新增 worktree；每个实际修复问题仍需单独专项验证并单独 Git commit。
+
+### 续接时的验收边界
+
+- 母任务目标仍为：逐个修复本轮失败并单 Bug 提交，完成全部回归、Bug 分析/方案记录、总 review，
+  最终交付所有用例通过后的完整覆盖率目录。本次只是保存进度，不是完成或新增执行授权。
+- 原始 functional matrix 共 26 组、每组 10 seed；其中 BasicTest 为 12 组。当前 BasicTest 60/120
+  已通过，其余 14 组 0/140 完成本轮矩阵验收。不同版本专项 PASS 不代替最终统一源码验收。
+- 已修复集成和证据见下面提交表；最新 `c9763bd7d` 的 later-split cancel 已通过定向和真实 DUT 39/39
+  专项，不能继续当成待修问题。统一最终版本、fault3 100-seed、覆盖率、总 review 均未完成。
+- 原始 cfg/seed 清单目录：
+  `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/mem_ut/ver/ut/memblock/sim/functional_cfg_cov_20261023_results`。
+  保留原归档；当前 strict-NC 恢复状态在第 7 组结果目录的 `campaign_state.tsv`，当前为 `STOPPED_RTL_CONFIRMED`。
+- 真实 DUT 每个日志严格要求：一次 TEST_PASS、正常 `$finish`、无 raw UVM ERROR/FATAL，final/caught/demoted
+  ERROR/FATAL 六项均为 0；controller rc=0、result=PASS、全 seed PASS、unknown=0 且无未完成分类。
+  ROB 负向定向的 caught fatal=19 是独立预期，不可当成真实 DUT 零错误验收。
+- 不再依赖旧 subagent 会话恢复；独立 review 结论已落盘。重新执行前先读本仓 AGENTS.md、Buglist/
+  回归执行规则和适用的 eda-sim skill；涉及 RTL 生成还须读 V2 RTL profile。
+- `.codex_csr_prefix_fix_20261025` 中仍有独立未合并 WIP；历史 l2tlb worktree 也必须保留。
+  不批量合并、不删除脏 worktree，不回到旧工作区并发改代码。当前 mother 分支是任务分支，不是主线。
+
 ## Integrated Bug Commits
 
 | Commit | Bug | Mother verification | Source worktree |
