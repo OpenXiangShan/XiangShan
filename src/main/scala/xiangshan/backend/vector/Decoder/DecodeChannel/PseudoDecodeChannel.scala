@@ -2,7 +2,7 @@ package xiangshan.backend.vector.Decoder.DecodeChannel
 
 import chisel3._
 import chisel3.experimental.hierarchy.{instantiable, public}
-import chisel3.util.{BitPat, ValidIO}
+import chisel3.util.{BitPat, Cat, ValidIO, is, switch}
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.decode.opcode.OpcodeTraits._
@@ -43,7 +43,7 @@ class PseudoDecodeChannel(
 
   val instBitFields: XSInstBitFields = in.rawInst.asTypeOf(new XSInstBitFields)
 
-  val patterns = instSeq
+  val patterns = if (HasZicfilp) instSeq else instSeq.filterNot(_ == InstPatterns.LPAD)
 
   val fields = Seq(
     legalField,
@@ -63,6 +63,7 @@ class PseudoDecodeChannel(
     isJField,
     isJrField,
     isMoveField,
+    isLPADField,
   )
 
   val table = new DecodeTable(patterns, fields)
@@ -80,6 +81,12 @@ class PseudoDecodeChannel(
     false.B
   }
 
+  // Like the SS fallback gate, only claim this encoding when its extension semantics apply.
+  // Otherwise SimpleDecodeChannel handles the same bits as AUIPC rd=x0.
+  val lpadEnabled = if (HasZicfilp) {
+    in.fromCSR.enableZicfilp.get && in.ZicfilpELP.get && in.ZicfilpPCAligned.get
+  } else false.B
+
   val selImm = Wire(ValidIO(DecodeSelImm()))
   val imm = Wire(UInt(32.W))
 
@@ -88,6 +95,7 @@ class PseudoDecodeChannel(
     selImm.bits,
     Seq(
       DecodeSelImm.I         -> ImmUnion.I.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.I.len),
+      DecodeSelImm.U         -> ImmUnion.U.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.U.len),
       DecodeSelImm.UJ        -> ImmUnion.J.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.J.len),
       DecodeSelImm.CSRRVLENB -> (VLEN / 8).U,
       DecodeSelImm.S         -> ImmUnion.S.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.S.len),
@@ -95,12 +103,16 @@ class PseudoDecodeChannel(
   )
 
   // Pseudo has priority; only yield allocated SS encodings when SSE is enabled.
-  out.valid := bundle(legalField) && !suppressMopFallback
+  out.valid := bundle(legalField) && !suppressMopFallback && (!bundle(isLPADField) || lpadEnabled)
   out.bits.fuType := bundle(fuTypeField)
   out.bits.opcode := bundle(opcodeField)
   out.bits.src1RenType := bundle(src1Field)
   out.bits.src2RenType := bundle(src2Field)
-  out.bits.lsrc1 := Mux(bundle(isMoveField), 0.U, instBitFields.RS1)
+  out.bits.lsrc1 := instBitFields.RS1
+  switch(Cat(bundle(isLPADField), bundle(isMoveField))) {
+    is("b10".U) { out.bits.lsrc1 := 7.U }
+    is("b01".U) { out.bits.lsrc1 := 0.U }
+  }
   out.bits.lsrc2 := instBitFields.RS2
   out.bits.ldest := instBitFields.RD
   out.bits.gpWen := bundle(gpWenField) && (out.bits.ldest =/= 0.U)
@@ -140,6 +152,8 @@ object PseudoDecodeChannel {
   class In(implicit p: Parameters) extends Bundle {
     val rawInst = UInt(32.W)
     val fromCSR = new CSRToDecode
+    val ZicfilpELP = Option.when(p(XSCoreParamsKey).HasZicfilp)(Bool())
+    val ZicfilpPCAligned = Option.when(p(XSCoreParamsKey).HasZicfilp)(Bool())
   }
 
   class Out extends Bundle {
@@ -176,6 +190,7 @@ object PseudoDecodeChannel {
 
     val J            = PseudoInstPattern(PseudoInstructions.J)
     val JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
+    val LPAD         = PseudoInstPattern(PseudoInstructions.LPAD)
     val MOP_R        = PseudoInstPattern(MOP_R_N)
     val MOP_RR       = PseudoInstPattern(MOP_RR_N)
   }
@@ -218,6 +233,7 @@ object PseudoDecodeChannel {
     PREFETCH_W    -> (LduOpcodes.prefetch_w + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
     J             -> (JmpOpcodes.j),
     JALR_RD_ZERO  -> (JmpOpcodes.jr),
+    LPAD          -> JmpOpcodes.j.copy().setTraits(Src1Gp, Src2Imm(DecodeSelImm.U), CannotRobCompress),
     MOP_R         -> (AluOpcodes.add.S2xRemove + CannotRobCompress),
     MOP_RR        -> (AluOpcodes.add.S2xRemove + CannotRobCompress),
   )
@@ -355,6 +371,11 @@ object PseudoDecodeChannel {
   val isJrField = new DecodeFieldGen(
     Bool(),
     (op: InstPattern) => (op == JALR_RD_ZERO).toBitPat
+  )
+
+  val isLPADField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (op == LPAD).toBitPat,
   )
 
   val isMoveField = new DecodeFieldGen(

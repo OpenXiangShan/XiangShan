@@ -99,8 +99,7 @@ object ScalaUopTable {
       _.ADDI    -> Seq(add.S2xRemove),
       _.AND     -> Seq(and),
       _.ANDI    -> Seq(and.S2xRemove),
-      // LPAD 阅读：基础 AUIPC 只有一条 LinkOpcodes.auipc uop，rd=x0 也先按本项译码。
-      // 需要检查的 LPAD 在 DecodeStage 再选择 JumpUnit 控制，以便读取隐含源 x7。
+      // Inactive LPADs use this AUIPC decode; active LPADs take PseudoDecodeChannel priority.
       _.AUIPC   -> Seq(auipc),
       _.BEQ     -> Seq(beq),
       _.BGE     -> Seq(bge),

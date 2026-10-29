@@ -46,7 +46,7 @@ private class ZicfilpDebugProbe(implicit p: Parameters) extends Module {
   zeroInputs(csr.nonMaskableIRP)
 
   val arch = Option.when(p(XSCoreParamsKey).HasZicfilp)(Module(new ArchZicfilp))
-  val spec = Option.when(p(XSCoreParamsKey).HasZicfilp)(Module(new SpecZicfilp))
+  val spec = Option.when(p(XSCoreParamsKey).HasZicfilp)(Module(new SpecZicfilp(p(XSCoreParamsKey).DecodeWidth)))
   // Match CSR wrapper's register before the signal reaches Decode/CtrlBlock.
   val effectiveEnable = RegNext(csr.io.toDecode.enableZicfilp.getOrElse(false.B), false.B)
   arch.foreach { state =>
