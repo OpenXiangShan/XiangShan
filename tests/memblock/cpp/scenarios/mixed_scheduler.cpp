@@ -81,9 +81,25 @@ bool MixedScenario::execute()
     phase = "random-translation-map";
     if (!prepare_random_translation_contexts()) return false;
     if (!prepare_tail()) return false;
-    if (!run_concurrent_windows()) return false;
-    while (actions < target_before_redirect) {
-        if (!run_serial_action()) return false;
+    if (constraints.concurrent_stream_per_mille == 0) {
+        if (!run_concurrent_windows()) return false;
+        while (actions < target_before_redirect)
+            if (!run_serial_action()) return false;
+    } else {
+        const unsigned concurrent_budget = concurrent_action_limit - actions;
+        while (actions < target_before_redirect) {
+            const auto used = coverage.concurrent_actions + coverage.stream[2];
+            const auto remaining = used < concurrent_budget ? concurrent_budget - used : 0;
+            const auto total_remaining = target_before_redirect - actions;
+            if (remaining != 0 && random() % total_remaining < remaining) {
+                if (std::min<std::uint64_t>(remaining, total_remaining) < 7 || random() % 1000U < constraints.concurrent_stream_per_mille) {
+                    if (!run_concurrent_stream(std::min<std::uint64_t>(remaining, total_remaining))) return false;
+                } else {
+                    concurrent_action_limit = actions + std::min<std::uint64_t>(remaining, total_remaining);
+                    if (!run_concurrent_windows()) return false;
+                }
+            } else if (!run_serial_action()) return false;
+        }
     }
     return finish();
 }

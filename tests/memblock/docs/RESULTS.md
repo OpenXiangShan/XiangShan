@@ -18,6 +18,20 @@ None.
 
 ## Current Changes Qualified Below
 
+- Ordinary mixed streams sample variable scalar/FP load, vector load, scalar
+  store, vector store and prefetch composition in 1..32-instruction epochs with
+  2..8 live instructions. Ready events interleave independent STA/STD and vector
+  uops; new admission continues after prefix retirement while younger work stays
+  live. One deque holds the actual oldest ROB head, with distinct live register
+  destinations, exact replay service and scalar/vector commit separation.
+  An independent admission-order byte image freezes younger load values from
+  initial bytes plus older input stores. Beat-crossing scalar STA waits for
+  actual head eligibility so its blocking acceptance helper cannot stall older
+  retirement. Schema 62 conserves initial issue, admission, retirement, replay
+  and placement observations. `concurrent-stream` defaults to 750; zero retains
+  legacy prefix scheduling. Epoch/context drains, conservative older-address
+  gating and full rename/cancellation histories remain explicit limits.
+
 - Ordinary scalar dependency traffic varies 1..4 older stores, 1..3 younger
   loads and an optional younger store, sampling ready STA, STD and load events.
   Loads wait for identified older address hits while older store data can remain
@@ -38,7 +52,8 @@ None.
   SQ target without scalar `scommit`. Heterogeneous windows keep the actual
   oldest head and distinct live integer destinations. Compiled production-method
   tests and independent mutation review qualify these bounded prerequisites;
-  general sliding admission and a complete retirement/rename ledger remain open.
+  the separate bounded stream provides sliding admission, while a complete
+  retirement/rename ledger remains open.
 
 - Canonical vector-data writing uops now select distinct destinations in 1..127;
   FOF fix-VL independently selects 1..31, and nonwriting uops drive zero.
@@ -51,8 +66,8 @@ None.
   instructions (`vstart >= vl`), including `vl=0`; ordinary body/agnostic rules
   remain separate. A scheduling-only sample contains 453 distinct legal orders
   out of 512 draws for four independent two-uop chains. Full allocation history,
-  arbitrary simultaneous writing-instruction allocation and sliding retirement
-  remain unqualified.
+  unbounded simultaneous writing-instruction allocation remains unqualified;
+  the bounded stream reserves distinct destinations through prefix retirement.
 - Canonical ordinary, heterogeneous-window, SQ-dependency and unresolved/refetch
   loads now select integer or FLH/FLW/FLD formats from seeded class/width weights.
   Independent mapped bytes and older input-store overlays determine FP payloads
@@ -224,10 +239,12 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 344 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 369 tests pass | Unit checks do not establish DUT functional coverage |
+| Ordinary sliding mixed DUT qualification | Frozen runtime-v4: 10/10 accepted finite seeds pass 14336 actions; all five retained artifact verifiers accept; 8/8 adjacent directed cases pass | `build/memblock/sliding-mixed-20261029/qualification-v4.json`; translated indexed, broad vector shapes, legacy controls, clean special overlap and default spec. 117 epochs, 2360 retired stream instructions, 1467 accepted-overlap admissions, 1706 continued admissions, 378 replay issues, 99 legacy windows and 7259/7259 final words. Development qualification only; pending/unaccepted runs excluded |
+| Ordinary stream mechanisms | Nine compiled scheduler tests pass: 256 executor runs and 240 execute-budget runs; 65 distinct structural schedules, 12 exact seed replays; both private scheduling mutations detected | `build/memblock/sliding-mixed-20261029/scheduler-tests/verification.json`; schedule signatures omit address/payload/cycle/delay. Synthetic ports/completion times, bare translation and representative vector shapes; real replay helpers separately tested. Six byte-overlay tests and five schema-accounting tests pass |
 | Scalar dependency interleaving | Frozen runtime-v1: 10/10 finite seeds pass 4608 actions; all artifact verifiers accept | `build/memblock/dependency-interleave-20261029/qualification-v1.json`; focused/translated mixed/spec/corner. 759 dependency windows, 546 accepted early loads, 269 with overlapping older STD unissued, 35 with multiple, 146 heterogeneous windows and 5465/5465 final tracked words. Known older addresses; no arbitrary unresolved-address or closure claim |
 | Dependency scheduler mechanics | Four compiled generator/oracle/accounting tests pass; private checks detect store-then-load, missing-STA-prerequisite, lost-event and duplicate-event mutants | `build/memblock/dependency-interleave-20261029/method-tests/verification.json`; actual generator and byte overlay, independent event invariants and sparse schema-61 accounting. Synthetic opportunity counts do not establish DUT timing |
-| Dispatch/retirement helpers | 12 compiled production-method tests pass; independent review approves and detects ten private helper mutations | `build/memblock/retirement-contract-20261029/review-v2/report.md`; real scoreboards/queue accounting with synthetic scheduling/ports. No full-CPU reachability or RTL-mutation claim |
+| Dispatch/retirement helpers | 17 compiled production-method tests pass, including five stream head/query/replay cases; prior independent helper review detects ten private mutations | `build/memblock/retirement-contract-20261029/review-v2/report.md`; real scoreboards/queue accounting with synthetic scheduling/ports. No full-CPU reachability or RTL-mutation claim |
 | Dispatch/retirement DUT qualification | Frozen runtime-v2: 14/14 finite seeds pass 12416 actions; artifact verifiers accept; 9/9 selected directed scenarios pass | `build/memblock/retirement-contract-20261029/qualification-v2.json`; translated indexed mixed/special, dirty pressure, spec/corner/CMO compatibility. 130 heterogeneous windows and 7512/7512 final tracked words. Development qualification, not closure |
 | Vector operands and oracle | Frozen runtime-v2: 18/18 finite seeds pass 5888 actions; all retained artifact verifiers accept | `build/memblock/vector-operands-20261029/qualification.json`; ordered/unordered indexed and agnostic controls, coverage/spec/corner, mixed and legal ordinary/segment FOF profiles. 1804 load source-chain edges and 1804 checked predecessor waits, 1450 store-source reuses, 146 heterogeneous windows and 10563/10563 final tracked words; development qualification, no closure claim |
 | Vector builder and mutation checks | Six production builder/source/scheduler/wait/scoreboard/accounting tests pass; 4992 builder cases, 192 no-op cases and 453/512 distinct dependency issue orders | Fresh non-author review detects eight private input/scheduler/replay mutations plus removal of the no-op comparator gate; 128 additional normal-body controls preserve active/mask/tail decisions. Helper/unit sensitivity, not RTL mutation coverage |
@@ -312,6 +329,19 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
+Fresh-context non-author review approves the bounded ordinary mixed stream,
+byte-prefix oracle, replay/head helpers and schema-62 accounting against
+`review-v1c.hashes.json`, with no outstanding findings. Its test-scope finding
+is resolved by modeling legacy seven/eight-action windows and allowed residual
+budgets. A primary-found strict-verifier false positive is independently
+reviewed: stream-only traffic now requires zero legacy shape fields while
+canonical vector and stream coverage checks remain active. The reviewer passes
+107 focused tests, rechecks all four targeted artifact verifiers and detects a
+third private mutation removing scalar-STA head eligibility. Evidence and primary
+disposition are `build/memblock/sliding-mixed-20261029/review-v1/review-report.txt`
+and `review-disposition.json` in its parent directory. Full rename/source
+history, complete CPU reachability and closure remain outside this approval.
+
 Fresh-context non-author review approves the ordinary scalar ready-event
 interleaving and schema-61 accounting change with no findings. It checks the
 CPU's independent paired STA/STD producers, matching-data replay eligibility,
@@ -344,12 +374,13 @@ Their scoped evidence and dispositions remain
 `build/memblock/fp-random-20261029/review-disposition.json` and
 `build/memblock/alias-manager-20261029/review-disposition.json`.
 
-The generator has local variation in dependency graphs, vector shapes, index
-operands, page maps and dependency-preserving indexed issue orders. Global
-scheduling still fixes five-producer windows before serial helpers and drains
-between them. Multiple unresolved stores and variable producer counts/ages with
-sliding admission remain the next normal-workload priorities. Source samples do
-not establish unique complete-run schedules or guarantee a design bug.
+The generator varies dependency graphs, vector shapes, index operands, page maps
+and dependency-preserving indexed issue orders. Ordinary stream epochs now also
+vary producer counts/ages and ready-event schedules, with sliding admission and
+random placement among serial helpers. Multiple speculative unresolved stores,
+epoch drains and broader address dependencies remain normal-workload priorities.
+Builder samples do not establish unique complete-run DUT schedules or guarantee
+a design bug.
 
 Fresh-context non-author review approves the dispatch/retirement prerequisite
 patch against the CPU ROB, LSQ prefix, SQ vector-commit and completion-driven

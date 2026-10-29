@@ -169,6 +169,7 @@ private:
     bool issue_constrained_fence(unsigned operation_kind);
     std::uint64_t mmio_access_address();
     bool run_concurrent_windows();
+    bool run_concurrent_stream(unsigned instruction_limit);
     unsigned int vector_shape_uop_count(
         const RandomVectorShape &shape);
     unsigned int vector_shape_flow_num(

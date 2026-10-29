@@ -910,6 +910,22 @@ auto Environment::scalar_store_pending(const StoreTransaction &transaction) cons
     return impl_->scalar_store_pending(transaction);
 }
 
+auto Environment::scalar_store_address_pending(const StoreTransaction &transaction) const -> bool
+{ return impl_->scalar_store_address_pending(transaction); }
+
+auto Environment::prefetch_pending(const PrefetchTransaction &transaction) const -> bool
+{ return impl_->prefetch_pending(transaction); }
+
+auto Environment::vector_memory_pending(const VectorMemoryTransaction &transaction) const -> bool
+{ return impl_->vector_memory_pending(transaction); }
+
+auto Environment::service_vector_replay(const VectorMemoryTransaction &transaction,
+    bool &replayed, unsigned timeout) -> bool
+{ return impl_->service_vector_replay(transaction, replayed, timeout); }
+
+auto Environment::set_rob_head_state(std::uint8_t value, bool flag, bool pending_store) -> bool
+{ return impl_->set_rob_head_state(value, flag, pending_store); }
+
 auto Environment::cancel_scalar_load_for_reset(const LoadTransaction &transaction)  -> bool
 {
     return impl_->cancel_scalar_load_for_reset(transaction);

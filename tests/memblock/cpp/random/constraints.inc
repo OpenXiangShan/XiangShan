@@ -185,6 +185,7 @@ struct RandomConstraints {
     std::array<unsigned, fence_kind_count> fence_kind_weights{};
     std::array<unsigned, 2> fence_scope_weights{};
     unsigned concurrent_actions_per_mille = 1000;
+    unsigned concurrent_stream_per_mille = 750;
     unsigned special_concurrent_per_mille = 0;
     unsigned translation_switches_per_mille = 0;
     unsigned tlb_flushes_per_mille = 0;
@@ -1102,6 +1103,8 @@ struct RandomConstraints {
             locality_weights[2] = parsed;
         } else if (key == "concurrent") {
             concurrent_actions_per_mille = parsed;
+        } else if (key == "concurrent-stream") {
+            concurrent_stream_per_mille = parsed;
         } else if (key == "special-concurrent") {
             special_concurrent_per_mille = parsed;
         } else if (key == "translation-switch") {
@@ -1768,6 +1771,7 @@ struct RandomConstraints {
                 "nested VS/G mode constraint weights cannot all be zero");
         }
         if (concurrent_actions_per_mille > 1000 ||
+            concurrent_stream_per_mille > 1000 ||
             special_concurrent_per_mille > 1000 ||
             translation_switches_per_mille > 1000 ||
             stage1_napot_per_mille > 1000 ||
@@ -2991,7 +2995,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=61 constraints=" << name
+        stream << "constraint_schema=62 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3099,6 +3103,7 @@ struct RandomConstraints {
                << " target_fence_scope=" << fence_scope_weights[0] << ','
                << fence_scope_weights[1]
                << " target_concurrent=" << concurrent_actions_per_mille
+               << " target_concurrent_stream=" << concurrent_stream_per_mille
                << " target_special_concurrent="
                << special_concurrent_per_mille
                << " target_translation_switch="

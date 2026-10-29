@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+"""Compile actual mixed schedulers against an independent obligation checker.
+
+The shell gives accepted producers deterministic synthetic completion times. It
+checks the legality of events the production scheduler selects; it never builds
+its ready-candidate list. These tests establish scheduler contracts, not DUT
+latency behavior or full-CPU input reachability.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+INPUTS = (
+    'cpp/scenarios/mixed_stream.cpp', 'cpp/scenarios/mixed_scheduler.cpp',
+    'cpp/scenarios/mixed_transactions.cpp', 'cpp/scenarios/mixed_vectors.cpp',
+    'cpp/scenarios/mixed/state.hpp', 'cpp/scenarios/shared.hpp',
+    'cpp/scenarios/mixed/scalar_load.hpp', 'cpp/scenarios/mixed/vector_indices.hpp',
+    'cpp/scenarios/mixed/vector_operands.hpp', 'cpp/scenarios/mixed/stream_oracle.hpp',
+    'cpp/random/constraints.inc', 'cpp/random/coverage.inc',
+    'cpp/environment/model.inc', 'cpp/memblock_env.hpp',
+    'cpp/generated_interface_types.hpp',
+)
+
+
+def input_hashes():
+    return {path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in INPUTS}
+
+
+def method(path, signature):
+    text = (ROOT / path).read_text()
+    start = text.index(signature)
+    return text[start:text.index('\n}\n', start) + 3]
+
+
+class MixedStreamTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.before = input_hashes()
+        cls.runs = []
+        cls.mutations = {}
+        cls.replays = 0
+        cls.constraint_case = None
+        cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
+        cls.addClassCleanup(cls.workspace.cleanup)
+        cls.addClassCleanup(cls.finalize)
+        source = (ROOT / 'unit/mixed_stream_fixture.cpp').read_text()
+        builders = [method('cpp/scenarios/mixed_transactions.cpp', signature) for signature in (
+            'memblock::LoadTransaction MixedScenario::make_load(',
+            'memblock::StoreTransaction MixedScenario::make_store(',
+            'memblock::PrefetchTransaction MixedScenario::make_prefetch(',
+            'unsigned long MixedScenario::constrained_window_address(',
+        )]
+        vectors = [method('cpp/scenarios/mixed_vectors.cpp', signature) for signature in (
+            'unsigned int MixedScenario::vector_shape_uop_count(',
+            'unsigned int MixedScenario::vector_shape_flow_num(',
+            'unsigned int MixedScenario::vector_shape_total_flows(',
+            'unsigned int MixedScenario::vector_shape_deficit(',
+            'const RandomVectorShape & MixedScenario::choose_vector_shape(',
+            'std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector_uops(',
+            'void MixedScenario::sample_constrained_vector_instruction(',
+        )]
+        source = source.replace('// PRODUCTION_BUILDERS_AND_VECTOR_PRODUCERS', '\n'.join(builders + vectors))
+        stream = (ROOT / 'cpp/scenarios/mixed_stream.cpp').read_text()
+        stream = '\n'.join(line for line in stream.splitlines() if not line.startswith('#include'))
+        source = source.replace('// PRODUCTION_STREAM', stream)
+        execute = method('cpp/scenarios/mixed_scheduler.cpp', 'bool MixedScenario::execute()')
+        source = source.replace('// PRODUCTION_EXECUTE', execute.replace('MixedScenario::', 'BudgetFixture::'))
+        cls.source = source
+        cls.binary = cls.compile(source, 'baseline')
+        cls.check_inputs()
+
+    @classmethod
+    def compile(cls, source, name):
+        path = Path(cls.workspace.name) / (name + '.cpp')
+        path.write_text(source)
+        binary = path.with_suffix('')
+        result = subprocess.run(
+            ['c++', '-std=c++20', '-O0', '-I', str(ROOT / 'cpp'), str(path), '-o', str(binary)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+        return binary
+
+    @classmethod
+    def check_inputs(cls):
+        if input_hashes() != cls.before:
+            raise AssertionError('production inputs changed during mixed scheduler tests')
+
+    @classmethod
+    def finalize(cls):
+        cls.check_inputs()
+        destination = os.environ.get('MEMBLOCK_MIXED_STREAM_REPORT')
+        if destination:
+            stream = [run for run in cls.runs if run['mode'] == 'stream']
+            mixed = [run for run in stream if run['family'] == 0 and run['limit'] == 32 and run['timing'] == 1]
+            report = {
+                'production_hashes': cls.before,
+                'scope': 'compiled production scheduler decisions with synthetic completion times; no DUT',
+                'successful_stream_runs': len(stream),
+                'successful_budget_runs': sum(run['mode'] == 'budget' for run in cls.runs),
+                'invariants_checked_per_successful_stream_run': [
+                    'architectural-prefix admission and retirement', 'exactly-once producer acceptance',
+                    'expectation/dispatch/retirement and LQ/SQ conservation',
+                    'class-distinct destinations held until retirement',
+                    'head-only scalar/vector split and ordered-load issue',
+                    'known older-store addresses before younger loads',
+                    'repeated-Vd producer completion before dependent issue',
+                    'installed ROB head and pending-store level',
+                    'production action/operation/overlap coverage matches independent observations'],
+                'schedule_fields': 'admission kind/identity; producer class/uop/identity; architectural prefix retirement',
+                'excluded_from_schedule': ['address', 'payload', 'cycle', 'delay'],
+                'unique_structural_schedules': len({run['result']['schedule'] for run in mixed}),
+                'unique_instruction_kind_sequences': len({tuple(run['result']['kinds']) for run in mixed}),
+                'unique_producer_count_sequences': len({tuple(run['result']['producer_counts']) for run in mixed}),
+                'epoch_lengths': sorted({run['result']['actions'] for run in mixed}),
+                'observations': {field: sum(run['result'][field] for run in stream) for field in (
+                    'overlap_admissions', 'continued_admissions', 'loads_before_older_std',
+                    'head_checks', 'dependency_checks')},
+                'peak_live': max((run['result']['peak_live'] for run in mixed), default=0),
+                'peak_accepted': max((run['result']['peak_accepted'] for run in mixed), default=0),
+                'mutation_sensitivity': cls.mutations,
+                'deterministic_replay_cases': cls.replays,
+                'constraint_case': cls.constraint_case,
+                'explicit_gaps': ['synthetic ports and completions', 'replay service reports no replay',
+                                  'bare translation only', 'representative decoder-legal vector shapes'],
+                'runs': cls.runs,
+            }
+            path = Path(destination)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(report, indent=2) + '\n')
+
+    def run_fixture(self, mode, *arguments, binary=None):
+        self.check_inputs()
+        result = subprocess.run([str(binary or self.binary), mode, *map(str, arguments)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def stream(self, seed, timing=1, family=0, limit=32, binary=None):
+        result = self.run_fixture('stream', seed, timing, family, limit, binary=binary)
+        if binary is None:
+            self.runs.append({'mode': 'stream', 'seed': seed, 'timing': timing,
+                              'family': family, 'limit': limit, 'result': result})
+        return result
+
+    def assert_sliding_observations(self, results):
+        self.assertGreaterEqual(max(run['peak_live'] for run in results), 3)
+        self.assertGreaterEqual(max(run['peak_accepted'] for run in results), 2)
+        self.assertGreater(sum(run['overlap_admissions'] for run in results), 0)
+        self.assertGreater(sum(run['continued_admissions'] for run in results), 0)
+
+    def test_seed_changes_structural_instruction_and_producer_schedules(self):
+        results = [self.stream(seed) for seed in range(1, 65)]
+        self.assertGreaterEqual(len({run['schedule'] for run in results}), 32)
+        self.assertGreaterEqual(len({tuple(run['kinds']) for run in results}), 16)
+        self.assertGreaterEqual(len({tuple(run['producer_counts']) for run in results}), 16)
+        self.assertGreaterEqual(len({run['actions'] for run in results}), 8)
+        self.assertGreaterEqual(len({run['peak_live'] for run in results}), 3)
+        self.assertEqual(set().union(*(set(run['kinds']) for run in results)), set(range(5)))
+        self.assert_sliding_observations(results)
+        self.assertGreater(sum(run['head_checks'] for run in results), 0)
+        self.assertGreater(sum(run['dependency_checks'] for run in results), 0)
+
+    def test_identical_seed_and_completion_pattern_replays_exactly(self):
+        for seed in (1, 2, 7, 13, 31, 79):
+            for timing in (0, 1):
+                with self.subTest(seed=seed, timing=timing):
+                    first = self.stream(seed, timing)
+                    self.assertEqual(first, self.stream(seed, timing))
+                    type(self).replays += 1
+
+    def test_load_can_issue_after_older_address_before_older_scalar_data(self):
+        results = [self.stream(seed, timing=0) for seed in range(1, 65)]
+        self.assertGreater(sum(run['loads_before_older_std'] for run in results), 0)
+
+    def test_obligations_hold_across_completion_patterns_and_operation_masks(self):
+        for timing in (0, 1):
+            for family in range(1, 6):
+                for seed in range(1, 9):
+                    with self.subTest(timing=timing, family=family, seed=seed):
+                        result = self.stream(seed, timing, family)
+                        self.assertEqual(set(result['kinds']), {family - 1})
+                        expected = (2 if family == 3 else 1)
+                        if family in (1, 3, 5):
+                            self.assertEqual(set(result['producer_counts']), {expected})
+
+    def test_zero_short_and_full_instruction_limits_conserve_work(self):
+        for limit in (0, 1, 2, 3, 7, 8, 31, 32):
+            for seed in (1, 7, 29):
+                with self.subTest(limit=limit, seed=seed):
+                    result = self.stream(seed, limit=limit)
+                    self.assertLessEqual(result['actions'], limit)
+                    if limit < 8:
+                        self.assertEqual(result['actions'], limit)
+                    self.assertEqual(sum(event.startswith('A') for event in result['schedule'].split(',')), result['actions'])
+                    self.assertEqual(result['schedule'].count('R'), result['actions'])
+
+    def test_real_constraint_presets_rate_boundaries_and_serialization(self):
+        result = self.run_fixture('constraints')
+        self.assertEqual(result, {'presets': 4, 'boundary_overrides': 8, 'out_of_range_rejections': 4})
+        type(self).constraint_case = result
+
+    def test_actual_execute_interleaves_serial_work_and_conserves_budgets(self):
+        schedules = []
+        legacy_sizes = set()
+        for rate in (0, 500, 1000):
+            for concurrent in (0, 1, 6, 7, 8, 9, 14, 15, 31, 97):
+                for seed in range(1, 9):
+                    with self.subTest(rate=rate, concurrent=concurrent, seed=seed):
+                        result = self.run_fixture('budget', seed, 97, concurrent, rate)
+                        self.runs.append({'mode': 'budget', 'seed': seed, 'rate': rate,
+                                          'concurrent': concurrent, 'result': result})
+                        self.assertEqual(result['actions'], 97)
+                        used = result['concurrent']
+                        self.assertLessEqual(used, concurrent)
+                        if rate == 0:
+                            self.assertLess(concurrent - used, 7)
+                            self.assertNotIn('C', result['schedule'])
+                        else:
+                            self.assertEqual(used, concurrent)
+                        events = result['schedule'].split(',')
+                        for event in events:
+                            if event.startswith('W'):
+                                self.assertIn(int(event[1:]), (7, 8))
+                                legacy_sizes.add(int(event[1:]))
+                        if rate == 1000:
+                            self.assertFalse(any(event.startswith('W') for event in events))
+                        if rate == 1000 and concurrent == 31:
+                            schedules.append(result['schedule'])
+        self.assertEqual(legacy_sizes, {7, 8})
+        self.assertGreaterEqual(len(set(schedules)), 4)
+        self.assertTrue(any(',C' in schedule and ',S,' in schedule for schedule in schedules))
+
+    def test_private_serial_admission_mutation_loses_required_overlap(self):
+        old = 'admitted < length && live.size() < depth &&'
+        self.assertEqual(self.source.count(old), 1)
+        binary = self.compile(self.source.replace(old, 'admitted < length && live.empty() &&'), 'serial-admission')
+        results = [self.stream(seed, binary=binary) for seed in range(1, 17)]
+        with self.assertRaises(AssertionError):
+            self.assert_sliding_observations(results)
+        self.mutations['serial_admission'] = {'rejected': True, 'peak_live': max(run['peak_live'] for run in results),
+                                             'overlap_admissions': sum(run['overlap_admissions'] for run in results)}
+
+    def test_private_missing_older_address_guard_is_rejected(self):
+        scalar = '(work.kind == 4 || older_addresses_known)'
+        vector = '(work.kind == 3 || older_addresses_known)'
+        self.assertEqual(self.source.count(scalar), 1)
+        self.assertEqual(self.source.count(vector), 1)
+        binary = self.compile(self.source.replace(scalar, 'true').replace(vector, 'true'), 'unknown-address-load')
+        rejected = None
+        for seed in range(1, 33):
+            result = subprocess.run([str(binary), 'stream', str(seed), '1', '0', '32'],
+                                    capture_output=True, text=True, timeout=10)
+            if result.returncode and 'older' in result.stderr and 'address' in result.stderr:
+                rejected = {'rejected': True, 'seed': seed, 'reason': result.stderr.strip()}
+                break
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIsNotNone(rejected, 'removing older-address guards escaped the independent event checker')
+        self.mutations['missing_older_address_guard'] = rejected
+
+
+if __name__ == '__main__':
+    unittest.main()

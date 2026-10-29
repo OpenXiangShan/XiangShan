@@ -541,6 +541,17 @@ auto Environment::Impl::scalar_store_pending(const StoreTransaction &transaction
     return store_scoreboard_.pending(transaction);
 }
 
+auto Environment::Impl::scalar_store_address_pending(const StoreTransaction &transaction) const -> bool
+{ return store_scoreboard_.address_pending(transaction); }
+
+auto Environment::Impl::prefetch_pending(const PrefetchTransaction &transaction) const -> bool
+{
+    return scoreboard_.pending(transaction);
+}
+
+auto Environment::Impl::vector_memory_pending(const VectorMemoryTransaction &transaction) const -> bool
+{ return vector_scoreboard_.pending(transaction); }
+
 auto Environment::Impl::cancel_scalar_load_for_reset(const LoadTransaction &transaction)  -> bool
 {
     // Cancel only at the completed reset boundary. A normal functional

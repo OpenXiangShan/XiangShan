@@ -65,6 +65,7 @@ combinations have occurred or establishes a coverage percentage.
 | Domain | Executable subset and source | Remaining scope |
 | --- | --- | --- |
 | Scalar/FP loads | Canonical integer/FLH/FLW/FLD format selection in ordinary/concurrent/SQ-dependency/unresolved graphs, byte-wise memory and older-store overlay boxing, payload sign bins, class/destination bounds and strict correct-data refetch; directed selected NC/MMIO/fault cases | Complete rename allocation history, other helper formats and exceptional misaligned FP enable semantics; wider timing/error interactions |
+| Ordinary mixed execution | Weighted variable scalar/FP load, vector load, scalar store, vector store and prefetch composition; 1..32-instruction epochs and 2..8 live instructions; ready-event operand/uop scheduling, sliding admission after prefix retirement, independent admission-order byte overlays, exact replay and final readback; mixed_stream.cpp | Epoch/context drains, full rename/cancellation history, multiple speculative unresolved addresses, dynamic address dependencies and special/atomic/CMO/fault overlap |
 | Stores/forwarding | Random 1..4 older-store/1..3 younger-load chains with shuffled operand arrival, partial byte overlays and optional younger-store exclusion; address/data order, masks, commit, cross-producer forwarding, directed readback, constrained-random final word readback for cacheable identity-mapped and declared permuted-page commits and same-context hypervisor readback for permitted/aligned cacheable stores | Output-only pulses, remaining aliased/non-cacheable/fault-path final state. A naturally aligned cross-page scalar store is not modeled as one legal top-level uop; the backend split is absent, so cross-page scalar split-store fault effects are untested and a single-uop completion is not an RTL claim. |
 | Vector addressing | Unit/strided/indexed/segment/whole-register shapes, bounded random index spacing/permutation and repeated gathers with disjoint scatter spans, class-bounded distinct per-uop destinations, repeated-Vd source chains and randomized dependency-preserving indexed issue, data/identity/policy, full 128-bit mask operand with directed high-element load/store/indexed cases; cache_queue.inc, vector_memory.inc | Ordered side-effect targets, all concurrent shapes, and reserved/illegal mask-shape combinations remain |
 | Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA, single-uop later-element/masked `vstart=1` faults with exact faulting-element addresses, legal two-uop segment noncanonical loads/stores whose later uop must expose the fault with no forbidden traffic, masked, unmasked, first-element, segment (field-1, element-1 and first-field) PMP-denied masked/unmasked vector loads, and PMP-denied (including masked, cross-page, both segment field orders and EEW 1/2) vector store faults whose inactive/read-only/writable target pages are read back unchanged, a partially masked load with an inactive unmapped element, and an all-masked unmapped control that observes no PTW/DCache traffic | Default exceptional vstart skip for other shapes, arbitrary restart/progress, broader fault-address attribution, and canonical-alias sensitivity. Per-uop success order is not an architectural oracle when a later uop of the same instruction exposes the fault before commit. |
@@ -116,9 +117,9 @@ requests and can contain multiple uops. No complete-bin prefix or
 coverage-completeness PASS gate is active. Coverage is observational;
 functional/identity/queue/implemented-protocol checks stay active.
 
-minimum_serial_actions() reserves budget before heterogeneous windows. Its
+minimum_serial_actions() reserves serial budget before concurrency epochs. Its
 unmodified-profile floor is 4362 for coverage/corner and 4246 for spec. Thus
-256/1024-action passes do not prove heterogeneous overlap. Inspect observed
+256/1024-action passes do not prove mixed overlap. Inspect observed
 windows/uops, manager depth and backpressure instead of configured weights.
 
 ## Top-Level IO and Interface Assumptions
@@ -153,8 +154,8 @@ The common scalar dependency direction now varies store/load counts, overlap,
 operand arrival and issue order with independent byte-overlay expectations and
 younger-store exclusion controls. Seed/address-dependent ordinary initial bytes
 also distinguish representative wrong-line substitutions. Next normal-workload
-gaps include multiple unresolved-address dependencies, varied heterogeneous
-producer composition and dynamic mapping/invalidation overlap. Ordinary static
+gaps include multiple unresolved-address dependencies, longer dynamic
+address/temporal streams and mapping/invalidation overlap. Ordinary static
 4-KiB nonidentity mappings now use seeded host/VS/G page permutations with
 byte-wise load/store expectations, covering root-reuse fences and physical final
 readback. Permutations may change cache colour; the manager recalls the stored
@@ -167,16 +168,20 @@ uncommitted-store refetch data and disjoint byte-mask controls. Bounded random i
 now vary offset spacing/permutation and repeated gathers for ordinary and
 segment operations; partial byte overlap and overlapping scatters remain open.
 
-A pinned source review finds meaningful local structural randomization but a
-fixed global schedule: five-producer heterogeneous windows all run before serial
-helpers and drain between windows. Dispatch now freezes scalar-store opposite-
+Ordinary mixed streams vary producer counts and instruction ages, choose ready
+operand/uop events, and admit new work after a completed prefix retires while
+younger instructions remain live. Epochs are randomly placed among serial
+helpers. A zero `concurrent-stream` rate retains the fixed legacy prefix;
+legacy windows also remain for clean NC/MMIO overlaps. Dispatch now freezes scalar-store opposite-
 queue value/wrap snapshots; selected store/vector-list waits retain unrelated
 obligations. Heterogeneous head movement waits for older special-load completion,
 and vector retirement uses recorded SQ targets without scalar commit pulses.
-These are bounded legality prerequisites, not sliding admission or a complete
-ROB/rename/cancellation ledger. Next ordinary-workload work should vary
-producer counts/ages with bounded sliding admission and interleave multiple
-unresolved store identities with younger loads. Canonical FP formats now share
+The stream holds a single architectural head and independent byte-prefix oracle,
+with distinct live class destinations. Its 1..32-instruction epochs, 2..8 live
+depth and conservative older-address gating do not implement a complete
+ROB/rename/cancellation ledger. Next ordinary-workload work should interleave
+multiple unresolved store identities with younger loads and reduce bounded
+stream/context drains where the backend contract supports it. Canonical FP formats now share
 ordinary/concurrent/dependency/unresolved builders with independent value/boxing
 checks. Vector-data/VL destinations stay within their separate default files;
 repeated-Vd indexed loads use distinct renames, independently modeled prior
@@ -190,8 +195,8 @@ guarantee a CPU bug.
 
 Priority work, each requiring executable stimulus and an independent check:
 
-1. Vary ordinary mixed producer counts/ages with bounded sliding admission;
-   add multiple unresolved store identities with interleaved operand arrival,
+1. Extend bounded ordinary mixed streams to multiple unresolved store identities
+   with interleaved operand arrival and broader temporal/address dependencies,
    and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable
    identity-mapped and declared permuted-page commits to remaining legal aliases, non-cacheable/device effects and
    fault-path side-effect checks; one cross-alias path is now directed, but

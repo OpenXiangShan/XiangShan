@@ -459,6 +459,7 @@ bool MixedScenario::run_concurrent_windows()
             environment.ptw_requests(), special_kind ? 8 : 7, 7);
         actions += 5;
         coverage.cacheable += 7;
+        if (constraints.concurrent_stream_per_mille != 0) return true;
     }
     return true;
 }

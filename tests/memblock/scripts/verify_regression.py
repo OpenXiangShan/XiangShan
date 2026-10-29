@@ -278,6 +278,7 @@ def _check_concurrent_vector_shapes(
                         enabled = (
                             legal
                             and target_concurrent != 0
+                            and result.get("target_concurrent_stream", 0) != 1000
                             and target_operations[2 + direction] != 0
                             and vector_targets["addressing"][addressing] != 0
                             and vector_targets["eew"][eew] != 0
@@ -1488,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4358,20 +4359,28 @@ def _check_mixed_coverage(
                 isinstance(value, int) and not isinstance(value, bool) and value > 0,
                 f"{name} coverage is absent: {value!r}",
             )
-        _positive_csv(result, "concurrent_ops", 5)
-        for name in ("concurrent",):
-            value = result.get(name)
-            _require(isinstance(value, str), f"{name} coverage is not a string")
-            try:
-                windows, actions, overlap, unresolved, classes = (
-                    int(item, 10) for item in value.split(",")
-                )
-            except (ValueError, TypeError) as error:
-                raise VerificationError(f"invalid {name} coverage: {value!r}") from error
-            _require(windows >= 4, f"{name} has too few windows: {value}")
-            _require(actions >= 20, f"{name} has too few actions: {value}")
-            _require(overlap > 0 and unresolved >= 2 and classes >= 2,
-                     f"{name} lacks unresolved overlap: {value}")
+        if result.get("target_concurrent_stream", 0) == 1000:
+            _positive_csv(result, "stream_ops", 5)
+            stream = _csv_counts(result, "stream", 12)
+            _require(stream[0] >= 4 and stream[2] >= 20,
+                     f"stream has too few epochs/actions: {stream}")
+            _require(stream[3] > 0 and stream[7] >= 2,
+                     f"stream lacks accepted unresolved overlap: {stream}")
+        else:
+            _positive_csv(result, "concurrent_ops", 5)
+            for name in ("concurrent",):
+                value = result.get(name)
+                _require(isinstance(value, str), f"{name} coverage is not a string")
+                try:
+                    windows, actions, overlap, unresolved, classes = (
+                        int(item, 10) for item in value.split(",")
+                    )
+                except (ValueError, TypeError) as error:
+                    raise VerificationError(f"invalid {name} coverage: {value!r}") from error
+                _require(windows >= 4, f"{name} has too few windows: {value}")
+                _require(actions >= 20, f"{name} has too few actions: {value}")
+                _require(overlap > 0 and unresolved >= 2 and classes >= 2,
+                         f"{name} lacks unresolved overlap: {value}")
         if require_backpressure:
             _positive_csv(result, "backpressure", 6)
     _require(
@@ -4571,6 +4580,44 @@ def _check_scalar_dependency_accounting(result: dict[str, Any]) -> None:
                  "scalar dependency interleaved windows disagree with early loads")
 
 
+def _check_stream_accounting(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 62:
+        return
+    rate = result.get("target_concurrent_stream")
+    _require(type(rate) is int and 0 <= rate <= 1000, "invalid target_concurrent_stream")
+    epochs, admitted, retired, overlap, sliding, prefix, live, pending, events, replays, after_serial, last = _csv_counts(result, "stream", 12)
+    operations = _csv_counts(result, "stream_ops", 5)
+    issues = _csv_counts(result, "stream_issue", 6)
+    vector_uops = _csv_counts(result, "stream_vector_uops", 2)
+    retries = result.get("stream_scalar_retries")
+    _require(type(retries) is int and retries >= 0, "invalid stream_scalar_retries")
+    _require(admitted == retired == sum(operations) and epochs <= retired <= 32 * epochs,
+             "stream admission/retirement/epoch counts disagree")
+    _require(0 <= pending <= live <= 8 and overlap <= admitted - epochs and sliding <= admitted - epochs,
+             "stream live overlap or sliding admissions exceed their bounds")
+    _require(prefix <= retired - epochs and after_serial <= epochs and (not sliding or prefix > 0),
+             "stream retirement/placement observations disagree")
+    _require(live <= retired and retired <= result.get("transactions", 0),
+             "stream live/retired counts exceed completed actions")
+    _require((operations[2] != 0 or retries == 0) and
+             (sum(vector_uops) != 0 or replays == 0),
+             "stream retry/replay has no matching producer")
+    _require(events == sum(issues) and issues[0] == operations[0] and
+             issues[1] == issues[2] == operations[2] and issues[5] == operations[4] and
+             issues[3:5] == vector_uops,
+             "stream accepted issue events are not conserved")
+    _require(operations[1] <= vector_uops[0] <= 8 * operations[1] and
+             operations[3] <= vector_uops[1] <= 8 * operations[3],
+             "stream vector uop counts disagree with instructions")
+    if epochs == 0:
+        _require(not any(_csv_counts(result, "stream", 12) + operations + issues + vector_uops) and retries == 0,
+                 "empty stream has nonzero observations")
+    else:
+        _require(live > 0 and 0 < last <= result.get("transactions", 0), "invalid stream action placement")
+    if rate == 0 or result.get("target_concurrent") == 0:
+        _require(epochs == 0, "disabled stream generated traffic")
+
+
 def _check_mixed_accounting(result: dict[str, Any]) -> None:
     """Validate queue/LSQ accounting, not coverage completeness.
 
@@ -4749,6 +4796,7 @@ def _check_result(
             f"{prefix} DCache grants and GrantAcks are not conserved",
         )
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
+        _check_stream_accounting(result)
         _check_scalar_dependency_accounting(result)
         _check_vector_index_accounting(result)
         _check_scalar_unresolved_accounting(result)

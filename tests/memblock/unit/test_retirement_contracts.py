@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_PATHS = (
     'cpp/environment/issue.cpp', 'cpp/environment/completion.cpp',
     'cpp/environment/control.cpp', 'cpp/environment/cycle.cpp',
+    'cpp/environment/observations.cpp',
     'cpp/environment/feedback_monitor.cpp', 'cpp/environment/queue_accounting.hpp',
     'cpp/environment/queue_accounting.cpp', 'cpp/environment/scoreboards.inc',
     'cpp/environment/model.inc', 'cpp/scenarios/mixed_transactions.cpp',
@@ -30,6 +31,11 @@ def production_hashes():
 def method(path, signature):
     source = (ROOT / path).read_text()
     start = source.index(signature)
+    # Observation helpers may keep their complete body on one line.
+    body = source.index('{', start)
+    line_end = source.index('\n', body)
+    if source[body:line_end].rstrip().endswith('}'):
+        return source[start:line_end + 1]
     return source[start:source.index('\n}\n', start) + 3]
 
 
@@ -54,11 +60,18 @@ class RetirementContractsTest(unittest.TestCase):
                 'auto Environment::Impl::run_until_vector_complete_with_replays(const std::vector<VectorMemoryTransaction> &transactions,',
                 'auto Environment::Impl::commit_vector_store(',
                 'auto Environment::Impl::run_until_sq_dequeued(',
+                'auto Environment::Impl::service_vector_replay(',
             ),
             'control.cpp': (
                 'auto Environment::Impl::set_rob_head(',
+                'auto Environment::Impl::set_rob_head_state(',
                 'auto Environment::Impl::pulse_pending_store(',
                 'auto Environment::Impl::pulse_store_commit_keep_pending(',
+            ),
+            'observations.cpp': (
+                'auto Environment::Impl::scalar_store_address_pending(',
+                'auto Environment::Impl::prefetch_pending(',
+                'auto Environment::Impl::vector_memory_pending(',
             ),
             'cycle.cpp': (
                 'auto Environment::Impl::scalar_store_key(',
@@ -138,6 +151,21 @@ class RetirementContractsTest(unittest.TestCase):
 
     def test_held_vector_replay_keeps_pending_head_without_scalar_commit(self):
         self.check_case('vector_held')
+
+    def test_stream_queries_use_class_wrap_uop_and_destination_identity(self):
+        self.check_case('stream_queries')
+
+    def test_stream_replay_service_selects_one_circular_flow_without_retirement(self):
+        self.check_case('stream_service')
+
+    def test_stream_replay_service_rejects_completed_target(self):
+        self.check_case('stream_service_completed')
+
+    def test_stream_replay_service_reports_failed_issue_without_acceptance(self):
+        self.check_case('stream_service_failed')
+
+    def test_stream_head_state_is_atomic_and_preserves_pending_level(self):
+        self.check_case('stream_head')
 
 
 if __name__ == '__main__':

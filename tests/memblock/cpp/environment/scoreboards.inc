@@ -172,6 +172,12 @@ public:
                    rob_identity(transaction.rob, transaction.rob_flag)) !=
             expected_.end();
     }
+    bool pending(const PrefetchTransaction &transaction) const
+    {
+        const auto it = expected_.find(
+            rob_identity(transaction.rob, transaction.rob_flag));
+        return it != expected_.end() && it->second.prefetch;
+    }
     bool cancel_for_reset(const LoadTransaction &transaction)
     {
         if (!error_.empty()) {

@@ -383,6 +383,16 @@ auto Environment::Impl::set_rob_head(std::uint8_t value,
     return check_components();
 }
 
+auto Environment::Impl::set_rob_head_state(std::uint8_t value,
+    bool flag, bool pending_store) -> bool
+{
+    dut_.queues.backend.pending_ptr_value.set(value);
+    dut_.queues.backend.pending_ptr_flag.set(flag);
+    dut_.queues.backend.pendingst.set(pending_store);
+    tick();
+    return check_components();
+}
+
 auto Environment::Impl::pulse_pending_load(std::uint8_t value,
     bool flag)  -> bool
 {

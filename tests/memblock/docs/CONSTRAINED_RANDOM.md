@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=61`.
+`constraint_schema=62`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -18,9 +18,8 @@ The parser, presets, validation, and target serialization are in
 Normal workload correctness has priority: ordinary scalar/FP and vector data,
 store-to-load dependencies, cache/TLB overlap and final byte visibility precede
 additional exotic error/protection combinations. This is workload-style block
-stimulus, not execution of a SPEC CPU program. Seeds vary transaction values
-and choices; fixed producer compositions and serialized helper boundaries remain
-explicit below. More constraints or longer runs do not guarantee an RTL bug.
+stimulus, not execution of a SPEC CPU program. Seeds vary transaction values, producer counts and ready-event schedules;
+bounded stream epochs and serialized helper boundaries remain explicit below. More constraints or longer runs do not guarantee an RTL bug.
 
 Choose the profile with `--constraints PROFILE`. Repeat `--constraint key=value`
 to override individual fields after the profile; later assignments to the same
@@ -74,7 +73,8 @@ they do not imply arbitrary numeric suffix support.
 | --- | --- |
 | `scalar-load`, `scalar-store`, `vector-load`, `vector-store`, `vector-segment`, `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure`, `miss-burst` | Relative operation weights, in this serialized order. Each selects a complete helper action, which can issue multiple transactions. |
 | `locality-hot`, `locality-warm`, `locality-cold` | Relative address-pool choices for helpers using locality. |
-| `concurrent` | Rate used to allocate the initial heterogeneous-window budget, subject to serial reservation. |
+| `concurrent` | Rate allocating the mixed concurrency action budget, subject to serial reservation. |
+| `concurrent-stream` | Rate selecting a variable ordinary mixed stream instead of a fixed heterogeneous window at an eligible concurrency site. Default 750 in all presets; 0 preserves the legacy prefix schedule, 1000 selects streams only. A residual budget below seven actions always uses a stream when enabled. |
 | `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
 | `translation-switch` | Rate for resampling the translation context after required context/leaf/fence observations. |
 | `tlb-flush` | Rate for a compatible translation fence after required fence observations. |
@@ -221,6 +221,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | Fence sfence/hfence-vvma/hfence-gvma | all 1 | 98/1/1 | all 1 | all 1 |
 | Fence global/selective | all 1 | 95/5 | all 1 | all 1 |
 | `concurrent` | 1000 | 100 | 500 | 0 |
+| `concurrent-stream` | 750 | 750 | 750 | 750 |
 | `special-concurrent` | 500 | 20 | 750 | 0 |
 | `translation-switch` | 500 | 1 | 750 | 500 |
 | `tlb-flush` | 50 | 20 | 100 | 50 |
@@ -322,9 +323,12 @@ those choices, that all Cartesian crosses are legal, or that a pin toggles.
 ## Scheduling And Action Counts
 
 [mixed_scheduler.cpp](../cpp/scenarios/mixed_scheduler.cpp) initializes the
-reference memory and page tables, then runs any budgeted heterogeneous windows,
-then serial weighted actions, and finally a canceled-load/survivor redirect
-check and drain. The drain ends with a DUT readback of every tracked cacheable,
+reference memory and page tables, then intersperses budgeted concurrency epochs
+with serial weighted actions when `concurrent-stream` is enabled. The probability
+of selecting concurrency is its remaining action budget divided by all remaining
+actions. A selected epoch chooses a sliding stream or one legacy window using
+`concurrent-stream`. Zero preserves legacy windows followed by serial actions.
+The run finishes with a canceled-load/survivor redirect check and drain. The drain ends with a DUT readback of every tracked cacheable,
 identity-mapped or declared permuted-page committed word before the accounting gates run. There is no
 mandatory operation-coverage prefix or coverage-completeness PASS gate. The
 final redirect check reserves two actions; `prepare_tail()` needs at least that
@@ -346,7 +350,7 @@ This floor is a scheduling reservation calculated from enabled dimensions,
 not a minimum legal run size and not a promise that serial bins will be filled.
 With unmodified presets, the floor is 4362 for `coverage` and `corner`, and
 4246 for `spec`. Therefore ordinary 256- or 1024-action runs of those presets
-have zero heterogeneous windows even when `concurrent` is nonzero. A custom
+have zero concurrency epochs even when `concurrent` is nonzero. A custom
 profile can change the floor. Increasing only a concurrency rate cannot bypass
 this reservation. See [prepare_tail()](../cpp/scenarios/mixed_initialization.cpp).
 
@@ -359,10 +363,38 @@ architectural-prefix LQ snapshot and wrap bit. The pending ROB head cannot pass
 an older incomplete special load, and simultaneous integer destinations are
 distinct. Scalar-store and vector-list waits select only their declared
 transactions; vector retirement and pending-store replay drive no scalar commit
-pulse. These prerequisites do not implement sliding admission. The helper drains
-before the next window. A requested concurrency rate is a budget, not a measured
+pulse. This legacy helper drains before the next window. A requested concurrency rate is a budget, not a measured
 simultaneity fraction; use the reported unresolved classes and samples as
 observations. See [run_concurrent_windows()](../cpp/scenarios/mixed_concurrent.cpp).
+
+The ordinary [stream executor](../cpp/scenarios/mixed_stream.cpp) draws an epoch
+of 8..32 architectural instructions, clipped to the remaining budget (so 1..7
+are legal), and a live depth of 2..8. It repeatedly samples from current legal
+admission, scalar load/prefetch, STA, STD and vector-uop events. Producer counts
+are drawn from the five configured operation weights instead of a fixed count
+per class. Admission accounts for actual vector LQ/SQ flows and queue headroom;
+retired prefixes free capacity for new work while younger instructions remain
+live. Integer, FP and vector writing destinations are distinct within each live
+class. One architectural deque owns the oldest ROB head and held `pendingst`;
+completion-driven LQ dequeue cannot advance it. Only a completed prefix retires,
+with scalar commit pulses excluded for vector stores. Context and epoch
+boundaries drain, but admission and prefix retirement within an epoch do not.
+
+An admission-order byte overlay freezes scalar/FP/vector load values from initial
+reference bytes plus every older input store, independently of issue/completion
+order. Loads wait until all older store addresses are known; older scalar STD
+may remain unissued. Vector-store address readiness conservatively waits for
+its checked writebacks. Beat-crossing loads and scalar STA, ordered-indexed loads and
+misaligned vector stores wait for the actual head. STD remains independently
+eligible; a blocking hit wait cannot prevent older work from retiring while a
+misaligned STA waits for SQ-head eligibility. Exact vector replay service
+retains unrelated requests and does not move the head. Scalar address retries
+apply only while its STA obligation remains pending. The address pool biases
+three of four line choices toward eight lines near a seeded arena and otherwise
+uses the configured cacheable pool; per-access offsets, shapes and data vary.
+Multiple speculative unresolved addresses, full rename history, atomics/CMO,
+segment/fault instructions and NC/MMIO within this stream remain outside it.
+Legacy windows still provide optional clean NC/MMIO overlaps.
 
 Serial operation selection is weighted from its first action. Ordinary vector
 shape and binary-policy choices do not prioritize uncovered bins. Translation
@@ -502,7 +534,9 @@ Array order and sampling code are authoritative in
 | `actual_load_merge_*`, `actual_bank_conflict_*`, `actual_set_pressure_*`, `actual_miss_burst_*` | Compound-action shapes, manager/terminal counts, and pressure observations. Same-bank stimulus does not require a particular RTL replay policy. |
 | `vector_operand_chains` | Repeated-logical-Vd load-source edges, store-source reuses and completed predecessor waits. Generated load edges must equal completed waits in a passing run; this is a driver obligation, not a physical-register-file monitor. |
 | `scalar_dependency_interleaving` | Accepted loads before all store halves, with overlapping older STD unissued, with multiple such STD operands, and windows with early loads. These count input timing/byte overlaps; they do not require an internal replay or bypass. |
-| `concurrent_ops` | Five producer counts: scalar load, vector load, scalar store, vector store, prefetch. |
+| `concurrent_ops` | Legacy-window producer counts: scalar load, vector load, scalar store, vector store, prefetch. |
+| `stream` | Epochs, admitted instructions, retired instructions, admissions with older accepted work pending, admissions after a prefix retired while older work remains live, prefix retirements with younger live work, maximum live instructions, maximum accepted-and-pending instructions, initial issue events, vector replay issues, epochs after serial work, last global action index. These are driver/scoreboard observations, not an internal pipeline occupancy oracle. |
+| `stream_ops`, `stream_issue`, `stream_vector_uops`, `stream_scalar_retries` | Retired instruction counts in the same five-class order; initial scalar-load/STA/STD/vector-load-uop/vector-store-uop/prefetch issues; admitted vector-load/store uops; repeated STA issues excluded from initial counts. Schema 62 requires conservation and bounds in both verifier modes without a positive-bin gate. The opt-in strict checker retains minimum epoch/action/overlap observations for a stream-only configuration. |
 | `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
 | `dcache_latency_*`, `ptw_latency_*`, `uncache_latency_*` | Manager response-latency samples, four bucket counts, total cycles, and maximum. These are observed responses, not architectural deadlines. |
@@ -683,7 +717,8 @@ within its instruction, including EMUL>LMUL indexed splits that revisit the same
 logical Vd. FOF fix-VL uops independently select 1..31 in the separate 32-entry VL
 file. Stores and operand-only segment uops have no writing destination and drive
 zero. These are bounded allocation witnesses; complete rename/free-list history
-and arbitrary concurrent writing-instruction allocation remain unmodeled.
+remain unmodeled. Sliding streams additionally reserve distinct destinations across
+all simultaneously live writing instructions of the same register class.
 
 For EMUL>LMUL indexed loads, each repeated-Vd uop consumes the preceding rename's
 old-destination value. The driver computes it from prior input operands and
@@ -703,8 +738,8 @@ The dependent successor waits for that exact ROB/flag/uop/destination completion
 registered expectations for unissued siblings remain live. Ordered indexed uops
 retain architectural order. The monitored vector slow-replay channel is store
 only: its LQ snapshot must never attribute a replay to a vector load. Ordinary,
-heterogeneous and vector-store readback builders share these rules. This does not
-remove the fixed heterogeneous composition or its global drain boundaries.
+heterogeneous, sliding-stream and vector-store readback builders share these
+rules. Stream epochs retain explicit boundaries and do not model full rename history.
 
 ## Ordinary Nonidentity Page Mappings
 
@@ -790,14 +825,16 @@ contiguous-PA results against production scoreboards.
   positions. Later arbitrary fault positions, all FOF policy combinations,
   strided/indexed FOF encodings, and active-segment redirect are not generated
   by this random interface. The segment FOF encoding is unit-stride only.
-- Heterogeneous windows have a fixed five-producer composition, optional clean
-  NC/MMIO load, bounded queue flow, dependent ordered-index issue, and a drain
-  between windows. Serial helpers supply local Probe/refill/pressure overlaps.
+- Legacy heterogeneous windows have a fixed five-producer composition, optional
+  clean NC/MMIO load and a drain between windows. Sliding streams vary ordinary
+  producer composition and interleave admission/retirement within 1..32-instruction
+  epochs, with 2..8 live instructions, but still drain at each epoch. Serial
+  helpers supply local Probe/refill/pressure overlaps.
   The scalar dependency direction adds variable ordinary store/load chains;
   the unresolved direction adds one-store/one-load late RAW recovery and
   disjoint-mask controls. Multiple unresolved stores/loads and predictor training
-  remain absent. Broad arbitrary
-  outstanding instruction mixtures, multiple CMO/atomic ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
+  remain absent. Unbounded mixtures, arbitrary dependency/rename histories,
+  multiple CMO/atomic ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
   injection are not provided by these constraints.
 - The final readback forces cacheable identity-mapped store/atomic effects and
   declared permuted-page store effects, but does not observe remaining aliases, non-cacheable/device effects,
@@ -827,14 +864,18 @@ page mappings. Dedicated seed samples exclude payload and timing when measuring
 structural uniqueness. Such samples establish those builders' variation, not
 unique full-run schedules or an assurance that a design bug exists.
 
-The highest remaining ordinary-workload limitations are the fixed five-producer
-composition of heterogeneous windows, all such windows preceding serial work,
-and a drain between windows. Dependency windows vary counts and interleave independent operand halves with
-loads after older addresses resolve; unresolved-address windows still have one
-store/load pair. Canonical FP formats now participate in ordinary,
+Ordinary stream epochs now vary the number, age and class of instructions,
+interleave STA/STD/vector/load events, and admit new work after prefix retirement
+while younger work remains live. They are randomly placed among serial helpers;
+`concurrent-stream=0` retains the fixed prefix for reproduction. Dedicated
+compiled executor tests measure schedules without payload/address/delay fields.
+The highest remaining ordinary-workload limitations are epoch/context drains,
+conservative older-address readiness and one-pair unresolved-address windows.
+Dependency windows also vary counts and interleave independent operand halves
+with loads after older addresses resolve. Canonical FP formats now participate in ordinary,
 heterogeneous, SQ dependency and unresolved/refetch traffic with independent
-boxing/data checks. Prioritize bounded sliding admission with variable producer
-counts/ages and multiple unresolved store identities with interleaved operand
-arrival; broader FP helper and exceptional-misalignment combinations remain open.
+boxing/data checks. Prioritize multiple unresolved store identities with
+interleaved operand arrival and broader temporal/address dependencies; broader
+FP helper and exceptional-misalignment combinations remain open.
 Broader temporal locality/dependent-address streams and scalar/vector SQ
 forwarding follow these. Rare error/protection/CMO crosses remain secondary.

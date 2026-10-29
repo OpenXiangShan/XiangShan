@@ -300,6 +300,13 @@ public:
     std::size_t pending_scalar_loads() const;
     bool scalar_load_pending(const LoadTransaction &transaction) const;
     bool scalar_store_pending(const StoreTransaction &transaction) const;
+    bool scalar_store_address_pending(const StoreTransaction &transaction) const;
+    bool prefetch_pending(const PrefetchTransaction &transaction) const;
+    bool vector_memory_pending(const VectorMemoryTransaction &transaction) const;
+    bool service_vector_replay(const VectorMemoryTransaction &transaction,
+        bool &replayed, unsigned timeout = 256);
+    bool set_rob_head_state(std::uint8_t value, bool flag, bool pending_store);
+
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);
     std::uint64_t scalar_load_reset_canceled() const;
     std::uint64_t scalar_load_canceled_observed() const;

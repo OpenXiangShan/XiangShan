@@ -128,6 +128,26 @@ auto Environment::Impl::run_until_vector_complete(unsigned timeout)  -> bool
     return check_components();
 }
 
+auto Environment::Impl::service_vector_replay(const VectorMemoryTransaction &transaction,
+    bool &replayed, unsigned timeout) -> bool
+{
+    replayed = false;
+    const auto request = feedback_.take_replay_for(transaction);
+    if (!request) return check_components();
+    if (!vector_scoreboard_.pending(transaction)) {
+        error_.record("vector replay matched an already completed stream uop");
+        return false;
+    }
+    auto replay = transaction;
+    replay.lane = request->lane;
+    replay.is_part_replay = request->is_part_replay;
+    replay.replay_mask = request->replay_mask;
+    replay.replay_mb_index = request->replay_mb_index;
+    if (!issue_vector(replay, timeout)) return false;
+    replayed = true;
+    return true;
+}
+
 auto Environment::Impl::run_until_vector_complete_with_replays(const VectorMemoryTransaction &transaction,
     unsigned timeout,
     bool pulse_pending_store_after_replay,

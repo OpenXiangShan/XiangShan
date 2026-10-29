@@ -194,6 +194,28 @@ with no second data opt-out and no unobserved queue cancellation. This directed
 round trip does not model arbitrary backend redirect arbitration or every IQ/LQ
 replay producer.
 
+### Ordinary sliding-stream expectations
+
+[StreamByteOracle](../cpp/scenarios/mixed/stream_oracle.hpp) owns a mirror-free
+physical-byte image. Admission follows architectural order; each input store
+overlays its active bytes before younger load values are frozen. Lazy initial
+bytes come from independent reference memory, with materialized bytes retained
+across later reference commits. Neither acceptance timing nor observed DUT data
+changes this prefix. Scalar extension/FP boxing and vector masks, prestart/tail
+and repeated-Vd source construction use that independent image. Base/reference
+and manager images are not modified by prediction. Final committed word
+readback remains a separate externally visible check.
+
+The [executor](../cpp/scenarios/mixed_stream.cpp) keeps architectural age in one
+deque, holds head/pending-store levels atomically, and retires only a complete
+prefix. Scalar STA/STD acknowledgements and vector uop completions match their
+scoreboards; prefetch queries require the prefetch class as well as ROB value
+and wrap. Exact vector replay service consumes only its matching feedback,
+rejects an already-completed target and preserves unrelated replay obligations.
+It does not move ROB head or emit scalar commit. These are bounded external
+backend models: no general rename/cancellation ledger, speculative multiple
+unresolved addresses or full-CPU timing equivalence is claimed.
+
 ### Scalar completion details
 
 `LoadScoreboard::expect` computes expected RF/FP enables from the *expected*
@@ -252,7 +274,9 @@ requests queued. Pending-store replay eligibility emits no scalar `scommit`.
 Vector-store commit waits for the uop's recorded SQ target, using its ROB head
 and merge-buffer completion eligibility; partial dequeue does not retire the
 whole instruction. Callers must retire older instructions first. Complete
-allocation history and general sliding retirement remain outside this model.
+allocation history remains outside this model; the bounded ordinary stream
+reserves destinations across its live instructions and retires only completed
+architectural prefixes.
 
 The common indexed generator now supplies permuted, irregularly spaced and
 optionally repeated load indices. The reference decodes unsigned operand bytes
@@ -574,7 +598,9 @@ both queue snapshots against allocation minus cancellation and drives the saved
 LQ flag. Explicit-pointer overloads remain for focused legacy callers and rely
 on those callers to preserve the same architectural prefix. `pendingPtr` names
 the oldest unretired instruction; completion-driven LQ dequeue alone cannot
-advance it. The heterogeneous helper waits for an older special load before
+advance it. The ordinary stream admits/retire prefixes within a bounded epoch
+and holds the actual oldest instruction and its store level. The legacy
+heterogeneous helper waits for an older special load before
 moving to the scalar load and preserves distinct live integer destinations.
 `run_until_queues_retired` waits until aggregate dequeue plus cancellation
 reaches allocation; its local final comparison checks only for a shortfall,
