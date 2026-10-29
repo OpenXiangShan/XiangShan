@@ -4,11 +4,34 @@
 
 - Worktree: `.codex_mother_integration_20261028`
 - Branch: `codex/memblock-csr-prefix-fix-20261025`
-- 当前生产源码提交：`c9763bd7d`；此前集成基线为 `4948d291e`，CSR closure 文档提交为 `201901c3d`。
-- 当前执行状态：`STOPPED_RTL_CONFIRMED`；strict-NC RTL Bug 等待 coding 授权，无活动仿真，母任务未完成。
+- 当前生产源码：`c9763bd7d`叠加本文件同提交的B1母集成；源单Bug提交`5a4dc2df4d`。
+- 当前执行状态：旧WIP审计/必要修复/专项及独立最终review通过，随本提交关闭门禁；接下来恢复非strict-NC矩阵。
+  strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
 ## 续接入口（2026-10-29）
+
+**最新用户指令覆盖下文旧恢复顺序**：先审计 source 剩余内容；必要修复在既有 source worktree
+逐项完成专项、独立提交，再合入 mother 并复测；不需要的给出证据。该门禁全部完成后，mother
+批量回归先跳过 strict-NC 已确认 RTL Bug 的组，执行其他组；不等待该 RTL 修改授权才推进其他组。
+不新建 worktree；仿真允许并发，源码修改和集成必须顺序。审计权威台账：
+`AI_DOC/analysis/framework_design/memblock_csr_prefix_wip_audit_20261029.md`。
+下文 strict-NC 原 seed/恢复列表继续保留，但不代表可跳过旧 WIP 门禁直接恢复其他批次。
+
+### 本轮门禁结论（2026-10-29）
+
+- 剩余WIP已逐文件审计：23个原跟踪源码/测试文件中3个净零，另4个原未跟踪测试文件，全部有必要性处置。
+  A0/FIFO/prefix已有集成不重复合；A1旧过滤及A2–A7额外机制不采用，证据和原WIP完整保留。
+- 唯一必要新修复B1：CSR SATP映射切换缺真实HS全SFENCE完成门禁，源单Bug`5a4dc2df4d`，精确合入mother，
+  保留a13d/c976/91d/prefix/current-live，不引ledger或RTL修改，没有新建worktree。
+- mother新编译后真实DUT14/14严格PASS（原8＋Sv39/PBMT safe/SFENCE各2），协议及15运输负例单列PASS；
+  独立`FINAL_DYNAMIC_REVIEW_PASS`，全部controller退出、unknown0；随本提交落地关闭旧WIP门禁。
+- 母专项目录：`mem_ut/ver/ut/memblock/sim/mother_csr_hs_fence_gate_20261029_results`，含验收JSON、2540项实际输入及六批结果。
+  source旧Sv39邻接FAIL/ABORTED保留，独立确认为缺母已修a13d；母本轮相同seed和参数再次PASS。
+- 原矩阵名额仍为BasicTest60/120、其他0/140；上述专项不替代固定原参数10-seed矩阵。
+  下一步组8–12，跳过strict-NC组7；随后其他非strict-NC组及最终统一覆盖率。
+- source保持证据存档，不表示仍有应合未合Bug。后续修改只在mother顺序完成；仿真可并行。
+  当前唯一远端为公共上游origin，未指定任务推送目标前只本地提交。
 
 后续继续母任务时，直接进入以下 worktree，不创建新的 Bug worktree：
 
@@ -18,11 +41,11 @@ git status --short
 git log -1 --oneline
 ```
 
-本次续接记录写入前 HEAD 为 `027a35355`；生产源码基线仍为 `c9763bd7d`。写入前 worktree 干净，
-本次仅补充文档，没有启动仿真。前轮已确认 controller/远端任务收敛。源码修改必须在本 mother worktree 中逐个问题顺序完成；不同 cfg
+历史续接注记（非当前状态）：早前记录前HEAD为`027a35355`、生产源码基线c976，彼时仅补文档且未启动仿真。
+本轮B1集成与验收已在上文更新。后续源码修改必须在本 mother worktree 中逐个问题顺序完成；不同 cfg
 或 seed 的仿真可以并发，但同一 `mode` 只能有一个 controller。
 
-当前暂停点是：
+以下为strict-NC单组的历史停止点，不代表母任务其他组必须停止：
 
 ```text
 status=STOPPED_RTL_CONFIRMED
@@ -35,11 +58,12 @@ error=787.300ns INT_WB_ATTACH no active uid for ROB key=0/14
 ```
 
 该问题已经完成两轮责任 review、Buglist 登记和方案 review，但**尚未取得 RTL coding 授权，未修改 RTL，
-不能把“继续”理解为 RTL 授权，也不能绕过该失败恢复回归**。授权或接收 RTL owner 修复后，按 RTL 生成规则处理
+不能把“继续”理解为 RTL 授权，不能把该组记作PASS**。最新用户已授权门禁关闭后绕开该组恢复其他组。
+只有重跑strict-NC本组时，才需先获得授权或接收 RTL owner 修复，按 RTL 生成规则处理
 `src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala` 的 NC 输出 staging，重新生成 RTL，
 使用新 `mode` 编译；不能复用旧的 `mother_strict_nc_wb_debug_20261029` simv。
 
-修复后的固定执行顺序：
+strict-NC本组获得修复后的历史执行顺序（当前其他组恢复顺序以上文最新指令为准）：
 
 1. 原始 seed `846339364` 专项编译仿真，严格确认通过。
 2. 重新执行第 7 组恢复批次：原 `ABORTED` seed
@@ -64,7 +88,7 @@ error=787.300ns INT_WB_ATTACH no active uid for ROB key=0/14
 ### 续接时的验收边界
 
 - 母任务目标仍为：逐个修复本轮失败并单 Bug 提交，完成全部回归、Bug 分析/方案记录、总 review，
-  最终交付所有用例通过后的完整覆盖率目录。本次只是保存进度，不是完成或新增执行授权。
+  最终交付所有用例通过后的完整覆盖率目录。本轮完成B1门禁不表示整个母任务完成，RTL仍无coding授权。
 - 原始 functional matrix 共 26 组、每组 10 seed；其中 BasicTest 为 12 组。当前 BasicTest 60/120
   已通过，其余 14 组 0/140 完成本轮矩阵验收。不同版本专项 PASS 不代替最终统一源码验收。
 - 已修复集成和证据见下面提交表；最新 `c9763bd7d` 的 later-split cancel 已通过定向和真实 DUT 39/39
@@ -84,6 +108,7 @@ error=787.300ns INT_WB_ATTACH no active uid for ROB key=0/14
 
 | Commit | Bug | Mother verification | Source worktree |
 |---|---|---|---|
+| 本文件同提交；源`5a4dc2df4d` | CSR非虚拟映射切换真实HS全SFENCE及C4门禁 | fresh compile；原8+Sv39/PBMT/SFENCE各2共14/14严格PASS；协议/15运输负例单列；最终独立review PASS | 原source WIP保留存档，后续不在其编码 |
 | `91d403eb1` | PMA/PMP CSR raw FIFO continuous prefix service | integrated before this continuation; later PBMT integration preserved ticket/revision/prefix semantics | preserved WIP source worktree remains untouched |
 | `fb9f04abe` | L2TLB PPN reuse smoke determinism | specialized 22/22 plus adjacent Sv39 1/1 PASS | deleted; branch retained |
 | `a13d10814` | Sv39 later-split mabuf response provenance | compile; original1; known5+random30 35/35; closure10 10/10; adjacent2; review-fix5; post-commit original1, all strict PASS | deleted; branch retained |

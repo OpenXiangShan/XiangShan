@@ -59,7 +59,9 @@ class memblock_csr_random_config_vseq extends memblock_dispatch_real_smoke_vseq;
             end
             begin
                 `uvm_do_on(initial_csr_seq, p_sequencer.csr_ctrl_sqr)
-                `uvm_do_on(csr_control_seq, p_sequencer.csr_ctrl_sqr)
+                csr_control_seq = memblock_csr_control_base_sequence::type_id::create("csr_control_seq");
+                csr_control_seq.mapping_fence_sqr = p_sequencer.fence_sqr;
+                csr_control_seq.start(p_sequencer.csr_ctrl_sqr);
             end
             begin
                 wait_for_initial_config(data);

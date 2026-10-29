@@ -90,7 +90,13 @@ flowchart TD
     O --> P[从 committed 单次求解并发送 target changed=111]
     P --> Q[driver 下一边界保持 target 并清 changed=000]
     Q --> R[可选 PMP/PMA write plan]
-    R --> S[stage_csr_dynamic_candidate + sendover]
+    R --> R1{nonvirtual SATP mode/root改变且至少一侧paged}
+    R1 -->|否| S[stage_csr_dynamic_candidate + sendover]
+    R1 -->|是| R2[等待真实full92 clean target]
+    R2 --> R3[原CSR owner预约并发送真实HS全SFENCE]
+    R3 --> R4[等待同owner/event/reset的C0与C4]
+    R4 --> R5[consume与清预约 保持CSR屏障]
+    R5 --> S
     S --> T[complete_csr_runtime_snapshot]
     T --> U{runtime/full snapshot 与 model 均匹配}
     U -->|否| T
@@ -115,7 +121,11 @@ flowchart TD
    memblock_csr_control_base_sequence 醒来后重新检查队列，弹出 token，并同步启动 memblock_dynamic_csr_change_sequence；base 自身不求解 CSR。
    dynamic child 从 committed state 复制完整基线；关闭动态组保持旧值，开启组参与一次约束求解，并要求至少一项实际变化。
    child 先发送三路 ATP changed=111 的完整 level；专项 driver 在下一驱动边界保持净化 level 并清成 000。
-   PMP_PMA 组开启时，child 继续发送 distributed write plan；随后登记 candidate、owner 和 drive sample，再报告 sendover。
+   PMP_PMA 组开启时，child 继续发送 distributed write plan。special非虚拟SATP mode/root改变且至少一侧分页时，
+   首次发送前必须核对原action/status control epoch并冻结L2 epoch，target/PMP阻塞由有界owner/reset监督覆盖。
+   随后等待真实monitor完整clean target，再以原CSR owner/kind预约并发送HS全地址全ASID SFENCE，包含global。
+   adapter现有C0/C4失效完成后，child消费观测并清预约，才登记candidate并报告sendover；其间不释放年轻UID屏障。
+   纯ASID/permission不强制fence；special虚拟路径在副作用前拒绝。失败不重采epoch、不继续beat或stage/sendover。
    control service 先匹配窄 runtime snapshot，再调用 commit_csr_dynamic_candidate_if_observed 检查完整 92 字段 snapshot 是否跨过 drive sample、payload 是否一致、PMP/PMA model 是否一致。
    任一 observation 未到时保持 WAIT_CSR_RUNTIME_SNAPSHOT；全部匹配后才清 candidate、更新 committed state，并进入 CONTROL_COMMIT_READY。
 
@@ -729,6 +739,43 @@ data.mark_csr_control_sendover(action);
 复制 target 并清除 changed/write/trigger/action pulse，调用 stage_csr_dynamic_candidate 保存净化 candidate、owner、profile 和 observation 下界。
 最后调用 mark_csr_control_sendover；control service 后续决定是否提交，child 自己不修改 control commit 状态。
 ```
+
+#### 2026-10-29 映射切换失效门禁补充
+
+上段源码展示的是非mapping发送/原candidate合同。当前special mapping分支在candidate前增加以下职责，
+不改变legacy和纯ASID更新的发送路径；所有函数均位于`memblock_dynamic_csr_change_sequence.sv`，
+预约/观测由`common_data_transaction.sv`持有。
+
+| 函数/对象 | 职责、输入与副作用 |
+|---|---|
+| `hs_mapping_fence_required(old,target)` | 只读比较SATP mode/root，至少一侧paged才需全fence。 |
+| `mapping_action_current(data,frozen_l2)` | 比较原action/status owner、CSR pending/enqueued、barrier、control ready及两reset域；不重绑身份。 |
+| `drive_mapping_csr_item()` | 对special mapping的每笔target/PMP正常UVM握手加有界监督；失败返回false、停止后续发送。 |
+| `complete_hs_mapping_fence()` | 等新full92 clean，调用arm、发送真实fence，等C0/C4并consume；只有全成功才返回true。 |
+| `arm_csr_mapping_fence()` | 同CSR owner预约既有expected/armed及event/reset下界；不伪装SFENCE marker，不改audit。 |
+| `record_control_sfence_c0_observation()` | adapter schedule边界允许已预约的CSR pending owner，冻结实际C0。 |
+| `apply_due_sfence_invalidate()` | 现有C4统一删除canonical/range/parent/completed并发布生效观测，不由child直接删模型。 |
+| `finish_csr_mapping_fence()` | 同owner/event/reset消费两观测槽并清全部预约字段；重复或未到C4返回false。 |
+| `mark_csr_control_sendover()` | 若仍armed/expected则拒绝；成功sendover仍需既有snapshot/PMA/retire才释放屏障。 |
+
+抽象功能描述：以下分支让真实缓存失效完成成为CSR映射切换的必要条件，不用固定延时或模型删除代替DUT事件。
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_dynamic_csr_change_sequence.sv`，`body()`的candidate前置分支。
+函数功能简析：输入已写完并净化的target、原sample及冻结L2 epoch；失败直接返回，禁止stage/sendover。
+
+```systemverilog
+if (needs_mapping_fence) begin
+    complete_hs_mapping_fence(data, clean, baseline_sample,
+                              action_l2_reset_epoch, mapping_fence_completed);
+    if (!mapping_fence_completed) return;
+end
+```
+
+中文伪代码：
+
+该分支负责把映射切换的真实失效完成接到既有candidate流程之前。
+先判断本次是否改变SATP映射；若需要，调用完成任务，任务复核原owner/reset、等clean观测、真实运输与C0/C4，
+并在成功后消费观测和清预约；若成功输出仍为否，立即结束本action，不登记candidate、不sendover。
+仅全成功才继续既有完整snapshot/PMA模型检查；child不递增SFENCE audit，也不自行解除CSR admission屏障。
 
 ### 7.4 完整 snapshot 与 candidate 提交
 

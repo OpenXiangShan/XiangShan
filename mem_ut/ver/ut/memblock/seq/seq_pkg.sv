@@ -141,6 +141,7 @@ package seq_pkg;
     `include "memblock_dispatch_real_smoke_vseq.sv"
     `include "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq.sv"
     `include "memblock_csr_random_config_vseq.sv"
+    `include "memblock_csr_mapping_transport_negative_vseq.sv"
     `include "memblock_csr_scalar_stress_vseq_base.sv"
     `include "memblock_csr_scalar_load_10k_vseq.sv"
     `include "memblock_csr_scalar_store_10k_vseq.sv"

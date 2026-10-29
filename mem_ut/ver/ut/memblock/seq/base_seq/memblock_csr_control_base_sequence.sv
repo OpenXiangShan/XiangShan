@@ -14,6 +14,8 @@
 class memblock_csr_control_base_sequence extends uvm_sequence #(csr_ctrl_agent_agent_xaction);
 
     common_data_transaction data;
+    // 中文注释：由专项VSEQ注入并传给dynamic child，复用fence agent而不改变CSR owner。
+    fence_agent_agent_sequencer mapping_fence_sqr;
 
     `uvm_object_utils(memblock_csr_control_base_sequence)
 
@@ -125,6 +127,7 @@ task memblock_csr_control_base_sequence::body();
                         `uvm_fatal(get_type_name(), "failed to create dynamic CSR child sequence")
                     end
                     dynamic_csr_seq.set_action(action);
+                    dynamic_csr_seq.mapping_fence_sqr = mapping_fence_sqr;
                     dynamic_csr_seq.start(m_sequencer, this);
                 end
                 MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL: begin

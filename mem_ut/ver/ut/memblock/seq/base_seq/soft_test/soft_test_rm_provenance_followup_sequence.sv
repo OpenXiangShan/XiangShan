@@ -65,6 +65,8 @@ class soft_test_rm_provenance_followup_sequence extends memblock_dispatch_base_s
     extern virtual task check_l2tlb_waiting_uid_logical_fanout();
     extern virtual task check_l2_d_error_sample_boundaries();
     extern virtual task check_uncache_source_lifecycle();
+    extern virtual task check_hs_mapping_fence_trigger_matrix();
+    extern virtual task check_hs_mapping_fence_protocol();
 
 endclass:soft_test_rm_provenance_followup_sequence
 
@@ -91,9 +93,208 @@ task soft_test_rm_provenance_followup_sequence::body();
     check_l2tlb_waiting_uid_logical_fanout();
     check_l2_d_error_sample_boundaries();
     check_uncache_source_lifecycle();
+    check_hs_mapping_fence_trigger_matrix();
+    check_hs_mapping_fence_protocol();
     `uvm_info(get_type_name(),
               "RM provenance follow-up directed checks completed", UVM_LOW)
 endtask:body
+
+task soft_test_rm_provenance_followup_sequence::check_hs_mapping_fence_trigger_matrix();
+    csr_ctrl_agent_agent_xaction old_level;
+    csr_ctrl_agent_agent_xaction target;
+    bit [3:0] modes[3] = '{4'd0, 4'd8, 4'd9};
+    bit expected;
+    int cases_checked;
+
+    old_level = csr_ctrl_agent_agent_xaction::type_id::create("fence_trigger_old");
+    target = csr_ctrl_agent_agent_xaction::type_id::create("fence_trigger_target");
+    cases_checked = 0;
+    foreach (modes[old_idx]) begin
+        foreach (modes[new_idx]) begin
+            old_level.io_ooo_to_mem_tlbCsr_satp_mode = modes[old_idx];
+            old_level.io_ooo_to_mem_tlbCsr_satp_ppn = 44'h80000;
+            target.copy(old_level);
+            target.io_ooo_to_mem_tlbCsr_satp_mode = modes[new_idx];
+            expected = old_idx != new_idx;
+            expect_true(memblock_dynamic_csr_change_sequence::hs_mapping_fence_required(
+                old_level, target) == expected, "mapping mode fence trigger mismatch");
+            target.copy(old_level);
+            target.io_ooo_to_mem_tlbCsr_satp_ppn++;
+            expect_true(memblock_dynamic_csr_change_sequence::hs_mapping_fence_required(
+                old_level, target) == (modes[old_idx] != 0), "root-only fence trigger mismatch");
+            target.copy(old_level);
+            target.io_ooo_to_mem_tlbCsr_satp_asid++;
+            target.io_ooo_to_mem_tlbCsr_priv_mxr = !old_level.io_ooo_to_mem_tlbCsr_priv_mxr;
+            expect_true(!memblock_dynamic_csr_change_sequence::hs_mapping_fence_required(
+                old_level, target), "ASID/permission-only update triggered mapping fence");
+            cases_checked += 3;
+        end
+    end
+    `uvm_info("CSR_MAPPING_FENCE_TRIGGER", $sformatf("cases=%0d PASS", cases_checked), UVM_LOW)
+endtask:check_hs_mapping_fence_trigger_matrix
+
+// 中文注释：仅为本Bug的软件协议定向；手工推进sample不代表真实接口验证。
+// 真实driver/monitor的C0/C4另由CSR random原规模专项确认。
+task soft_test_rm_provenance_followup_sequence::check_hs_mapping_fence_protocol();
+    common_data_transaction local_data;
+    status_transaction status;
+    memblock_control_owner_t owner;
+    memblock_control_owner_t wrong_owner;
+    memblock_sfence_payload_t payload;
+    memblock_sfence_payload_t wrong_payload;
+    memblock_control_sfence_observation_t observation;
+    memblock_csr_control_action_t csr_action;
+    memblock_uncache_owner_expected_fatal_catcher catcher;
+    mmu_csr_runtime_state csr;
+    memblock_tlb_lookup_key_t key;
+    memblock_tlb_lookup_key_t completed_only_key;
+    memblock_tlb_entry entry;
+    memblock_tlb_entry completed_only_entry;
+    longint unsigned reset_epoch;
+    longint unsigned saved_event;
+    longint unsigned event_seq;
+    bit saved_special;
+
+    local_data = new("csr_mapping_protocol_local_data");
+    local_data.main_trans_num = 2;
+    local_data.main_table_by_uid = new[2];
+    local_data.status_by_uid = new[2];
+    status = local_data.init_status_for_uid(0);
+    status.control_kind = MEMBLOCK_CONTROL_KIND_CSR;
+    status.control_state = MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING;
+    status.control_action_enqueued = 1'b1;
+    owner = '{valid:1'b1, uid:0, dynamic_epoch:0,
+              action_generation:1, kind:MEMBLOCK_CONTROL_KIND_CSR};
+    status.control_owner = owner;
+    local_data.active_control_barrier_valid = 1'b1;
+    local_data.active_control_barrier_uid = 0;
+    reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+    saved_event = memblock_sync_pkg::last_allocated_l2tlb_event_seq;
+    event_seq = saved_event + 1;
+    saved_special = memblock_sync_pkg::csr_special_sequence_active;
+    memblock_sync_pkg::csr_special_sequence_active = 1'b1;
+    payload = '{default:'0};
+    payload.valid = 1'b1;
+    payload.ignore_addr = 1'b1;
+    payload.ignore_id = 1'b1;
+    payload.target_stage = MEMBLOCK_SFENCE_TARGET_HS_S1;
+    wrong_owner = owner;
+    wrong_owner.action_generation++;
+    catcher = new("mapping_wrong_owner", "*arm owner/state/payload mismatch*");
+    uvm_report_cb::add(null, catcher);
+    expect_true(!local_data.arm_csr_mapping_fence(wrong_owner, payload),
+                "wrong owner armed CSR mapping fence");
+    uvm_report_cb::delete(null, catcher);
+    expect_true(catcher.caught_count == 1 && !status.control_sfence_c0_armed &&
+                !status.control_expected_sfence_valid, "failed arm mutated reservation");
+    expect_true(local_data.arm_csr_mapping_fence(owner, payload), "valid CSR arm failed");
+    expect_true(local_data.control_barrier_blocks_admission(1), "young admission escaped CSR barrier");
+
+    csr_action = '{default:'0};
+    csr_action.owner = owner;
+    csr_action.completion_profile = MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT;
+    csr_action.expected_runtime_csr_valid = 1'b1;
+    catcher = new("mapping_early_sendover", "*sendover precedes mapping fence completion*");
+    uvm_report_cb::add(null, catcher);
+    local_data.mark_csr_control_sendover(csr_action);
+    uvm_report_cb::delete(null, catcher);
+    expect_true(catcher.caught_count == 1 && status.control_action_enqueued &&
+                status.control_state == MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING,
+                "early sendover changed CSR state");
+    local_data.record_control_sfence_c0_observation(payload, reset_epoch, saved_event, 100);
+    expect_true(!local_data.control_sfence_c0_observation.valid, "stale event accepted as C0");
+    local_data.record_control_sfence_c0_observation(payload, reset_epoch+1, event_seq, 100);
+    expect_true(!local_data.control_sfence_c0_observation.valid, "wrong reset accepted as C0");
+    wrong_payload = payload;
+    wrong_payload.ignore_id = 1'b0;
+    local_data.record_control_sfence_c0_observation(wrong_payload, reset_epoch, event_seq, 100);
+    expect_true(!local_data.control_sfence_c0_observation.valid, "wrong payload accepted as C0");
+
+    csr = mmu_csr_runtime_state::type_id::create("csr_mapping_global_csr");
+    csr.reset();
+    csr.satp_mode = 4'd8;
+    csr.satp_asid = 16'h123;
+    key = csr.make_lookup_key(52'h87a51, 2'd0);
+    entry = local_data.build_tlb_entry_for_key_with_csr(key, csr);
+    entry.s1_pte_g = 1'b1;
+    local_data.publish_live_tlb_entry(key, entry, csr);
+    local_data.record_completed_tlb_response(entry, 0, 99);
+    completed_only_key = csr.make_lookup_key(52'h89b71, 2'd0);
+    completed_only_entry = local_data.build_tlb_entry_for_key_with_csr(completed_only_key, csr);
+    completed_only_entry.s1_pte_g = 1'b1;
+    local_data.record_completed_tlb_response(completed_only_entry, 1, 99);
+    expect_true(local_data.tlb_entry_by_key.exists(key) && entry.range_index_keys.size() != 0 &&
+                entry.parent_occupancy_keys.size() != 0 &&
+                local_data.completed_tlb_entry_by_key.exists(key) &&
+                local_data.completed_tlb_entry_by_key.exists(completed_only_key),
+                "mapping test failed to install indexed live/completed fixtures");
+    memblock_sync_pkg::last_allocated_l2tlb_event_seq = event_seq;
+    payload.sample_seq = 100;
+    payload.reset_epoch = reset_epoch;
+    payload.lifecycle_event_seq = event_seq;
+    expect_true(local_data.schedule_sfence_invalidate(payload, 100, reset_epoch, event_seq),
+                "mapping C0 scheduling failed");
+    expect_true(local_data.get_control_sfence_c0_observation(owner, observation),
+                "CSR pending did not record C0");
+    expect_true(local_data.apply_due_sfence_invalidate(103, reset_epoch) == 0 &&
+                local_data.tlb_entry_by_key.exists(key) &&
+                local_data.completed_tlb_entry_by_key.exists(key) &&
+                local_data.completed_tlb_entry_by_key.exists(completed_only_key) &&
+                !local_data.finish_csr_mapping_fence(owner, event_seq, reset_epoch, observation),
+                "mapping fence finished or deleted global entry before C4");
+    expect_true(local_data.apply_due_sfence_invalidate(104, reset_epoch) == 1 &&
+                !local_data.tlb_entry_by_key.exists(key) &&
+                !local_data.completed_tlb_entry_by_key.exists(key) &&
+                !local_data.completed_tlb_entry_by_key.exists(completed_only_key) &&
+                local_data.tlb_anchor_keys_by_range_key.num() == 0 &&
+                local_data.tlb_parent_owner_set.num() == 0 &&
+                local_data.tlb_parent_occupancy_count.num() == 0 &&
+                local_data.completed_tlb_anchor_keys_by_range_key.num() == 0 &&
+                local_data.completed_tlb_response_token_by_key.num() == 0 &&
+                local_data.completed_tlb_response_sample_by_key.num() == 0,
+                "C4 failed to remove global live/completed entry");
+    expect_true(!local_data.finish_csr_mapping_fence(wrong_owner, event_seq, reset_epoch, observation) &&
+                !local_data.finish_csr_mapping_fence(owner, event_seq+1, reset_epoch, observation) &&
+                !local_data.finish_csr_mapping_fence(owner, event_seq, reset_epoch+1, observation) &&
+                local_data.control_sfence_effective_observation.valid,
+                "wrong owner/event/reset consumed C4 observation");
+    expect_true(local_data.finish_csr_mapping_fence(owner, event_seq, reset_epoch, observation) &&
+                observation.due_sample_seq == 104 && !status.control_sfence_c0_armed &&
+                !status.control_expected_sfence_valid &&
+                status.control_expected_sfence == memblock_sfence_payload_t'{default:'0} &&
+                status.control_sfence_pre_drive_event_seq == 0 &&
+                status.control_sfence_c0_event_seq == 0 &&
+                status.control_l2tlb_reset_epoch_at_arm == 0 &&
+                !local_data.control_sfence_c0_observation.valid &&
+                !local_data.control_sfence_effective_observation.valid &&
+                status.control_owner == owner && status.control_kind == MEMBLOCK_CONTROL_KIND_CSR &&
+                status.control_audit_creation_count == 0 &&
+                status.control_audit_owner_bind_count == 0 &&
+                status.control_audit_csr_enqueue_count == 0 &&
+                status.control_audit_csr_start_count == 0 &&
+                status.control_audit_csr_completion_count == 0 &&
+                status.control_audit_sfence_enqueue_count == 0 &&
+                status.control_audit_sfence_start_count == 0 &&
+                status.control_audit_sfence_completion_count == 0 &&
+                status.control_audit_l2_assert_enqueue_count == 0 &&
+                status.control_audit_l2_assert_start_count == 0 &&
+                status.control_audit_l2_assert_completion_count == 0 &&
+                status.control_audit_l2_release_enqueue_count == 0 &&
+                status.control_audit_l2_release_start_count == 0 &&
+                status.control_audit_l2_release_completion_count == 0 &&
+                status.control_audit_terminal_count == 0 &&
+                status.control_audit_barrier_release_count == 0,
+                "C4 completion did not consume/disarm under original CSR owner");
+    expect_true(!local_data.finish_csr_mapping_fence(owner, event_seq, reset_epoch, observation),
+                "mapping C4 consumed twice");
+    local_data.mark_csr_control_sendover(csr_action);
+    expect_true(status.control_state == MEMBLOCK_CONTROL_STATE_CSR_SENDOVER &&
+                !status.control_action_enqueued && local_data.control_barrier_blocks_admission(1),
+                "post-C4 sendover failed or prematurely released young admission");
+    memblock_sync_pkg::last_allocated_l2tlb_event_seq = saved_event;
+    memblock_sync_pkg::csr_special_sequence_active = saved_special;
+    `uvm_info("CSR_MAPPING_FENCE_PROTOCOL", "global/C0/C4/owner/event/reset/sendover/admission PASS", UVM_LOW)
+endtask:check_hs_mapping_fence_protocol
 
 task soft_test_rm_provenance_followup_sequence::check_uid_tlb_payload_over_live_entry();
     localparam memblock_uid_t TEST_UID = 7;

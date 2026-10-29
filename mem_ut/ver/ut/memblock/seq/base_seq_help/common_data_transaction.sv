@@ -272,7 +272,7 @@ class common_data_transaction extends uvm_object;
     memblock_uid_t              control_barrier_prefix_external_origin_new_end_uid;
     // 中文注释：当前唯一控制 SFence 的 C0/C4 adapter observation。写入：已有
     // L2TLB adapter 在 schedule/apply 边界；读取/清除：control barrier service。
-    // 这两个槽不保存 generic fence，避免普通 SFence 干扰控制 owner。
+    // CSR mapping子流程也以原CSR owner预约/消费两槽；不保存未预约generic fence。
     memblock_control_sfence_observation_t control_sfence_c0_observation;
     memblock_control_sfence_observation_t control_sfence_effective_observation;
 
@@ -2592,6 +2592,10 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("CONTROL_ACTION", "invalid CSR action at sendover")
         end
         status = get_status(action.owner.uid);
+        if (status.control_sfence_c0_armed || status.control_expected_sfence_valid) begin
+            `uvm_fatal("CONTROL_ACTION", "CSR sendover precedes mapping fence completion")
+            return;
+        end
         if (!memblock_control_owner_equal(status.control_owner, action.owner) ||
             status.control_state != MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING ||
             !status.control_action_enqueued) begin
@@ -8304,8 +8308,67 @@ class common_data_transaction extends uvm_object;
                expected.target_stage == observed.target_stage;
     endfunction:control_sfence_payload_matches
 
-    // 抽象职责：adapter 在 C0 schedule 边界把匹配的 raw fence 固化为 owner 化
-    // observation。它不改 control_state；service 仅在 worker sendover 后消费该槽。
+    // 中文注释：预约同CSR owner的全HS fence，复用既有观测槽；所有校验先于状态修改。
+    function bit arm_csr_mapping_fence(
+        input memblock_control_owner_t owner,
+        input memblock_sfence_payload_t payload);
+        status_transaction status;
+        if (!owner.valid || !active_control_barrier_valid ||
+            active_control_barrier_uid != owner.uid || !is_valid_uid(owner.uid)) begin
+            `uvm_fatal("CSR_MAPPING_FENCE", "mapping fence has no active CSR barrier")
+            return 1'b0;
+        end
+        status = get_status(owner.uid);
+        if (!memblock_sync_pkg::csr_special_sequence_active ||
+            !memblock_control_owner_equal(status.control_owner, owner) ||
+            status.control_kind != MEMBLOCK_CONTROL_KIND_CSR ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING ||
+            !status.control_action_enqueued || status.control_sfence_c0_armed ||
+            control_sfence_c0_observation.valid || control_sfence_effective_observation.valid ||
+            !payload.valid || !payload.ignore_addr || !payload.ignore_id ||
+            payload.hv || payload.hg || payload.target_stage != MEMBLOCK_SFENCE_TARGET_HS_S1 ||
+            memblock_sync_pkg::l2tlb_reset_active()) begin
+            `uvm_fatal("CSR_MAPPING_FENCE", "mapping fence arm owner/state/payload mismatch")
+            return 1'b0;
+        end
+        status.control_expected_sfence_valid = 1'b1;
+        status.control_expected_sfence = payload;
+        status.control_sfence_c0_armed = 1'b1;
+        status.control_sfence_pre_drive_event_seq = memblock_sync_pkg::last_allocated_l2tlb_event_seq;
+        status.control_l2tlb_reset_epoch_at_arm = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+        return 1'b1;
+    endfunction:arm_csr_mapping_fence
+
+    function bit finish_csr_mapping_fence(
+        input memblock_control_owner_t owner,
+        input longint unsigned event_seq,
+        input longint unsigned reset_epoch,
+        output memblock_control_sfence_observation_t observation);
+        status_transaction status;
+        observation = '{default:'0};
+        if (!owner.valid || !active_control_barrier_valid ||
+            active_control_barrier_uid != owner.uid || !is_valid_uid(owner.uid)) return 1'b0;
+        status = get_status(owner.uid);
+        if (!memblock_control_owner_equal(status.control_owner, owner) ||
+            status.control_kind != MEMBLOCK_CONTROL_KIND_CSR ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING ||
+            !status.control_sfence_c0_armed ||
+            reset_epoch != status.control_l2tlb_reset_epoch_at_arm ||
+            reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
+            event_seq <= status.control_sfence_pre_drive_event_seq) return 1'b0;
+        if (!try_consume_control_sfence_effective_observation(
+                owner, event_seq, reset_epoch, observation)) return 1'b0;
+        status.control_expected_sfence_valid = 1'b0;
+        status.control_expected_sfence = '{default:'0};
+        status.control_sfence_c0_armed = 1'b0;
+        status.control_sfence_pre_drive_event_seq = 0;
+        status.control_sfence_c0_event_seq = 0;
+        status.control_l2tlb_reset_epoch_at_arm = 0;
+        return 1'b1;
+    endfunction:finish_csr_mapping_fence
+
+    // 抽象职责：adapter在C0固化匹配的owner观测，不改control_state。
+    // 普通SFENCE由service消费；CSR mapping由child等待C4后消费并清预约再sendover。
     function void record_control_sfence_c0_observation(
         input memblock_sfence_payload_t payload,
         input longint unsigned reset_epoch,
@@ -8318,12 +8381,15 @@ class common_data_transaction extends uvm_object;
             return;
         end
         status = get_status(active_control_barrier_uid);
-        if (status.control_kind != MEMBLOCK_CONTROL_KIND_SFENCE ||
+        if (!((status.control_kind == MEMBLOCK_CONTROL_KIND_SFENCE &&
+               status.control_state inside {MEMBLOCK_CONTROL_STATE_SFENCE_REQ,
+                   MEMBLOCK_CONTROL_STATE_SFENCE_SENDOVER,
+                   MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE}) ||
+              (status.control_kind == MEMBLOCK_CONTROL_KIND_CSR &&
+               memblock_sync_pkg::csr_special_sequence_active &&
+               status.control_state == MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING)) ||
             !status.control_owner.valid || !status.control_expected_sfence_valid ||
             !status.control_sfence_c0_armed ||
-            !(status.control_state inside {MEMBLOCK_CONTROL_STATE_SFENCE_REQ,
-                                            MEMBLOCK_CONTROL_STATE_SFENCE_SENDOVER,
-                                            MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE}) ||
             lifecycle_event_seq <= status.control_sfence_pre_drive_event_seq ||
             reset_epoch != status.control_l2tlb_reset_epoch_at_arm ||
             !control_sfence_payload_matches(status.control_expected_sfence, payload)) begin
