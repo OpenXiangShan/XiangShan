@@ -83,7 +83,7 @@ worktree。2026-10-29 用户允许并发仿真加速：配置逐组推进，组�
 |---:|---|---|---|---|---:|
 | 1 | `basicTest` | `memblock_dispatch_manual_control_vseq` | `csr_sfence_check_store_manual_control` | `PASS` | 10/10 |
 | 2 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `csr_sfence_check_store_rob_control` | `PASS` | 10/10 |
-| 3 | `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | `NOT_RUN` | 0/10 |
+| 3 | `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | `PASS` | 10/10 |
 | 4 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | `NOT_RUN` | 0/10 |
 | 5 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | `NOT_RUN` | 0/10 |
 | 6 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | `NOT_RUN` | 0/10 |
@@ -105,5 +105,10 @@ controller 为 `planned=completed=pass=10`，所有失败/未完成分类为 0�
 10 颗 seed 并发执行，controller 为 `planned=completed=pass=10`，`peak_active=10`，所有失败/未完成分类为 0，
 `remote_unknown_jobs=0`；逐日志严格验收与第 1 组相同，seed 清单与原始归档逐行一致。
 
-其余 14 组 functional matrix、fault3 100-seed 专项和最终覆盖率尚未完成。当前共 20/120 关闭前两组，
+第 3 组结果目录：
+`mem_ut/ver/ut/memblock/sim/.eda_regression/basicTest_tc_dispatch_real_cancel_reconcile_smoke_20261029_110111_2464759_19771`。
+controller 为 `planned=completed=pass=10`，失败/未完成分类和 `remote_unknown_jobs` 均为 0；
+逐日志严格验收通过，seed 清单与原始归档逐行一致。
+
+其余 14 组 functional matrix、fault3 100-seed 专项和最终覆盖率尚未完成。当前共 30/120 关闭前三组，
 不能解释为母任务全部完成；发生源码修复后需要重新评估已通过组的相邻复测范围和最终统一版本验收。
