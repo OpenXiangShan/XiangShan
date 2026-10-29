@@ -1,4 +1,5 @@
-L2CacheConfig: { size: 1 MB, ways: 8, inclusive: true, banks: 4, tp: false, enableFlush: true }
+# enableFlush is reserved; Oceanus L2 does not yet implement the flush handshake required by power-down.
+L2CacheConfig: { size: 1 MB, ways: 8, banks: 4, enableFlush: true }
 
 EnablePowerDown: true
 

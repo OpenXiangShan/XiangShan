@@ -18,7 +18,6 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import xscache.coupledL2._
 import xscache.chi._
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tile.MaxHartIdBits
@@ -37,7 +36,7 @@ import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.L1CCHIUpstream
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import oceanus.l2.L2UpstreamTable
+import oceanus.l2.{L2Params, L2UpstreamTable}
 import xiangshan.cache.wpu.WPUParameters
 import xiangshan.frontend._
 import xiangshan.mem.prefetch._
@@ -292,12 +291,10 @@ case class XSCoreParameters
   // D$/I$/PTW SrcIDs are looked up from the same object. Type1 order = D$ channel index.
   // Keep in sync with dcacheParametersOpt.nCCHIChannels (WithNKBL1D updates both).
   cchiUpstream: L2UpstreamTable = L1CCHIUpstream(nDcacheCh = 2),
-  L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
-    name = "l2",
+  L2CacheParamsOpt: Option[L2Params] = Some(L2Params(
+    mshrSize = 32,
     ways = 8,
-    sets = 1024, // default 512KB L2
-    prefetch = Seq(xscache.coupledL2.prefetch.PrefetchReceiverParams(), xscache.coupledL2.prefetch.BOPParameters(),
-      xscache.coupledL2.prefetch.TPParameters()),
+    sets = 1024, // default 512KB L2 (one slice)
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,

@@ -102,10 +102,6 @@ trait HasDCacheParameters
   with HasL1CacheParameters {
   val cacheParams = dcacheParameters
   val cfg = cacheParams
-  def l2ClientPcBitsOpt: Option[Int] = p(XSCoreParamsKey).L2CacheParamsOpt
-    .flatMap(_.clientCaches.find(_.name == "dcache"))
-    .flatMap(_.pcBitOpt)
-
   def GenLatencyArray: Boolean = hasBerti
 
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant

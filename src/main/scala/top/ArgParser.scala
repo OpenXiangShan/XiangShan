@@ -25,7 +25,7 @@ import difftest.DifftestModule
 
 import scala.annotation.tailrec
 import scala.sys.exit
-import chisel3.util.log2Up
+import chisel3.util.{isPow2, log2Up}
 import utility._
 import device.IMSICBusType
 
@@ -179,19 +179,17 @@ object ArgParser {
         case "--l2-cache-size" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case XSTileKey =>
-              val tileParams = up(XSTileKey)
-              val banks = tileParams.map(_.L2NBanks)
-              val ways = tileParams.map(_.L2CacheParamsOpt.map(_.ways))
-              val l2sets = banks zip ways map { case (banks, ways) =>
-                ways.map(value.toInt * 1024 / banks / _ / 64)
-              }
-              val newL2Params = tileParams zip l2sets map { case (tileParam, l2sets) =>
-                tileParam.L2CacheParamsOpt.map(_.copy(
-                  sets = l2sets.get
-                ))
-              }
-              tileParams zip newL2Params map { case (tileParam, newL2Param) =>
-                tileParam.copy(L2CacheParamsOpt = newL2Param)
+              val sizeInBytes = value.toInt * 1024
+              require(sizeInBytes > 0, "L2 size must be positive")
+              up(XSTileKey).map { tile =>
+                tile.copy(L2CacheParamsOpt = tile.L2CacheParamsOpt.map { l2 =>
+                  val bytesPerSet = tile.L2NBanks * l2.ways * l2.blockBytes
+                  require(sizeInBytes % bytesPerSet == 0,
+                    "L2 size must be a multiple of banks * ways * blockBytes")
+                  val sets = sizeInBytes / bytesPerSet
+                  require(isPow2(sets), "L2 sets per slice must be a power of two")
+                  l2.copy(sets = sets)
+                })
               }
           }), tail)
         case "--l3-cache-size" :: value :: tail =>

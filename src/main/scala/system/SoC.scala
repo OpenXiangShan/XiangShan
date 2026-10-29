@@ -22,7 +22,6 @@ import chisel3._
 import chisel3.util._
 import device.{AXI4MemEncrypt, DebugModule, DebugModuleIO, SYSCNT, SYSCNTConsts, SYSCNTParams, TIMER, TIMERConsts, TIMERParams, TLPMA, TLPMAIO}
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
-import xscache.coupledL2.L2Param
 import xscache.chi.CHIIssue
 import xscache.openLLC.OpenLLCParam
 import freechips.rocketchip.amba.axi4._
@@ -170,12 +169,9 @@ trait HasSoCParameter {
     require(!soc.EnablePowerDown, "LLC=ZhuJiang does not support power-down flows")
     require(!soc.WFIClockGate, "LLC=ZhuJiang does not support WFI clock gating")
     require(
-      !tiles.exists(_.L2CacheParamsOpt.exists(_.enableL2Flush)),
-      "LLC=ZhuJiang does not support flushL2"
-    )
-    require(
-      !tiles.exists(_.L2CacheParamsOpt.exists(l2 => l2.dataCheck.nonEmpty || l2.enablePoison)),
-      "LLC=ZhuJiang requires CoupledL2 DataCheck and Poison disabled"
+      !p(oceanus.chi.CHIParametersKey).dataCheckPresent &&
+        !p(oceanus.chi.CHIParametersKey).poisonPresent,
+      "LLC=ZhuJiang requires Oceanus CHI DataCheck and Poison disabled"
     )
   }
 
