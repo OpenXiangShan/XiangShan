@@ -28,7 +28,7 @@
   独立`FINAL_DYNAMIC_REVIEW_PASS`，全部controller退出、unknown0；随本提交落地关闭旧WIP门禁。
 - 母专项目录：`mem_ut/ver/ut/memblock/sim/mother_csr_hs_fence_gate_20261029_results`，含验收JSON、2540项实际输入及六批结果。
   source旧Sv39邻接FAIL/ABORTED保留，独立确认为缺母已修a13d；母本轮相同seed和参数再次PASS。
-- 原矩阵名额仍为BasicTest60/120、其他0/140；上述专项不替代固定原参数10-seed矩阵。
+- 原矩阵BasicTest现为70/120、其他0/140；门禁专项不替代固定原参数10-seed矩阵。
   下一步组8–12，跳过strict-NC组7；随后其他非strict-NC组及最终统一覆盖率。
 - source保持证据存档，不表示仍有应合未合Bug。后续修改只在mother顺序完成；仿真可并行。
   当前唯一远端为公共上游origin，未指定任务推送目标前只本地提交。
@@ -38,8 +38,14 @@
 母集成提交`60dcca7c6`已落地，旧WIP门禁关闭；现从组8启动新coverage mode
 `mother_post_wip_cov_20261029`，原10 seed并发、MAIN1000/CHECK_TRIGGER0/timeout1000000000ns。
 结果根目录：`mem_ut/ver/ut/memblock/sim/mother_post_wip_cov_20261029_results`；
-`campaign_state.tsv`逐组维护，组7仍延期不运行。新coverage编译已PASS，组8原10 seed全部运行中，
-当前组8为RUNNING，未提前增加PASS数。
+`campaign_state.tsv`逐组维护，组7仍延期不运行。新coverage编译已PASS，组8原10 seed已严格10/10 PASS，
+组9已联停收敛：8 FAIL、2 NOT_RUN、unknown0，均为发送前`PBMT RF cfg snapshot does not match directed contract`。
+现已确认任务参数/矩阵profile缺陷：当前PBMT固定B/C两UID，统一MAIN1000覆盖了正确cfg2。
+原seed原MAIN1000带波形仍201ns fatal；只修两个shell后，单元和原seed cfg2正向严格PASS，独立实现review PASS。
+本Bug提交后才恢复组9新批次：原8FAIL加新26012919/26012920替换2个NOT_RUN；组10–12尚未启动。
+SV/cfg/RM/RTL不改，不将MAIN2通过说成原1000参数通过。方案/证据见W44 Buglist最新章节。
+组8的summary/results、逐日志六项计数、TEST_PASS/finish均已核验，
+报告见组目录`strict_acceptance.json`；本轮coverage矩阵完成10 seed，不冒称最终完整覆盖率已完成。
 
 后续继续母任务时，直接进入以下 worktree，不创建新的 Bug worktree：
 
@@ -81,8 +87,9 @@ strict-NC本组获得修复后的历史执行顺序（当前其他组恢复顺�
 4. BasicTest 12 组全部收敛后，执行其余 14 组 functional matrix，再执行 fault3 100-seed 专项。
 5. 在最终稳定源码上重新编译 coverage 版本，收集并合并覆盖率，完成总问题/方案 review。
 
-上述 BasicTest 原始矩阵批次固定保留：`--tc basicTest`、对应 `--ts/--cfg`、`--monitor --record`、
-`--timeout-ns 1000000000`、`+MEMBLOCK_MAIN_TRANS_NUM=1000`、`+MEMBLOCK_CHECK_TRIGGER_EN=0`。
+上述BasicTest批次保留tc/ts/cfg/monitor/record、timeout1000000000ns及CHECK_TRIGGER0。
+普通随机项保留MAIN1000；**PBMT组9例外使用fixed_cfg，保留当前cfg两UID，不追加MAIN覆盖**。
+旧统一MAIN1000是本轮已确认的参数路由Bug，原失败记录保留，不能继续把它作为PBMT恢复前置。
 其余 14 组必须使用下表各自的 tc/ts/cfg 和原始归档参数，不能全部改成 basicTest；fault3 也需先核对原专项记录。
 恢复时必须为新空结果目录，使用显式 `--seeds`；保留每轮 `campaign_state.tsv`，不得直接使用
 `failed_seeds.txt` 混合恢复。完整 Bug 证据和源码级方案见：
@@ -97,7 +104,7 @@ strict-NC本组获得修复后的历史执行顺序（当前其他组恢复顺�
 
 - 母任务目标仍为：逐个修复本轮失败并单 Bug 提交，完成全部回归、Bug 分析/方案记录、总 review，
   最终交付所有用例通过后的完整覆盖率目录。本轮完成B1门禁不表示整个母任务完成，RTL仍无coding授权。
-- 原始 functional matrix 共 26 组、每组 10 seed；其中 BasicTest 为 12 组。当前 BasicTest 60/120
+- 原始 functional matrix 共 26 组、每组 10 seed；其中 BasicTest 为 12 组。当前 BasicTest 70/120
   已通过，其余 14 组 0/140 完成本轮矩阵验收。不同版本专项 PASS 不代替最终统一源码验收。
 - 已修复集成和证据见下面提交表；最新 `c9763bd7d` 的 later-split cancel 已通过定向和真实 DUT 39/39
   专项，不能继续当成待修问题。统一最终版本、fault3 100-seed、覆盖率、总 review 均未完成。
@@ -109,7 +116,7 @@ strict-NC本组获得修复后的历史执行顺序（当前其他组恢复顺�
   ROB 负向定向的 caught fatal=19 是独立预期，不可当成真实 DUT 零错误验收。
 - 不再依赖旧 subagent 会话恢复；独立 review 结论已落盘。重新执行前先读本仓 AGENTS.md、Buglist/
   回归执行规则和适用的 eda-sim skill；涉及 RTL 生成还须读 V2 RTL profile。
-- `.codex_csr_prefix_fix_20261025` 中仍有独立未合并 WIP；历史 l2tlb worktree 也必须保留。
+- `.codex_csr_prefix_fix_20261025`保留未采用WIP和原始证据；必要B1已合入，不再表示应合未合Bug。历史l2tlb工作区保留。
   不批量合并、不删除脏 worktree，不回到旧工作区并发改代码。当前 mother 分支是任务分支，不是主线。
 
 ## Integrated Bug Commits
@@ -164,14 +171,15 @@ byte-identical to integrated commit `91d403eb1`; intermediate revisions were not
 - `mem_ut/ver/ut/memblock/sim/.eda_regression/basicTest_tc_csr_scalar_mixed_10k_20261029_101217_1952662_25705`
 - `mem_ut/ver/ut/memblock/sim/.eda_regression/basicTest_tc_csr_scalar_store_sta_std_10k_20261029_102811_2195279_10269`
 
-## Preserved / Not Merged
+## 保留工作区（不是待合Bug清单）
 
-- `.codex_csr_prefix_fix_20261025`: prefix Bug commit 已通过既有错误 worktree形成并合入 mother；该 worktree
-  不再承接修改，待确认无未合并独立问题后删除。
+- `.codex_csr_prefix_fix_20261025`：prefix及必要B1已合入mother，逐文件不迁移证据已review。
+  不再承接编码；暂保留原始WIP/仿真/波形绝对路径作证据，不能删除后让Buglist链接失效。
 - CSR scalar cfg 前置修复已合入 mother；后续 CSR scalar 回归和修复只在 mother worktree 顺序执行。
 - `.codex_l2tlb_stage_verify`, `_r3`, `_r4`, `_r7`, `_r8`: dirty historical adaptation worktrees; not part of the
   current Bug integration and therefore not deleted.
-- `.codex_sparse_ppn_isolation_20261025`: dirty detached worktree with soft-test/cfg changes; not deleted.
+- 历史状态列过`.codex_sparse_ppn_isolation_20261025`，本轮实际目录/`git worktree list`均不存在，不计现存工作区。
+  不能仅因路径消失推断补丁已合或过时；必要PPN修复以本文件Integrated Bug Commits的提交/专项证据为准。
 
 ## Current Decision
 
@@ -196,8 +204,8 @@ worktree。2026-10-29 用户允许并发仿真加速：配置逐组推进，组�
 | 5 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | `PASS` | 10/10 |
 | 6 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | `PASS` | 10/10 |
 | 7 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_strict_nc_100k` | `FAIL/STOPPED_RTL_CONFIRMED` | 0/10 |
-| 8 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | `RUNNING` | 0/10 |
-| 9 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | `NOT_RUN` | 0/10 |
+| 8 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | `PASS` | 10/10 |
+| 9 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | 原8FAIL＋2NOT_RUN保留；profile已修专项PASS，待提交后恢复 | 0/10 |
 | 10 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | `NOT_RUN` | 0/10 |
 | 11 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_10k` | `NOT_RUN` | 0/10 |
 | 12 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_1k` | `NOT_RUN` | 0/10 |
@@ -232,9 +240,9 @@ cfg 名称含 `100k`，本轮仍保留原始归档的 `MAIN_TRANS_NUM=1000` 覆�
 原始 seed `212889620` 及原先 9 颗被联停的 seed 全部严格 PASS，seed 清单与原始归档一致，
 controller 无失败/未完成/远端未知任务。该结果未触发静态审查发现的旧 later-split completion 迟到场景；
 该后续问题现已按 `memblock_redirect_later_split_cancel_integration_plan_20261029.md` 完成确定性复现、修复和专项验证，
-提交为 `c9763bd7d`；当前暂停原因是第 7 组 strict-NC 的独立新问题，不是 later-split cancel 尚未修复。
+提交为`c9763bd7d`；第7组strict-NC仍因独立RTL问题延期，不是later-split cancel未修，也不阻塞已授权的其他组。
 
-其余 14 组 functional matrix、fault3 100-seed 专项和最终覆盖率尚未完成。当前共 60/120 关闭前六组，
+其余14组functional matrix、fault3 100-seed专项和最终完整覆盖率尚未完成。当前BasicTest70/120，已关闭前六组及组8，
 不能解释为母任务全部完成；发生源码修复后需要重新评估已通过组的相邻复测范围和最终统一版本验收。
 
 ## 当前单 Bug 闭环

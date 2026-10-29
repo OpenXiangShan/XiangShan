@@ -1,5 +1,9 @@
 # Memblock CSR Scalar 10k 功能覆盖矩阵集成修复 Plan
 
+后续修订（2026-10-30）：本方案历史“普通26项全override”不再包含PBMT response-fault。
+现为普通25项保留统一覆盖、PBMT1项使用fixed_cfg保持两UID、scalar4项保持本方案10k策略。
+独立缺陷及实现证据见`memblock_pbmt_matrix_fixed_cfg_profile_plan_20261029.md`与对应review，不重写本方案历史验收记录。
+
 ## 1. 专有名词与抽象功能说明
 
 ### 1.1 专有名词

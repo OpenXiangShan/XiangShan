@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run all functional plus cfg presets with one shared VCS code-coverage mode.
 # Each preset gets ten random seeds. Default profiles use the common request
-# count override; CSR scalar 10k profiles preserve the exact cfg count.
+# count override; directed fixed-cfg and CSR scalar profiles keep cfg counts.
 
 set -uo pipefail
 
@@ -40,7 +40,7 @@ CASES=(
     'tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16|basicTest|memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq|default'
     'tc_dispatch_real_mmu_sv39_strict_nc_100k|basicTest|memblock_dispatch_real_smoke_vseq|default'
     'tc_l2tlb_fault_2pct_no_trigger|basicTest|memblock_dispatch_real_smoke_vseq|default'
-    'tc_l2tlb_pbmt_response_fault|basicTest|memblock_l2tlb_pbmt_response_fault_vseq|default'
+    'tc_l2tlb_pbmt_response_fault|basicTest|memblock_l2tlb_pbmt_response_fault_vseq|fixed_cfg'
     'tc_l2tlb_pbmt_csr_gate_nc|tc_l2tlb_pbmt_csr_gate|virtual_base_sequence|default'
     'tc_l2tlb_pbmt_csr_gate_io|tc_l2tlb_pbmt_csr_gate|virtual_base_sequence|default'
     'tc_l2tlb_ppn_reuse_smoke|tc_l2tlb_ppn_reuse_smoke|virtual_base_sequence|default'
@@ -74,6 +74,11 @@ resolve_case_profile() {
         default)
             CASE_PLUS_FILE="$SIM_DIR/../seq/plus_cfg"
             CASE_OVERRIDE_TRANS_NUM=1
+            ;;
+        fixed_cfg)
+            # Fixed directed tables own their request count; never inject TRANS_NUM.
+            CASE_PLUS_FILE="$SIM_DIR/../seq/plus_cfg"
+            CASE_OVERRIDE_TRANS_NUM=0
             ;;
         csr_scalar_10k)
             CASE_PLUS_FILE="$SIM_DIR/../seq/csr_scalar_stress/cfg"

@@ -22,11 +22,24 @@ TRANS_NUM=4321 COUNT=1 JOBS=1 \
 [[ "$(awk -F '\t' '$3 == "--compile" {n++} END {print n+0}' "$TRACE")" -eq 1 ]] || fail 'compile count mismatch'
 [[ "$(awk -F '\t' 'NR == 1 && $3 == "--compile" {print 1}' "$TRACE")" == 1 ]] || fail 'first case did not compile'
 [[ "$(awk -F '\t' 'NR > 1 && $3 != "--no-compile" {n++} END {print n+0}' "$TRACE")" -eq 0 ]] || fail 'non-first case compile mode mismatch'
-[[ "$(awk -F '\t' 'NR <= 26 && $4 == "4321" {n++} END {print n+0}' "$TRACE")" -eq 26 ]] || fail 'default TRANS_NUM routing mismatch'
+[[ "$(awk -F '\t' 'NR <= 26 && $1 != "tc_l2tlb_pbmt_response_fault" && $4 == "4321" {n++} END {print n+0}' "$TRACE")" -eq 25 ]] || fail 'default TRANS_NUM routing mismatch'
+[[ "$(awk -F '\t' '$1 == "tc_l2tlb_pbmt_response_fault" && $4 == "ABSENT" {n++} END {print n+0}' "$TRACE")" -eq 1 ]] || fail 'PBMT fixed cfg count was overridden'
 [[ "$(awk -F '\t' 'NR > 26 && $4 == "ABSENT" {n++} END {print n+0}' "$TRACE")" -eq 4 ]] || fail 'scalar TRANS_NUM override was not removed'
 [[ "$(awk -F '\t' '$5 == "0" {n++} END {print n+0}' "$TRACE")" -eq 30 ]] || fail 'CHECK_TRIGGER routing mismatch'
 [[ "$(awk -F '\t' 'NR <= 26 && $2 ~ /\/seq\/plus_cfg$/ {n++} END {print n+0}' "$TRACE")" -eq 26 ]] || fail 'default plus-file routing mismatch'
 [[ "$(awk -F '\t' 'NR > 26 && $2 ~ /\/seq\/csr_scalar_stress\/cfg$/ {n++} END {print n+0}' "$TRACE")" -eq 4 ]] || fail 'scalar plus-file routing mismatch'
+
+# Verify effective fixed-cfg values with the real runner, not only mock routing.
+"$SCRIPT_DIR/run_eda_regression.sh" --tc basicTest \
+    --ts memblock_l2tlb_pbmt_response_fault_vseq \
+    --cfg tc_l2tlb_pbmt_response_fault --plus-file "$SIM_DIR/../seq/plus_cfg" \
+    --seed 1476684907 --plusarg +MEMBLOCK_CHECK_TRIGGER_EN=0 \
+    --dry-run --output-dir "$ROOT/pbmt_dry_run" >"$ROOT/pbmt_dry_run.log" 2>&1
+tr ' ' '\n' <"$ROOT/pbmt_dry_run/effective_plusargs.txt" >"$ROOT/pbmt_effective.txt"
+[[ "$(grep -c '^+MEMBLOCK_MAIN_TRANS_NUM=' "$ROOT/pbmt_effective.txt")" -eq 1 ]] || fail 'PBMT MAIN parameter is not unique'
+grep -qx '+MEMBLOCK_MAIN_TRANS_NUM=2' "$ROOT/pbmt_effective.txt" || fail 'PBMT effective MAIN is not cfg value 2'
+[[ "$(grep -c '^+MEMBLOCK_CHECK_TRIGGER_EN=' "$ROOT/pbmt_effective.txt")" -eq 1 ]] || fail 'PBMT CHECK_TRIGGER parameter is not unique'
+grep -qx '+MEMBLOCK_CHECK_TRIGGER_EN=0' "$ROOT/pbmt_effective.txt" || fail 'PBMT CHECK_TRIGGER override changed'
 
 cat >"$ROOT/invalid_cases" <<'EOF'
 default|basicTest|virtual_base_sequence|unknown_profile
