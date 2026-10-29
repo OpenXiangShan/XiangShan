@@ -220,6 +220,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   streamStrideOpt.foreach(pf => {
     val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = true)
     val enableL1StridePrefetcher = Constantin.createRecord(s"pf_enableL1StridePrefetcher$hartId", initValue = true)
+    val strideTrainOnHit = Constantin.createRecord(s"pf_strideTrainOnHit$hartId", initValue = false)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := l1D_pf_enable
     pf.io.fdbkDegree := 1.U
@@ -238,7 +239,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       // for stride
       val source = io.trainSource.s3_load(i)
       pf.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
-        source.bits.miss || isFromStride(source.bits.metaSource)
+        source.bits.miss || isFromStride(source.bits.metaSource) || strideTrainOnHit
       ) && !source.bits.isHwPrefetch // && isLoadAccess(source.bits.uop)
       pf.stride_train(i).bits := source.bits
       pf.stride_train(i).bits.pc := Mux(
