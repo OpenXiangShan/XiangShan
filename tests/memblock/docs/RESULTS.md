@@ -91,22 +91,19 @@ None.
   root-reuse fences, legal tail branch/refetch and integer destination bounds
   remain enforced. Arbitrary simultaneous synonyms and CMO/error-grant ownership
   remain outside this direction.
-- `scalar-unresolved` draws 1..4 older stores and 1..4 provisional scalar/FP
-  loads with all addresses withheld. Independent producer groups permit varied
-  STA/STD-ready events and out-of-age address resolution. Loads issue in shuffled
-  order. Input geometry selects one oldest conflicting victim with an optional
-  disjoint surviving prefix and an invalidated younger suffix containing both
-  overlapping and disjoint loads. On the first conflict, remaining events pause
-  for the exact flush-itself identity and two-stage return; later older operands
-  resolve only after recovery drains. Every invalidated load is strictly
-  refetched at its restored ROB/pdest and fresh LQ/scoreboard epoch before store
-  commit, with youngest-writer program-order bytes. Every touched word receives
-  strict terminal readback. Schema 64 retains store accounting and adds load
-  count/peak, victim/prefix and complete suffix accounting. The source witness
-  `A,S0,P1,S1,...,L0,L1,...` retains an incomplete non-memory head; it does not
-  establish every randomized full-CPU FU/PTW timing. Repeated recovery/refetch,
-  unfinished cancellation, full rename/FTQ history and unresolved sliding
-  admission remain open.
+- `scalar-unresolved` draws 1..4 older stores and 1..4 younger scalar/FP loads.
+  Every conflicting STA independently selects the oldest completed byte-overlap
+  victim and recovers its whole suffix before the next STA. Victim age may move
+  older/equal/younger. Strict intermediate images use only known-address older
+  stores in program age; pending known STD is made ready, while unknown-address
+  data remains invisible. Hidden writes may leave data unchanged. Loads restore
+  ROB/pdest/PC/SQ identity and receive current FTQ and fresh LQ/scoreboard epochs;
+  original untrained and subsequent trained-hit/nonwaiting metadata have an
+  explicit external predictor witness. Every touched word receives terminal
+  readback after age-ordered store commit. Schema 65 distinguishes unique loads
+  from repeated executions and records round/victim/movement/knowledge/predictor
+  observations. Full producer timing, dynamic SSIT/LFST and rename history,
+  unfinished cancellation and unresolved sliding admission remain gaps.
 - Ordinary and segment indexed operands now vary bounded offset spacing,
   permutation and repeated gathers. Each instruction generates one complete
   architectural index vector before CPU-compatible uop slicing. Scatters use
@@ -243,7 +240,7 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 389 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 398 tests pass | Unit checks do not establish DUT functional coverage |
 | Ordinary sliding mixed DUT qualification | Frozen runtime-v4: 10/10 accepted finite seeds pass 14336 actions; all five retained artifact verifiers accept; 8/8 adjacent directed cases pass | `build/memblock/sliding-mixed-20261029/qualification-v4.json`; translated indexed, broad vector shapes, legacy controls, clean special overlap and default spec. 117 epochs, 2360 retired stream instructions, 1467 accepted-overlap admissions, 1706 continued admissions, 378 replay issues, 99 legacy windows and 7259/7259 final words. Development qualification only; pending/unaccepted runs excluded |
 | Ordinary stream mechanisms | Nine compiled scheduler tests pass: 256 executor runs and 240 execute-budget runs; 65 distinct structural schedules, 12 exact seed replays; both private scheduling mutations detected | `build/memblock/sliding-mixed-20261029/scheduler-tests/verification.json`; schedule signatures omit address/payload/cycle/delay. Synthetic ports/completion times, bare translation and representative vector shapes; real replay helpers separately tested. Six byte-overlay tests and five schema-accounting tests pass |
 | Scalar dependency interleaving | Frozen runtime-v1: 10/10 finite seeds pass 4608 actions; all artifact verifiers accept | `build/memblock/dependency-interleave-20261029/qualification-v1.json`; focused/translated mixed/spec/corner. 759 dependency windows, 546 accepted early loads, 269 with overlapping older STD unissued, 35 with multiple, 146 heterogeneous windows and 5465/5465 final tracked words. Known older addresses; no arbitrary unresolved-address or closure claim |
@@ -260,14 +257,14 @@ The current qualification is:
 | Nonidentity oracle mechanics | Six map/oracle tests plus two production-manager tests pass; 128 seeded topologies/768 context maps; 24 manager lifecycle/version cases and 32 independently enumerated complete-line candidates | Wrong-page/contiguous-PA substitutions, old dirty alias data, D/E ordering, release races and torn/reordered/late versions are checked. Fresh review independently checks 5408 images across 96 update histories; uncheckpointed fallback and long histories remain unqualified |
 | Nonidentity adjacent directed checks | 19/19 selected scenarios pass | Runtime-v3, native commands/logs at `build/memblock/alias-manager-20261029/directed-native-v3`; scalar/FP, forwarding/misalignment, full vector/segment, translation/alias/faults, CBO.ZERO, atomic, coherence/release and CMO; selected set, not full catalog |
 | Mixed development validation | 2/2 coverage seeds 731..732 pass at 4608 actions; artifact verifier accepts | Frozen pre-PMP runtime; 33/32 heterogeneous windows and 2338/2288 final observed words; `build/memblock/report-namespace-20261028/random`; no closure claim |
-| Unresolved load-group DUT | Frozen runtime-v1: 15/15 finite seeds pass 11456 actions; all eight artifact verifiers accept | `build/memblock/multi-load-recovery-20261029/qualification-v1.json`; 1372 windows, 3414 older stores, 3478 provisional loads, 694 redirects and 1220 strict suffix refetches, including 269 disjoint younger loads. 2258 loads survive without refetch; all four victim ages and STA conflict ranks occur, with 221 additional first-STA competitors. 1897 touched-word readbacks and 5509/5509 final tracked words. Integer/FP, conflict/control/disabled, translated permutations, mixed and default spec; finite qualification, zero unresolved LQ cancellations, no closure claim |
-| Unresolved load-group mechanics | Compiled graph/oracle/obligation tests and accounting tests pass; 4608 load-group samples yield 1294 topologies and 796 schedules excluding payload/address/width/delay | `unit/test_unresolved_load_group.py`; fixed four-load/victim-age-one bucket reaches all 24 provisional issue permutations and all six suffix-refetch permutations. Literal byte/boxing and group transitions reject private fixed-order, wrong-victim and missing-suffix mutants. Accounting accepts every 38416 four-window count/age profile plus endpoint/pair cases; all three saved conflict/control multi-window inconsistencies reject. These are helper/source checks, not full DUT schedules |
-| Unresolved suffix oracle sensitivity | Two private C++ expectation variants linked against the unchanged DUT model reject at strict scalar data checks; matching golden seed1801 passes | `build/memblock/multi-load-recovery-20261029/dut-oracle-faults-v1/verification.json`; stale conflicting refetch and wrong disjoint-suffix refetch values. Testbench expectation fault sensitivity, not RTL mutation or CPU bug evidence |
+| Repeated unresolved DUT | Frozen runtime-v1: 17/17 finite seeds pass 11680 actions; all nine artifact verifiers accept | `build/memblock/repeated-recovery-20261029/qualification-v1.json`; 1605 windows, 4019 older stores, 3988 initial loads, 1819 redirects, 573 multi-round windows and 3829 strict suffix executions. 2210 refetches retain unknown STAs, 1575 values are unchanged, 1787 executions repeat prior refetches, and 505 pending STD events are promoted. Victims move older/equal/younger 119/642/133 times; all four round counts/ages occur. 2208 touched-word readbacks and 5812/5812 final words. Integer/FP, conflict/control/disabled, translated, mixed and default spec; finite qualification with zero unresolved LQ cancellations, no closure claim |
+| Repeated recovery mechanics | Four compiled planner/oracle/ledger tests pass; 4608 groups yield 3413 topology signatures and 3369 schedules excluding address/data/width/delay | `unit/test_unresolved_load_group.py`; all 24 four-load initial permutations and all six three-load suffix permutations, 1384 multi-round windows, visible/hidden writers and all victim movements. Literal known-byte/boxing/final-equals-initial cases and 20 bad ledger transitions pass; five private helper faults reject, including future-byte leakage and stale FTQ. Eight compiled-reporter accounting tests accept 22720 independently derived histories and enforce per-instruction FP execution bounds. Helper/report checks, not full DUT schedules |
+| Repeated epoch oracle sensitivity | Three private C++ expectation variants linked to the unchanged DUT model reject at strict scalar data checks; golden seed1901 passes | `build/memblock/repeated-recovery-20261029/dut-oracle-faults-v1/verification.json`; stale preceding epoch, premature final/future-store overlay and wrong unchanged-epoch value. UT expectation fault sensitivity, not RTL mutation or CPU bug evidence |
 | Random indexed operands | 4/4 focused seeds 861..864 pass at 128 actions each; repeat endpoints 0/1000 pass 2 seeds each | Frozen runtime `build/memblock/vector-indices-20261029/runtime`; ordinary/segment directions, repeats and descending offsets observed. All tracked final words read back; finite accounting verifiers accept. Overlapping scatter/device ordering remain excluded |
 | Indexed mixed development | Custom mixed seed897 passes 1024 actions with 46 heterogeneous windows and 1313/1313 final words | Artifact `build/memblock/vector-indices-20261029/mixed`; 208 indexed instructions, 327 generated repeated offsets, 1172 descents; these operand counts include inactive elements |
 | Indexed broad development | Seed891 passes 4608 coverage actions; finite artifact verifier accepts | `build/memblock/vector-indices-20261029/coverage-replay`; 32 heterogeneous windows, 113 dependency windows, 488 indexed instructions and 2325/2325 final words. Exact runtime/seed replay completes in 687 seconds after a 300-second budget timeout; no closure claim |
 | Indexed profile compatibility | 2/2 spec and 2/2 corner seeds pass at 512 actions with compact latency; seed892 passes 512 with default spec timing | Artifacts `build/memblock/vector-indices-20261029/{spec,corner,spec-timing}`; seeds871/872 have zero indexed instructions and establish compatibility only. Seed892 executes one indexed load/store pair; corner seeds exercise both ordinary/segment directions. Strict coverage rejects unrelated sparse prefetch/probe bins; no closure claim |
-| Refetch/forwarding regression | Current load-group runtime-v1: 6/6 adjacent directed cases pass | `build/memblock/multi-load-recovery-20261029/{directed-v1,alias-v1}`; alias round trip, memory violation, forwarding, FP, store-TLB miss and scalar misalignment. Selected contracts, not general redirect arbitration or full catalog |
+| Refetch/forwarding regression | Current repeated-recovery runtime-v1: 6/6 adjacent directed cases pass | `build/memblock/repeated-recovery-20261029/{directed-v1,alias-v1}`; alias round trip, memory violation, forwarding, FP, store-TLB miss and scalar misalignment. Selected contracts, not general redirect arbitration or full catalog |
 | Campaign report isolation | Concurrent two-regression/one-benchmark fixture and aggregate rerun pass | Fresh run-ID directory and matching document ID; previous sidecar bytes retained; artifact `build/memblock/report-namespace-20261028/check-unit.log` |
 | check-rtl | Pass | Inventory/schema/generated-file consistency, not full prose or RTL-source provenance |
 | Restored-original directed | 90/90 pass | Every catalogued directed test through the corrected harness and runtime from RTL `43b971f2`; artifact `build/memblock/verify-restored-rtl-20261028/directed` |
@@ -333,26 +330,26 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
-Fresh-context non-author review passes the bounded multi-store/multi-load
-unresolved executor, strict byte oracle, group obligation and schema-64
-accounting against `review-v1b.hashes.json`, with no open blocking findings.
-Conflict/control population bounds now reject all three saved impossible
-multi-window/victim combinations. Independent enumeration accepts 20773 legal
-accounting populations, in addition to the tracked 38416 four-window count/age
-profiles. The reviewer runs the actual extracted executor over 3840 windows with
-an independent surrogate, exercising all four victim ages, queue/ROB wrap and
-cancellation premises 0..4; seven private controller faults reject. These are
-controller/helper sensitivity checks, not RTL mutations or nonzero DUT
-cancellation evidence. Main qualification passes 389 unit tests, fifteen finite
-random seeds, all eight artifact verifiers and six adjacent directed contracts.
-Two private C++ expectation faults against the unchanged DUT model reject wrong
-conflicting and disjoint suffix-refetch data. Evidence is
-`build/memblock/multi-load-recovery-20261029/review-v1/independent-review.md`,
-with `review-v1b.hashes.json`, `review-disposition.json`, `qualification-v1.json`
-and `provenance-v1.json` in its parent. Repeated recovery, unfinished canceled
-loads/late completions, unresolved sliding admission and full-CPU timing/rename
-history remain outside approval; surviving-prefix retirement attribution is
-aggregate. All DUT unresolved cases have zero observed LQ cancellation.
+Fresh-context non-author review approves bounded repeated completed-load
+recovery, the known-address byte oracle, suffix obligation and schema-65
+accounting, with no blocking findings. All fourteen implementation/contract/test
+hashes remain pinned by `review-v1.hashes.json`; RESULTS qualification updates
+were explicitly allowed. The reviewer passes seventeen focused tests and runs
+the actual extracted executor/factories over 7680 independent-surrogate windows,
+including all four round counts, every victim-movement direction and declared
+cancellation premises 0..4. Twelve private controller/expectation/identity faults
+reject, and all nine published artifact verifiers accept. These are helper and
+controller sensitivity checks, not RTL mutations or positive DUT cancellation
+evidence. Main qualification passes 398 unit tests, seventeen finite random
+seeds/11680 actions and six adjacent directed contracts. Three private C++
+expectation faults against the unchanged DUT model reject stale preceding
+images, future-store leakage and wrong unchanged-epoch data. Evidence is
+`build/memblock/repeated-recovery-20261029/review-v1/independent-review.md`,
+with `review-v1.hashes.json`, `review-disposition.json`, `qualification-v1.json`
+and `provenance-v1.json` in its parent. Unfinished canceled loads/late
+completions, unresolved sliding admission, dynamic SSIT/LFST, full-CPU
+producer/rename/frontend timing and joint-history reconstruction remain outside
+approval. All DUT unresolved cases have zero observed LQ cancellation.
 
 Fresh-context non-author review approves the bounded ordinary mixed stream,
 byte-prefix oracle, replay/head helpers and schema-62 accounting against
@@ -403,7 +400,7 @@ The generator varies dependency graphs, vector shapes, index operands, page maps
 and dependency-preserving indexed issue orders. Ordinary stream epochs now also
 vary producer counts/ages and ready-event schedules, with sliding admission and
 random placement among serial helpers. The separate unresolved graph supports
-multiple older stores/loads, surviving load prefixes and whole-suffix recovery. Repeated recovery/refetch,
+multiple older stores/loads, surviving load prefixes and whole-suffix recovery. Unfinished cancellation and
 unresolved sliding admission, epoch drains and broader address dependencies
 remain normal-workload priorities.
 Builder samples do not establish unique complete-run DUT schedules or guarantee

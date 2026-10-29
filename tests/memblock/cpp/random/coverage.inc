@@ -3181,6 +3181,13 @@ struct MixedCoverage {
     // provisional issue-age inversions/maximum loads.
     std::array<std::uint64_t, 11> scalar_unresolved_load_group{};
     std::array<std::uint64_t, 4> scalar_unresolved_victim{};
+    // Redirect rounds/multi-round windows/invalidated epochs/refetched epochs/
+    // repeated refetches/speculative refetches/changed values/unchanged values/
+    // known-store sum/promoted STD/refetch issue inversions/max rounds/trained refetches.
+    std::array<std::uint64_t, 13> scalar_unresolved_epochs{};
+    std::array<std::uint64_t, 4> scalar_unresolved_round_victim{};
+    // Successive victim moved older/stayed equal/moved younger.
+    std::array<std::uint64_t, 3> scalar_unresolved_victim_movement{};
 
     // Operand-pattern observations, once per architectural indexed instruction.
     // These include inactive offsets and do not claim memory requests occurred.
@@ -3595,7 +3602,10 @@ struct MixedCoverage {
                " scalar_unresolved_graph=" + csv(scalar_unresolved_graph) +
                " scalar_unresolved_first_conflict=" + csv(scalar_unresolved_first_conflict) +
                " scalar_unresolved_load_group=" + csv(scalar_unresolved_load_group) +
-               " scalar_unresolved_victim=" + csv(scalar_unresolved_victim) + " scalar_dependency=" +
+               " scalar_unresolved_victim=" + csv(scalar_unresolved_victim) +
+               " scalar_unresolved_epochs=" + csv(scalar_unresolved_epochs) +
+               " scalar_unresolved_round_victim=" + csv(scalar_unresolved_round_victim) +
+               " scalar_unresolved_victim_movement=" + csv(scalar_unresolved_victim_movement) + " scalar_dependency=" +
                std::to_string(scalar_dependency_windows) + ',' +
                std::to_string(scalar_dependency_stores) + ',' +
                std::to_string(scalar_dependency_loads) + ',' +

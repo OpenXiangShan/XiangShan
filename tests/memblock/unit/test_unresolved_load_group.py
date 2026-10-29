@@ -32,27 +32,34 @@ class UnresolvedLoadGroupTest(unittest.TestCase):
     def test_random_graphs_and_independent_byte_oracles(self):
         self.assertEqual(self.run_mode("planner")["samples"], 4608)
 
+    def test_literal_known_store_versions_hidden_overwrites_and_boxing(self):
+        self.assertTrue(self.run_mode("oracle")["final_equals_initial"])
+
     def test_full_suffix_obligations_and_bad_transitions(self):
-        self.assertEqual(self.run_mode("obligations")["invalid_transitions_rejected"], 18)
+        self.assertEqual(self.run_mode("obligations")["invalid_transitions_rejected"], 20)
 
 
     def test_private_fixed_schedule_and_missing_suffix_mutants_are_detected(self):
         mutations = (
-            ("fixed_issue_order", "const unsigned choice = random() % ready.size();",
-             "const unsigned choice = 0;", "planner", "issue-order"),
-            ("youngest_victim", "const auto &id = identities_[victim_];",
-             "const auto &id = identities_.back();", "obligations", "legal redirect"),
-            ("missing_suffix_obligations", "!std::all_of(refetched_.begin() + victim_, refetched_.end(), [](bool done) { return done; })",
-             "!refetched_[victim_]", "obligations", "invalid obligation"),
+            ("fixed_issue_order", "unresolved_load_group.hpp",
+             "const unsigned choice = random() % ready.size();", "const unsigned choice = 0;", "planner", "issue-order"),
+            ("youngest_victim", "unresolved_load_group.hpp",
+             "const auto &id = identities_[victim];", "const auto &id = identities_.back();", "obligations", "legal redirect"),
+            ("missing_suffix_obligations", "unresolved_load_group.hpp",
+             "stage_ != Stage::returned || !all_complete()", "stage_ != Stage::returned", "obligations", "invalid obligation"),
+            ("unknown_store_leak", "unresolved_epochs.hpp",
+             "if (known_[index]) visible.push_back(stores_[index]);", "visible.push_back(stores_[index]);", "oracle", "unknown stores"),
+            ("old_ftq_epoch", "unresolved_load_group.hpp",
+             "const auto next = loads[victim].ftq_ptr + 1U;", "const auto next = loads[victim].ftq_ptr;", "obligations", "legal suffix"),
         )
-        for name, old, new, mode, diagnostic in mutations:
+        for name, filename, old, new, mode, diagnostic in mutations:
             with self.subTest(mutant=name):
                 folder = Path(self.directory.name) / name
                 includes = folder / "scenarios/mixed"
                 includes.mkdir(parents=True)
                 for source in (ROOT / "cpp/scenarios/mixed").glob("*.hpp"):
                     shutil.copyfile(source, includes / source.name)
-                header = includes / "unresolved_load_group.hpp"
+                header = includes / filename
                 text = header.read_text()
                 self.assertEqual(text.count(old), 1)
                 header.write_text(text.replace(old, new))

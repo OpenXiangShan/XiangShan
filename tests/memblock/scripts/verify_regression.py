@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4449,7 +4449,8 @@ def _check_scalar_fp_accounting(result: dict[str, Any]) -> None:
              "FP format/origin/choice counts disagree")
     for origin in range(4):
         selected = choices[origin * 2 + 1]
-        _require((selected <= origins[origin] <= 2 * selected) if origin == 3
+        maximum_executions = 5 if result.get("constraint_schema", 0) >= 65 else 2
+        _require((selected <= origins[origin] <= maximum_executions * selected) if origin == 3
                  else origins[origin] == selected,
                  "FP checked executions disagree with selected origins")
     for width in range(3):
@@ -4566,6 +4567,9 @@ def _check_scalar_unresolved_accounting(result: dict[str, Any]) -> None:
                                         peak_loads * (loads - windows) // 2),
                  "unresolved load-group issue inversions exceed possible age pairs")
         cancel_limit = invalidated
+        if result.get("constraint_schema", 0) >= 65:
+            epoch_counts = _csv_counts(result, "scalar_unresolved_epochs", 13)
+            cancel_limit = epoch_counts[2]
     _require(before <= windows and conflicts <= overlap <= 8 * conflicts and canceled <= cancel_limit,
              "unresolved load operand/overlap/cancellation counts exceed bounds")
     if result.get("constraint_schema", 0) >= 63:
@@ -4608,6 +4612,37 @@ def _check_scalar_unresolved_accounting(result: dict[str, Any]) -> None:
                  sum((rank + 1) * count for rank, count in enumerate(first)) <= prefix and
                  not any(first[maximum:]),
                  "unresolved graph first-conflict positions disagree with stores")
+    if result.get("constraint_schema", 0) >= 65:
+        rounds, multi_round, invalidated_epochs, refetched_epochs, repeated, speculative, different, unchanged, known_sum, promoted, refetch_inversions, peak_rounds, trained = epoch_counts
+        round_victims = _csv_counts(result, "scalar_unresolved_round_victim", 4)
+        movement = _csv_counts(result, "scalar_unresolved_victim_movement", 3)
+        _require(all(value <= (1 << 64) - 1 for value in (*epoch_counts, *round_victims, *movement)),
+                 "unresolved epoch observations exceed the uint64 counter domain")
+        _require(conflicts <= rounds <= prefix and multi_round <= min(conflicts, multi) and
+                 multi_round <= rounds - conflicts <= 3 * multi_round and
+                 (peak_rounds == 0) == (conflicts == 0) and 0 <= peak_rounds <= maximum and
+                 (peak_rounds > 1) == (multi_round > 0) and
+                 (not multi_round or conflicts + multi_round + peak_rounds - 2 <= rounds <=
+                  conflicts + (peak_rounds - 1) * multi_round),
+                 "unresolved epoch round/peak/window counts disagree")
+        _require(sum(round_victims) == rounds and not any(round_victims[peak_loads:]) and
+                 all(round_victims[age] >= victims[age] for age in range(4)) and
+                 sum(movement) == rounds - conflicts,
+                 "unresolved epoch victim/movement observations disagree")
+        round_prefix = sum(age * count for age, count in enumerate(round_victims))
+        _require(invalidated <= invalidated_epochs == refetched_epochs and
+                 rounds <= invalidated_epochs <= peak_loads * rounds - round_prefix and
+                 repeated == invalidated_epochs - invalidated and
+                 rounds - conflicts <= repeated <= peak_loads * (rounds - conflicts) and
+                 repeated <= max(0, peak_rounds - 1) * invalidated and
+                 different + unchanged == invalidated_epochs and different >= conflicts,
+                 "unresolved epoch suffix/version obligations are not conserved")
+        _require(rounds - conflicts <= speculative <= invalidated_epochs and
+                 rounds + multi_round <= known_sum <= maximum * rounds and
+                 promoted <= min(prefix, stores - early) and
+                 refetch_inversions <= min(6 * rounds, (peak_loads - 1) * invalidated_epochs // 2) and
+                 rounds <= trained <= invalidated_epochs,
+                 "unresolved epoch knowledge/data/predictor observations exceed bounds")
     if rate == 0:
         _require(windows == 0, "disabled unresolved load direction generated windows")
     if conflict_rate == 0:
