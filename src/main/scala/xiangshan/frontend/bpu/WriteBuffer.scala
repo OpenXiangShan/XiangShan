@@ -41,16 +41,18 @@ import xiangshan.XSModule
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
  * @param nameSuffix Suffix of name, used for clearer logging
+ * @param hasInvalidate Whether external SRAM writes can invalidate clean shadows by set index
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:        T,
-    numEntries: Int = 1,
-    numPorts:   Int = 1,
-    numWays:    Int = 1,
-    hasCnt:     Boolean = false,
-    hasWayMask: Boolean = false,
-    hasFlush:   Boolean = false,
-    nameSuffix: String = ""
+    gen:           T,
+    numEntries:    Int = 1,
+    numPorts:      Int = 1,
+    numWays:       Int = 1,
+    hasCnt:        Boolean = false,
+    hasWayMask:    Boolean = false,
+    hasFlush:      Boolean = false,
+    nameSuffix:    String = "",
+    hasInvalidate: Boolean = false
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
@@ -60,9 +62,10 @@ class WriteBuffer[T <: WriteReqBundle](
     val read:  Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
     val full:  Vec[Bool]           = Output(Vec(numPorts, Bool()))
     // A full miss overwrites a pending dirty entry.
-    val overwrite: Vec[Bool]         = Output(Vec(numPorts, Bool()))
-    val takenMask: Option[Vec[Bool]] = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
-    val flush:     Option[Bool]      = Option.when(hasFlush)(Input(Bool()))
+    val overwrite:  Vec[Bool]             = Output(Vec(numPorts, Bool()))
+    val takenMask:  Option[Vec[Bool]]     = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
+    val flush:      Option[Bool]          = Option.when(hasFlush)(Input(Bool()))
+    val invalidate: Option[ValidIO[UInt]] = Option.when(hasInvalidate)(Flipped(Valid(UInt(gen.setIdx.getWidth.W))))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
@@ -115,6 +118,25 @@ class WriteBuffer[T <: WriteReqBundle](
     val drainIdx = PriorityEncoder(dirty(rowIdx))
     when(io.read(rowIdx).fire) {
       nextDirty(rowIdx)(drainIdx) := false.B
+    }
+  }
+
+  // External SRAM writes make matching clean shadows stale. Apply invalidation
+  // before incoming writes so a new request to a different set can reuse the slot.
+  // The caller must serialize external writes with pending/incoming writes to the same set.
+  io.invalidate.foreach { invalidate =>
+    when(invalidate.valid) {
+      assert(
+        !io.write.map(write => write.valid && write.bits.setIdx === invalidate.bits).reduce(_ || _),
+        "WriteBuffer shadow invalidation conflicts with an incoming write"
+      )
+      for (rowIdx <- 0 until numPorts; entryIdx <- 0 until numEntries) {
+        val hit = shadowValid(rowIdx)(entryIdx) && entries(rowIdx)(entryIdx).setIdx === invalidate.bits
+        assert(!(hit && dirty(rowIdx)(entryIdx)), "WriteBuffer shadow invalidation conflicts with a pending write")
+        when(hit && !dirty(rowIdx)(entryIdx)) {
+          nextShadowValid(rowIdx)(entryIdx) := false.B
+        }
+      }
     }
   }
 
