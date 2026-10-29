@@ -208,27 +208,14 @@ class IttageTable(
   private val updateWdata                           = Wire(new IttageEntry(tagLen))
 
   private val updateAllBitmask = VecInit.fill(ittageEntrySz)(1.U).asUInt // update all entry
-  private val updateNoBitmask  = VecInit.fill(ittageEntrySz)(0.U).asUInt // update no
   // Build the mask through the entry field itself so it follows the Bundle's actual layout.
   private val usefulMaskEntry = WireInit(0.U.asTypeOf(new IttageEntry(tagLen)))
   usefulMaskEntry.usefulCnt := UsefulCounter.SaturatePositive
   private val updateUsefulBitmask       = usefulMaskEntry.asUInt
   private val updateExceptUsefulBitmask = ~updateUsefulBitmask
 
-  private val needReset      = RegInit(false.B)
-  private val usefulCanReset = !(io.req.fire || trainReqValid || io.update.valid) && needReset
-  // Sweep one set index per cycle; all banks reuse resetSet so the full table resets in NumSetsPerBank cycles.
-  private val (resetSet, resetFinish) = Counter(usefulCanReset, NumSetsPerBank)
-  when(io.update.resetUsefulCnt) {
-    needReset := true.B
-  }.elsewhen(resetFinish) {
-    needReset := false.B
-  }
-  private val updateBitmask = Mux(
-    io.update.usefulCntValid && io.update.valid,
-    updateAllBitmask,
-    Mux(io.update.valid, updateExceptUsefulBitmask, Mux(usefulCanReset, updateUsefulBitmask, updateNoBitmask))
-  )
+  private val updateBitmask    = Mux(io.update.usefulCntValid, updateAllBitmask, updateExceptUsefulBitmask)
+  private val usefulResetWdata = 0.U.asTypeOf(new IttageEntry(tagLen))
 
   /**
     Bypass write data from per-bank WriteBuffer to SRAM when that bank's read port is idle.
@@ -239,28 +226,50 @@ class IttageTable(
       gen = new IttageWriteReq(tagLen, NumSetsPerBank, ittageEntrySz),
       numEntries = TableWriteBufferSize,
       numPorts = 1,
-      nameSuffix = s"ittageTable${tableIdx}_bank$bankIdx"
+      nameSuffix = s"ittageTable${tableIdx}_bank$bankIdx",
+      hasInvalidate = true
     )).suggestName(s"ittage_write_buffer_bank$bankIdx")
   }
 
   // write to per-bank write buffers
   writeBuffers.zipWithIndex.foreach { case (writeBuffer, bankIdx) =>
     val writePort = writeBuffer.io.write.head
-    writePort.valid        := (io.update.valid && updateBankMask(bankIdx)) || usefulCanReset
+    writePort.valid        := io.update.valid && updateBankMask(bankIdx)
     writePort.bits.entry   := updateWdata
-    writePort.bits.setIdx  := Mux(usefulCanReset, resetSet, updateIdx)
+    writePort.bits.setIdx  := updateIdx
     writePort.bits.bitmask := updateBitmask
   }
 
-  // read the stored write req from write buffer and push into the matching bank SRAM
+  // Reads and ordinary updates take priority over background useful-counter clears.
+  // Each bank sweeps independently, advancing only when the SRAM accepts a clear.
   tables.zip(writeBuffers).zipWithIndex.foreach { case ((bank, writeBuffer), bankIdx) =>
-    val readPort     = writeBuffer.io.read.head
-    val writeValid   = readPort.valid && !bank.io.r.req.valid
-    val writeEntry   = readPort.bits.entry
-    val writeSetIdx  = readPort.bits.setIdx
-    val writeBitMask = readPort.bits.bitmask
+    val readPort          = writeBuffer.io.read.head
+    val usefulResetActive = RegInit(false.B)
+    val usefulResetGrant = usefulResetActive && bank.io.resetDone &&
+      !bank.io.r.req.valid && !readPort.valid && !writeBuffer.io.write.head.valid
+    val usefulResetFire                     = usefulResetGrant && bank.io.w.req.fire
+    val (usefulResetSet, usefulResetFinish) = Counter(usefulResetFire, NumSetsPerBank)
+    // Coalesce requests during a sweep; a request on its last write starts another sweep.
+    when(io.update.resetUsefulCnt) {
+      usefulResetActive := true.B
+    }.elsewhen(usefulResetFinish) {
+      usefulResetActive := false.B
+    }
+
+    val writeValid   = !bank.io.r.req.valid && (readPort.valid || usefulResetGrant)
+    val writeEntry   = Mux(usefulResetGrant, usefulResetWdata, readPort.bits.entry)
+    val writeSetIdx  = Mux(usefulResetGrant, usefulResetSet, readPort.bits.setIdx)
+    val writeBitMask = Mux(usefulResetGrant, updateUsefulBitmask, readPort.bits.bitmask)
     bank.io.w.apply(writeValid, writeEntry, writeSetIdx, true.B, writeBitMask)
     readPort.ready := bank.io.w.req.ready && !bank.io.r.req.valid
+
+    // The buffer is drained and has no incoming update when a clear is granted.
+    // Forget the old write record only after SRAM has actually changed.
+    writeBuffer.io.invalidate.get.valid := usefulResetFire
+    writeBuffer.io.invalidate.get.bits  := usefulResetSet
+
+    XSPerfAccumulate(s"ittage_table_bank${bankIdx}_useful_reset_write", usefulResetFire)
+    XSPerfAccumulate(s"ittage_table_bank${bankIdx}_useful_reset_finish", usefulResetFinish)
   }
 
   // Power-on reset
@@ -281,12 +290,8 @@ class IttageTable(
     ConfidenceCounter.WeakPositive, // reset to neutral (weak positive) when allocate
     oldCtr.getUpdate(io.update.correct)
   )
-  updateWdata.tag := updateTag
-  updateWdata.usefulCnt := Mux(
-    usefulCanReset,
-    UsefulCounter.SaturateNegative,
-    io.update.usefulCnt
-  )
+  updateWdata.tag       := updateTag
+  updateWdata.usefulCnt := io.update.usefulCnt
   // only when ctr is null
   updateWdata.targetOffset := Mux(
     io.update.alloc || oldCtr.isSaturateNegative,
