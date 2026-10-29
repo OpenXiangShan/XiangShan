@@ -8,6 +8,8 @@ import top.{ArgParser, Generator}
 import utils.BundleUtils.makeValid
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodeInUopDebug, UopIdx}
+import xiangshan.backend.decode.SpecZicfilp
+import xiangshan.backend.decode.isa.{Instructions, PseudoInstructions}
 import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.decode.opcode.Opcode
@@ -65,6 +67,7 @@ class DecodeChannels(
     val redirect = Input(Bool())
     // if rename can accept all UopWidth uops
     val renameCanAccept = Input(Bool())
+    val ZicfilpRedirect = Option.when(p(XSCoreParamsKey).HasZicfilp)(Flipped(ValidIO(Bool())))
     val mops = Flipped(Vec(mopWidth, DecoupledIO(new Bundle {
       val info = new DecodeChannelInput
       val ctrl = new MopCtrlBundle
@@ -75,12 +78,36 @@ class DecodeChannels(
     val uops = Vec(uopWidth, ValidIO(new Bundle {
       val info = new DecodeChannelOutput
       val ctrl = new MopCtrlBundle
+      val zicfilp = Option.when(p(XSCoreParamsKey).HasZicfilp)(new ZicfilpDecodeInfo)
     }))
   }))
 
   val instValids = in.mops.map(_.valid)
   val insts: Seq[Riscv32BitInst with BitFieldsVec] = in.mops.map(_.bits.info.rawInst.asTypeOf(new Riscv32BitInst with BitFieldsVec))
   val inMopCtrl: Seq[MopCtrlBundle] = in.mops.map(_.bits.ctrl)
+
+  val specZicfilp = Option.when(p(XSCoreParamsKey).HasZicfilp)(Module(new SpecZicfilp(mopWidth)))
+  val decodedMopCtrl = Wire(Vec(mopWidth, new DecodedMopCtrlBundle))
+  decodedMopCtrl.zip(inMopCtrl).foreach { case (sink, source) => sink.ctrl := source }
+  specZicfilp.foreach { spec =>
+    spec.io.enable := in.mops.head.bits.info.fromCSR.enableZicfilp.get
+    spec.io.redirect := in.ZicfilpRedirect.get
+    for (i <- 0 until mopWidth) {
+      val inst = in.mops(i).bits.info.rawInst
+      val rs1 = inst(19, 15)
+      val isJalr = inst === Instructions.JALR && rs1 =/= 1.U && rs1 =/= 5.U && rs1 =/= 7.U
+      val isLPAD = inst === PseudoInstructions.LPAD && inMopCtrl(i).ZicfilpPCAligned.get
+      spec.io.valid(i) := in.mops(i).valid && !in.redirect
+      spec.io.fire(i) := in.mops(i).fire && !in.redirect
+      spec.io.isJalr(i) := isJalr
+      spec.io.isLPAD(i) := isLPAD
+      val info = decodedMopCtrl(i).zicfilp.get
+      info.info.ZicfilpJalr := isJalr
+      info.info.ZicfilpLPADValid := spec.io.lpadValid(i)
+      info.isLPAD := isLPAD
+      info.exception := spec.io.exception(i)
+    }
+  }
 
   // Instantiate vector decode channel by vector instruction patterns
   val vectorDecodeChannelM8: Definition[VectorDecodeChannel] = Definition(new VectorDecodeChannel(vectorInsts))
@@ -155,7 +182,7 @@ class DecodeChannels(
       RegEnable(next, update)
   }
 
-  val bufferedMopCtrlNext = Wire(new MopCtrlBundle)
+  val bufferedMopCtrlNext = Wire(new DecodedMopCtrlBundle)
   val bufferedMopCtrl = RegEnable(bufferedMopCtrlNext, uopBufferUpdate)
 
   val uopBufferCtrlDecoder = Module(new UopBufferCtrlDecoder(
@@ -167,7 +194,7 @@ class DecodeChannels(
 
   val uopSelectMod = Module(new UopSelectModule(
     uopBundle = new DecodeChannelOutput,
-    mopBundle = new MopCtrlBundle,
+    mopBundle = new DecodedMopCtrlBundle,
     mopWidth = mopWidth,
     uopWidth = uopWidth,
     uopBufferSize = uopBufferSize,
@@ -176,7 +203,7 @@ class DecodeChannels(
 
   val bufferSelectMod = Module(new BufferSelectModule(
     uopBundle = new DecodeChannelOutput,
-    mopBundle = new MopCtrlBundle,
+    mopBundle = new DecodedMopCtrlBundle,
     mopWidth = mopWidth,
     uopWidth = uopWidth,
     uopBufferLength = uopBufferSize,
@@ -213,6 +240,8 @@ class DecodeChannels(
   psdDecodeChannelsIn.zipWithIndex.foreach { case (modIn, i) =>
     modIn.rawInst := in.mops(i).bits.info.rawInst
     modIn.fromCSR := in.mops(i).bits.info.fromCSR
+    modIn.ZicfilpELP.foreach(_ := specZicfilp.get.io.elp(i) && !in.redirect)
+    modIn.ZicfilpPCAligned.foreach(_ := inMopCtrl(i).ZicfilpPCAligned.get)
   }
 
   /**
@@ -277,7 +306,7 @@ class DecodeChannels(
     }
   }
   uopSelectMod.in.uopFromBuffer := uopBuffer
-  uopSelectMod.in.mopFromInput := in.mops.map(_.bits.ctrl)
+  uopSelectMod.in.mopFromInput := decodedMopCtrl
   uopSelectMod.in.mopFromBuffer := bufferedMopCtrl
   uopSelectMod.in.uopSelect := uopBufferCtrlDecoder.out.selForUop
 
@@ -287,7 +316,7 @@ class DecodeChannels(
 
   bufferSelectMod.in.uopFromChannel := uopSelectMod.in.uopFromChannel
   bufferSelectMod.in.uopFromBuffer := uopBuffer
-  bufferSelectMod.in.mopFromInput := in.mops.map(_.bits.ctrl)
+  bufferSelectMod.in.mopFromInput := decodedMopCtrl
   bufferSelectMod.in.mopFromBuffer := bufferedMopCtrl
   bufferSelectMod.in.uopSelect := uopBufferCtrlDecoder.out.selForBufffer
   bufferSelectMod.in.mopAcceptVec := uopBufferCtrlDecoder.out.acceptVec.map(_ && in.renameCanAccept)
@@ -303,7 +332,8 @@ class DecodeChannels(
   for (i <- 0 until uopWidth) {
     out.uops(i).valid := uopBufferCtrlDecoder.out.uopValids(i)
     out.uops(i).bits.info := uopSelectMod.out.decodedInfoOut(i)
-    out.uops(i).bits.ctrl := uopSelectMod.out.bypassInfoOut(i)
+    out.uops(i).bits.ctrl := uopSelectMod.out.bypassInfoOut(i).ctrl
+    out.uops(i).bits.zicfilp.foreach(_ := uopSelectMod.out.bypassInfoOut(i).zicfilp.get)
   }
 }
 
@@ -648,6 +678,17 @@ object DecodeChannelOutput {
 
     uop
   }
+}
+
+class ZicfilpDecodeInfo(implicit p: Parameters) extends XSBundle {
+  val info = new ZicfilpInfo
+  val isLPAD = Bool()
+  val exception = Bool()
+}
+
+class DecodedMopCtrlBundle(implicit p: Parameters) extends XSBundle {
+  val ctrl = new MopCtrlBundle
+  val zicfilp = Option.when(HasZicfilp)(new ZicfilpDecodeInfo)
 }
 
 class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
