@@ -81,11 +81,9 @@ jobs:
           fi
       - name: GSIM Test - Linux
         run: |
-          # TODO: remove --disable-fork to enable lightSSS when gsim supports it
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${PERF_HOME} \
             --numa --threads 1 \
-            --disable-fork \
             --ci linux-hello-opensbi \
             2> stderr.log
           cat stderr.log | sort
