@@ -67,6 +67,22 @@ class NewFLManager(
   val s1ValidCount = s1QueueSize.U(s1CountWidth.W) - s1FreeCount
   val s1CanAllocateReg = RegInit(false.B)
 
+  // Rotate the bank order by the number of candidates that actually entered
+  // s1 in the previous refill.  Starting from bank 1 keeps the first refill
+  // independent from the reset value used by the old fixed-order path.
+  private val initialStartBank = if (bankCount == 1) 0 else 1
+  val s0StartBank = RegInit(initialStartBank.U(bankIndexWidth.W))
+
+  private def addBankOffset(base: UInt, offset: UInt): UInt = {
+    // The offset is at most renameWidth (two candidates per bank), so two
+    // conditional reductions are sufficient even for a non-power-of-two
+    // bank count.
+    val sum = base +& offset
+    val reducedOnce = Mux(sum >= bankCount.U, sum - bankCount.U, sum)
+    val reducedTwice = Mux(reducedOnce >= bankCount.U, reducedOnce - bankCount.U, reducedOnce)
+    reducedTwice(bankIndexWidth - 1, 0)
+  }
+
   private def addS1Ptr(ptr: UInt, increment: UInt): UInt = {
     val sum = ptr +& increment
     if (s1QueueSizeIsPow2) {
@@ -99,6 +115,10 @@ class NewFLManager(
   val s0AllocBitmap = in.freeBitmap & ~reservedBitmap
   val s0Candidates = Wire(Vec(renameWidth, UInt(phyRegIdxWidth.W)))
   val s0CandidateValid = Wire(Vec(renameWidth, Bool()))
+  val bankFirstCandidates = Wire(Vec(bankCount, UInt(phyRegIdxWidth.W)))
+  val bankLastCandidates = Wire(Vec(bankCount, UInt(phyRegIdxWidth.W)))
+  val bankFirstCandidateValid = Wire(Vec(bankCount, Bool()))
+  val bankLastCandidateValid = Wire(Vec(bankCount, Bool()))
   for (bankIndex <- 0 until bankCount) {
     // Match IntRegFileBank: the low-order preg bits select the bank
     // (preg % bankCount), while the remaining bits select the bank-local row.
@@ -125,15 +145,24 @@ class NewFLManager(
     val bankHasCandidate = bankSelect.hasOne
     val bankHasTwoCandidates = bankSelect.hasTwo
 
-    // Keep a fixed bank order for the first candidates, then walk the banks
-    // in reverse order for the last candidates:
-    // bank0_first ... bank3_first, bank3_last ... bank0_last.
-    val lastCandidateIdx = renameWidth - 1 - bankIndex
-    s0Candidates(bankIndex) := firstCandidate
-    s0Candidates(lastCandidateIdx) := lastCandidate
-    s0CandidateValid(bankIndex) := !in.flush && bankHasCandidate
+    bankFirstCandidates(bankIndex) := firstCandidate
+    bankLastCandidates(bankIndex) := lastCandidate
+    bankFirstCandidateValid(bankIndex) := bankHasCandidate
+    bankLastCandidateValid(bankIndex) := bankHasCandidate && bankHasTwoCandidates
+  }
+
+  // Use a rotated bank order for both halves.  The second half is the reverse
+  // of the first half, so a start bank of 2 produces
+  //   bank2_first bank3_first bank0_first bank1_first
+  //   bank1_last  bank0_last  bank3_last  bank2_last.
+  for (orderIndex <- 0 until bankCount) {
+    val orderedBank = addBankOffset(s0StartBank, orderIndex.U)
+    val lastCandidateIdx = renameWidth - 1 - orderIndex
+    s0Candidates(orderIndex) := bankFirstCandidates(orderedBank)
+    s0Candidates(lastCandidateIdx) := bankLastCandidates(orderedBank)
+    s0CandidateValid(orderIndex) := !in.flush && bankFirstCandidateValid(orderedBank)
     s0CandidateValid(lastCandidateIdx) :=
-      !in.flush && bankHasCandidate && bankHasTwoCandidates
+      !in.flush && bankLastCandidateValid(orderedBank)
   }
 
   // Newly released registers are not yet in this cycle's bitmap.
@@ -153,6 +182,9 @@ class NewFLManager(
     enqueueValid(candidateIdx) := enqueueCandidateValid(candidateIdx) &&
       enqueueOffset(candidateIdx) < s1EnqueueCapacity
   }
+  // Count only the candidates selected by s0 that actually enter s1.  Free
+  // requests appended after the s0 stream do not rotate the bank order.
+  val s0ToS1Count = PopCount(enqueueValid.take(renameWidth))
   // The accepted stream is a stable prefix of the valid candidates. Count the
   // raw valids once and clamp to FIFO capacity, instead of PopCount-ing the
   // per-candidate capacity comparisons again on the tail-pointer path.
@@ -231,6 +263,11 @@ class NewFLManager(
   // fit, so advance tail by the raw count without waiting for capacity clamp.
   s1TailPtr := Mux(s1WillBeFull, s1HeadPtrNext, addS1Ptr(s1TailPtr, rawCandidateCount))
   s1FreeCount := s1FreeCountNext
+  when (in.flush) {
+    s0StartBank := initialStartBank.U(bankIndexWidth.W)
+  }.elsewhen (s0ToS1Count.orR) {
+    s0StartBank := addBankOffset(s0StartBank, s0ToS1Count)
+  }
   // Stable candidate ranks occupy a contiguous cyclic interval. A low-bit
   // first butterfly therefore routes them without conflicts, using O(Q log Q)
   // two-input switches instead of an O(Q * enqueueWidth) data crossbar.
