@@ -258,6 +258,8 @@ with no second data opt-out and no unobserved queue cancellation. This directed
 round trip does not model arbitrary backend redirect arbitration or every IQ/LQ
 replay producer.
 
+The ordinary mixed executor has a separate bounded memory-violation recovery path. Before driving the public redirect, `Environment::cancel_pending_for_redirect` removes only still-pending killed scoreboard obligations and cancels only unauthorized registered ReleaseData groups; committed/authorized store inputs survive. The stream matches the returned ROB/FTQ pointer, FTQ offset, wrap and RVC identity against an independently registered live load or vector instruction, samples physical LQ/SQ cancellation counts, and waits the selected local queue-recovery guard. Its `StreamByteOracle` checkpoint is taken before each ordinary admission and restored at the first killed instruction, so a canceled store cannot remain in the expected byte image. Replacement instructions receive fresh ROB/queue generations and destinations. This is a bounded memory-only recovery contract; it does not establish adjacent redirect arbitration, full ROB walk completion, or universal late-writeback silence.
+
 ### Ordinary sliding-stream expectations
 
 [StreamByteOracle](../cpp/scenarios/mixed/stream_oracle.hpp) owns a mirror-free

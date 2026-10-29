@@ -1120,11 +1120,15 @@ implemented grammar, not DUT joint coverage or full-CPU input legality.
 
 An older allocated unaligned SQ entry can mark forwarding data unavailable even
 when its data is valid. A misaligned load can turn that condition into a public
-flush-self replay. Mixed recovery must therefore preserve committed pending SQ
-records, invalidate the whole killed vector instruction and younger mixed suffix,
-reconcile physical cancellation separately from architectural invalidation, and
-strictly check fresh execution. Queue drain before every such load would remove
-the overlap this direction needs to verify. General handling remains missing.
+flush-self replay. The native ordinary stream now handles this bounded memory-
+violation path: it validates the independent ROB/FTQ/RVC victim identity, cancels
+pending scalar/vector/prefetch obligations and unauthorized ReleaseData groups,
+reconciles physical LQ/SQ credits, restores the independent byte overlay before
+the first killed instruction, frees killed destinations, and admits replacement
+generations after the local queue-recovery guard. Queue drain before every such
+load would remove the overlap this direction needs to verify. Adjacent returns,
+competing EXU/ROB redirects, scalar late-output histories and store-headed walk
+levels remain outside this bounded path.
 
 ### Ordinary producer dependencies
 

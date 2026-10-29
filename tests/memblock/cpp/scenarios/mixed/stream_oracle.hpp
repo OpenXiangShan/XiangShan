@@ -9,7 +9,25 @@ namespace memblock::scenarios::mixed {
 // only to that prefix; neither store acceptance nor DUT data advances it.
 class StreamByteOracle {
 public:
+    struct Checkpoint {
+        memblock::SparseMemory image;
+        std::set<std::uint64_t> known;
+        std::set<std::uint64_t> store_lines;
+    };
+
     explicit StreamByteOracle(const memblock::SparseMemory &base) : base_(base) {}
+
+    Checkpoint checkpoint() const
+    {
+        return Checkpoint{image_, known_, store_lines_};
+    }
+
+    void restore(const Checkpoint &checkpoint)
+    {
+        image_ = checkpoint.image;
+        known_ = checkpoint.known;
+        store_lines_ = checkpoint.store_lines;
+    }
 
     bool has_store_in_line(std::uint64_t physical_address) const
     {

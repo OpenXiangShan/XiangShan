@@ -858,6 +858,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         generator = (MEMBLOCK_ROOT / "scripts/generate_cpp.py").read_text()
         for contract in (
             "sample_memory_violation",
+            "cancel_pending_for_redirect",
             "MemoryViolationStats",
             "run_memory_violation",
             "run_rar_violation",

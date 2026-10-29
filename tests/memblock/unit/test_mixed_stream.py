@@ -580,6 +580,11 @@ class MixedStreamTest(unittest.TestCase):
         self.assertEqual(result, {'presets': 4, 'boundary_overrides': 16, 'out_of_range_rejections': 8})
         type(self).constraint_case = result
 
+    def test_stream_oracle_checkpoint_restores_canceled_store_overlay(self):
+        result = self.run_fixture('oracle-rollback')
+        self.assertEqual(result['before'], result['restored'])
+        self.assertNotEqual(result['before'], result['overlaid'])
+
     def test_actual_execute_interleaves_serial_work_and_conserves_budgets(self):
         schedules = []
         legacy_sizes = set()
@@ -612,9 +617,9 @@ class MixedStreamTest(unittest.TestCase):
         self.assertTrue(any(',C' in schedule and ',S,' in schedule for schedule in schedules))
 
     def test_private_serial_admission_mutation_loses_required_overlap(self):
-        old = 'admitted < length && live.size() < depth &&'
+        old = 'admitted < target_admissions && live.size() < depth &&'
         self.assertEqual(self.source.count(old), 1)
-        binary = self.compile(self.source.replace(old, 'admitted < length && live.empty() &&'), 'serial-admission')
+        binary = self.compile(self.source.replace(old, 'admitted < target_admissions && live.empty() &&'), 'serial-admission')
         results = [self.stream(seed, binary=binary) for seed in range(1, 17)]
         with self.assertRaises(AssertionError):
             self.assert_sliding_observations(results)
@@ -644,9 +649,9 @@ class MixedStreamTest(unittest.TestCase):
         self.assertGreater(sum(r['stream_vstart_flush'][0] for r in results), 0)
         self.assertGreater(sum(r['stream_vstart_flush'][1] for r in results), 0)
         for name, before, after in (
-            ('missing_restart_barrier', '!restart_barrier && admitted < length', 'admitted < length'),
+            ('missing_restart_barrier', '!restart_barrier && admitted < target_admissions', 'admitted < target_admissions'),
             ('missing_restart_redirect', '!environment.redirect_after(head.rob(), head.flag(), false)', 'false'),
-            ('short_restart_recovery', '!environment.run_cycles(6)', '!environment.run_cycles(0)'),
+            ('short_restart_recovery', '!environment.run_cycles(6)) return false;', '!environment.run_cycles(0)) return false;'),
         ):
             self.assertEqual(self.source.count(before), 1)
             binary = self.compile(self.source.replace(before, after), name)

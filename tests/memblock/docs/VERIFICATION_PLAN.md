@@ -198,7 +198,7 @@ high priorities. Nonzero-VSTART
 vectors retain their required whole-instruction flush-after through a serialized
 suffix barrier with low `pendingst`, zero cancellation and conservative local
 recovery; `stream_vstart_flush` records that lifecycle. This direction does not
-establish general mixed-suffix cancellation. Ordinary scalar/vector input groups
+establish cancellation for every mixed suffix or adjacent redirect. Ordinary scalar/vector input groups
 are independently registered before acceptance and authorized by public head;
 whole-line version checking supports eviction before reference commit. Entry and
 exit SBuffer/link drains isolate these epochs from untracked legacy classes;

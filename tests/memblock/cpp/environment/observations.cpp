@@ -588,6 +588,40 @@ auto Environment::Impl::cancel_scalar_load_after_redirect(const LoadTransaction 
     return true;
 }
 
+auto Environment::Impl::cancel_pending_for_redirect(
+    std::uint8_t rob_value, bool rob_flag, bool flush_itself) -> bool
+{
+    if (rob_value >= kRobEntries) {
+        error_.record("bulk redirect cancellation has an invalid ROB anchor");
+        return false;
+    }
+    scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
+    store_scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
+    vector_scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
+
+    const auto kills = [&](unsigned value, bool flag) {
+        const bool equal = value == rob_value && flag == rob_flag;
+        const bool younger = flag == rob_flag ? value > rob_value : value < rob_value;
+        return younger || (flush_itself && equal);
+    };
+    for (auto *tracked : {&scalar_release_inputs_, &vector_release_inputs_}) {
+        std::vector<std::uint64_t> orders;
+        std::vector<std::uint64_t> keys;
+        for (const auto &[key, inputs] : *tracked) {
+            if (!kills(inputs.rob, inputs.flag) || inputs.authorized) continue;
+            keys.push_back(key);
+            if (inputs.registered)
+                for (const auto &group : inputs.groups) orders.push_back(group.order);
+        }
+        if (!orders.empty() && !memory_agent_.cancel_release_stores(orders)) {
+            error_.merge(memory_agent_.failures());
+            return false;
+        }
+        for (const auto key : keys) tracked->erase(key);
+    }
+    return check_components();
+}
+
 auto Environment::Impl::scalar_load_redirect_canceled() const -> std::uint64_t
 { return scoreboard_.redirect_canceled(); }
 

@@ -31,6 +31,7 @@ struct StreamWork {
     struct Producer { bool complete = false, retired = false; unsigned depth = 0; };
     std::shared_ptr<Producer> result = std::make_shared<Producer>();
     std::shared_ptr<Producer> address_source, data_source;
+    std::shared_ptr<StreamByteOracle::Checkpoint> oracle_before;
     std::uint8_t rob() const {
         if (kind == 0) return load.rob;
         if (kind == 2) return store.rob;
@@ -75,6 +76,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     const unsigned depth = 2U + random() % 7U;
     const unsigned length = std::min(instruction_limit, constraints.stream_min_instructions +
         unsigned(random() % (constraints.stream_max_instructions - constraints.stream_min_instructions + 1U)));
+    unsigned target_admissions = length;
     std::set<unsigned> admitted_rob_identities;
     unsigned admitted = 0, retired = 0, recovery_serial = 0;
     std::optional<StreamRecovery> recovery;
@@ -83,7 +85,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     auto &inflight = coverage.stream_recovery_inflight;
     const auto drained_before = environment.store_retirement_stats().drained;
     auto last_progress = environment.cycle();
-    const auto deadline = environment.cycle() + std::uint64_t{length} * constrained_completion_timeout * 4U;
+    std::uint64_t deadline = environment.cycle() + std::uint64_t{target_admissions} * constrained_completion_timeout * 4U;
     const auto start_action = actions;
     ++coverage.stream[0];
     coverage.stream[10] += actions > coverage.concurrent_actions + coverage.stream[2];
@@ -298,10 +300,18 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (environment.memory_violation_stats().count != expected_violations) {
             const auto &violation = environment.memory_violation_stats();
             std::ostringstream detail;
-            detail << ":unexpected-redirect:cycle=" << violation.last_cycle
+            detail << ":redirect-recovery:cycle=" << violation.last_cycle
                 << ":rob=" << unsigned(violation.last.rob_value) << '/' << violation.last.rob_flag
                 << ":ftq=" << unsigned(violation.last.ftq_value) << '/' << unsigned(violation.last.ftq_offset)
                 << ":level=" << violation.last.level;
+            const auto kills = [&](const StreamWork &item) {
+                const bool equal = item.rob() == violation.last.rob_value &&
+                    item.flag() == violation.last.rob_flag;
+                const bool younger = item.flag() == violation.last.rob_flag
+                    ? item.rob() > violation.last.rob_value
+                    : item.rob() < violation.last.rob_value;
+                return younger || (violation.last.level && equal);
+            };
             for (const auto &item : live) {
                 detail << ":live={rob=" << unsigned(item.rob()) << '/' << item.flag()
                     << ",kind=" << item.kind << ",issued=" << all_issued(item)
@@ -313,7 +323,63 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                         << '/' << unsigned(uop.vstart);
                 detail << '}';
             }
-            phase += detail.str(); return false;
+            const auto victim = std::find_if(live.begin(), live.end(), [&](const StreamWork &item) {
+                return item.rob() == violation.last.rob_value && item.flag() == violation.last.rob_flag;
+            });
+            const auto victim_identity_ok = [&]() {
+                if (victim == live.end() || victim->kind == 2U || victim->kind == 3U || victim->kind == 4U)
+                    return false;
+                if (violation.last.ftq_flag)
+                    return false;
+                if (victim->kind == 0U)
+                    return violation.last.ftq_value == victim->load.ftq_ptr &&
+                        violation.last.ftq_offset == victim->load.ftq_offset &&
+                        violation.last.is_rvc == victim->load.predecode_rvc;
+                return !victim->vectors.empty() &&
+                    violation.last.ftq_value == victim->vectors.front().ftq_ptr &&
+                    violation.last.ftq_offset == victim->vectors.front().ftq_offset &&
+                    !violation.last.is_rvc;
+            };
+            const auto killed = static_cast<unsigned>(std::count_if(live.begin(), live.end(), kills));
+            const auto first_killed = std::find_if(live.begin(), live.end(), kills);
+            if (!victim_identity_ok() || killed == 0 || first_killed == live.end() ||
+                !first_killed->oracle_before || recovery ||
+                !environment.cancel_pending_for_redirect(violation.last.rob_value,
+                    violation.last.rob_flag, violation.last.level)) {
+                phase += detail.str() + ":unmatched-or-nested";
+                return false;
+            }
+            const auto lq_before = environment.lq_redirect_canceled_observed();
+            const auto sq_before = environment.sq_redirect_canceled_observed();
+            if (!environment.redirect_after(violation.last.rob_value,
+                    violation.last.rob_flag, violation.last.level)) {
+                phase += detail.str() + ":redirect-drive-failed";
+                return false;
+            }
+            const auto lq_canceled = environment.lq_redirect_canceled_observed() - lq_before;
+            const auto sq_canceled = environment.sq_redirect_canceled_observed() - sq_before;
+            if (lq_canceled > lq_offset || sq_canceled > sq_offset ||
+                !environment.run_cycles(6)) {
+                phase += detail.str() + ":queue-recovery-failed";
+                return false;
+            }
+            lq_offset -= lq_canceled;
+            sq_offset -= sq_canceled;
+            oracle.restore(*first_killed->oracle_before);
+            for (const auto &item : live) {
+                if (!kills(item)) continue;
+                if (item.kind == 0) destinations[item.load.fp_wen ? 1U : 0U].erase(item.load.pdest);
+                if (item.kind == 1) for (const auto &uop : item.vectors) destinations[2].erase(uop.pdest);
+            }
+            live.erase(std::remove_if(live.begin(), live.end(), kills), live.end());
+            target_admissions += killed;
+            deadline += std::uint64_t{killed} * constrained_completion_timeout * 4U;
+            expected_violations = violation.count;
+            if (!live.empty() && !install_head()) return false;
+            phase += ":killed=" + std::to_string(killed) +
+                ":lq_cancel=" + std::to_string(lq_canceled) +
+                ":sq_cancel=" + std::to_string(sq_canceled);
+            continue;
         }
         unsigned waiting_addresses = 0;
         for (auto &work : live) if (work.kind == 2 && !work.recovery_id) {
@@ -486,7 +552,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         // Serialize its suffix as a chosen constraint; retain older work.
         const bool restart_barrier = std::any_of(live.begin(), live.end(),
             [](const auto &work) { return work.needs_restart_flush(); });
-        if (!restart_barrier && admitted < length && live.size() < depth &&
+        if (!restart_barrier && admitted < target_admissions && live.size() < depth &&
             (!recovery || recovery->phase == StreamRecovery::Phase::admission) &&
             std::accumulate(weights.begin(), weights.end(), std::uint64_t{0}) != 0)
             ready.push_back({0, 0, 0});
@@ -680,13 +746,14 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             coverage.stream[4] += retired != 0 && !live.empty();
             StreamWork work;
             if (!recovery) {
+                work.oracle_before = std::make_shared<StreamByteOracle::Checkpoint>(oracle.checkpoint());
                 auto selection = random() % std::accumulate(weights.begin(), weights.end(), std::uint64_t{0});
                 for (work.kind = 0; work.kind < 4 && selection >= weights[work.kind]; ++work.kind)
                     selection -= weights[work.kind];
             } else work.kind = recovery->stores.size() < recovery->plan.stores.size() ? 2U : 0U;
             auto line = recovery ? recovery->base : random() % 4U != 0 ? arena + (random() % 8U) * 64U :
                 constrained_cacheable_address(64, translation, leaf, false);
-            const unsigned slots = std::min<unsigned>(depth - live.size(), length - admitted);
+            const unsigned slots = std::min<unsigned>(depth - live.size(), target_admissions - admitted);
             if (!recovery && work.kind == 2 && slots >= 2 && lq_free != 0 && sq_free != 0 &&
                 weights[0] != 0 && random() % 1000U < constraints.stream_unresolved_per_mille)
                 begin_recovery(line, slots, lq_free, sq_free);

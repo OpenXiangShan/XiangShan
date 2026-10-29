@@ -946,6 +946,12 @@ auto Environment::cancel_scalar_load_after_redirect(const LoadTransaction &trans
     return impl_->cancel_scalar_load_after_redirect(transaction);
 }
 
+auto Environment::cancel_pending_for_redirect(std::uint8_t rob_value,
+    bool rob_flag, bool flush_itself) -> bool
+{
+    return impl_->cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
+}
+
 auto Environment::scalar_load_redirect_canceled() const -> std::uint64_t
 { return impl_->scalar_load_redirect_canceled(); }
 

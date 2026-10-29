@@ -227,6 +227,7 @@ struct SyntheticEnvironment {
     std::uint64_t sq_redirect_canceled_observed() const { return 0; }
     std::uint64_t lq_redirect_canceled_observed() const { return canceled_lq; }
     std::uint64_t scalar_load_redirect_canceled() const { return cold_cancellations; }
+    bool cancel_pending_for_redirect(std::uint8_t, bool, bool) { return true; }
     bool redirect_after(std::uint8_t rob, bool flag, bool itself) {
         if (!itself) {
             auto &head = find(rob, flag);
@@ -1001,6 +1002,27 @@ int main(int argc, char **argv) {
             require(rejected == 2 * presets, "stream rate above 1000 was accepted");
             std::cout << "{\"presets\":" << presets << ",\"boundary_overrides\":" << boundaries
                 << ",\"out_of_range_rejections\":" << rejected << "}\n";
+        } else if (mode == "oracle-rollback") {
+            SparseMemory base;
+            base.define_repeating_incrementing(0x80010000, 0x1000, 256, 0x31);
+            StreamByteOracle oracle(base);
+            LoadTransaction load;
+            load.address = 0x80010020;
+            load.op = LoadOp::ld;
+            const auto before = oracle.scalar_load(load);
+            const auto checkpoint = oracle.checkpoint();
+            StoreTransaction store;
+            store.address = 0x80010020;
+            store.data = 0x8877665544332211ULL;
+            store.op = StoreOp::sd;
+            oracle.store(store);
+            const auto overlaid = oracle.scalar_load(load);
+            require(overlaid != before, "store overlay did not change independent oracle bytes");
+            oracle.restore(checkpoint);
+            require(oracle.scalar_load(load) == before,
+                "oracle checkpoint failed to remove canceled-store bytes");
+            std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
+                << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
         } else if (mode == "stream" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback") {
             require(argc == 6 || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");

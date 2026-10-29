@@ -683,6 +683,11 @@ public:
 
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);
     bool cancel_scalar_load_after_redirect(const LoadTransaction &transaction);
+    // Cancel every still-pending scoreboard obligation and unauthorized
+    // ReleaseData input in an independently certified ROB suffix.  The caller
+    // must drive the matching redirect and reconcile physical queue credits.
+    bool cancel_pending_for_redirect(std::uint8_t rob_value, bool rob_flag,
+        bool flush_itself);
     std::uint64_t scalar_load_redirect_canceled() const;
 
     std::uint64_t scalar_load_reset_canceled() const;
