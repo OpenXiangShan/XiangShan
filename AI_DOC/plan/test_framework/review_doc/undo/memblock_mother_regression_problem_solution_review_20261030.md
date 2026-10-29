@@ -87,6 +87,10 @@ NPI事实提取/断言确认低段corrupt后取消高段，正式RM责任分类�
 fault3跨轮当前1/100，原1FAIL/19ABORTED/80NOT_RUN历史保留；
 待完成：单Bug提交后的剩99seed每seed10000笔恢复及统一修复SV基线25组250项重验；
 最终独立结果review和修复后稳定版本边界确认。
+恢复批次现已收敛为0PASS/1FAIL/19ABORTED/79NOT_RUN，unknown0，新首错seed1705742557在724655.8ns报ROLLBACK_XMR来源冲突；
+不是首段异常修复复发。新矩阵前5组50/50严格通过，第6组由主agent首错管理联停为9PASS/1ABORTED、0功能FAIL。
+当前只运行原参数波形复现，责任尚待确认；Turing已对精确同拍候选方案完成只读静态review，不能替代正式责任门禁。
+分析入口：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
 当前25组250个通过记录的SV基线覆盖率已过滤合并，目录`mem_ut/ver/ut/memblock/sim/mother_matrix_pass_coverage_20261030`，
 有效`urgReport_r2`/`merged_r2.vdb`确认250 tests/records及精确白名单一致，工具日志无ERROR/WARNING；
 DUT line80.38%、condition59.51%、toggle37.90%、FSM3.55%，fcov关闭、不启用branch。

@@ -9,7 +9,8 @@
 - 当前执行状态：旧WIP门禁已关闭；原矩阵非strict-NC共25组250/250通过，strict-NC10项延期；25组通过SV基线覆盖率已过滤合并。
   新fault3问题已独立确认为RM并通过方案review。r5 fresh compile及相同临时参数最小真实DUT用例严格PASS，
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
-  本BugTuring最终独立review PASS并已提交；fault3跨轮1/100、剩余99项已启动恢复；同源码25组250项独立mode重验已开始fresh compile。
+  本BugTuring最终独立review PASS并已提交；fault3恢复99出现新ROLLBACK_XMR，当前跨轮1/100、`PAUSED_ANALYSIS`；
+  修复后矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。原参数波形复现与独立责任分析进行中。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -371,7 +372,7 @@ DUT层次`top_tb.U_MEMBLOCK`：line80.38%、condition59.51%、toggle37.90%、FSM
 
 | tc | ts | cfg | 请求数/seed数 | 状态 | 已验收/计划 |
 |---|---|---|---|---|---:|
-| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 每seed10000笔，原100seed | 原seed已PASS，1343dbce3提交后恢复99运行中 | 1/100 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 每seed10000笔，原100seed | PAUSED_ANALYSIS：新rollback来源冲突 | 1/100 |
 
 原seed来源：`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/mem_ut/ver/ut/memblock/sim/fault3_100seed_8e45befc1_20261019_results/seeds.txt`，
 SHA256=`c785d5cebc36b850aa31adc1b076ad11aad21a6f18e63afd7ef44a5b7bddd196`，无新增/替换seed。
@@ -439,7 +440,7 @@ Turing独立责任分类为`REVIEW_PASS`，已登记W44 RM周文件“跨页Load
 | `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | STRICT_PASS | 10/10 |
 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | STRICT_PASS | 10/10 |
 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | STRICT_PASS | 10/10 |
-| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | 运行中 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | 首错管理联停：9PASS/1ABORTED，0功能FAIL | 0/10 |
 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 待执行 | 0/10 |
 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | 待执行 | 0/10 |
 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | 待执行 | 0/10 |
@@ -459,4 +460,13 @@ Turing独立责任分类为`REVIEW_PASS`，已登记W44 RM周文件“跨页Load
 | `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_io` | 待执行 | 0/10 |
 | `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_nc` | 待执行 | 0/10 |
 | `tc_l2tlb_ppn_reuse_smoke` | `virtual_base_sequence` | `tc_l2tlb_ppn_reuse_smoke` | 待执行 | 0/10 |
+
+### 新首错：Rollback来源关联冲突
+
+seed1705742557于724655.800ns，`ROLLBACK_XMR cannot correlate rollback output rob=1/126 level=1 sample=144894 conflict=1`。
+99项恢复批次最终0PASS/1FAIL/19ABORTED/79NOT_RUN，unknown0；controller已退出，原失败/联停/未启动记录均保留。
+并行矩阵controller已收敛，第6组9PASS/1ABORTED（212889620）无功能FAIL；第7–25组未启动，不继续批量或修改生产源码。
+当前只运行原参数带波形专项：`mother_rollback_1705742557_debug_20261030_results`；Turing独立只读分析同步进行。
+分析入口：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
+责任尚未确认，暂不登记正式Buglist，也不把已修首段错误Bug重新标记失败；状态为`PAUSED_ANALYSIS`。
 最终交付还需完成独立 fault3 100-seed、统一稳定源码的覆盖率数据库与合并报告、问题/方案总 review。
