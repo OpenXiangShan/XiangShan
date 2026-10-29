@@ -378,7 +378,23 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.minstret)
 
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new MhpmcounterModule(num)).setAddr(CSRs.mhpmcounter3 - 3 + num)
+    Module(new CSRModule(s"Mhpmcounter$num", new MhpmcounterBundle) with HasMachineCounterControlBundle with HasPerfCounterBundle with HasSiregCounterBundle {
+      toSireg := regOut.asUInt
+      val countingInhibit = this.mcountinhibit.asUInt(num) | !countingEn
+      val counterAdd = reg.ALL.asUInt +& perf.value
+      when (w.wen) {
+        reg := w.wdata
+      }.elsewhen(fromSireg.valid) {
+        reg := fromSireg.bits
+      }.elsewhen (perf.value =/= 0.U && !countingInhibit) {
+        reg := counterAdd.tail(1)
+      }.otherwise {
+        reg := reg
+      }
+      // Count overflow never results from writes to the mhpmcountern or mhpmeventn registers, only from
+      // hardware increments of counter registers.
+      toMhpmeventOF := !w.wen && !fromSireg.valid && !countingInhibit && counterAdd.head(1).asBool
+    }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
   val mcyclecfg = Module(new CSRModule("Mcyclecfg", new EventInhibitBundle) with HasSiregCfgBundle {
@@ -809,25 +825,6 @@ class EventInhibitBundle extends CSRBundle {
   val UINH    = RW(60).withReset(0.U).withDescription("Inhibit counting in HU-mode.")
   val VSINH   = RW(59).withReset(0.U).withDescription("Inhibit counting in VS-mode.")
   val VUINH   = RW(58).withReset(0.U).withDescription("Inhibit counting in VU-mode.")
-}
-
-class MhpmcounterModule(num: Int)(implicit p: Parameters)
-  extends CSRModule(s"Mhpmcounter$num", new MhpmcounterBundle)
-    with HasMachineCounterControlBundle with HasPerfCounterBundle with HasSiregCounterBundle {
-  require(num >= 3 && num <= 31)
-  toSireg := regOut.asUInt
-  private val countingInhibit = this.mcountinhibit.asUInt(num) || !countingEn
-  private val increment = !w.wen && !fromSireg.valid && perf.value =/= 0.U && !countingInhibit
-  private val counterAdd = reg.ALL.asUInt +& perf.value
-  when(w.wen) {
-    reg := w.wdata
-  }.elsewhen(fromSireg.valid) {
-    reg := fromSireg.bits
-  }.elsewhen(increment) {
-    reg := counterAdd.tail(1)
-  }
-  // Report overflow only when the hardware increment is applied.
-  toMhpmeventOF := increment && counterAdd.head(1).asBool
 }
 
 class MhpmeventBundle extends EventInhibitBundle {
