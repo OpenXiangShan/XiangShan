@@ -24,7 +24,7 @@ vector-segment-noncanonical and translation-alias are catalogued but not
 benchmark-selected. This
 is registration, not passing-run or coverage evidence. MixedScenario implements
 the canonical constrained-random catalog entry. Constraint input/output uses
-constraint_schema=63. The legal field definitions and per-run observed counters
+constraint_schema=64. The legal field definitions and per-run observed counters
 are in [CONSTRAINED_RANDOM.md](CONSTRAINED_RANDOM.md), not duplicated here.
 
 ## Generated interface inventory
@@ -96,7 +96,7 @@ legal field combinations are covered. G identifiers refer to the gap table.
 | io_mem_to_ooo_writebackVldu_* | FeedbackMonitor -> VectorMemoryScoreboard::observe. | Returned bytes/mask, destination and vd-index, vector config, success VSTART, FOF fix-VL and configured exception/trigger/debug metadata. | G5: fault VSTART is optional and most config/data checks are bypassed for exception progress. |
 | io_mem_to_ooo_staIqFeedback_*, io_mem_to_ooo_vstuIqFeedback_* | FeedbackMonitor::sample_after_edge records queue identity, hit/replay and vector replay mask/index; STA-hit waits match lane/SQ value/wrap, and scalar/vector-list replay waits retain unrelated obligations. Single-step stream replay services only its identified uop without changing head/commit state. | iq-slow-feedback, store-tlb-miss-preserve, vector-store and mixed replay traffic. | Complete producer/exception/concurrency attribution is absent; G7. |
 | io_mem_to_ooo_wakeup_*, io_mem_to_ooo_ldCancel_* | FeedbackMonitor records lane, destination/write class and cycle; load-feedback and forwarding scenarios assert selected relations. | Cache/refill wakeup, dependency/bank conflicts, load cancel and cancellation recovery. | Event recording alone does not validate each producer or exactly-once wakeup/cancel relation; G7. |
-| io_mem_to_ooo_memoryViolation_* | FeedbackMonitor records complete retained redirect metadata; memory-violation and rar-violation compare independently chosen victims. | RAW/RAR, one-victim recovery from 1..4 delayed older stores with strict provisional/refetch data and surviving SQ prefix, release/coherence overlap, ROB wrap and replay paths. | Complete mixed attribution and timing/occupancy combinations remain; G7. |
+| io_mem_to_ooo_memoryViolation_* | FeedbackMonitor records complete retained redirect metadata; memory-violation and rar-violation compare independently chosen victims. | RAW/RAR, oldest-victim/whole-load-suffix recovery from 1..4 delayed older stores and 1..4 completed loads with strict data, surviving load/SQ prefixes, release/coherence overlap, ROB wrap and replay paths. | Complete mixed attribution and timing/occupancy combinations remain; G7. |
 | io_ooo_to_mem_lsqio_*, io_mem_to_ooo_lqCancelCnt, io_mem_to_ooo_sqCancelCnt, io_mem_to_ooo_sqDeq, io_mem_to_ooo_lqDeq, io_mem_to_ooo_lqDeqPtr_* | set_rob_head, pending-load/store and commit helpers; QueueAccounting tracks retirement/cancellation; FeedbackMonitor records MMIO request identities. | Queue pressure/wrap, atomically held oldest-head/store levels, ordinary sliding completed-prefix retirement, scalar commit, vector recorded-target retirement without scalar scommit, and redirect drain. | Only scommit, pendingMMIOld, pendingst and pendingPtr survive on the generated input side. No generated lcommit/pendingld/pendingVst/commit input. |
 | io_mem_to_ooo_lsqio_loadMmio_*, io_mem_to_ooo_lsqio_loadMmioUop_*, io_mem_to_ooo_lsqio_storeMmio* | wait_for_mmio_request/wait_for_mmio_store_request and FeedbackMonitor; scenario-level head checks and device journal. | MMIO ordering, pending-head request, uncached width/error/outstanding and non-idempotent device paths. | Broader overlapping device/redirect/error/reset combinations remain; G3/G6. |
 | io_redirect_*, io_ooo_to_mem_isStoreException, io_mem_to_ooo_lsqio_vaddr, io_mem_to_ooo_lsqio_gpaddr, io_mem_to_ooo_lsqio_isForVSnonLeafPTE | redirect/flush helpers, exception selector and scenario reads; reference VA/GPA and no-effect checks. | Scalar/vector/guest exception addresses, selective cancellation, surviving work, vector-store flush. | Fault VSTART/VL standalone outputs are pruned; vector writeback progress still has G5. |
@@ -149,7 +149,7 @@ MixedScenario composes existing transaction APIs. Its implementation is in
 [mixed/scenario.hpp](../cpp/scenarios/mixed/scenario.hpp), the mixed action/policy
 files and [constraints.inc](../cpp/random/constraints.inc). Profiles constrain
 operations, address locality/boundaries, known-address byte dependencies and
-1..4-older-store/one-load unresolved-address recovery with strict refetch data, vector shape and bounded
+1..4-older-store/1..4-load unresolved-address recovery with strict suffix refetch data, vector shape and bounded
 index permutations/repeated gathers with disjoint scatter spans, static
 unrestricted host/VS/G page permutations with independent byte expectations
 and physical final observation, translation/protection, errors, probes and independent response latency. A sampled field is

@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4522,7 +4522,51 @@ def _check_scalar_unresolved_accounting(result: dict[str, Any]) -> None:
              "unresolved load provisional/final obligations are not conserved")
     _require(redirects == returned == refetched == conflicts,
              "unresolved load redirect/refetch obligations are not conserved")
-    _require(before <= windows and conflicts <= overlap <= 8 * conflicts and canceled <= conflicts,
+    cancel_limit = conflicts
+    if result.get("constraint_schema", 0) >= 64:
+        loads, multi_load, completions, survivors, invalidated, refetch_loads, disjoint, changed, competitors, issue_inversions, peak_loads = _csv_counts(
+            result, "scalar_unresolved_load_group", 11)
+        victims = _csv_counts(result, "scalar_unresolved_victim", 4)
+        _require(all(value <= (1 << 64) - 1 for value in (
+            loads, multi_load, completions, survivors, invalidated, refetch_loads,
+            disjoint, changed, competitors, issue_inversions, peak_loads, *victims)),
+            "unresolved load-group observations exceed the uint64 counter domain")
+        _require(windows <= loads <= 4 * windows and multi_load <= windows and
+                 multi_load <= loads - windows <= 3 * multi_load and
+                 (peak_loads == 0) == (windows == 0) and 0 <= peak_loads <= 4 and
+                 (peak_loads > 1) == (multi_load > 0) and
+                 (not multi_load or windows + multi_load + peak_loads - 2 <= loads <=
+                  windows + (peak_loads - 1) * multi_load),
+                 "unresolved load-group count/peak/window observations disagree")
+        _require(completions == loads == survivors + invalidated and refetch_loads == invalidated and
+                 conflicts <= changed <= invalidated and disjoint + changed == invalidated and
+                 competitors <= changed - conflicts and
+                 invalidated - conflicts <= (peak_loads - 1) * min(conflicts, multi_load),
+                 "unresolved load-group provisional/suffix obligations are not conserved")
+        surviving_conflicts = sum(age * count for age, count in enumerate(victims))
+        _require(sum(victims) == conflicts and not any(victims[peak_loads:]) and
+                 controls <= survivors - surviving_conflicts <= peak_loads * controls and
+                 conflicts <= invalidated <= peak_loads * conflicts - surviving_conflicts,
+                 "unresolved load-group victim/surviving prefix observations disagree")
+        conflict_extras = invalidated + surviving_conflicts - conflicts
+        control_extras = loads - windows - conflict_extras
+        capacity = max(1, peak_loads - 1)
+        # Each positive-age victim forces a distinct multi-load conflict
+        # window. Extra loads also require enough multi windows in each
+        # population; the two populations must partition the reported total.
+        # Positive-age victims already own multi windows. Only suffix extras
+        # can turn an age-zero victim's single-load window into another multi.
+        minimum_conflict_multi = max(conflicts - victims[0],
+                                     (conflict_extras + capacity - 1) // capacity)
+        minimum_control_multi = (control_extras + capacity - 1) // capacity
+        _require(minimum_conflict_multi + minimum_control_multi <= multi_load <=
+                 min(conflicts, invalidated - victims[0]) + min(controls, control_extras),
+                 "unresolved load-group multi windows disagree with victim/control prefixes")
+        _require(issue_inversions <= min(6 * multi_load, 2 * (loads - windows),
+                                        peak_loads * (loads - windows) // 2),
+                 "unresolved load-group issue inversions exceed possible age pairs")
+        cancel_limit = invalidated
+    _require(before <= windows and conflicts <= overlap <= 8 * conflicts and canceled <= cancel_limit,
              "unresolved load operand/overlap/cancellation counts exceed bounds")
     if result.get("constraint_schema", 0) >= 63:
         stores, multi, early, events, inversions, maximum, prefix, words, pairs = _csv_counts(

@@ -139,42 +139,47 @@ an integer-only window uses 1..223. Semantic byte-source counters do not require
 any particular internal forwarding path.
 
 The separate `scalar-unresolved` direction withholds 1..4 older store addresses
-while one younger nonpredicted load completes. Its initial strict expectation
-is the pre-store snapshot; an older incomplete non-memory ROB group A holds
-retirement. A groups the first store's base/data producers with an independent
-unfinished FP DIV/SQRT member; later stores have distinct older producer groups
-Pi separated by their consuming stores: `A,S0,P1,S1,...,L`. Their independent
-operand-ready events permit out-of-age STA/STD arrival. Compression, aggregated
-WB counts and commit rules come from `backend/rename/CompressUnit.scala`,
-`Rename.scala` and `backend/rob/RobBundles.scala`. This is a unit-level
-partial-order premise, without cycle-accurate qualification of every FU/PTW or
-producer delay. A completed producer is never the artificial head.
+while 1..4 younger nonpredicted scalar/FP loads strictly complete against the
+pre-store snapshot in a shuffled issue order. An incomplete non-memory ROB group
+A holds retirement. A groups S0's base/data producers with an independent
+unfinished FP member; later producer groups are separated by their stores:
+`A,S0,P1,S1,...,L0,L1,...`. Scalar/FP loads retain distinct ROB entries. Compression,
+aggregated WB and commit rules come from `backend/rename/CompressUnit.scala`,
+`backend/decode/DecodeUnit.scala`, `Rename.scala` and `backend/rob/RobBundles.scala`.
+This is a unit-level partial-order premise, without cycle-accurate qualification
+of every FU/PTW/producer delay. A completed producer is never an artificial head.
 
-Input byte overlap independently selects conflict or all-disjoint control.
-Stop remaining operand events immediately at the first overlapping STA hit,
-require the full flush-itself victim identity, and return it through the two
-registered backend stages. Further STAs wait until cancellation filters drain;
-each overlapping STA could otherwise legitimately generate another request.
-Older SQ entries and dispatch snapshots survive, with no cancellation/dequeue.
-Only observed VirtualLQ cancellation rewinds its cursor; a completed VirtualLQ
-entry may already have dequeued while RAW still retains the provisional victim.
-Resolve all remaining older operands before allocating strict refetch at the
-same architectural ROB/pdest and a fresh LQ/scoreboard epoch. Program-order
-older input stores determine the youngest writer of each byte, independently
-of issue/feedback order. Distinguishability repair changes that youngest writer,
-so hidden older stores cannot make stale provisional data satisfy refetch.
+Input byte geometry selects conflicts or all-disjoint controls. Loads older than
+the chosen primary victim are disjoint from every store. A store disjoint from
+that victim is disjoint from all loads; younger loads can overlap permitted
+stores or be disjoint. At the first overlapping STA hit, the oldest conflicting
+input load must be the primary. Suspend remaining operands, require its complete
+flush-itself identity and return it through the two registered backend stages.
+Further STAs wait until cancellation filters drain. Every older SQ entry and
+dispatch snapshot survives, with no cancellation/dequeue. Only observed
+VirtualLQ cancellation rewinds its cursor, bounded by the invalidated suffix
+length. All completed entries may already have dequeued while RAW retains them.
 
-After correct refetch, finish A's remaining external component, retire the
-non-memory prefix and commit stores in age order. One or two strict touched-word
-readbacks use the original snapshot plus input stores after commit/drain; only
-then is the architectural obligation complete. Controls require no redirect
-through their quiet/terminal interval. Both execution epochs retain normal
-identity/data/sideband checks, with no alias data opt-out. Warm, provisional/
-refetch and each readback role have distinct numeric destinations in 1..191 for
-an FP window or 1..223 for integer-only traffic; refetch restores the original
-pdest. This bounded model covers multiple older unresolved addresses and one
-victim, not repeated recovery, trained prediction, a full rename/commit engine
-or general unresolved sliding traffic.
+The disjoint older load prefix survives. After remaining store operands resolve,
+refetch the entire victim-and-younger suffix, including disjoint younger loads,
+at the same ROB/pdest and saved SQ snapshot, with fresh LQ/scoreboard epochs.
+Allocate that suffix in program age and independently shuffle issue order. Input
+stores determine the youngest writer per byte in program order. Each overlapping
+load's distinguishing byte is repaired in its last input writer; a repair cannot
+undo another distinction. A group obligation rejects missing/duplicate provisional
+or suffix execution, wrong victim, invalid transition and incomplete terminal
+readback. Already-consumed provisional scoreboard entries are never canceled or
+waived; each new epoch has a fresh strict expectation.
+
+After suffix completion, release A, retire completed non-memory prefixes, commit
+stores in age order and check every touched aligned word against the independent
+snapshot-plus-store image after drain. Controls require no redirect through their
+quiet/terminal interval. Warm, every live load and each readback use distinct
+numeric destinations in 1..191 if any load is FP, otherwise 1..223; refetch restores
+original destinations. This bounded model covers multiple completed younger
+loads, exact oldest-victim selection, surviving prefix and whole-suffix recovery.
+Repeated recovery/refetch, unfinished cancellation/late completions, trained
+prediction, full rename/FTQ history and unresolved sliding traffic remain open.
 The mixed tail's general cancellation fixture also uses a distinct older
 non-memory branch ROB anchor after completed memory traffic; it does not assign
 a branch redirect to a completed store. Its refetch retains the canceled ROB

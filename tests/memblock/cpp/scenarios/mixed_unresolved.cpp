@@ -1,5 +1,5 @@
 #include "mixed/scenario.hpp"
-#include "mixed/unresolved_graph.hpp"
+#include "mixed/unresolved_load_group.hpp"
 #include <set>
 
 namespace memblock::scenarios::mixed {
@@ -18,17 +18,25 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
     for (unsigned byte = 0; byte < snapshot.size(); ++byte)
         snapshot[byte] = environment.memory().read_byte(pages
             ? pages->physical_address(base + byte) : base + byte);
-    distinguish_unresolved_graph(plan, snapshot);
+    const auto group = make_unresolved_load_group(random, plan, constraints.scalar_load_policy());
+    distinguish_unresolved_load_group(plan, group, snapshot);
     const auto byte_stores = unresolved_graph_bytes(plan);
-    const auto initial = scalar_dependency_expected(snapshot, {}, plan.load);
-    const auto final = scalar_dependency_expected(snapshot, byte_stores, plan.load);
-    if ((initial != final) != plan.conflict) {
-        phase += ":indistinguishable-plan";
-        return false;
+    std::vector<std::uint64_t> initial, final;
+    for (const auto &shape : group.loads) {
+        initial.push_back(scalar_dependency_expected(snapshot, {}, shape));
+        final.push_back(scalar_dependency_expected(snapshot, byte_stores, shape));
+        const bool overlaps = std::any_of(byte_stores.begin(), byte_stores.end(),
+            [&](const auto &store) { return unresolved_overlap(store, shape); });
+        if ((initial.back() != final.back()) != overlaps) {
+            phase += ":indistinguishable-plan";
+            return false;
+        }
     }
     std::set<unsigned> words;
     for (const auto &store : byte_stores) words.insert(store.offset & ~7U);
-    const auto pdests = unresolved_graph_destinations(random, 2U + words.size(), plan.load.fp
+    const bool any_fp = std::any_of(group.loads.begin(), group.loads.end(),
+        [](const auto &load) { return load.fp; });
+    const auto pdests = unresolved_graph_destinations(random, 1U + group.loads.size() + words.size(), any_fp
         ? memblock::kFpPhysicalRegisters : memblock::kIntegerPhysicalRegisters);
     auto warm = make_load(base, memblock::LoadOp::ld, random() % memblock::kScalarLoadLanes);
     warm.pdest = pdests[0];
@@ -49,14 +57,19 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
             static_cast<memblock::StoreOp>(std::countr_zero(item.width)),
             random() % memblock::kScalarStoreLanes));
     }
-    auto load = make_load(base + plan.load.offset,
-        static_cast<memblock::LoadOp>(plan.load.op), random() % memblock::kScalarLoadLanes,
-        plan.load.fp);
-    load.pdest = pdests[1];
-    load.store_set_hit = load.load_wait_bit = load.load_wait_strict = false;
-    load.wait_for_rob_flag = false;
-    load.wait_for_rob_value = 0;
-    UnresolvedLoadObligation obligation(load, plan.conflict);
+    std::vector<memblock::LoadTransaction> loads;
+    for (unsigned index = 0; index < group.loads.size(); ++index) {
+        const auto &shape = group.loads[index];
+        auto load = make_load(base + shape.offset,
+            static_cast<memblock::LoadOp>(shape.op), random() % memblock::kScalarLoadLanes, shape.fp);
+        load.pdest = pdests[index + 1U];
+        load.store_set_hit = load.load_wait_bit = load.load_wait_strict = false;
+        load.wait_for_rob_flag = false;
+        load.wait_for_rob_value = 0;
+        loads.push_back(load);
+    }
+    const auto &primary = loads[group.primary];
+    UnresolvedLoadGroupObligation obligation(loads, group.victim);
     const auto violations_before = environment.memory_violation_stats().count;
     const auto sq_before = environment.sq_dequeued();
     std::vector<bool> data_issued(stores.size(), false), address_issued(stores.size(), false);
@@ -66,25 +79,37 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
         environment.expect_store(store);
         if (!environment.enqueue_store(store)) return false;
     }
-    environment.expect_load_data(load, initial);
-    if (!environment.enqueue_load(load)) return false;
+    for (unsigned index = 0; index < loads.size(); ++index) {
+        environment.expect_load_data(loads[index], initial[index]);
+        if (!environment.enqueue_load(loads[index])) return false;
+    }
     for (unsigned index = 0; index < stores.size(); ++index) {
         if (!plan.stores[index].data_before_load) continue;
         if (!environment.issue_store_data(stores[index], timeout)) return false;
         data_issued[index] = data_first[index] = true;
         ++early_data;
     }
-    if (!environment.issue_load(load, timeout) ||
-        !environment.run_until_load_complete(load, timeout) || !obligation.provisional() ||
-        environment.sq_dequeued() != sq_before ||
-        environment.memory_violation_stats().count != violations_before) {
-        phase += ":provisional";
-        return false;
+    unsigned load_issue_inversions = 0;
+    std::vector<bool> load_issued(loads.size());
+    for (unsigned event = 0; event < group.issue_order.size(); ++event) {
+        const unsigned index = group.issue_order[event];
+        for (unsigned older = 0; older < index; ++older) load_issue_inversions += !load_issued[older];
+        if (!environment.run_cycles(group.issue_delays[event]) ||
+            !environment.issue_load(loads[index], timeout)) return false;
+        load_issued[index] = true;
+    }
+    for (unsigned index = 0; index < loads.size(); ++index) {
+        if (!environment.run_until_load_complete(loads[index], timeout) || !obligation.provisional(index) ||
+            environment.sq_dequeued() != sq_before ||
+            environment.memory_violation_stats().count != violations_before) {
+            phase += ":provisional=" + std::to_string(index);
+            return false;
+        }
     }
     const auto lq_cancel_before = environment.lq_redirect_canceled_observed();
     const auto sq_cancel_before = environment.sq_redirect_canceled_observed();
     bool recovered = false;
-    unsigned address_rank = 0, first_conflict_rank = 0, address_inversions = 0;
+    unsigned address_rank = 0, first_conflict_rank = 0, address_inversions = 0, competitors = 0;
     for (const auto &event : plan.after_provisional) {
         phase = "random-scalar-unresolved:stores=" + std::to_string(stores.size()) +
             ":operand=" + std::to_string(static_cast<unsigned>(event.kind)) +
@@ -104,8 +129,14 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
             address_issued[event.store] = true;
             ++address_rank;
             const auto &bytes = byte_stores[event.store];
-            const bool overlap = bytes.offset < plan.load.offset + plan.load.width() &&
-                plan.load.offset < bytes.offset + bytes.width;
+            unsigned oldest = loads.size();
+            for (unsigned index = 0; index < group.loads.size(); ++index)
+                if (unresolved_overlap(bytes, group.loads[index])) { oldest = index; break; }
+            const bool overlap = oldest != loads.size();
+            if (overlap && oldest != group.victim) {
+                phase += ":invalid-oldest-victim-geometry";
+                return false;
+            }
             if (overlap && !recovered) {
                 // Do not resolve another address while this RAW request is
                 // pending: each overlapping STA can independently select L.
@@ -117,16 +148,18 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
                     phase += ":missing-or-mismatched-redirect";
                     return false;
                 }
+                for (unsigned index = group.victim + 1U; index < loads.size(); ++index)
+                    competitors += unresolved_overlap(bytes, group.loads[index]);
                 const auto return_cycle = violation.last_cycle + 2U;
                 if (environment.cycle() > return_cycle ||
                     !environment.run_cycles(static_cast<unsigned>(return_cycle - environment.cycle())) ||
-                    !environment.redirect_after(load.rob, load.rob_flag, true) ||
+                    !environment.redirect_after(primary.rob, primary.rob_flag, true) ||
                     !obligation.returned() || !environment.run_cycles(8)) {
                     phase += ":redirect-return";
                     return false;
                 }
                 const auto canceled = environment.lq_redirect_canceled_observed() - lq_cancel_before;
-                if (canceled > 1 || canceled > lq_offset ||
+                if (canceled > loads.size() - group.victim || canceled > lq_offset ||
                     environment.sq_redirect_canceled_observed() != sq_cancel_before ||
                     environment.sq_dequeued() != sq_before) {
                     phase += ":redirect-accounting";
@@ -153,28 +186,47 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
         forwarded += std::any_of(byte_stores.begin(), byte_stores.end(), [&](const auto &store) {
             return byte >= store.offset && byte < store.offset + store.width;
         });
+    unsigned invalidated = 0, disjoint_invalidated = 0;
     if (recovered) {
-        // Every older address/data obligation is now complete. The surviving
-        // prefix supplies exact bytes before any store is allowed to retire.
-        auto replay = load;
-        replay.lq = memblock::lq_pointer_value(lq_offset);
-        replay.lq_flag = memblock::lq_pointer_flag(lq_offset++);
-        environment.expect_load_data(replay, final);
-        if (!environment.enqueue_load(replay) || !environment.issue_load(replay, timeout) ||
-            !environment.run_until_load_complete(replay, timeout) || !obligation.refetched()) return false;
-        coverage.sample(replay);
-        coverage.sample_fp_load(replay, final, 3, forwarded, plan.load.width() - forwarded);
+        // All older operands are now complete. Restore every invalidated
+        // instruction in program order, preserving ROB, destination and SQ
+        // snapshots; only its observed-allocation LQ epoch is fresh.
+        auto replays = loads;
+        for (unsigned index = group.victim; index < loads.size(); ++index) {
+            auto &replay = replays[index];
+            replay.lq = memblock::lq_pointer_value(lq_offset);
+            replay.lq_flag = memblock::lq_pointer_flag(lq_offset++);
+            environment.expect_load_data(replay, final[index]);
+            if (!environment.enqueue_load(replay)) return false;
+            ++invalidated;
+            disjoint_invalidated += initial[index] == final[index];
+        }
+        for (unsigned index : group.refetch_order)
+            if (!environment.issue_load(replays[index], timeout)) return false;
+        for (unsigned index = group.victim; index < loads.size(); ++index) {
+            const auto &replay = replays[index];
+            if (!environment.run_until_load_complete(replay, timeout) || !obligation.refetched(index)) return false;
+            unsigned covered = 0;
+            const auto &shape = group.loads[index];
+            for (unsigned byte = shape.offset; byte < shape.offset + shape.width(); ++byte)
+                covered += std::any_of(byte_stores.begin(), byte_stores.end(), [&](const auto &store) {
+                    return byte >= store.offset && byte < store.offset + store.width;
+                });
+            coverage.sample(replay);
+            coverage.sample_fp_load(replay, final[index], 3, covered, shape.width() - covered);
+        }
     } else if (!environment.run_cycles(32) ||
-        environment.memory_violation_stats().count != violations_before || !obligation.no_conflict()) return false;
+        environment.memory_violation_stats().count != violations_before) return false;
+    if (!obligation.resolved()) return false;
     if (environment.sq_dequeued() != sq_before) return false;
     for (const auto &store : stores) {
         if (!environment.set_rob_head_state(store.rob, store.rob_flag, true) ||
             !environment.commit_store(store, timeout)) return false;
     }
-    if (!environment.set_rob_head_state(load.rob, load.rob_flag, false) ||
+    if (!environment.set_rob_head_state(loads.back().rob, loads.back().rob_flag, false) ||
         !environment.run_until_queues_retired(timeout) || !environment.pulse_sbuffer_flush() ||
         !environment.run_until_sbuffer_empty(timeout)) return false;
-    unsigned role = 2;
+    unsigned role = 1U + loads.size();
     for (auto word : words) {
         auto readback = make_load(base + word, memblock::LoadOp::ld,
             random() % memblock::kScalarLoadLanes);
@@ -188,9 +240,19 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
     if (!obligation.readback() || !obligation.done() ||
         environment.memory_violation_stats().count != violations_before + unsigned(plan.conflict)) return false;
     for (unsigned index = 0; index < stores.size(); ++index) coverage.sample(stores[index], data_first[index]);
-    coverage.sample(load);
-    coverage.sample_fp_load(load, initial, 3, 0, plan.load.width());
-    coverage.sample_scalar_format_choice(3, plan.load.fp);
+    for (unsigned index = 0; index < loads.size(); ++index) {
+        coverage.sample(loads[index]);
+        coverage.sample_fp_load(loads[index], initial[index], 3, 0, group.loads[index].width());
+        coverage.sample_scalar_format_choice(3, group.loads[index].fp);
+    }
+    auto &load_group = coverage.scalar_unresolved_load_group;
+    load_group[0] += loads.size(); load_group[1] += loads.size() > 1;
+    load_group[2] += loads.size(); load_group[3] += loads.size() - invalidated;
+    load_group[4] += invalidated; load_group[5] += invalidated;
+    load_group[6] += disjoint_invalidated; load_group[7] += invalidated - disjoint_invalidated;
+    load_group[8] += competitors; load_group[9] += load_issue_inversions;
+    load_group[10] = std::max<std::uint64_t>(load_group[10], loads.size());
+    if (recovered) ++coverage.scalar_unresolved_victim[group.victim];
     ++coverage.scalar_unresolved_windows;
     coverage.scalar_unresolved_conflicts += plan.conflict;
     coverage.scalar_unresolved_controls += !plan.conflict;
@@ -211,7 +273,7 @@ bool MixedScenario::execute_scalar_unresolved(ActionWindow &window)
             graph[8] += byte_stores[first].offset < byte_stores[second].offset + byte_stores[second].width &&
                 byte_stores[second].offset < byte_stores[first].offset + byte_stores[first].width;
     if (recovered) ++coverage.scalar_unresolved_first_conflict[first_conflict_rank - 1U];
-    coverage.cacheable += 1U + stores.size() + 1U + unsigned(recovered) + words.size();
+    coverage.cacheable += 1U + stores.size() + loads.size() + invalidated + words.size();
     window.probe_candidate = pages ? pages->physical_address(base) : base;
     ++actions;
     return true;

@@ -3176,6 +3176,11 @@ struct MixedCoverage {
     // distinct touched words/overlapping older-store pairs.
     std::array<std::uint64_t, 9> scalar_unresolved_graph{};
     std::array<std::uint64_t, 4> scalar_unresolved_first_conflict{};
+    // Loads/multi-load windows/provisional completions/survivors/invalidated/
+    // refetched/disjoint invalidated/conflicting invalidated/first-STA competitors/
+    // provisional issue-age inversions/maximum loads.
+    std::array<std::uint64_t, 11> scalar_unresolved_load_group{};
+    std::array<std::uint64_t, 4> scalar_unresolved_victim{};
 
     // Operand-pattern observations, once per architectural indexed instruction.
     // These include inactive offsets and do not claim memory requests occurred.
@@ -3588,7 +3593,9 @@ struct MixedCoverage {
                std::to_string(scalar_unresolved_overlap_bytes) + ',' +
                std::to_string(scalar_unresolved_lq_canceled) +
                " scalar_unresolved_graph=" + csv(scalar_unresolved_graph) +
-               " scalar_unresolved_first_conflict=" + csv(scalar_unresolved_first_conflict) + " scalar_dependency=" +
+               " scalar_unresolved_first_conflict=" + csv(scalar_unresolved_first_conflict) +
+               " scalar_unresolved_load_group=" + csv(scalar_unresolved_load_group) +
+               " scalar_unresolved_victim=" + csv(scalar_unresolved_victim) + " scalar_dependency=" +
                std::to_string(scalar_dependency_windows) + ',' +
                std::to_string(scalar_dependency_stores) + ',' +
                std::to_string(scalar_dependency_loads) + ',' +

@@ -78,7 +78,7 @@ combinations have occurred or establishes a coverage percentage.
 | Uncache/MMIO | Width/mask/data, device side effects, errors, serialization | Source credit and malformed manager inputs |
 | ECC | Selected tag/data masks, banks/ways, reports/survivors | Wider masks, persistent/delayed events and concurrency |
 | LSQ/ROB/redirect | Six-lane enqueue, aggregate retire/cancel, wrap/stale suppression | Full per-retirement attribution and output-only pulse identity |
-| RAW/RAR/feedback | Random aligned 1..4-older-store/one-load unresolved-address conflicts and same-region all-disjoint controls with producer-ready event order, youngest-writer byte overlays and every touched word read back; strict provisional data, matching flush-itself return and correct-data frontend refetch before store commit; selected sources/arbitration/metadata; mixed_unresolved.cpp, load_feedback.inc | Multiple victims/repeated recovery, unresolved sliding admission, trained prediction, general redirect arbitration, all source crosses and stable architectural feedback rules |
+| RAW/RAR/feedback | Random aligned 1..4-older-store/1..4-load unresolved-address conflicts, surviving disjoint prefixes and whole-suffix refetch, plus all-disjoint controls with producer-ready event order, youngest-writer byte overlays and every touched word read back; strict provisional data, matching flush-itself return and correct-data frontend refetch before store commit; selected sources/arbitration/metadata; mixed_unresolved.cpp, load_feedback.inc | Repeated recovery/refetch, unfinished canceled loads/late completions, unresolved sliding admission, trained prediction, general redirect arbitration, all source crosses and stable architectural feedback rules |
 | Reset | Manager/frontend, cold atomic, partial LR/LD, clean CMO | Partial modifying/error refills, dirty state, more replay producers |
 | Bridges/control | Frontend TL/PTW, trace/DFT/reset, interrupts, L2/TLB/hint/flush/WFI | Matching-MSHR/external consumer policy and dynamic controls |
 | Performance/prefetch | Transport, characterization, selected suppression | Integration-owned meaning/training/selection |
@@ -154,7 +154,7 @@ The common scalar dependency direction now varies store/load counts, overlap,
 operand arrival and issue order with independent byte-overlay expectations and
 younger-store exclusion controls. Seed/address-dependent ordinary initial bytes
 also distinguish representative wrong-line substitutions. Next normal-workload
-gaps include multiple unresolved victims, repeated recovery and longer dynamic
+gaps include repeated unresolved recovery/refetch, unfinished cancellation and longer dynamic
 address/temporal streams and mapping/invalidation overlap. Ordinary static
 4-KiB nonidentity mappings now use seeded host/VS/G page permutations with
 byte-wise load/store expectations, covering root-reuse fences and physical final
@@ -162,9 +162,9 @@ readback. Permutations may change cache colour; the manager recalls the stored
 old alias and checks its data against an independent drained reference checkpoint
 before constructing the replacement grant. Context changes drain SBuffer/D/E;
 general simultaneous synonym writes and cross-alias replay stay outside this
-direction. A bounded 1..4-older-store/one-load direction now checks provisional
+direction. A bounded 1..4-older-store/1..4-load direction now checks provisional
 execution with all addresses unresolved, randomized operand-ready arrival,
-first-conflict recovery, uncommitted-prefix refetch data and all-disjoint
+oldest-victim selection, surviving load prefixes, whole-suffix refetch data and all-disjoint
 byte-mask controls. Expected byte ownership follows program age, and every
 touched word receives a strict terminal readback. Bounded random indexed vectors
 now vary offset spacing/permutation and repeated gathers for ordinary and
@@ -182,7 +182,7 @@ The stream holds a single architectural head and independent byte-prefix oracle,
 with distinct live class destinations. Its 1..32-instruction epochs, 2..8 live
 depth and conservative older-address gating do not implement a complete
 ROB/rename/cancellation ledger. Next ordinary-workload work should interleave
-multiple victims/repeated recovery and integrate the isolated unresolved graph
+repeated recovery/refetch and integrate the isolated unresolved graph
 into sliding admission, while reducing bounded stream/context drains where the
 backend contract supports it. Canonical FP formats now share
 ordinary/concurrent/dependency/unresolved builders with independent value/boxing
@@ -199,7 +199,7 @@ guarantee a CPU bug.
 Priority work, each requiring executable stimulus and an independent check:
 
 1. Integrate isolated multi-store unresolved graphs into bounded sliding traffic;
-   add multiple victims/repeated recovery and broader temporal/address dependencies,
+   add repeated recovery/refetch, unfinished cancellation and broader temporal/address dependencies,
    and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable
    identity-mapped and declared permuted-page commits to remaining legal aliases, non-cacheable/device effects and
    fault-path side-effect checks; one cross-alias path is now directed, but
