@@ -3188,6 +3188,10 @@ struct MixedCoverage {
     std::array<std::uint64_t, 4> scalar_unresolved_round_victim{};
     // Successive victim moved older/stayed equal/moved younger.
     std::array<std::uint64_t, 3> scalar_unresolved_victim_movement{};
+    // Selected attempts/fresh-line unavailable/windows/accepted held misses/
+    // canceled expectations/late responses drained/strict refetches/FP roles/
+    // extra release-delay cycles. Completed initial loads remain in load_group.
+    std::array<std::uint64_t, 9> scalar_unresolved_inflight{};
 
     // Operand-pattern observations, once per architectural indexed instruction.
     // These include inactive offsets and do not claim memory requests occurred.
@@ -3605,7 +3609,8 @@ struct MixedCoverage {
                " scalar_unresolved_victim=" + csv(scalar_unresolved_victim) +
                " scalar_unresolved_epochs=" + csv(scalar_unresolved_epochs) +
                " scalar_unresolved_round_victim=" + csv(scalar_unresolved_round_victim) +
-               " scalar_unresolved_victim_movement=" + csv(scalar_unresolved_victim_movement) + " scalar_dependency=" +
+               " scalar_unresolved_victim_movement=" + csv(scalar_unresolved_victim_movement) +
+               " scalar_unresolved_inflight=" + csv(scalar_unresolved_inflight) + " scalar_dependency=" +
                std::to_string(scalar_dependency_windows) + ',' +
                std::to_string(scalar_dependency_stores) + ',' +
                std::to_string(scalar_dependency_loads) + ',' +

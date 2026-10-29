@@ -931,6 +931,14 @@ auto Environment::cancel_scalar_load_for_reset(const LoadTransaction &transactio
     return impl_->cancel_scalar_load_for_reset(transaction);
 }
 
+auto Environment::cancel_scalar_load_after_redirect(const LoadTransaction &transaction) -> bool
+{
+    return impl_->cancel_scalar_load_after_redirect(transaction);
+}
+
+auto Environment::scalar_load_redirect_canceled() const -> std::uint64_t
+{ return impl_->scalar_load_redirect_canceled(); }
+
 auto Environment::scalar_load_reset_canceled() const -> std::uint64_t
 {
     return impl_->scalar_load_reset_canceled();

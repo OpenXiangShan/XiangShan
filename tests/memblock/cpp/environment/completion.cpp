@@ -920,6 +920,7 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
     bool flush_itself,
     bool is_vls_exception)  -> bool
 {
+    scalar_redirect_boundary_.reset();
     if (is_vls_exception && !flush_itself) {
         error_.record("VLS exception redirect must enter as a flush redirect");
         return false;
@@ -943,7 +944,10 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
     const std::uint64_t sq_canceled =
         dut_.queues.retirement.sq_cancel_cnt.value();
     if (!queues_.observe_redirect_cancellation(lq_canceled, sq_canceled)) return false;
-    return check_components();
+    if (!check_components()) return false;
+    scalar_redirect_boundary_ = ScalarRedirectBoundary{rob_value, rob_flag,
+        flush_itself, cycle(), lq_canceled};
+    return true;
 }
 
 auto Environment::Impl::ok() const -> bool

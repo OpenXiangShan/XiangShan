@@ -60,7 +60,7 @@ static void presets() {
         assert(c.vector_segment_high_va_per_mille == rate);
         assert(c.enabled_vector_segment_high_va_crosses() == 24);
         assert(!c.vector_segment_high_va_cross_enabled(24));
-        assert(c.summary().find("constraint_schema=65") != std::string::npos);
+        assert(c.summary().find("constraint_schema=66") != std::string::npos);
         assert(c.summary().find(" target_vector_segment_high_va=" +
                                std::to_string(rate)) != std::string::npos);
         const auto reserved = c.minimum_serial_actions();

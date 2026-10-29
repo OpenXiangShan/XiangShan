@@ -24,6 +24,7 @@ struct UnresolvedLoadGroup {
     std::vector<unsigned> issue_order;
     std::vector<unsigned> issue_delays;
     std::vector<UnresolvedRecoveryRound> rounds;
+    std::optional<unsigned> unfinished;
 };
 
 inline std::vector<unsigned> unresolved_random_order(std::mt19937_64 &random,
@@ -44,15 +45,26 @@ inline std::vector<unsigned> unresolved_random_order(std::mt19937_64 &random,
 // geometry constraint suppresses an earlier, later or repeated victim.
 inline UnresolvedLoadGroup make_unresolved_load_group(std::mt19937_64 &random,
     const UnresolvedStoreGraph &graph, const ScalarLoadPolicy &policy = {},
-    unsigned maximum_loads = 4)
+    unsigned maximum_loads = 4, bool inflight = false)
 {
     if (maximum_loads == 0 || maximum_loads > 4 || graph.stores.empty())
         throw std::invalid_argument("invalid unresolved load group constraint");
+    if (inflight && (!graph.conflict || maximum_loads < 2))
+        throw std::invalid_argument("unfinished unresolved load needs a conflicting older witness");
     UnresolvedLoadGroup group;
-    const unsigned count = 1U + random() % maximum_loads;
-    group.primary = random() % count;
+    const unsigned warm_count = 1U + random() % (maximum_loads - unsigned(inflight));
+    const unsigned count = warm_count + unsigned(inflight);
+    group.primary = random() % warm_count;
     group.victim = count;
     for (unsigned index = 0; index < count; ++index) {
+        if (inflight && index == warm_count) {
+            const auto format = policy.choose(random);
+            // A separate cache line, disjoint from every store in this graph.
+            // The executor owns its independent reference image and response hold.
+            group.loads.push_back({64, format.op, format.fp});
+            group.unfinished = index;
+            continue;
+        }
         if (index == group.primary) {
             group.loads.push_back(graph.load);
             continue;
@@ -112,22 +124,25 @@ inline void reset_unresolved_ftq_suffix(std::vector<Load> &loads, unsigned victi
     }
 }
 
-// Every execution scoreboard completes strictly before a new STA. This ledger
-// retains architectural obligations across any number of completed, invalidated
-// and refetched epochs without pretending that execution completion retires a load.
+// Warm initial executions and every refetch complete before a new STA. A youngest
+// held cold role instead owes an observed initial cancellation before refetch.
+// Architectural obligations survive completion, cancellation and invalidation.
 class UnresolvedLoadGroupObligation {
 public:
     template<class Load>
-    UnresolvedLoadGroupObligation(const std::vector<Load> &loads, unsigned maximum_rounds)
-        : maximum_rounds_(maximum_rounds), executions_(loads.size()), pending_(loads.size(), true)
+    UnresolvedLoadGroupObligation(const std::vector<Load> &loads, unsigned maximum_rounds,
+        std::optional<unsigned> unfinished = {})
+        : maximum_rounds_(maximum_rounds), unfinished_(unfinished), executions_(loads.size()), pending_(loads.size(), true)
     {
-        if (loads.empty() || maximum_rounds == 0) { failed_ = true; return; }
+        if (loads.empty() || maximum_rounds == 0 ||
+            (unfinished && (*unfinished + 1U != loads.size() || loads.size() < 2))) { failed_ = true; return; }
         for (const auto &load : loads) identities_.push_back({load.rob, load.rob_flag,
             load.ftq_ptr, load.ftq_offset, load.predecode_rvc, load.pdest});
     }
     bool provisional(unsigned index)
     {
-        if (failed_ || stage_ != Stage::initial || index >= pending_.size() || !pending_[index]) return fail();
+        if (failed_ || stage_ != Stage::initial || index >= pending_.size() ||
+            (unfinished_ && index == *unfinished_) || !pending_[index]) return fail();
         pending_[index] = false;
         ++executions_[index];
         if (all_complete()) stage_ = Stage::ready;
@@ -136,8 +151,13 @@ public:
     template<class Redirect>
     bool redirect(const Redirect &event, unsigned victim)
     {
-        if (failed_ || stage_ != Stage::ready || victim >= identities_.size() ||
-            rounds_ >= maximum_rounds_) return fail();
+        bool initial_unfinished = stage_ == Stage::initial && unfinished_ && rounds_ == 0 &&
+            victim < *unfinished_ && pending_[*unfinished_];
+        if (initial_unfinished)
+            for (unsigned index = 0; index < pending_.size(); ++index)
+                if (index != *unfinished_ && pending_[index]) initial_unfinished = false;
+        if (failed_ || (stage_ != Stage::ready && !initial_unfinished) ||
+            victim >= identities_.size() || rounds_ >= maximum_rounds_) return fail();
         const auto &id = identities_[victim];
         if (!event.valid || !event.level || event.ftq_flag || event.rob_value != id.rob ||
             event.rob_flag != id.flag || event.ftq_value != id.ftq ||
@@ -147,9 +167,17 @@ public:
         stage_ = Stage::redirected;
         return true;
     }
+    bool initial_canceled(unsigned index)
+    {
+        if (failed_ || stage_ != Stage::redirected || rounds_ != 0 ||
+            !unfinished_ || index != *unfinished_ || initial_canceled_) return fail();
+        initial_canceled_ = true;
+        return true;
+    }
     bool returned()
     {
-        if (failed_ || stage_ != Stage::redirected) return fail();
+        if (failed_ || stage_ != Stage::redirected ||
+            (rounds_ == 0 && unfinished_ && !initial_canceled_)) return fail();
         const auto next_ftq = identities_[victim_].ftq + 1U;
         if (next_ftq >= 64) return fail();
         unsigned offset = 0;
@@ -204,6 +232,8 @@ private:
     bool fail() { failed_ = true; return false; }
     bool all_complete() const { return std::none_of(pending_.begin(), pending_.end(), [](bool pending) { return pending; }); }
     unsigned maximum_rounds_, victim_ = 0, rounds_ = 0;
+    std::optional<unsigned> unfinished_;
+    bool initial_canceled_ = false;
     std::vector<Identity> identities_;
     std::vector<unsigned> executions_;
     std::vector<bool> pending_;

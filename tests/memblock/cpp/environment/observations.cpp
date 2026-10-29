@@ -564,6 +564,23 @@ auto Environment::Impl::cancel_scalar_load_for_reset(const LoadTransaction &tran
     return scoreboard_.cancel_for_reset(transaction) && check_components();
 }
 
+auto Environment::Impl::cancel_scalar_load_after_redirect(const LoadTransaction &transaction) -> bool
+{
+    if (!scalar_redirect_boundary_ || scalar_redirect_boundary_->cycle != cycle() ||
+        scalar_redirect_boundary_->remaining == 0) {
+        error_.record("scalar redirect cancellation requires a just-observed LQ cancellation");
+        return false;
+    }
+    const auto &boundary = *scalar_redirect_boundary_;
+    if (!scoreboard_.cancel_for_redirect(transaction, boundary.rob, boundary.flag,
+            boundary.flush_itself) || !check_components()) return false;
+    --scalar_redirect_boundary_->remaining;
+    return true;
+}
+
+auto Environment::Impl::scalar_load_redirect_canceled() const -> std::uint64_t
+{ return scoreboard_.redirect_canceled(); }
+
 auto Environment::Impl::scalar_load_reset_canceled() const -> std::uint64_t
 {
     return scoreboard_.reset_canceled();

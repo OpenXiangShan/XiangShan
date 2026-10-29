@@ -240,6 +240,7 @@ struct RandomConstraints {
     unsigned vector_index_repeat_per_mille = 250;
     unsigned scalar_unresolved_per_mille = 100;
     unsigned scalar_unresolved_conflict_per_mille = 500;
+    unsigned scalar_unresolved_inflight_per_mille = 250;
     unsigned translation_permuted_per_mille = 500;
     unsigned scalar_fp_per_mille = 200;
     std::array<unsigned, 3> scalar_fp_width_weights{0, 1, 1};
@@ -1191,6 +1192,8 @@ struct RandomConstraints {
             scalar_unresolved_per_mille = parsed;
         } else if (key == "scalar-unresolved-conflict") {
             scalar_unresolved_conflict_per_mille = parsed;
+        } else if (key == "scalar-unresolved-inflight") {
+            scalar_unresolved_inflight_per_mille = parsed;
         } else if (key == "scalar-fp") {
             scalar_fp_per_mille = parsed;
         } else if (key == "scalar-fp16") {
@@ -1822,6 +1825,7 @@ struct RandomConstraints {
             vector_index_repeat_per_mille > 1000 ||
             scalar_unresolved_per_mille > 1000 ||
             scalar_unresolved_conflict_per_mille > 1000 ||
+            scalar_unresolved_inflight_per_mille > 1000 ||
             translation_permuted_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
@@ -2995,7 +2999,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=65 constraints=" << name
+        stream << "constraint_schema=66 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3179,6 +3183,7 @@ struct RandomConstraints {
                << " target_vector_index_repeat=" << vector_index_repeat_per_mille
                << " target_scalar_unresolved=" << scalar_unresolved_per_mille
                << " target_scalar_unresolved_conflict=" << scalar_unresolved_conflict_per_mille
+               << " target_scalar_unresolved_inflight=" << scalar_unresolved_inflight_per_mille
                << " target_translation_permuted=" << translation_permuted_per_mille
                << " target_latency=" << latency_name(response_latency.dcache)
                << ',' << latency_name(response_latency.ptw) << ','

@@ -78,7 +78,7 @@ combinations have occurred or establishes a coverage percentage.
 | Uncache/MMIO | Width/mask/data, device side effects, errors, serialization | Source credit and malformed manager inputs |
 | ECC | Selected tag/data masks, banks/ways, reports/survivors | Wider masks, persistent/delayed events and concurrency |
 | LSQ/ROB/redirect | Six-lane enqueue, aggregate retire/cancel, wrap/stale suppression | Full per-retirement attribution and output-only pulse identity |
-| RAW/RAR/feedback | Random aligned 1..4-older-store/1..4-load unresolved-address conflicts, surviving disjoint prefixes and whole-suffix refetch, plus all-disjoint controls with producer-ready event order, youngest-writer byte overlays and every touched word read back; strict initial and known-address epoch data, matching current FTQ flush-itself return and repeated frontend suffix refetch before store commit; selected sources/arbitration/metadata; mixed_unresolved.cpp, load_feedback.inc | Unfinished canceled loads/late completions, arbitrary predictor histories, unresolved sliding admission, trained prediction, general redirect arbitration, all source crosses and stable architectural feedback rules |
+| RAW/RAR/feedback | Random aligned 1..4-older-store/1..4-load unresolved-address conflicts, surviving disjoint prefixes and whole-suffix refetch, plus all-disjoint controls with producer-ready event order, youngest-writer byte overlays and every touched word read back; strict warm initial and known-address epoch data, optional youngest held cold-load cancellation/late-response drain, matching current FTQ flush-itself return and repeated frontend suffix refetch before store commit; selected sources/arbitration/metadata; mixed_unresolved.cpp, load_feedback.inc | General unfinished/late-response overlap beyond one youngest held cold role, arbitrary predictor histories, unresolved sliding admission, trained prediction, general redirect arbitration, all source crosses and stable architectural feedback rules |
 | Reset | Manager/frontend, cold atomic, partial LR/LD, clean CMO | Partial modifying/error refills, dirty state, more replay producers |
 | Bridges/control | Frontend TL/PTW, trace/DFT/reset, interrupts, L2/TLB/hint/flush/WFI | Matching-MSHR/external consumer policy and dynamic controls |
 | Performance/prefetch | Transport, characterization, selected suppression | Integration-owned meaning/training/selection |
@@ -154,7 +154,7 @@ The common scalar dependency direction now varies store/load counts, overlap,
 operand arrival and issue order with independent byte-overlay expectations and
 younger-store exclusion controls. Seed/address-dependent ordinary initial bytes
 also distinguish representative wrong-line substitutions. Next normal-workload
-gaps include unfinished unresolved cancellation/late completions and longer dynamic
+gaps include broader unfinished unresolved cancellation/late-response overlap and longer dynamic
 address/temporal streams and mapping/invalidation overlap. Ordinary static
 4-KiB nonidentity mappings now use seeded host/VS/G page permutations with
 byte-wise load/store expectations, covering root-reuse fences and physical final
@@ -165,7 +165,10 @@ general simultaneous synonym writes and cross-alias replay stay outside this
 direction. A bounded 1..4-older-store/1..4-load direction now checks provisional
 execution with all addresses unresolved, randomized operand-ready arrival,
 per-STA oldest-victim selection, surviving prefixes, repeated known-address suffix images and all-disjoint
-byte-mask controls. Expected byte ownership follows program age, and every
+byte-mask controls. A conditional youngest cold role stays pending through the first
+redirect, consumes an observed positive LQ cancellation and drains its old D/E
+lifecycle before same-identity strict refetch; unavailable fresh-line attempts
+remain explicit. Expected byte ownership follows program age, and every
 touched word receives a strict terminal readback. Bounded random indexed vectors
 now vary offset spacing/permutation and repeated gathers for ordinary and
 segment operations; partial byte overlap and overlapping scatters remain open.
@@ -182,7 +185,7 @@ The stream holds a single architectural head and independent byte-prefix oracle,
 with distinct live class destinations. Its 1..32-instruction epochs, 2..8 live
 depth and conservative older-address gating do not implement a complete
 ROB/rename/cancellation ledger. Next ordinary-workload work should interleave
-unfinished recovery/late completion and integrate the isolated unresolved graph
+broader unfinished recovery/late-response overlap and integrate the isolated unresolved graph
 into sliding admission, while reducing bounded stream/context drains where the
 backend contract supports it. Canonical FP formats now share
 ordinary/concurrent/dependency/unresolved builders with independent value/boxing
@@ -199,7 +202,7 @@ guarantee a CPU bug.
 Priority work, each requiring executable stimulus and an independent check:
 
 1. Integrate isolated multi-store unresolved graphs into bounded sliding traffic;
-   add unfinished cancellation and broader temporal/address dependencies,
+   extend unfinished cancellation beyond the bounded youngest cold role and add broader temporal/address dependencies,
    and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable
    identity-mapped and declared permuted-page commits to remaining legal aliases, non-cacheable/device effects and
    fault-path side-effect checks; one cross-alias path is now directed, but

@@ -308,6 +308,8 @@ public:
     bool set_rob_head_state(std::uint8_t value, bool flag, bool pending_store);
 
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);
+    bool cancel_scalar_load_after_redirect(const LoadTransaction &transaction);
+    std::uint64_t scalar_load_redirect_canceled() const;
     std::uint64_t scalar_load_reset_canceled() const;
     std::uint64_t scalar_load_canceled_observed() const;
     bool cancel_scalar_store_for_reset(const StoreTransaction &transaction);
@@ -1514,6 +1516,12 @@ private:
     DutAdapter dut_;
     FailureState error_{"environment", "environment-contract"};
     std::optional<std::uint64_t> last_reset_completed_cycle_;
+    struct ScalarRedirectBoundary {
+        unsigned rob;
+        bool flag, flush_itself;
+        std::uint64_t cycle, remaining;
+    };
+    std::optional<ScalarRedirectBoundary> scalar_redirect_boundary_;
     SparseMemory bus_memory_;
     SparseMemory memory_;
     TileLinkMemoryAgent memory_agent_;

@@ -669,6 +669,8 @@ public:
 
 
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);
+    bool cancel_scalar_load_after_redirect(const LoadTransaction &transaction);
+    std::uint64_t scalar_load_redirect_canceled() const;
 
     std::uint64_t scalar_load_reset_canceled() const;
     std::uint64_t scalar_load_canceled_observed() const;

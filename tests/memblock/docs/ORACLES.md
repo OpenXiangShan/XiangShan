@@ -139,7 +139,9 @@ an integer-only window uses 1..223. Semantic byte-source counters do not require
 any particular internal forwarding path.
 
 The separate `scalar-unresolved` direction withholds 1..4 older addresses while
-1..4 younger scalar/FP loads strictly complete against the pre-store image.
+1..4 younger scalar/FP roles execute against the pre-store image. The optional
+`scalar-unresolved-inflight` case reserves the youngest role as a pending cold
+load; every other initial load strictly completes.
 An incomplete non-memory group A holds retirement with source ordering
 `A,S0,P1,S1,...,L0,L1,...`. Independent producers permit out-of-age STA/STD arrival;
 memory instructions retain separate ROB entries. This is a partial-order witness,
@@ -159,11 +161,41 @@ stores cannot supply bytes even when STD arrived. The independent
 `UnresolvedEpochImage` overlays only known-address stores in program age. Repair
 each newly visible writer against the preceding image; a completely hidden
 older write can leave data unchanged despite a required redirect. Each execution
-keeps strict data, identity and sideband expectations. All initial/suffix loads
-complete before the next STA, and an architectural group obligation rejects
+keeps strict data, identity and sideband expectations. All warm initial loads and every strict suffix execution
+complete before the next STA. A separately tracked initial cold obligation may
+instead require observed cancellation. The architectural group obligation rejects
 missing/duplicate/out-of-order epochs. Disjoint younger loads refetch too;
 surviving-prefix values must still equal the known image. No reset cancellation
 or simultaneous canceled-data waiver is used.
+
+The optional cold role is on a different line of the same mapped 4-KiB page,
+disjoint from all older stores. First flush and drain prior committed SBuffer
+stores, which could otherwise forward without an accepted A. Freshness then
+uses accepted external physical A history; the per-line D hold is armed before
+any further DUT tick. A prefetch
+may own the A, so the oracle does not claim unique load/request attribution.
+If the page has no fresh line, an explicit unavailable counter records that the
+completed-load path ran. Independently mapped bytes determine the cold value.
+
+The cold load is issued with a normal strict pending expectation. Hold its D
+response through the first conflicting STA and returned redirect. Keep the
+expectation active through all three `redirect_after` ticks: an already-s3
+completion during propagation can be legal. Only an exact still-pending killed
+identity can then be canceled, immediately at the observed redirect boundary and
+within its positive observed LQ cancellation budget. Check ROB age/wrap, opcode,
+address, destination/class, FTQ/RVC and LQ/SQ snapshots. The group cannot return
+its suffix without this explicit initial cancellation. Cancellation erases the
+pending expectation and makes any old writeback unexpected; it grants no data
+waiver. LQ rewinds only by observed cancellation and SQ must remain unchanged.
+
+Keep D held through the redirect-filter drain plus a seeded 0..7-cycle gap.
+Release and finish the old D/E protocol, then observe 32 quiet cycles before
+registering any same-ROB/destination suffix expectation. The cache may finish
+its accepted refill/GrantAck after instruction cancellation; the canceled load
+may not complete in the RF/FP domain. The cold role strictly completes on every
+refetch, including later rounds. Current scope is one youngest unfinished
+initial role in a bounded graph; early-release races, arbitrary unfinished
+positions/counts and sliding speculative admission remain unqualified.
 
 Every suffix restores original ROB/pdest, PC, register class and SQ snapshot,
 with fresh LQ/scoreboard epochs. Initial load PCs/FTQ halfword offsets are a
@@ -187,8 +219,8 @@ After all addresses/data resolve, every current load must match the complete
 program-age image. Only then release A, commit stores in age order, drain and
 strictly read back every touched aligned word. Warm/live-load/readback roles
 reserve distinct numeric destinations in 1..191 when any load is FP, otherwise
-1..223. Full rename/free-list/producer timing, unfinished cancellation/late
-completion and unresolved sliding admission remain gaps. Scenario/epoch checks
+1..223. Full rename/free-list/producer timing, general unfinished/late-response
+overlap and unresolved sliding admission remain gaps. Scenario/epoch checks
 and aggregate accounting do not independently identify each surviving LQ entry.
 The mixed tail's general cancellation fixture also uses a distinct older
 non-memory branch ROB anchor after completed memory traffic; it does not assign

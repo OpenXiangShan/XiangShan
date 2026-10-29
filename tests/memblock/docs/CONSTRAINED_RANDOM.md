@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=65`.
+`constraint_schema=66`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -85,6 +85,7 @@ they do not imply arbitrary numeric suffix support.
 | `scalar-fp16`, `scalar-fp32`, `scalar-fp64` | Relative FLH/FLW/FLD width weights when FP is selected. Coverage/corner use 1/1/1, spec uses 0/1/1, and cmo-stress uses 1/1/1 with FP disabled. Enabled FP requires a nonzero sum; zero disables that FP width. |
 | `scalar-unresolved` | Rate replacing an eligible ordinary scalar-store action with a 1..4-older-store/1..4-younger-load delayed-address graph, before the `scalar-dependency` selection. Defaults coverage/spec/corner/cmo-stress: 200/100/300/0. |
 | `scalar-unresolved-conflict` | Conditional window rate with at least one older store overlapping the load; default 500 in all presets. Zero forces disjoint-byte controls and 1000 forces conflicts. |
+| `scalar-unresolved-inflight` | Conditional conflicting-window rate selecting one youngest unfinished cold scalar/FP load, with a held late response and observed redirect cancellation; default 250 in all presets. Selection needs a same-page line with no accepted external A history; unavailable attempts are reported. Zero retains all-completed windows. |
 | `scalar-dependency` | Rate replacing a remaining eligible ordinary scalar-store action with a randomized dependency window: 1..4 older stores, 1..3 younger loads, and an optional store younger than those loads. Widths, byte overlap, payloads, lanes, operand arrival, issue order and 0..7-cycle gaps vary. Defaults coverage/spec/corner/cmo-stress: 350/200/500/0. |
 | `latency` | `compact` or `spec`, applied to all three managers. |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | `compact` or `spec`, applied to one manager. |
@@ -266,6 +267,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | `scalar-dependency` | 350 | 200 | 500 | 0 |
 | `scalar-unresolved` | 200 | 100 | 300 | 0 |
 | `scalar-unresolved-conflict` | 500 | 500 | 500 | 500 |
+| `scalar-unresolved-inflight` | 250 | 250 | 250 | 250 |
 | Latency DCache/PTW/Uncache | compact/compact/compact | spec/spec/spec | spec/spec/spec | compact/compact/compact |
 
 Profiles specify directions, not measured workload fidelity or observed coverage.
@@ -635,8 +637,10 @@ remaining fault/device setup pools.
 ## Unresolved Scalar Store Addresses
 
 `scalar-unresolved` uses the ordinary cacheable context and one warm line,
-drawing 1..4 older stores and 1..4 younger scalar/FP loads. All addresses remain
-unknown through every initial strict completion. Stores/primary load use one
+drawing 1..4 older stores and 1..4 younger scalar/FP loads. All store addresses remain
+unknown through initial execution. Windows without a cold role strictly complete
+every load; an optional youngest cold load instead remains pending until observed
+cancellation. Stores/primary load use one
 16-byte comparison region; other loads can use the full line. Conflict windows
 contain an overlapping primary load; controls keep every load disjoint from every
 store. Other load/store edges are unrestricted, so different STAs may select
@@ -698,21 +702,48 @@ the generated STA inputs: this is an external producer witness, not dynamically
 exercised SSIT/LFST training. Full predictor, rename and frontend execution remain
 outside the block oracle.
 
-A group obligation retains every instruction across completed, invalidated and
-refetched epochs. It rejects missing/duplicate initial or suffix completion,
+`scalar-unresolved-inflight` can reserve one of the four roles as the youngest
+load on a different line of the same 4-KiB page. Other roles remain on the warm
+line, with at least one completed conflict. Drain prior committed SBuffer stores
+before the seeded cyclic search: a never-requested line could otherwise receive
+forwarded data from a pending committed store. Choose a line with no accepted
+physical A history and arm its per-line D hold before any further DUT tick. No available line records an unavailable attempt and retains the
+completed-load path. A prefetch can own the held A; this is a pending-load and
+late-response check, not unique request attribution. The cold load's independent
+bytes and FP boxing come from the mapped architectural input image.
+
+All warm loads complete, while the accepted cold load remains pending with its
+response held. The first conflicting STA selects a completed warm victim and
+flushes the entire suffix. Strict pending expectations stay active through the
+three `redirect_after` ticks, allowing legal writeback-stage boundary behavior.
+Only then may a matching pending killed scalar obligation be canceled, using
+the just-observed redirect and its positive LQ cancellation budget. Wrong age,
+identity, queue snapshot, duplicate cancellation, missing cancellation or stale
+boundary fails. Removing the expectation makes a later old writeback unexpected;
+no data waiver is added. Hold D through the redirect-filter drain, wait another
+random 0..7 cycles, then release and drain the old D/E lifecycle plus a 32-cycle
+quiet check before registering any identical-ROB/destination refetch. Late cache
+refill is legal; late RF/FP completion is not. Refetch the complete suffix and
+finish every later round strictly. Only the first initial cold execution is
+canceled; every refetched execution must complete.
+
+A group obligation retains every instruction across completed, canceled,
+invalidated and refetched epochs. It rejects missing/duplicate initial or suffix completion,
 wrong current victim metadata, changed architectural destination/identity, stale
 FTQ epoch, premature next redirect and incomplete terminal readback. Already
-consumed execution scoreboards are never waived or canceled. This all-completed
-direction supplies no cancellation API for unfinished scoreboards.
+consumed execution scoreboards are never waived or canceled. The optional
+unfinished role adds one explicit initial cancellation obligation;
+its suffix cannot be returned or completed without that observed cancellation.
 
 The existing `scalar_unresolved` tuple remains per-window: windows, conflicts,
-controls, initial completion, windows with matched/returned/completed recovery,
+controls, initial execution boundary (warm completions and optional cold pending),
+windows with matched/returned/completed recovery,
 committed readback, any early STD, primary overlapping-byte union, and total
 observed LQ cancellations across rounds. `scalar_unresolved_graph` retains store,
 event, peak, inversion, prefix, touched-word and older-store-pair meanings.
 `scalar_unresolved_first_conflict` still bins the first conflicting STA's
 resolution rank. `scalar_unresolved_load_group` counts distinct initial loads,
-multi-load windows, initial completions, never-invalidated survivors, distinct
+multi-load windows, successful initial completions, never-invalidated survivors, distinct
 invalidated/refetched loads, globally disjoint/conflicting invalidated loads,
 additional first-STA competitors, initial issue inversions and maximum loads.
 `scalar_unresolved_victim` now bins the earliest victim across all rounds,
@@ -725,11 +756,18 @@ sum of known-store counts at each refetch round, promoted STD operands, refetch
 issue inversions, maximum rounds, and trained-hit refetches.
 `scalar_unresolved_round_victim` bins every round's victim age;
 `scalar_unresolved_victim_movement` counts older/equal/younger transitions.
+Schema 66 adds `scalar_unresolved_inflight`: selected attempts, fresh-line
+unavailability, materialized windows, accepted held-pending loads, canceled
+expectations, late responses drained before refetch, strict cold refetch
+executions, FP cold roles, and extra release-gap cycles. Initial successful
+completions plus initial cancellations equal distinct initial loads. The cold
+role is disjoint, always invalidated, and may refetch once per recovery round.
+
 The verifier checks necessary uint64, window/unique-load/epoch/peak, suffix,
 knowledge, data, predictor, cancellation and movement bounds without positive
 sparse-bin gates. It does not reconstruct full joint histories.
 
-Unfinished cancellation/late completions, unresolved sliding admission,
+General unfinished cancellation/late-completion overlap, unresolved sliding admission,
 arbitrary trained-predictor states, full rename history and cycle-accurate
 producer/frontend timing remain gaps. A timeout is not an RTL liveness proof.
 
@@ -885,8 +923,9 @@ contiguous-PA results against production scoreboards.
   The scalar dependency direction adds variable ordinary store/load chains;
   the unresolved direction adds 1..4 delayed older stores and 1..4 completed
   provisional loads, exact oldest-victim selection, surviving prefix, repeated whole-suffix
-  refetch and disjoint-mask controls. Unfinished
-  cancellation, sliding unresolved admission and predictor training remain
+  refetch and disjoint-mask controls. A conditional youngest held cold role adds
+  explicit observed cancellation and old-response drain before refetch. Broader unfinished
+  cancellation, sliding unresolved admission and dynamic predictor training remain
   absent. Unbounded mixtures, arbitrary dependency/rename histories,
   multiple CMO/atomic ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
   injection are not provided by these constraints.
@@ -931,7 +970,7 @@ heterogeneous, SQ dependency and unresolved/refetch traffic with independent
 boxing/data checks. The unresolved direction interleaves 1..4 older store operand-ready events,
 varies 1..4 younger load issue permutations and victim age, and refetches the
 whole invalidated suffix at each conflicting STA, with visible/hidden writer
-versions and earlier/equal/later victims. Prioritize unfinished cancellation
+versions and earlier/equal/later victims. Prioritize broader unfinished cancellation
 and integration into sliding admission and broader temporal/address dependencies; broader
 FP helper and exceptional-misalignment combinations remain open.
 Broader temporal locality/dependent-address streams and scalar/vector SQ

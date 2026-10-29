@@ -24,6 +24,8 @@ public:
         std::uint8_t ftq_value = 0;
         std::uint8_t ftq_offset = 0;
         bool is_rvc = false;
+        unsigned lq = 0, sq = 0;
+        bool lq_flag = false, sq_flag = false;
     };
 
     void expect(const LoadTransaction &transaction, std::uint64_t data)
@@ -59,6 +61,7 @@ public:
                 static_cast<std::uint8_t>(transaction.ftq_ptr),
                 transaction.ftq_offset,
                 transaction.predecode_rvc,
+                transaction.lq, transaction.sq, transaction.lq_flag, transaction.sq_flag,
             });
         if (!inserted && error_.empty()) {
             std::ostringstream message;
@@ -196,6 +199,34 @@ public:
         ++reset_canceled_;
         return true;
     }
+    // Call only after the driver has observed the returned redirect and its
+    // queue cancellation. Removing this expectation makes any later old-epoch
+    // writeback unexpected; it never grants a canceled-data waiver.
+    bool cancel_for_redirect(const LoadTransaction &transaction,
+        unsigned rob, bool flag, bool flush_itself)
+    {
+        if (!error_.empty()) return false;
+        const auto it = expected_.find(rob_identity(transaction.rob, transaction.rob_flag));
+        const bool equal = transaction.rob == rob && transaction.rob_flag == flag;
+        const bool younger = transaction.rob_flag == flag ? transaction.rob > rob : transaction.rob < rob;
+        if (rob >= kRobEntries || transaction.rob >= kRobEntries ||
+            !(younger || (flush_itself && equal)) || it == expected_.end() ||
+            it->second.prefetch || it->second.exception_mask != 0 ||
+            it->second.pdest != transaction.pdest || it->second.address != transaction.address ||
+            it->second.op != static_cast<std::uint16_t>(transaction.op) ||
+            it->second.rf_wen != transaction.rf_wen || it->second.fp_wen != transaction.fp_wen ||
+            it->second.ftq_value != transaction.ftq_ptr || it->second.ftq_offset != transaction.ftq_offset ||
+            it->second.is_rvc != transaction.predecode_rvc ||
+            it->second.lq != transaction.lq || it->second.sq != transaction.sq ||
+            it->second.lq_flag != transaction.lq_flag || it->second.sq_flag != transaction.sq_flag) {
+            error_.record("redirect cancellation does not match a pending killed scalar load");
+            return false;
+        }
+        expected_.erase(it);
+        ++redirect_canceled_;
+        return true;
+    }
+    std::uint64_t redirect_canceled() const { return redirect_canceled_; }
     std::uint64_t reset_canceled() const { return reset_canceled_; }
     std::size_t pending() const { return expected_.size(); }
     std::size_t pending_prefetch() const { return pending_prefetch_; }
@@ -303,6 +334,7 @@ private:
     std::uint64_t observed_ = 0;
     std::uint64_t canceled_observed_ = 0;
     std::uint64_t reset_canceled_ = 0;
+    std::uint64_t redirect_canceled_ = 0;
     std::uint64_t prefetch_observed_ = 0;
     std::size_t pending_prefetch_ = 0;
     FailureState error_{"scalar-load", "completion-contract"};

@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4524,6 +4524,22 @@ def _check_scalar_unresolved_accounting(result: dict[str, Any]) -> None:
     _require(redirects == returned == refetched == conflicts,
              "unresolved load redirect/refetch obligations are not conserved")
     cancel_limit = conflicts
+    initial_canceled = 0
+    if result.get("constraint_schema", 0) >= 66:
+        inflight_rate = result.get("target_scalar_unresolved_inflight")
+        _require(type(inflight_rate) is int and 0 <= inflight_rate <= 1000,
+                 "invalid scalar unresolved inflight rate")
+        attempts, unavailable, inflight_windows, accepted, initial_canceled, late_drained, cold_refetches, cold_fp, release_gaps = _csv_counts(
+            result, "scalar_unresolved_inflight", 9)
+        _require(all(value <= (1 << 64) - 1 for value in (
+            attempts, unavailable, inflight_windows, accepted, initial_canceled,
+            late_drained, cold_refetches, cold_fp, release_gaps)),
+            "unresolved inflight observations exceed the uint64 counter domain")
+        _require(attempts == unavailable + inflight_windows and attempts <= conflicts and
+                 inflight_windows == accepted == initial_canceled == late_drained and
+                 cold_fp <= inflight_windows and release_gaps <= 7 * inflight_windows and
+                 (inflight_rate != 0 or attempts == 0),
+                 "unresolved inflight attempt/cancellation/late-response obligations disagree")
     if result.get("constraint_schema", 0) >= 64:
         loads, multi_load, completions, survivors, invalidated, refetch_loads, disjoint, changed, competitors, issue_inversions, peak_loads = _csv_counts(
             result, "scalar_unresolved_load_group", 11)
@@ -4539,7 +4555,7 @@ def _check_scalar_unresolved_accounting(result: dict[str, Any]) -> None:
                  (not multi_load or windows + multi_load + peak_loads - 2 <= loads <=
                   windows + (peak_loads - 1) * multi_load),
                  "unresolved load-group count/peak/window observations disagree")
-        _require(completions == loads == survivors + invalidated and refetch_loads == invalidated and
+        _require(completions + initial_canceled == loads == survivors + invalidated and refetch_loads == invalidated and
                  conflicts <= changed <= invalidated and disjoint + changed == invalidated and
                  competitors <= changed - conflicts and
                  invalidated - conflicts <= (peak_loads - 1) * min(conflicts, multi_load),
@@ -4643,6 +4659,11 @@ def _check_scalar_unresolved_accounting(result: dict[str, Any]) -> None:
                  refetch_inversions <= min(6 * rounds, (peak_loads - 1) * invalidated_epochs // 2) and
                  rounds <= trained <= invalidated_epochs,
                  "unresolved epoch knowledge/data/predictor observations exceed bounds")
+    if result.get("constraint_schema", 0) >= 66:
+        _require(inflight_windows <= multi_load and initial_canceled <= min(canceled, disjoint) and
+                 inflight_windows <= cold_refetches <= min(4 * inflight_windows,
+                     inflight_windows + rounds - conflicts, unchanged),
+                 "unresolved inflight suffix/refetch observations disagree")
     if rate == 0:
         _require(windows == 0, "disabled unresolved load direction generated windows")
     if conflict_rate == 0:
