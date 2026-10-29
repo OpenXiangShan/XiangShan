@@ -1027,6 +1027,14 @@ public:
         : write_mirror_(write_mirror)
     {}
 
+    // Conservative input-image provenance. Explicit initialization and every
+    // later reference write disqualify a byte; a lazy region definition does
+    // not materialize it. This query never observes DUT or manager state.
+    bool has_explicit_byte(std::uint64_t address) const
+    {
+        return bytes_.find(address) != bytes_.end();
+    }
+
     void write_byte(std::uint64_t address, std::uint8_t value)
     {
         bytes_[address] = value;

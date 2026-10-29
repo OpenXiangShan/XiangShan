@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4450,6 +4450,10 @@ def _check_scalar_fp_accounting(result: dict[str, Any]) -> None:
         fp_invalidated = _csv_counts(result, "stream_recovery", 20)[15]
         _require(max(0, invalidated - 4 * choices[2]) <= fp_invalidated <= min(invalidated, 4 * choices[3]),
                  "stream refetch changed its selected register class")
+        if result.get("constraint_schema", 0) >= 69:
+            inflight = _csv_counts(result, "stream_recovery_inflight", 11)
+            _require(inflight[7] <= choices[3] and inflight[2] - inflight[7] <= choices[2],
+                     "unfinished stream role changed its selected register class")
     _require(sum(widths) == sum(origins) and sum(choices) <= scalar[0],
              "FP format/origin/choice counts disagree")
     for origin in range(4):
@@ -4789,12 +4793,32 @@ def _check_stream_recovery_accounting(result: dict[str, Any]) -> None:
     victims = _csv_counts(result, "stream_recovery_victims", 4)
     stream = _csv_counts(result, "stream", 12)
     operations = _csv_counts(result, "stream_ops", 5)
-    serialized = counts + shapes + victims + stream + operations
+    cold = 0
+    if result.get("constraint_schema", 0) >= 69:
+        inflight_rate = result.get("target_stream_unresolved_inflight")
+        _require(type(inflight_rate) is int and 0 <= inflight_rate <= 1000,
+                 "invalid unfinished stream rate")
+        inflight = _csv_counts(result, "stream_recovery_inflight", 11)
+        attempts, unavailable, cold, held, explicit_canceled, drained, cold_refetched, cold_fp, gaps, old_producers, old_retire = inflight
+        _require(attempts == unavailable + cold and cold == held == explicit_canceled == drained and
+                 attempts <= conflicts and cold <= sum(shapes[5:8]),
+                 "unfinished stream selection/hold/cancellation/drain obligations disagree")
+        _require(cold <= cold_refetched <= min(4 * cold, cold + rounds - conflicts, refetched) and
+                 cold_fp <= cold and gaps <= 7 * cold and old_retire <= prefix_retired and
+                 old_producers <= stream[8] + result.get("stream_scalar_retries", 0) + refetched,
+                 "unfinished stream response/refetch/prefix observations exceed bounds")
+        if cold == 0:
+            _require(not any(inflight[2:]), "no unfinished stream role has active observations")
+        if inflight_rate == 0:
+            _require(attempts == 0, "disabled unfinished stream generated attempts")
+    else:
+        inflight = []
+    serialized = counts + shapes + victims + stream + operations + inflight
     for field, length in (("stream_issue", 6), ("stream_vector_uops", 2), ("stream_waiting_head", 2)):
         serialized += _csv_counts(result, field, length)
     _require(all(count <= (1 << 64) - 1 for count in serialized),
              "stream recovery counters exceed the emitter uint64 domain")
-    _require(windows == conflicts + controls == resolved and initial == loads and
+    _require(windows == conflicts + controls == resolved and initial + cold == loads and
              retired_stores == stores <= operations[2] and retired_loads == loads <= operations[0],
              "stream recovery architectural/epoch obligations disagree")
     _require(sum(shapes[:4]) == sum(shapes[4:8]) == sum(shapes[8:]) == windows and
@@ -4812,7 +4836,7 @@ def _check_stream_recovery_accounting(result: dict[str, Any]) -> None:
                  "stream recovery roles exceed observed maximum live instructions")
     _require(conflicts <= rounds <= min(4 * conflicts, stores) and sum(victims) == rounds and
              all(count == 0 for count in victims[max_loads:]) and
-             rounds <= invalidated == refetched <= sum(count * (max_loads - i) for i, count in enumerate(victims)),
+             rounds + cold <= refetched == invalidated + cold <= sum(count * (max_loads - i) for i, count in enumerate(victims)),
              "stream recovery victim/suffix executions disagree")
     for minimum_rounds in range(1, 5):
         _require(sum(shapes[8 + minimum_rounds:]) <= sum(shapes[minimum_rounds - 1:4]),
@@ -4837,7 +4861,7 @@ def _check_stream_recovery_accounting(result: dict[str, Any]) -> None:
         return total
 
     victim_age_sum = sum(age * count for age, count in enumerate(victims))
-    _require(paired_round_load_sum(True) - victim_age_sum <= invalidated <=
+    _require(paired_round_load_sum(True) - victim_age_sum <= refetched <=
              paired_round_load_sum(False) - victim_age_sum,
              "stream rounds did not refetch complete suffixes")
     for age in range(4):
@@ -4850,7 +4874,7 @@ def _check_stream_recovery_accounting(result: dict[str, Any]) -> None:
         _require(sum(victims[age:]) <= capacity,
                  "stream victim ages exceed eligible window/round capacity")
     _require(pending_prefix <= windows and prefix_retired <= stream[2] and
-             continued <= stream[1] - stores - loads and canceled <= invalidated and
+             continued <= stream[1] - stores - loads and cold <= canceled <= refetched and
              fp_invalidated <= invalidated,
              "stream recovery prefix/cancellation/FP observations exceed bounds")
     if windows == 0:

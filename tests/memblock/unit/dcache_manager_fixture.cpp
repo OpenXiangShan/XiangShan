@@ -51,9 +51,9 @@ struct Fixture {
     }
     void ok() { require(manager.ok(), manager.error()); }
     void acquire(unsigned alias, unsigned source=0, unsigned grow=1,
-                 std::uint64_t address=line) {
+                 std::uint64_t address=line, unsigned opcode=6) {
         auto &a = dut.dcache.a;
-        a.valid.set(1); a.opcode.set(6); a.param.set(grow); a.size.set(6);
+        a.valid.set(1); a.opcode.set(opcode); a.param.set(grow); a.size.set(6);
         a.source.set(source); a.address.set(address); a.mask.set(0xffffffff);
         a.user_req_source.set(2); a.user_alias.set(alias);
         a.user_vaddr.set(((address & 0xfff) | (alias << 12)) >> 6);
@@ -62,6 +62,14 @@ struct Fixture {
     void ack(unsigned sink=1) {
         dut.dcache.e.sink.set(sink); dut.dcache.e.valid.set(1);
         step(); dut.dcache.e.valid.set(0);
+    }
+    void expect_line_idle(bool expected, const std::string &state,
+                          std::uint64_t address=line) const {
+        // Exercise physical-line normalization through the production query.
+        for (unsigned offset : {0U, 1U, 31U, 63U}) {
+            require(manager.line_grants_idle(address + offset) == expected,
+                    state + " (offset " + std::to_string(offset) + ")");
+        }
     }
     void owner(unsigned grow=1) {
         acquire(1, 0, grow);
@@ -152,12 +160,164 @@ void exhaustive_versions()
     }
 }
 
+void line_grants_lifecycle(const std::string &test)
+{
+    Fixture f;
+    f.expect_line_idle(true, "initial line was not idle");
+    if (test == "line-grants-holds") {
+        f.manager.hold_response_at(line + 13);
+        f.expect_line_idle(false, "armed target hold reported idle");
+        f.expect_line_idle(true, "unrelated armed hold blocked line", line + 64);
+        f.manager.hold_response_at(line + 69);
+        f.acquire(1);
+        require(f.manager.response_held_at(line), "target response was not held");
+        f.expect_line_idle(false, "held Grant reported idle");
+        f.manager.schedule_held_response_release_at(line + 7, 2);
+        f.step();
+        require(f.manager.response_held_at(line), "scheduled hold released too early");
+        f.expect_line_idle(false, "scheduled held Grant reported idle");
+        f.step();
+        require(!f.manager.response_held_at(line), "scheduled hold did not release");
+        f.expect_line_idle(false, "released, queued Grant reported idle");
+        f.ack(); // First D and E; final D is still queued.
+        f.expect_line_idle(false, "held Grant retired before final D");
+        f.step();
+        f.expect_line_idle(true, "released held Grant did not retire");
+        f.expect_line_idle(false, "unrelated hold was lost", line + 64);
+        require(!f.manager.responses_idle(), "unrelated armed hold did not stay busy");
+    } else if (test == "line-grants-final-d-before-e") {
+        f.manager.force_next_response_delay(2);
+        f.manager.force_next_interbeat_delay(1);
+        f.acquire(1);
+        f.expect_line_idle(false, "delayed Grant reported idle");
+        f.step(); f.step();
+        require(!f.dut.dcache.d.valid.boolean(), "first D delay was not exercised");
+        f.expect_line_idle(false, "queued Grant reported idle");
+        f.dut.dcache.d.ready.set(0); f.step();
+        require(f.dut.dcache.d.valid.boolean() && f.manager.grant_data_beat_count() == 0,
+                "first D stall was not exercised");
+        f.expect_line_idle(false, "stalled first D reported idle");
+        f.dut.dcache.d.ready.set(1); f.step();
+        require(f.manager.grant_data_beat_count() == 1, "first D did not complete");
+        f.expect_line_idle(false, "partial Grant reported idle");
+        f.step(); // Interbeat delay.
+        require(!f.dut.dcache.d.valid.boolean(), "interbeat delay was not exercised");
+        f.dut.dcache.d.ready.set(0); f.step();
+        f.expect_line_idle(false, "stalled final D reported idle");
+        require(f.dut.dcache.d.valid.boolean() && f.manager.grant_data_beat_count() == 1,
+                "final D stall was not exercised");
+        f.dut.dcache.d.ready.set(1); f.step();
+        require(f.manager.responses_idle() && !f.manager.grant_acks_idle(),
+                "final-D-only state was not exercised");
+        f.expect_line_idle(false, "final D before E retired Grant");
+        f.ack();
+        f.expect_line_idle(true, "final D then E did not retire Grant");
+    } else if (test == "line-grants-e-before-final-d") {
+        f.acquire(1); f.ack(); // Legal E with first accepted D.
+        require(f.manager.grant_acks_idle() && !f.manager.responses_idle(),
+                "E-first state was not exercised");
+        f.expect_line_idle(false, "E before final D retired Grant");
+        f.dut.dcache.d.ready.set(0); f.step();
+        f.expect_line_idle(false, "early-E stalled final D reported idle");
+        f.dut.dcache.d.ready.set(1); f.step();
+        f.expect_line_idle(true, "E then final D did not retire Grant");
+    } else if (test == "line-grants-same-pa-pending") {
+        // Keep a distinct line's held Grant live throughout target completion.
+        f.manager.hold_response_at(line + 64);
+        f.acquire(1, 2, 1, line + 64);
+        f.expect_line_idle(true, "unrelated held Grant blocked target");
+        f.acquire(1);
+        f.acquire(1, 1); // First target D; next same-PA A queues.
+        require(f.manager.refill_count() == 2, "same-PA successor did not queue");
+        f.expect_line_idle(false, "queued same-PA Acquire reported idle");
+        f.ack(1); // Final old D/E immediately enables the successor Grant.
+        require(f.manager.refill_count() == 3, "same-PA successor did not progress");
+        f.expect_line_idle(false, "same-PA successor lost Grant lifetime");
+        f.step(); f.ack(2);
+        f.expect_line_idle(true, "same-PA Grants did not retire");
+        f.expect_line_idle(false, "unrelated held Grant was lost", line + 64);
+        require(!f.manager.responses_idle() && !f.manager.grant_acks_idle(),
+                "independent line did not remain active");
+    } else if (test == "line-grants-recall-pending") {
+        f.owner(); f.next_alias();
+        // No target Grant exists yet: only the accepted Acquire awaiting C.
+        require(f.manager.grant_acks_idle() && !f.manager.response_held(),
+                "pending-only Acquire state was not exercised");
+        f.expect_line_idle(false, "Acquire awaiting alias recall reported idle");
+        f.expect_line_idle(true, "target recall blocked unrelated line", line + 64);
+        f.c(5, 1, 0);
+        f.expect_line_idle(false, "Acquire awaiting partial C reported idle");
+        f.c(5, 1, 1);
+        f.expect_line_idle(false, "post-recall queued Grant reported idle");
+        f.step(); f.ack();
+        f.expect_line_idle(true, "recalled Acquire/Grant did not retire");
+    } else if (test == "line-grants-acquire-perm") {
+        f.owner(0); // First obtain B, then legally grow BtoT.
+        f.acquire(1, 0, 2, line, 7);
+        f.expect_line_idle(false, "AcquirePerm Grant reported idle");
+        f.step();
+        require(f.manager.responses_idle() && !f.manager.grant_acks_idle(),
+                "data-less final-D-only Grant state was not exercised");
+        f.expect_line_idle(false, "data-less Grant retired before E");
+        f.ack();
+        f.expect_line_idle(true, "data-less Grant did not retire");
+    } else if (test == "line-grants-scope") {
+        // An ordinary same-line Get, ReleaseData, ReleaseAck or standalone
+        // Probe is outside the cacheable Acquire/Grant lifecycle query.
+        auto &a = f.dut.dcache.a;
+        a.valid.set(1); a.opcode.set(4); a.param.set(0); a.size.set(3);
+        a.source.set(0); a.address.set(line); a.mask.set(0xff);
+        f.dut.dcache.d.ready.set(0);
+        f.step(); a.valid.set(0); f.step();
+        require(!f.manager.responses_idle(), "Get response was not outstanding");
+        f.expect_line_idle(true, "same-line Get blocked Grant query");
+        f.dut.dcache.d.ready.set(1); f.step();
+        f.c(7, 1, 0);
+        require(!f.manager.responses_idle(), "partial ReleaseData was not active");
+        f.expect_line_idle(true, "same-line ReleaseData blocked Grant query");
+        f.c(7, 1, 1);
+        f.expect_line_idle(true, "same-line ReleaseAck blocked Grant query");
+        f.step();
+        require(f.manager.request_probe(line, 2, false, 5), "standalone Probe failed");
+        f.step();
+        require(!f.manager.probes_idle(), "standalone Probe was not active");
+        f.expect_line_idle(true, "same-line standalone Probe blocked Grant query");
+        f.c(4, 5);
+    } else if (test == "line-grants-reset") {
+        f.manager.hold_response_at(line + 128);
+        f.manager.hold_response_at(line + 192);
+        f.dut.dcache.d.ready.set(0);
+        f.acquire(1); f.acquire(1, 1);
+        f.acquire(1, 2, 1, line + 64);
+        f.acquire(1, 3, 1, line + 128);
+        f.manager.schedule_held_response_release_at(line + 128, 10);
+        f.expect_line_idle(false, "reset setup lacked target Grant/Acquire");
+        f.expect_line_idle(false, "reset setup lacked unrelated Grant", line + 64);
+        f.expect_line_idle(false, "reset setup lacked held response", line + 128);
+        f.expect_line_idle(false, "reset setup lacked armed hold", line + 192);
+        f.manager.reset_link_state();
+        for (unsigned offset : {0U, 64U, 128U, 192U})
+            f.expect_line_idle(true, "reset retained line state", line + offset);
+        require(f.manager.responses_idle() && f.manager.grant_acks_idle(),
+                "reset retained global Grant/response state");
+        f.dut.dcache.d.ready.set(1);
+        f.acquire(1); f.ack(); f.step();
+        f.expect_line_idle(true, "post-reset Grant did not retire");
+    } else {
+        throw std::runtime_error("unknown line Grant lifecycle case: " + test);
+    }
+    f.ok();
+}
+
 int main(int argc, char **argv)
 {
     try {
         const std::string test = argc>1 ? argv[1] : "dirty";
         if (test == "release-version-exhaustive") {
             exhaustive_versions(); return 0;
+        }
+        if (test.starts_with("line-grants-")) {
+            line_grants_lifecycle(test); return 0;
         }
         Fixture f;
         if (test == "early-e") {

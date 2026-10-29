@@ -237,6 +237,7 @@ public:
     std::uint64_t dcache_c_payload_stability_checks() const;
     std::uint64_t dcache_release_target_payload_stability_checks() const;
     bool dcache_grants_drained() const;
+    bool dcache_line_grants_idle(std::uint64_t address) const;
     bool dcache_responses_idle() const;
     bool dcache_release_channel_idle() const;
     std::uint64_t ptw_requests() const;

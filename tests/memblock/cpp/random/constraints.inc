@@ -187,6 +187,7 @@ struct RandomConstraints {
     unsigned concurrent_actions_per_mille = 1000;
     unsigned concurrent_stream_per_mille = 750;
     unsigned stream_unresolved_per_mille = 125;
+    unsigned stream_unresolved_inflight_per_mille = 250;
     unsigned special_concurrent_per_mille = 0;
     unsigned translation_switches_per_mille = 0;
     unsigned tlb_flushes_per_mille = 0;
@@ -1109,6 +1110,8 @@ struct RandomConstraints {
             concurrent_stream_per_mille = parsed;
         } else if (key == "stream-unresolved") {
             stream_unresolved_per_mille = parsed;
+        } else if (key == "stream-unresolved-inflight") {
+            stream_unresolved_inflight_per_mille = parsed;
         } else if (key == "special-concurrent") {
             special_concurrent_per_mille = parsed;
         } else if (key == "translation-switch") {
@@ -1779,6 +1782,7 @@ struct RandomConstraints {
         if (concurrent_actions_per_mille > 1000 ||
             concurrent_stream_per_mille > 1000 ||
             stream_unresolved_per_mille > 1000 ||
+            stream_unresolved_inflight_per_mille > 1000 ||
             special_concurrent_per_mille > 1000 ||
             translation_switches_per_mille > 1000 ||
             stage1_napot_per_mille > 1000 ||
@@ -3017,7 +3021,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=68 constraints=" << name
+        stream << "constraint_schema=69 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3127,6 +3131,7 @@ struct RandomConstraints {
                << " target_concurrent=" << concurrent_actions_per_mille
                << " target_concurrent_stream=" << concurrent_stream_per_mille
                << " target_stream_unresolved=" << stream_unresolved_per_mille
+               << " target_stream_unresolved_inflight=" << stream_unresolved_inflight_per_mille
                << " target_special_concurrent="
                << special_concurrent_per_mille
                << " target_translation_switch="

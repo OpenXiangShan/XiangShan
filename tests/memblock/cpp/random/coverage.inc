@@ -3270,6 +3270,9 @@ struct MixedCoverage {
     // Store count 1..4 / load count 1..4 / completed round count 0..4.
     std::array<std::uint64_t, 13> stream_recovery_shapes{};
     std::array<std::uint64_t, 4> stream_recovery_victims{};
+    // Attempt/unavailable/selected/held/canceled/old-grant-drained/cold-refetch/
+    // FP cold roles/release-gap sum/prefix producer and retirement progress.
+    std::array<std::uint64_t, 11> stream_recovery_inflight{};
     static constexpr unsigned kConcurrentClasses = 5;
     std::array<std::uint64_t, memblock::generated::kLsqEnqueueLanes>
         dispatch_widths{};
@@ -3640,6 +3643,7 @@ struct MixedCoverage {
                " stream_recovery=" + csv(stream_recovery) +
                " stream_recovery_shapes=" + csv(stream_recovery_shapes) +
                " stream_recovery_victims=" + csv(stream_recovery_victims) +
+               " stream_recovery_inflight=" + csv(stream_recovery_inflight) +
                " scalar_misaligned=" +
                std::to_string(scalar_misaligned) + " store_misaligned=" +
                std::to_string(scalar_store_misaligned) + ',' +

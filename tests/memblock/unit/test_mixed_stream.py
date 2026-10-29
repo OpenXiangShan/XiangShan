@@ -25,6 +25,7 @@ INPUTS = (
     'cpp/scenarios/mixed/scalar_load.hpp', 'cpp/scenarios/mixed/vector_indices.hpp',
     'cpp/scenarios/mixed/vector_operands.hpp', 'cpp/scenarios/mixed/stream_oracle.hpp',
     'cpp/scenarios/mixed/stream_recovery.hpp', 'cpp/scenarios/mixed/unresolved_load_group.hpp',
+    'cpp/scenarios/mixed/unresolved_epochs.hpp', 'unit/mixed_stream_fixture.cpp',
     'cpp/random/constraints.inc', 'cpp/random/coverage.inc',
     'cpp/environment/model.inc', 'cpp/memblock_env.hpp',
     'cpp/generated_interface_types.hpp',
@@ -51,6 +52,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.constraint_case = None
         cls.reservations = []
         cls.recoveries = []
+        cls.cold_recoveries = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -139,6 +141,8 @@ class MixedStreamTest(unittest.TestCase):
                 'constraint_case': cls.constraint_case,
                 'reservations': cls.reservations,
                 'recovery_cases': cls.recoveries,
+                'cold_recovery_cases': cls.cold_recoveries,
+                'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
                 'recovery_observations': {field: sum(run['result'][field] for run in cls.recoveries)
                     for field in ('recovery_windows', 'recovery_rounds', 'recovery_prefix',
                                   'refetch_issues', 'surviving_prefix_redirects', 'checked_scalar_values', 'lq_canceled')},
@@ -206,6 +210,102 @@ class MixedStreamTest(unittest.TestCase):
         self.assertGreater(sum(r['refetch_issues'] for r in results), 0)
         self.assertGreater(sum(r['lq_canceled'] for r in results), 0)
         self.assertGreater(sum(r['surviving_prefix_redirects'] for r in results), 0)
+
+    def test_unfinished_recovery_keeps_strict_cancellation_and_target_grant_boundary(self):
+        results = []
+        for timing in (0, 1):
+            for seed in range(1, 65):
+                result = self.run_fixture('recovery', seed, timing, 0, 32, 1000, 1000)
+                results.append(result)
+                self.cold_recoveries.append(dict(seed=seed, timing=timing, result=result))
+                self.assertEqual(result['cold_selected'], result['cold_canceled'])
+                self.assertEqual(result['cold_canceled'], result['old_released'])
+                self.assertEqual(result['old_released'], result['cold_refetched'])
+        self.assertGreater(sum(r['cold_selected'] for r in results), 32)
+        self.assertGreater(sum(r['old_prefix_retirements'] for r in results), 0)
+        self.assertGreater(sum(r['old_prefix_producers'] for r in results), 0)
+        self.assertGreaterEqual(len({r['schedule'] for r in results if r['cold_selected']}), 32)
+        for seed in (1, 7, 29):
+            first = self.run_fixture('recovery', seed, 1, 0, 32, 1000, 1000)
+            self.assertEqual(first, self.run_fixture('recovery', seed, 1, 0, 32, 1000, 1000))
+
+    def test_unfinished_disabled_controls_and_unavailable_freshness_keep_completed_path(self):
+        for conflict, rate, freshness in ((1000, 0, ()), (0, 1000, ()), (1000, 1000, ('unavailable',)),
+                                          (1000, 1000, ('narrow-history',))):
+            results = [self.run_fixture('recovery', seed, 1, 0, 32, conflict, rate, *freshness)
+                       for seed in range(1, 17)]
+            self.assertEqual(sum(r['cold_selected'] for r in results), 0)
+            self.assertGreater(sum(r['recovery_windows'] for r in results), 0)
+            self.assertEqual(sum(r['cold_canceled'] for r in results), 0)
+            if freshness:
+                self.assertGreater(sum(r['cold_unavailable'] for r in results), 0)
+            else:
+                self.assertEqual(sum(r['cold_attempts'] for r in results), 0)
+
+    def test_narrow_prior_A_anywhere_in_line_prevents_cold_selection(self):
+        old = 'environment.dcache_requests_covering_since(physical + byte, 0)'
+        self.assertEqual(self.source.count(old), 1)
+        binary = self.compile(self.source.replace(old, 'environment.dcache_requests_covering_since(physical, 0)'),
+                              'cold_history_line_base_only')
+        detected = None
+        for seed in range(1, 17):
+            result = subprocess.run([str(binary), 'recovery', str(seed), '1', '0', '32', '1000', '1000', 'narrow-history'],
+                                    capture_output=True, text=True, timeout=10)
+            if result.returncode:
+                self.assertIn('cold hold ignored a narrow prior A', result.stderr)
+                detected = dict(rejected=True, seed=seed, reason=result.stderr.strip())
+                break
+        self.assertIsNotNone(detected)
+        self.mutations['cold_history_line_base_only'] = detected
+
+    def test_successor_completed_between_idle_observations_restarts_quiet_time(self):
+        results = [self.run_fixture('recovery', seed, 1, 0, 32, 1000, 1000, 'successor-history')
+                   for seed in range(1, 17)]
+        self.assertGreater(sum(r['cold_selected'] for r in results), 0)
+        old = '(episode.old_quiet_since && requests != episode.old_quiet_requests)'
+        self.assertEqual(self.source.count(old), 1)
+        binary = self.compile(self.source.replace(old, 'false'), 'missed_successor_acquire')
+        detected = None
+        for seed in range(1, 17):
+            result = subprocess.run([str(binary), 'recovery', str(seed), '1', '0', '32', '1000', '1000', 'successor-history'],
+                                    capture_output=True, text=True, timeout=10)
+            if result.returncode:
+                self.assertIn('cold refetch preceded old Grant completion', result.stderr)
+                detected = dict(rejected=True, seed=seed, reason=result.stderr.strip())
+                break
+        self.assertIsNotNone(detected)
+        self.mutations['missed_successor_acquire'] = detected
+
+    def test_private_cold_cancellation_lifecycle_and_data_faults_are_rejected(self):
+        mutations = (
+            ('late_cold_cancel', '!environment.cancel_scalar_load_after_redirect(cold)',
+             '(!environment.run_cycles(1) || !environment.cancel_scalar_load_after_redirect(cold))',
+             'missed exact scalar cancellation boundary'),
+            ('lost_cold_cancel', '!environment.cancel_scalar_load_after_redirect(cold)',
+             'false', 'surviving-prefix-queue-contract'),
+            ('early_cold_refetch', '!environment.dcache_line_grants_idle(*episode.cold_physical)',
+             'false', 'cold refetch preceded old Grant completion'),
+            ('wrong_cold_data', 'episode.cold_expected = oracle.scalar_load(cold);',
+             'episode.cold_expected = oracle.scalar_load(cold) ^ 1U;',
+             'expected value disagreed with independent input byte history'),
+        )
+        for name, old, new, diagnostic in mutations:
+            self.assertEqual(self.source.count(old), 1)
+            mutated = self.source.replace(old, new)
+            if name == 'early_cold_refetch':
+                mutated = mutated.replace('!episode.old_quiet_since && environment.dcache_line_grants_idle(*episode.cold_physical)',
+                                          '!episode.old_quiet_since')
+            binary = self.compile(mutated, name)
+            detected = None
+            for seed in range(1, 65):
+                result = subprocess.run([str(binary), 'recovery', str(seed), '1', '0', '32', '1000', '1000'],
+                                        capture_output=True, text=True, timeout=10)
+                if result.returncode:
+                    self.assertIn(diagnostic, result.stderr)
+                    detected = dict(rejected=True, seed=seed, reason=result.stderr.strip())
+                    break
+            self.assertIsNotNone(detected, name + ' escaped the independent cold checker')
+            self.mutations[name] = detected
 
     def test_recovery_seed_replay_and_short_budgets(self):
         for limit in (0, 1, 2, 3, 7, 8, 31):
@@ -331,7 +431,7 @@ class MixedStreamTest(unittest.TestCase):
 
     def test_real_constraint_presets_rate_boundaries_and_serialization(self):
         result = self.run_fixture('constraints')
-        self.assertEqual(result, {'presets': 4, 'boundary_overrides': 8, 'out_of_range_rejections': 4})
+        self.assertEqual(result, {'presets': 4, 'boundary_overrides': 16, 'out_of_range_rejections': 8})
         type(self).constraint_case = result
 
     def test_actual_execute_interleaves_serial_work_and_conserves_budgets(self):

@@ -292,18 +292,42 @@ committed-byte observation; no fake per-episode readback is recorded.
 An older ordinary prefix retains its actual head and all obligations across the
 graph's anchor, operand waits, redirect and strict refetch. Prefix STD and replay
 progress remain schedulable. No unrelated younger instruction is admitted into
-the killed suffix. All graph loads complete before each overlapping STA; return
-at observed+2 and refetch the whole suffix strictly after pointer/filter recovery.
+the killed suffix. Every warm graph load completes before an overlapping STA;
+the optional youngest cold role remains held and pending through the first
+redirect. Return at observed+2 and refetch the whole suffix strictly after
+pointer/filter recovery.
 Observed LQ cancellations alone rewind allocation; prefix SQ dequeue may advance
 up to, but never cross, the first graph allocation boundary before anchor release.
-Zero SQ and explicit scalar-load cancellations are required. Conflicting STAs
+SQ cancellation is forbidden; explicit scalar cancellation is limited to the
+one selected cold initial execution. Conflicting STAs
 are eligible only at a non-store actual head or the nonmemory anchor, retaining
 `pendingst=false` across redirect return. This bounded restriction avoids claiming
 unmodeled registered pending-store suppression or arbitrary full-ROB walk timing.
 The external initially-unassigned predictor/producer premise also requires a
 compatible prefix history; dynamic SSIT/LFST/rename history and an executable
-full-CPU wall-clock witness remain unqualified. Unfinished graph roles and broad
-late-response overlap inside the sliding stream remain open.
+full-CPU wall-clock witness remain unqualified.
+
+A selected cold physical line has no accepted A covering any byte, no explicit
+reference bytes and no older admitted input-store bytes in the stream overlay.
+The hold is armed before another tick. This excludes pending committed and
+uncommitted store forwarding without a SBuffer drain. The cold expected value is
+frozen independently of the graph's warm-line epoch image; class and destination
+remain unchanged. Read materialization and lazy initial definitions do not count
+as explicit writes. Older loads/prefetches may share its refill.
+
+Retain its strict expectation throughout all three redirect-return ticks. Require
+a positive observed LQ cancellation and exact still-pending cold identity, then
+cancel at that same boundary before another tick. Later old RF/FP writeback is
+unexpected. Release after filter recovery and a seeded 0..7-cycle gap, retaining
+prefix producer/replay/retirement eligibility. Wait only for the target-line
+cacheable Acquire/Grant lifecycle, including pending acquires, held responses
+and both final D and E, then observe 32 quiet cycles before same-identity
+refetch. An accepted target-line A history change restarts quiet time, including
+a successor lifecycle wholly inside a multi-tick prefix helper between idle
+samples. This checks bounded late-response behavior; it does not prove universal
+pipeline emptiness. Every later cold refetch completes strictly. Broader
+unfinished overlap, early-release races and arbitrary younger classes remain
+open.
 
 ### Scalar completion details
 

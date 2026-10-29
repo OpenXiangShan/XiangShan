@@ -44,8 +44,16 @@ None.
   resumes ordinary admission without queue/SBuffer/D/E drains, while graph
   destinations remain reserved through retirement. Execution resolution and
   final global committed-word observation stay separate; the isolated helper
-  still requires its terminal readback. Unfinished sliding loads, store-headed
-  redirect/walk levels and full producer/predictor/rename timing remain gaps.
+  still requires its terminal readback. Schema 69 adds a conditional youngest
+  unfinished cold scalar/FP role. Freshness excludes accepted A coverage across
+  its physical line, explicit reference writes and older input-store bytes,
+  retaining prefix progress without a SBuffer drain. Its strict expectation
+  survives redirect propagation and cancels only at the exact positive observed
+  LQ boundary. Target-line Grant completion requires both final D and E; accepted
+  request history restarts the 32-cycle quiet interval even if a successor
+  lifecycle completes between scheduler polls. Every later cold execution
+  strictly completes. Broader unfinished overlap, store-headed redirect/walk
+  levels and full producer/predictor/rename timing remain gaps.
 
 - Ordinary scalar dependency traffic varies 1..4 older stores, 1..3 younger
   loads and an optional younger store, sampling ready STA, STD and load events.
@@ -123,8 +131,8 @@ None.
   response drains with no old writeback before same-identity suffix refetch.
   Schema 66 separates initial completions/cancellations, unavailable fresh-line
   attempts and strict cold refetches. Full producer timing, dynamic SSIT/LFST and
-  rename history, broader unfinished overlap and unresolved sliding admission
-  remain gaps.
+  rename history, broader unfinished overlap and arbitrary younger admission
+  across sliding redirects remain gaps.
 - Ordinary and segment indexed operands now vary bounded offset spacing,
   permutation and repeated gathers. Each instruction generates one complete
   architectural index vector before CPU-compatible uop slicing. Scatters use
@@ -261,12 +269,13 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 442 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 459 tests pass | Unit checks do not establish DUT functional coverage |
 | Ordinary sliding mixed DUT qualification | Frozen runtime-v1: 22/22 accepted finite seeds pass 11776 actions; all seven retained artifact verifiers accept; 8/8 adjacent directed cases pass | `build/memblock/ordinary-scheduling-20261029/qualification-v3.json`; unmodified short spec/coverage/corner plus stream-only and legacy controls. 138 epochs, 2584 retired stream instructions, 1569 accepted-overlap admissions, 1988 continued admissions, 809 replay issues, 959/1406 admission/producer choices with a completed head, 61 legacy windows and 5394/5394 final words. Development qualification only. Two CMO-stress controls lack terminal acceptance at 240s; previous-runtime seed 1 also times out with progress. Those controls remain excluded |
 | Ordinary stream mechanisms | Fourteen compiled scheduler tests pass: 384 executor runs and 288 execute-budget runs; fixed eight-load/eight-producer population has 64 distinct schedules in 64 seeds; 12 exact seed replays; three private scheduling faults detected | `build/memblock/ordinary-scheduling-20261029/scheduler-tests/report-v2.json`; signatures omit address/payload/cycle/delay. Synthetic ports/completion times, Bare translation and representative vector shapes. Six byte-overlay and eight schema-accounting tests pass; independent review additionally rejects premature retirement |
-| Retained-prefix stream recovery DUT | Frozen runtime-v1: 42/42 finite seed cases pass 15360 actions; ten artifact verifiers accept; 8/8 adjacent directed cases pass | `build/memblock/stream-recovery-20261029/qualification-v2.json`; forced/control/conflict/FP, indexed-vector-heavy prefixes and unmodified spec/coverage/corner plus disabled control. 423 episodes, 282 returned rounds, 375 strict refetches, 28 observed LQ cancellations, 147 invalidated FP checks, 187 accepted-prefix starts, 705 prefix retirements, 561 post-release admissions, 7918/7918 final words. Store/load counts and rounds reach four; victim ages 0..3 occur. Development qualification only |
-| Recovery executor and ledger | 17 scheduler tests pass, including 192 recovery executor cases/293 episodes with independent scalar byte checks; four recovery faults detected. Five execution-ledger tests retain isolated readback gating and reject 48 shared invalid transitions per ledger type | `build/memblock/stream-recovery-20261029/scheduler-tests/report-v3.json`, `epoch-ledger/verification.json`; wrong deadline, missing LQ rewind, changed destination and stale prefix snapshot reject. Synthetic timing/ports and stubbed replay, Bare translation only; no RTL mutation claim. Invalid-constructor ASan overflow is fixed and independently classed as UT helper safety |
-| Recovery sparse accounting | 16 tests pass: 15740 explicit histories and 192 aggregate populations; independent replay accepts 29403 extra structural pairs | `build/memblock/stream-recovery-20261029/accounting-v3.log` and `accounting-tests/independent-checker-v2.json`; full suffix, victim/load and round/store capacities, FP class, disabled/legacy and uint64 bounds. Marginal necessary bounds do not reconstruct every joint history |
+| Retained-prefix stream recovery DUT | Frozen runtime-v2: 42/42 finite seed cases pass 16384 actions; ten artifact verifiers accept; 10/10 adjacent native directed cases pass | `build/memblock/unfinished-stream-20261029/qualification-v2.json`; forced/conflict/FP, disjoint, cold/parent-disabled, indexed prefixes and unmodified spec/coverage/corner. 385 episodes, 423 returned rounds, 671 strict suffix refetches and 164 observed LQ cancellations. All 109 held cold roles cancel explicitly and drain old responses, then strictly refetch 174 times; 43 cold roles are FP. Old-response phases retain one prefix producer selection and 25 prefix retirements. All 8336 tracked final words are observed. No fresh-line shortage sampled in DUT; unmodified short spec samples no cold role. Development qualification only |
+| Recovery executor and ledger | 22 scheduler tests pass, including 192 completed-recovery executor cases and 128 cold-enabled cases with 55 actual cold roles; independent scalar byte/state checks, strict cancellation and Grant/quiet boundaries | `build/memblock/unfinished-stream-20261029/fixture-tests/report-v6.json`; same eight-load population has 64 structural schedules in 64 seeds, excluding address/payload/cycle/delay. Four cold faults, a line-base-only freshness fault and a missed-successor-history fault reject. Narrow prior-A, explicit-byte shortage, disjoint/disabled and seed replay controls pass. Synthetic timing/ports, stubbed replay, Bare translation; no full-CPU timing or RTL mutation claim. Shared ledger retains isolated terminal-readback gating |
+| Recovery sparse accounting and lifecycle | 34 stream accounting tests pass; schema69 adds 6408 explicit cold execution histories and 160 mixed aggregates; eight manager lifecycle cases pass and nine private query faults reject | `build/memblock/unfinished-stream-20261029/accounting-tests/`, `line-grants/query-mutation-results.json`; initial strict completions plus canceled cold roles equal initial loads, and invalidated completed executions plus cold cancellations equal strict refetches. A selected first round requires a completed warm victim. Class/shape/suffix, disabled/schema68 and uint64 checks remain sparse necessary bounds, not full joint-history reconstruction. Per-line Acquire/Grant readiness includes pending acquires, holds and both D/E completion orders while unrelated lines stay active |
+| Integrated recovery oracle sensitivity | Two private C++ faults linked to the unchanged frozen DUT model reject; matching golden seed1 passes | `build/memblock/unfinished-stream-20261029/dut-oracle-faults-v2/verification.json`; wrong cold-refetch data fails the strict scalar comparison and omitted initial cancellation fails the surviving-prefix obligation. Private UT/controller sensitivity, not RTL mutation or CPU bug evidence |
 | Scalar dependency interleaving | Frozen runtime-v1: 10/10 finite seeds pass 4608 actions; all artifact verifiers accept | `build/memblock/dependency-interleave-20261029/qualification-v1.json`; focused/translated mixed/spec/corner. 759 dependency windows, 546 accepted early loads, 269 with overlapping older STD unissued, 35 with multiple, 146 heterogeneous windows and 5465/5465 final tracked words. Known older addresses; no arbitrary unresolved-address or closure claim |
 | Dependency scheduler mechanics | Four compiled generator/oracle/accounting tests pass; private checks detect store-then-load, missing-STA-prerequisite, lost-event and duplicate-event mutants | `build/memblock/dependency-interleave-20261029/method-tests/verification.json`; actual generator and byte overlay, independent event invariants and sparse schema-61 accounting. Synthetic opportunity counts do not establish DUT timing |
 | Dispatch/retirement helpers | 17 compiled production-method tests pass, including five stream head/query/replay cases; prior independent helper review detects ten private mutations | `build/memblock/retirement-contract-20261029/review-v2/report.md`; real scoreboards/queue accounting with synthetic scheduling/ports. No full-CPU reachability or RTL-mutation claim |
@@ -354,20 +363,21 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
-Fresh-context non-author review accepts the retained-prefix stream recovery
-implementation at `build/memblock/stream-recovery-20261029/review-v3.hashes.json`,
-with no unresolved blocking findings. Its medium-severity artifact finding is
-resolved: graph role counts must fit the observed maximum live instructions.
-The reviewer passes 17 scheduler, seven byte-oracle, five execution-ledger and
-16 accounting tests, rejects four additional private faults (removed non-store
-head guard, premature anchor, omitted suffix member and wrong epoch image), and
-passes 192 additional FP boundary cases. It independently replays all ten
-artifact verifiers and recounts 42 cases/15360 actions, 423 resolved episodes,
-375 refetches and 7918/7918 final words. Report and primary disposition are
-`review-v1/independent-review.txt` and `review-disposition.json` in that artifact
-root. Full CPU timing/predictor/rename history, unfinished sliding recovery,
-store-headed redirect adaptation and per-entry LQ survival remain unqualified;
-no closure or CPU RTL bug is claimed.
+Fresh-context non-author review accepts schema69 retained-prefix unfinished-load
+recovery for bounded development qualification, with no open blocking findings.
+The medium temporal-witness finding is resolved: counted accepted-A history
+restarts quiet time when a complete same-line successor occurs between idle
+polls inside a multi-tick prefix helper. Independent narrow-Get freshness and
+missed-successor faults reject. The reviewer verifies all 174 source snapshot
+hashes, ten post-fix campaign artifacts and five frozen-runtime hashes, and
+rechecks all 42 records/16384 actions, 109 cold cancellations/drains, 174 strict
+cold refetches and 8336/8336 final words. It inspects 459 passing unit tests and
+22 passing production-executor fixture tests. Report and primary disposition are
+`build/memblock/unfinished-stream-20261029/review-v2/independent-review.md`
+and `review-disposition.json` in its parent. Full CPU timing/predictor/rename
+history, broader unfinished overlap, store-headed redirect adaptation and
+universal stale-response exclusion remain unqualified. No closure or CPU RTL
+bug is claimed.
 
 Fresh-context non-author review accepts bounded unfinished-load cancellation,
 late-response draining, strict suffix refetch and schema-66 accounting against
@@ -388,7 +398,8 @@ and `provenance-v3.json` in its parent. Fresh-line shortages were covered only
 by helpers/surrogate, with none sampled by these DUT cases. The D/E drain and
 32-cycle quiet interval qualify this ordinary aligned cacheable witness; they
 are not a universal pipeline-empty or arbitrary-late-result proof. Broader
-unfinished/early-release overlap, unresolved sliding admission, dynamic
+unfinished/early-release overlap beyond the bounded integrated role, arbitrary
+younger admission across redirects, dynamic
 predictor/rename histories and full-CPU producer timing remain outside approval.
 
 Fresh-context non-author review accepts the bounded ordinary stream's ready
@@ -401,7 +412,7 @@ impossible records; a private premature-retirement mutation is rejected by the
 independent completion checker. Review and primary disposition are
 `review-v1/review-verdict.txt` and `review-disposition.json` in that artifact root.
 The actual byte oracle and commit helpers retain their earlier bounded contract.
-Full rename/source history, unresolved sliding recovery, complete CPU timing
+Full rename/source history, broader mixed-class sliding recovery, complete CPU timing
 reachability and closure remain outside approval.
 
 Fresh-context non-author review approves the ordinary scalar ready-event
@@ -442,8 +453,9 @@ vary producer counts/ages and ready-event schedules, with sliding admission and
 random placement among serial helpers. The separate unresolved graph supports
 multiple older stores/loads, surviving load prefixes and whole-suffix recovery,
 including one youngest unfinished cold role with observed cancellation and old
-response drain. Broader unfinished overlap, unresolved sliding admission, epoch
-drains and broader address dependencies
+response drain. Integrated recovery now retains the older mixed prefix with a
+youngest cold role and per-line lifecycle checks. Broader unfinished overlap,
+arbitrary younger admission across redirects, epoch drains and broader address dependencies
 remain normal-workload priorities.
 Builder samples do not establish unique complete-run DUT schedules or guarantee
 a design bug.

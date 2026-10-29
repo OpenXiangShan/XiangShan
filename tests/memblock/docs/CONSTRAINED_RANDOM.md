@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=68`.
+`constraint_schema=69`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -75,6 +75,7 @@ they do not imply arbitrary numeric suffix support.
 | `locality-hot`, `locality-warm`, `locality-cold` | Relative address-pool choices for helpers using locality. |
 | `concurrent` | Rate allocating the mixed concurrency action budget, subject to the serial reservation capped at half the initial available budget. |
 | `concurrent-stream` | Rate selecting a variable ordinary mixed stream instead of a fixed heterogeneous window at an eligible concurrency site. Default 750 in all presets; 0 preserves the legacy prefix schedule, 1000 selects streams only. A residual budget below seven actions always uses a stream when enabled. |
+| `stream-unresolved-inflight` | Conditional conflicting stream-graph rate, default 250 in all presets, selecting one youngest held cold scalar/FP role when at least two load slots fit. Requires a same-page physical line without accepted A coverage, explicit reference bytes or older admitted store bytes. Unavailable attempts retain the completed-load path; zero disables selection. |
 | `stream-unresolved` | Conditional rate (default 125 in all presets) replacing an eligible scalar-store admission with a variable unresolved-store/scalar-load graph inside the same sliding stream. Needs at least two remaining live/budget slots and actual LQ/SQ capacity. Zero disables it; `scalar-unresolved-conflict` controls conflict/control geometry. |
 | `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
 | `translation-switch` | Rate for resampling the translation context after required context/leaf/fence observations. |
@@ -225,6 +226,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | `concurrent` | 1000 | 100 | 500 | 0 |
 | `concurrent-stream` | 750 | 750 | 750 | 750 |
 | `stream-unresolved` | 125 | 125 | 125 | 125 |
+| `stream-unresolved-inflight` | 250 | 250 | 250 | 250 |
 | `special-concurrent` | 500 | 20 | 750 | 0 |
 | `translation-switch` | 500 | 1 | 750 | 500 |
 | `tlb-flush` | 50 | 20 | 100 | 50 |
@@ -418,8 +420,9 @@ stores. Prefix store addresses must be known before graph loads issue; prefix
 STD, vector replay and completed-prefix retirement remain schedulable during
 all graph waits. No episode queue/SBuffer/D/E drain is inserted.
 
-Every graph load initially strictly completes. Randomized graph operand events
-then reveal addresses and consume STD independently; a successful overlapping
+All warm graph loads initially strictly complete; an optional youngest cold role
+remains pending as described below. Randomized graph operand events then reveal
+addresses and consume STD independently; a successful overlapping
 STA must name its oldest completed overlapping scalar/FP victim. Return the
 exact current ROB/FTQ/RVC identity at observed+2, inhibit enqueue through the
 redirect/filter recovery interval, rewind only the observed LQ cancellation,
@@ -429,8 +432,9 @@ promoted before refetch; its planned event is consumed once. All unrelated
 prefix obligations remain live. Conflicting STA events wait until the actual
 head is a non-store or the anchor; this avoids extending the current adapter's
 unqualified store-headed redirect `pendingst` behavior. Prefix SQ dequeue is
-legal up to the first graph allocation boundary; graph dequeue and all SQ or
-scalar-load cancellation are forbidden. All graph operands and current epochs
+legal up to the first graph allocation boundary; graph dequeue and all SQ cancellation are forbidden. Scalar scoreboard
+cancellation is limited to the selected initial cold role at its exact observed
+redirect boundary. All graph operands and current epochs
 must complete and the expected redirect count stay stable before the anchor
 releases. Ordinary admission resumes while graph instructions can still be live;
 only original architectural instructions retire/count as actions. Invalidated
@@ -438,8 +442,35 @@ strict FP executions add to origin 1 checks, preserving one format choice per
 instruction. The global committed-word readback observes final bytes; the
 execution-only ledger does not claim an isolated episode readback.
 
-Unfinished graph loads within the sliding stream, arbitrary younger-class
-cancellation, full rename/producer wall-clock history, atomics/CMO,
+`stream-unresolved-inflight` selects a same-page line in seeded rotating order.
+Every byte must lack accepted physical A coverage and explicit reference-memory
+writes; the stream's input overlay must also contain no older store in the line.
+These conservative exclusions avoid committed SBuffer forwarding and uncommitted
+prefix-store forwarding without draining either. Lazy initial definitions and
+read materialization are distinct from explicit writes. Arm the per-line hold
+before any further tick. The selected load retains its frozen independent bytes
+and integer/FP class through all executions. Older loads or prefetches may merge
+with the held request; no unique A ownership is asserted.
+
+The cold expectation remains strict throughout redirect propagation. At the
+just-observed positive LQ cancellation boundary, cancel exactly that still-pending
+scalar obligation before any further tick. Observed LQ cancellations may include
+completed warm suffix entries as well, and alone determine cursor rewind. Keep
+the response held through filter recovery and a random 0..7-cycle release gap.
+Release is a ready event; prefix producers, replay and retirement remain eligible
+while the old target-line Acquire/Grant lifecycle completes through both final D
+and E. Then observe 32 quiet cycles before registering any same-identity strict
+refetch. Accepted target-line A history restarts the interval even when a
+successor Acquire/Grant completes inside a multi-tick prefix helper between idle
+observations. Other lines need not become idle. This is a bounded old-writeback witness,
+not proof that every CPU pipeline stage is empty. Every later cold execution must
+complete strictly; only its first initial execution may cancel. Initial strict
+completions plus cold cancellations equal admitted graph loads. Strict refetches
+equal invalidated completed executions plus initial cold cancellations. Every
+selected first round also refetches an older completed warm victim.
+
+Broader unfinished graph overlap, arbitrary younger-class cancellation,
+full rename/producer wall-clock history, atomics/CMO,
 segment/fault instructions and NC/MMIO within this stream remain outside it.
 Legacy windows still provide optional clean NC/MMIO overlaps.
 
@@ -586,6 +617,7 @@ Array order and sampling code are authoritative in
 | `stream_ops`, `stream_issue`, `stream_vector_uops`, `stream_scalar_retries` | Retired instruction counts in the same five-class order; initial scalar-load/STA/STD/vector-load-uop/vector-store-uop/prefetch issues; admitted vector-load/store uops; repeated STA issues excluded from initial counts. Schema 62 requires conservation and bounds in both verifier modes without a positive-bin gate. The opt-in strict checker retains minimum epoch/action/overlap observations for a stream-only configuration. |
 | `stream_waiting_head` | Schema 67: admission and operand/uop event selections while the oldest architectural instruction is complete and eligible to retire. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
 | `stream_recovery` | Schema 68: started windows, conflict windows, controls, graph stores/loads admitted, initial strictly checked loads, returned rounds, invalidated completed executions, strictly checked refetches, graph stores/loads retired, starts with accepted pending prefix, prefix retirements during the barrier, ordinary admissions after release with graph roles live, observed LQ cancellations, invalidated FP executions, maximum stores/loads/rounds, resolved windows. Refetch executions do not add architectural initial issue/action counts. Both verifier modes enforce sparse conservation, suffix/capacity/shape and emitter-domain bounds, including graph-role counts versus the observed maximum live instructions. |
+| `stream_recovery_inflight` | Schema 69: attempts, unavailable fresh lines, selected cold roles, observed held initial roles, explicit initial cancellations, target old Grant drained plus quiet completion, strict cold refetch completions, selected FP cold roles, release-gap sum, and prefix producer/retirement selections during release/drain phases. Sparse runs require conservation without nonzero coverage gates. |
 | `stream_recovery_shapes`, `stream_recovery_victims` | Store-count 1..4, load-count 1..4 and round-count 0..4 histograms; per-round victim ages 0..3. Marginals support necessary bounds only; they do not reconstruct every joint history. |
 | `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
@@ -815,7 +847,8 @@ The verifier checks necessary uint64, window/unique-load/epoch/peak, suffix,
 knowledge, data, predictor, cancellation and movement bounds without positive
 sparse-bin gates. It does not reconstruct full joint histories.
 
-General unfinished cancellation/late-completion overlap, general unfinished sliding recovery,
+General unfinished cancellation/late-completion overlap beyond the one youngest
+cold role in isolated and integrated sliding graphs,
 arbitrary trained-predictor states, full rename history and cycle-accurate
 producer/frontend timing remain gaps. A timeout is not an RTL liveness proof.
 
@@ -973,7 +1006,8 @@ contiguous-PA results against production scoreboards.
   provisional loads, exact oldest-victim selection, surviving prefix, repeated whole-suffix
   refetch and disjoint-mask controls. A conditional youngest held cold role adds
   explicit observed cancellation and old-response drain before refetch. Broader unfinished
-  cancellation, sliding unresolved admission and dynamic predictor training remain
+  cancellation beyond the bounded integrated cold role, arbitrary younger-class
+  admission across redirects and dynamic predictor training remain
   absent. Unbounded mixtures, arbitrary dependency/rename histories,
   multiple CMO/atomic ordering, cross-hart reservations, arbitrary fault overlap, and broad reset
   injection are not provided by these constraints.
@@ -1011,7 +1045,9 @@ while younger work remains live. They are randomly placed among serial helpers;
 `concurrent-stream=0` retains the fixed prefix for reproduction. Dedicated
 compiled executor tests measure schedules without payload/address/delay fields.
 The highest remaining ordinary-workload limitations are epoch/context drains,
-conservative older-address readiness and isolated completed-load recovery graphs.
+conservative older-address readiness and bounded recovery graphs. Integrated
+recovery retains the ordinary prefix and permits one unfinished youngest cold
+role; it still blocks unrelated younger admission until graph resolution.
 Dependency windows also vary counts and interleave independent operand halves
 with loads after older addresses resolve. Canonical FP formats now participate in ordinary,
 heterogeneous, SQ dependency and unresolved/refetch traffic with independent
@@ -1019,7 +1055,7 @@ boxing/data checks. The unresolved direction interleaves 1..4 older store operan
 varies 1..4 younger load issue permutations and victim age, and refetches the
 whole invalidated suffix at each conflicting STA, with visible/hidden writer
 versions and earlier/equal/later victims. Prioritize broader unfinished cancellation
-within sliding traffic and broader temporal/address dependencies; broader
+beyond the bounded youngest role and broader temporal/address dependencies; broader
 FP helper and exceptional-misalignment combinations remain open.
 Broader temporal locality/dependent-address streams and scalar/vector SQ
 forwarding follow these. Rare error/protection/CMO crosses remain secondary.

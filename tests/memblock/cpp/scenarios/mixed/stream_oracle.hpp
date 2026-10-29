@@ -11,6 +11,11 @@ class StreamByteOracle {
 public:
     explicit StreamByteOracle(const memblock::SparseMemory &base) : base_(base) {}
 
+    bool has_store_in_line(std::uint64_t physical_address) const
+    {
+        return store_lines_.count(physical_address & ~std::uint64_t{63}) != 0;
+    }
+
     std::array<unsigned char, 64> line_snapshot(std::uint64_t base,
         const std::shared_ptr<const memblock::ReferencePageMap> &pages = {})
     {
@@ -133,6 +138,7 @@ private:
 
     void overlay(std::uint64_t address, unsigned char value)
     {
+        store_lines_.insert(address & ~std::uint64_t{63});
         image_.write_reference_byte(address, value);
         known_.insert(address);
     }
@@ -140,6 +146,7 @@ private:
     const memblock::SparseMemory &base_;
     memblock::SparseMemory image_;
     std::set<std::uint64_t> known_;
+    std::set<std::uint64_t> store_lines_;
 };
 
 } // namespace memblock::scenarios::mixed

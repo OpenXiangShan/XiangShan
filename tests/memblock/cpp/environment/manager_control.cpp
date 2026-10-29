@@ -202,6 +202,11 @@ auto Environment::Impl::hold_dcache_response_at(std::uint64_t address)  -> void
     memory_agent_.hold_response_at(address);
 }
 
+auto Environment::Impl::dcache_line_grants_idle(std::uint64_t address) const -> bool
+{
+    return memory_agent_.line_grants_idle(address);
+}
+
 auto Environment::Impl::dcache_response_held() const -> bool
 {
     return memory_agent_.response_held();

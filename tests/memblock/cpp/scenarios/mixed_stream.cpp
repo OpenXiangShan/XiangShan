@@ -67,6 +67,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     std::optional<StreamRecovery> recovery;
     auto expected_violations = environment.memory_violation_stats().count;
     auto &recovery_counts = coverage.stream_recovery;
+    auto &inflight = coverage.stream_recovery_inflight;
     auto last_progress = environment.cycle();
     const auto deadline = environment.cycle() + std::uint64_t{length} * constrained_completion_timeout * 4U;
     const auto start_action = actions;
@@ -122,8 +123,43 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         episode.plan = make_unresolved_store_graph(random,
             constraints.scalar_unresolved_conflict_per_mille, constraints.scalar_load_policy(),
             std::min({4U, slots - 1U, sq_capacity}));
+        const unsigned load_capacity = std::min({4U, slots - unsigned(episode.plan.stores.size()), lq_capacity});
+        if (episode.plan.conflict && load_capacity >= 2 &&
+            random() % 1000U < constraints.stream_unresolved_inflight_per_mille) {
+            ++inflight[0];
+            const auto pages = reference_pages_for(episode.base);
+            const unsigned first = random() % 64U;
+            for (unsigned step = 0; step < 64; ++step) {
+                const auto address = (episode.base & ~std::uint64_t{4095}) + ((first + step) % 64U) * 64U;
+                const auto physical = pages ? pages->physical_address(address) : address;
+                if (address == episode.base || oracle.has_store_in_line(physical)) continue;
+                bool prior_effect = false;
+                for (unsigned byte = 0; byte < 64 && !prior_effect; ++byte)
+                    prior_effect = environment.memory().has_explicit_byte(physical + byte) ||
+                        environment.dcache_requests_covering_since(physical + byte, 0) != 0;
+                if (prior_effect) continue;
+                episode.cold_address = address;
+                episode.cold_physical = physical;
+                environment.hold_dcache_response_at(physical);
+                break; // Arm the hold before another DUT tick or prefetch.
+            }
+            inflight[1] += !episode.cold_address;
+        }
         episode.group = make_unresolved_load_group(random, episode.plan, constraints.scalar_load_policy(),
-            std::min({4U, slots - unsigned(episode.plan.stores.size()), lq_capacity}));
+            load_capacity, episode.cold_address.has_value());
+        if (episode.cold_address) {
+            const auto &shape = episode.group.loads.back();
+            *episode.cold_address += (random() % (64U / shape.width())) * shape.width();
+            memblock::LoadTransaction cold;
+            cold.address = *episode.cold_address;
+            cold.reference_pages = reference_pages_for(cold.address);
+            cold.op = static_cast<memblock::LoadOp>(shape.op);
+            cold.fp_wen = shape.fp;
+            cold.rf_wen = !shape.fp;
+            episode.cold_expected = oracle.scalar_load(cold);
+            ++inflight[2];
+            inflight[7] += shape.fp;
+        }
         // This includes unretired ordinary prefix inputs, never DUT/cache data.
         const auto snapshot = oracle.line_snapshot(episode.base, reference_pages_for(episode.base));
         distinguish_unresolved_epochs(episode.plan, episode.group, snapshot);
@@ -146,6 +182,39 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         ++coverage.stream_recovery_shapes[4U + episode.group.loads.size() - 1U];
     };
 
+    const auto prepare_refetch = [&]() {
+        auto &episode = *recovery;
+        const unsigned victim = episode.refetch_victim;
+        reset_unresolved_ftq_suffix(episode.loads, victim);
+        for (unsigned index = victim; index < episode.loads.size(); ++index) {
+            auto &load_work = graph_work(index, false);
+            const bool initially_canceled = episode.rounds == 1 && episode.group.unfinished && index == *episode.group.unfinished;
+            if (pending(load_work) || (!initially_canceled && !load_work.checked)) return false;
+            if (!initially_canceled) {
+                // Each invalidated completed execution was strictly checked.
+                // The final execution is sampled at architectural retirement.
+                coverage.sample(load_work.load);
+                coverage.sample_fp_load(load_work.load, load_work.expected_scalar, 1);
+                recovery_counts[15] += load_work.load.fp_wen;
+                ++recovery_counts[7];
+            }
+            auto &load = episode.loads[index];
+            load.lq = memblock::lq_pointer_value(lq_offset);
+            load.lq_flag = memblock::lq_pointer_flag(lq_offset++);
+            load.store_set_hit = episode.trained[index];
+            load_work.load = load;
+            load_work.expected_scalar = episode.expected(index);
+            load_work.issued[0] = load_work.checked = false;
+            load_work.refetch = true;
+            environment.expect_load_data(load_work.load, load_work.expected_scalar);
+            if (!environment.enqueue_load(load_work.load)) return false;
+        }
+        episode.phase = StreamRecovery::Phase::refetch;
+        episode.issue = 0;
+        episode.ready_cycle = environment.cycle() + episode.issue_delays().front();
+        return true;
+    };
+
     const auto retire_head = [&]() {
         auto &work = live.front();
         for (const auto &uop : work.vectors) {
@@ -154,7 +223,10 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         }
         coverage.stream[5] += live.size() > 1;
         if (work.recovery_id) ++recovery_counts[work.kind == 2 ? 9U : 10U];
-        if (recovery) ++recovery_counts[12];
+        if (recovery) {
+            ++recovery_counts[12];
+            inflight[10] += recovery->old_response_active();
+        }
         if (work.kind == 2 && !environment.commit_store(work.store, constrained_completion_timeout)) return false;
         if (work.kind == 3) for (const auto &uop : work.vectors)
             if (!environment.commit_vector_store(uop, constrained_completion_timeout)) return false;
@@ -198,13 +270,17 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             auto &episode = *recovery;
             if (environment.sq_dequeued() > episode.sq_dequeue_limit ||
                 environment.sq_redirect_canceled_observed() != episode.sq_cancel_before ||
-                environment.scalar_load_redirect_canceled() != episode.scalar_cancel_before) {
+                environment.scalar_load_redirect_canceled() != episode.scalar_cancel_before + unsigned(episode.cold_canceled)) {
                 phase += ":surviving-prefix-queue-contract"; return false;
             }
             if (episode.phase == StreamRecovery::Phase::initial || episode.phase == StreamRecovery::Phase::refetch) {
                 bool complete = episode.loads.size() == episode.group.loads.size();
                 for (unsigned index = 0; index < episode.loads.size(); ++index) {
                     auto &work = graph_work(index, false);
+                    if (episode.phase == StreamRecovery::Phase::initial && episode.group.unfinished && index == *episode.group.unfinished) {
+                        complete &= work.issued[0] && environment.dcache_response_held_at(*episode.cold_physical) && pending(work);
+                        continue;
+                    }
                     if (work.issued[0] && !work.checked && !pending(work)) {
                         if (episode.phase == StreamRecovery::Phase::initial) {
                             if (!episode.obligation->provisional(index)) return false;
@@ -212,12 +288,14 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                         } else {
                             if (!episode.obligation->refetched(index, work.load)) return false;
                             ++recovery_counts[8];
+                            inflight[6] += episode.group.unfinished && index == *episode.group.unfinished;
                         }
                         work.checked = true;
                     }
                     complete &= work.checked;
                 }
                 if (complete) {
+                    inflight[3] += episode.phase == StreamRecovery::Phase::initial && episode.group.unfinished.has_value();
                     if (episode.phase == StreamRecovery::Phase::refetch && !episode.obligation->finish_round()) return false;
                     episode.phase = StreamRecovery::Phase::operands;
                     episode.ready_cycle = environment.cycle() + (episode.operand < episode.plan.after_provisional.size()
@@ -245,11 +323,28 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     }
                 }
             }
+            if (episode.phase == StreamRecovery::Phase::drain_old) {
+                const auto requests = environment.dcache_requests_covering_since(*episode.cold_physical, 0);
+                // Prefix helpers may advance many ticks. A complete successor
+                // Acquire/Grant between idle samples must restart quiet time.
+                if (!environment.dcache_line_grants_idle(*episode.cold_physical) ||
+                    (episode.old_quiet_since && requests != episode.old_quiet_requests)) episode.old_quiet_since.reset();
+                if (!episode.old_quiet_since && environment.dcache_line_grants_idle(*episode.cold_physical)) {
+                    episode.old_quiet_since = environment.cycle();
+                    episode.old_quiet_requests = requests;
+                }
+                if (episode.old_quiet_since && environment.cycle() - *episode.old_quiet_since >= 32U) {
+                    if (environment.dcache_response_held_at(*episode.cold_physical) ||
+                        pending(graph_work(*episode.group.unfinished, false))) return false;
+                    ++inflight[5];
+                    if (!prepare_refetch()) return false;
+                }
+            }
             if (episode.phase == StreamRecovery::Phase::quiet && environment.cycle() >= episode.ready_cycle) {
                 if (episode.rounds != episode.group.rounds.size() || episode.rounds != episode.obligation->rounds() ||
                     !episode.obligation->resolved() || !episode.obligation->done()) return false;
                 for (unsigned index = 0; index < episode.loads.size(); ++index)
-                    if (graph_work(index, false).expected_scalar != episode.image->expected(episode.group.loads[index])) return false;
+                    if (graph_work(index, false).expected_scalar != episode.expected(index)) return false;
                 ++recovery_counts[19];
                 recovery_counts[18] = std::max<std::uint64_t>(recovery_counts[18], episode.rounds);
                 ++coverage.stream_recovery_shapes[8U + episode.rounds];
@@ -295,6 +390,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             (!recovery || recovery->phase == StreamRecovery::Phase::admission) &&
             std::accumulate(weights.begin(), weights.end(), std::uint64_t{0}) != 0)
             ready.push_back({0, 0, 0});
+        if (recovery && recovery->phase == StreamRecovery::Phase::release_old && environment.cycle() >= recovery->ready_cycle)
+            ready.push_back({7, 0, 0});
         bool older_addresses_known = true, prefix_addresses_known = true;
         if (recovery && recovery->phase == StreamRecovery::Phase::operands &&
             recovery->operand < recovery->plan.after_provisional.size() && environment.cycle() >= recovery->ready_cycle) {
@@ -374,10 +471,16 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             continue;
         }
         const auto event = ready[random() % ready.size()];
-        if (completed_head && event.kind != 5)
+        if (recovery && recovery->old_response_active() && event.kind >= 1 && event.kind <= 4)
+            ++inflight[9];
+        if (completed_head && event.kind != 5 && event.kind != 7)
             ++coverage.stream_waiting_head[event.kind == 0 ? 0U : 1U];
         if (event.kind == 5) {
             if (!retire_head()) return false;
+        } else if (event.kind == 7) {
+            if (!environment.release_held_dcache_response_at(*recovery->cold_physical)) return false;
+            recovery->phase = StreamRecovery::Phase::drain_old;
+            recovery->old_quiet_since.reset();
         } else if (event.kind == 6) {
             auto &episode = *recovery;
             const auto operand = episode.plan.after_provisional.at(episode.operand++);
@@ -412,8 +515,18 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     const auto return_cycle = violation.last_cycle + 2U;
                     if (environment.cycle() > return_cycle ||
                         !environment.run_cycles(static_cast<unsigned>(return_cycle - environment.cycle())) ||
-                        !environment.redirect_after(episode.loads[victim].rob, episode.loads[victim].rob_flag, true) ||
-                        !episode.obligation->returned() || !environment.run_cycles(8)) return false;
+                        !environment.redirect_after(episode.loads[victim].rob, episode.loads[victim].rob_flag, true)) return false;
+                    if (episode.rounds == 0 && episode.group.unfinished) {
+                        const auto &cold = episode.loads[*episode.group.unfinished];
+                        if (environment.lq_redirect_canceled_observed() == cancel_before ||
+                            !environment.dcache_response_held_at(*episode.cold_physical) ||
+                            !pending(graph_work(*episode.group.unfinished, false)) ||
+                            !environment.cancel_scalar_load_after_redirect(cold) ||
+                            !episode.obligation->initial_canceled(*episode.group.unfinished)) return false;
+                        episode.cold_canceled = true;
+                        ++inflight[4];
+                    }
+                    if (!episode.obligation->returned() || !environment.run_cycles(8)) return false;
                     const auto canceled = environment.lq_redirect_canceled_observed() - cancel_before;
                     if (canceled > episode.loads.size() - victim || canceled > lq_offset ||
                         environment.sq_redirect_canceled_observed() != episode.sq_cancel_before ||
@@ -425,32 +538,15 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     ++recovery_counts[6];
                     ++coverage.stream_recovery_victims[victim];
                     for (unsigned index = 0; index < victim; ++index)
-                        if (graph_work(index, false).expected_scalar != episode.image->expected(episode.group.loads[index])) return false;
+                        if (graph_work(index, false).expected_scalar != episode.expected(index)) return false;
                     episode.trained[victim] = true;
-                    reset_unresolved_ftq_suffix(episode.loads, victim);
-                    for (unsigned index = victim; index < episode.loads.size(); ++index) {
-                        auto &load_work = graph_work(index, false);
-                        if (!load_work.checked || pending(load_work)) return false;
-                        // Sample the strictly completed execution being
-                        // invalidated; the final execution is sampled at retire.
-                        coverage.sample(load_work.load);
-                        coverage.sample_fp_load(load_work.load, load_work.expected_scalar, 1);
-                        recovery_counts[15] += load_work.load.fp_wen;
-                        ++recovery_counts[7];
-                        auto &load = episode.loads[index];
-                        load.lq = memblock::lq_pointer_value(lq_offset);
-                        load.lq_flag = memblock::lq_pointer_flag(lq_offset++);
-                        load.store_set_hit = episode.trained[index];
-                        load_work.load = load;
-                        load_work.expected_scalar = episode.image->expected(episode.group.loads[index]);
-                        load_work.issued[0] = load_work.checked = false;
-                        load_work.refetch = true;
-                        environment.expect_load_data(load_work.load, load_work.expected_scalar);
-                        if (!environment.enqueue_load(load_work.load)) return false;
-                    }
-                    episode.phase = StreamRecovery::Phase::refetch;
-                    episode.issue = 0;
-                    episode.ready_cycle = environment.cycle() + episode.issue_delays().front();
+                    episode.refetch_victim = victim;
+                    if (episode.rounds == 1 && episode.group.unfinished) {
+                        episode.phase = StreamRecovery::Phase::release_old;
+                        const auto gap = random() % 8U;
+                        inflight[8] += gap;
+                        episode.ready_cycle = environment.cycle() + gap;
+                    } else if (!prepare_refetch()) return false;
                 }
             }
             ++coverage.stream[8];
@@ -483,7 +579,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (work.kind == 0) {
                 const auto format = graph_admission ? ScalarLoadShape{recovery->group.loads[work.recovery_index].op,
                     recovery->group.loads[work.recovery_index].fp} : constraints.scalar_load_policy().choose(random);
-                work.load = make_load(graph_admission ? line + recovery->group.loads[work.recovery_index].offset :
+                const bool cold_role = graph_admission && recovery->group.unfinished && work.recovery_index == *recovery->group.unfinished;
+                work.load = make_load(cold_role ? *recovery->cold_address : graph_admission ? line + recovery->group.loads[work.recovery_index].offset :
                     constrained_window_address(line, 1U << (format.op & 3U)),
                     static_cast<memblock::LoadOp>(format.op), random() % memblock::kScalarLoadLanes, format.fp);
                 work.load.pdest = allocate_destination(format.fp ? 1U : 0U);
@@ -498,7 +595,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     work.load.store_set_hit = work.load.load_wait_bit = work.load.load_wait_strict = false;
                     work.load.wait_for_rob_flag = false;
                     work.load.wait_for_rob_value = 0;
-                    work.expected_scalar = episode.image->expected(episode.group.loads[work.recovery_index]);
+                    work.expected_scalar = episode.expected(work.recovery_index);
                     episode.loads.push_back(work.load);
                     ++recovery_counts[4];
                 } else work.expected_scalar = oracle.scalar_load(work.load);
@@ -562,7 +659,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             live.push_back(std::move(work)); ++admitted; ++coverage.stream[1];
             if (was_empty && !install_head()) return false;
             if (graph_admission && recovery->loads.size() == recovery->group.loads.size()) {
-                recovery->obligation.emplace(recovery->loads, recovery->stores.size());
+                recovery->obligation.emplace(recovery->loads, recovery->stores.size(), recovery->group.unfinished);
                 recovery->phase = StreamRecovery::Phase::initial;
                 recovery->ready_cycle = environment.cycle() + recovery->group.issue_delays.front();
             }

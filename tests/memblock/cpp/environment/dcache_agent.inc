@@ -1054,6 +1054,30 @@ public:
     {
         return expected_grant_acks_.empty();
     }
+    // Cacheable Acquire/Grant lifetime for one physical 64-byte line. A
+    // Grant remains live until both final D and E, in either order; armed
+    // holds also reserve the line before its A request arrives.
+    bool line_grants_idle(std::uint64_t address) const
+    {
+        const std::uint64_t line = address & ~(kLineBytes - 1U);
+        return std::none_of(
+                   pending_acquires_.begin(), pending_acquires_.end(),
+                   [line](const PendingAcquire &acquire) {
+                       return (acquire.request.address & ~(kLineBytes - 1U)) == line;
+                   }) &&
+            !line_grant_busy(line) &&
+            std::find(pending_held_response_addresses_.begin(),
+                pending_held_response_addresses_.end(), line) ==
+                pending_held_response_addresses_.end() &&
+            hold_next_response_address_ != line &&
+            building_held_response_address_ != line &&
+            std::none_of(held_responses_.begin(), held_responses_.end(),
+                [line](const HeldResponse &response) {
+                    return response.address == line;
+                }) &&
+            (!scheduled_held_response_release_ ||
+                scheduled_held_response_release_->first != line);
+    }
     bool release_channel_idle() const
     {
         const bool probe_hold = hold_c_until_probe_requests_ &&

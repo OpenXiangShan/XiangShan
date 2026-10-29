@@ -348,6 +348,56 @@ static void snapshot_prefix() {
     require(mapped == current, "snapshot ignored declared physical alias");
 }
 
+static void freshness_provenance() {
+    constexpr std::uint64_t line = 0x80008000;
+    SparseMemory bus;
+    SparseMemory base(&bus);
+    base.define_repeating_incrementing(line, 4096, 256, 0x20);
+    base.define_seeded_random(line + 4096, 4096, 0x12345678);
+    StreamByteOracle oracle(base);
+    for (unsigned offset=0; offset<8192; ++offset) {
+        (void)base.read_byte(line + offset);
+        require(!base.has_explicit_byte(line + offset), "lazy reads became explicit writes");
+    }
+    (void)oracle.line_snapshot(line);
+    (void)oracle.scalar_load(load(line + 128, 2));
+    VectorMemoryTransaction read;
+    read.address = line + 192;
+    (void)oracle.vector_load(read);
+    for (unsigned offset=0; offset<256; ++offset) {
+        require(!base.has_explicit_byte(line + offset), "oracle materialization changed base provenance");
+        require(!oracle.has_store_in_line(line + offset), "read materialization became an input store");
+    }
+    // Uncommitted input bytes exclude the full physical line without changing
+    // reference memory. Store addresses may span two lines or mapped pages.
+    oracle.store(store(line + 63, 2, 0xabcd));
+    require(oracle.has_store_in_line(line) && oracle.has_store_in_line(line + 127),
+        "split input store did not exclude both lines");
+    require(!base.has_explicit_byte(line + 63) && !base.has_explicit_byte(line + 64),
+        "input prediction masqueraded as a committed write");
+    auto alias = store(0x1008, 1, 0x67);
+    alias.oracle_address = line + 136;
+    oracle.store(alias);
+    require(oracle.has_store_in_line(line + 128) && !oracle.has_store_in_line(0x1008),
+        "store provenance used virtual instead of physical address");
+    auto vector = read;
+    vector.store = true; vector.vm = false; vector.mask_bits = 1;
+    vector.vl = 16; vector.data.fill(0x59);
+    oracle.store(vector);
+    require(oracle.has_store_in_line(line + 192), "active vector store did not exclude its line");
+    vector.address += 64; vector.mask_bits = 0;
+    oracle.store(vector);
+    require(!oracle.has_store_in_line(line + 256), "all-masked vector store excluded untouched line");
+    base.write_reference_byte(line + 321, base.read_byte(line + 321));
+    require(base.has_explicit_byte(line + 321) && !base.has_explicit_byte(line + 320),
+        "same-value committed write lost provenance");
+    base.write_byte(line + 383, 0x9a);
+    require(base.has_explicit_byte(line + 383) && bus.has_explicit_byte(line + 383),
+        "explicit initialization/mirror provenance missing");
+    require(!oracle.has_store_in_line(line + 321), "reference write invented a stream store");
+    std::cout << "freshness_provenance_bytes=8192\n";
+}
+
 static void rejection_atomicity() {
     constexpr std::uint64_t address = 0x80005000;
     SparseMemory base;
@@ -418,6 +468,7 @@ int main(int argc, char **argv) {
     else if (test == "mapped") mapped_splits();
     else if (test == "activity") vector_activity();
     else if (test == "chains") indexed_chains();
+    else if (test == "freshness") freshness_provenance();
     else if (test == "rejections") rejection_atomicity();
     else throw std::runtime_error("unknown fixture case");
 }
@@ -475,6 +526,9 @@ class StreamOracleTest(unittest.TestCase):
 
     def test_line_snapshot_includes_live_prefix_and_declared_aliases(self):
         self.check_case("snapshot")
+
+    def test_cold_freshness_distinguishes_lazy_reads_commits_and_pending_stores(self):
+        self.check_case("freshness")
 
     def test_rejected_operations_leave_bytes_and_operands_untouched(self):
         self.check_case("rejections")

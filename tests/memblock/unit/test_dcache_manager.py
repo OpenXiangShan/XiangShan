@@ -24,6 +24,14 @@ class DcacheManagerTest(unittest.TestCase):
             text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_line_grant_lifecycle_uses_manager_transaction_provenance(self):
+        for name in ("holds", "final-d-before-e", "e-before-final-d", "same-pa-pending",
+                     "recall-pending", "acquire-perm", "scope", "reset"):
+            with self.subTest(case=name):
+                result = subprocess.run([str(self.binary), "line-grants-" + name],
+                    text=True, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_alias_protocol_and_independent_epoch_data(self):
         for name in ("dirty", "branch", "same-alias-write", "release-race", "ntonn-release",
                      "early-e", "final-d-before-e", "early-e-late-d", "serial-probes", "reset",

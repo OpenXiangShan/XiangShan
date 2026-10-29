@@ -27,7 +27,7 @@ struct SyntheticEnvironment {
     };
     struct Instruction {
         unsigned kind = 0, id = 0, flows = 0, group = 0, epoch = 0;
-        bool refetch_pending = false;
+        bool refetch_pending = false, initial_cold = false, cold_canceled = false;
         LoadTransaction load;
         StoreTransaction store;
         std::uint8_t rob = 0;
@@ -40,7 +40,64 @@ struct SyntheticEnvironment {
     struct LqEntry { unsigned id, epoch, flows; bool done = false; };
     mutable std::deque<LqEntry> lq_entries;
     mutable std::uint64_t canceled_lq = 0;
-    bool recovery_enabled = false, at_anchor = false;
+    bool recovery_enabled = false, cold_enabled = false, narrow_history = false, successor_history = false, at_anchor = false;
+    std::optional<std::uint64_t> held_line, released_at, redirect_boundary;
+    std::optional<LoadTransaction> cold_snapshot;
+    std::set<std::uint64_t> requested_lines;
+    mutable std::map<std::uint64_t, std::uint64_t> request_counts;
+    mutable bool successor_recorded = false;
+    unsigned cold_cancellations = 0, cold_releases = 0, cold_refetches = 0;
+    unsigned prefix_old_producers = 0, prefix_old_retirements = 0;
+    std::uint64_t grant_idle_at = 0;
+    bool old_response_active() const { return cold_snapshot && !cold_refetches_for_epoch; }
+    bool cold_refetches_for_epoch = false;
+    std::uint64_t dcache_requests_covering_since(std::uint64_t address, std::uint64_t) const {
+        const auto line = address & ~std::uint64_t{63};
+        // A completed successor may be visible only through counted accepted-A
+        // history at the next scheduler poll, while current readiness is idle.
+        if (successor_history && released_at && cold_snapshot && !successor_recorded &&
+            tick >= grant_idle_at + 8U) {
+            ++request_counts[cold_snapshot->address & ~std::uint64_t{63}];
+            successor_recorded = true;
+        }
+        const auto found = request_counts.find(line);
+        return unsigned(narrow_history && (address & 63U) == 1U) +
+            (found == request_counts.end() ? 0U : found->second);
+    }
+    void hold_dcache_response_at(std::uint64_t address) {
+        const auto line = address & ~std::uint64_t{63};
+        require(!narrow_history, "cold hold ignored a narrow prior A");
+        require(!held_line && !requested_lines.count(line), "cold hold lacked a fresh target line");
+        held_line = line; released_at.reset(); cold_snapshot.reset(); cold_refetches_for_epoch = false;
+        trace.push_back("H");
+    }
+    bool dcache_response_held_at(std::uint64_t address) const {
+        return held_line == (address & ~std::uint64_t{63}) && requested_lines.count(*held_line);
+    }
+    bool release_held_dcache_response_at(std::uint64_t address) {
+        require(dcache_response_held_at(address) && cold_snapshot &&
+            tick >= *redirect_boundary + 8U, "cold response released before exact cancellation/filter recovery");
+        require(!expected.count(key(*cold_snapshot, 0)), "old response released with uncanceled scalar obligation");
+        held_line.reset(); released_at = tick; successor_recorded = false;
+        grant_idle_at = tick + 11U + (cold_snapshot->pdest % 9U);
+        ++cold_releases; trace.push_back("D"); return true;
+    }
+    bool dcache_line_grants_idle(std::uint64_t address) const {
+        if (held_line == (address & ~std::uint64_t{63})) return false;
+        return !released_at || tick >= grant_idle_at;
+    }
+    bool cancel_scalar_load_after_redirect(const LoadTransaction &t) {
+        require(redirect_boundary == tick && cold_snapshot.has_value(), "missed exact scalar cancellation boundary");
+        auto &work = find(t.rob, t.rob_flag);
+        require(work.initial_cold && !work.cold_canceled && work.refetch_pending &&
+            t.pdest == cold_snapshot->pdest && t.fp_wen == cold_snapshot->fp_wen &&
+            t.lq == cold_snapshot->lq && t.lq_flag == cold_snapshot->lq_flag &&
+            dcache_response_held_at(t.address) && canceled_lq,
+            "wrong or duplicate pending cold cancellation");
+        require(expected.erase(key(t, 0)) == 1 && enqueued.erase(key(t, 0)) == 1,
+            "cold obligation disappeared before explicit cancellation");
+        work.cold_canceled = true; ++cold_cancellations; trace.push_back("C"); return true;
+    }
     unsigned next_rob = 157, group_serial = 0, active_group = 0, first_graph = 0;
     std::optional<unsigned> anchor_identity;
     unsigned refetch_issues = 0, invalidated_executions = 0, surviving_prefix_redirects = 0;
@@ -79,7 +136,7 @@ struct SyntheticEnvironment {
     const Environment::MemoryViolationStats &memory_violation_stats() const { return violation; }
     std::uint64_t sq_redirect_canceled_observed() const { return 0; }
     std::uint64_t lq_redirect_canceled_observed() const { return canceled_lq; }
-    std::uint64_t scalar_load_redirect_canceled() const { return 0; }
+    std::uint64_t scalar_load_redirect_canceled() const { return cold_cancellations; }
     bool redirect_after(std::uint8_t rob, bool flag, bool itself) {
         require(recovery_enabled && itself && violation.last.rob_value == rob && violation.last.rob_flag == flag,
             "returned wrong redirect victim");
@@ -93,13 +150,21 @@ struct SyntheticEnvironment {
         unsigned offset = 0;
         for (unsigned index = victim.id; index < instructions.size(); ++index) {
             auto &work = instructions[index];
-            require(work.kind == 0 && work.group == active_group && work.uops[0].issued && tick >= work.uops[0].due,
-                "redirect canceled an unfinished or unrelated suffix");
+            require(work.kind == 0 && work.group == active_group && work.uops[0].issued,
+                "redirect canceled an unrelated suffix");
+            const bool cold = work.initial_cold && work.epoch == 0;
+            if (cold) {
+                require(!complete(work) && dcache_response_held_at(work.load.address) &&
+                    expected.count(key(work.load, 0)), "cold initial expectation was not strict through redirect");
+                cold_snapshot = work.load;
+            } else {
+                require(complete(work), "redirect canceled an unfinished warm suffix");
+                expected.erase(key(work.load, 0)); enqueued.erase(key(work.load, 0));
+                ++invalidated_executions;
+            }
             work.refetch_pending = true;
-            expected.erase(key(work.load, 0)); enqueued.erase(key(work.load, 0));
             work.load.ftq_ptr = expected_next_ftq; work.load.ftq_offset = offset;
             offset += work.load.predecode_rvc ? 1 : 2;
-            ++invalidated_executions;
         }
         for (auto it = lq_entries.begin(); it != lq_entries.end();) {
             if (it->id >= victim.id) { canceled_lq += it->flows; it = lq_entries.erase(it); }
@@ -107,6 +172,7 @@ struct SyntheticEnvironment {
         }
         trace.push_back("X" + std::to_string(victim.id));
         tick += 3;
+        redirect_boundary = tick;
         return true;
     }
     void refresh_lq() const {
@@ -121,6 +187,7 @@ struct SyntheticEnvironment {
     std::uint64_t lq_dequeued() const { refresh_lq(); return lq_done; }
     std::uint64_t sq_dequeued() const { return sq_done; }
     bool complete(const Instruction &work) const {
+        if (work.initial_cold && work.epoch == 0) return false;
         if (work.kind == 2)
             return work.address && work.data && tick >= work.address_due && tick >= work.data_due;
         if (recovery_enabled && work.kind == 0 && !work.uops.empty() && !work.uops[0].completed) {
@@ -159,6 +226,7 @@ struct SyntheticEnvironment {
             }
             if (work.is_store()) sq_done += work.flows;
             else if (!recovery_enabled) lq_done += work.flows;
+            prefix_old_retirements += old_response_active() && work.group != active_group;
             trace.push_back("R" + std::to_string(work.id));
             ++retired;
         }
@@ -269,12 +337,19 @@ struct SyntheticEnvironment {
                     t.lq_flag == lq_pointer_flag(initial_lq + lq_used - canceled_lq), "refetch used a stale LQ cursor");
                 require(expected.count(key(t, 0)) && enqueued.insert(key(t, 0)).second,
                     "refetch lacked one fresh expectation");
+                if (work.initial_cold && work.epoch == 0) {
+                    require(work.cold_canceled && released_at && tick >= grant_idle_at + (successor_history ? 8U : 0U) + 32U,
+                        "cold refetch preceded old Grant completion and bounded quiet witness");
+                    cold_refetches_for_epoch = true;
+                    ++cold_refetches;
+                }
                 work.load = t; work.refetch_pending = false; ++work.epoch;
                 work.uops[0].issued = work.uops[0].completed = false; work.uops[0].due = 0;
                 allocate(work, 1); trace.push_back("F" + std::to_string(work.id)); return true;
             }
         }
         auto &work = admit(t, 0); work.load = t; work.last_uop_seen = true; work.uops.emplace_back();
+        work.initial_cold = work.group && held_line == (t.address & ~std::uint64_t{63});
         const unsigned width = 1U << (static_cast<unsigned>(t.op) & 3U);
         work.needs_head = (t.address & 15U) + width > 16;
         scalar_domains[work.id] = t.fp_wen ? 1 : 0;
@@ -335,9 +410,10 @@ struct SyntheticEnvironment {
     }
     std::uint64_t due(const Instruction &work, unsigned uop = 0) const {
         // Completion timing does not inspect the scheduler's candidate list.
-        return tick + (latency ? 37U + ((work.id * 7U + uop * 11U) % 31U) : 3U + (work.id + uop) % 5U);
+        return tick + (cold_enabled && !work.group && (work.kind == 1 || work.kind == 3) ? 143U : latency ? 37U + ((work.id * 7U + uop * 11U) % 31U) : 3U + (work.id + uop) % 5U);
     }
     void note_producer() {
+        prefix_old_producers += old_response_active();
         issues_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
     }
     void issue(Instruction &work, unsigned index, const char *tag) {
@@ -388,6 +464,8 @@ struct SyntheticEnvironment {
     bool issue_load(const LoadTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag); check_load_age(work); check_head(work);
         if (recovery_enabled) check_scalar_value(work, t);
+        requested_lines.insert(t.address & ~std::uint64_t{63});
+        ++request_counts[t.address & ~std::uint64_t{63}];
         issue(work, 0, "L"); return true;
     }
     bool issue_prefetch(const PrefetchTransaction &t, unsigned) {
@@ -400,7 +478,9 @@ struct SyntheticEnvironment {
             for (unsigned index = work.id + 1; index < instructions.size(); ++index) {
                 const auto &load = instructions[index];
                 if (load.group != active_group || load.kind != 0) continue;
-                require(complete(load), "graph STA preceded a strict initial/refetch completion");
+                require(complete(load) || (load.initial_cold && load.epoch == 0 &&
+                    load.uops[0].issued && dcache_response_held_at(load.load.address)),
+                    "graph STA preceded a strict initial/refetch completion");
             }
         }
         if (!work.address) { work.address = true; work.address_due = latency ? due(work) : tick + 1U; ++producer_counts[work.id]; ++issues; }
@@ -445,7 +525,10 @@ struct SyntheticEnvironment {
         }
         issue(work, index, t.store ? "VS" : "VL"); return true;
     }
-    bool scalar_load_pending(const LoadTransaction &t) const { return !complete(find(t.rob, t.rob_flag)); }
+    bool scalar_load_pending(const LoadTransaction &t) const {
+        const auto &work = find(t.rob, t.rob_flag);
+        return work.initial_cold && work.cold_canceled && work.epoch == 0 ? false : !complete(work);
+    }
     bool scalar_store_pending(const StoreTransaction &t) const { return !complete(find(t.rob, t.rob_flag)); }
     bool prefetch_pending(const PrefetchTransaction &t) const { return !complete(find(t.rob, t.rob_flag)); }
     bool scalar_store_address_pending(const StoreTransaction &t) const {
@@ -508,6 +591,11 @@ struct SyntheticEnvironment {
             admissions_with_completed_head, issues_with_completed_head},
             "production completed-head choices disagreed with independent observations");
         require(coverage.stream[8] + refetch_issues == issues, "production issue count disagreed with accepted producers");
+        require(coverage.stream_recovery_inflight[2] == cold_cancellations && cold_cancellations == cold_releases &&
+            cold_releases == cold_refetches, "unfinished stream lifecycle accounting disagreed");
+        require(coverage.stream_recovery_inflight[9] == prefix_old_producers &&
+            coverage.stream_recovery_inflight[10] == prefix_old_retirements,
+            "old-response prefix scheduling accounting disagreed");
         std::array<std::uint64_t, 5> operations{};
         for (const auto &work : instructions) {
             ++operations[work.kind];
@@ -541,6 +629,7 @@ public:
         for (unsigned index = 0; index < operations.size(); ++index)
             constraints.operation_weights[operations[index]] = family == 0 ? (index == 0 ? 7 : 3) : (family == index + 1 ? 1 : 0);
         constraints.stream_unresolved_per_mille = 0;
+        constraints.stream_unresolved_inflight_per_mille = 0;
         constraints.misaligned_per_mille = 450;
         constraints.scalar_fp_per_mille = 350;
         // Decoder-legal representatives include ordinary, unordered, ordered,
@@ -637,34 +726,54 @@ int main(int argc, char **argv) {
                 auto policy = RandomConstraints::preset(name);
                 policy.validate();
                 require(policy.concurrent_stream_per_mille == 750, "preset lost default stream rate");
-                require(policy.summary().find("target_concurrent_stream=750") != std::string::npos,
-                    "default stream rate absent from serialized policy");
+                require(policy.stream_unresolved_inflight_per_mille == 250, "preset lost cold stream rate");
                 ++presets;
-                for (unsigned value : {0U, 1000U}) {
-                    policy.apply("concurrent-stream=" + std::to_string(value));
-                    policy.validate();
-                    require(policy.concurrent_stream_per_mille == value, "stream-rate override was not applied");
-                    require(policy.summary().find("target_concurrent_stream=" + std::to_string(value) + " ") != std::string::npos,
-                        "stream-rate override absent from serialized policy");
-                    ++boundaries;
+                for (const auto *field : {"concurrent-stream", "stream-unresolved-inflight"}) {
+                    for (unsigned value : {0U, 1000U}) {
+                        policy.apply(std::string(field) + "=" + std::to_string(value));
+                        policy.validate();
+                        const auto actual = std::string(field) == "concurrent-stream" ?
+                            policy.concurrent_stream_per_mille : policy.stream_unresolved_inflight_per_mille;
+                        require(actual == value, "stream-rate override was not applied");
+                        const auto target = std::string(field) == "concurrent-stream" ?
+                            "target_concurrent_stream=" : "target_stream_unresolved_inflight=";
+                        require(policy.summary().find(target + std::to_string(value) + " ") != std::string::npos,
+                            "stream-rate override absent from serialized policy");
+                        ++boundaries;
+                    }
+                    policy.apply(std::string(field) + "=1001");
+                    try { policy.validate(); }
+                    catch (const std::invalid_argument &) { ++rejected; }
+                    policy.apply(std::string(field) + "=0");
                 }
-                policy.apply("concurrent-stream=1001");
-                try { policy.validate(); }
-                catch (const std::invalid_argument &) { ++rejected; }
             }
-            require(rejected == presets, "stream rate above 1000 was accepted");
+            require(rejected == 2 * presets, "stream rate above 1000 was accepted");
             std::cout << "{\"presets\":" << presets << ",\"boundary_overrides\":" << boundaries
                 << ",\"out_of_range_rejections\":" << rejected << "}\n";
         } else if (mode == "stream" || mode == "recovery") {
-            require(argc == 6 || (mode == "recovery" && argc == 7), "stream seed/timing/family/limit required");
+            require(argc == 6 || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]));
             const unsigned limit = std::stoul(argv[5]);
             if (mode == "recovery") {
                 fixture.environment.recovery_enabled = true;
                 fixture.constraints.stream_unresolved_per_mille = 1000;
-                fixture.constraints.scalar_unresolved_conflict_per_mille = argc == 7 ? std::stoul(argv[6]) : 500;
+                fixture.constraints.scalar_unresolved_conflict_per_mille = argc >= 7 ? std::stoul(argv[6]) : 500;
+                fixture.constraints.stream_unresolved_inflight_per_mille = argc >= 8 ? std::stoul(argv[7]) : 0;
+                fixture.environment.cold_enabled = fixture.constraints.stream_unresolved_inflight_per_mille != 0;
+                if (argc == 9) {
+                    if (std::string(argv[8]) == "unavailable") {
+                        for (std::uint64_t address = 0x80010000; address < 0x80012000; ++address)
+                            fixture.environment.bytes.write_reference_byte(address, (address * 17U) >> 3U);
+                    } else {
+                        const std::string history = argv[8];
+                        require(history == "narrow-history" || history == "successor-history", "unknown freshness mode");
+                        fixture.environment.narrow_history = history == "narrow-history";
+                        fixture.environment.successor_history = history == "successor-history";
+                    }
+                }
             }
-            require(fixture.run_concurrent_stream(limit), "production stream failed: " + fixture.phase);
+            const bool completed = fixture.run_concurrent_stream(limit);
+            require(completed, "production stream failed: " + fixture.phase);
             auto &env = fixture.environment;
             env.finish(fixture.actions, fixture.coverage, fixture.constraint_coverage);
             require(fixture.actions <= limit && (limit == 0 || fixture.actions != 0), "stream violated caller instruction limit");
@@ -682,6 +791,14 @@ int main(int argc, char **argv) {
                 << ",\"surviving_prefix_redirects\":" << env.surviving_prefix_redirects
                 << ",\"checked_scalar_values\":" << env.checked_scalar_values
                 << ",\"lq_canceled\":" << env.canceled_lq
+                << ",\"cold_attempts\":" << fixture.coverage.stream_recovery_inflight[0]
+                << ",\"cold_unavailable\":" << fixture.coverage.stream_recovery_inflight[1]
+                << ",\"cold_selected\":" << fixture.coverage.stream_recovery_inflight[2]
+                << ",\"cold_canceled\":" << env.cold_cancellations
+                << ",\"old_released\":" << env.cold_releases
+                << ",\"cold_refetched\":" << env.cold_refetches
+                << ",\"old_prefix_producers\":" << env.prefix_old_producers
+                << ",\"old_prefix_retirements\":" << env.prefix_old_retirements
                 << ",\"commits\":" << env.commits << ",\"lq_allocated\":" << env.lq_used
                 << ",\"sq_allocated\":" << env.sq_used << ",\"producer_counts\":[";
             for (unsigned i = 0; i < env.producer_counts.size(); ++i) std::cout << (i ? "," : "") << env.producer_counts[i];

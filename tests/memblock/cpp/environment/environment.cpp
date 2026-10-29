@@ -609,6 +609,11 @@ auto Environment::dcache_grants_drained() const -> bool
     return impl_->dcache_grants_drained();
 }
 
+auto Environment::dcache_line_grants_idle(std::uint64_t address) const -> bool
+{
+    return impl_->dcache_line_grants_idle(address);
+}
+
 auto Environment::dcache_responses_idle() const -> bool
 {
     return impl_->dcache_responses_idle();

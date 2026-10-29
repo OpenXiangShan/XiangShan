@@ -539,6 +539,11 @@ public:
 
     bool dcache_grants_drained() const;
 
+    // Read-only physical 64-byte line's cacheable Acquire/Grant lifecycle,
+    // including armed/held responses. Other lines do not block the query;
+    // this does not establish general Get/Release or pipeline idle.
+    bool dcache_line_grants_idle(std::uint64_t address) const;
+
     bool dcache_responses_idle() const;
 
     bool dcache_release_channel_idle() const;
