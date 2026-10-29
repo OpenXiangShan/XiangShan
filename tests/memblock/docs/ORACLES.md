@@ -153,7 +153,9 @@ return it through the two backend stages at observed cycle+2. Drain redirect
 filters before another address or refetch. All older stores/snapshots survive
 with zero SQ cancellation/dequeue. Rewind LQ only by that redirect's observed
 cancellation in 0..suffix length; all completed entries may already have dequeued
-while RAW retains them. Victims can move older, remain equal or move younger.
+while RAW retains them. These zero-SQ-dequeue checks belong to the isolated
+helper; the integrated stream permits the surviving older prefix to dequeue up
+to the first graph SQ allocation boundary. Victims can move older, remain equal or move younger.
 
 Complete any pending known-address STD, consuming its later planned event only
 once, before allocating/issuing the whole invalidated suffix. Unknown-address
@@ -220,7 +222,7 @@ program-age image. Only then release A, commit stores in age order, drain and
 strictly read back every touched aligned word. Warm/live-load/readback roles
 reserve distinct numeric destinations in 1..191 when any load is FP, otherwise
 1..223. Full rename/free-list/producer timing, general unfinished/late-response
-overlap and unresolved sliding admission remain gaps. Scenario/epoch checks
+overlap within sliding traffic remain gaps. Scenario/epoch checks
 and aggregate accounting do not independently identify each surviving LQ entry.
 The mixed tail's general cancellation fixture also uses a distinct older
 non-memory branch ROB anchor after completed memory traffic; it does not assign
@@ -274,8 +276,34 @@ scoreboards; prefetch queries require the prefetch class as well as ROB value
 and wrap. Exact vector replay service consumes only its matching feedback,
 rejects an already-completed target and preserves unrelated replay obligations.
 It does not move ROB head or emit scalar commit. These are bounded external
-backend models: no general rename/cancellation ledger, speculative multiple
-unresolved addresses or full-CPU timing equivalence is claimed.
+backend models: no general rename/cancellation ledger or full-CPU timing
+equivalence is claimed.
+
+The integrated `stream-unresolved` graph snapshots physical bytes from this
+same admission-order image before any graph store overlay. Thus older ordinary
+unretired stores enter its initial expected bytes, while unresolved graph stores
+do not. `UnresolvedLoadEpochs` tracks strict initial and repeated suffix
+executions, preserving the same redirect identity rules as the isolated helper;
+its completion means execution resolution only. The isolated
+`UnresolvedLoadGroupObligation` additionally still requires actual terminal
+readback. Stream instructions retain independent retirement and final global
+committed-byte observation; no fake per-episode readback is recorded.
+
+An older ordinary prefix retains its actual head and all obligations across the
+graph's anchor, operand waits, redirect and strict refetch. Prefix STD and replay
+progress remain schedulable. No unrelated younger instruction is admitted into
+the killed suffix. All graph loads complete before each overlapping STA; return
+at observed+2 and refetch the whole suffix strictly after pointer/filter recovery.
+Observed LQ cancellations alone rewind allocation; prefix SQ dequeue may advance
+up to, but never cross, the first graph allocation boundary before anchor release.
+Zero SQ and explicit scalar-load cancellations are required. Conflicting STAs
+are eligible only at a non-store actual head or the nonmemory anchor, retaining
+`pendingst=false` across redirect return. This bounded restriction avoids claiming
+unmodeled registered pending-store suppression or arbitrary full-ROB walk timing.
+The external initially-unassigned predictor/producer premise also requires a
+compatible prefix history; dynamic SSIT/LFST/rename history and an executable
+full-CPU wall-clock witness remain unqualified. Unfinished graph roles and broad
+late-response overlap inside the sliding stream remain open.
 
 ### Scalar completion details
 

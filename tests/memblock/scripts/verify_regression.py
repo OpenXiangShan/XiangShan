@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4445,13 +4445,19 @@ def _check_scalar_fp_accounting(result: dict[str, Any]) -> None:
     overlay = _csv_counts(result, "scalar_fp_overlay", 2)
     load_ops = _csv_counts(result, "load_ops", 7)
     scalar = _csv_counts(result, "scalar", 2)
+    if result.get("constraint_schema", 0) >= 68:
+        invalidated = _csv_counts(result, "stream_recovery", 20)[7]
+        fp_invalidated = _csv_counts(result, "stream_recovery", 20)[15]
+        _require(max(0, invalidated - 4 * choices[2]) <= fp_invalidated <= min(invalidated, 4 * choices[3]),
+                 "stream refetch changed its selected register class")
     _require(sum(widths) == sum(origins) and sum(choices) <= scalar[0],
              "FP format/origin/choice counts disagree")
     for origin in range(4):
         selected = choices[origin * 2 + 1]
         maximum_executions = 5 if result.get("constraint_schema", 0) >= 65 else 2
+        stream_invalidated = _csv_counts(result, "stream_recovery", 20)[15] if origin == 1 and result.get("constraint_schema", 0) >= 68 else 0
         _require((selected <= origins[origin] <= maximum_executions * selected) if origin == 3
-                 else origins[origin] == selected,
+                 else (origins[origin] == selected + stream_invalidated and stream_invalidated <= 4 * selected),
                  "FP checked executions disagree with selected origins")
     for width in range(3):
         _require(signs[2*width] + signs[2*width+1] + faults[width] == widths[width]
@@ -4756,13 +4762,105 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
         _require(live > 0 and 0 < last <= result.get("transactions", 0), "invalid stream action placement")
     if result.get("constraint_schema", 0) >= 67:
         waiting_admissions, waiting_issues = _csv_counts(result, "stream_waiting_head", 2)
-        _require(waiting_admissions <= admitted - epochs and waiting_issues <= events + retries - epochs,
+        refetch_issues = _csv_counts(result, "stream_recovery", 20)[8] if result.get("constraint_schema", 0) >= 68 else 0
+        _require(waiting_admissions <= admitted - epochs and waiting_issues <= events + retries + refetch_issues - epochs,
                  "stream completed-head selections exceed admitted/issued work")
         if admitted == epochs:
             _require(waiting_admissions == waiting_issues == 0,
                      "empty or singleton-only stream has completed-head selections")
     if rate == 0 or result.get("target_concurrent") == 0:
         _require(epochs == 0, "disabled stream generated traffic")
+
+
+
+def _check_stream_recovery_accounting(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 68:
+        return
+    rate = result.get("target_stream_unresolved")
+    conflict_rate = result.get("target_scalar_unresolved_conflict")
+    _require(type(rate) is int and 0 <= rate <= 1000 and
+             type(conflict_rate) is int and 0 <= conflict_rate <= 1000,
+             "invalid stream recovery rate")
+    counts = _csv_counts(result, "stream_recovery", 20)
+    (windows, conflicts, controls, stores, loads, initial, rounds, invalidated, refetched,
+     retired_stores, retired_loads, pending_prefix, prefix_retired, continued, canceled,
+     fp_invalidated, max_stores, max_loads, max_rounds, resolved) = counts
+    shapes = _csv_counts(result, "stream_recovery_shapes", 13)
+    victims = _csv_counts(result, "stream_recovery_victims", 4)
+    stream = _csv_counts(result, "stream", 12)
+    operations = _csv_counts(result, "stream_ops", 5)
+    serialized = counts + shapes + victims + stream + operations
+    for field, length in (("stream_issue", 6), ("stream_vector_uops", 2), ("stream_waiting_head", 2)):
+        serialized += _csv_counts(result, field, length)
+    _require(all(count <= (1 << 64) - 1 for count in serialized),
+             "stream recovery counters exceed the emitter uint64 domain")
+    _require(windows == conflicts + controls == resolved and initial == loads and
+             retired_stores == stores <= operations[2] and retired_loads == loads <= operations[0],
+             "stream recovery architectural/epoch obligations disagree")
+    _require(sum(shapes[:4]) == sum(shapes[4:8]) == sum(shapes[8:]) == windows and
+             stores == sum((i + 1) * shapes[i] for i in range(4)) and
+             loads == sum((i + 1) * shapes[4 + i] for i in range(4)) and
+             rounds == sum(i * shapes[8 + i] for i in range(5)) and shapes[8] == controls,
+             "stream recovery shape/role/round populations disagree")
+    peak = lambda values: max((i + 1 for i, count in enumerate(values) if count), default=0)
+    _require(max_stores == peak(shapes[:4]) and max_loads == peak(shapes[4:8]) and
+             max_rounds == peak(shapes[9:]) and max_rounds <= max_stores,
+             "stream recovery maxima disagree with observed shapes")
+    if windows:
+        _require(max_stores + 1 <= stream[6] and max_loads + 1 <= stream[6] and
+                 stores + loads <= windows * stream[6],
+                 "stream recovery roles exceed observed maximum live instructions")
+    _require(conflicts <= rounds <= min(4 * conflicts, stores) and sum(victims) == rounds and
+             all(count == 0 for count in victims[max_loads:]) and
+             rounds <= invalidated == refetched <= sum(count * (max_loads - i) for i, count in enumerate(victims)),
+             "stream recovery victim/suffix executions disagree")
+    for minimum_rounds in range(1, 5):
+        _require(sum(shapes[8 + minimum_rounds:]) <= sum(shapes[minimum_rounds - 1:4]),
+                 "stream round population exceeds per-window store capacity")
+
+    def paired_round_load_sum(descending_rounds: bool) -> int:
+        # Rearrangement bounds on sum(load_count * rounds), with compressed
+        # marginal histograms. No per-window correlation is invented.
+        load_bins = [[i + 1, count] for i, count in enumerate(shapes[4:8]) if count]
+        round_bins = [[i, count] for i, count in enumerate(shapes[8:]) if count]
+        if descending_rounds:
+            round_bins.reverse()
+        total = 0
+        left = right = 0
+        while left < len(load_bins) and right < len(round_bins):
+            amount = min(load_bins[left][1], round_bins[right][1])
+            total += amount * load_bins[left][0] * round_bins[right][0]
+            load_bins[left][1] -= amount
+            round_bins[right][1] -= amount
+            left += load_bins[left][1] == 0
+            right += round_bins[right][1] == 0
+        return total
+
+    victim_age_sum = sum(age * count for age, count in enumerate(victims))
+    _require(paired_round_load_sum(True) - victim_age_sum <= invalidated <=
+             paired_round_load_sum(False) - victim_age_sum,
+             "stream rounds did not refetch complete suffixes")
+    for age in range(4):
+        eligible_windows = sum(shapes[4 + age:8])
+        capacity = 0
+        for round_count in range(4, -1, -1):
+            assigned = min(eligible_windows, shapes[8 + round_count])
+            capacity += assigned * round_count
+            eligible_windows -= assigned
+        _require(sum(victims[age:]) <= capacity,
+                 "stream victim ages exceed eligible window/round capacity")
+    _require(pending_prefix <= windows and prefix_retired <= stream[2] and
+             continued <= stream[1] - stores - loads and canceled <= invalidated and
+             fp_invalidated <= invalidated,
+             "stream recovery prefix/cancellation/FP observations exceed bounds")
+    if windows == 0:
+        _require(not any(counts + shapes + victims), "empty stream recovery has observations")
+    if rate == 0 or result.get("target_concurrent") == 0 or result.get("target_concurrent_stream") == 0:
+        _require(windows == 0, "disabled stream recovery generated work")
+    if conflict_rate == 0:
+        _require(conflicts == 0, "disabled stream recovery conflict generated redirects")
+    if conflict_rate == 1000:
+        _require(controls == 0, "conflict-only stream recovery generated controls")
 
 
 def _check_mixed_accounting(result: dict[str, Any]) -> None:
@@ -4944,6 +5042,7 @@ def _check_result(
         )
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
         _check_stream_accounting(result)
+        _check_stream_recovery_accounting(result)
         _check_scalar_dependency_accounting(result)
         _check_vector_index_accounting(result)
         _check_scalar_unresolved_accounting(result)

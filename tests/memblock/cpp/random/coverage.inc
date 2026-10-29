@@ -3262,6 +3262,14 @@ struct MixedCoverage {
     std::uint64_t stream_scalar_retries = 0;
     // Admission / producer selections while a completed head could retire.
     std::array<std::uint64_t, 2> stream_waiting_head{};
+    // Started/conflict/control/stores/loads/initial checked/returned rounds/
+    // invalidated executions/refetch checked/store retire/load retire/
+    // accepted-prefix starts/prefix retire during barrier/post-release admit/
+    // observed LQ cancel/invalidated FP/max stores/max loads/max rounds/resolved.
+    std::array<std::uint64_t, 20> stream_recovery{};
+    // Store count 1..4 / load count 1..4 / completed round count 0..4.
+    std::array<std::uint64_t, 13> stream_recovery_shapes{};
+    std::array<std::uint64_t, 4> stream_recovery_victims{};
     static constexpr unsigned kConcurrentClasses = 5;
     std::array<std::uint64_t, memblock::generated::kLsqEnqueueLanes>
         dispatch_widths{};
@@ -3629,6 +3637,9 @@ struct MixedCoverage {
                " stream_issue=" + csv(stream_issue) + " stream_vector_uops=" + csv(stream_vector_uops) +
                " stream_scalar_retries=" + std::to_string(stream_scalar_retries) +
                " stream_waiting_head=" + csv(stream_waiting_head) +
+               " stream_recovery=" + csv(stream_recovery) +
+               " stream_recovery_shapes=" + csv(stream_recovery_shapes) +
+               " stream_recovery_victims=" + csv(stream_recovery_victims) +
                " scalar_misaligned=" +
                std::to_string(scalar_misaligned) + " store_misaligned=" +
                std::to_string(scalar_store_misaligned) + ',' +

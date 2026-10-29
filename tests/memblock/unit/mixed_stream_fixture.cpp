@@ -4,6 +4,7 @@
 #include "scenarios/mixed/vector_indices.hpp"
 #include "scenarios/mixed/vector_operands.hpp"
 #include "scenarios/mixed/stream_oracle.hpp"
+#include "scenarios/mixed/stream_recovery.hpp"
 #include <functional>
 #include <map>
 #include <tuple>
@@ -19,18 +20,32 @@ static void require(bool condition, const std::string &message) {
 struct SyntheticEnvironment {
     struct Uop {
         bool issued = false, committed = false;
+        mutable bool completed = false;
         std::uint64_t due = 0;
         unsigned destination = 0;
         VectorMemoryTransaction vector;
     };
     struct Instruction {
-        unsigned kind = 0, id = 0, flows = 0;
+        unsigned kind = 0, id = 0, flows = 0, group = 0, epoch = 0;
+        bool refetch_pending = false;
+        LoadTransaction load;
+        StoreTransaction store;
         std::uint8_t rob = 0;
         bool flag = false, address = false, data = false, committed = false;
         bool last_uop_seen = false, needs_head = false;
         std::uint64_t address_due = 0, data_due = 0;
         std::vector<Uop> uops;
+        bool is_store() const { return kind == 2 || kind == 3; }
     };
+    struct LqEntry { unsigned id, epoch, flows; bool done = false; };
+    mutable std::deque<LqEntry> lq_entries;
+    mutable std::uint64_t canceled_lq = 0;
+    bool recovery_enabled = false, at_anchor = false;
+    unsigned next_rob = 157, group_serial = 0, active_group = 0, first_graph = 0;
+    std::optional<unsigned> anchor_identity;
+    unsigned refetch_issues = 0, invalidated_executions = 0, surviving_prefix_redirects = 0;
+    unsigned checked_scalar_values = 0, expected_next_ftq = 0;
+    std::map<unsigned, std::uint64_t> load_expectations;
     SparseMemory bytes;
     std::vector<Instruction> instructions;
     std::array<std::set<unsigned>, 3> destinations;
@@ -45,7 +60,8 @@ struct SyntheticEnvironment {
     unsigned admissions_with_completed_head = 0, issues_with_completed_head = 0;
     std::optional<unsigned> installed_head;
     bool pending_store_level = false;
-    std::uint64_t tick = 0, lq_used = 0, sq_used = 0, lq_done = 0, sq_done = 0;
+    std::uint64_t tick = 0, lq_used = 0, sq_used = 0, sq_done = 0;
+    mutable std::uint64_t lq_done = 0;
     static constexpr unsigned initial_lq = 69, initial_sq = 53;
 
     explicit SyntheticEnvironment(unsigned timing) : latency(timing) {
@@ -57,16 +73,70 @@ struct SyntheticEnvironment {
     std::uint64_t tilelink_requests() const { return issues; }
     std::uint64_t lq_allocated() const { return lq_used; }
     std::uint64_t sq_allocated() const { return sq_used; }
-    std::uint64_t lq_canceled() const { return 0; }
+    std::uint64_t lq_canceled() const { return canceled_lq; }
     std::uint64_t sq_canceled() const { return 0; }
-    std::uint64_t lq_dequeued() const { return lq_done; }
+    Environment::MemoryViolationStats violation;
+    const Environment::MemoryViolationStats &memory_violation_stats() const { return violation; }
+    std::uint64_t sq_redirect_canceled_observed() const { return 0; }
+    std::uint64_t lq_redirect_canceled_observed() const { return canceled_lq; }
+    std::uint64_t scalar_load_redirect_canceled() const { return 0; }
+    bool redirect_after(std::uint8_t rob, bool flag, bool itself) {
+        require(recovery_enabled && itself && violation.last.rob_value == rob && violation.last.rob_flag == flag,
+            "returned wrong redirect victim");
+        require(tick == violation.last_cycle + 2, "missed backend redirect deadline");
+        check_installed_head();
+        require(at_anchor || !instructions[retired].is_store(), "redirect held a store pendingst level");
+        refresh_lq();
+        const auto &victim = find(rob, flag);
+        surviving_prefix_redirects += retired < first_graph;
+        expected_next_ftq = victim.load.ftq_ptr + 1;
+        unsigned offset = 0;
+        for (unsigned index = victim.id; index < instructions.size(); ++index) {
+            auto &work = instructions[index];
+            require(work.kind == 0 && work.group == active_group && work.uops[0].issued && tick >= work.uops[0].due,
+                "redirect canceled an unfinished or unrelated suffix");
+            work.refetch_pending = true;
+            expected.erase(key(work.load, 0)); enqueued.erase(key(work.load, 0));
+            work.load.ftq_ptr = expected_next_ftq; work.load.ftq_offset = offset;
+            offset += work.load.predecode_rvc ? 1 : 2;
+            ++invalidated_executions;
+        }
+        for (auto it = lq_entries.begin(); it != lq_entries.end();) {
+            if (it->id >= victim.id) { canceled_lq += it->flows; it = lq_entries.erase(it); }
+            else ++it;
+        }
+        trace.push_back("X" + std::to_string(victim.id));
+        tick += 3;
+        return true;
+    }
+    void refresh_lq() const {
+        if (!recovery_enabled) return;
+        for (auto &entry : lq_entries)
+            if (entry.epoch == instructions[entry.id].epoch && complete(instructions[entry.id])) entry.done = true;
+        while (!lq_entries.empty() && lq_entries.front().done) {
+            lq_done += lq_entries.front().flows;
+            lq_entries.pop_front();
+        }
+    }
+    std::uint64_t lq_dequeued() const { refresh_lq(); return lq_done; }
     std::uint64_t sq_dequeued() const { return sq_done; }
     bool complete(const Instruction &work) const {
         if (work.kind == 2)
             return work.address && work.data && tick >= work.address_due && tick >= work.data_due;
+        if (recovery_enabled && work.kind == 0 && !work.uops.empty() && !work.uops[0].completed) {
+            const unsigned width = 1U << (unsigned(work.load.op) & 3U);
+            for (unsigned index = 0; index < work.id; ++index) {
+                const auto &older = instructions[index];
+                if (older.kind != 2 || !older.address) continue;
+                const unsigned store_width = 1U << unsigned(older.store.op);
+                if (older.store.address < work.load.address + width && work.load.address < older.store.address + store_width &&
+                    (!older.data || tick < older.data_due)) return false;
+            }
+        }
         return work.last_uop_seen && !work.uops.empty() &&
             std::all_of(work.uops.begin(), work.uops.end(), [&](const auto &uop) {
-                return uop.issued && tick >= uop.due;
+                if (uop.issued && tick >= uop.due) uop.completed = true;
+                return uop.completed;
             });
     }
     bool accepted(const Instruction &work) const {
@@ -87,10 +157,12 @@ struct SyntheticEnvironment {
                 for (const auto &uop : work.uops)
                     require(destinations[domain].erase(uop.destination) == 1, "destination released twice");
             }
-            (work.kind == 2 || work.kind == 3 ? sq_done : lq_done) += work.flows;
+            if (work.is_store()) sq_done += work.flows;
+            else if (!recovery_enabled) lq_done += work.flows;
             trace.push_back("R" + std::to_string(work.id));
             ++retired;
         }
+        refresh_lq();
     }
     std::map<unsigned, unsigned> scalar_domains;
     Instruction &find(std::uint8_t rob, bool flag) {
@@ -107,13 +179,15 @@ struct SyntheticEnvironment {
         throw std::runtime_error("pending query did not match a live identity");
     }
     static unsigned identity(std::uint8_t rob, bool flag) { return rob + (flag ? kRobEntries : 0U); }
-    template<class T> auto key(const T &t, unsigned kind, unsigned uop = 0) const {
+    template<class T> std::tuple<unsigned, unsigned, unsigned> key(const T &t, unsigned kind, unsigned uop = 0) const {
         return std::make_tuple(identity(t.rob, t.rob_flag), kind, uop);
     }
     template<class T> void expect(const T &t, unsigned kind, unsigned uop = 0) {
         require(expected.insert(key(t, kind, uop)).second, "duplicate expectation");
     }
-    void expect_load_data(const LoadTransaction &t, std::uint64_t) { expect(t, 0); }
+    void expect_load_data(const LoadTransaction &t, std::uint64_t value) {
+        expect(t, 0); load_expectations[identity(t.rob, t.rob_flag)] = value;
+    }
     void expect_store(const StoreTransaction &t) { expect(t, 2); }
     void expect_prefetch(const PrefetchTransaction &t) { expect(t, 4); }
     void expect_vector(const VectorMemoryTransaction &t) { expect(t, t.store ? 3 : 1, t.vuop_idx); }
@@ -124,24 +198,42 @@ struct SyntheticEnvironment {
         require(expected.count(key(t, kind, uop)) != 0, "dispatch lacked prior expectation");
         require(enqueued.insert(key(t, kind, uop)).second, "duplicate dispatch");
         if (uop == 0) {
-            admissions_with_completed_head += retired < instructions.size() && complete(instructions[retired]);
+            admissions_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
             const unsigned next = instructions.size();
             // Builders start immediately before ROB/queue wrap boundaries.
-            require(t.rob == rob_pointer_value(157 + next) && t.rob_flag == rob_pointer_flag(157 + next),
+            const auto received = identity(t.rob, t.rob_flag);
+            const bool graph_load = [&] { if constexpr (requires { t.pc; }) return t.pc.has_value(); else return false; }();
+            if (recovery_enabled && active_group && std::any_of(instructions.begin(), instructions.end(),
+                [&](const auto &work) { return work.group == active_group && work.kind == 0; }) &&
+                (!graph_load || received == (next_rob + 1U) % (2U * kRobEntries))) {
+                for (const auto &work : instructions) if (work.group == active_group)
+                    require(complete(work) && !work.refetch_pending, "younger admission escaped unresolved recovery barrier");
+                active_group = 0; anchor_identity.reset(); at_anchor = false;
+            }
+            if (recovery_enabled && kind == 2 && received == (next_rob + 1U) % (2U * kRobEntries)) {
+                if (!active_group) {
+                    active_group = ++group_serial;
+                    first_graph = next;
+                    anchor_identity = next_rob % (2U * kRobEntries);
+                }
+                ++next_rob; // Independent nonmemory producer marker.
+            }
+            require(received == next_rob % (2U * kRobEntries),
                 "admission reordered or duplicated the architectural ROB prefix");
+            ++next_rob;
             bool had_pending = false;
             for (unsigned index = retired; index < instructions.size(); ++index)
                 had_pending |= accepted(instructions[index]) && !complete(instructions[index]);
             overlap_admissions += had_pending;
             continued_admissions += retired != 0 && retired != instructions.size();
-            instructions.push_back(Instruction{.kind = kind, .id = next, .rob = t.rob, .flag = t.rob_flag});
+            instructions.push_back(Instruction{.kind = kind, .id = next, .group = active_group, .rob = t.rob, .flag = t.rob_flag});
             trace.push_back("A" + std::to_string(next) + ":" + std::to_string(kind));
             producer_counts.push_back(0);
         }
         auto &work = instructions.back();
         require(work.rob == t.rob && work.flag == t.rob_flag && work.kind == kind,
             "vector siblings escaped their architectural admission");
-        const auto lq = initial_lq + lq_used, sq = initial_sq + sq_used;
+        const auto lq = initial_lq + lq_used - canceled_lq, sq = initial_sq + sq_used;
         require(t.lq == lq_pointer_value(lq) && t.lq_flag == lq_pointer_flag(lq) &&
             t.sq == sq_pointer_value(sq) && t.sq_flag == sq_pointer_flag(sq),
             "dispatch cursor snapshot disagreed with allocated prefix");
@@ -152,7 +244,9 @@ struct SyntheticEnvironment {
     void allocate(Instruction &work, unsigned count) {
         work.flows += count;
         (work.kind == 2 || work.kind == 3 ? sq_used : lq_used) += count;
-        require(lq_used - lq_done <= kVirtualLoadQueueEntries - kLqEnqueueHeadroom,
+        if (recovery_enabled && !work.is_store()) lq_entries.push_back({work.id, work.epoch, count});
+        refresh_lq();
+        require(lq_used - canceled_lq - lq_done <= kVirtualLoadQueueEntries - kLqEnqueueHeadroom,
             "LQ admission exceeded reserved capacity");
         require(sq_used - sq_done <= kStoreQueueEntries - kSqEnqueueHeadroom,
             "SQ admission exceeded reserved capacity");
@@ -165,14 +259,29 @@ struct SyntheticEnvironment {
         work.uops.back().destination = value;
     }
     bool enqueue_load(const LoadTransaction &t) {
-        auto &work = admit(t, 0); work.last_uop_seen = true; work.uops.emplace_back();
+        if (recovery_enabled) {
+            for (auto &work : instructions) if (work.rob == t.rob && work.flag == t.rob_flag && work.refetch_pending) {
+                require(work.load.pdest == t.pdest && work.load.fp_wen == t.fp_wen && work.load.pc == t.pc &&
+                    work.load.sq == t.sq && work.load.sq_flag == t.sq_flag && work.load.predecode_rvc == t.predecode_rvc &&
+                    work.load.ftq_ptr == t.ftq_ptr && work.load.ftq_offset == t.ftq_offset,
+                    "refetch changed architectural or frontend identity");
+                require(t.lq == lq_pointer_value(initial_lq + lq_used - canceled_lq) &&
+                    t.lq_flag == lq_pointer_flag(initial_lq + lq_used - canceled_lq), "refetch used a stale LQ cursor");
+                require(expected.count(key(t, 0)) && enqueued.insert(key(t, 0)).second,
+                    "refetch lacked one fresh expectation");
+                work.load = t; work.refetch_pending = false; ++work.epoch;
+                work.uops[0].issued = work.uops[0].completed = false; work.uops[0].due = 0;
+                allocate(work, 1); trace.push_back("F" + std::to_string(work.id)); return true;
+            }
+        }
+        auto &work = admit(t, 0); work.load = t; work.last_uop_seen = true; work.uops.emplace_back();
         const unsigned width = 1U << (static_cast<unsigned>(t.op) & 3U);
         work.needs_head = (t.address & 15U) + width > 16;
         scalar_domains[work.id] = t.fp_wen ? 1 : 0;
         destination(work, t.fp_wen ? 1 : 0, t.pdest); allocate(work, 1); return true;
     }
     bool enqueue_store(const StoreTransaction &t) {
-        auto &work = admit(t, 2);
+        auto &work = admit(t, 2); work.store = t;
         const unsigned width = 1U << static_cast<unsigned>(t.op);
         work.needs_head = (t.address & 15U) + width > 16U;
         allocate(work, 1); return true;
@@ -198,6 +307,7 @@ struct SyntheticEnvironment {
         for (unsigned index = retired; index < work.id; ++index) {
             const auto &older = instructions[index];
             if (older.kind == 2) {
+                if (work.group && work.group == older.group && work.load.pc) continue;
                 require(older.address && tick >= older.address_due,
                     "younger load issued before an older scalar-store address was known");
                 loads_before_older_std += !older.data;
@@ -209,7 +319,7 @@ struct SyntheticEnvironment {
     void check_installed_head() const {
         require(installed_head && *installed_head == retired, "accepted producer without current architectural ROB head");
         const auto &head = instructions.at(retired);
-        require(pending_store_level == (head.kind == 2 || head.kind == 3), "accepted producer with wrong pending-store level");
+        require(pending_store_level == (!at_anchor && (head.kind == 2 || head.kind == 3)), "accepted producer with wrong pending-store level");
     }
     void check_head(const Instruction &work, bool ordered = false) {
         if (work.needs_head || ordered) {
@@ -228,7 +338,7 @@ struct SyntheticEnvironment {
         return tick + (latency ? 37U + ((work.id * 7U + uop * 11U) % 31U) : 3U + (work.id + uop) % 5U);
     }
     void note_producer() {
-        issues_with_completed_head += retired < instructions.size() && complete(instructions[retired]);
+        issues_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
     }
     void issue(Instruction &work, unsigned index, const char *tag) {
         check_installed_head();
@@ -236,11 +346,49 @@ struct SyntheticEnvironment {
         auto &uop = work.uops.at(index);
         require(!uop.issued, "duplicate uop acceptance");
         uop.issued = true; uop.due = due(work, index); ++producer_counts[work.id]; ++issues;
+        if (work.kind == 0 && work.epoch) ++refetch_issues;
         trace.push_back(std::string(tag) + std::to_string(work.id) + ":" + std::to_string(index));
         sample_accepted(); ++tick;
     }
+    void check_scalar_value(const Instruction &load, const LoadTransaction &t) {
+        const unsigned width = 1U << (unsigned(t.op) & 3U);
+        std::uint64_t payload = 0;
+        for (unsigned byte = 0; byte < width; ++byte) {
+            const auto address = t.address + byte;
+            unsigned char value = bytes.read_byte(address);
+            for (unsigned index = 0; index < load.id; ++index) {
+                const auto &older = instructions[index];
+                if (older.kind == 2) {
+                    if (load.group == older.group && load.load.pc && !older.address) continue;
+                    const auto first = older.store.address;
+                    if (address >= first && address - first < (1U << unsigned(older.store.op)))
+                        value = older.store.data >> (8U * (address - first));
+                } else if (older.kind == 3) {
+                    for (const auto &uop : older.uops) {
+                        const auto &v = uop.vector;
+                        const unsigned element_width = 1U << vector_data_eew(v);
+                        const auto active = active_vector_elements(v);
+                        for (unsigned element = 0; element < 16U / element_width; ++element) {
+                            if (!((active >> element) & 1U)) continue;
+                            const auto first = vector_element_virtual_address(v, element);
+                            if (address >= first && address - first < element_width)
+                                value = v.data[element * element_width + address - first];
+                        }
+                    }
+                }
+            }
+            payload |= std::uint64_t{value} << (8U * byte);
+        }
+        if (width < 8 && (t.fp_wen || (unsigned(t.op) < 4 && (payload >> (width * 8U - 1U)))))
+            payload |= ~((std::uint64_t{1} << (width * 8U)) - 1U);
+        require(load_expectations.at(identity(t.rob, t.rob_flag)) == payload,
+            "stream scalar expected value disagreed with independent input byte history");
+        ++checked_scalar_values;
+    }
     bool issue_load(const LoadTransaction &t, unsigned) {
-        auto &work = find(t.rob, t.rob_flag); check_load_age(work); check_head(work); issue(work, 0, "L"); return true;
+        auto &work = find(t.rob, t.rob_flag); check_load_age(work); check_head(work);
+        if (recovery_enabled) check_scalar_value(work, t);
+        issue(work, 0, "L"); return true;
     }
     bool issue_prefetch(const PrefetchTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag); issue(work, 0, "P"); return true;
@@ -248,9 +396,32 @@ struct SyntheticEnvironment {
     bool issue_store_address_until_tlb_hit(const StoreTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag);
         check_installed_head(); check_head(work); note_producer();
+        if (recovery_enabled && work.group == active_group && active_group) {
+            for (unsigned index = work.id + 1; index < instructions.size(); ++index) {
+                const auto &load = instructions[index];
+                if (load.group != active_group || load.kind != 0) continue;
+                require(complete(load), "graph STA preceded a strict initial/refetch completion");
+            }
+        }
         if (!work.address) { work.address = true; work.address_due = latency ? due(work) : tick + 1U; ++producer_counts[work.id]; ++issues; }
         else require(tick < work.address_due, "reissued an already completed store address");
-        trace.push_back("SA" + std::to_string(work.id)); sample_accepted(); ++tick; return true;
+        trace.push_back("SA" + std::to_string(work.id)); sample_accepted(); ++tick;
+        if (recovery_enabled && work.group == active_group && active_group) {
+            for (unsigned index = work.id + 1; index < instructions.size(); ++index) {
+                const auto &load = instructions[index];
+                if (load.group != active_group || load.kind != 0) continue;
+                const auto a = t.address, b = load.load.address;
+                if (a < b + (1U << (unsigned(load.load.op) & 3U)) && b < a + (1U << unsigned(t.op))) {
+                    ++violation.count; violation.last_cycle = tick;
+                    violation.last = {.valid = true, .is_rvc = load.load.predecode_rvc,
+                        .rob_flag = load.flag, .rob_value = load.rob,
+                        .ftq_value = static_cast<std::uint8_t>(load.load.ftq_ptr),
+                        .ftq_offset = load.load.ftq_offset, .level = true};
+                    break;
+                }
+            }
+        }
+        return true;
     }
     bool issue_store_data(const StoreTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag); check_installed_head(); require(!work.data, "duplicate scalar store data");
@@ -300,8 +471,19 @@ struct SyntheticEnvironment {
             installed_head.reset(); pending_store_level = false; return true;
         }
         const auto &head = instructions.at(retired);
-        require(head.rob == rob && head.flag == flag && pending_store == (head.kind == 2 || head.kind == 3),
-            "installed ROB head or pending-store level disagreed with oldest live instruction");
+        if (recovery_enabled && active_group && retired == first_graph && anchor_identity == identity(rob, flag)) {
+            require(!pending_store, "nonmemory recovery anchor asserted pendingst");
+            at_anchor = true;
+        } else {
+            require(head.rob == rob && head.flag == flag && pending_store == head.is_store(),
+                "installed ROB head or pending-store level disagreed with oldest live instruction");
+            if (recovery_enabled && active_group && retired == first_graph) {
+                for (const auto &work : instructions) if (work.group == active_group)
+                    require(complete(work) && !work.refetch_pending, "released recovery anchor before all obligations completed");
+                active_group = 0; anchor_identity.reset();
+            }
+            at_anchor = false;
+        }
         installed_head = retired; pending_store_level = pending_store; return true;
     }
     bool run_cycles(unsigned count) { synchronize_retirement(); tick += count; return true; }
@@ -310,13 +492,13 @@ struct SyntheticEnvironment {
         return std::all_of(instructions.begin() + retired, instructions.end(), [&](const auto &work) { return complete(work); });
     }
     bool run_until_queues_retired(unsigned) {
-        synchronize_retirement(); return lq_used == lq_done && sq_used == sq_done;
+        synchronize_retirement(); return lq_used == lq_done + canceled_lq && sq_used == sq_done;
     }
     void finish(unsigned count, const MixedCoverage &coverage, const ConstraintCoverage &constraints) {
         synchronize_retirement();
         require(retired == count && instructions.size() == count, "lost or excess architectural work");
         require(expected == enqueued, "expectation/dispatch conservation failed");
-        require(lq_used == lq_done && sq_used == sq_done, "queue conservation failed");
+        require(lq_used == lq_done + canceled_lq && sq_used == sq_done, "queue conservation failed");
         for (const auto &domain : destinations) require(domain.empty(), "physical destination leaked");
         require(coverage.stream[1] == count && coverage.stream[2] == count && constraints.actions == count,
             "production action/admission/retirement accounting disagreed");
@@ -325,11 +507,11 @@ struct SyntheticEnvironment {
         require(coverage.stream_waiting_head == std::array<std::uint64_t, 2>{
             admissions_with_completed_head, issues_with_completed_head},
             "production completed-head choices disagreed with independent observations");
-        require(coverage.stream[8] == issues, "production issue count disagreed with accepted producers");
+        require(coverage.stream[8] + refetch_issues == issues, "production issue count disagreed with accepted producers");
         std::array<std::uint64_t, 5> operations{};
         for (const auto &work : instructions) {
             ++operations[work.kind];
-            const auto count = work.kind == 2 ? 2 : work.uops.size();
+            const auto count = work.kind == 2 ? 2 : work.kind == 0 ? 1U + work.epoch : work.uops.size();
             require(producer_counts[work.id] == count, "producer conservation failed");
         }
         require(coverage.stream_ops == operations, "retired operation-kind accounting disagreed");
@@ -358,6 +540,7 @@ public:
             RandomConstraints::scalar_store, RandomConstraints::vector_store, RandomConstraints::prefetch}};
         for (unsigned index = 0; index < operations.size(); ++index)
             constraints.operation_weights[operations[index]] = family == 0 ? (index == 0 ? 7 : 3) : (family == index + 1 ? 1 : 0);
+        constraints.stream_unresolved_per_mille = 0;
         constraints.misaligned_per_mille = 450;
         constraints.scalar_fp_per_mille = 350;
         // Decoder-legal representatives include ordinary, unordered, ordered,
@@ -472,10 +655,15 @@ int main(int argc, char **argv) {
             require(rejected == presets, "stream rate above 1000 was accepted");
             std::cout << "{\"presets\":" << presets << ",\"boundary_overrides\":" << boundaries
                 << ",\"out_of_range_rejections\":" << rejected << "}\n";
-        } else if (mode == "stream") {
-            require(argc == 6, "stream seed/timing/family/limit required");
+        } else if (mode == "stream" || mode == "recovery") {
+            require(argc == 6 || (mode == "recovery" && argc == 7), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]));
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "recovery") {
+                fixture.environment.recovery_enabled = true;
+                fixture.constraints.stream_unresolved_per_mille = 1000;
+                fixture.constraints.scalar_unresolved_conflict_per_mille = argc == 7 ? std::stoul(argv[6]) : 500;
+            }
             require(fixture.run_concurrent_stream(limit), "production stream failed: " + fixture.phase);
             auto &env = fixture.environment;
             env.finish(fixture.actions, fixture.coverage, fixture.constraint_coverage);
@@ -487,6 +675,13 @@ int main(int argc, char **argv) {
                 << ",\"dependency_checks\":" << env.dependency_checks << ",\"issues\":" << env.issues
                 << ",\"admissions_with_completed_head\":" << env.admissions_with_completed_head
                 << ",\"issues_with_completed_head\":" << env.issues_with_completed_head
+                << ",\"recovery_windows\":" << fixture.coverage.stream_recovery[0]
+                << ",\"recovery_rounds\":" << fixture.coverage.stream_recovery[6]
+                << ",\"recovery_prefix\":" << fixture.coverage.stream_recovery[11]
+                << ",\"refetch_issues\":" << env.refetch_issues
+                << ",\"surviving_prefix_redirects\":" << env.surviving_prefix_redirects
+                << ",\"checked_scalar_values\":" << env.checked_scalar_values
+                << ",\"lq_canceled\":" << env.canceled_lq
                 << ",\"commits\":" << env.commits << ",\"lq_allocated\":" << env.lq_used
                 << ",\"sq_allocated\":" << env.sq_used << ",\"producer_counts\":[";
             for (unsigned i = 0; i < env.producer_counts.size(); ++i) std::cout << (i ? "," : "") << env.producer_counts[i];

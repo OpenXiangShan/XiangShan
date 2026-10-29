@@ -126,11 +126,12 @@ inline void reset_unresolved_ftq_suffix(std::vector<Load> &loads, unsigned victi
 
 // Warm initial executions and every refetch complete before a new STA. A youngest
 // held cold role instead owes an observed initial cancellation before refetch.
-// Architectural obligations survive completion, cancellation and invalidation.
-class UnresolvedLoadGroupObligation {
+// Execution obligations survive completion, cancellation and invalidation.
+// Resolution completes this ledger; architectural memory visibility is separate.
+class UnresolvedLoadEpochs {
 public:
     template<class Load>
-    UnresolvedLoadGroupObligation(const std::vector<Load> &loads, unsigned maximum_rounds,
+    UnresolvedLoadEpochs(const std::vector<Load> &loads, unsigned maximum_rounds,
         std::optional<unsigned> unfinished = {})
         : maximum_rounds_(maximum_rounds), unfinished_(unfinished), executions_(loads.size()), pending_(loads.size(), true)
     {
@@ -151,6 +152,7 @@ public:
     template<class Redirect>
     bool redirect(const Redirect &event, unsigned victim)
     {
+        if (failed_) return fail();
         bool initial_unfinished = stage_ == Stage::initial && unfinished_ && rounds_ == 0 &&
             victim < *unfinished_ && pending_[*unfinished_];
         if (initial_unfinished)
@@ -216,20 +218,16 @@ public:
         stage_ = Stage::resolved;
         return true;
     }
-    bool readback()
-    {
-        if (failed_ || stage_ != Stage::resolved) return fail();
-        stage_ = Stage::complete;
-        return true;
-    }
-    bool done() const { return !failed_ && stage_ == Stage::complete; }
+    bool done() const { return !failed_ && stage_ == Stage::resolved; }
     unsigned executions(unsigned index) const { return executions_.at(index); }
     unsigned rounds() const { return rounds_; }
 
+protected:
+    bool fail() { failed_ = true; return false; }
+
 private:
     struct Identity { unsigned rob; bool flag; std::uint64_t ftq; unsigned offset; bool rvc; unsigned pdest; };
-    enum class Stage { initial, ready, redirected, returned, resolved, complete };
-    bool fail() { failed_ = true; return false; }
+    enum class Stage { initial, ready, redirected, returned, resolved };
     bool all_complete() const { return std::none_of(pending_.begin(), pending_.end(), [](bool pending) { return pending; }); }
     unsigned maximum_rounds_, victim_ = 0, rounds_ = 0;
     std::optional<unsigned> unfinished_;
@@ -239,6 +237,22 @@ private:
     std::vector<bool> pending_;
     bool failed_ = false;
     Stage stage_ = Stage::initial;
+};
+
+// Isolated groups also owe strict architectural memory readback after resolution.
+class UnresolvedLoadGroupObligation : public UnresolvedLoadEpochs {
+public:
+    using UnresolvedLoadEpochs::UnresolvedLoadEpochs;
+    bool readback()
+    {
+        if (readback_ || !UnresolvedLoadEpochs::done()) return fail();
+        readback_ = true;
+        return true;
+    }
+    bool done() const { return readback_ && UnresolvedLoadEpochs::done(); }
+
+private:
+    bool readback_ = false;
 };
 
 } // namespace memblock::scenarios::mixed

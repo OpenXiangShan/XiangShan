@@ -11,6 +11,21 @@ class StreamByteOracle {
 public:
     explicit StreamByteOracle(const memblock::SparseMemory &base) : base_(base) {}
 
+    std::array<unsigned char, 64> line_snapshot(std::uint64_t base,
+        const std::shared_ptr<const memblock::ReferencePageMap> &pages = {})
+    {
+        if (base & 63U) throw std::invalid_argument("unaligned stream snapshot");
+        std::array<std::uint64_t, 64> addresses{};
+        std::array<unsigned char, 64> result{};
+        for (unsigned byte = 0; byte < addresses.size(); ++byte)
+            addresses[byte] = pages ? pages->physical_address(base + byte) : base + byte;
+        for (unsigned byte = 0; byte < addresses.size(); ++byte) {
+            materialize(addresses[byte]);
+            result[byte] = image_.read_byte(addresses[byte]);
+        }
+        return result;
+    }
+
     std::uint64_t scalar_load(const memblock::LoadTransaction &transaction)
     {
         const auto encoding = static_cast<unsigned>(transaction.op);

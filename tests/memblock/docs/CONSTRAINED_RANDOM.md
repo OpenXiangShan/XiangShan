@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=67`.
+`constraint_schema=68`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -75,6 +75,7 @@ they do not imply arbitrary numeric suffix support.
 | `locality-hot`, `locality-warm`, `locality-cold` | Relative address-pool choices for helpers using locality. |
 | `concurrent` | Rate allocating the mixed concurrency action budget, subject to the serial reservation capped at half the initial available budget. |
 | `concurrent-stream` | Rate selecting a variable ordinary mixed stream instead of a fixed heterogeneous window at an eligible concurrency site. Default 750 in all presets; 0 preserves the legacy prefix schedule, 1000 selects streams only. A residual budget below seven actions always uses a stream when enabled. |
+| `stream-unresolved` | Conditional rate (default 125 in all presets) replacing an eligible scalar-store admission with a variable unresolved-store/scalar-load graph inside the same sliding stream. Needs at least two remaining live/budget slots and actual LQ/SQ capacity. Zero disables it; `scalar-unresolved-conflict` controls conflict/control geometry. |
 | `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
 | `translation-switch` | Rate for resampling the translation context after required context/leaf/fence observations. |
 | `tlb-flush` | Rate for a compatible translation fence after required fence observations. |
@@ -223,6 +224,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | Fence global/selective | all 1 | 95/5 | all 1 | all 1 |
 | `concurrent` | 1000 | 100 | 500 | 0 |
 | `concurrent-stream` | 750 | 750 | 750 | 750 |
+| `stream-unresolved` | 125 | 125 | 125 | 125 |
 | `special-concurrent` | 500 | 20 | 750 | 0 |
 | `translation-switch` | 500 | 1 | 750 | 500 |
 | `tlb-flush` | 50 | 20 | 100 | 50 |
@@ -402,7 +404,42 @@ retains unrelated requests and does not move the head. Scalar address retries
 apply only while its STA obligation remains pending. The address pool biases
 three of four line choices toward eight lines near a seeded arena and otherwise
 uses the configured cacheable pool; per-access offsets, shapes and data vary.
-Multiple speculative unresolved addresses, full rename history, atomics/CMO,
+The conditional `stream-unresolved` direction reserves a complete fitting graph
+at a scalar-store admission: 1..4 older stores and 1..4 scalar/FP loads fit the
+remaining 2..8 live slots and action budget. It retains the older mixed prefix
+and closes unrelated younger admission until the graph resolves. A nonmemory
+anchor before the graph stores holds their retirement; the actual ordinary
+prefix head remains installed until it reaches that anchor. Nonmemory producer
+markers between graph stores use ROB identities but do not count as memory
+actions. Graph store inputs overlay the ordinary stream image in program age;
+initial graph loads instead use an immutable snapshot taken from that image
+before those stores. Each known-address epoch overlays only resolved graph
+stores. Prefix store addresses must be known before graph loads issue; prefix
+STD, vector replay and completed-prefix retirement remain schedulable during
+all graph waits. No episode queue/SBuffer/D/E drain is inserted.
+
+Every graph load initially strictly completes. Randomized graph operand events
+then reveal addresses and consume STD independently; a successful overlapping
+STA must name its oldest completed overlapping scalar/FP victim. Return the
+exact current ROB/FTQ/RVC identity at observed+2, inhibit enqueue through the
+redirect/filter recovery interval, rewind only the observed LQ cancellation,
+and strictly refetch the complete victim-and-younger suffix with retained
+ROB/pdest/PC/class/SQ and fresh LQ/FTQ epochs. Known-address graph STD can be
+promoted before refetch; its planned event is consumed once. All unrelated
+prefix obligations remain live. Conflicting STA events wait until the actual
+head is a non-store or the anchor; this avoids extending the current adapter's
+unqualified store-headed redirect `pendingst` behavior. Prefix SQ dequeue is
+legal up to the first graph allocation boundary; graph dequeue and all SQ or
+scalar-load cancellation are forbidden. All graph operands and current epochs
+must complete and the expected redirect count stay stable before the anchor
+releases. Ordinary admission resumes while graph instructions can still be live;
+only original architectural instructions retire/count as actions. Invalidated
+strict FP executions add to origin 1 checks, preserving one format choice per
+instruction. The global committed-word readback observes final bytes; the
+execution-only ledger does not claim an isolated episode readback.
+
+Unfinished graph loads within the sliding stream, arbitrary younger-class
+cancellation, full rename/producer wall-clock history, atomics/CMO,
 segment/fault instructions and NC/MMIO within this stream remain outside it.
 Legacy windows still provide optional clean NC/MMIO overlaps.
 
@@ -548,6 +585,8 @@ Array order and sampling code are authoritative in
 | `stream` | Epochs, admitted instructions, retired instructions, admissions with older accepted work pending, admissions after a prefix retired while older work remains live, prefix retirements with younger live work, maximum live instructions, maximum accepted-and-pending instructions, initial issue events, vector replay issues, epochs after serial work, last global action index. These are driver/scoreboard observations, not an internal pipeline occupancy oracle. |
 | `stream_ops`, `stream_issue`, `stream_vector_uops`, `stream_scalar_retries` | Retired instruction counts in the same five-class order; initial scalar-load/STA/STD/vector-load-uop/vector-store-uop/prefetch issues; admitted vector-load/store uops; repeated STA issues excluded from initial counts. Schema 62 requires conservation and bounds in both verifier modes without a positive-bin gate. The opt-in strict checker retains minimum epoch/action/overlap observations for a stream-only configuration. |
 | `stream_waiting_head` | Schema 67: admission and operand/uop event selections while the oldest architectural instruction is complete and eligible to retire. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
+| `stream_recovery` | Schema 68: started windows, conflict windows, controls, graph stores/loads admitted, initial strictly checked loads, returned rounds, invalidated completed executions, strictly checked refetches, graph stores/loads retired, starts with accepted pending prefix, prefix retirements during the barrier, ordinary admissions after release with graph roles live, observed LQ cancellations, invalidated FP executions, maximum stores/loads/rounds, resolved windows. Refetch executions do not add architectural initial issue/action counts. Both verifier modes enforce sparse conservation, suffix/capacity/shape and emitter-domain bounds, including graph-role counts versus the observed maximum live instructions. |
+| `stream_recovery_shapes`, `stream_recovery_victims` | Store-count 1..4, load-count 1..4 and round-count 0..4 histograms; per-round victim ages 0..3. Marginals support necessary bounds only; they do not reconstruct every joint history. |
 | `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
 | `dcache_latency_*`, `ptw_latency_*`, `uncache_latency_*` | Manager response-latency samples, four bucket counts, total cycles, and maximum. These are observed responses, not architectural deadlines. |
@@ -776,7 +815,7 @@ The verifier checks necessary uint64, window/unique-load/epoch/peak, suffix,
 knowledge, data, predictor, cancellation and movement bounds without positive
 sparse-bin gates. It does not reconstruct full joint histories.
 
-General unfinished cancellation/late-completion overlap, unresolved sliding admission,
+General unfinished cancellation/late-completion overlap, general unfinished sliding recovery,
 arbitrary trained-predictor states, full rename history and cycle-accurate
 producer/frontend timing remain gaps. A timeout is not an RTL liveness proof.
 
@@ -980,7 +1019,7 @@ boxing/data checks. The unresolved direction interleaves 1..4 older store operan
 varies 1..4 younger load issue permutations and victim age, and refetches the
 whole invalidated suffix at each conflicting STA, with visible/hidden writer
 versions and earlier/equal/later victims. Prioritize broader unfinished cancellation
-and integration into sliding admission and broader temporal/address dependencies; broader
+within sliding traffic and broader temporal/address dependencies; broader
 FP helper and exceptional-misalignment combinations remain open.
 Broader temporal locality/dependent-address streams and scalar/vector SQ
 forwarding follow these. Rare error/protection/CMO crosses remain secondary.

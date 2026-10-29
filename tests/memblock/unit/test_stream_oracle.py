@@ -320,6 +320,34 @@ static void indexed_chains() {
     std::cout << "indexed_chain_uops=" << cases << '\n';
 }
 
+static void snapshot_prefix() {
+    constexpr std::uint64_t a = 0x80006000;
+    SparseMemory base;
+    for (unsigned byte=0; byte<64; ++byte) base.write_reference_byte(a+byte, 0x30+byte);
+    StreamByteOracle oracle(base);
+    oracle.store(store(a+3, 4, 0x89abcdefU));
+    oracle.store(store(a+5, 2, 0x1234U));
+    const auto saved = oracle.line_snapshot(a);
+    for (unsigned byte=0; byte<64; ++byte) {
+        unsigned char expected = 0x30+byte;
+        if (byte>=3 && byte<7) expected = 0x89abcdefU >> ((byte-3)*8U);
+        if (byte>=5 && byte<7) expected = 0x1234U >> ((byte-5)*8U);
+        require(saved[byte] == expected, "snapshot omitted unretired input store bytes");
+        base.write_reference_byte(a+byte, 0x55);
+    }
+    oracle.store(store(a+8, 8, 0xfedcba9876543210ULL));
+    const auto current = oracle.line_snapshot(a);
+    require(saved[8] == 0x38 && current[8] == 0x10, "snapshot was not immutable across later stores");
+    require(current[3] == 0xef && current[6] == 0x12 && current[20] == 0x44,
+        "later reference commits overwrote prefix snapshot bytes");
+    reject([&] { oracle.line_snapshot(a+1); }, "unaligned snapshot accepted");
+    // A declared nonidentity virtual page maps to the same physical prefix.
+    auto pages = std::make_shared<ReferencePageMap>(0x60000000,
+        std::vector<std::uint64_t>{a & ~std::uint64_t{4095}});
+    const auto mapped = oracle.line_snapshot(0x60000000 + (a & 4095U), pages);
+    require(mapped == current, "snapshot ignored declared physical alias");
+}
+
 static void rejection_atomicity() {
     constexpr std::uint64_t address = 0x80005000;
     SparseMemory base;
@@ -384,7 +412,8 @@ static void rejection_atomicity() {
 int main(int argc, char **argv) {
     require(argc == 2, "fixture case required");
     const std::string test = argv[1];
-    if (test == "scalar") scalar_prefix();
+    if (test == "snapshot") snapshot_prefix();
+    else if (test == "scalar") scalar_prefix();
     else if (test == "lazy") lazy_and_aliases();
     else if (test == "mapped") mapped_splits();
     else if (test == "activity") vector_activity();
@@ -443,6 +472,9 @@ class StreamOracleTest(unittest.TestCase):
 
     def test_repeated_vd_sources_use_pending_scalar_and_vector_bytes(self):
         self.check_case("chains")
+
+    def test_line_snapshot_includes_live_prefix_and_declared_aliases(self):
+        self.check_case("snapshot")
 
     def test_rejected_operations_leave_bytes_and_operands_untouched(self):
         self.check_case("rejections")

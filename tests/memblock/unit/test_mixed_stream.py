@@ -24,6 +24,7 @@ INPUTS = (
     'cpp/scenarios/mixed/state.hpp', 'cpp/scenarios/shared.hpp',
     'cpp/scenarios/mixed/scalar_load.hpp', 'cpp/scenarios/mixed/vector_indices.hpp',
     'cpp/scenarios/mixed/vector_operands.hpp', 'cpp/scenarios/mixed/stream_oracle.hpp',
+    'cpp/scenarios/mixed/stream_recovery.hpp', 'cpp/scenarios/mixed/unresolved_load_group.hpp',
     'cpp/random/constraints.inc', 'cpp/random/coverage.inc',
     'cpp/environment/model.inc', 'cpp/memblock_env.hpp',
     'cpp/generated_interface_types.hpp',
@@ -49,6 +50,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.replays = 0
         cls.constraint_case = None
         cls.reservations = []
+        cls.recoveries = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -136,6 +138,10 @@ class MixedStreamTest(unittest.TestCase):
                 'deterministic_replay_cases': cls.replays,
                 'constraint_case': cls.constraint_case,
                 'reservations': cls.reservations,
+                'recovery_cases': cls.recoveries,
+                'recovery_observations': {field: sum(run['result'][field] for run in cls.recoveries)
+                    for field in ('recovery_windows', 'recovery_rounds', 'recovery_prefix',
+                                  'refetch_issues', 'surviving_prefix_redirects', 'checked_scalar_values', 'lq_canceled')},
                 'explicit_gaps': ['synthetic ports and completions', 'replay service reports no replay',
                                   'bare translation only', 'representative decoder-legal vector shapes'],
                 'runs': cls.runs,
@@ -184,6 +190,57 @@ class MixedStreamTest(unittest.TestCase):
             self.assertEqual(run['producer_counts'], [1] * 8)
         self.assertGreaterEqual(len({run['schedule'] for run in results}), 32)
         self.assert_retirement_interleaving(results)
+
+    def test_recovery_preserves_mixed_prefix_and_strict_epochs(self):
+        results = []
+        for conflict in (0, 500, 1000):
+            for timing in (0, 1):
+                for seed in range(1, 33):
+                    with self.subTest(conflict=conflict, timing=timing, seed=seed):
+                        result = self.run_fixture('recovery', seed, timing, 0, 32, conflict)
+                        results.append(result)
+                        self.recoveries.append(dict(seed=seed, timing=timing, conflict=conflict, result=result))
+        self.assertGreater(sum(r['recovery_windows'] for r in results), 0)
+        self.assertGreater(sum(r['recovery_rounds'] for r in results), 0)
+        self.assertGreater(sum(r['recovery_prefix'] for r in results), 0)
+        self.assertGreater(sum(r['refetch_issues'] for r in results), 0)
+        self.assertGreater(sum(r['lq_canceled'] for r in results), 0)
+        self.assertGreater(sum(r['surviving_prefix_redirects'] for r in results), 0)
+
+    def test_recovery_seed_replay_and_short_budgets(self):
+        for limit in (0, 1, 2, 3, 7, 8, 31):
+            for seed in (1, 7, 29):
+                first = self.run_fixture('recovery', seed, 1, 0, limit, 1000)
+                self.assertEqual(first, self.run_fixture('recovery', seed, 1, 0, limit, 1000))
+                self.assertLessEqual(first['actions'], limit)
+                self.assertEqual(first['recovery_windows'], 0 if limit < 2 else first['recovery_windows'])
+
+    def test_private_recovery_deadline_snapshot_and_suffix_faults_are_rejected(self):
+        mutations = (
+            ('late_redirect', 'violation.last_cycle + 2U', 'violation.last_cycle + 3U',
+             'missed backend redirect deadline'),
+            ('lost_refetch_lq_rewind', 'lq_offset -= canceled;', '(void)canceled;',
+             'refetch used a stale LQ cursor'),
+            ('changed_refetch_destination', 'load_work.load = load;',
+             'load.pdest = (load.pdest + 1U) % 191U + 1U; load_work.load = load;',
+             'refetch changed architectural or frontend identity'),
+            ('stale_prefix_snapshot', 'const auto snapshot = oracle.line_snapshot(episode.base, reference_pages_for(episode.base));',
+             'std::array<unsigned char, 64> snapshot{}; for (unsigned byte=0; byte<64; ++byte) snapshot[byte] = environment.memory().read_byte(episode.base + byte);',
+             'expected value disagreed with independent input byte history'),
+        )
+        for name, old, new, diagnostic in mutations:
+            self.assertEqual(self.source.count(old), 1)
+            binary = self.compile(self.source.replace(old, new), name)
+            detected = None
+            for seed in range(1, 257):
+                result = subprocess.run([str(binary), 'recovery', str(seed), '1', '0', '32', '1000'],
+                                        capture_output=True, text=True, timeout=10)
+                if result.returncode:
+                    self.assertIn(diagnostic, result.stderr)
+                    detected = dict(rejected=True, seed=seed, reason=result.stderr.strip())
+                    break
+            self.assertIsNotNone(detected, name + ' escaped the independent recovery checker')
+            self.mutations[name] = detected
 
     def assert_retirement_interleaving(self, results):
         self.assertGreater(sum(run['admissions_with_completed_head'] for run in results), 0)
