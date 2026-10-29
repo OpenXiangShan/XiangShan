@@ -60,4 +60,32 @@ class IfuCfvecToffeeCoverage(NativeDomainToffeeCoverage):
         )
 
 
+    # BIN-954 diagnostics are run-level state read through the hub/sink API.
+    # Only these three fields are shared. Other native evaluator state remains
+    # on this model; do not forward generic __setattr__ to the runtime.
+    @property
+    def _ifu_exception_metadata_checks(self):
+        return self._runtime._ifu_exception_metadata_checks
+
+    @_ifu_exception_metadata_checks.setter
+    def _ifu_exception_metadata_checks(self, value):
+        self._runtime._ifu_exception_metadata_checks = value
+
+    @property
+    def _ifu_exception_metadata_witnesses(self):
+        return self._runtime._ifu_exception_metadata_witnesses
+
+    @_ifu_exception_metadata_witnesses.setter
+    def _ifu_exception_metadata_witnesses(self, value):
+        self._runtime._ifu_exception_metadata_witnesses = value
+
+    @property
+    def _ifu_exception_metadata_gaps(self):
+        return self._runtime._ifu_exception_metadata_gaps
+
+    @_ifu_exception_metadata_gaps.setter
+    def _ifu_exception_metadata_gaps(self, value):
+        self._runtime._ifu_exception_metadata_gaps = value
+
+
 __all__ = ["CFVEC_COVERPOINTS", "IfuCfvecToffeeCoverage"]

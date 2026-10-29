@@ -1311,6 +1311,9 @@ def test_ifu_exception_metadata_owner_leaf_uses_ibuffer_and_gpa_contract(tmp_pat
         )
         dut.set(_PREFIX + "s2_icacheMeta_0_exception_value", exception)
         dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
+        dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+        dut.set(_PREFIX + "s2_alignedInstrVec_0_blockSel", 0)
+        dut.set(_PREFIX + "s2_alignedInstrVec_0_isCrossBlockInstr", 0)
         sample_cfvec_coverage(recorder, env, cycle)
         if cycle < 3:
             assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_056")

@@ -6,7 +6,8 @@ import os
 
 import pytest
 
-from env.funcov.py.ifu.compact_funcov import _read_ifu_internal_with_path
+from env.funcov.py.ifu.compact_funcov import _gpf_metadata_delivery_scope, _read_ifu_internal_with_path
+from tests.py.support.ifu_exception_scope import assert_no_effective_ifu_exception
 from tests.py.zhaoxinran.translation import test_address_translation_context_switch as context
 from tests.py.zhaoxinran.translation import test_address_translation_gstage_provenance as gstage
 from tests.py.zhaoxinran.translation import test_address_translation_fault as translation_faults
@@ -30,6 +31,19 @@ def _capture_metadata(env):
         "s2_prevEndIsHalfRviInfo_bits_pc_addr", "s2_prevEndIsHalfRviInfo_bits_data",
         "s2_fetchBlock_0_ftqIdx_flag", "s2_fetchBlock_0_ftqIdx_value",
         "s2_fetchBlock_0_startVAddr_addr", "io_toIBuffer_bits_enqEnable",
+    )
+
+    stems += (
+        "io_toIBuffer_bits_valid", "io_toIBuffer_bits_exceptionMask",
+        "s2_fetchBlock_0_valid", "s2_fetchBlock_1_valid",
+    )
+    stems += tuple(
+        f"s2_{stem}_1_{field}"
+        for stem, fields in (
+            ("fetchBlock", ("ftqIdx_flag", "ftqIdx_value", "startVAddr_addr")),
+            ("icacheMeta", ("exception_value", "gpAddr_addr", "isForVSnonLeafPTE")),
+        )
+        for field in fields
     )
 
     def capture(cycle, active_env):
@@ -60,6 +74,20 @@ def _capture_metadata(env):
                     readable[path] = int(value)
                     assert int(value) == state[stem], {"alias_disagreement": readable, "stem": stem}
             canaries[stem] = readable
+        effective = (state["io_toIBuffer_bits_valid"] & state["io_toIBuffer_bits_enqEnable"]
+                     & state["io_toIBuffer_bits_exceptionMask"])
+        for lane in range(36):
+            if not (effective >> lane) & 1:
+                continue
+            for stem in (f"s2_alignedInstrVec_{lane}_blockSel",
+                         f"s2_alignedInstrVec_{lane}_isCrossBlockInstr",
+                         f"io_toIBuffer_bits_ftqPtr_{lane}_flag",
+                         f"io_toIBuffer_bits_ftqPtr_{lane}_value"):
+                value, path = _read_ifu_internal_with_path(
+                    active_env.functional_coverage, active_env.dut, stem)
+                assert value is not None, {"missing_metadata_probe": stem}
+                state[stem] = int(value)
+                paths[stem] = path
         gp = active_env.backend_from_ifu_if
         state["gpaddr"] = {
             "wen": int(gp.gpaddr_mem_wen.value), "waddr": int(gp.gpaddr_mem_waddr.value),
@@ -83,13 +111,18 @@ def _save_review(env, records, component):
         "satp_without_fault": {"satp_flush"}, "vs_nonleaf_gpf": {"gpaddr", "vs_nonleaf_pte"},
         "backend_fault": {"backend_exception"}, "cross_page": {"cross_page"},
     }[component]
-    assert expected <= set(getattr(env.functional_coverage, "_ifu_exception_metadata_checks", ()))
+    sink = env.functional_coverage.toffee_sink
+    assert expected <= set(getattr(sink, "_ifu_exception_metadata_checks", ()))
     env._emit_event("ifu.exception_metadata_component_review", {
         "component": component, "transactions": interesting,
-        "sampler_checks": sorted(getattr(env.functional_coverage, "_ifu_exception_metadata_checks", ())),
+        "sampler_checks": sorted(getattr(sink, "_ifu_exception_metadata_checks", ())),
+        "component_witnesses": dict(getattr(sink, "_ifu_exception_metadata_witnesses", {})),
+        "missing_probes": sorted(getattr(sink, "_ifu_exception_metadata_gaps", ())),
         "coverage_promotion": "none: partial BIN-954 diagnostic",
     })
-    assert not env.get_errors()
+    assert not env.functional_coverage.contract_errors, env.functional_coverage.contract_errors
+    assert not env.monitor.get_errors(), env.monitor.get_errors()
+    assert not env.get_errors(), env.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-954")
@@ -100,7 +133,8 @@ def test_ifu_exception_metadata_satp_without_fault_diagnostic(env):
     delivered = [r for r in records if r["io_toIBuffer_ready"] and r["io_toIBuffer_bits_hasSatpFlush"]]
     assert delivered, {"reason": "no accepted satp-flush metadata"}
     assert all(r["s2_icacheMeta_0_hasSatpFlush"] == 1 for r in delivered)
-    assert all(r["io_toIBuffer_bits_exceptionType_value"] == 0 for r in delivered)
+    for record in delivered:
+        record["effective_exception_scope"] = assert_no_effective_ifu_exception(record)
     assert all(r["io_toIBuffer_bits_isBackendException"] == 0 for r in delivered)
     assert delivered[0]["s2_fetchBlock_0_startVAddr_addr"] << 1 == context._NEW_VA
     _save_review(env, records, "satp_without_fault")
@@ -119,15 +153,32 @@ def test_ifu_exception_metadata_vs_nonleaf_gpf_diagnostic(env):
     gstage.test_address_translation_gstage_provenance(
         env, scenario, "instruction_guest_page_fault", True
     )
-    delivered = [r for r in records if r["io_toIBuffer_ready"] and r["gpaddr"]["wen"]]
-    assert delivered, {"reason": "no accepted GPF metadata"}
+    delivered = []
+    for record in records:
+        if not record["io_toIBuffer_ready"] or not record["gpaddr"]["wen"]:
+            continue
+        def read(stem, *, gp=False):
+            key = {"wen": "wen", "waddr": "waddr", "wdata_gpaddr": "addr",
+                   "wdata_isForVSnonLeafPTE": "nonleaf"}.get(stem, stem)
+            value = record["gpaddr"][key] if gp else record[stem]
+            if value is None:
+                raise KeyError(stem)
+            return int(value)
+        scope = _gpf_metadata_delivery_scope(
+            read, record["io_toIBuffer_bits_exceptionType_value"],
+            record["s2_icacheMeta_0_exception_value"])
+        if scope is not None:
+            record["effective_gpf_scope"] = scope
+            delivered.append(record)
+    assert delivered, {"reason": "no accepted effective GPF metadata"}
     for r in delivered:
-        assert r["io_toIBuffer_bits_exceptionType_value"] == r["s2_icacheMeta_0_exception_value"] == 2
+        scope = r["effective_gpf_scope"]
+        source = scope["gpaddr_source_block"]
         assert r["gpaddr"]["addr"] == gstage._GPA
-        assert r["s2_icacheMeta_0_gpAddr_addr"] << 1 == gstage._GPA
-        assert r["gpaddr"]["nonleaf"] == r["s2_icacheMeta_0_isForVSnonLeafPTE"] == 1
-        assert r["gpaddr"]["waddr"] == r["s2_fetchBlock_0_ftqIdx_value"]
-        assert r["s2_fetchBlock_0_startVAddr_addr"] << 1 == gstage._VA
+        assert r[f"s2_icacheMeta_{source}_gpAddr_addr"] << 1 == gstage._GPA
+        assert r["gpaddr"]["nonleaf"] == r[f"s2_icacheMeta_{source}_isForVSnonLeafPTE"] == 1
+        assert scope["ftq"] == scope["delivered_ftq"]
+        assert scope["start_pc"] == gstage._VA
     _save_review(env, records, "vs_nonleaf_gpf")
 
 
@@ -191,7 +242,9 @@ def test_ifu_exception_metadata_all_components_one_run(env, monkeypatch):
             "phase": phase.__name__, "end_cycle": int(env.current_cycle),
             "monitor_errors": len(env.monitor.get_errors()),
             "translation_error_count": env.translation_oracle.get_stats()["error_count"],
-            "sampler_checks": sorted(getattr(env.functional_coverage, "_ifu_exception_metadata_checks", ())),
+            "sampler_checks": sorted(getattr(sink, "_ifu_exception_metadata_checks", ())),
+        "component_witnesses": dict(getattr(sink, "_ifu_exception_metadata_witnesses", {})),
+        "missing_probes": sorted(getattr(sink, "_ifu_exception_metadata_gaps", ())),
         })
         # A fully checked phase has ended; do not interpret reset cycles under
         # the prior phase's translation oracle. No errors/counters are erased.

@@ -1674,6 +1674,60 @@ def _sample_writeback(recorder, dut, cycle: int, pointer_redirect: bool) -> None
     recorder._ifu_wb_pending = pending
 
 
+def _gpf_metadata_delivery_scope(read, exception: int, meta_exception: int):
+    """Prove the selected GPF owns an effective accepted entry, or return None.
+
+    PriorityMux uses exception payload even on invalid blocks. Never skip that
+    candidate and borrow a different block. Missing reads propagate KeyError;
+    callers record a gap instead of inventing a value. No cross-cycle state.
+    """
+    if exception != 2 or read("io_toIBuffer_valid") != 1 or read("io_toIBuffer_ready") != 1:
+        return None
+    if meta_exception == 2:
+        source = 0
+    elif meta_exception == 0 and read("s2_icacheMeta_1_exception_value") == 2:
+        source = 1
+    else:
+        return None
+    if read(f"s2_fetchBlock_{source}_valid") != 1:
+        return None
+    valid = read("io_toIBuffer_bits_valid")
+    enq = read("io_toIBuffer_bits_enqEnable")
+    mask = read("io_toIBuffer_bits_exceptionMask")
+    limit = (1 << _IFU_OUTPUT_SLOT_COUNT) - 1
+    if any(value < 0 or value > limit for value in (valid, enq, mask)) or enq & ~valid:
+        return None
+    effective = valid & enq & mask
+    # The ICache exception index is emitted as UIntToOH. A bus payload without
+    # its one valid/enqueued exception entry is not a delivered GPF witness.
+    if not effective or mask & (mask - 1):
+        return None
+    lane = effective.bit_length() - 1
+    block_sel = read(f"s2_alignedInstrVec_{lane}_blockSel")
+    cross_block = read(f"s2_alignedInstrVec_{lane}_isCrossBlockInstr")
+    if block_sel not in (0, 1) or cross_block not in (0, 1):
+        return None
+    if (block_sel | cross_block) != source:
+        return None
+    ftq = [read(f"s2_fetchBlock_{source}_ftqIdx_flag"),
+           read(f"s2_fetchBlock_{source}_ftqIdx_value")]
+    delivered_ftq = [read(f"io_toIBuffer_bits_ftqPtr_{lane}_{field}") for field in ("flag", "value")]
+    if ftq[0] not in (0, 1) or delivered_ftq != ftq:
+        return None
+    start_pc = read(f"s2_fetchBlock_{source}_startVAddr_addr") << 1
+    nonleaf = read(f"s2_icacheMeta_{source}_isForVSnonLeafPTE")
+    if nonleaf not in (0, 1):
+        return None
+    if (read("wen", gp=True) != 1 or read("waddr", gp=True) != ftq[1]
+            or read("wdata_gpaddr", gp=True) != read(f"s2_icacheMeta_{source}_gpAddr_addr") << 1
+            or read("wdata_isForVSnonLeafPTE", gp=True) != nonleaf):
+        return None
+    return {"ftq": ftq, "start_pc": start_pc, "gpaddr_source_block": source,
+            "gpaddr_priority": "first_gpf_candidate", "effective_exception_mask": effective,
+            "exception_lane": lane, "delivered_ftq": delivered_ftq,
+            "selected_block_valid": True, "vs_nonleaf_pte": bool(nonleaf)}
+
+
 def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
     """Accumulate the five separately specified BIN-954 components in one run.
 
@@ -1736,15 +1790,13 @@ def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
         except KeyError as exc:
             note_gap("cross_page", exc)
 
-    # GPF has encoding 2. A stale wen/data combination under PF/AF/HWE/Ill
-    # must not count, even if its address accidentally matches an FTQ index.
-    if exception == meta_exception == 2:
+    gp_scope = None
+    if exception == 2:
         try:
-            if (read("wen", gp=True) == 1 and read("waddr", gp=True) == ftq[1]
-                    and read("wdata_gpaddr", gp=True) == read("s2_icacheMeta_0_gpAddr_addr") << 1
-                    and read("wdata_isForVSnonLeafPTE", gp=True) == read("s2_icacheMeta_0_isForVSnonLeafPTE")):
+            gp_scope = _gpf_metadata_delivery_scope(read, exception, meta_exception)
+            if gp_scope is not None:
                 observed.add("gpaddr")
-                if values["gpAddrMem.wdata_isForVSnonLeafPTE"] == 1:
+                if gp_scope["vs_nonleaf_pte"]:
                     observed.add("vs_nonleaf_pte")
         except KeyError as exc:
             note_gap("gpaddr", exc)
@@ -1756,7 +1808,10 @@ def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
     witness = {"cycle": int(cycle), "ftq": ftq, "start_pc": start_pc,
                "values": dict(values), "signal_paths": dict(paths), "ibuffer_delivery": True}
     for component in added:
-        witnesses[component] = witness
+        if component in {"gpaddr", "vs_nonleaf_pte"}:
+            witnesses[component] = dict(witness, **gp_scope)
+        else:
+            witnesses[component] = witness
     recorder._ifu_exception_metadata_witnesses = witnesses
     recorder._ifu_exception_metadata_checks = set(witnesses)
     evidence = {"event": "ifu_exception_metadata_contract", "cycle": int(cycle),
