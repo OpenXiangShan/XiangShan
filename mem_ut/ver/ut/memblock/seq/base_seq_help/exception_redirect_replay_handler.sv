@@ -241,7 +241,9 @@ class exception_redirect_replay_handler extends uvm_object;
         redirect = data.active_redirect;
         if (data.redirect_drive_done_for(redirect) &&
             data.cancel_redirect_scan_ready(redirect)) begin
-            data.apply_redirect_flush(redirect);
+            if (!data.apply_redirect_flush(redirect)) begin
+                return;
+            end
         end else if (seq_csr_common::is_initialized() &&
                      seq_csr_common::get_redirect_freeze_timeout() != 0 &&
                      (memblock_sync_pkg::get_dispatch_service_cycle() - data.redirect_freeze_cycle) >=

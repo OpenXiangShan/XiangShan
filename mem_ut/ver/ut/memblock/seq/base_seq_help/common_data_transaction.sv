@@ -21,6 +21,32 @@ endclass:memblock_pma_pmp_replay_ticket
 
 class common_data_transaction extends uvm_object;
 
+    typedef enum int unsigned {
+        MEMBLOCK_CONTROL_AUDIT_CREATION,
+        MEMBLOCK_CONTROL_AUDIT_OWNER_BIND,
+        MEMBLOCK_CONTROL_AUDIT_CSR_ENQUEUE,
+        MEMBLOCK_CONTROL_AUDIT_CSR_START,
+        MEMBLOCK_CONTROL_AUDIT_CSR_COMPLETION,
+        MEMBLOCK_CONTROL_AUDIT_SFENCE_ENQUEUE,
+        MEMBLOCK_CONTROL_AUDIT_SFENCE_START,
+        MEMBLOCK_CONTROL_AUDIT_SFENCE_COMPLETION,
+        MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_ENQUEUE,
+        MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_START,
+        MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_COMPLETION,
+        MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_ENQUEUE,
+        MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_START,
+        MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_COMPLETION,
+        MEMBLOCK_CONTROL_AUDIT_TERMINAL,
+        MEMBLOCK_CONTROL_AUDIT_BARRIER_RELEASE
+    } memblock_control_audit_event_e;
+
+    typedef struct {
+        bit                            valid;
+        memblock_uid_t                 uid;
+        memblock_control_audit_event_e event_kind;
+        int unsigned                   generation;
+    } memblock_control_lifecycle_ticket_t;
+
     typedef bit [53:0] memblock_uid_tlb_wait_shape_key_t;
     localparam bit [3:0] MEMBLOCK_SV39_MODE = 4'd8;
     localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
@@ -239,6 +265,11 @@ class common_data_transaction extends uvm_object;
     // 在该 UID terminal_done 后由 control service 解除；普通 LSQ admission 不得越过它。
     bit            active_control_barrier_valid;
     memblock_uid_t active_control_barrier_uid;
+    bit                         control_barrier_prefix_external_provenance_valid;
+    memblock_uid_t              control_barrier_prefix_external_provenance_uid;
+    memblock_redirect_payload_t control_barrier_prefix_external_origin_redirect;
+    memblock_uid_t              control_barrier_prefix_external_origin_old_end_uid;
+    memblock_uid_t              control_barrier_prefix_external_origin_new_end_uid;
     // 中文注释：当前唯一控制 SFence 的 C0/C4 adapter observation。写入：已有
     // L2TLB adapter 在 schedule/apply 边界；读取/清除：control barrier service。
     // 这两个槽不保存 generic fence，避免普通 SFence 干扰控制 owner。
@@ -386,6 +417,7 @@ class common_data_transaction extends uvm_object;
         uid_waiting_by_vpn_s2xlate.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        clear_control_barrier_prefix_external_provenance();
         control_sfence_c0_observation = '{default:'0};
         control_sfence_effective_observation = '{default:'0};
         csr_control_action_q.delete();
@@ -418,8 +450,18 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA", "PMA/PMP testcase reset revision precheck failed")
         end
 
+        if (control_barrier_prefix_external_provenance_valid) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("reset_all_tables rejects residual control provenance uid=%0d origin_old/new=%0d/%0d",
+                                 control_barrier_prefix_external_provenance_uid,
+                                 control_barrier_prefix_external_origin_old_end_uid,
+                                 control_barrier_prefix_external_origin_new_end_uid))
+            return;
+        end
+
         if (main_trans_num_i == 0) begin
             `uvm_fatal("COMMON_DATA", "reset_all_tables requires non-zero main_trans_num")
+            return;
         end
 
         main_trans_num      = main_trans_num_i;
@@ -529,6 +571,7 @@ class common_data_transaction extends uvm_object;
         uid_by_sq.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        clear_control_barrier_prefix_external_provenance();
         control_sfence_c0_observation = '{default:'0};
         control_sfence_effective_observation = '{default:'0};
         csr_control_action_q.delete();
@@ -1892,7 +1935,7 @@ class common_data_transaction extends uvm_object;
     endfunction:assert_uid_within_rob_admission_window
 
     // redirect 等低频事件入口使用有限 active ROB map 审计，不扫描完整主表。
-    function void audit_active_rob_window(input string caller);
+    function bit audit_active_rob_window(input string caller);
         memblock_uid_t frontier_uid;
 
         frontier_uid = dispatch_progress.rob_commit_frontier_uid;
@@ -1902,7 +1945,14 @@ class common_data_transaction extends uvm_object;
             memblock_rob_key_t rob_key;
 
             uid = uid_by_active_rob[map_key];
-            status = get_status(uid);
+            if (!is_valid_uid(uid) || status_by_uid[uid] == null ||
+                main_table_by_uid[uid] == null) begin
+                `uvm_fatal("ROB_ADMISSION_WINDOW",
+                           $sformatf("%s active ROB map references invalid uid=%0d map_key=%0h",
+                                     caller, uid, map_key))
+                return 1'b0;
+            end
+            status = status_by_uid[uid];
             rob_key = status.get_rob_key();
             if (!status.active || rob_order_util::rob_to_map_key(rob_key) != map_key ||
                 get_main_transaction(uid).get_rob_key() != rob_key) begin
@@ -1910,29 +1960,31 @@ class common_data_transaction extends uvm_object;
                            $sformatf("%s active ROB map identity mismatch uid=%0d map_key=%0h active=%0d rob=%0d/%0d",
                                      caller, uid, map_key, status.active,
                                      rob_key.flag, rob_key.value))
-                return;
+                return 1'b0;
             end
             if (!status.rob_commit) begin
                 if (!assert_uid_within_rob_admission_window(uid, caller)) begin
-                    return;
+                    return 1'b0;
                 end
             end else if (uid > frontier_uid) begin
                 `uvm_fatal("ROB_ADMISSION_FRONTIER",
                            $sformatf("%s committed active owner is younger than frontier uid=%0d frontier=%0d",
                                      caller, uid, frontier_uid))
-                return;
+                return 1'b0;
             end
         end
+        return 1'b1;
     endfunction:audit_active_rob_window
 
     // redirect 完成后只验证 prefix containment；发现 prefix 外 owner 报错，不补扫。
-    function void assert_active_owners_within_admission_prefix(
+    function bit assert_active_owners_within_admission_prefix(
         input memblock_redirect_payload_t redirect,
-        input memblock_uid_t old_end_uid,
         input string caller);
         memblock_uid_t new_end_uid;
+        int unsigned provenance_match_count;
 
         new_end_uid = get_active_scan_end_uid();
+        provenance_match_count = 0;
         foreach (uid_by_active_rob[map_key]) begin
             memblock_uid_t uid;
             status_transaction status;
@@ -1942,19 +1994,49 @@ class common_data_transaction extends uvm_object;
             if (uid < new_end_uid) begin
                 continue;
             end
-            status = get_status(uid);
+            if (!is_valid_uid(uid) || status_by_uid[uid] == null ||
+                main_table_by_uid[uid] == null) begin
+                `uvm_fatal("ROB_ADMISSION_PREFIX",
+                           $sformatf("%s prefix scan references invalid uid=%0d", caller, uid))
+                return 1'b0;
+            end
+            status = status_by_uid[uid];
             rob_key = status.get_rob_key();
+            if (control_barrier_prefix_external_provenance_valid &&
+                uid == control_barrier_prefix_external_provenance_uid &&
+                active_control_barrier_valid && active_control_barrier_uid == uid &&
+                is_control_op_class(main_table_by_uid[uid].op_class) &&
+                status.active && status.enq && !status.terminal_done &&
+                status.control_state == MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT &&
+                !status.control_owner.valid && !status.control_action_enqueued &&
+                !status.active_lq_mapped && !status.active_sq_mapped &&
+                rob_order_util::rob_need_flush(rob_key, redirect)) begin
+                provenance_match_count++;
+                continue;
+            end
             `uvm_fatal("ROB_ADMISSION_PREFIX",
-                       $sformatf("%s found prefix-external active owner uid=%0d rob=%0d/%0d redirect=%0d/%0d old_end=%0d new_end=%0d frontier=%0d distance=%0d lq/sq_mapped=%0d/%0d",
+                       $sformatf("%s found prefix-external active owner uid=%0d rob=%0d/%0d redirect=%0d/%0d new_end=%0d frontier=%0d distance=%0d lq/sq_mapped=%0d/%0d provenance=%0d/%0d barrier=%0d/%0d",
                                  caller, uid, rob_key.flag, rob_key.value,
                                  redirect.rob_key.flag, redirect.rob_key.value,
-                                 old_end_uid, new_end_uid,
+                                 new_end_uid,
                                  dispatch_progress.rob_commit_frontier_uid,
                                  uid - dispatch_progress.rob_commit_frontier_uid,
                                  status.active_lq_mapped,
-                                 status.active_sq_mapped))
-            return;
+                                 status.active_sq_mapped,
+                                 control_barrier_prefix_external_provenance_valid,
+                                 control_barrier_prefix_external_provenance_uid,
+                                 active_control_barrier_valid,
+                                 active_control_barrier_uid))
+            return 1'b0;
         end
+        if (control_barrier_prefix_external_provenance_valid && provenance_match_count != 1) begin
+            `uvm_fatal("ROB_ADMISSION_PREFIX",
+                       $sformatf("%s provenance uid=%0d matched prefix-external owners %0d times new_end=%0d",
+                                 caller, control_barrier_prefix_external_provenance_uid,
+                                 provenance_match_count, new_end_uid))
+            return 1'b0;
+        end
+        return 1'b1;
     endfunction:assert_active_owners_within_admission_prefix
 
     function void mark_uid_enqueued(input memblock_uid_t uid);
@@ -1978,15 +2060,21 @@ class common_data_transaction extends uvm_object;
         dispatch_progress.max_enqueued_uid = uid;
     endfunction:mark_uid_enqueued
 
-    function void rollback_max_enqueued_uid(input memblock_uid_t oldest_flushed_uid);
-        check_uid(oldest_flushed_uid, "rollback_max_enqueued_uid");
+    function bit rollback_max_enqueued_uid(input memblock_uid_t oldest_flushed_uid);
+        if (!is_valid_uid(oldest_flushed_uid)) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("rollback_max_enqueued_uid got invalid uid=%0d main_trans_num=%0d",
+                                 oldest_flushed_uid, main_trans_num))
+            return 1'b0;
+        end
         if (oldest_flushed_uid == 0) begin
             dispatch_progress.max_enqueued_uid       = 0;
             dispatch_progress.max_enqueued_uid_valid = 1'b0;
-            return;
+            return 1'b1;
         end
         dispatch_progress.max_enqueued_uid       = oldest_flushed_uid - 1;
         dispatch_progress.max_enqueued_uid_valid = 1'b1;
+        return 1'b1;
     endfunction:rollback_max_enqueued_uid
 
     function void advance_terminal_done_uid();
@@ -2036,6 +2124,7 @@ class common_data_transaction extends uvm_object;
                redirect_deleted_lq_owner_by_key.num() == 0 &&
                redirect_deleted_sq_owner_by_key.num() == 0 &&
                !active_control_barrier_valid &&
+               !control_barrier_prefix_external_provenance_valid &&
                !has_pending_redirect_drive() &&
                !flush_in_progress &&
                !active_redirect.valid &&
@@ -2112,6 +2201,15 @@ class common_data_transaction extends uvm_object;
     // 这样 responder 可以在 prepare 期间继续接收 DUT 内部尾请求，不能在此函数中等待或清队列。
     function void request_global_stop_if_done();
         if (global_stop_requested) begin
+            return;
+        end
+
+        if (transaction_done() && control_barrier_prefix_external_provenance_valid) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("transaction complete with residual control provenance uid=%0d origin_old/new=%0d/%0d",
+                                 control_barrier_prefix_external_provenance_uid,
+                                 control_barrier_prefix_external_origin_old_end_uid,
+                                 control_barrier_prefix_external_origin_new_end_uid))
             return;
         end
 
@@ -2195,17 +2293,20 @@ class common_data_transaction extends uvm_object;
         main_control_transaction main_tr;
         status_transaction       status;
         memblock_control_kind_e  expected_kind;
+        memblock_control_lifecycle_ticket_t audit_ticket;
 
         check_uid(uid, "activate_control_uid");
         if (get_next_new_admit_uid() != uid) begin
             `uvm_fatal("CONTROL_ADMISSION",
                        $sformatf("control admission uid=%0d is not the next prefix uid=%0d",
                                  uid, get_next_new_admit_uid()))
+            return;
         end
         if (active_control_barrier_valid) begin
             `uvm_fatal("CONTROL_ADMISSION",
                        $sformatf("cannot admit control uid=%0d while barrier uid=%0d is active",
                                  uid, active_control_barrier_uid))
+            return;
         end
         if (!assert_uid_within_rob_admission_window(uid, "activate_control_uid")) begin
             return;
@@ -2218,6 +2319,7 @@ class common_data_transaction extends uvm_object;
                        $sformatf("invalid fresh control admission uid=%0d op=%0d active/enq/done=%0d/%0d/%0d",
                                  uid, main_tr.op_class, status.active, status.enq,
                                  status.terminal_done))
+            return;
         end
         expected_kind = control_kind_from_op_class(main_tr.op_class);
         if (status.control_kind != expected_kind ||
@@ -2228,6 +2330,11 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("CONTROL_ADMISSION",
                        $sformatf("control uid=%0d has non-neutral static state kind/state=%0d/%0d",
                                  uid, status.control_kind, status.control_state))
+            return;
+        end
+        if (!precheck_control_lifecycle_event(
+                uid, MEMBLOCK_CONTROL_AUDIT_CREATION, audit_ticket)) begin
+            return;
         end
 
         activate_uid(uid, 1'b0, 1'b0);
@@ -2245,6 +2352,7 @@ class common_data_transaction extends uvm_object;
         status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
         active_control_barrier_uid = uid;
         active_control_barrier_valid = 1'b1;
+        record_control_lifecycle_event(audit_ticket);
     endfunction:activate_control_uid
 
     // 抽象职责：redirect 回退后重新跨过已保留的静态控制标记，只恢复 admission
@@ -2264,22 +2372,37 @@ class common_data_transaction extends uvm_object;
                                  uid, active_control_barrier_valid,
                                  active_control_barrier_uid, status.active, status.enq,
                                  status.terminal_done, status.control_state))
+            return;
+        end
+        if (!control_barrier_prefix_external_provenance_valid ||
+            control_barrier_prefix_external_provenance_uid != uid) begin
+            `uvm_fatal("CONTROL_ADMISSION_PROVENANCE",
+                       $sformatf("restore uid=%0d lacks matching provenance valid/uid=%0d/%0d",
+                                 uid, control_barrier_prefix_external_provenance_valid,
+                                 control_barrier_prefix_external_provenance_uid))
+            return;
         end
         mark_uid_enqueued(uid);
+        clear_control_barrier_prefix_external_provenance();
         status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     endfunction:restore_control_admission_prefix
 
     // 抽象职责：确认 redirect 命中的是尚未拥有动作实例的静态控制标记。该 helper
     // 不清状态、不撤 ROB map、不计入 LSQ cancel，也不推进 dynamic_epoch。
-    function void preserve_static_control_marker_on_redirect(
+    function bit preserve_static_control_marker_on_redirect(
         input memblock_uid_t uid,
         input memblock_redirect_payload_t redirect
     );
         status_transaction status;
 
-        check_uid(uid, "preserve_static_control_marker_on_redirect");
-        status = get_status(uid);
-        if (!redirect.valid || !uid_is_control_marker(uid) ||
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null ||
+            main_table_by_uid[uid] == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("preserve_static_control_marker_on_redirect invalid uid=%0d", uid))
+            return 1'b0;
+        end
+        status = status_by_uid[uid];
+        if (!redirect.valid || !is_control_op_class(main_table_by_uid[uid].op_class) ||
             !active_control_barrier_valid || active_control_barrier_uid != uid ||
             !status.active || !status.enq || status.terminal_done ||
             status.control_state != MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT ||
@@ -2288,16 +2411,28 @@ class common_data_transaction extends uvm_object;
                        $sformatf("redirect cannot preserve control uid=%0d state=%0d owner_valid=%0d action_enqueued=%0d",
                                  uid, status.control_state, status.control_owner.valid,
                                  status.control_action_enqueued))
+            return 1'b0;
         end
+        return 1'b1;
     endfunction:preserve_static_control_marker_on_redirect
 
     // 抽象职责：控制 worker 在 terminal_done 已被公共 commit/retire 固化后解除 barrier，
     // 使后续 UID 恢复 admission；它不负责 commit 或状态推进。
     function void release_control_barrier_after_terminal(input memblock_uid_t uid);
         status_transaction status;
+        memblock_control_lifecycle_ticket_t audit_ticket;
+        bit matching_csr_action;
+        bit matching_sfence_action;
+        bit matching_l2_release_request;
 
         check_uid(uid, "release_control_barrier_after_terminal");
         status = get_status(uid);
+        if (control_barrier_prefix_external_provenance_valid) begin
+            `uvm_fatal("CONTROL_BARRIER",
+                       $sformatf("cannot release uid=%0d with residual provenance uid=%0d",
+                                 uid, control_barrier_prefix_external_provenance_uid))
+            return;
+        end
         if (!active_control_barrier_valid || active_control_barrier_uid != uid ||
             !uid_is_control_marker(uid) || !status.terminal_done || status.active) begin
             `uvm_fatal("CONTROL_BARRIER",
@@ -2305,9 +2440,52 @@ class common_data_transaction extends uvm_object;
                                  uid, active_control_barrier_valid,
                                  active_control_barrier_uid, status.terminal_done,
                                  status.active))
+            return;
+        end
+        matching_csr_action = 1'b0;
+        foreach (csr_control_action_q[idx]) begin
+            if (memblock_control_owner_equal(csr_control_action_q[idx].owner,
+                                             status.control_owner)) begin
+                matching_csr_action = 1'b1;
+            end
+        end
+        matching_sfence_action = 1'b0;
+        foreach (sfence_control_action_q[idx]) begin
+            if (memblock_control_owner_equal(sfence_control_action_q[idx].owner,
+                                             status.control_owner)) begin
+                matching_sfence_action = 1'b1;
+            end
+        end
+        matching_l2_release_request = 1'b0;
+        foreach (l2_flush_release_request_q[idx]) begin
+            if (memblock_control_owner_equal(l2_flush_release_request_q[idx].owner,
+                                             status.control_owner)) begin
+                matching_l2_release_request = 1'b1;
+            end
+        end
+        if (status.control_action_enqueued || matching_csr_action ||
+            matching_sfence_action || matching_l2_release_request ||
+            status.control_flushsb_request_queued ||
+            (attached_flushsb_req_valid && attached_flushsb_req.owner_valid &&
+             memblock_control_owner_equal(attached_flushsb_req.owner, status.control_owner)) ||
+            (active_flushsb_req_valid && active_flushsb_req.owner_valid &&
+             memblock_control_owner_equal(active_flushsb_req.owner, status.control_owner)) ||
+            (flushsb_completed.valid &&
+             memblock_control_owner_equal(flushsb_completed.owner, status.control_owner))) begin
+            `uvm_fatal("CONTROL_LIFECYCLE_AUDIT",
+                       $sformatf("release uid=%0d has residual action/queue/flushSb", uid))
+            return;
+        end
+        if (!precheck_control_lifecycle_event(
+                uid, MEMBLOCK_CONTROL_AUDIT_BARRIER_RELEASE, audit_ticket)) begin
+            return;
         end
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        status.control_owner = '{default:'0};
+        status.control_action_enqueued = 1'b0;
+        status.control_flushsb_request_queued = 1'b0;
+        record_control_lifecycle_event(audit_ticket);
     endfunction:release_control_barrier_after_terminal
 
     // 抽象职责：清除本 testcase 尚未交付的 control worker 工作项和 shutdown 回执。
@@ -2334,24 +2512,71 @@ class common_data_transaction extends uvm_object;
     // event 丢失不会丢动作，因为 worker 每次醒来都重新检查 queue；本函数不推进
     // status，调用者必须先完成 owner/state 校验和状态写入。
     function void enqueue_csr_control_action(input memblock_csr_control_action_t action);
+        memblock_control_lifecycle_ticket_t audit_ticket;
+        status_transaction status;
+        memblock_control_audit_event_e event_kind;
+
         if (!action.owner.valid) begin
             `uvm_fatal("CONTROL_ACTION", "enqueue_csr_control_action got invalid owner")
+            return;
         end
         if (control_workers_shutdown_requested || csr_control_worker_exited) begin
             `uvm_fatal("CONTROL_ACTION", "cannot enqueue CSR action after worker shutdown/exited")
+            return;
         end
-        csr_control_action_q.push_back(action);
-        ->csr_control_action_available_ev;
+        if (!is_valid_uid(action.owner.uid) || status_by_uid[action.owner.uid] == null) begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue CSR action references invalid owner uid")
+            return;
+        end
+        status = status_by_uid[action.owner.uid];
+        if (!memblock_control_owner_equal(status.control_owner, action.owner)) begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue CSR action owner mismatch")
+            return;
+        end
+        if (action.completion_profile == MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT &&
+            action.l2_flush_phase == MEMBLOCK_L2_FLUSH_PHASE_NONE) begin
+            event_kind = MEMBLOCK_CONTROL_AUDIT_CSR_ENQUEUE;
+        end else if (action.completion_profile == MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL &&
+                     action.l2_flush_phase == MEMBLOCK_L2_FLUSH_PHASE_ASSERT) begin
+            event_kind = MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_ENQUEUE;
+        end else begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue CSR action has unsupported audit profile")
+            return;
+        end
+        if (!precheck_control_lifecycle_event(action.owner.uid, event_kind, audit_ticket)) begin
+            return;
+        end
+        commit_csr_control_action(action, audit_ticket);
     endfunction:enqueue_csr_control_action
 
     // 抽象职责：CSR worker 从 FIFO 取出唯一待交付 action；为空时只返回 0，
     // 不等待 event，避免把 queue state 与 event 唤醒语义混为一体。
     function bit try_pop_csr_control_action(output memblock_csr_control_action_t action);
+        memblock_control_lifecycle_ticket_t audit_ticket;
+        memblock_control_audit_event_e event_kind;
+
         if (csr_control_action_q.size() == 0) begin
             action = '{default:'0};
             return 1'b0;
         end
+        action = csr_control_action_q[0];
+        if (action.completion_profile == MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT &&
+            action.l2_flush_phase == MEMBLOCK_L2_FLUSH_PHASE_NONE) begin
+            event_kind = MEMBLOCK_CONTROL_AUDIT_CSR_START;
+        end else if (action.completion_profile == MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL &&
+                     action.l2_flush_phase == MEMBLOCK_L2_FLUSH_PHASE_ASSERT) begin
+            event_kind = MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_START;
+        end else begin
+            `uvm_fatal("CONTROL_ACTION", "CSR queue front has unsupported audit profile")
+            action = '{default:'0};
+            return 1'b0;
+        end
+        if (!precheck_control_lifecycle_event(action.owner.uid, event_kind, audit_ticket)) begin
+            action = '{default:'0};
+            return 1'b0;
+        end
         action = csr_control_action_q.pop_front();
+        record_control_lifecycle_event(audit_ticket);
         return 1'b1;
     endfunction:try_pop_csr_control_action
 
@@ -2447,22 +2672,54 @@ class common_data_transaction extends uvm_object;
     // 抽象职责：持久化 SFence action 并唤醒唯一 fence worker。token 含 C0 arm
     // 前的基线字段；本函数不读取 monitor event，也不把 event 当作 action 真源。
     function void enqueue_sfence_control_action(input memblock_sfence_control_action_t action);
+        memblock_control_lifecycle_ticket_t audit_ticket;
+        status_transaction status;
+
         if (!action.owner.valid) begin
             `uvm_fatal("CONTROL_ACTION", "enqueue_sfence_control_action got invalid owner")
+            return;
         end
         if (control_workers_shutdown_requested || sfence_control_worker_exited) begin
             `uvm_fatal("CONTROL_ACTION", "cannot enqueue SFence action after worker shutdown/exited")
+            return;
+        end
+        if (!is_valid_uid(action.owner.uid) || status_by_uid[action.owner.uid] == null) begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue SFence action references invalid owner uid")
+            return;
+        end
+        status = status_by_uid[action.owner.uid];
+        if (!memblock_control_owner_equal(status.control_owner, action.owner)) begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue SFence action owner mismatch")
+            return;
+        end
+        if (!precheck_control_lifecycle_event(
+                action.owner.uid, MEMBLOCK_CONTROL_AUDIT_SFENCE_ENQUEUE,
+                audit_ticket)) begin
+            return;
         end
         sfence_control_action_q.push_back(action);
+        status.control_action_enqueued = 1'b1;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        record_control_lifecycle_event(audit_ticket);
         ->sfence_control_action_available_ev;
     endfunction:enqueue_sfence_control_action
 
     function bit try_pop_sfence_control_action(output memblock_sfence_control_action_t action);
+        memblock_control_lifecycle_ticket_t audit_ticket;
+
         if (sfence_control_action_q.size() == 0) begin
             action = '{default:'0};
             return 1'b0;
         end
+        action = sfence_control_action_q[0];
+        if (!precheck_control_lifecycle_event(
+                action.owner.uid, MEMBLOCK_CONTROL_AUDIT_SFENCE_START,
+                audit_ticket)) begin
+            action = '{default:'0};
+            return 1'b0;
+        end
         action = sfence_control_action_q.pop_front();
+        record_control_lifecycle_event(audit_ticket);
         return 1'b1;
     endfunction:try_pop_sfence_control_action
 
@@ -2522,24 +2779,53 @@ class common_data_transaction extends uvm_object;
     function void enqueue_l2_flush_release_request(
         input memblock_l2_flush_release_request_t request
     );
+        memblock_control_lifecycle_ticket_t audit_ticket;
+        status_transaction status;
+
         if (!request.owner.valid || request.control_reset_epoch == 0) begin
             `uvm_fatal("CONTROL_ACTION", "enqueue_l2_flush_release_request got invalid request")
+            return;
         end
         if (l2_flush_release_request_q.size() != 0) begin
             `uvm_fatal("CONTROL_ACTION", "only one active L2 flush RELEASE request is supported")
+            return;
+        end
+        if (!is_valid_uid(request.owner.uid) || status_by_uid[request.owner.uid] == null) begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue L2 release references invalid owner uid")
+            return;
+        end
+        status = status_by_uid[request.owner.uid];
+        if (!memblock_control_owner_equal(status.control_owner, request.owner) ||
+            !precheck_control_lifecycle_event(
+                request.owner.uid, MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_ENQUEUE,
+                audit_ticket)) begin
+            return;
         end
         l2_flush_release_request_q.push_back(request);
+        status.control_state = MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        record_control_lifecycle_event(audit_ticket);
         ->csr_control_action_available_ev;
     endfunction:enqueue_l2_flush_release_request
 
     function bit try_pop_l2_flush_release_request(
         output memblock_l2_flush_release_request_t request
     );
+        memblock_control_lifecycle_ticket_t audit_ticket;
+
         if (l2_flush_release_request_q.size() == 0) begin
             request = '{default:'0};
             return 1'b0;
         end
+        request = l2_flush_release_request_q[0];
+        if (!precheck_control_lifecycle_event(
+                request.owner.uid, MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_START,
+                audit_ticket)) begin
+            request = '{default:'0};
+            return 1'b0;
+        end
         request = l2_flush_release_request_q.pop_front();
+        record_control_lifecycle_event(audit_ticket);
         return 1'b1;
     endfunction:try_pop_l2_flush_release_request
 
@@ -4764,16 +5050,17 @@ class common_data_transaction extends uvm_object;
 
     // Fault ROB head已经完成异常提交后仍可能持有RTL中的committed LQ/SQ entry。
     // Redirect只flush年轻实例；该head保持active owner，等待正常deq完成异常终态。
-    function void preserve_fault_uid_during_redirect(
+
+    function bit preserve_fault_uid_during_redirect(
         input memblock_uid_t uid,
         input memblock_redirect_payload_t redirect);
         status_transaction status;
 
-        if (!redirect.valid) begin
-            `uvm_fatal("COMMON_DATA",
-                       "preserve_fault_uid_during_redirect requires valid redirect")
+        if (!precheck_uid_redirect_mutation(uid, redirect, 1'b1,
+                                            "preserve_fault_uid_during_redirect")) begin
+            return 1'b0;
         end
-        status = get_status(uid);
+        status = status_by_uid[uid];
         if (!status.active || !status.rob_commit || status.terminal_done ||
             status.get_rob_key() != redirect.rob_key ||
             (!status.fault && !status.exception_pending &&
@@ -4781,101 +5068,28 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA",
                        $sformatf("uid=%0d is not the active committed fault at redirect head",
                                  uid))
+            return 1'b0;
         end
-        // fault head不走普通年轻UID的reissue路径，但其尚未发射的 sibling
-        // issue item同样不能在exception后继续留在scheduler中。
-        quiesce_fault_uid_pending_work(uid);
-        begin
-            int record_idx;
-            record_idx = find_cancel_record_index_by_id(active_cancel_record_id);
-            if (record_idx >= 0) begin
-                if (status.active_lq_mapped) begin
-                    capture_redirect_deleted_owner(uid, cancel_record_q[record_idx].redirect_epoch);
-                    note_lsq_cancel_for_uid(uid, cancel_record_q[record_idx].redirect_epoch);
-                end
-                arm_fault_redirect_resource_candidate(uid,
-                                                      cancel_record_q[record_idx].redirect_epoch,
-                                                      cancel_record_q[record_idx].cancel_record_id);
-                if (status.active_lq_mapped) begin
-                    // Delete only the live map.  The saved redirect-deleted owner
-                    // retains the old physical identity until cancel/deq resolves.
-                    release_uid_lq_mapping(uid);
-                end
-            end
-        end
+        commit_preserve_fault_uid_during_redirect(uid, redirect);
+        return 1'b1;
     endfunction:preserve_fault_uid_during_redirect
 
-    function void prepare_uid_for_redirect_reissue(input memblock_uid_t uid,
+    function bit prepare_uid_for_redirect_reissue(input memblock_uid_t uid,
                                                    input memblock_redirect_payload_t redirect);
         status_transaction status;
-        memblock_rob_key_t old_rob_key;
-        int unsigned old_dynamic_epoch;
 
-        if (!redirect.valid) begin
-            `uvm_fatal("COMMON_DATA", "prepare_uid_for_redirect_reissue requires valid redirect")
+        if (!precheck_uid_redirect_mutation(uid, redirect, 1'b0,
+                                            "prepare_uid_for_redirect_reissue")) begin
+            return 1'b0;
         end
-        if (uid_is_control_marker(uid)) begin
-            `uvm_fatal("CONTROL_REDIRECT",
-                       $sformatf("control uid=%0d must use static preserve or fatal redirect handling", uid))
-        end
-        status = get_status(uid);
-        old_rob_key = status.get_rob_key();
-        old_dynamic_epoch = status.dynamic_epoch;
+        status = status_by_uid[uid];
         if (status.terminal_done) begin
             `uvm_fatal("COMMON_DATA",
                        $sformatf("redirect tries to flush already terminal_done uid=%0d", uid))
+            return 1'b0;
         end
-
-        // 中文注释：先冻结旧 owner，再登记 provisional cancel；retire 删除
-        // active map 后，迟到 deq 只能从这份单代身份恢复。
-        capture_redirect_deleted_owner(uid, memblock_sync_pkg::dispatch_flush_epoch);
-        note_lsq_cancel_for_uid(uid, memblock_sync_pkg::dispatch_flush_epoch);
-        cancel_later_split_tlb_record_for_uid(uid, old_dynamic_epoch,
-                                              "redirect_reissue");
-        cancel_waiting_uid_tlb_record_for_uid(uid, "redirect_flush");
-        // redirect命中的旧动态实例不再等待writeback/commit；pending fault 未 commit 时
-        // 必须完整清理 fault 证据与所有 target 状态，之后从同一 UID 重新 admission。
-        if ((status.fault || status.exception_pending || status.sta_fault || status.std_fault) &&
-            !status.rob_commit) begin
-            if (status.active) begin
-                // owner 已在本函数入口冻结，这里只释放活映射。
-                release_uid_lq_mapping(uid);
-                release_uid_sq_mapping(uid, 1'b1);
-                uid_by_active_rob.delete(rob_order_util::rob_to_map_key(status.get_rob_key()));
-                status.active = 1'b0;
-            end
-            remove_uid_from_issue_queues(uid);
-            reset_uid_after_older_redirect(uid);
-            return;
-        end
-        if (status.active) begin
-            retire_active_uid(uid);
-        end else begin
-            remove_uid_from_issue_queues(uid);
-        end
-        begin
-            bit dropped_pending_draft;
-            int unsigned cleared_epoch;
-
-            cleared_epoch = status.dynamic_epoch;
-            dropped_pending_draft = clear_uid_dispatch_result(uid);
-            if (dropped_pending_draft) begin
-                `uvm_info("PENDING_FAULT_DRAFT",
-                          $sformatf("drop pending store fault draft on redirect reissue uid=%0d dynamic_epoch=%0d",
-                                    uid, cleared_epoch),
-                          UVM_LOW)
-            end
-        end
-        status.redirect_pending = 1'b1;
-        status.flushed          = 1'b1;
-        status.dynamic_epoch++;
-        status.active           = 1'b0;
-        status.success          = 1'b0;
-        status.terminal_done    = 1'b0;
-        inherit_uncache_retry_boost_for_reissue(uid, old_rob_key,
-                                                old_dynamic_epoch,
-                                                status.dynamic_epoch);
-        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        commit_uid_for_redirect_reissue(uid);
+        return 1'b1;
     endfunction:prepare_uid_for_redirect_reissue
 
     function void request_redirect_flush(input memblock_redirect_payload_t redirect);
@@ -5020,18 +5234,33 @@ class common_data_transaction extends uvm_object;
                memblock_sync_pkg::dispatch_flush_in_progress;
     endfunction:issue_blocked_by_global_flush
 
-    function void apply_redirect_flush_range(input memblock_redirect_payload_t redirect);
+    function bit apply_redirect_flush_range(input memblock_redirect_payload_t redirect);
         memblock_uid_t begin_uid;
         memblock_uid_t end_uid;
+        memblock_uid_t planned_terminal_done_uid;
+        memblock_uid_t new_end_uid;
         memblock_uid_t oldest_flushed_uid;
+        memblock_uid_t fault_head_uids[$];
+        memblock_uid_t inactive_cleanup_uids[$];
+        memblock_uid_t reissue_uids[$];
         bit found_flushed;
+        bit preserve_observation_valid;
+        memblock_uid_t preserve_observation_uid;
+        bit establish_provenance;
+        bit start_deleted_owner_window;
+        int unsigned planned_cancel_lq_count;
+        int unsigned planned_cancel_sq_count;
+        int unsigned planned_deleted_lq_owner_count;
+        int unsigned planned_deleted_sq_owner_count;
         int record_idx;
 
         if (!redirect.valid) begin
             `uvm_fatal("COMMON_DATA", "apply_redirect_flush_range requires valid redirect")
+            return 1'b0;
         end
         if (!active_cancel_record_id_valid) begin
             `uvm_fatal("LSQ_CANCEL", "redirect flush scan has no active cancel record")
+            return 1'b0;
         end
         record_idx = find_cancel_record_index_by_id(active_cancel_record_id);
         if (record_idx < 0 ||
@@ -5042,20 +5271,39 @@ class common_data_transaction extends uvm_object;
             latest_drained_cancel_sample_seq <
                 cancel_record_q[record_idx].redirect_lsq_sample_seq) begin
             `uvm_fatal("LSQ_CANCEL", "redirect flush scan started before its anchored LSQ sample boundary")
+            return 1'b0;
         end
-        audit_active_rob_window("apply_redirect_flush_range:before_scan");
-        advance_terminal_done_uid();
-        begin_uid = get_active_scan_begin_uid();
+        if (!audit_active_rob_window("apply_redirect_flush_range:before_scan")) begin
+            return 1'b0;
+        end
+        if (!plan_terminal_done_uid_for_redirect_range(planned_terminal_done_uid)) begin
+            return 1'b0;
+        end
+        begin_uid = planned_terminal_done_uid;
         end_uid   = get_active_scan_end_uid();
         found_flushed = 1'b0;
+        preserve_observation_valid = 1'b0;
+        preserve_observation_uid = 0;
+        establish_provenance = 1'b0;
+        planned_cancel_lq_count = cancel_record_q[record_idx].software_cancel_lq_count;
+        planned_cancel_sq_count = cancel_record_q[record_idx].software_cancel_sq_count;
+        planned_deleted_lq_owner_count = 0;
+        planned_deleted_sq_owner_count = 0;
 
-        // redirect flush只扫描已admission的活跃窗口；真正flush判断仍由ROB顺序语义决定。
+        // Phase 1: read-only plan/precheck.  No public state may change until
+        // every UID, marker, post-prefix and cancel/window condition is approved.
         for (memblock_uid_t uid = begin_uid; uid < end_uid; uid++) begin
             status_transaction status;
             memblock_rob_key_t rob_key;
             bit terminal_fault_head;
 
-            status = get_status(uid);
+            if (!is_valid_uid(uid) || status_by_uid[uid] == null ||
+                main_table_by_uid[uid] == null) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("redirect scan references invalid uid=%0d", uid))
+                return 1'b0;
+            end
+            status = status_by_uid[uid];
             terminal_fault_head = status.active && status.rob_commit &&
                                   !status.terminal_done &&
                                   status.get_rob_key() == redirect.rob_key &&
@@ -5063,14 +5311,20 @@ class common_data_transaction extends uvm_object;
                                    status.load_fault || status.sta_fault ||
                                    status.std_fault);
             if (terminal_fault_head) begin
-                preserve_fault_uid_during_redirect(uid, redirect);
+                if (!precheck_uid_redirect_mutation(
+                        uid, redirect, 1'b1,
+                        "apply_redirect_flush_range:plan_fault_head")) begin
+                    return 1'b0;
+                end
+                fault_head_uids.push_back(uid);
+                if (status.active_lq_mapped) begin
+                    planned_cancel_lq_count += main_table_by_uid[uid].numLsElem;
+                    planned_deleted_lq_owner_count++;
+                end
                 continue;
             end
             if (status.terminal_done || (!status.active && !status.writeback && !status.pass)) begin
-                // redirect scan是清理旧动态实例的事件边界。inactive/terminal UID
-                // 不会再被重新路由；若其旧issue item因前一轮redirect竞态残留，
-                // 必须在这里一并删除，否则scheduler会长期看到不可发射的pending work。
-                remove_uid_from_issue_queues(uid);
+                inactive_cleanup_uids.push_back(uid);
                 continue;
             end
             rob_key = status.get_rob_key();
@@ -5078,48 +5332,143 @@ class common_data_transaction extends uvm_object;
                 if (uid_is_control_marker(uid)) begin
                     if (status.control_state ==
                         MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT) begin
-                        preserve_static_control_marker_on_redirect(uid, redirect);
+                        if (!preserve_static_control_marker_on_redirect(uid, redirect)) begin
+                            return 1'b0;
+                        end
+                        if (preserve_observation_valid) begin
+                            `uvm_fatal("CONTROL_REDIRECT",
+                                       "redirect observed more than one static control marker")
+                            return 1'b0;
+                        end
+                        preserve_observation_valid = 1'b1;
+                        preserve_observation_uid = uid;
                         continue;
                     end
                     `uvm_fatal("CONTROL_REDIRECT",
                                $sformatf("redirect covers started control uid=%0d state=%0d; the barrier forbids this recovery",
                                          uid, status.control_state))
+                    return 1'b0;
                 end
                 if (!found_flushed || uid < oldest_flushed_uid) begin
                     oldest_flushed_uid = uid;
                     found_flushed = 1'b1;
                 end
-                prepare_uid_for_redirect_reissue(uid, redirect);
+                if (!precheck_uid_redirect_mutation(
+                        uid, redirect, 1'b0,
+                        "apply_redirect_flush_range:plan_reissue")) begin
+                    return 1'b0;
+                end
+                reissue_uids.push_back(uid);
+                if (status.active_lq_mapped) begin
+                    planned_cancel_lq_count += main_table_by_uid[uid].numLsElem;
+                    planned_deleted_lq_owner_count++;
+                end
+                if (status.active_sq_mapped) begin
+                    planned_cancel_sq_count += main_table_by_uid[uid].numLsElem;
+                    planned_deleted_sq_owner_count++;
+                end
             end
         end
         if (found_flushed) begin
-            rollback_max_enqueued_uid(oldest_flushed_uid);
+            if (!is_valid_uid(oldest_flushed_uid)) begin
+                `uvm_fatal("COMMON_DATA", "redirect plan produced invalid rollback uid")
+                return 1'b0;
+            end
+            new_end_uid = oldest_flushed_uid;
+            if (!control_barrier_prefix_external_provenance_valid &&
+                preserve_observation_valid &&
+                preserve_observation_uid >= new_end_uid) begin
+                if (!precheck_control_barrier_prefix_external_provenance(
+                        preserve_observation_uid, redirect, end_uid, new_end_uid)) begin
+                    return 1'b0;
+                end
+                establish_provenance = 1'b1;
+            end
+        end else begin
+            new_end_uid = end_uid;
         end
-        assert_active_owners_within_admission_prefix(
-            redirect, end_uid, "apply_redirect_flush_range:after_scan");
-        if (cancel_record_q[record_idx].software_cancel_lq_count > MEMBLOCK_LQ_SIZE ||
-            cancel_record_q[record_idx].software_cancel_sq_count > MEMBLOCK_SQ_SIZE) begin
-            `uvm_fatal("LSQ_CANCEL", "finalized software cancel count exceeds LSQ capacity")
+        if (!precheck_redirect_post_state_invariant(
+                redirect, new_end_uid, reissue_uids,
+                establish_provenance, preserve_observation_uid)) begin
+            return 1'b0;
+        end
+        if (planned_cancel_lq_count > MEMBLOCK_LQ_SIZE ||
+            planned_cancel_sq_count > MEMBLOCK_SQ_SIZE) begin
+            `uvm_fatal("LSQ_CANCEL", "planned software cancel count exceeds LSQ capacity")
+            return 1'b0;
+        end
+        if (!check_cancel_pending_aggregate_checked(
+                "apply_redirect_flush_range:before_finalize")) begin
+            return 1'b0;
+        end
+        if (!precheck_cancel_pending_aggregate_after_redirect_plan(
+                record_idx, planned_cancel_lq_count, planned_cancel_sq_count,
+                "apply_redirect_flush_range:planned_aggregate")) begin
+            return 1'b0;
+        end
+        start_deleted_owner_window = planned_deleted_lq_owner_count != 0 ||
+                                     planned_deleted_sq_owner_count != 0;
+        if (start_deleted_owner_window &&
+            !precheck_start_redirect_deleted_owner_window_plan(
+                record_idx, planned_deleted_lq_owner_count,
+                planned_deleted_sq_owner_count)) begin
+            return 1'b0;
+        end
+        if (!start_deleted_owner_window &&
+            (planned_cancel_lq_count != cancel_record_q[record_idx].software_cancel_lq_count ||
+             planned_cancel_sq_count != cancel_record_q[record_idx].software_cancel_sq_count)) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "redirect plan has cancel increments without saved deleted owners")
+            return 1'b0;
+        end
+
+        // Phase 2: commit only.  Every helper below is mutation-only and has no
+        // catchable report checks; all possible failures were approved above.
+        dispatch_progress.terminal_done_uid = planned_terminal_done_uid;
+        foreach (inactive_cleanup_uids[idx]) begin
+            commit_remove_uid_from_issue_queues_for_redirect_range(
+                inactive_cleanup_uids[idx]);
+        end
+        foreach (fault_head_uids[idx]) begin
+            commit_preserve_fault_uid_during_redirect(fault_head_uids[idx], redirect);
+        end
+        foreach (reissue_uids[idx]) begin
+            commit_uid_for_redirect_reissue(reissue_uids[idx]);
+        end
+        if (found_flushed) begin
+            if (oldest_flushed_uid == 0) begin
+                dispatch_progress.max_enqueued_uid = 0;
+                dispatch_progress.max_enqueued_uid_valid = 1'b0;
+            end else begin
+                dispatch_progress.max_enqueued_uid = oldest_flushed_uid - 1;
+                dispatch_progress.max_enqueued_uid_valid = 1'b1;
+            end
+            if (establish_provenance) begin
+                commit_control_barrier_prefix_external_provenance(
+                    preserve_observation_uid, redirect, end_uid, new_end_uid);
+            end
         end
         cancel_record_q[record_idx].active_scan_done = 1'b1;
         cancel_record_q[record_idx].state_flush_applied_service_cycle =
             memblock_sync_pkg::get_dispatch_service_cycle();
-        if (redirect_deleted_lq_owner_by_key.num() != 0 ||
-            redirect_deleted_sq_owner_by_key.num() != 0) begin
-            start_redirect_deleted_owner_window(record_idx);
+        if (start_deleted_owner_window) begin
+            commit_start_redirect_deleted_owner_window(record_idx);
         end else begin
             cancel_record_q[record_idx].software_count_finalized = 1'b1;
         end
         active_cancel_record_id_valid = 1'b0;
         active_cancel_record_id = 0;
-        check_cancel_pending_aggregate();
+        return 1'b1;
     endfunction:apply_redirect_flush_range
 
-    function void apply_redirect_flush(input memblock_redirect_payload_t redirect);
+    function bit apply_redirect_flush(input memblock_redirect_payload_t redirect);
         if (!redirect.valid) begin
             `uvm_fatal("COMMON_DATA", "apply_redirect_flush requires valid redirect")
+            return 1'b0;
         end
-        apply_redirect_flush_range(redirect);
+        if (!apply_redirect_flush_range(redirect)) begin
+            return 1'b0;
+        end
         clear_ptw_wait_replay_by_redirect(redirect);
         clear_redirect_drive_queue();
         redirect_phase = MEMBLOCK_REDIRECT_PHASE_STATE_FLUSH_APPLIED;
@@ -5128,6 +5477,7 @@ class common_data_transaction extends uvm_object;
         issue_freeze_ack   = 1'b0;
         active_redirect    = '{default:'0};
         redirect_phase     = MEMBLOCK_REDIRECT_PHASE_IDLE;
+        return 1'b1;
     endfunction:apply_redirect_flush
 
     function memblock_wb_event_t make_empty_wb_event();
@@ -6339,6 +6689,8 @@ class common_data_transaction extends uvm_object;
     // pass 或 issue target；控制 service 先把状态推进到 CONTROL_COMMIT_READY。
     function void try_retire_control_committed_uid(input memblock_uid_t uid);
         status_transaction status;
+        memblock_control_lifecycle_ticket_t audit_ticket;
+        memblock_uid_t planned_terminal_done_uid;
 
         check_uid(uid, "try_retire_control_committed_uid");
         if (!uid_is_control_marker(uid)) begin
@@ -6362,10 +6714,23 @@ class common_data_transaction extends uvm_object;
                                  status.active_sq_mapped,
                                  status.redirect_pending, status.flushed,
                                  active_redirect.valid))
+            return;
         end
-        set_status_field(uid, MEMBLOCK_STATUS_SUCCESS, 1'b1);
-        set_status_field(uid, MEMBLOCK_STATUS_TERMINAL_DONE, 1'b1);
-        retire_active_uid(uid);
+        if (control_barrier_prefix_external_provenance_valid) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("cannot terminal uid=%0d with residual provenance uid=%0d",
+                                 uid, control_barrier_prefix_external_provenance_uid))
+            return;
+        end
+        if (!precheck_control_lifecycle_event(
+                uid, MEMBLOCK_CONTROL_AUDIT_TERMINAL, audit_ticket)) begin
+            return;
+        end
+        if (!precheck_control_terminal_retire(uid, planned_terminal_done_uid)) begin
+            return;
+        end
+        commit_control_terminal_retire(uid, planned_terminal_done_uid);
+        record_control_lifecycle_event(audit_ticket);
     endfunction:try_retire_control_committed_uid
 
     function memblock_tlb_lookup_key_t make_tlb_key_by_req(input bit [37:0] vpn,
@@ -10259,16 +10624,40 @@ class common_data_transaction extends uvm_object;
     endfunction:release_ptw_wait_replay
 
     function void clear_ptw_wait_replay_by_redirect(input memblock_redirect_payload_t redirect);
+        bit effective_flush_itself;
+
+        effective_flush_itself = redirect.is_vls_exception ?
+                                 memblock_redirect_effective_level(redirect) :
+                                 redirect.flush_itself;
         for (int idx = ptw_wait_replay_q.size(); idx > 0; idx--) begin
             status_transaction status;
+            memblock_uid_t uid;
+            memblock_rob_key_t rob_key;
+            bit same_rob;
+            bit different_flag;
+            bit compare_value;
+            bit need_flush;
 
-            if (!is_valid_uid(ptw_wait_replay_q[idx - 1].uid)) begin
+            uid = ptw_wait_replay_q[idx - 1].uid;
+            if (!is_valid_uid(uid) || status_by_uid[uid] == null) begin
                 ptw_wait_replay_q.delete(idx - 1);
                 continue;
             end
-            status = get_status(ptw_wait_replay_q[idx - 1].uid);
-            if (!status.active ||
-                rob_order_util::rob_need_flush(status.get_rob_key(), redirect)) begin
+            // Redirect range precheck has already approved all mutable state.
+            // Keep this wrapper-tail cleanup commit-only: do not call get_status()
+            // or ROB helpers with report-capable key validation after range
+            // mutation has started.  The range precheck already validated every
+            // active UID/key, so reproduce rob_need_flush() with pure bit logic.
+            status = status_by_uid[uid];
+            rob_key.flag = status.robIdx_flag;
+            rob_key.value = status.robIdx_value;
+            same_rob = {rob_key.flag, rob_key.value} ==
+                       {redirect.rob_key.flag, redirect.rob_key.value};
+            different_flag = rob_key.flag ^ redirect.rob_key.flag;
+            compare_value = rob_key.value > redirect.rob_key.value;
+            need_flush = (effective_flush_itself && same_rob) ||
+                         (different_flag ^ compare_value);
+            if (!status.active || need_flush) begin
                 ptw_wait_replay_q.delete(idx - 1);
             end
         end
@@ -10561,6 +10950,15 @@ class common_data_transaction extends uvm_object;
         longint unsigned pma_pmp_applied_count;
         longint unsigned pma_pmp_pending_count;
 
+        if (control_barrier_prefix_external_provenance_valid) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("end_test_check residual control provenance uid=%0d origin_old/new=%0d/%0d",
+                                 control_barrier_prefix_external_provenance_uid,
+                                 control_barrier_prefix_external_origin_old_end_uid,
+                                 control_barrier_prefix_external_origin_new_end_uid))
+            return;
+        end
+
         if (memblock_sync_pkg::raw_monitor_queue_size() != 0) begin
             `uvm_error("COMMON_DATA",
                        $sformatf("raw monitor queues are not drained at end_test_check: size=%0d",
@@ -10619,6 +11017,12 @@ class common_data_transaction extends uvm_object;
                                      status_by_uid[uid].uncache_retry_rob_key.flag,
                                      status_by_uid[uid].uncache_retry_rob_key.value))
             end
+            if (main_table_by_uid[uid] != null &&
+                is_control_op_class(main_table_by_uid[uid].op_class) &&
+                !assert_control_lifecycle_audit_complete(
+                    uid, 1'b1, "end_test_check")) begin
+                return;
+            end
         end
         if (uid_by_active_rob.num() != 0 || uid_by_lq.num() != 0 || uid_by_sq.num() != 0) begin
             `uvm_error("COMMON_DATA", "active ROB/LQ/SQ mapping is not empty at end_test_check")
@@ -10670,6 +11074,1526 @@ class common_data_transaction extends uvm_object;
         // responder/drain 已完成之后，不能让最后一拍 monitor event 被静默丢弃。
         memblock_sync_pkg::dispatch_monitor_capture_en = 1'b0;
     endfunction:end_test_check
+
+
+    function bit assert_control_lifecycle_audit_complete(
+        input memblock_uid_t uid,
+        input bit expect_released,
+        input string caller
+    );
+        status_transaction status;
+
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null) begin
+            `uvm_fatal("CONTROL_LIFECYCLE_AUDIT",
+                       $sformatf("%s invalid uid=%0d", caller, uid))
+            return 1'b0;
+        end
+        status = status_by_uid[uid];
+        if (!control_lifecycle_action_matrix_complete(status) ||
+            status.control_audit_terminal_count != 1 ||
+            status.control_audit_barrier_release_count != expect_released ||
+            status.control_action_generation != 1 ||
+            (expect_released &&
+             (status.active || status.control_owner.valid ||
+              status.control_action_enqueued ||
+              (active_control_barrier_valid && active_control_barrier_uid == uid)))) begin
+            `uvm_fatal("CONTROL_LIFECYCLE_AUDIT",
+                       $sformatf("%s incomplete uid=%0d kind=%0d generation=%0d create/bind=%0d/%0d csr=%0d/%0d/%0d sfence=%0d/%0d/%0d l2_assert=%0d/%0d/%0d l2_release=%0d/%0d/%0d terminal/release=%0d/%0d active/owner/action=%0d/%0d/%0d",
+                                 caller, uid, status.control_kind,
+                                 status.control_action_generation,
+                                 status.control_audit_creation_count,
+                                 status.control_audit_owner_bind_count,
+                                 status.control_audit_csr_enqueue_count,
+                                 status.control_audit_csr_start_count,
+                                 status.control_audit_csr_completion_count,
+                                 status.control_audit_sfence_enqueue_count,
+                                 status.control_audit_sfence_start_count,
+                                 status.control_audit_sfence_completion_count,
+                                 status.control_audit_l2_assert_enqueue_count,
+                                 status.control_audit_l2_assert_start_count,
+                                 status.control_audit_l2_assert_completion_count,
+                                 status.control_audit_l2_release_enqueue_count,
+                                 status.control_audit_l2_release_start_count,
+                                 status.control_audit_l2_release_completion_count,
+                                 status.control_audit_terminal_count,
+                                 status.control_audit_barrier_release_count,
+                                 status.active, status.control_owner.valid,
+                                 status.control_action_enqueued))
+            return 1'b0;
+        end
+        if (expect_released) begin
+            `uvm_info("CONTROL_LIFECYCLE_AUDIT",
+                      $sformatf("event=final uid=%0d kind=%0d generation=%0d create/bind=1/1 csr=%0d/%0d/%0d sfence=%0d/%0d/%0d l2_assert=%0d/%0d/%0d l2_release=%0d/%0d/%0d terminal/release=1/1",
+                                uid, status.control_kind,
+                                status.control_action_generation,
+                                status.control_audit_csr_enqueue_count,
+                                status.control_audit_csr_start_count,
+                                status.control_audit_csr_completion_count,
+                                status.control_audit_sfence_enqueue_count,
+                                status.control_audit_sfence_start_count,
+                                status.control_audit_sfence_completion_count,
+                                status.control_audit_l2_assert_enqueue_count,
+                                status.control_audit_l2_assert_start_count,
+                                status.control_audit_l2_assert_completion_count,
+                                status.control_audit_l2_release_enqueue_count,
+                                status.control_audit_l2_release_start_count,
+                                status.control_audit_l2_release_completion_count), UVM_LOW)
+        end
+        return 1'b1;
+    endfunction:assert_control_lifecycle_audit_complete
+
+
+
+    function bit check_cancel_pending_aggregate_checked(input string caller);
+        int unsigned expected_lq;
+        int unsigned expected_sq;
+
+        expected_lq = 0;
+        expected_sq = 0;
+        foreach (cancel_record_q[idx]) begin
+            if (cancel_record_q[idx].valid &&
+                !cancel_record_q[idx].software_applied) begin
+                expected_lq += cancel_record_q[idx].software_cancel_lq_count;
+                expected_sq += cancel_record_q[idx].software_cancel_sq_count;
+            end
+        end
+        if (pending_lq_cancel_count != expected_lq ||
+            pending_sq_cancel_count != expected_sq) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("%s pending cancel aggregate drift stored=%0d/%0d records=%0d/%0d",
+                                 caller, pending_lq_cancel_count,
+                                 pending_sq_cancel_count, expected_lq, expected_sq))
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:check_cancel_pending_aggregate_checked
+
+
+
+    function void clear_control_barrier_prefix_external_provenance();
+        control_barrier_prefix_external_provenance_valid = 1'b0;
+        control_barrier_prefix_external_provenance_uid = 0;
+        control_barrier_prefix_external_origin_redirect = '{default:'0};
+        control_barrier_prefix_external_origin_old_end_uid = 0;
+        control_barrier_prefix_external_origin_new_end_uid = 0;
+    endfunction:clear_control_barrier_prefix_external_provenance
+
+
+
+    function void commit_cancel_waiting_uid_tlb_record_for_redirect_range(
+        input memblock_uid_t uid
+    );
+        memblock_uid_tlb_record record;
+        memblock_uid_tlb_wait_shape_key_t shape_key;
+
+        if (!uid_tlb_record_by_uid.exists(uid) || uid_tlb_record_by_uid[uid] == null ||
+            !uid_tlb_record_by_uid[uid].is_waiting()) begin
+            return;
+        end
+        record = uid_tlb_record_by_uid[uid];
+        shape_key = make_uid_tlb_wait_shape_key(record.vpn, record.s2xlate);
+        record.mark_canceled();
+        for (int idx = int'(uid_waiting_by_vpn_s2xlate[shape_key].size()) - 1;
+             idx >= 0; idx--) begin
+            if (uid_waiting_by_vpn_s2xlate[shape_key][idx] == uid) begin
+                uid_waiting_by_vpn_s2xlate[shape_key].delete(idx);
+            end
+        end
+        if (uid_waiting_by_vpn_s2xlate[shape_key].size() == 0) begin
+            uid_waiting_by_vpn_s2xlate.delete(shape_key);
+        end
+    endfunction:commit_cancel_waiting_uid_tlb_record_for_redirect_range
+
+
+
+    function void commit_capture_redirect_deleted_owner_for_redirect_range(
+        input memblock_uid_t uid,
+        input int record_idx
+    );
+        status_transaction status;
+        memblock_redirect_deleted_owner_t owner;
+        memblock_lq_key_t lq_key;
+        memblock_sq_key_t sq_key;
+
+        status = status_by_uid[uid];
+        owner = '{default:'0};
+        owner.valid = 1'b1;
+        owner.uid = uid;
+        owner.old_dynamic_epoch = status.dynamic_epoch;
+        owner.old_activation_flush_epoch = status.active_instance_flush_epoch;
+        owner.redirect_epoch = cancel_record_q[record_idx].redirect_epoch;
+        owner.cancel_record_id = cancel_record_q[record_idx].cancel_record_id;
+        if (status.active_lq_mapped) begin
+            lq_key.flag = status.lqIdx_flag;
+            lq_key.value = status.lqIdx_value;
+            redirect_deleted_lq_owner_by_key[
+                rob_order_util::lq_to_map_key(lq_key)] = owner;
+        end
+        if (status.active_sq_mapped) begin
+            sq_key.flag = status.sqIdx_flag;
+            sq_key.value = status.sqIdx_value;
+            redirect_deleted_sq_owner_by_key[
+                rob_order_util::sq_to_map_key(sq_key)] = owner;
+        end
+    endfunction:commit_capture_redirect_deleted_owner_for_redirect_range
+
+
+
+    function void commit_control_barrier_prefix_external_provenance(
+        input memblock_uid_t uid,
+        input memblock_redirect_payload_t redirect,
+        input memblock_uid_t old_end_uid,
+        input memblock_uid_t new_end_uid
+    );
+        control_barrier_prefix_external_provenance_uid = uid;
+        control_barrier_prefix_external_origin_redirect = redirect;
+        control_barrier_prefix_external_origin_old_end_uid = old_end_uid;
+        control_barrier_prefix_external_origin_new_end_uid = new_end_uid;
+        control_barrier_prefix_external_provenance_valid = 1'b1;
+    endfunction:commit_control_barrier_prefix_external_provenance
+
+
+    function void commit_control_terminal_retire(
+        input memblock_uid_t uid,
+        input memblock_uid_t planned_terminal_done_uid
+    );
+        status_transaction     status;
+        memblock_rob_key_t     rob_key;
+        memblock_rob_map_key_t rob_map_key;
+
+        status = status_by_uid[uid];
+        rob_key.flag = status.robIdx_flag;
+        rob_key.value = status.robIdx_value;
+        rob_map_key = rob_order_util::rob_to_map_key(rob_key);
+
+        status.uncache_retry_boost = 1'b0;
+        status.uncache_retry_count = 0;
+        status.uncache_retry_identity_valid = 1'b0;
+        status.uncache_retry_rob_key = '{default:'0};
+        status.uncache_retry_has_dynamic_epoch = 1'b0;
+        status.uncache_retry_dynamic_epoch = 0;
+        for (int idx = load_issue_q.size(); idx > 0; idx--) begin
+            if (load_issue_q[idx - 1].uid == uid) load_issue_q.delete(idx - 1);
+        end
+        for (int idx = sta_issue_q.size(); idx > 0; idx--) begin
+            if (sta_issue_q[idx - 1].uid == uid) sta_issue_q.delete(idx - 1);
+        end
+        for (int idx = std_issue_q.size(); idx > 0; idx--) begin
+            if (std_issue_q[idx - 1].uid == uid) std_issue_q.delete(idx - 1);
+        end
+        status.queued_load = 1'b0;
+        status.queued_sta = 1'b0;
+        status.queued_std = 1'b0;
+        for (int idx = ptw_wait_replay_q.size(); idx > 0; idx--) begin
+            if (ptw_wait_replay_q[idx - 1].uid == uid) ptw_wait_replay_q.delete(idx - 1);
+        end
+        status.sta_late_fault_tombstone_q.delete();
+        std_late_raw_tombstone_by_rob.delete(rob_map_key);
+        uid_by_active_rob.delete(rob_map_key);
+        status.success = 1'b1;
+        status.terminal_done = 1'b1;
+        dispatch_progress.terminal_done_uid = planned_terminal_done_uid;
+        status.active = 1'b0;
+        `uvm_info("COMMON_DATA",
+                  $sformatf("control terminal retire uid=%0d success=%0d terminal_done=%0d rob=%0d/%0d frontier=%0d",
+                            uid, status.success, status.terminal_done,
+                            status.robIdx_flag, status.robIdx_value,
+                            dispatch_progress.terminal_done_uid),
+                  UVM_LOW)
+    endfunction:commit_control_terminal_retire
+
+
+    function void commit_csr_control_action(
+        input memblock_csr_control_action_t action,
+        input memblock_control_lifecycle_ticket_t audit_ticket
+    );
+        status_transaction status;
+
+        status = status_by_uid[action.owner.uid];
+        csr_control_action_q.push_back(action);
+        status.control_action_enqueued = 1'b1;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        record_control_lifecycle_event(audit_ticket);
+        ->csr_control_action_available_ev;
+    endfunction:commit_csr_control_action
+
+
+
+    function void commit_l2_flush_release_request(
+        input memblock_l2_flush_release_request_t request,
+        input memblock_control_lifecycle_ticket_t audit_ticket
+    );
+        status_transaction status;
+
+        status = status_by_uid[request.owner.uid];
+        l2_flush_release_request_q.push_back(request);
+        status.control_state = MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        record_control_lifecycle_event(audit_ticket);
+        ->csr_control_action_available_ev;
+    endfunction:commit_l2_flush_release_request
+
+
+
+    function void commit_note_lsq_cancel_for_redirect_range(
+        input memblock_uid_t uid,
+        input int record_idx
+    );
+        status_transaction status;
+        memblock_lq_key_t lq_key;
+        main_control_transaction main_tr;
+
+        status = status_by_uid[uid];
+        main_tr = main_table_by_uid[uid];
+        if (status.active_lq_mapped) begin
+            cancel_record_q[record_idx].software_cancel_lq_count += main_tr.numLsElem;
+            pending_lq_cancel_count += main_tr.numLsElem;
+        end
+        if (status.active_sq_mapped) begin
+            cancel_record_q[record_idx].software_cancel_sq_count += main_tr.numLsElem;
+            pending_sq_cancel_count += main_tr.numLsElem;
+        end
+        status.lsq_cancel_accounted_epoch = cancel_record_q[record_idx].redirect_epoch;
+        status.lsq_reservation_state = MEMBLOCK_LSQ_RESERVATION_CANCEL_ACCOUNTED;
+    endfunction:commit_note_lsq_cancel_for_redirect_range
+
+
+    function void commit_preserve_fault_uid_during_redirect(
+        input memblock_uid_t uid,
+        input memblock_redirect_payload_t redirect);
+        status_transaction status;
+        int record_idx;
+
+        status = status_by_uid[uid];
+        record_idx = find_cancel_record_index_by_id(active_cancel_record_id);
+        commit_quiesce_fault_uid_for_redirect_range(uid);
+        if (status.active_lq_mapped) begin
+            commit_capture_redirect_deleted_owner_for_redirect_range(uid, record_idx);
+            commit_note_lsq_cancel_for_redirect_range(uid, record_idx);
+        end
+        if (!fault_redirect_resource.valid) begin
+            memblock_lq_key_t lq_key;
+            memblock_sq_key_t sq_key;
+
+            fault_redirect_resource = '{default:'0};
+            fault_redirect_resource.valid = status.active_lq_mapped || status.active_sq_mapped;
+            fault_redirect_resource.uid = uid;
+            fault_redirect_resource.dynamic_epoch = status.dynamic_epoch;
+            fault_redirect_resource.redirect_epoch = cancel_record_q[record_idx].redirect_epoch;
+            fault_redirect_resource.cancel_record_id = cancel_record_q[record_idx].cancel_record_id;
+            if (status.active_sq_mapped) begin
+                sq_key.flag = status.sqIdx_flag;
+                sq_key.value = status.sqIdx_value;
+                fault_redirect_resource.is_lq = 1'b0;
+                fault_redirect_resource.sq_key = sq_key;
+                fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_CANDIDATE;
+            end else if (status.active_lq_mapped) begin
+                lq_key.flag = status.lqIdx_flag;
+                lq_key.value = status.lqIdx_value;
+                fault_redirect_resource.is_lq = 1'b1;
+                fault_redirect_resource.lq_key = lq_key;
+                fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_LQ_CANCEL_PENDING;
+            end
+        end
+        if (status.active_lq_mapped) begin
+            commit_release_uid_lq_mapping_for_redirect_range(uid);
+        end
+    endfunction:commit_preserve_fault_uid_during_redirect
+
+
+
+    function void commit_quiesce_fault_uid_for_redirect_range(
+        input memblock_uid_t uid
+    );
+        status_transaction status;
+
+        status = status_by_uid[uid];
+        commit_remove_uid_from_issue_queues_for_redirect_range(uid);
+        release_ptw_wait_replay(uid);
+        status.replay_pending = 1'b0;
+        status.replay_target_load = 1'b0;
+        status.replay_target_sta = 1'b0;
+        status.replay_target_std = 1'b0;
+    endfunction:commit_quiesce_fault_uid_for_redirect_range
+
+
+
+    function void commit_release_uid_lq_mapping_for_redirect_range(
+        input memblock_uid_t uid
+    );
+        status_transaction status;
+        memblock_lq_key_t lq_key;
+
+        status = status_by_uid[uid];
+        if (!status.active_lq_mapped) begin
+            return;
+        end
+        lq_key.flag = status.lqIdx_flag;
+        lq_key.value = status.lqIdx_value;
+        uid_by_lq.delete(rob_order_util::lq_to_map_key(lq_key));
+        status.active_lq_mapped = 1'b0;
+        status.lsq_deq = !status.active_sq_mapped;
+        if (status.lsq_deq) begin
+            status.clear_lsq_reservation_visibility();
+        end
+    endfunction:commit_release_uid_lq_mapping_for_redirect_range
+
+
+
+    function void commit_release_uid_sq_mapping_for_redirect_range(
+        input memblock_uid_t uid
+    );
+        status_transaction status;
+        memblock_sq_key_t sq_key;
+
+        status = status_by_uid[uid];
+        if (!status.active_sq_mapped) begin
+            return;
+        end
+        for (int idx = std_issue_q.size(); idx > 0; idx--) begin
+            if (std_issue_q[idx - 1].uid == uid) begin
+                std_issue_q.delete(idx - 1);
+            end
+        end
+        status.queued_std = 1'b0;
+        sq_key.flag = status.sqIdx_flag;
+        sq_key.value = status.sqIdx_value;
+        uid_by_sq.delete(rob_order_util::sq_to_map_key(sq_key));
+        status.active_sq_mapped = 1'b0;
+        status.lsq_deq = !status.active_lq_mapped;
+        if (status.lsq_deq) begin
+            status.clear_lsq_reservation_visibility();
+        end
+    endfunction:commit_release_uid_sq_mapping_for_redirect_range
+
+
+
+    function void commit_remove_uid_from_issue_queues_for_redirect_range(
+        input memblock_uid_t uid
+    );
+        for (int idx = load_issue_q.size(); idx > 0; idx--) begin
+            if (load_issue_q[idx - 1].uid == uid) begin
+                load_issue_q.delete(idx - 1);
+            end
+        end
+        for (int idx = sta_issue_q.size(); idx > 0; idx--) begin
+            if (sta_issue_q[idx - 1].uid == uid) begin
+                sta_issue_q.delete(idx - 1);
+            end
+        end
+        for (int idx = std_issue_q.size(); idx > 0; idx--) begin
+            if (std_issue_q[idx - 1].uid == uid) begin
+                std_issue_q.delete(idx - 1);
+            end
+        end
+        status_by_uid[uid].queued_load = 1'b0;
+        status_by_uid[uid].queued_sta = 1'b0;
+        status_by_uid[uid].queued_std = 1'b0;
+    endfunction:commit_remove_uid_from_issue_queues_for_redirect_range
+
+
+
+    function void commit_reset_uid_after_older_redirect_for_redirect_range(
+        input memblock_uid_t uid
+    );
+        status_transaction status;
+        memblock_rob_key_t old_rob_key;
+        int unsigned old_dynamic_epoch;
+        bit inherit_retry_boost;
+
+        status = status_by_uid[uid];
+        old_rob_key = status.get_rob_key();
+        old_dynamic_epoch = status.dynamic_epoch;
+        inherit_retry_boost = status.uncache_retry_boost &&
+                              status.uncache_retry_identity_valid &&
+                              status.uncache_retry_rob_key == old_rob_key &&
+                              status.uncache_retry_dynamic_epoch == old_dynamic_epoch;
+        void'(clear_pending_store_fault(uid));
+        status.mmio_tag_valid = 1'b0;
+        status.is_mmio_load = 1'b0;
+        status.is_mmio_store = 1'b0;
+        status.mmio_tag_source = MEMBLOCK_MMIO_TAG_NONE;
+        status.mmio_tag_dynamic_epoch = 0;
+        status.enq = 1'b0;
+        status.issue_ready = 1'b0;
+        status.queued_load = 1'b0;
+        status.queued_sta = 1'b0;
+        status.queued_std = 1'b0;
+        status.load_dispatched = 1'b0;
+        status.sta_dispatched = 1'b0;
+        status.std_dispatched = 1'b0;
+        status.load_writeback = 1'b0;
+        status.sta_writeback = 1'b0;
+        status.std_writeback = 1'b0;
+        status.load_issue_feedback_success = 1'b0;
+        status.sta_issue_feedback_success = 1'b0;
+        status.std_issue_feedback_success = 1'b0;
+        status.clear_sta_late_fault_tombstones();
+        status.load_pass = 1'b0;
+        status.sta_pass = 1'b0;
+        status.std_pass = 1'b0;
+        status.writeback = 1'b0;
+        status.pass = 1'b0;
+        status.issue_killed = 1'b1;
+        status.exception_pending = 1'b0;
+        status.replay_pending = 1'b0;
+        status.replay_target_load = 1'b0;
+        status.replay_target_sta = 1'b0;
+        status.replay_target_std = 1'b0;
+        status.rob_commit = 1'b0;
+        status.lsq_deq = 1'b0;
+        status.fault = 1'b0;
+        status.load_fault = 1'b0;
+        status.sta_fault = 1'b0;
+        status.std_fault = 1'b0;
+        status.exception_vec = '0;
+        status.exception_vaddr = '0;
+        status.exception_gpaddr = '0;
+        status.active_instance_flush_epoch_valid = 1'b0;
+        status.active_instance_flush_epoch = 0;
+        status.clear_target_instance_flush_epochs();
+        status.clear_lsq_reservation_visibility();
+        status.redirect_pending = 1'b1;
+        status.flushed = 1'b1;
+        status.dynamic_epoch++;
+        status.active = 1'b0;
+        status.success = 1'b0;
+        status.terminal_done = 1'b0;
+        if (inherit_retry_boost) begin
+            status.uncache_retry_dynamic_epoch = status.dynamic_epoch;
+            status.uncache_retry_has_dynamic_epoch = 1'b1;
+        end else begin
+            status.uncache_retry_boost = 1'b0;
+            status.uncache_retry_identity_valid = 1'b0;
+            status.uncache_retry_rob_key = '{default:'0};
+            status.uncache_retry_has_dynamic_epoch = 1'b0;
+            status.uncache_retry_dynamic_epoch = 0;
+        end
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    endfunction:commit_reset_uid_after_older_redirect_for_redirect_range
+
+
+
+    function void commit_retire_active_uid_for_redirect_range(
+        input memblock_uid_t uid
+    );
+        status_transaction status;
+        memblock_rob_map_key_t rob_map_key;
+
+        status = status_by_uid[uid];
+        if (status.std_dispatched &&
+            (status.fault || status.exception_pending || status.sta_fault)) begin
+            memblock_std_late_raw_tombstone_t tombstone;
+            rob_map_key = rob_order_util::rob_to_map_key(status.get_rob_key());
+            if (!std_late_raw_tombstone_by_rob.exists(rob_map_key)) begin
+                tombstone = '{default:'0};
+                tombstone.valid = 1'b1;
+                tombstone.uid = uid;
+                tombstone.dynamic_epoch = status.dynamic_epoch;
+                tombstone.redirect_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+                tombstone.expire_service_sample =
+                    memblock_sync_pkg::get_dispatch_service_cycle() +
+                    MEMBLOCK_REDIRECT_DELETED_OWNER_HOLD_SAMPLES;
+                std_late_raw_tombstone_by_rob[rob_map_key] = tombstone;
+            end
+        end
+        commit_remove_uid_from_issue_queues_for_redirect_range(uid);
+        release_ptw_wait_replay(uid);
+        status.clear_sta_late_fault_tombstones();
+        uid_by_active_rob.delete(rob_order_util::rob_to_map_key(status.get_rob_key()));
+        commit_release_uid_lq_mapping_for_redirect_range(uid);
+        commit_release_uid_sq_mapping_for_redirect_range(uid);
+        status.active = 1'b0;
+    endfunction:commit_retire_active_uid_for_redirect_range
+
+
+
+    function void commit_start_redirect_deleted_owner_window(input int record_idx);
+        redirect_deleted_owner_window_active = 1'b1;
+        redirect_deleted_owner_epoch = cancel_record_q[record_idx].redirect_epoch;
+        redirect_deleted_owner_record_id = cancel_record_q[record_idx].cancel_record_id;
+        redirect_deleted_owner_expire_sample =
+            cancel_record_q[record_idx].redirect_sample_seq +
+            MEMBLOCK_REDIRECT_DELETED_OWNER_HOLD_SAMPLES;
+    endfunction:commit_start_redirect_deleted_owner_window
+
+
+
+    function void commit_uid_for_redirect_reissue(input memblock_uid_t uid);
+        status_transaction status;
+        memblock_rob_key_t old_rob_key;
+        int unsigned old_dynamic_epoch;
+        int record_idx;
+
+        status = status_by_uid[uid];
+        old_rob_key = status.get_rob_key();
+        old_dynamic_epoch = status.dynamic_epoch;
+        record_idx = find_cancel_record_index_by_id(active_cancel_record_id);
+        commit_capture_redirect_deleted_owner_for_redirect_range(uid, record_idx);
+        commit_note_lsq_cancel_for_redirect_range(uid, record_idx);
+        commit_cancel_waiting_uid_tlb_record_for_redirect_range(uid);
+        // redirect命中的旧动态实例不再等待writeback/commit；pending fault 未 commit 时
+        // 必须完整清理 fault 证据与所有 target 状态，之后从同一 UID 重新 admission。
+        if ((status.fault || status.exception_pending || status.sta_fault || status.std_fault) &&
+            !status.rob_commit) begin
+            commit_release_uid_lq_mapping_for_redirect_range(uid);
+            commit_release_uid_sq_mapping_for_redirect_range(uid);
+            uid_by_active_rob.delete(rob_order_util::rob_to_map_key(status.get_rob_key()));
+            status.active = 1'b0;
+            commit_remove_uid_from_issue_queues_for_redirect_range(uid);
+            commit_reset_uid_after_older_redirect_for_redirect_range(uid);
+            return;
+        end
+        commit_retire_active_uid_for_redirect_range(uid);
+        commit_reset_uid_after_older_redirect_for_redirect_range(uid);
+    endfunction:commit_uid_for_redirect_reissue
+
+
+
+    function bit control_lifecycle_action_matrix_complete(
+        input status_transaction status
+    );
+        if (status.control_audit_creation_count != 1 ||
+            status.control_audit_owner_bind_count != 1 ||
+            status.control_action_generation != 1) begin
+            return 1'b0;
+        end
+        case (status.control_kind)
+            MEMBLOCK_CONTROL_KIND_CSR:
+                return status.control_audit_csr_enqueue_count == 1 &&
+                       status.control_audit_csr_start_count == 1 &&
+                       status.control_audit_csr_completion_count == 1 &&
+                       status.control_audit_sfence_enqueue_count == 0 &&
+                       status.control_audit_sfence_start_count == 0 &&
+                       status.control_audit_sfence_completion_count == 0 &&
+                       status.control_audit_l2_assert_enqueue_count == 0 &&
+                       status.control_audit_l2_assert_start_count == 0 &&
+                       status.control_audit_l2_assert_completion_count == 0 &&
+                       status.control_audit_l2_release_enqueue_count == 0 &&
+                       status.control_audit_l2_release_start_count == 0 &&
+                       status.control_audit_l2_release_completion_count == 0;
+            MEMBLOCK_CONTROL_KIND_SFENCE:
+                return status.control_audit_csr_enqueue_count == 0 &&
+                       status.control_audit_csr_start_count == 0 &&
+                       status.control_audit_csr_completion_count == 0 &&
+                       status.control_audit_sfence_enqueue_count == 1 &&
+                       status.control_audit_sfence_start_count == 1 &&
+                       status.control_audit_sfence_completion_count == 1 &&
+                       status.control_audit_l2_assert_enqueue_count == 0 &&
+                       status.control_audit_l2_assert_start_count == 0 &&
+                       status.control_audit_l2_assert_completion_count == 0 &&
+                       status.control_audit_l2_release_enqueue_count == 0 &&
+                       status.control_audit_l2_release_start_count == 0 &&
+                       status.control_audit_l2_release_completion_count == 0;
+            MEMBLOCK_CONTROL_KIND_CHECK_STORE:
+                return status.control_audit_csr_enqueue_count == 0 &&
+                       status.control_audit_csr_start_count == 0 &&
+                       status.control_audit_csr_completion_count == 0 &&
+                       status.control_audit_sfence_enqueue_count == 0 &&
+                       status.control_audit_sfence_start_count == 0 &&
+                       status.control_audit_sfence_completion_count == 0 &&
+                       status.control_audit_l2_assert_enqueue_count == 1 &&
+                       status.control_audit_l2_assert_start_count == 1 &&
+                       status.control_audit_l2_assert_completion_count == 1 &&
+                       status.control_audit_l2_release_enqueue_count == 1 &&
+                       status.control_audit_l2_release_start_count == 1 &&
+                       status.control_audit_l2_release_completion_count == 1;
+            default: return 1'b0;
+        endcase
+    endfunction:control_lifecycle_action_matrix_complete
+
+
+
+    function string control_lifecycle_event_name(
+        input memblock_control_audit_event_e event_kind
+    );
+        case (event_kind)
+            MEMBLOCK_CONTROL_AUDIT_CREATION: return "creation";
+            MEMBLOCK_CONTROL_AUDIT_OWNER_BIND: return "owner_bind";
+            MEMBLOCK_CONTROL_AUDIT_CSR_ENQUEUE: return "csr_enqueue";
+            MEMBLOCK_CONTROL_AUDIT_CSR_START: return "csr_start";
+            MEMBLOCK_CONTROL_AUDIT_CSR_COMPLETION: return "csr_completion";
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_ENQUEUE: return "sfence_enqueue";
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_START: return "sfence_start";
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_COMPLETION: return "sfence_completion";
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_ENQUEUE: return "l2_assert_enqueue";
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_START: return "l2_assert_start";
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_COMPLETION: return "l2_assert_completion";
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_ENQUEUE: return "l2_release_enqueue";
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_START: return "l2_release_start";
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_COMPLETION: return "l2_release_completion";
+            MEMBLOCK_CONTROL_AUDIT_TERMINAL: return "terminal";
+            MEMBLOCK_CONTROL_AUDIT_BARRIER_RELEASE: return "barrier_release";
+            default: return "unknown";
+        endcase
+    endfunction:control_lifecycle_event_name
+
+
+
+    function bit establish_control_barrier_prefix_external_provenance(
+        input memblock_uid_t uid,
+        input memblock_redirect_payload_t redirect,
+        input memblock_uid_t old_end_uid,
+        input memblock_uid_t new_end_uid
+    );
+        if (!precheck_control_barrier_prefix_external_provenance(
+                uid, redirect, old_end_uid, new_end_uid)) begin
+            return 1'b0;
+        end
+        commit_control_barrier_prefix_external_provenance(
+            uid, redirect, old_end_uid, new_end_uid);
+        return 1'b1;
+    endfunction:establish_control_barrier_prefix_external_provenance
+
+
+
+    function int unsigned get_control_lifecycle_event_count(
+        input status_transaction status,
+        input memblock_control_audit_event_e event_kind
+    );
+        case (event_kind)
+            MEMBLOCK_CONTROL_AUDIT_CREATION: return status.control_audit_creation_count;
+            MEMBLOCK_CONTROL_AUDIT_OWNER_BIND: return status.control_audit_owner_bind_count;
+            MEMBLOCK_CONTROL_AUDIT_CSR_ENQUEUE: return status.control_audit_csr_enqueue_count;
+            MEMBLOCK_CONTROL_AUDIT_CSR_START: return status.control_audit_csr_start_count;
+            MEMBLOCK_CONTROL_AUDIT_CSR_COMPLETION: return status.control_audit_csr_completion_count;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_ENQUEUE: return status.control_audit_sfence_enqueue_count;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_START: return status.control_audit_sfence_start_count;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_COMPLETION: return status.control_audit_sfence_completion_count;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_ENQUEUE: return status.control_audit_l2_assert_enqueue_count;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_START: return status.control_audit_l2_assert_start_count;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_COMPLETION: return status.control_audit_l2_assert_completion_count;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_ENQUEUE: return status.control_audit_l2_release_enqueue_count;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_START: return status.control_audit_l2_release_start_count;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_COMPLETION: return status.control_audit_l2_release_completion_count;
+            MEMBLOCK_CONTROL_AUDIT_TERMINAL: return status.control_audit_terminal_count;
+            MEMBLOCK_CONTROL_AUDIT_BARRIER_RELEASE: return status.control_audit_barrier_release_count;
+            default: return '1;
+        endcase
+    endfunction:get_control_lifecycle_event_count
+
+
+
+    function bit peek_control_sfence_effective_observation(
+        input memblock_control_owner_t owner,
+        input longint unsigned lifecycle_event_seq,
+        input longint unsigned reset_epoch,
+        output memblock_control_sfence_observation_t observation
+    );
+        observation = '{default:'0};
+        if (!control_sfence_effective_observation.valid ||
+            !memblock_control_owner_equal(control_sfence_effective_observation.owner, owner) ||
+            control_sfence_effective_observation.lifecycle_event_seq != lifecycle_event_seq ||
+            control_sfence_effective_observation.reset_epoch != reset_epoch) begin
+            return 1'b0;
+        end
+        observation = control_sfence_effective_observation;
+        return 1'b1;
+    endfunction:peek_control_sfence_effective_observation
+
+
+
+    function bit plan_terminal_done_uid_for_redirect_range(
+        output memblock_uid_t planned_terminal_done_uid
+    );
+        memblock_uid_t uid;
+
+        uid = dispatch_progress.terminal_done_uid;
+        planned_terminal_done_uid = uid;
+        while (uid < main_trans_num) begin
+            if (status_by_uid[uid] == null) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("redirect terminal frontier references null status uid=%0d", uid))
+                return 1'b0;
+            end
+            if (!status_by_uid[uid].terminal_done) begin
+                break;
+            end
+            uid++;
+        end
+        planned_terminal_done_uid = uid;
+        return 1'b1;
+    endfunction:plan_terminal_done_uid_for_redirect_range
+
+
+
+    function bit precheck_cancel_pending_aggregate_after_redirect_plan(
+        input int record_idx,
+        input int unsigned planned_record_lq_count,
+        input int unsigned planned_record_sq_count,
+        input string caller
+    );
+        int unsigned expected_lq;
+        int unsigned expected_sq;
+        int unsigned planned_pending_lq;
+        int unsigned planned_pending_sq;
+
+        if (record_idx < 0 || record_idx >= cancel_record_q.size() ||
+            planned_record_lq_count < cancel_record_q[record_idx].software_cancel_lq_count ||
+            planned_record_sq_count < cancel_record_q[record_idx].software_cancel_sq_count) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("%s invalid redirect cancel plan record=%0d planned=%0d/%0d current=%0d/%0d",
+                                 caller, record_idx,
+                                 planned_record_lq_count, planned_record_sq_count,
+                                 record_idx >= 0 && record_idx < cancel_record_q.size() ?
+                                     cancel_record_q[record_idx].software_cancel_lq_count : 0,
+                                 record_idx >= 0 && record_idx < cancel_record_q.size() ?
+                                     cancel_record_q[record_idx].software_cancel_sq_count : 0))
+            return 1'b0;
+        end
+        expected_lq = 0;
+        expected_sq = 0;
+        foreach (cancel_record_q[idx]) begin
+            if (cancel_record_q[idx].valid && !cancel_record_q[idx].software_applied) begin
+                expected_lq += idx == record_idx ? planned_record_lq_count :
+                                                  cancel_record_q[idx].software_cancel_lq_count;
+                expected_sq += idx == record_idx ? planned_record_sq_count :
+                                                  cancel_record_q[idx].software_cancel_sq_count;
+            end
+        end
+        planned_pending_lq = pending_lq_cancel_count + planned_record_lq_count -
+                             cancel_record_q[record_idx].software_cancel_lq_count;
+        planned_pending_sq = pending_sq_cancel_count + planned_record_sq_count -
+                             cancel_record_q[record_idx].software_cancel_sq_count;
+        if (planned_pending_lq != expected_lq || planned_pending_sq != expected_sq) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("%s planned pending cancel aggregate drift planned=%0d/%0d records=%0d/%0d",
+                                 caller, planned_pending_lq, planned_pending_sq,
+                                 expected_lq, expected_sq))
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:precheck_cancel_pending_aggregate_after_redirect_plan
+
+
+
+    function bit precheck_control_barrier_prefix_external_provenance(
+        input memblock_uid_t uid,
+        input memblock_redirect_payload_t redirect,
+        input memblock_uid_t old_end_uid,
+        input memblock_uid_t new_end_uid
+    );
+        status_transaction status;
+        memblock_rob_key_t rob_key;
+
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null ||
+            main_table_by_uid[uid] == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("precheck control provenance invalid uid=%0d", uid))
+            return 1'b0;
+        end
+        status = status_by_uid[uid];
+        rob_key = status.get_rob_key();
+        if (control_barrier_prefix_external_provenance_valid || old_end_uid == 0 ||
+            uid != old_end_uid - 1 || uid < new_end_uid ||
+            !active_control_barrier_valid || active_control_barrier_uid != uid ||
+            !is_control_op_class(main_table_by_uid[uid].op_class) ||
+            !status.active || !status.enq || status.terminal_done ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT ||
+            status.control_owner.valid || status.control_action_enqueued ||
+            status.active_lq_mapped || status.active_sq_mapped ||
+            !rob_order_util::rob_need_flush(rob_key, redirect)) begin
+            `uvm_fatal("CONTROL_ADMISSION_PROVENANCE",
+                       $sformatf("cannot establish control provenance uid=%0d old/new=%0d/%0d barrier=%0d/%0d state=%0d owner/action=%0d/%0d lq/sq=%0d/%0d",
+                                 uid, old_end_uid, new_end_uid,
+                                 active_control_barrier_valid, active_control_barrier_uid,
+                                 status.control_state, status.control_owner.valid,
+                                 status.control_action_enqueued,
+                                 status.active_lq_mapped, status.active_sq_mapped))
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:precheck_control_barrier_prefix_external_provenance
+
+
+
+    function bit precheck_control_lifecycle_event(
+        input memblock_uid_t uid,
+        input memblock_control_audit_event_e event_kind,
+        output memblock_control_lifecycle_ticket_t ticket
+    );
+        status_transaction status;
+        int unsigned event_count;
+        bit predecessor_ok;
+
+        ticket = '{default:'0};
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null ||
+            main_table_by_uid[uid] == null ||
+            !is_control_op_class(main_table_by_uid[uid].op_class)) begin
+            `uvm_fatal("CONTROL_LIFECYCLE_AUDIT",
+                       $sformatf("event=%0s invalid control uid=%0d",
+                                 control_lifecycle_event_name(event_kind), uid))
+            return 1'b0;
+        end
+        status = status_by_uid[uid];
+        event_count = get_control_lifecycle_event_count(status, event_kind);
+        if (event_count != 0) begin
+            `uvm_fatal("CONTROL_LIFECYCLE_AUDIT",
+                       $sformatf("duplicate event=%0s uid=%0d kind=%0d generation=%0d count=%0d",
+                                 control_lifecycle_event_name(event_kind), uid,
+                                 status.control_kind, status.control_action_generation,
+                                 event_count))
+            return 1'b0;
+        end
+        predecessor_ok = 1'b0;
+        case (event_kind)
+            MEMBLOCK_CONTROL_AUDIT_CREATION:
+                predecessor_ok = !status.active && !status.enq &&
+                    status.control_audit_owner_bind_count == 0 &&
+                    status.control_action_generation == 0 &&
+                    !status.control_owner.valid;
+            MEMBLOCK_CONTROL_AUDIT_OWNER_BIND:
+                predecessor_ok = status.control_audit_creation_count == 1 &&
+                    status.control_action_generation == 0 &&
+                    !status.control_owner.valid && !status.control_action_enqueued &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT &&
+                    !control_barrier_prefix_external_provenance_valid;
+            MEMBLOCK_CONTROL_AUDIT_CSR_ENQUEUE:
+                predecessor_ok = status.control_kind == MEMBLOCK_CONTROL_KIND_CSR &&
+                    status.control_audit_owner_bind_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING &&
+                    status.control_owner.valid && !status.control_action_enqueued;
+            MEMBLOCK_CONTROL_AUDIT_CSR_START:
+                predecessor_ok = status.control_kind == MEMBLOCK_CONTROL_KIND_CSR &&
+                    status.control_audit_csr_enqueue_count == 1 &&
+                    status.control_owner.valid && status.control_action_enqueued;
+            MEMBLOCK_CONTROL_AUDIT_CSR_COMPLETION:
+                predecessor_ok = status.control_audit_csr_start_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_WAIT_CSR_RUNTIME_SNAPSHOT;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_ENQUEUE:
+                predecessor_ok = status.control_kind == MEMBLOCK_CONTROL_KIND_SFENCE &&
+                    status.control_audit_owner_bind_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_SFENCE_REQ &&
+                    status.control_owner.valid && !status.control_action_enqueued;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_START:
+                predecessor_ok = status.control_kind == MEMBLOCK_CONTROL_KIND_SFENCE &&
+                    status.control_audit_sfence_enqueue_count == 1 &&
+                    status.control_owner.valid && status.control_action_enqueued;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_COMPLETION:
+                predecessor_ok = status.control_audit_sfence_start_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_ENQUEUE:
+                predecessor_ok = status.control_kind == MEMBLOCK_CONTROL_KIND_CHECK_STORE &&
+                    status.control_audit_owner_bind_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT &&
+                    status.control_owner.valid && !status.control_action_enqueued;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_START:
+                predecessor_ok = status.control_audit_l2_assert_enqueue_count == 1 &&
+                    status.control_owner.valid && status.control_action_enqueued;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_COMPLETION:
+                predecessor_ok = status.control_audit_l2_assert_start_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_ENQUEUE:
+                predecessor_ok = status.control_audit_l2_assert_completion_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_START:
+                predecessor_ok = status.control_audit_l2_release_enqueue_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_COMPLETION:
+                predecessor_ok = status.control_audit_l2_release_start_count == 1 &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_IDLE;
+            MEMBLOCK_CONTROL_AUDIT_TERMINAL:
+                predecessor_ok = control_lifecycle_action_matrix_complete(status) &&
+                    status.control_state == MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY &&
+                    status.active && !status.terminal_done;
+            MEMBLOCK_CONTROL_AUDIT_BARRIER_RELEASE:
+                predecessor_ok = control_lifecycle_action_matrix_complete(status) &&
+                    status.control_audit_terminal_count == 1 &&
+                    status.terminal_done && !status.active &&
+                    active_control_barrier_valid && active_control_barrier_uid == uid &&
+                    !control_barrier_prefix_external_provenance_valid;
+            default: predecessor_ok = 1'b0;
+        endcase
+        if (!predecessor_ok) begin
+            `uvm_fatal("CONTROL_LIFECYCLE_AUDIT",
+                       $sformatf("event=%0s predecessor mismatch uid=%0d kind=%0d state=%0d generation=%0d create/bind=%0d/%0d terminal/release=%0d/%0d",
+                                 control_lifecycle_event_name(event_kind), uid,
+                                 status.control_kind, status.control_state,
+                                 status.control_action_generation,
+                                 status.control_audit_creation_count,
+                                 status.control_audit_owner_bind_count,
+                                 status.control_audit_terminal_count,
+                                 status.control_audit_barrier_release_count))
+            return 1'b0;
+        end
+        ticket.valid = 1'b1;
+        ticket.uid = uid;
+        ticket.event_kind = event_kind;
+        ticket.generation = (event_kind == MEMBLOCK_CONTROL_AUDIT_OWNER_BIND) ?
+            1 : status.control_action_generation;
+        return 1'b1;
+    endfunction:precheck_control_lifecycle_event
+
+
+    function bit precheck_control_terminal_retire(
+        input memblock_uid_t uid,
+        output memblock_uid_t planned_terminal_done_uid
+    );
+        status_transaction     status;
+        memblock_rob_key_t     rob_key;
+        memblock_rob_map_key_t rob_map_key;
+        memblock_rob_map_key_t scan_rob_map_key;
+        memblock_lq_map_key_t  scan_lq_map_key;
+        memblock_sq_map_key_t  scan_sq_map_key;
+        memblock_uid_t         scan_uid;
+
+        planned_terminal_done_uid = dispatch_progress.terminal_done_uid;
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control terminal retire invalid uid=%0d", uid))
+            return 1'b0;
+        end
+        status = status_by_uid[uid];
+        if (!status.active || status.terminal_done ||
+            status.active_lq_mapped || status.active_sq_mapped) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control terminal retire status mismatch uid=%0d active/terminal=%0d/%0d lq/sq=%0d/%0d",
+                                 uid, status.active, status.terminal_done,
+                                 status.active_lq_mapped, status.active_sq_mapped))
+            return 1'b0;
+        end
+
+        rob_key.flag = status.robIdx_flag;
+        rob_key.value = status.robIdx_value;
+        rob_map_key = rob_order_util::rob_to_map_key(rob_key);
+        if (!uid_by_active_rob.exists(rob_map_key) ||
+            uid_by_active_rob[rob_map_key] != uid) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control terminal retire uid=%0d has inconsistent active ROB mapping rob=%0d/%0d",
+                                 uid, rob_key.flag, rob_key.value))
+            return 1'b0;
+        end
+        foreach (uid_by_active_rob[scan_rob_map_key]) begin
+            if (uid_by_active_rob[scan_rob_map_key] == uid &&
+                scan_rob_map_key != rob_map_key) begin
+                `uvm_fatal("CONTROL_COMMIT",
+                           $sformatf("control terminal retire uid=%0d has duplicate active ROB mapping",
+                                     uid))
+                return 1'b0;
+            end
+        end
+        foreach (uid_by_lq[scan_lq_map_key]) begin
+            if (uid_by_lq[scan_lq_map_key] == uid) begin
+                `uvm_fatal("CONTROL_COMMIT",
+                           $sformatf("control terminal retire uid=%0d has residual LQ mapping", uid))
+                return 1'b0;
+            end
+        end
+        foreach (uid_by_sq[scan_sq_map_key]) begin
+            if (uid_by_sq[scan_sq_map_key] == uid) begin
+                `uvm_fatal("CONTROL_COMMIT",
+                           $sformatf("control terminal retire uid=%0d has residual SQ mapping", uid))
+                return 1'b0;
+            end
+        end
+        foreach (load_issue_q[idx]) begin
+            if (load_issue_q[idx].uid == uid) begin
+                `uvm_fatal("CONTROL_COMMIT",
+                           $sformatf("control terminal retire uid=%0d has residual load issue item", uid))
+                return 1'b0;
+            end
+        end
+        foreach (sta_issue_q[idx]) begin
+            if (sta_issue_q[idx].uid == uid) begin
+                `uvm_fatal("CONTROL_COMMIT",
+                           $sformatf("control terminal retire uid=%0d has residual STA issue item", uid))
+                return 1'b0;
+            end
+        end
+        foreach (std_issue_q[idx]) begin
+            if (std_issue_q[idx].uid == uid) begin
+                `uvm_fatal("CONTROL_COMMIT",
+                           $sformatf("control terminal retire uid=%0d has residual STD issue item", uid))
+                return 1'b0;
+            end
+        end
+        foreach (ptw_wait_replay_q[idx]) begin
+            if (ptw_wait_replay_q[idx].uid == uid) begin
+                `uvm_fatal("CONTROL_COMMIT",
+                           $sformatf("control terminal retire uid=%0d has residual PTW replay item", uid))
+                return 1'b0;
+            end
+        end
+        if (status.sta_late_fault_tombstone_q.size() != 0 ||
+            std_late_raw_tombstone_by_rob.exists(rob_map_key)) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control terminal retire uid=%0d has residual tombstone sta/std=%0d/%0d",
+                                 uid, status.sta_late_fault_tombstone_q.size(),
+                                 std_late_raw_tombstone_by_rob.exists(rob_map_key)))
+            return 1'b0;
+        end
+
+        if (dispatch_progress.terminal_done_uid > main_trans_num) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control terminal retire invalid frontier=%0d main_trans_num=%0d",
+                                 dispatch_progress.terminal_done_uid, main_trans_num))
+            return 1'b0;
+        end
+        scan_uid = dispatch_progress.terminal_done_uid;
+        while (scan_uid < main_trans_num) begin
+            if (status_by_uid[scan_uid] == null) begin
+                `uvm_fatal("CONTROL_COMMIT",
+                           $sformatf("control terminal retire frontier references null status uid=%0d",
+                                     scan_uid))
+                return 1'b0;
+            end
+            if (scan_uid != uid && !status_by_uid[scan_uid].terminal_done) begin
+                break;
+            end
+            scan_uid++;
+        end
+        planned_terminal_done_uid = scan_uid;
+        return 1'b1;
+    endfunction:precheck_control_terminal_retire
+
+
+
+    function bit precheck_l2_assert_completion_release_enqueue(
+        input memblock_uid_t uid,
+        output memblock_control_lifecycle_ticket_t assert_ticket,
+        output memblock_control_lifecycle_ticket_t release_ticket
+    );
+        status_transaction status;
+
+        assert_ticket = '{default:'0};
+        release_ticket = '{default:'0};
+        if (!precheck_control_lifecycle_event(
+                uid, MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_COMPLETION,
+                assert_ticket)) begin
+            return 1'b0;
+        end
+        status = status_by_uid[uid];
+        if (status.control_audit_l2_release_enqueue_count != 0 ||
+            status.control_kind != MEMBLOCK_CONTROL_KIND_CHECK_STORE ||
+            status.control_audit_l2_assert_start_count != 1 ||
+            status.control_audit_l2_assert_completion_count != 0 ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE ||
+            !status.control_owner.valid || status.control_action_enqueued ||
+            l2_flush_release_request_q.size() != 0) begin
+            `uvm_fatal("CONTROL_LIFECYCLE_AUDIT",
+                       $sformatf("combined L2 ASSERT completion/RELEASE enqueue precheck mismatch uid=%0d state=%0d generation=%0d assert=%0d/%0d release_enqueue=%0d owner/action=%0d/%0d queue=%0d",
+                                 uid, status.control_state,
+                                 status.control_action_generation,
+                                 status.control_audit_l2_assert_start_count,
+                                 status.control_audit_l2_assert_completion_count,
+                                 status.control_audit_l2_release_enqueue_count,
+                                 status.control_owner.valid,
+                                 status.control_action_enqueued,
+                                 l2_flush_release_request_q.size()))
+            assert_ticket = '{default:'0};
+            return 1'b0;
+        end
+        release_ticket.valid = 1'b1;
+        release_ticket.uid = uid;
+        release_ticket.event_kind = MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_ENQUEUE;
+        release_ticket.generation = status.control_action_generation;
+        return 1'b1;
+    endfunction:precheck_l2_assert_completion_release_enqueue
+
+
+
+    function bit precheck_redirect_post_state_invariant(
+        input memblock_redirect_payload_t redirect,
+        input memblock_uid_t planned_new_end_uid,
+        input memblock_uid_t reissue_uids[$],
+        input bit establish_provenance,
+        input memblock_uid_t planned_provenance_uid
+    );
+        int unsigned provenance_match_count;
+
+        provenance_match_count = 0;
+        foreach (uid_by_active_rob[map_key]) begin
+            memblock_uid_t uid;
+            status_transaction status;
+            memblock_rob_key_t rob_key;
+            bit planned_removed;
+            bit provenance_valid;
+            memblock_uid_t provenance_uid;
+
+            uid = uid_by_active_rob[map_key];
+            planned_removed = 1'b0;
+            foreach (reissue_uids[idx]) begin
+                if (reissue_uids[idx] == uid) begin
+                    planned_removed = 1'b1;
+                end
+            end
+            if (planned_removed || uid < planned_new_end_uid) begin
+                continue;
+            end
+            if (!is_valid_uid(uid) || status_by_uid[uid] == null ||
+                main_table_by_uid[uid] == null) begin
+                `uvm_fatal("ROB_ADMISSION_PREFIX",
+                           $sformatf("redirect post-state plan references invalid uid=%0d", uid))
+                return 1'b0;
+            end
+            status = status_by_uid[uid];
+            rob_key = status.get_rob_key();
+            provenance_valid = control_barrier_prefix_external_provenance_valid ||
+                               establish_provenance;
+            provenance_uid = control_barrier_prefix_external_provenance_valid ?
+                control_barrier_prefix_external_provenance_uid :
+                planned_provenance_uid;
+            if (provenance_valid && uid == provenance_uid &&
+                active_control_barrier_valid && active_control_barrier_uid == uid &&
+                is_control_op_class(main_table_by_uid[uid].op_class) &&
+                status.active && status.enq && !status.terminal_done &&
+                status.control_state == MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT &&
+                !status.control_owner.valid && !status.control_action_enqueued &&
+                !status.active_lq_mapped && !status.active_sq_mapped &&
+                rob_order_util::rob_need_flush(rob_key, redirect)) begin
+                provenance_match_count++;
+                continue;
+            end
+            `uvm_fatal("ROB_ADMISSION_PREFIX",
+                       $sformatf("redirect planned post-state has prefix-external owner uid=%0d new_end=%0d provenance=%0d/%0d",
+                                 uid, planned_new_end_uid,
+                                 provenance_valid, provenance_uid))
+            return 1'b0;
+        end
+        if ((control_barrier_prefix_external_provenance_valid || establish_provenance) &&
+            provenance_match_count != 1) begin
+            `uvm_fatal("ROB_ADMISSION_PREFIX",
+                       $sformatf("redirect planned provenance uid=%0d matched owners=%0d new_end=%0d",
+                                 control_barrier_prefix_external_provenance_valid ?
+                                     control_barrier_prefix_external_provenance_uid :
+                                     planned_provenance_uid,
+                                 provenance_match_count, planned_new_end_uid))
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:precheck_redirect_post_state_invariant
+
+
+
+    function bit precheck_start_redirect_deleted_owner_window(input int record_idx);
+        if (redirect_deleted_owner_window_active ||
+            (redirect_deleted_lq_owner_by_key.num() == 0 &&
+             redirect_deleted_sq_owner_by_key.num() == 0)) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "start window requires idle state and at least one saved owner")
+            return 1'b0;
+        end
+        if (record_idx < 0 || record_idx >= cancel_record_q.size() ||
+            !cancel_record_q[record_idx].valid ||
+            !cancel_record_q[record_idx].redirect_anchor_valid ||
+            cancel_record_q[record_idx].active_scan_done ||
+            cancel_record_q[record_idx].software_count_finalized ||
+            cancel_record_q[record_idx].software_applied) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "start window precheck got an invalid cancel record lifecycle")
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:precheck_start_redirect_deleted_owner_window
+
+
+
+    function bit precheck_start_redirect_deleted_owner_window_plan(
+        input int record_idx,
+        input int unsigned planned_lq_owner_count,
+        input int unsigned planned_sq_owner_count
+    );
+        if (planned_lq_owner_count == 0 && planned_sq_owner_count == 0) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "planned deleted-owner window requires at least one owner")
+            return 1'b0;
+        end
+        if (redirect_deleted_owner_window_active ||
+            redirect_deleted_lq_owner_by_key.num() != 0 ||
+            redirect_deleted_sq_owner_by_key.num() != 0) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "planned deleted-owner window requires empty current owner state")
+            return 1'b0;
+        end
+        if (record_idx < 0 || record_idx >= cancel_record_q.size() ||
+            !cancel_record_q[record_idx].valid ||
+            !cancel_record_q[record_idx].redirect_anchor_valid ||
+            cancel_record_q[record_idx].active_scan_done ||
+            cancel_record_q[record_idx].software_count_finalized ||
+            cancel_record_q[record_idx].software_applied) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "planned deleted-owner window got invalid cancel record lifecycle")
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:precheck_start_redirect_deleted_owner_window_plan
+
+
+
+    function bit precheck_uid_redirect_mutation(
+        input memblock_uid_t uid,
+        input memblock_redirect_payload_t redirect,
+        input bit require_fault_head,
+        input string caller
+    );
+        status_transaction status;
+        main_control_transaction main_tr;
+        memblock_rob_map_key_t rob_map_key;
+        int record_idx;
+
+        if (!redirect.valid || !is_valid_uid(uid) || status_by_uid[uid] == null ||
+            main_table_by_uid[uid] == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("%s invalid redirect/uid valid=%0d uid=%0d",
+                                 caller, redirect.valid, uid))
+            return 1'b0;
+        end
+        status = status_by_uid[uid];
+        main_tr = main_table_by_uid[uid];
+        if (is_control_op_class(main_tr.op_class) || status.terminal_done || !status.active) begin
+            `uvm_fatal("CONTROL_REDIRECT",
+                       $sformatf("%s rejects control/terminal/inactive uid=%0d op=%0d terminal/active=%0d/%0d",
+                                 caller, uid, main_tr.op_class, status.terminal_done,
+                                 status.active))
+            return 1'b0;
+        end
+        if (require_fault_head &&
+            (!status.active || !status.rob_commit ||
+             status.get_rob_key() != redirect.rob_key ||
+             (!status.fault && !status.exception_pending && !status.load_fault &&
+              !status.sta_fault && !status.std_fault))) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("%s uid=%0d is not active committed fault head", caller, uid))
+            return 1'b0;
+        end
+        record_idx = find_cancel_record_index_by_id(active_cancel_record_id);
+        if (!active_cancel_record_id_valid || record_idx < 0 ||
+            !cancel_record_q[record_idx].valid ||
+            !cancel_record_q[record_idx].redirect_anchor_valid ||
+            cancel_record_q[record_idx].software_count_finalized ||
+            cancel_record_q[record_idx].software_applied ||
+            !redirect_payload_equal(redirect, cancel_record_q[record_idx].redirect) ||
+            cancel_record_q[record_idx].redirect_epoch !=
+                memblock_sync_pkg::dispatch_flush_epoch) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("%s uid=%0d has no open active cancel record", caller, uid))
+            return 1'b0;
+        end
+        if (status.lsq_cancel_accounted_epoch == cancel_record_q[record_idx].redirect_epoch) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("%s uid=%0d was already cancel-accounted", caller, uid))
+            return 1'b0;
+        end
+        if ((status.active_lq_mapped || status.active_sq_mapped) &&
+            (main_tr.numLsElem != 1 ||
+             status.lsq_reservation_state != MEMBLOCK_LSQ_RESERVATION_DUT_VISIBLE ||
+             !status.lsq_reservation_sample_valid ||
+             status.lsq_reservation_sample_seq > cancel_record_q[record_idx].redirect_lsq_sample_seq)) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("%s uid=%0d invalid mapped cancel reservation", caller, uid))
+            return 1'b0;
+        end
+        if (!check_cancel_pending_aggregate_checked(caller)) begin
+            return 1'b0;
+        end
+        if (cancel_record_q[record_idx].software_cancel_lq_count +
+                (status.active_lq_mapped ? main_tr.numLsElem : 0) > MEMBLOCK_LQ_SIZE ||
+            cancel_record_q[record_idx].software_cancel_sq_count +
+                (status.active_sq_mapped ? main_tr.numLsElem : 0) > MEMBLOCK_SQ_SIZE) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("%s uid=%0d cancel count would exceed capacity", caller, uid))
+            return 1'b0;
+        end
+        if (redirect_deleted_owner_window_active) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       $sformatf("%s uid=%0d previous owner window is active", caller, uid))
+            return 1'b0;
+        end
+        if (status.active) begin
+            rob_map_key = rob_order_util::rob_to_map_key(status.get_rob_key());
+            if (!uid_by_active_rob.exists(rob_map_key) || uid_by_active_rob[rob_map_key] != uid) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("%s uid=%0d has inconsistent active ROB map", caller, uid))
+                return 1'b0;
+            end
+            if (!status.active_instance_flush_epoch_valid ||
+                status.active_instance_flush_epoch >=
+                    cancel_record_q[record_idx].redirect_epoch) begin
+                `uvm_fatal("REDIRECT_DELETED_OWNER",
+                           $sformatf("%s uid=%0d activation epoch valid/value=%0d/%0d is not older than redirect epoch=%0d",
+                                     caller, uid,
+                                     status.active_instance_flush_epoch_valid,
+                                     status.active_instance_flush_epoch,
+                                     cancel_record_q[record_idx].redirect_epoch))
+                return 1'b0;
+            end
+        end
+        if (status.active_lq_mapped) begin
+            memblock_lq_key_t key;
+            memblock_lq_map_key_t map_key;
+            key.flag = status.lqIdx_flag;
+            key.value = status.lqIdx_value;
+            map_key = rob_order_util::lq_to_map_key(key);
+            if (!is_valid_lq_key(key) || !uid_by_lq.exists(map_key) ||
+                uid_by_lq[map_key] != uid || redirect_deleted_lq_owner_by_key.exists(map_key)) begin
+                `uvm_fatal("REDIRECT_DELETED_OWNER",
+                           $sformatf("%s uid=%0d has invalid/duplicate LQ owner", caller, uid))
+                return 1'b0;
+            end
+        end
+        if (status.active_sq_mapped) begin
+            memblock_sq_key_t key;
+            memblock_sq_map_key_t map_key;
+            key.flag = status.sqIdx_flag;
+            key.value = status.sqIdx_value;
+            map_key = rob_order_util::sq_to_map_key(key);
+            if (!is_valid_sq_key(key) || !uid_by_sq.exists(map_key) ||
+                uid_by_sq[map_key] != uid || redirect_deleted_sq_owner_by_key.exists(map_key)) begin
+                `uvm_fatal("REDIRECT_DELETED_OWNER",
+                           $sformatf("%s uid=%0d has invalid/duplicate SQ owner", caller, uid))
+                return 1'b0;
+            end
+        end
+        if (require_fault_head && fault_redirect_resource.valid &&
+            (!fault_redirect_resource_matches(uid, status.dynamic_epoch) ||
+             fault_redirect_resource.redirect_epoch != cancel_record_q[record_idx].redirect_epoch ||
+             fault_redirect_resource.cancel_record_id != cancel_record_q[record_idx].cancel_record_id)) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("%s uid=%0d conflicts with active fault resource", caller, uid))
+            return 1'b0;
+        end
+        if (uid_tlb_record_by_uid.exists(uid) && uid_tlb_record_by_uid[uid] != null &&
+            uid_tlb_record_by_uid[uid].is_waiting()) begin
+            memblock_uid_tlb_record record;
+            memblock_uid_tlb_wait_shape_key_t shape_key;
+            int unsigned match_count;
+
+            record = uid_tlb_record_by_uid[uid];
+            if (!record.record_valid || record.uid != uid) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("%s uid=%0d has invalid waiting TLB record", caller, uid))
+                return 1'b0;
+            end
+            shape_key = make_uid_tlb_wait_shape_key(record.vpn, record.s2xlate);
+            match_count = 0;
+            if (uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+                foreach (uid_waiting_by_vpn_s2xlate[shape_key][idx]) begin
+                    if (uid_waiting_by_vpn_s2xlate[shape_key][idx] == uid) begin
+                        match_count++;
+                    end
+                end
+            end
+            if (match_count != 1) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("%s uid=%0d waiting TLB index match_count=%0d",
+                                     caller, uid, match_count))
+                return 1'b0;
+            end
+            if (uid_waiting_by_vpn_s2xlate[shape_key].size() > MEMBLOCK_ROB_SIZE) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("%s uid=%0d waiting TLB index bucket size=%0d exceeds ROB capacity=%0d",
+                                     caller, uid,
+                                     uid_waiting_by_vpn_s2xlate[shape_key].size(),
+                                     MEMBLOCK_ROB_SIZE))
+                return 1'b0;
+            end
+            foreach (uid_waiting_by_vpn_s2xlate[shape_key][idx]) begin
+                memblock_uid_t candidate_uid;
+                memblock_uid_tlb_record candidate_record;
+
+                candidate_uid = uid_waiting_by_vpn_s2xlate[shape_key][idx];
+                if (!uid_tlb_record_by_uid.exists(candidate_uid) ||
+                    uid_tlb_record_by_uid[candidate_uid] == null ||
+                    !uid_tlb_record_by_uid[candidate_uid].record_valid ||
+                    !uid_tlb_record_by_uid[candidate_uid].is_waiting()) begin
+                    continue;
+                end
+                candidate_record = uid_tlb_record_by_uid[candidate_uid];
+                if (candidate_record.uid != candidate_uid ||
+                    make_uid_tlb_wait_shape_key(candidate_record.vpn,
+                                                candidate_record.s2xlate) != shape_key) begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("%s uid=%0d waiting TLB index contains corrupt candidate=%0d",
+                                         caller, uid, candidate_uid))
+                    return 1'b0;
+                end
+            end
+        end
+        if (status.active && status.std_dispatched &&
+            (status.fault || status.exception_pending || status.sta_fault)) begin
+            memblock_std_late_raw_tombstone_t tombstone;
+            rob_map_key = rob_order_util::rob_to_map_key(status.get_rob_key());
+            if (std_late_raw_tombstone_by_rob.exists(rob_map_key)) begin
+                tombstone = std_late_raw_tombstone_by_rob[rob_map_key];
+                if (!tombstone.valid || tombstone.uid != uid ||
+                    tombstone.dynamic_epoch != status.dynamic_epoch) begin
+                    `uvm_fatal("STD_LATE_TOMBSTONE",
+                               $sformatf("%s uid=%0d conflicts with existing tombstone",
+                                         caller, uid))
+                    return 1'b0;
+                end
+            end
+        end
+        return 1'b1;
+    endfunction:precheck_uid_redirect_mutation
+
+
+
+    function void record_control_lifecycle_event(
+        input memblock_control_lifecycle_ticket_t ticket
+    );
+        status_transaction status;
+
+        if (!ticket.valid) begin
+            return;
+        end
+        status = status_by_uid[ticket.uid];
+        case (ticket.event_kind)
+            MEMBLOCK_CONTROL_AUDIT_CREATION: status.control_audit_creation_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_OWNER_BIND: status.control_audit_owner_bind_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_CSR_ENQUEUE: status.control_audit_csr_enqueue_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_CSR_START: status.control_audit_csr_start_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_CSR_COMPLETION: status.control_audit_csr_completion_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_ENQUEUE: status.control_audit_sfence_enqueue_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_START: status.control_audit_sfence_start_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_SFENCE_COMPLETION: status.control_audit_sfence_completion_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_ENQUEUE: status.control_audit_l2_assert_enqueue_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_START: status.control_audit_l2_assert_start_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_L2_ASSERT_COMPLETION: status.control_audit_l2_assert_completion_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_ENQUEUE: status.control_audit_l2_release_enqueue_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_START: status.control_audit_l2_release_start_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_L2_RELEASE_COMPLETION: status.control_audit_l2_release_completion_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_TERMINAL: status.control_audit_terminal_count = 1;
+            MEMBLOCK_CONTROL_AUDIT_BARRIER_RELEASE: status.control_audit_barrier_release_count = 1;
+            default: return;
+        endcase
+        `uvm_info("CONTROL_LIFECYCLE_AUDIT",
+                  $sformatf("event=%0s uid=%0d kind=%0d generation=%0d create/bind=%0d/%0d csr=%0d/%0d/%0d sfence=%0d/%0d/%0d l2_assert=%0d/%0d/%0d l2_release=%0d/%0d/%0d terminal/release=%0d/%0d",
+                            control_lifecycle_event_name(ticket.event_kind), ticket.uid,
+                            status.control_kind, status.control_action_generation,
+                            status.control_audit_creation_count,
+                            status.control_audit_owner_bind_count,
+                            status.control_audit_csr_enqueue_count,
+                            status.control_audit_csr_start_count,
+                            status.control_audit_csr_completion_count,
+                            status.control_audit_sfence_enqueue_count,
+                            status.control_audit_sfence_start_count,
+                            status.control_audit_sfence_completion_count,
+                            status.control_audit_l2_assert_enqueue_count,
+                            status.control_audit_l2_assert_start_count,
+                            status.control_audit_l2_assert_completion_count,
+                            status.control_audit_l2_release_enqueue_count,
+                            status.control_audit_l2_release_start_count,
+                            status.control_audit_l2_release_completion_count,
+                            status.control_audit_terminal_count,
+                            status.control_audit_barrier_release_count), UVM_LOW)
+    endfunction:record_control_lifecycle_event
+
+
+
+    function bit remove_uid_from_issue_queues_for_redirect_range_checked(
+        input memblock_uid_t uid
+    );
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("redirect issue-queue cleanup invalid uid=%0d", uid))
+            return 1'b0;
+        end
+        remove_uid_from_issue_queues(uid);
+        return 1'b1;
+    endfunction:remove_uid_from_issue_queues_for_redirect_range_checked
+
+
 
 endclass:common_data_transaction
 

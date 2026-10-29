@@ -573,7 +573,10 @@ task soft_test_memblock_pending_mmio_directed_sequence::prepare_redirect_deleted
         `uvm_fatal(get_type_name(),
                    $sformatf("%s redirect scan was not ready at R+1", scenario_name))
     end
-    data.apply_redirect_flush(redirect);
+    if (!data.apply_redirect_flush(redirect)) begin
+        `uvm_fatal(get_type_name(), "directed redirect flush preparation failed")
+        return;
+    end
     if (!data.redirect_deleted_owner_window_pending()) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("%s did not create redirect-deleted owner window",
