@@ -392,6 +392,10 @@ bool MixedScenario::execute_vector_segment(ActionWindow &window)
             segment_uop.ftq_ptr = random() & 0x3fU;
             segment_uop.ftq_offset =
                 static_cast<std::uint8_t>(random() & 7U);
+            // All fields and memory uops belong to this frontend instruction.
+            // Keep the per-uop draws to preserve unrelated seeded choices.
+            segment_uop.ftq_ptr = uops.front().ftq_ptr;
+            segment_uop.ftq_offset = uops.front().ftq_offset;
             for (auto &byte : segment_uop.data) {
                 byte = static_cast<unsigned char>(random());
             }

@@ -323,6 +323,10 @@ std::vector<memblock::VectorMemoryTransaction> MixedScenario::make_random_vector
             .last_uop = uop + 1U == uop_count,
         });
         auto &transaction = uops.back();
+        // Decode copies one frontend instruction into every memory uop.
+        // Preserve the draws above so unrelated seeded choices stay unchanged.
+        transaction.ftq_ptr = uops.front().ftq_ptr;
+        transaction.ftq_offset = uops.front().ftq_offset;
         for (auto &byte : transaction.data) {
             byte = static_cast<unsigned char>(random());
         }

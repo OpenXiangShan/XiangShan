@@ -948,6 +948,16 @@ only: its LQ snapshot must never attribute a replay to a vector load. Ordinary,
 heterogeneous, sliding-stream and vector-store readback builders share these
 rules. Stream epochs retain explicit boundaries and do not model full rename history.
 
+All uops of one ordinary or segment vector instruction retain the same ROB
+value/wrap and victim FTQ pointer/offset, including operand-only segment uops.
+Complex decode copies that frontend identity from one instruction to every
+sibling; independent per-uop FTQ choices are not a legal stimulus dimension.
+The random builders preserve their existing per-uop PRNG draws, then constrain
+sibling FTQ fields to the first uop's values. Other operands, queue history and
+subsequent random choices retain their seeded sequence. Frontend identity still
+varies across instructions. This input-generation invariant is separate from
+checking returned memory-violation fields and does not qualify general replay.
+
 ## Ordinary Nonidentity Page Mappings
 
 `translation-permuted` changes ordinary address relationships rather than

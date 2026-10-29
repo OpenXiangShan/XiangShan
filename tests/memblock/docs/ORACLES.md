@@ -409,6 +409,12 @@ register count and EEW. Active elements use global element position, VL,
 `vstart`, `vm` and mask bits. Expected successful load data starts with the
 supplied old destination and replaces active bytes with reference memory.
 
+Canonical ordinary and segment vector sibling uops retain one instruction's
+FTQ pointer/offset as well as ROB value/wrap, matching complex decode's copying
+of the latched instruction. The builders constrain sibling fields after retaining
+the original random draws. This is an input-legality rule; terminal vector WB
+has no FTQ comparison, and general public memory-replay matching remains open.
+
 Canonical vector writing uops use distinct numeric destinations 1..127; FOF
 fix-VL uses the separate VL domain 1..31. Nonwriting store/segment uops drive zero.
 Repeated logical Vd in EMUL>LMUL indexed loads is a chain of distinct renames.
