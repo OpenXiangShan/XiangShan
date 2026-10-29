@@ -4,7 +4,8 @@
 
 - Worktree: `.codex_mother_integration_20261028`
 - Branch: `codex/memblock-csr-prefix-fix-20261025`
-- 本轮已验收源码提交：`4948d291e`；CSR closure 文档提交：`201901c3d`。
+- 当前生产源码提交：`c9763bd7d`；此前集成基线为 `4948d291e`，CSR closure 文档提交为 `201901c3d`。
+- 当前执行状态：`STOPPED_RTL_CONFIRMED`；strict-NC RTL Bug 等待 coding 授权，无活动仿真，母任务未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
 ## Integrated Bug Commits
@@ -89,7 +90,7 @@ worktree。2026-10-29 用户允许并发仿真加速：配置逐组推进，组�
 | 4 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | `PASS` | 10/10 |
 | 5 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | `PASS` | 10/10 |
 | 6 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | `PASS` | 10/10 |
-| 7 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_strict_nc_100k` | `FAIL/PAUSED_ANALYSIS` | 0/10 |
+| 7 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_strict_nc_100k` | `FAIL/STOPPED_RTL_CONFIRMED` | 0/10 |
 | 8 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | `NOT_RUN` | 0/10 |
 | 9 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | `NOT_RUN` | 0/10 |
 | 10 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | `NOT_RUN` | 0/10 |
@@ -125,7 +126,8 @@ cfg 名称含 `100k`，本轮仍保留原始归档的 `MAIN_TRANS_NUM=1000` 覆�
 `mem_ut/ver/ut/memblock/sim/.eda_regression/basicTest_tc_dispatch_real_mmu_sv39_smoke_20261029_111009_2539662_24995`。
 原始 seed `212889620` 及原先 9 颗被联停的 seed 全部严格 PASS，seed 清单与原始归档一致，
 controller 无失败/未完成/远端未知任务。该结果未触发静态审查发现的旧 later-split completion 迟到场景；
-现暂停新组，按 `memblock_redirect_later_split_cancel_integration_plan_20261029.md` 完成确定性复现与修复。
+该后续问题现已按 `memblock_redirect_later_split_cancel_integration_plan_20261029.md` 完成确定性复现、修复和专项验证，
+提交为 `c9763bd7d`；当前暂停原因是第 7 组 strict-NC 的独立新问题，不是 later-split cancel 尚未修复。
 
 其余 14 组 functional matrix、fault3 100-seed 专项和最终覆盖率尚未完成。当前共 60/120 关闭前六组，
 不能解释为母任务全部完成；发生源码修复后需要重新评估已通过组的相邻复测范围和最终统一版本验收。
@@ -135,7 +137,7 @@ controller 无失败/未完成/远端未知任务。该结果未触发静态审�
 | 问题 | 责任与复现 | 当前修改 | 状态与恢复条件 |
 |---|---|---|---|
 | redirect 集成遗漏 later-split cancel | 静态 review 发现；定向 seed `2601029` 在 201ns 报 `LATER_SPLIT_TLB completion provenance mismatch`，修复前 1/1 FAIL | mother 中恢复旧 epoch 的现有 cancel 调用，补 4 个确定性场景及前置失败原子性检查 | `FINAL_PASS`；定向 PASS、真实 DUT 固定/随机 39/39 严格 PASS；独立最终 `REVIEW_PASS`，单 Bug commit=`c9763bd7d` |
-| strict-NC 写回找不到活动 UID | `basicTest / memblock_dispatch_real_smoke_vseq / tc_dispatch_real_mmu_sv39_strict_nc_100k / seed=846339364`，787.300ns `INT_WB_ATTACH no active uid for ROB key=0/14` | 尚无代码修改；当前只分析，未判定 RTL/RM/框架责任 | `PAUSED_ANALYSIS`；原批次 1 FAIL、5 ABORTED、4 NOT_RUN，unknown=0，原 seed 正强制编译 debug 波形复现 |
+| strict-NC 写回找不到活动 UID | `basicTest / memblock_dispatch_real_smoke_vseq / tc_dispatch_real_mmu_sv39_strict_nc_100k / seed=846339364`，787.300ns `INT_WB_ATTACH no active uid for ROB key=0/14`；两位独立 reviewer 确认 NC staging 漏取消为 RTL 责任 | 尚无代码修改；原 seed debug 在相同时刻复现；局部 NC valid/data 寄存器修复方案已 review，等待 RTL coding 授权 | `STOPPED_RTL_CONFIRMED`；原批次 1 FAIL、5 ABORTED、4 NOT_RUN，unknown=0；debug compile PASS、单 seed FAIL，所有 controller 已退出 |
 
 修复前结果目录：
 `mem_ut/ver/ut/memblock/sim/.eda_regression/basicTest_default_20261029_112338_2626771_13498`。
@@ -148,6 +150,21 @@ controller 无失败/未完成/远端未知任务。该结果未触发静态审�
 ABORTED seeds：`874181294,2113203111,202201584,1595761652,203579979`；未启动 seeds：
 `1733858606,1807727296,1728147241,1940125520`。首错 seed 先专项闭环，后续恢复清单按执行规则记录。
 debug 复现目录：`mem_ut/ver/ut/memblock/sim/mother_strict_nc_wb_debug_20261029_results`。
+
+波形确认：NC lane1 的输出寄存器从 705.3ns 起持有 ROB0/14；755.3ns 仅顶层发出 redirect，
+760.3ns uncacheBuffer/LoadUnit 收到局部 redirect 后，输出寄存器仍未取消旧返回；阻塞解除后进入流水线，780.3ns 产生旧 LDA 写回，
+787.3ns 框架报错。源码候选为 `LoadQueueUncache.scala` 中 NC 输出 `AddPipelineReg(..., false.B)`。
+NC 允许投机执行，不能把“未等 ROB 队首”直接认作激励错误；也不能仅凭 adapter fatal 认定 RTL。
+完整证据与责任复核入口：
+`AI_DOC/analysis/source_sv/dispatch_framework_sv/strict_nc_redirect_late_lda_seed846339364_analysis_20261029.md`。
+当前没有运行中的仿真；未放宽 checker、未修改 RTL、未启动第 8–12 组。
+
+2026-10-29 两轮独立责任 review 已完成：Galileo 核对框架合同/身份和后端消解，Dewey 核对 RTL
+取消链并 review 同拍 replacement 方案。正式记录与具体源码方案位于
+`AI_DOC/buglist/rtl/v2/rtl_buglist_2026-W44_20261026.md`。
+本轮按规则以 `STOPPED_RTL_CONFIRMED` 停止后续回归，不表示母任务完成。继续条件为明确授权修复
+该 NC staging RTL（或接收 RTL owner 修复）；原 seed 专项通过后，才恢复五颗 ABORTED 和四个待替换
+NOT_RUN 名额，再推进后续组。仿真仍可组内并发；源码修改仍只在 mother 逐 Bug 顺序执行。
 
 ## 其余 14 组原始矩阵
 
