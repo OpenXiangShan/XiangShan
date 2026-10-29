@@ -484,6 +484,18 @@ class memblock_rm_readonly_api extends uvm_object;
         input  bit [51:0] request_vpn,
         output later_split_load_response_view_t response_view
     );
+    // 中文注释：只读首段执行与独立D-error历史；pending区分尚未消费和已消费但无证明。
+    extern function bit try_read_first_split_cache_error_for_rm(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch,
+        input memblock_rob_key_t rob_key,
+        input bit [63:0] original_vaddr,
+        input mem_addr_t line_addr,
+        input longint unsigned bound_load_sample,
+        output memblock_first_split_access_context_t context_view,
+        output l2_d_error_view_t error_view,
+        output bit observation_pending
+    );
     // 中文注释：RM 与 software-only 检查共用的纯值 PBMT/PBMTE 语义入口。
     // 只消费 readonly view，不访问 common_data owner，也不修改任何 entry。
     extern static function bit eval_pbmt_fault_overlay(
@@ -1359,6 +1371,74 @@ function bit memblock_rm_readonly_api::try_read_later_split_load_response_for_rm
     response_view.sample_seq = record.mabuf_response_sample_seq;
     return 1'b1;
 endfunction:try_read_later_split_load_response_for_rm
+
+function bit memblock_rm_readonly_api::try_read_first_split_cache_error_for_rm(
+    input memblock_uid_t uid,
+    input int unsigned dynamic_epoch,
+    input memblock_rob_key_t rob_key,
+    input bit [63:0] original_vaddr,
+    input mem_addr_t line_addr,
+    input longint unsigned bound_load_sample,
+    output memblock_first_split_access_context_t context_view,
+    output l2_d_error_view_t error_view,
+    output bit observation_pending
+);
+    common_data_transaction data;
+    status_transaction status;
+    memblock_first_split_access_context_t candidate;
+    bit [63:0] expected_low_vaddr;
+
+    context_view = '{default:'0};
+    error_view = '{default:'0};
+    observation_pending = 1'b0;
+    if (bound_load_sample == 0 || !try_get_common_data(data)) return 1'b0;
+    // 必须先等消费边界，不能把尚未建立的context当作已经观察过但不存在。
+    if (data.split_observed_sample_seq == 0 ||
+        data.split_observed_reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
+        data.split_observed_sample_seq < bound_load_sample) begin
+        observation_pending = 1'b1;
+        return 1'b0;
+    end
+    if (!data.is_valid_uid(uid) || data.status_by_uid[uid] == null ||
+        data.main_table_by_uid[uid] == null || data.main_table_by_uid[uid].vaddr != original_vaddr) return 1'b0;
+    // V2 mabuf的低段可以向下对齐，但不能换成同页另一条line。
+    expected_low_vaddr = original_vaddr;
+    case (data.main_table_by_uid[uid].fuOpType[1:0])
+        2'd1: ;
+        2'd2: if (original_vaddr[1:0] == 2'd1) expected_low_vaddr--;
+        2'd3: begin
+            case (original_vaddr[2:0])
+                3'd1, 3'd2, 3'd3: expected_low_vaddr -= original_vaddr[2:0];
+                3'd5: expected_low_vaddr--;
+                default: ;
+            endcase
+        end
+        default: return 1'b0;
+    endcase
+    status = data.status_by_uid[uid];
+    candidate = status.first_split_access;
+    if (!candidate.valid || candidate.uid != uid || status.dynamic_epoch != dynamic_epoch ||
+        candidate.dynamic_epoch != dynamic_epoch || candidate.rob_key != rob_key ||
+        status.get_rob_key() != rob_key || candidate.original_vaddr != original_vaddr ||
+        candidate.reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
+        candidate.request_vaddr[63:12] != original_vaddr[63:12] ||
+        candidate.request_vaddr != expected_low_vaddr ||
+        candidate.request_vaddr[63:6] != original_vaddr[63:6] ||
+        candidate.response_vaddr != candidate.request_vaddr ||
+        candidate.request_sample_seq == 0 ||
+        candidate.data_sample_seq <= candidate.request_sample_seq ||
+        candidate.response_sample_seq <= candidate.data_sample_seq ||
+        candidate.response_sample_seq > bound_load_sample ||
+        candidate.later_page_seen || !candidate.data_cache_eligible ||
+        candidate.response_nc || candidate.response_mmio || candidate.response_need_replay) return 1'b0;
+    if (!read_l2_d_error_for_rm(line_addr, candidate.data_sample_seq, error_view) ||
+        !error_view.valid || (!error_view.denied && !error_view.corrupt)) begin
+        error_view = '{default:'0};
+        return 1'b0;
+    end
+    context_view = candidate;
+    return 1'b1;
+endfunction:try_read_first_split_cache_error_for_rm
 
 function bit memblock_rm_readonly_api::read_uid_tlb_for_rm(
     input  memblock_uid_t uid,

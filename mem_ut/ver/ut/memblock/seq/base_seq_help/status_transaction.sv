@@ -21,9 +21,32 @@ typedef struct {
     longint unsigned     create_cycle;
 } memblock_sta_late_fault_tombstone_t;
 
+// 中文注释：每UID只保留当前低段attempt的结构执行事实，不保存DUT异常。
+// 三个被动observer写入；status reset/redirect清零，terminal后保留供异步RM读取。
+// later_page_seen在同UID/epoch/reset内单调，低段重放不能抹除已执行高页。
+typedef struct {
+    bit valid;
+    memblock_uid_t uid;
+    int unsigned dynamic_epoch;
+    longint unsigned reset_epoch;
+    memblock_rob_key_t rob_key;
+    bit [63:0] original_vaddr;
+    bit [63:0] request_vaddr;
+    longint unsigned request_sample_seq;
+    longint unsigned data_sample_seq;
+    bit data_cache_eligible;
+    longint unsigned response_sample_seq;
+    bit [63:0] response_vaddr;
+    bit response_nc;
+    bit response_mmio;
+    bit response_need_replay;
+    bit later_page_seen;
+} memblock_first_split_access_context_t;
+
 class status_transaction extends uvm_object;
 
     memblock_uid_t uid;
+    memblock_first_split_access_context_t first_split_access;
 
     bit active;
     bit enq;
@@ -195,6 +218,7 @@ class status_transaction extends uvm_object;
 
     function void reset(input memblock_uid_t uid_i);
         uid               = uid_i;
+        first_split_access = '{default:'0};
         active            = 1'b0;
         enq               = 1'b0;
         issue_ready       = 1'b0;

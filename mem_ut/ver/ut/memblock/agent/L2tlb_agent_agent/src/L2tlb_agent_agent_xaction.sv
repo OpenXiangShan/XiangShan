@@ -38,6 +38,12 @@ typedef struct {
     logic            sampled_split_load_resp_mmio;
     logic            sampled_split_load_resp_need_replay;
     logic            sampled_split_load_resp_misalign_need_wakeup;
+    // 中文注释：driver按mon_cb锁存的S2被动事实，随本transport sample/reset失效。
+    logic            sampled_lu1_split_data_valid;
+    logic            sampled_lu1_split_data_rob_flag;
+    logic [7:0]      sampled_lu1_split_data_rob_value;
+    logic [63:0]     sampled_lu1_split_data_vaddr;
+    logic            sampled_lu1_split_data_cache_eligible;
     logic            sampled_lu1_tlb_req_valid;
     logic [63:0]     sampled_lu1_tlb_req_fullva;
     logic            sampled_lu1_tlb_req_frm_mabuf;

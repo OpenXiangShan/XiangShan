@@ -323,6 +323,11 @@ task L2tlb_agent_agent_driver::sample_previous_vif(
         this.vif.mon_mp.mon_cb.split_load_resp_need_replay;
     sample.sampled_split_load_resp_misalign_need_wakeup =
         this.vif.mon_mp.mon_cb.split_load_resp_misalign_need_wakeup;
+    sample.sampled_lu1_split_data_valid = this.vif.mon_mp.mon_cb.lu1_split_data_valid;
+    sample.sampled_lu1_split_data_rob_flag = this.vif.mon_mp.mon_cb.lu1_split_data_rob_flag;
+    sample.sampled_lu1_split_data_rob_value = this.vif.mon_mp.mon_cb.lu1_split_data_rob_value;
+    sample.sampled_lu1_split_data_vaddr = this.vif.mon_mp.mon_cb.lu1_split_data_vaddr;
+    sample.sampled_lu1_split_data_cache_eligible = this.vif.mon_mp.mon_cb.lu1_split_data_cache_eligible;
     sample.sampled_lu1_tlb_req_valid =
         this.vif.mon_mp.mon_cb.lu1_tlb_req_valid;
     sample.sampled_lu1_tlb_req_fullva =

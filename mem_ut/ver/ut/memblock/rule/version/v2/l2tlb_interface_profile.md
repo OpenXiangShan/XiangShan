@@ -119,6 +119,23 @@ build/rtl/MemBlock.sv
   io_l2_pmp_resp_ld/st/instr/mmio/atomic
 ```
 
+## 首段执行的被动诊断适配（2026-10-30）
+
+`memblock_first_split_data_error_termination_fix_plan_20261030.md`补充现有split旁路，
+只用于RM关联实际低段request、S2取数和response，不接管或模拟L2Cache/PTW下游。
+五个输入及V2生成RTL定位：
+
+| 输入 | 被动来源 |
+|---|---|
+| `lu1_split_data_valid` | `inner_LoadUnit_1.s2_fire && s2_in_r_isFrmMisAlignBuf` |
+| `lu1_split_data_rob_flag/value` | 同模块`s2_in_r_uop_robIdx_flag/value` |
+| `lu1_split_data_vaddr` | 同模块`s2_in_r_vaddr[49:0]`符号扩展，不能换成保留原VA的fullva |
+| `lu1_split_data_cache_eligible` | 实际S2非miss、无SQ/SBuffer/D-channel/MSHR forward、非NC-with-data的纯cache资格；不含异常或错误位 |
+
+driver按现有mon_cb和immutable sample复制，sequence在reset/anchor/lifecycle门禁后消费；inactive接管分支全部置0。
+RM在同reset连续消费边界到达LDA上界后，以实际S2 sample查询独立D-error历史，不能按WB时刻倒推。
+原DTLB/L2TLB request/response、owner、ready和token调度合同保持不变。重新生成RTL时须复查以上内部定位。
+
 ## 后续必做项
 
 1. 更新 V2 RTL 后重新定位 DTLB 到 L2TLB 的 request/response 路径。

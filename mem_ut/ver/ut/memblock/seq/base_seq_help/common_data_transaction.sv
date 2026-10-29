@@ -165,6 +165,10 @@ class common_data_transaction extends uvm_object;
     // retained through RM commit and invalidated on redirect/reset.
     memblock_later_split_tlb_record
         later_split_tlb_record_by_uid[memblock_uid_t];
+    // 中文注释：active L2TLB owner完成全部split observer后推进的连续消费边界。
+    // constructor清0，reset以epoch隔离；缺口冻结，RM不得把尚未消费的高页当作不存在。
+    longint unsigned split_observed_reset_epoch;
+    longint unsigned split_observed_sample_seq;
     // WAITING UID 的 request-fire 候选索引。key 只包含 DTLB request 可见的
     // vpn/s2xlate；每个 bucket 受 DTLB filter 物理容量限制。
     memblock_uid_t uid_waiting_by_vpn_s2xlate[memblock_uid_tlb_wait_shape_key_t][$];
@@ -325,6 +329,8 @@ class common_data_transaction extends uvm_object;
         main_trans_num      = 0;
         next_uid            = 0;
         main_table_ready    = 1'b0;
+        split_observed_reset_epoch = 0;
+        split_observed_sample_seq = 0;
         global_stop_requested = 1'b0;
         global_stop_prepare_requested = 1'b0;
         global_stop_prepare_last_activity_time = 0;
@@ -4081,6 +4087,7 @@ class common_data_transaction extends uvm_object;
             pending_store_fault_by_uid.delete(uid);
         end
         void'(clear_uid_dispatch_result(uid));
+        status.first_split_access = '{default:'0};
         status.fault           = 1'b0;
         status.exception_pending = 1'b0;
         status.sta_fault       = 1'b0;
@@ -5849,6 +5856,126 @@ class common_data_transaction extends uvm_object;
                   $sformatf("clear all later-split records reason=%s", reason),
                   UVM_LOW)
     endfunction:cancel_all_later_split_tlb_records
+
+    // 中文注释：只绑定mabuf真实请求，不生成翻译或改变调度；高页标记跨低段重放保持。
+    function void observe_first_split_request_sample(
+        input bit request_fire,
+        input memblock_rob_key_t rob_key,
+        input bit [63:0] vaddr,
+        input longint unsigned sample_seq,
+        input longint unsigned reset_epoch);
+        memblock_uid_t uid;
+        status_transaction status;
+        main_control_transaction main_tr;
+        memblock_first_split_access_context_t context_value;
+        bit same_instance;
+
+        if (!request_fire) return;
+        if (sample_seq == 0 ||
+            reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
+            !lookup_active_uid_by_rob(rob_key, uid)) begin
+            `uvm_fatal("FIRST_SPLIT_ACCESS", "split request lacks current sample/reset/active ROB")
+            return;
+        end
+        status = get_status(uid);
+        main_tr = get_main_transaction(uid);
+        if (main_tr.fuType != MEMBLOCK_FUTYPE_LDU ||
+            !memblock_op_behavior_util::is_load_fuoptype(main_tr.fuOpType)) begin
+            `uvm_fatal("FIRST_SPLIT_ACCESS", "split request is not a scalar Load")
+            return;
+        end
+        context_value = status.first_split_access;
+        same_instance = context_value.valid && context_value.uid == uid &&
+                        context_value.dynamic_epoch == status.dynamic_epoch &&
+                        context_value.reset_epoch == reset_epoch &&
+                        context_value.rob_key == rob_key;
+        if (vaddr[63:12] != main_tr.vaddr[63:12]) begin
+            if (!same_instance) begin
+                `uvm_fatal("FIRST_SPLIT_ACCESS", "later-page split lacks first-page context")
+                return;
+            end
+            status.first_split_access.later_page_seen = 1'b1;
+            return;
+        end
+        if (same_instance &&
+            (context_value.response_sample_seq == 0 ||
+             context_value.response_sample_seq >= sample_seq)) begin
+            `uvm_fatal("FIRST_SPLIT_ACCESS",
+                       $sformatf("overlapping low split uid=%0d epoch=%0d old_request=%0d old_response=%0d new_request=%0d",
+                                 uid, status.dynamic_epoch, context_value.request_sample_seq,
+                                 context_value.response_sample_seq, sample_seq))
+            return;
+        end
+        context_value = '{default:'0};
+        context_value.valid = 1'b1;
+        context_value.uid = uid;
+        context_value.dynamic_epoch = status.dynamic_epoch;
+        context_value.reset_epoch = reset_epoch;
+        context_value.rob_key = rob_key;
+        context_value.original_vaddr = main_tr.vaddr;
+        context_value.request_vaddr = vaddr;
+        context_value.request_sample_seq = sample_seq;
+        context_value.later_page_seen = same_instance && status.first_split_access.later_page_seen;
+        status.first_split_access = context_value;
+    endfunction:observe_first_split_request_sample
+
+    // 中文注释：记录实际S2取数，不以response减拍猜时刻；仅同attempt能更新。
+    function void observe_first_split_data_sample(
+        input bit data_valid,
+        input memblock_rob_key_t rob_key,
+        input bit [63:0] vaddr,
+        input bit cache_eligible,
+        input longint unsigned sample_seq,
+        input longint unsigned reset_epoch);
+        memblock_uid_t uid;
+        status_transaction status;
+        memblock_first_split_access_context_t context_value;
+
+        if (!data_valid || !lookup_active_uid_by_rob(rob_key, uid)) return;
+        status = get_status(uid);
+        context_value = status.first_split_access;
+        if (!context_value.valid || context_value.uid != uid ||
+            context_value.dynamic_epoch != status.dynamic_epoch ||
+            context_value.reset_epoch != reset_epoch ||
+            reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
+            context_value.rob_key != rob_key || context_value.request_vaddr != vaddr ||
+            context_value.request_sample_seq >= sample_seq ||
+            context_value.data_sample_seq >= sample_seq || context_value.response_sample_seq != 0) return;
+        // LU内部fast replay可以不产生新的mabuf请求；响应前最后一次S2才是返回数据的取数点。
+        status.first_split_access.data_sample_seq = sample_seq;
+        status.first_split_access.data_cache_eligible = cache_eligible;
+    endfunction:observe_first_split_data_sample
+
+    // 中文注释：返回只提供身份/路径/重放证据，不解码DUT异常用于预测。
+    function void observe_first_split_response_sample(
+        input bit response_valid,
+        input memblock_rob_key_t rob_key,
+        input bit [63:0] vaddr,
+        input bit nc,
+        input bit mmio,
+        input bit need_replay,
+        input longint unsigned sample_seq,
+        input longint unsigned reset_epoch);
+        memblock_uid_t uid;
+        status_transaction status;
+        memblock_first_split_access_context_t context_value;
+
+        if (!response_valid || !lookup_active_uid_by_rob(rob_key, uid)) return;
+        status = get_status(uid);
+        context_value = status.first_split_access;
+        if (!context_value.valid || context_value.uid != uid ||
+            context_value.dynamic_epoch != status.dynamic_epoch ||
+            context_value.reset_epoch != reset_epoch ||
+            reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
+            context_value.rob_key != rob_key || context_value.request_vaddr != vaddr ||
+            context_value.data_sample_seq == 0 || context_value.data_sample_seq >= sample_seq ||
+            context_value.response_sample_seq != 0) return;
+        status.first_split_access.response_sample_seq = sample_seq;
+        status.first_split_access.response_vaddr = vaddr;
+        status.first_split_access.response_nc = nc;
+        status.first_split_access.response_mmio = mmio;
+        status.first_split_access.response_need_replay = need_replay;
+    endfunction:observe_first_split_response_sample
 
     function void observe_later_split_tlb_sample(
         input bit split_fire,
@@ -11595,6 +11722,7 @@ class common_data_transaction extends uvm_object;
         status.sta_issue_feedback_success = 1'b0;
         status.std_issue_feedback_success = 1'b0;
         status.clear_sta_late_fault_tombstones();
+        status.first_split_access = '{default:'0};
         status.load_pass = 1'b0;
         status.sta_pass = 1'b0;
         status.std_pass = 1'b0;

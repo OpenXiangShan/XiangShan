@@ -67,6 +67,7 @@ class soft_test_rm_provenance_followup_sequence extends memblock_dispatch_base_s
     extern virtual task check_uncache_source_lifecycle();
     extern virtual task check_hs_mapping_fence_trigger_matrix();
     extern virtual task check_hs_mapping_fence_protocol();
+    extern virtual task check_first_split_cache_error_provenance();
 
 endclass:soft_test_rm_provenance_followup_sequence
 
@@ -95,6 +96,7 @@ task soft_test_rm_provenance_followup_sequence::body();
     check_uncache_source_lifecycle();
     check_hs_mapping_fence_trigger_matrix();
     check_hs_mapping_fence_protocol();
+    check_first_split_cache_error_provenance();
     `uvm_info(get_type_name(),
               "RM provenance follow-up directed checks completed", UVM_LOW)
 endtask:body
@@ -756,5 +758,206 @@ task soft_test_rm_provenance_followup_sequence::check_uncache_source_lifecycle()
                 "ownerless D completion did not trigger the expected fatal");
     responder.clear_runtime_state();
 endtask:check_uncache_source_lifecycle
+
+// 中文注释：仅为首段早停Bug验证结构/错误历史门禁；不替代真实DUT或修改无关软件测试预期。
+task soft_test_rm_provenance_followup_sequence::check_first_split_cache_error_provenance();
+    main_control_transaction saved_main[];
+    status_transaction saved_status[];
+    int unsigned saved_count;
+    memblock_uid_t saved_owner;
+    bit saved_owner_valid;
+    longint unsigned saved_frontier;
+    longint unsigned saved_frontier_epoch;
+    memblock_rob_key_t rob_key;
+    memblock_rob_map_key_t map_key;
+    status_transaction status;
+    memblock_first_split_access_context_t baseline;
+    memblock_first_split_access_context_t context_view;
+    memblock_rm_readonly_api::l2_d_error_view_t error_view;
+    memblock_rm_readonly_api ro;
+    mem_access_base_sequence::mem_addr_t line_addr;
+    longint unsigned reset_epoch;
+    longint unsigned reservation_generation;
+    bit pending;
+    bit proven;
+    bit denied;
+    bit corrupt;
+    bit needs_candidate;
+
+    ro = memblock_rm_readonly_api::get();
+    saved_main = data.main_table_by_uid;
+    saved_status = data.status_by_uid;
+    saved_count = data.main_trans_num;
+    saved_frontier = data.split_observed_sample_seq;
+    saved_frontier_epoch = data.split_observed_reset_epoch;
+    rob_key = '{flag: 1'b0, value: 8'd73};
+    map_key = rob_order_util::rob_to_map_key(rob_key);
+    saved_owner_valid = data.uid_by_active_rob.exists(map_key);
+    if (saved_owner_valid) saved_owner = data.uid_by_active_rob[map_key];
+    data.main_trans_num = 1;
+    data.main_table_by_uid = new[1];
+    data.status_by_uid = new[1];
+    data.main_table_by_uid[0] = main_control_transaction::type_id::create("first_split_main");
+    data.main_table_by_uid[0].uid = 0;
+    data.main_table_by_uid[0].fuType = MEMBLOCK_FUTYPE_LDU;
+    data.main_table_by_uid[0].fuOpType = MEMBLOCK_LSUOP_LH;
+    data.main_table_by_uid[0].vaddr = 64'h80001fff;
+    data.status_by_uid[0] = status_transaction::type_id::create("first_split_status");
+    status = data.status_by_uid[0];
+    status.active = 1'b1;
+    status.robIdx_flag = rob_key.flag;
+    status.robIdx_value = rob_key.value;
+    status.dynamic_epoch = 7;
+    data.uid_by_active_rob[map_key] = 0;
+    reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+    data.split_observed_reset_epoch = reset_epoch;
+    data.split_observed_sample_seq = 40;
+    line_addr = 48'h80001fc0;
+
+    data.observe_first_split_request_sample(1, rob_key, 64'h80001fff, 10, reset_epoch);
+    data.observe_first_split_data_sample(1, rob_key, 64'h80001ffe, 1, 19, reset_epoch);
+    expect_true(status.first_split_access.data_sample_seq == 0, "wrong S2 VA changed low attempt");
+    data.observe_first_split_data_sample(1, rob_key, 64'h80001fff, 0, 19, reset_epoch);
+    data.observe_first_split_data_sample(1, rob_key, 64'h80001fff, 1, 20, reset_epoch);
+    data.observe_first_split_data_sample(1, rob_key, 64'h80001fff, 0, 21, reset_epoch);
+    expect_true(!status.first_split_access.data_cache_eligible, "new forward S2 retained old cache eligibility");
+    data.observe_first_split_data_sample(1, rob_key, 64'h80001fff, 1, 22, reset_epoch);
+    data.observe_first_split_response_sample(1, rob_key, 64'h80001fff, 0, 0, 0, 30, reset_epoch);
+    data.observe_first_split_data_sample(1, rob_key, 64'h80001fff, 0, 30, reset_epoch);
+    baseline = status.first_split_access;
+    expect_true(baseline.request_sample_seq == 10 && baseline.data_sample_seq == 22 &&
+                baseline.data_cache_eligible && baseline.response_sample_seq == 30,
+                "first split event binding or same-sample response/S2 handling failed");
+    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
+    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(line_addr, 0, 1, 15, 10'h22, 0);
+    expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending) && !pending &&
+                error_view.corrupt && !error_view.denied && context_view.data_sample_seq == 22,
+                "independent pre-data corrupt did not prove low termination");
+    // 每个不匹配条件都必须独立拒绝；不借DUT异常值产生预期。
+    for (int idx = 0; idx < 16; idx++) begin
+        status.first_split_access = baseline;
+        case (idx)
+            0: status.first_split_access.valid = 0;
+            1: status.first_split_access.uid = 1;
+            2: status.first_split_access.dynamic_epoch = 6;
+            3: status.first_split_access.rob_key.value++;
+            4: status.first_split_access.original_vaddr++;
+            5: status.first_split_access.reset_epoch++;
+            6: status.first_split_access.data_sample_seq = 0;
+            7: status.first_split_access.data_sample_seq = 10;
+            8: status.first_split_access.response_sample_seq = 41;
+            9: status.first_split_access.response_need_replay = 1;
+            10: status.first_split_access.data_cache_eligible = 0;
+            11: status.first_split_access.response_nc = 1;
+            12: status.first_split_access.response_mmio = 1;
+            13: status.first_split_access.later_page_seen = 1;
+            14: begin
+                status.first_split_access.request_vaddr -= 64;
+                status.first_split_access.response_vaddr = status.first_split_access.request_vaddr;
+            end
+            15: begin
+                status.first_split_access.request_vaddr--;
+                status.first_split_access.response_vaddr = status.first_split_access.request_vaddr;
+            end
+        endcase
+        proven = ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending);
+        expect_true(!proven && !pending, $sformatf("bad first split evidence accepted case=%0d", idx));
+    end
+    for (int size = 2; size <= 3; size++) begin
+        for (int offset = 1; offset < (1 << size); offset++) begin
+            bit [63:0] original_va;
+            bit [63:0] low_va;
+            original_va = 64'h80002000 - (1 << size) + offset;
+            if (size == 2) low_va = offset == 1 ? 64'h80001ffc : original_va;
+            else begin
+                case (offset)
+                    1, 2, 3: low_va = 64'h80001ff8;
+                    4, 5: low_va = 64'h80001ffc;
+                    6: low_va = 64'h80001ffe;
+                    7: low_va = 64'h80001fff;
+                endcase
+            end
+            data.main_table_by_uid[0].fuOpType = size == 2 ? MEMBLOCK_LSUOP_LW : MEMBLOCK_LSUOP_LD;
+            data.main_table_by_uid[0].vaddr = original_va;
+            status.first_split_access = baseline;
+            status.first_split_access.original_vaddr = original_va;
+            status.first_split_access.request_vaddr = low_va;
+            status.first_split_access.response_vaddr = low_va;
+            expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, original_va,
+                            line_addr, 40, context_view, error_view, pending), "legal downaligned split rejected");
+            status.first_split_access.request_vaddr++;
+            status.first_split_access.response_vaddr++;
+            expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, original_va,
+                            line_addr, 40, context_view, error_view, pending), "invalid low geometry accepted");
+        end
+    end
+    data.main_table_by_uid[0].fuOpType = MEMBLOCK_LSUOP_LH;
+    data.main_table_by_uid[0].vaddr = 64'h80001fff;
+    status.first_split_access = baseline;
+    data.split_observed_sample_seq = 39;
+    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending) && pending,
+                "lagging consumer was treated as settled");
+    status.first_split_access = '{default:'0};
+    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending) && pending,
+                "context absence bypassed consumer settling");
+    status.first_split_access = baseline;
+    data.split_observed_sample_seq = 40;
+    expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending) && !pending,
+                "delayed consumer could not settle later");
+    data.split_observed_reset_epoch++;
+    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending) && pending,
+                "old reset frontier authorized termination");
+    data.split_observed_reset_epoch = reset_epoch;
+    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
+    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending) && !pending,
+                "clean low segment authorized termination");
+    expect_true(mem_access_base_sequence::prepare_l2_d_error_for_grant(
+                    line_addr, 12, 10'h23, 1, 0, 1, denied, corrupt, needs_candidate,
+                    reservation_generation), "failed to reserve independent error");
+    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending), "reserve-only became active error");
+    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
+        line_addr, denied, corrupt, 25, 10'h23, reservation_generation);
+    expect_true(!ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending), "post-data pre-WB activation leaked backwards");
+    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
+    mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(line_addr, 1, 1, 15, 10'h24, 0);
+    expect_true(ro.try_read_first_split_cache_error_for_rm(0, 7, rob_key, 64'h80001fff,
+                    line_addr, 40, context_view, error_view, pending) && error_view.denied,
+                "independent pre-data denied was lost");
+    data.observe_first_split_request_sample(1, rob_key, 64'h80002000, 31, reset_epoch);
+    data.observe_first_split_request_sample(1, rob_key, 64'h80001fff, 32, reset_epoch);
+    expect_true(status.first_split_access.later_page_seen && status.first_split_access.data_sample_seq == 0,
+                "low replay erased later-page execution or reused old data sample");
+    begin
+        memblock_uncache_owner_expected_fatal_catcher first_high_catcher;
+        status.first_split_access = '{default:'0};
+        first_high_catcher = new("first_high_catcher", "later-page split lacks first-page context");
+        uvm_report_cb::add(null, first_high_catcher);
+        data.observe_first_split_request_sample(1, rob_key, 64'h80002000, 33, reset_epoch);
+        uvm_report_cb::delete(null, first_high_catcher);
+        expect_true(first_high_catcher.caught_count == 1 && !status.first_split_access.valid,
+                    "ownerless first high-page event was silently forgotten");
+    end
+    status.reset(0);
+    expect_true(!status.first_split_access.valid, "status reset retained low attempt");
+
+    data.main_table_by_uid = saved_main;
+    data.status_by_uid = saved_status;
+    data.main_trans_num = saved_count;
+    data.split_observed_sample_seq = saved_frontier;
+    data.split_observed_reset_epoch = saved_frontier_epoch;
+    if (saved_owner_valid) data.uid_by_active_rob[map_key] = saved_owner;
+    else data.uid_by_active_rob.delete(map_key);
+    mem_access_base_sequence::reset_l2_d_error_ledger(1'b1);
+    `uvm_info("FIRST_SPLIT_PROVENANCE_DIRECTED", "first split positive and negative gates PASS", UVM_LOW)
+endtask:check_first_split_cache_error_provenance
 
 `endif

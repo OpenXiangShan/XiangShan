@@ -699,6 +699,36 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
 
     // Only mutate split provenance after the sample anchor, producer
     // watermarks, CSR history, and same-sample lifecycle events are settled.
+    if (data.split_observed_sample_seq == 0 ||
+        data.split_observed_reset_epoch != sample.sampled_reset_epoch) begin
+        if (acceptance_opened_since_reset || sample.sampled_split_load_req_fire ||
+            sample.sampled_lu1_split_data_valid || sample.sampled_split_load_resp_valid) begin
+            `uvm_fatal("FIRST_SPLIT_ACCESS", "first observation baseline is not startup/reset silent")
+            return;
+        end
+    end
+    data.observe_first_split_request_sample(
+        sample.sampled_split_load_req_fire &&
+            !sample.sampled_split_load_req_misalign_need_wakeup,
+        '{flag: sample.sampled_split_load_req_rob_flag,
+          value: sample.sampled_split_load_req_rob_value},
+        sample.sampled_split_load_req_fullva, sample_seq, sample.sampled_reset_epoch);
+    data.observe_first_split_response_sample(
+        sample.sampled_split_load_resp_valid &&
+            !sample.sampled_split_load_resp_misalign_need_wakeup,
+        '{flag: sample.sampled_split_load_resp_rob_flag,
+          value: sample.sampled_split_load_resp_rob_value},
+        sample.sampled_split_load_resp_vaddr,
+        sample.sampled_split_load_resp_nc, sample.sampled_split_load_resp_mmio,
+        sample.sampled_split_load_resp_need_replay,
+        sample_seq, sample.sampled_reset_epoch);
+    data.observe_first_split_data_sample(
+        sample.sampled_lu1_split_data_valid === 1'b1,
+        '{flag: sample.sampled_lu1_split_data_rob_flag,
+          value: sample.sampled_lu1_split_data_rob_value},
+        sample.sampled_lu1_split_data_vaddr,
+        sample.sampled_lu1_split_data_cache_eligible === 1'b1,
+        sample_seq, sample.sampled_reset_epoch);
     data.observe_later_split_tlb_sample(
         sample.sampled_split_load_req_fire &&
             !sample.sampled_split_load_req_misalign_need_wakeup,
@@ -725,6 +755,14 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
         sample.sampled_split_load_resp_mmio,
         sample.sampled_split_load_resp_need_replay,
         sample_seq);
+
+    // 中文注释：只在完整消费后推进连续边界；早退造成的缺口不得被后拍跨越。
+    if (data.split_observed_sample_seq == 0 ||
+        data.split_observed_reset_epoch != sample.sampled_reset_epoch ||
+        sample_seq == data.split_observed_sample_seq + 1) begin
+        data.split_observed_reset_epoch = sample.sampled_reset_epoch;
+        data.split_observed_sample_seq = sample_seq;
+    end
 
     if (driving_valid && sampled_resp_valid) begin
         if (due_barrier_this_sample) begin

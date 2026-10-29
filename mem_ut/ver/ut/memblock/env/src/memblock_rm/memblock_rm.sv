@@ -24,6 +24,8 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     rm_ls_rob_key_t observer_check_store_rob;
     bit          observer_check_store_wait_logged;
     bit          observer_mismatch_reported;
+    // 中文注释：只为当前提交UID等待首段被动证据；成功/普通失败清0，256次poll后明确报错。
+    int unsigned observer_first_split_wait_count;
     bit          observer_trace_main_emitted[int unsigned];
     bit          observer_trace_translation_emitted[int unsigned];
     bit          observer_trace_translation_path_emitted[int unsigned];
@@ -101,6 +103,17 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         memblock_rm_readonly_api::status_view_t status_view,
         output rm_ls_program_item_t item
     );
+    extern function bit observer_build_commit_item_with_observation(
+        memblock_rm_readonly_api::main_transaction_view_t main_view,
+        memblock_rm_readonly_api::status_view_t status_view,
+        output rm_ls_program_item_t item,
+        output bit deferred
+    );
+    extern function bit observer_try_apply_first_split_data_error(
+        rm_ls_program_item_t item,
+        int unsigned prefix_bytes,
+        output bit deferred
+    );
     extern function bit observer_capture_commit_actual(
         memblock_rm_readonly_api::main_transaction_view_t main_view,
         rm_ls_program_item_t item,
@@ -139,6 +152,7 @@ function void memblock_rm::build_phase(uvm_phase phase);
     this.observer_check_store_rob = '{default:'0};
     this.observer_check_store_wait_logged = 1'b0;
     this.observer_mismatch_reported = 1'b0;
+    this.observer_first_split_wait_count = 0;
     this.observer_trace_main_emitted.delete();
     this.observer_trace_translation_emitted.delete();
     this.observer_trace_translation_path_emitted.delete();
@@ -359,10 +373,71 @@ function bit memblock_rm::observer_should_expect_addr_misaligned(
     return 1'b1;
 endfunction:observer_should_expect_addr_misaligned
 
+// 中文注释：RM独立证明已翻译首页的普通cache访问，在查询未执行高页前预测数据异常。
+// DUT仅提供同ROB执行身份和写回时间上界，错误值来自独立D.fire历史。
+function bit memblock_rm::observer_try_apply_first_split_data_error(
+    rm_ls_program_item_t item,
+    int unsigned prefix_bytes,
+    output bit deferred
+);
+    memblock_rm_readonly_api ro;
+    memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t byte_view;
+    memblock_rm_readonly_api::dut_writeback_view_t load_view;
+    memblock_rm_readonly_api::l2_d_error_view_t error_view;
+    memblock_first_split_access_context_t context_view;
+    memblock_rob_key_t rob_key;
+
+    deferred = 1'b0;
+    if (prefix_bytes == 0 || prefix_bytes >= item.size_bytes ||
+        !seq_csr_common::get_pma_pmp_model_en()) return 1'b0;
+    ro = memblock_rm_readonly_api::get();
+    for (int unsigned idx = 0; idx < prefix_bytes; idx++) begin
+        if (!item.pa_valid_mask[idx] ||
+            item.pa_by_byte[idx][47:6] != item.pa_by_byte[0][47:6] ||
+            !ro.read_pma_pmp_af_for_rm(item.uid, item.dynamic_epoch, 1'b1,
+                                      item.pa_by_byte[idx][47:0], 1, PMA_PMP_CMD_READ, byte_view) ||
+            !byte_view.valid || !byte_view.translation_eligible || !byte_view.af_decided ||
+            !byte_view.normal_cacheable || byte_view.ld_access_fault) return 1'b0;
+    end
+    rob_key = '{flag: item.rob.flag, value: item.rob.value};
+    if (!ro.read_dut_load_writeback_for_rm(rob_key, load_view) ||
+        !load_view.valid || !load_view.rob_valid || !load_view.rob_flag_valid ||
+        load_view.rob_flag !== rob_key.flag || load_view.rob_value !== rob_key.value ||
+        load_view.source_kind != 2'd1 || load_view.sample_seq == 0 ||
+        load_view.replay_inst || load_view.flush_pipe) return 1'b0;
+    if (!ro.try_read_first_split_cache_error_for_rm(
+            item.uid, item.dynamic_epoch, rob_key, item.computed_vaddr,
+            memblock_rm_readonly_api::mem_addr_t'({item.pa_by_byte[0][47:6], 6'b0}),
+            load_view.sample_seq, context_view, error_view, deferred)) return 1'b0;
+    item.expected_dcache_denied = error_view.denied;
+    item.expected_dcache_corrupt = error_view.corrupt && !error_view.denied;
+    if (item.expected_dcache_denied) item.expected_exception[5] = 1'b1;
+    if (item.expected_dcache_corrupt) item.expected_exception[19] = 1'b1;
+    `uvm_info("RM_LS_FIRST_SPLIT_DATA_ERROR",
+              $sformatf("uid=%0d epoch=%0d rob=%0d/%0d va=0x%0h line=0x%0h request/data/response=%0d/%0d/%0d wb_sample=%0d generation=%0d activation=%0d/%0d denied=%0d corrupt=%0d pa_mask=0x%0h expected_exception=0x%0h",
+                        item.uid, item.dynamic_epoch, item.rob.flag, item.rob.value,
+                        item.computed_vaddr, {item.pa_by_byte[0][47:6], 6'b0},
+                        context_view.request_sample_seq, context_view.data_sample_seq,
+                        context_view.response_sample_seq, load_view.sample_seq, error_view.generation,
+                        error_view.corrupt_activation_sample, error_view.denied_activation_sample,
+                        error_view.denied, error_view.corrupt, item.pa_valid_mask, item.expected_exception), UVM_LOW)
+    return 1'b1;
+endfunction:observer_try_apply_first_split_data_error
+
 function bit memblock_rm::observer_build_commit_item(
     memblock_rm_readonly_api::main_transaction_view_t main_view,
     memblock_rm_readonly_api::status_view_t status_view,
     output rm_ls_program_item_t item
+);
+    bit deferred;
+    return observer_build_commit_item_with_observation(main_view, status_view, item, deferred);
+endfunction:observer_build_commit_item
+
+function bit memblock_rm::observer_build_commit_item_with_observation(
+    memblock_rm_readonly_api::main_transaction_view_t main_view,
+    memblock_rm_readonly_api::status_view_t status_view,
+    output rm_ls_program_item_t item,
+    output bit deferred
 );
     memblock_rm_readonly_api ro;
     memblock_rm_readonly_api::tlb_request_context_view_t tlb_context;
@@ -421,6 +496,7 @@ function bit memblock_rm::observer_build_commit_item(
     bit [7:0] required_pa_mask;
     rm_ls_error_e translation_path_error;
 
+    deferred = 1'b0;
     item = new(main_view.uid);
     pma_pmp_view = '{default:'0};
     item.valid = 1'b1;
@@ -565,6 +641,13 @@ function bit memblock_rm::observer_build_commit_item(
         dut_stops_after_first_page = 1'b0;
         for (int unsigned byte_index = 0; byte_index < item.size_bytes; byte_index++) begin
             byte_va = item.computed_vaddr + byte_index;
+            if (byte_va[63:12] != first_vpn && item.kind == RM_LS_KIND_LOAD &&
+                misaligned && tlb_context.hd_misalign_ld_enable && all_bytes_pma_pbmt &&
+                !translation_access_fault && !stage_one_fault && !stage_two_fault &&
+                !pma_pmp_access_fault && !first_byte_is_pma_mmio) begin
+                if (observer_try_apply_first_split_data_error(item, byte_index, deferred)) break;
+                if (deferred) return 1'b0;
+            end
             if (!ro.resolve_tlb_entry_for_rm(item.uid, byte_va[63:12],
                                              tlb_context, entry)) begin
                 ls_model.set_error(RM_LS_ERR_TLB_ENTRY_NOT_READY,
@@ -962,7 +1045,7 @@ function bit memblock_rm::observer_build_commit_item(
         observer_trace_translation_emitted[item.uid] = 1'b1;
     end
     return 1'b1;
-endfunction:observer_build_commit_item
+endfunction:observer_build_commit_item_with_observation
 
 function bit memblock_rm::observer_apply_load_d_error_expectation(
     rm_ls_program_item_t item,
@@ -1278,6 +1361,7 @@ function bit memblock_rm::observer_process_current_commit();
     bit check_complete;
     bit check_result;
     bit missing_dut_load_writeback;
+    bit deferred;
     bit exception_precheck_ready;
     bit exception_match;
     bit any_exception;
@@ -1294,6 +1378,7 @@ function bit memblock_rm::observer_process_current_commit();
         observer_check_store_rob = '{default:'0};
         observer_check_store_wait_logged = 1'b0;
         observer_mismatch_reported = 1'b0;
+        observer_first_split_wait_count = 0;
         observer_trace_main_emitted.delete();
         observer_trace_translation_emitted.delete();
         observer_trace_dut_load_emitted.delete();
@@ -1365,13 +1450,25 @@ function bit memblock_rm::observer_process_current_commit();
         end
         return 1'b0;
     end
-    if (!observer_build_commit_item(main_view, status_view, item)) begin
+    if (!observer_build_commit_item_with_observation(main_view, status_view, item, deferred)) begin
+        if (deferred) begin
+            observer_first_split_wait_count++;
+            if (observer_first_split_wait_count < 256) return 1'b0;
+            if (!observer_mismatch_reported) begin
+                `uvm_error("RM_LS_FIRST_SPLIT_NOT_SETTLED",
+                           $sformatf("uid=%0d split observation did not settle after 256 polls", main_view.uid))
+                observer_mismatch_reported = 1'b1;
+            end
+            return 1'b0;
+        end
+        observer_first_split_wait_count = 0;
         if (!observer_mismatch_reported) begin
             `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
             observer_mismatch_reported = 1'b1;
         end
         return 1'b0;
     end
+    observer_first_split_wait_count = 0;
     if (!ls_model.add_item(item)) begin
         if (!observer_mismatch_reported) begin
             `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)

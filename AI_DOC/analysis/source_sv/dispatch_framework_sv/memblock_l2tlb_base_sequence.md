@@ -25,8 +25,27 @@
 | flush event | CSR changed 或 sfence 产生的非破坏性生命周期 sideband | get_latest_l2tlb_flush_event() |
 | lifecycle owner | 唯一拥有 ready、queue、token 和 response 调度权的 sequence | memblock_sync_pkg owner state |
 | ready opportunity | reset或flush阻塞解除后至少发送一拍可接受ready的机会，不等同于request fire | ready_opportunity_since_lifecycle_block |
+| first split | mabuf实际低段request/S2取数/response，不是初始RS issue | `status.first_split_access` |
+| observation frontier | 同reset已完整消费split事实的连续sample边界；缺口不能跨过 | `split_observed_sample_seq/reset_epoch` |
 
 该 sequence 的抽象职责是每拍推进一次 responder service：从稳定的 clocking block sample 识别真实 request fire，为每次 fire 冻结 CSR、lookup key、TLB entry 和 response payload，按 due/order 策略逐拍返回，并在 reset、flush、stop 时闭合 token 生命周期。
+
+### 2026-10-30 首段被动观测补充
+
+抽象功能描述：`send_l2tlb_cycle()`额外消费同一不可变sample中的split执行结构事实，供RM判断
+跨页访问是否在低段独立数据错误处终止；不读取异常位生成期望，不影响responder请求或响应调度。
+
+消费顺序为：现有reset/anchor、producer与CSR history、lifecycle门禁，首段request→response→实际S2取数，
+原later-page observer，最后发布连续消费边界。首段context按UID/epoch/reset/ROB/实际VA关联，
+高页已执行标记在同实例低段replay时保留；redirect两个重置入口清除，terminal保留供异步RM读取。
+S2只采实际取数时刻、ROB、实际拆分VA及非forward的纯cache资格，不采DUT异常或cache错误值。
+同拍response先绑定拍前取数，保存后不能再被本拍S2覆盖；无response的LU内部fast replay允许更新到最后一次取数。
+独立错误值仍由原memory D.fire历史提供，与L2TLB responder角色无关。
+
+首次边界仅能在本reset尚未开放ready且无split活动的startup静默期建立；后续只允许连续sample推进。
+NOT_READY/history等早退不推进，不允许下一sample跨越缺口。RM读到边界不足时保留当前UID、有界重试，
+不能把尚未消费的高页事件解释为没有高页；缺口永久不收敛会显式报错，不静默跳比较。
+专项方案与执行证据：`AI_DOC/plan/rm_plan/do/memblock_first_split_data_error_termination_fix_plan_20261030.md`。
 
 ## 2. 类和成员状态
 
