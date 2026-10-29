@@ -94,47 +94,48 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             live.front().rob(), live.front().flag(), live.front().is_store());
     };
 
+    const auto retire_head = [&]() {
+        auto &work = live.front();
+        for (const auto &uop : work.vectors) {
+            bool replayed = false;
+            if (!environment.service_vector_replay(uop, replayed, 256)) return false;
+        }
+        coverage.stream[5] += live.size() > 1;
+        if (work.kind == 2 && !environment.commit_store(work.store, constrained_completion_timeout)) return false;
+        if (work.kind == 3) for (const auto &uop : work.vectors)
+            if (!environment.commit_vector_store(uop, constrained_completion_timeout)) return false;
+        if (work.kind == 0) destinations[work.load.fp_wen ? 1U : 0U].erase(work.load.pdest);
+        if (work.kind == 1) for (const auto &uop : work.vectors) destinations[2].erase(uop.pdest);
+        const auto old_rob = work.rob(); const auto old_flag = work.flag();
+        ++coverage.stream_ops[work.kind];
+        ++coverage.stream[2]; ++retired; ++actions;
+        ++constraint_coverage.actions;
+        ++constraint_coverage.operations[stream_operations[work.kind]];
+        if (work.kind == 0) {
+            coverage.sample(work.load);
+            coverage.sample_fp_load(work.load, work.expected_scalar, 1);
+            coverage.sample_scalar_format_choice(1, work.load.fp_wen);
+            constraint_coverage.sample_dcache_load(std::nullopt);
+        } else if (work.kind == 2) coverage.sample(work.store, work.data_first);
+        else if (work.kind == 4) coverage.sample(work.prefetch);
+        else {
+            for (const auto &uop : work.vectors) coverage.sample(uop);
+            sample_constrained_vector_instruction(work.kind == 3, work.shape, work.vectors);
+        }
+        ++coverage.cacheable;
+        live.pop_front();
+        if (live.empty()) {
+            if (!environment.set_rob_head_state(old_rob, old_flag, false)) return false;
+        } else if (!install_head()) return false;
+        last_progress = environment.cycle();
+        return true;
+    };
+
     while (retired < length) {
         phase = "mixed-stream:admitted=" + std::to_string(admitted) +
             ":retired=" + std::to_string(retired) + ":live=" + std::to_string(live.size());
         report_progress();
         if (environment.cycle() > deadline) { phase += ":epoch-deadline"; return false; }
-        while (!live.empty() && all_issued(live.front()) && !pending(live.front())) {
-            auto &work = live.front();
-            for (const auto &uop : work.vectors) {
-                bool replayed = false;
-                if (!environment.service_vector_replay(uop, replayed, 256)) return false;
-            }
-            coverage.stream[5] += live.size() > 1;
-            if (work.kind == 2 && !environment.commit_store(work.store, constrained_completion_timeout)) return false;
-            if (work.kind == 3) for (const auto &uop : work.vectors)
-                if (!environment.commit_vector_store(uop, constrained_completion_timeout)) return false;
-            if (work.kind == 0) destinations[work.load.fp_wen ? 1U : 0U].erase(work.load.pdest);
-            if (work.kind == 1) for (const auto &uop : work.vectors) destinations[2].erase(uop.pdest);
-            const auto old_rob = work.rob(); const auto old_flag = work.flag();
-            ++coverage.stream_ops[work.kind];
-            ++coverage.stream[2]; ++retired; ++actions;
-            ++constraint_coverage.actions;
-            ++constraint_coverage.operations[stream_operations[work.kind]];
-            if (work.kind == 0) {
-                coverage.sample(work.load);
-                coverage.sample_fp_load(work.load, work.expected_scalar, 1);
-                coverage.sample_scalar_format_choice(1, work.load.fp_wen);
-                constraint_coverage.sample_dcache_load(std::nullopt);
-            } else if (work.kind == 2) coverage.sample(work.store, work.data_first);
-            else if (work.kind == 4) coverage.sample(work.prefetch);
-            else {
-                for (const auto &uop : work.vectors) coverage.sample(uop);
-                sample_constrained_vector_instruction(work.kind == 3, work.shape, work.vectors);
-            }
-            ++coverage.cacheable;
-            live.pop_front();
-            if (live.empty()) {
-                if (!environment.set_rob_head_state(old_rob, old_flag, false)) return false;
-            } else if (!install_head()) return false;
-            last_progress = environment.cycle();
-        }
-        if (retired == length) break;
 
         bool replayed = false;
         for (auto &work : live) {
@@ -163,9 +164,12 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (fits) weights[kind] = constraints.operation_weights[stream_operations[kind]];
         }
         // 0 = admission, 1 = scalar load/prefetch, 2 = STA, 3 = STD,
-        // 4 = vector uop. Candidates are regenerated from current obligations.
+        // 4 = vector uop, 5 = completed architectural head retirement.
+        // Candidates are regenerated from current obligations.
         struct Event { unsigned kind, instruction, uop; };
         std::vector<Event> ready;
+        const bool completed_head = !live.empty() && all_issued(live.front()) && !pending(live.front());
+        if (completed_head) ready.push_back({5, 0, 0});
         if (admitted < length && live.size() < depth &&
             std::accumulate(weights.begin(), weights.end(), std::uint64_t{0}) != 0)
             ready.push_back({0, 0, 0});
@@ -210,7 +214,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             continue;
         }
         const auto event = ready[random() % ready.size()];
-        if (event.kind == 0) {
+        if (completed_head && event.kind != 5)
+            ++coverage.stream_waiting_head[event.kind == 0 ? 0U : 1U];
+        if (event.kind == 5) {
+            if (!retire_head()) return false;
+        } else if (event.kind == 0) {
             const bool had_accepted_pending = std::any_of(live.begin(), live.end(),
                 [&](const auto &work) { return work.accepted() && pending(work); });
             coverage.stream[3] += had_accepted_pending;

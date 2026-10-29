@@ -91,9 +91,10 @@ coverage, spec, corner and cmo-stress share one generator. Examples:
     make -C tests/memblock constrained-random SEED=2 ACTIONS=4608 CONSTRAINTS=coverage CONSTRAINT='concurrent=250 latency=compact'
     make -C tests/memblock regression REGRESSION_JOBS=8 SEEDS=8 ACTIONS=16384
 
-Sparse coverage does not cause functional FAIL. A 256/1024-action default
-profile does not reach heterogeneous windows because serial budget is reserved;
-inspect observed counters. One action is not necessarily one uop/bus request.
+Sparse coverage does not cause functional FAIL. The serial reservation is
+capped at half the available action budget so short default coverage/spec/corner
+runs can reach ordinary concurrency. Inspect observed counters to establish
+overlap. One action is not necessarily one uop/bus request.
 Before accounting gates, the run drains Sbuffer/DCache/queues and reads back
 every tracked cacheable identity-mapped or declared permuted-page committed word; CMO-maintained lines are
 excluded and aliased/non-cacheable effects remain outside that oracle.

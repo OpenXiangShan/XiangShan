@@ -117,10 +117,12 @@ requests and can contain multiple uops. No complete-bin prefix or
 coverage-completeness PASS gate is active. Coverage is observational;
 functional/identity/queue/implemented-protocol checks stay active.
 
-minimum_serial_actions() reserves serial budget before concurrency epochs. Its
-unmodified-profile floor is 4362 for coverage/corner and 4246 for spec. Thus
-256/1024-action passes do not prove mixed overlap. Inspect observed
+minimum_serial_actions() estimates enabled serial dimensions: 4362 for
+coverage/corner and 4246 for spec. Its scheduling reservation is capped at half
+the initial available action budget, keeping ordinary concurrency reachable in
+short runs; sufficiently large runs retain the full estimate. Inspect observed
 windows/uops, manager depth and backpressure instead of configured weights.
+An allocated concurrency budget does not establish actual overlap.
 
 ## Top-Level IO and Interface Assumptions
 
@@ -174,7 +176,7 @@ now vary offset spacing/permutation and repeated gathers for ordinary and
 segment operations; partial byte overlap and overlapping scatters remain open.
 
 Ordinary mixed streams vary producer counts and instruction ages, choose ready
-operand/uop events, and admit new work after a completed prefix retires while
+operand/uop and completed-head retirement events, and admit new work after a completed prefix retires while
 younger instructions remain live. Epochs are randomly placed among serial
 helpers. A zero `concurrent-stream` rate retains the fixed legacy prefix;
 legacy windows also remain for clean NC/MMIO overlaps. Dispatch now freezes scalar-store opposite-

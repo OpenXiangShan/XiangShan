@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=66`.
+`constraint_schema=67`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -73,7 +73,7 @@ they do not imply arbitrary numeric suffix support.
 | --- | --- |
 | `scalar-load`, `scalar-store`, `vector-load`, `vector-store`, `vector-segment`, `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure`, `miss-burst` | Relative operation weights, in this serialized order. Each selects a complete helper action, which can issue multiple transactions. |
 | `locality-hot`, `locality-warm`, `locality-cold` | Relative address-pool choices for helpers using locality. |
-| `concurrent` | Rate allocating the mixed concurrency action budget, subject to serial reservation. |
+| `concurrent` | Rate allocating the mixed concurrency action budget, subject to the serial reservation capped at half the initial available budget. |
 | `concurrent-stream` | Rate selecting a variable ordinary mixed stream instead of a fixed heterogeneous window at an eligible concurrency site. Default 750 in all presets; 0 preserves the legacy prefix schedule, 1000 selects streams only. A residual budget below seven actions always uses a stream when enabled. |
 | `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
 | `translation-switch` | Rate for resampling the translation context after required context/leaf/fence observations. |
@@ -344,17 +344,22 @@ budget `A = requested_actions - 2`:
 ```text
 requested_concurrent = floor(A * concurrent / 1000)
 minimum_concurrent  = concurrent == 0 ? 0 : min(A, special_enabled ? 64 : 56)
+reserved_serial    = min(minimum_serial_actions(), floor(A / 2))
 concurrent_limit   = min(max(requested_concurrent, minimum_concurrent),
-                         A - min(minimum_serial_actions(), A))
+                         A - reserved_serial)
 ```
 
-This floor is a scheduling reservation calculated from enabled dimensions,
-not a minimum legal run size and not a promise that serial bins will be filled.
-With unmodified presets, the floor is 4362 for `coverage` and `corner`, and
-4246 for `spec`. Therefore ordinary 256- or 1024-action runs of those presets
-have zero concurrency epochs even when `concurrent` is nonzero. A custom
-profile can change the floor. Increasing only a concurrency rate cannot bypass
-this reservation. See [prepare_tail()](../cpp/scenarios/mixed_initialization.cpp).
+The serial estimate counts enabled dimensions, not a minimum legal run size or
+promise to fill bins. Its unmodified value is 4362 for `coverage`/`corner` and
+4246 for `spec`. Capping the reservation at half of `A` keeps ordinary overlap
+reachable in short runs and preserves the full reservation whenever
+`A >= 2 * minimum_serial_actions()`. Unmodified 256/1024-action profiles now
+allocate concurrency budgets of 127/511 (`coverage` and `corner`) and 64/102
+(`spec`), including the clean-special minimum. `cmo-stress` disables concurrency.
+A zero `concurrent` rate still allocates no concurrency. Legacy-only mode can
+leave fewer than seven budgeted actions unused; enabled streams consume the
+residual budget. These are action budgets, so inspect accepted overlap counters.
+See [prepare_tail()](../cpp/scenarios/mixed_initialization.cpp).
 
 A heterogeneous window requires seven available actions, or eight with its
 optional clean NC/MMIO load. It includes scalar load, vector load, scalar
@@ -372,7 +377,10 @@ observations. See [run_concurrent_windows()](../cpp/scenarios/mixed_concurrent.c
 The ordinary [stream executor](../cpp/scenarios/mixed_stream.cpp) draws an epoch
 of 8..32 architectural instructions, clipped to the remaining budget (so 1..7
 are legal), and a live depth of 2..8. It repeatedly samples from current legal
-admission, scalar load/prefetch, STA, STD and vector-uop events. Producer counts
+admission, scalar load/prefetch, STA, STD, vector-uop and completed-head
+retirement events. Retirement competes with every other eligible event; it is
+not a greedy completed-prefix drain. Younger admissions and producer selections
+can therefore occur while an older complete instruction remains live. Producer counts
 are drawn from the five configured operation weights instead of a fixed count
 per class. Admission accounts for actual vector LQ/SQ flows and queue headroom;
 retired prefixes free capacity for new work while younger instructions remain
@@ -539,6 +547,7 @@ Array order and sampling code are authoritative in
 | `concurrent_ops` | Legacy-window producer counts: scalar load, vector load, scalar store, vector store, prefetch. |
 | `stream` | Epochs, admitted instructions, retired instructions, admissions with older accepted work pending, admissions after a prefix retired while older work remains live, prefix retirements with younger live work, maximum live instructions, maximum accepted-and-pending instructions, initial issue events, vector replay issues, epochs after serial work, last global action index. These are driver/scoreboard observations, not an internal pipeline occupancy oracle. |
 | `stream_ops`, `stream_issue`, `stream_vector_uops`, `stream_scalar_retries` | Retired instruction counts in the same five-class order; initial scalar-load/STA/STD/vector-load-uop/vector-store-uop/prefetch issues; admitted vector-load/store uops; repeated STA issues excluded from initial counts. Schema 62 requires conservation and bounds in both verifier modes without a positive-bin gate. The opt-in strict checker retains minimum epoch/action/overlap observations for a stream-only configuration. |
+| `stream_waiting_head` | Schema 67: admission and operand/uop event selections while the oldest architectural instruction is complete and eligible to retire. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
 | `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |
 | `dcache_latency_*`, `ptw_latency_*`, `uncache_latency_*` | Manager response-latency samples, four bucket counts, total cycles, and maximum. These are observed responses, not architectural deadlines. |

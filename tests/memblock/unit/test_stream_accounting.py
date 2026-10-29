@@ -73,6 +73,43 @@ class StreamAccountingTest(unittest.TestCase):
             verifier._check_stream_accounting({**single, 'stream': '1,1,1,0,0,0,1,0,1,0,0,1',
                                                'stream_scalar_retries': 1})
 
+    def test_ready_head_sparse_observations_and_old_schema_compatibility(self):
+        base = {**sample(), 'constraint_schema': 67, 'stream_waiting_head': '0,0'}
+        for admissions, issues in ((0, 0), (18, 40), (1, 1)):
+            verifier._check_stream_accounting({**base, 'stream_waiting_head': f'{admissions},{issues}'})
+        verifier._check_stream_accounting({**sample(), 'constraint_schema': 66})
+        empty = {**base, 'stream': ','.join(['0'] * 12),
+                 'stream_ops': '0,0,0,0,0', 'stream_issue': '0,0,0,0,0,0',
+                 'stream_vector_uops': '0,0', 'stream_scalar_retries': 0}
+        verifier._check_stream_accounting(empty)
+        for counts in ('1,0', '0,1'):
+            with self.subTest(counts=counts), self.assertRaises(verifier.VerificationError):
+                verifier._check_stream_accounting({**empty, 'stream_waiting_head': counts})
+
+    def test_singleton_epochs_cannot_postpone_own_producers(self):
+        for kind, issues, events, retries in ((0, '1,0,0,0,0,0', 1, 0),
+                                             (2, '0,1,1,0,0,0', 2, 2)):
+            ops = [0] * 5
+            ops[kind] = 1
+            result = {**sample(), 'constraint_schema': 67, 'transactions': 1,
+                'stream': f'1,1,1,0,0,0,1,0,{events},0,0,1',
+                'stream_ops': ','.join(map(str, ops)), 'stream_issue': issues,
+                'stream_vector_uops': '0,0', 'stream_scalar_retries': retries,
+                'stream_waiting_head': '0,0'}
+            verifier._check_stream_accounting(result)
+            for waiting in ('1,0', '0,1'):
+                with self.subTest(kind=kind, waiting=waiting), self.assertRaises(verifier.VerificationError):
+                    verifier._check_stream_accounting({**result, 'stream_waiting_head': waiting})
+
+    def test_ready_head_missing_malformed_and_excess_observations(self):
+        base = {**sample(), 'constraint_schema': 67}
+        with self.assertRaises(verifier.VerificationError):
+            verifier._check_stream_accounting(base)
+        for counts in (True, None, [], '', '0', '0,0,0', '-1,0', '0,-1',
+                       'True,0', '1.0,0', '19,0', '0,41'):
+            with self.subTest(counts=counts), self.assertRaises(verifier.VerificationError):
+                verifier._check_stream_accounting({**base, 'stream_waiting_head': counts})
+
     def test_stream_only_disables_legacy_shape_targets_but_rejects_forged_windows(self):
         result = dict(target_concurrent=1000, target_concurrent_stream=1000,
                       actual_concurrent_vector_shape=','.join(['0'] * 16),

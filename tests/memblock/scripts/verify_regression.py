@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4754,6 +4754,13 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
                  "empty stream has nonzero observations")
     else:
         _require(live > 0 and 0 < last <= result.get("transactions", 0), "invalid stream action placement")
+    if result.get("constraint_schema", 0) >= 67:
+        waiting_admissions, waiting_issues = _csv_counts(result, "stream_waiting_head", 2)
+        _require(waiting_admissions <= admitted - epochs and waiting_issues <= events + retries - epochs,
+                 "stream completed-head selections exceed admitted/issued work")
+        if admitted == epochs:
+            _require(waiting_admissions == waiting_issues == 0,
+                     "empty or singleton-only stream has completed-head selections")
     if rate == 0 or result.get("target_concurrent") == 0:
         _require(epochs == 0, "disabled stream generated traffic")
 

@@ -19,6 +19,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 INPUTS = (
     'cpp/scenarios/mixed_stream.cpp', 'cpp/scenarios/mixed_scheduler.cpp',
+    'cpp/scenarios/mixed_initialization.cpp',
     'cpp/scenarios/mixed_transactions.cpp', 'cpp/scenarios/mixed_vectors.cpp',
     'cpp/scenarios/mixed/state.hpp', 'cpp/scenarios/shared.hpp',
     'cpp/scenarios/mixed/scalar_load.hpp', 'cpp/scenarios/mixed/vector_indices.hpp',
@@ -47,6 +48,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.mutations = {}
         cls.replays = 0
         cls.constraint_case = None
+        cls.reservations = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -100,6 +102,7 @@ class MixedStreamTest(unittest.TestCase):
         destination = os.environ.get('MEMBLOCK_MIXED_STREAM_REPORT')
         if destination:
             stream = [run for run in cls.runs if run['mode'] == 'stream']
+            fixed = [run for run in stream if run['family'] == 1 and run['limit'] == 8 and run['timing'] == 0]
             mixed = [run for run in stream if run['family'] == 0 and run['limit'] == 32 and run['timing'] == 1]
             report = {
                 'production_hashes': cls.before,
@@ -117,18 +120,22 @@ class MixedStreamTest(unittest.TestCase):
                     'production action/operation/overlap coverage matches independent observations'],
                 'schedule_fields': 'admission kind/identity; producer class/uop/identity; architectural prefix retirement',
                 'excluded_from_schedule': ['address', 'payload', 'cycle', 'delay'],
+                'fixed_eight_load_structural_schedules': len({run['result']['schedule'] for run in fixed}),
+                'fixed_eight_load_samples': len(fixed),
                 'unique_structural_schedules': len({run['result']['schedule'] for run in mixed}),
                 'unique_instruction_kind_sequences': len({tuple(run['result']['kinds']) for run in mixed}),
                 'unique_producer_count_sequences': len({tuple(run['result']['producer_counts']) for run in mixed}),
                 'epoch_lengths': sorted({run['result']['actions'] for run in mixed}),
                 'observations': {field: sum(run['result'][field] for run in stream) for field in (
                     'overlap_admissions', 'continued_admissions', 'loads_before_older_std',
-                    'head_checks', 'dependency_checks')},
+                    'head_checks', 'dependency_checks', 'admissions_with_completed_head',
+                    'issues_with_completed_head')},
                 'peak_live': max((run['result']['peak_live'] for run in mixed), default=0),
                 'peak_accepted': max((run['result']['peak_accepted'] for run in mixed), default=0),
                 'mutation_sensitivity': cls.mutations,
                 'deterministic_replay_cases': cls.replays,
                 'constraint_case': cls.constraint_case,
+                'reservations': cls.reservations,
                 'explicit_gaps': ['synthetic ports and completions', 'replay service reports no replay',
                                   'bare translation only', 'representative decoder-legal vector shapes'],
                 'runs': cls.runs,
@@ -168,6 +175,68 @@ class MixedStreamTest(unittest.TestCase):
         self.assert_sliding_observations(results)
         self.assertGreater(sum(run['head_checks'] for run in results), 0)
         self.assertGreater(sum(run['dependency_checks'] for run in results), 0)
+
+    def test_fixed_eight_load_population_varies_event_schedule(self):
+        results = [self.stream(seed, timing=0, family=1, limit=8) for seed in range(1, 65)]
+        for run in results:
+            self.assertEqual(run['actions'], 8)
+            self.assertEqual(run['kinds'], [0] * 8)
+            self.assertEqual(run['producer_counts'], [1] * 8)
+        self.assertGreaterEqual(len({run['schedule'] for run in results}), 32)
+        self.assert_retirement_interleaving(results)
+
+    def assert_retirement_interleaving(self, results):
+        self.assertGreater(sum(run['admissions_with_completed_head'] for run in results), 0)
+        self.assertGreater(sum(run['issues_with_completed_head'] for run in results), 0)
+
+    def test_admission_and_issue_can_precede_ready_head_retirement(self):
+        results = [self.stream(seed, timing=0) for seed in range(1, 65)]
+        self.assert_retirement_interleaving(results)
+
+    def test_short_default_profiles_retain_concurrency_and_serial_budget(self):
+        expected = {
+            'coverage': (127, 511), 'corner': (127, 511),
+            'spec': (64, 102), 'cmo-stress': (0, 0),
+        }
+        for profile, budgets in expected.items():
+            for actions, expected_budget in zip((256, 1024), budgets):
+                reservation = self.run_fixture('reservation', profile, actions - 2)
+                self.assertEqual(reservation['budget'], expected_budget)
+                self.reservations.append(dict(profile=profile, actions=actions, **reservation))
+                for seed in (1, 7):
+                    for rate in (0, 750, 1000):
+                        result = self.run_fixture('budget', seed, actions - 2, expected_budget, rate)
+                        self.runs.append({'mode': 'budget', 'seed': seed, 'profile': profile,
+                                          'rate': rate, 'result': result})
+                        used = result['concurrent']
+                        self.assertLessEqual(used, expected_budget)
+                        self.assertLess(expected_budget - used, 7 if rate == 0 else 1)
+                        self.assertEqual(result['actions'], actions - 2)
+                        self.assertIn('S', result['schedule'].split(','))
+
+    def test_reservation_bounds_large_runs_and_integer_boundaries(self):
+        for profile in ('coverage', 'spec', 'corner', 'cmo-stress'):
+            floor = self.run_fixture('reservation', profile, 0)['floor']
+            values = sorted({0, 1, 2, 55, 56, 63, 64, 254, 1022, 16382,
+                             2 * floor - 1, 2 * floor, 2 * floor + 1, 2**32 - 1})
+            previous = 0
+            for available in values:
+                if available < 0:
+                    continue
+                result = self.run_fixture('reservation', profile, available)
+                budget, rate = result['budget'], result['rate']
+                self.assertGreaterEqual(budget, previous)
+                self.assertLessEqual(budget, available)
+                self.assertGreaterEqual(available - budget, min(floor, available // 2))
+                if rate:
+                    self.assertGreater(budget, 0 if available else -1)
+                else:
+                    self.assertEqual(budget, 0)
+                if available >= 2 * floor:
+                    minimum = min(available, 64)  # All enabled standard presets include clean special traffic.
+                    expected = min(max(available * rate // 1000, minimum), available - floor) if rate else 0
+                    self.assertEqual(budget, expected)
+                previous = budget
 
     def test_identical_seed_and_completion_pattern_replays_exactly(self):
         for seed in (1, 2, 7, 13, 31, 79):
@@ -248,6 +317,19 @@ class MixedStreamTest(unittest.TestCase):
             self.assert_sliding_observations(results)
         self.mutations['serial_admission'] = {'rejected': True, 'peak_live': max(run['peak_live'] for run in results),
                                              'overlap_admissions': sum(run['overlap_admissions'] for run in results)}
+
+    def test_private_greedy_retirement_loses_ready_head_interleaving(self):
+        old = 'const auto event = ready[random() % ready.size()];'
+        self.assertEqual(self.source.count(old), 1)
+        binary = self.compile(self.source.replace(old,
+            'const auto event = completed_head ? Event{5, 0, 0} : ready[random() % ready.size()];'),
+            'greedy-retirement')
+        results = [self.stream(seed, timing=0, binary=binary) for seed in range(1, 17)]
+        with self.assertRaises(AssertionError):
+            self.assert_retirement_interleaving(results)
+        self.mutations['greedy_retirement'] = {'rejected': True,
+            'admissions_with_completed_head': sum(run['admissions_with_completed_head'] for run in results),
+            'issues_with_completed_head': sum(run['issues_with_completed_head'] for run in results)}
 
     def test_private_missing_older_address_guard_is_rejected(self):
         scalar = '(work.kind == 4 || older_addresses_known)'

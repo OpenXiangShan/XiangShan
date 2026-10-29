@@ -267,7 +267,9 @@ readback remains a separate externally visible check.
 
 The [executor](../cpp/scenarios/mixed_stream.cpp) keeps architectural age in one
 deque, holds head/pending-store levels atomically, and retires only a complete
-prefix. Scalar STA/STD acknowledgements and vector uop completions match their
+prefix. A completed head becomes a ready retirement event alongside admission
+and issue; delaying its selection preserves the actual head, live destinations
+and all outstanding obligations. Scalar STA/STD acknowledgements and vector uop completions match their
 scoreboards; prefetch queries require the prefetch class as well as ROB value
 and wrap. Exact vector replay service consumes only its matching feedback,
 rejects an already-completed target and preserves unrelated replay obligations.

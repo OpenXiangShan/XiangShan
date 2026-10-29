@@ -42,6 +42,7 @@ struct SyntheticEnvironment {
     unsigned overlap_admissions = 0, continued_admissions = 0;
     unsigned loads_before_older_std = 0, head_checks = 0, dependency_checks = 0;
     unsigned issues = 0, commits = 0;
+    unsigned admissions_with_completed_head = 0, issues_with_completed_head = 0;
     std::optional<unsigned> installed_head;
     bool pending_store_level = false;
     std::uint64_t tick = 0, lq_used = 0, sq_used = 0, lq_done = 0, sq_done = 0;
@@ -123,6 +124,7 @@ struct SyntheticEnvironment {
         require(expected.count(key(t, kind, uop)) != 0, "dispatch lacked prior expectation");
         require(enqueued.insert(key(t, kind, uop)).second, "duplicate dispatch");
         if (uop == 0) {
+            admissions_with_completed_head += retired < instructions.size() && complete(instructions[retired]);
             const unsigned next = instructions.size();
             // Builders start immediately before ROB/queue wrap boundaries.
             require(t.rob == rob_pointer_value(157 + next) && t.rob_flag == rob_pointer_flag(157 + next),
@@ -225,8 +227,12 @@ struct SyntheticEnvironment {
         // Completion timing does not inspect the scheduler's candidate list.
         return tick + (latency ? 37U + ((work.id * 7U + uop * 11U) % 31U) : 3U + (work.id + uop) % 5U);
     }
+    void note_producer() {
+        issues_with_completed_head += retired < instructions.size() && complete(instructions[retired]);
+    }
     void issue(Instruction &work, unsigned index, const char *tag) {
         check_installed_head();
+        note_producer();
         auto &uop = work.uops.at(index);
         require(!uop.issued, "duplicate uop acceptance");
         uop.issued = true; uop.due = due(work, index); ++producer_counts[work.id]; ++issues;
@@ -241,13 +247,14 @@ struct SyntheticEnvironment {
     }
     bool issue_store_address_until_tlb_hit(const StoreTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag);
-        check_installed_head(); check_head(work);
+        check_installed_head(); check_head(work); note_producer();
         if (!work.address) { work.address = true; work.address_due = latency ? due(work) : tick + 1U; ++producer_counts[work.id]; ++issues; }
         else require(tick < work.address_due, "reissued an already completed store address");
         trace.push_back("SA" + std::to_string(work.id)); sample_accepted(); ++tick; return true;
     }
     bool issue_store_data(const StoreTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag); check_installed_head(); require(!work.data, "duplicate scalar store data");
+        note_producer();
         work.data = true; work.data_due = due(work, 1); ++producer_counts[work.id]; ++issues;
         trace.push_back("SD" + std::to_string(work.id)); sample_accepted(); ++tick; return true;
     }
@@ -315,6 +322,9 @@ struct SyntheticEnvironment {
             "production action/admission/retirement accounting disagreed");
         require(coverage.stream[3] == overlap_admissions && coverage.stream[4] == continued_admissions,
             "production overlap coverage disagreed with independent admission observations");
+        require(coverage.stream_waiting_head == std::array<std::uint64_t, 2>{
+            admissions_with_completed_head, issues_with_completed_head},
+            "production completed-head choices disagreed with independent observations");
         require(coverage.stream[8] == issues, "production issue count disagreed with accepted producers");
         std::array<std::uint64_t, 5> operations{};
         for (const auto &work : instructions) {
@@ -475,12 +485,21 @@ int main(int argc, char **argv) {
                 << ",\"overlap_admissions\":" << env.overlap_admissions << ",\"continued_admissions\":" << env.continued_admissions
                 << ",\"loads_before_older_std\":" << env.loads_before_older_std << ",\"head_checks\":" << env.head_checks
                 << ",\"dependency_checks\":" << env.dependency_checks << ",\"issues\":" << env.issues
+                << ",\"admissions_with_completed_head\":" << env.admissions_with_completed_head
+                << ",\"issues_with_completed_head\":" << env.issues_with_completed_head
                 << ",\"commits\":" << env.commits << ",\"lq_allocated\":" << env.lq_used
                 << ",\"sq_allocated\":" << env.sq_used << ",\"producer_counts\":[";
             for (unsigned i = 0; i < env.producer_counts.size(); ++i) std::cout << (i ? "," : "") << env.producer_counts[i];
             std::cout << "],\"kinds\":[";
             for (unsigned i = 0; i < env.instructions.size(); ++i) std::cout << (i ? "," : "") << env.instructions[i].kind;
             std::cout << "]}\n";
+        } else if (mode == "reservation") {
+            require(argc == 4, "reservation profile/available required");
+            const auto policy = RandomConstraints::preset(argv[2]);
+            const auto available = static_cast<unsigned>(std::stoul(argv[3]));
+            std::cout << "{\"floor\":" << policy.minimum_serial_actions()
+                << ",\"budget\":" << policy.concurrent_action_budget(available)
+                << ",\"rate\":" << policy.concurrent_actions_per_mille << "}\n";
         } else if (mode == "budget") {
             require(argc == 6, "budget seed/total/concurrent/rate required");
             BudgetFixture fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), std::stoul(argv[5]));

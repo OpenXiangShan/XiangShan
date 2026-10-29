@@ -108,26 +108,8 @@ bool MixedScenario::prepare_tail()
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure,
         constraints.response_latency);
     const unsigned available_tail_actions = target_before_redirect - actions;
-    const unsigned requested_concurrent_actions = static_cast<unsigned>(
-        std::uint64_t{available_tail_actions} *
-        constraints.concurrent_actions_per_mille / 1000);
-    const unsigned minimum_concurrent_actions =
-        constraints.concurrent_actions_per_mille == 0
-        ? 0
-        : std::min(
-              constraints.special_concurrent_per_mille != 0 &&
-                      constraints.uses_concurrent_special_operations()
-                  ? 64U : 56U,
-              available_tail_actions);
-    const unsigned concurrent_action_budget = std::max(
-        requested_concurrent_actions, minimum_concurrent_actions);
-    const unsigned constrained_floor_actions =
-        constraints.minimum_serial_actions();
-    const unsigned maximum_concurrent_limit =
-        target_before_redirect -
-        std::min(constrained_floor_actions, available_tail_actions);
-    concurrent_action_limit = std::min(
-        maximum_concurrent_limit, actions + concurrent_action_budget);
+    concurrent_action_limit = actions +
+        constraints.concurrent_action_budget(available_tail_actions);
 
     for (std::size_t slot = 0; slot < atomic_values.size(); ++slot) {
         atomic_values[slot] = environment.memory().expected_load(

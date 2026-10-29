@@ -3260,6 +3260,8 @@ struct MixedCoverage {
     std::array<std::uint64_t, 6> stream_issue{};
     std::array<std::uint64_t, 2> stream_vector_uops{};
     std::uint64_t stream_scalar_retries = 0;
+    // Admission / producer selections while a completed head could retire.
+    std::array<std::uint64_t, 2> stream_waiting_head{};
     static constexpr unsigned kConcurrentClasses = 5;
     std::array<std::uint64_t, memblock::generated::kLsqEnqueueLanes>
         dispatch_widths{};
@@ -3626,6 +3628,7 @@ struct MixedCoverage {
                " stream=" + csv(stream) + " stream_ops=" + csv(stream_ops) +
                " stream_issue=" + csv(stream_issue) + " stream_vector_uops=" + csv(stream_vector_uops) +
                " stream_scalar_retries=" + std::to_string(stream_scalar_retries) +
+               " stream_waiting_head=" + csv(stream_waiting_head) +
                " scalar_misaligned=" +
                std::to_string(scalar_misaligned) + " store_misaligned=" +
                std::to_string(scalar_store_misaligned) + ',' +

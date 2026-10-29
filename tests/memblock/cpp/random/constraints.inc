@@ -2937,6 +2937,20 @@ struct RandomConstraints {
             (stride_stream_per_mille == 0 ? 0U : 8U);
     }
 
+
+    unsigned concurrent_action_budget(unsigned available) const
+    {
+        if (concurrent_actions_per_mille == 0) return 0;
+        const unsigned requested = static_cast<unsigned>(
+            std::uint64_t{available} * concurrent_actions_per_mille / 1000U);
+        const unsigned minimum = std::min(available,
+            special_concurrent_per_mille != 0 && uses_concurrent_special_operations() ? 64U : 56U);
+        // The enabled serial-dimension estimate must leave room for ordinary
+        // overlap in short runs. Larger runs retain the complete reservation.
+        const unsigned serial_reservation = std::min(minimum_serial_actions(), available / 2U);
+        return std::min(std::max(requested, minimum), available - serial_reservation);
+    }
+
     bool uses_dcache() const
     {
         return std::any_of(
@@ -2999,7 +3013,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=66 constraints=" << name
+        stream << "constraint_schema=67 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
