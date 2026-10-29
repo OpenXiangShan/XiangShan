@@ -46,6 +46,7 @@ auto Environment::Impl::write_distributed_csr(std::uint16_t address,
 auto Environment::Impl::tick(bool monitor)  -> void
 {
     set_failure_cycle();
+    if (!authorize_release_store_inputs()) return;
     memory_agent_.drive(dut_);
     ptw_agent_.drive(dut_);
     uncache_agent_.drive(dut_);

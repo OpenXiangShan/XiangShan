@@ -57,6 +57,7 @@ public:
     std::uint64_t key = 0;
     std::uint64_t cycle() const { return dut_.edges; }
     void set_failure_cycle() { error_.set_cycle(cycle()); }
+    bool authorize_release_store_inputs() { return true; }
     void tick(bool monitor = true);
     bool wait_for_enqueue_capacity(unsigned lq, unsigned sq, unsigned timeout = 32);
     bool check_components() {

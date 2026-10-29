@@ -22,7 +22,7 @@ struct SyntheticEnvironment {
     struct Uop {
         bool issued = false, committed = false;
         mutable bool completed = false;
-        std::uint64_t due = 0;
+        std::uint64_t due = 0, sq_target = 0;
         unsigned destination = 0;
         VectorMemoryTransaction vector;
     };
@@ -33,9 +33,11 @@ struct SyntheticEnvironment {
         StoreTransaction store;
         std::uint8_t rob = 0;
         bool flag = false, address = false, data = false, committed = false;
-        bool last_uop_seen = false, needs_head = false;
+        bool last_uop_seen = false, needs_head = false, needs_pending_store = false, restart_blocked = false;
+        std::optional<std::uint64_t> restart_boundary;
+        bool needs_restart_flush() const { return !uops.empty() && uops.front().vector.vstart != 0; }
         unsigned address_attempts = 0, address_retries = 0;
-        std::uint64_t address_due = 0, data_due = 0;
+        std::uint64_t address_due = 0, data_due = 0, sq_target = 0;
         std::vector<Uop> uops;
         bool is_store() const { return kind == 2 || kind == 3; }
     };
@@ -168,7 +170,44 @@ struct SyntheticEnvironment {
     unsigned admissions_with_completed_head = 0, issues_with_completed_head = 0;
     std::optional<unsigned> installed_head;
     bool pending_store_level = false;
-    std::uint64_t tick = 0, lq_used = 0, sq_used = 0, sq_done = 0;
+    std::uint64_t tick = 0, lq_used = 0, sq_used = 0;
+    mutable std::uint64_t sq_done = 0;
+    struct RetiredStore { std::uint64_t target, due; unsigned id; };
+    mutable std::deque<RetiredStore> retired_stores;
+    mutable Environment::StoreRetirementStats retirement_stats;
+    unsigned retired_pending_admissions = 0, retired_pending_issues = 0, retired_pending_heads = 0;
+    unsigned head_retirement_marker = 0;
+    void refresh_sq() const {
+        while (!retired_stores.empty() && retired_stores.front().due <= tick) {
+            sq_done = retired_stores.front().target;
+            retired_stores.pop_front();
+            ++retirement_stats.drained;
+        }
+        retirement_stats.pending = retired_stores.size();
+    }
+    void capture_store_edge() {
+        refresh_sq();
+        retirement_stats.pending_before_last_edge = retired_stores.size();
+        ++tick;
+        refresh_sq();
+    }
+    const Environment::StoreRetirementStats &store_retirement_stats() const {
+        refresh_sq(); return retirement_stats;
+    }
+    void register_retired_store(std::uint64_t target, unsigned id, bool vector) {
+        require(target > sq_done && target <= sq_used, "retired store lost its physical SQ target");
+        ++(vector ? retirement_stats.vector_uops : retirement_stats.scalar);
+        ++retirement_stats.pending_at_retirement;
+        retired_stores.push_back({target, tick + 19U + 3U * (id % 7U), id});
+        retirement_stats.pending = retired_stores.size();
+        retirement_stats.max_pending = std::max(retirement_stats.max_pending, retirement_stats.pending);
+    }
+    std::uint64_t completion_edge(const Instruction &work) const {
+        if (work.kind == 2) return std::max(work.address_due, work.data_due);
+        std::uint64_t edge = 0;
+        for (const auto &uop : work.uops) edge = std::max(edge, uop.due);
+        return edge;
+    }
     mutable std::uint64_t lq_done = 0;
     static constexpr unsigned initial_lq = 69, initial_sq = 53;
 
@@ -189,6 +228,19 @@ struct SyntheticEnvironment {
     std::uint64_t lq_redirect_canceled_observed() const { return canceled_lq; }
     std::uint64_t scalar_load_redirect_canceled() const { return cold_cancellations; }
     bool redirect_after(std::uint8_t rob, bool flag, bool itself) {
+        if (!itself) {
+            auto &head = find(rob, flag);
+            check_installed_head();
+            require(head.id == retired && head.id + 1U == instructions.size() &&
+                head.needs_restart_flush() && complete(head) && !head.restart_boundary,
+                "VSTART flush-after lacked the sole completed architectural head");
+            require(!pending_store_level && tick >= completion_edge(head) + 7U,
+                "VSTART flush-after violated producer timing or pendingst");
+            tick += 3U;
+            head.restart_boundary = tick;
+            trace.push_back("VSF" + std::to_string(head.id));
+            return true;
+        }
         require(recovery_enabled && itself && violation.last.rob_value == rob && violation.last.rob_flag == flag,
             "returned wrong redirect victim");
         require(tick == violation.last_cycle + 2, "missed backend redirect deadline");
@@ -236,7 +288,7 @@ struct SyntheticEnvironment {
         }
     }
     std::uint64_t lq_dequeued() const { refresh_lq(); return lq_done; }
-    std::uint64_t sq_dequeued() const { return sq_done; }
+    std::uint64_t sq_dequeued() const { refresh_sq(); return sq_done; }
     bool complete(const Instruction &work) const {
         if (work.initial_cold && work.epoch == 0) return false;
         if (work.kind == 2)
@@ -251,6 +303,9 @@ struct SyntheticEnvironment {
                     (!older.data || tick < older.data_due)) return false;
             }
         }
+        if (work.needs_pending_store &&
+            std::any_of(work.uops.begin(), work.uops.end(), [](const auto &uop) { return !uop.completed; }) &&
+            (installed_head != work.id || !pending_store_level)) return false;
         return work.last_uop_seen && !work.uops.empty() &&
             std::all_of(work.uops.begin(), work.uops.end(), [&](const auto &uop) {
                 if (uop.issued && tick >= uop.due) uop.completed = true;
@@ -267,6 +322,9 @@ struct SyntheticEnvironment {
         while (retired < *actions) {
             const auto &work = instructions.at(retired);
             require(complete(work), "retired incomplete architectural head");
+            if (work.needs_restart_flush())
+                require(work.restart_boundary && tick >= *work.restart_boundary + 6U,
+                    "VSTART retirement lacked recovered whole-instruction flush-after");
             if (work.kind == 2) require(work.committed, "scalar store retired without commit");
             if (work.kind == 3) for (const auto &uop : work.uops)
                 require(uop.committed, "vector store retired without all commits");
@@ -281,13 +339,16 @@ struct SyntheticEnvironment {
                 require(expected.erase(terminal) == 1 && enqueued.erase(terminal) == 1,
                     "terminal identity lacked exactly one expectation and dispatch");
             }
-            if (work.is_store()) sq_done += work.flows;
-            else if (!recovery_enabled) lq_done += work.flows;
+            if (!work.is_store() && !recovery_enabled) lq_done += work.flows;
+            const auto age = work.kind == 1 || work.kind == 3 ? 4U : 3U;
+            require(tick >= completion_edge(work) + age,
+                "architectural retirement preceded backend writeback readiness");
             prefix_old_retirements += old_response_active() && work.group != active_group;
             trace.push_back("R" + std::to_string(work.id));
             ++retired;
         }
         refresh_lq();
+        refresh_sq();
     }
     std::map<unsigned, unsigned> scalar_domains;
     Instruction &find(std::uint8_t rob, bool flag) {
@@ -324,6 +385,8 @@ struct SyntheticEnvironment {
         require(enqueued.insert(key(t, kind, uop)).second, "duplicate dispatch");
         if (uop == 0) {
             admissions_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
+            for (unsigned index = retired; index < instructions.size(); ++index)
+                require(!instructions[index].needs_restart_flush(), "younger admission escaped VSTART barrier");
             const unsigned next = instructions.size();
             // Builders start immediately before ROB/queue wrap boundaries.
             const auto received = identity(t.rob, t.rob_flag);
@@ -371,8 +434,16 @@ struct SyntheticEnvironment {
     void allocate(Instruction &work, unsigned count) {
         work.flows += count;
         (work.kind == 2 || work.kind == 3 ? sq_used : lq_used) += count;
+        if (work.is_store()) {
+            work.sq_target = sq_used;
+            if (!work.uops.empty()) work.uops.back().sq_target = sq_used;
+        }
         if (recovery_enabled && !work.is_store()) lq_entries.push_back({work.id, work.epoch, count});
         refresh_lq();
+        refresh_sq();
+        capture_store_edge();
+        if (work.kind != 1 && work.kind != 3 || work.last_uop_seen)
+            retired_pending_admissions += retirement_stats.pending_before_last_edge != 0;
         require(lq_used - canceled_lq - lq_done <= kVirtualLoadQueueEntries - kLqEnqueueHeadroom,
             "LQ admission exceeded reserved capacity");
         require(sq_used - sq_done <= kStoreQueueEntries - kSqEnqueueHeadroom,
@@ -404,7 +475,9 @@ struct SyntheticEnvironment {
                 }
                 work.load = t; work.refetch_pending = false; ++work.epoch;
                 work.uops[0].issued = work.uops[0].completed = false; work.uops[0].due = 0;
-                allocate(work, 1); trace.push_back("F" + std::to_string(work.id)); return true;
+                const auto prior_retired_pending = retired_pending_admissions;
+                allocate(work, 1); retired_pending_admissions = prior_retired_pending;
+                trace.push_back("F" + std::to_string(work.id)); return true;
             }
         }
         auto &work = admit(t, 0); work.load = t; work.last_uop_seen = true; work.uops.emplace_back();
@@ -420,6 +493,28 @@ struct SyntheticEnvironment {
         work.needs_head = (t.address & 15U) + width > 16U;
         allocate(work, 1); return true;
     }
+    bool begin_store_release_epoch(unsigned) {
+        require(retired == instructions.size(), "release epoch began with unfinished architectural work");
+        return true;
+    }
+    bool end_store_release_epoch(unsigned) {
+        synchronize_retirement();
+        require(retired == instructions.size() && retired_stores.empty(),
+            "release epoch ended with unfinished physical or architectural work");
+        return true;
+    }
+    bool track_store_release_inputs(const StoreTransaction &t) {
+        const auto &work = find(t.rob, t.rob_flag);
+        require(work.kind == 2 && !work.address && !work.data && work.sq_target != 0,
+            "release tracking was not installed after scalar dispatch and before acceptance");
+        return true;
+    }
+    bool track_vector_release_inputs(const VectorMemoryTransaction &t) {
+        const auto &work = find(t.rob, t.rob_flag);
+        require(t.store && t.vuop_idx < work.uops.size() && !work.uops[t.vuop_idx].issued,
+            "release tracking was not installed after vector dispatch and before acceptance");
+        return true;
+    }
     bool enqueue_prefetch(const PrefetchTransaction &t) {
         auto &work = admit(t, 4); work.last_uop_seen = true; work.uops.emplace_back(); allocate(work, 1); return true;
     }
@@ -434,6 +529,7 @@ struct SyntheticEnvironment {
             if (((active >> element) & 1U) == 0) continue;
             const auto address = vector_element_virtual_address(t, element);
             work.needs_head |= t.store ? (address & (width - 1U)) != 0 : (address & 15U) + width > 16U;
+            work.needs_pending_store |= t.store && (address & 4095U) + width > 4096U;
         }
         allocate(work, t.flow_num); return true;
     }
@@ -453,7 +549,9 @@ struct SyntheticEnvironment {
     void check_installed_head() const {
         require(installed_head && *installed_head == retired, "accepted producer without current architectural ROB head");
         const auto &head = instructions.at(retired);
-        require(pending_store_level == (!at_anchor && (head.kind == 2 || head.kind == 3)), "accepted producer with wrong pending-store level");
+        const bool flush_blocked = head.restart_blocked &&
+            (!head.restart_boundary || tick < *head.restart_boundary + 6U);
+        require(pending_store_level == (!at_anchor && head.is_store() && !flush_blocked), "accepted producer with wrong pending-store level");
     }
     void check_head(const Instruction &work, bool ordered = false) {
         if (work.needs_head || ordered) {
@@ -484,7 +582,8 @@ struct SyntheticEnvironment {
         uop.issued = true; uop.due = due(work, index); ++producer_counts[work.id]; ++issues;
         if (work.kind == 0 && work.epoch) ++refetch_issues;
         trace.push_back(std::string(tag) + std::to_string(work.id) + ":" + std::to_string(index));
-        sample_accepted(); ++tick;
+        sample_accepted(); capture_store_edge();
+        retired_pending_issues += retirement_stats.pending_before_last_edge != 0;
     }
     void check_scalar_value(const Instruction &load, const LoadTransaction &t) {
         const unsigned width = 1U << (unsigned(t.op) & 3U);
@@ -542,7 +641,8 @@ struct SyntheticEnvironment {
         if (miss) {
             check_installed_head(); check_head(work); check_dependency(work.id, false); note_producer();
             ++issues; ++producer_counts[work.id]; ++address_misses;
-            trace.push_back("SM" + std::to_string(work.id)); ++tick;
+            trace.push_back("SM" + std::to_string(work.id)); capture_store_edge();
+            retired_pending_issues += retirement_stats.pending_before_last_edge != 0;
         } else if (!issue_store_address_until_tlb_hit(t, timeout)) return false;
         work.address_retries += work.address_attempts != 0;
         ++work.address_attempts;
@@ -567,7 +667,8 @@ struct SyntheticEnvironment {
         if (!work.address) check_dependency(work.id, false);
         if (!work.address) { work.address = true; work.address_due = latency ? due(work) : tick + 1U; ++producer_counts[work.id]; ++issues; }
         else require(tick < work.address_due, "reissued an already completed store address");
-        trace.push_back("SA" + std::to_string(work.id)); sample_accepted(); ++tick;
+        trace.push_back("SA" + std::to_string(work.id)); sample_accepted(); capture_store_edge();
+        retired_pending_issues += !work.group && retirement_stats.pending_before_last_edge != 0;
         if (recovery_enabled && work.group == active_group && active_group) {
             for (unsigned index = work.id + 1; index < instructions.size(); ++index) {
                 const auto &load = instructions[index];
@@ -590,7 +691,8 @@ struct SyntheticEnvironment {
         note_producer();
         check_dependency(work.id, true);
         work.data = true; work.data_due = due(work, 1); ++producer_counts[work.id]; ++issues;
-        trace.push_back("SD" + std::to_string(work.id)); sample_accepted(); ++tick; return true;
+        trace.push_back("SD" + std::to_string(work.id)); sample_accepted(); capture_store_edge();
+        retired_pending_issues += !work.group && retirement_stats.pending_before_last_edge != 0; return true;
     }
     bool issue_vector(const VectorMemoryTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag);
@@ -621,27 +723,60 @@ struct SyntheticEnvironment {
         const auto &uop = find(t.rob, t.rob_flag).uops.at(t.vuop_idx); return !uop.issued || tick < uop.due;
     }
     bool service_vector_replay(const VectorMemoryTransaction &, bool &serviced, unsigned) { serviced = false; return true; }
-    bool commit_store(const StoreTransaction &t, unsigned) {
-        auto &work = find(t.rob, t.rob_flag); require(work.id == retired && complete(work), "commit outside completed head");
-        require(!work.committed, "duplicate scalar commit"); work.committed = true; ++commits; return true;
+    bool retire_store(const StoreTransaction &t) {
+        auto &work = find(t.rob, t.rob_flag);
+        require(work.id == retired && complete(work), "scalar retirement outside completed head");
+        require(tick >= completion_edge(work) + 2U, "scalar scommit preceded backend readiness");
+        require(!work.committed, "duplicate scalar retirement");
+        capture_store_edge();
+        work.committed = true; ++commits;
+        register_retired_store(work.sq_target, work.id, false);
+        return true;
     }
-    bool commit_vector_store(const VectorMemoryTransaction &t, unsigned) {
-        auto &work = find(t.rob, t.rob_flag); require(work.id == retired && complete(work), "vector commit outside completed head");
-        auto &uop = work.uops.at(t.vuop_idx); require(!uop.committed, "duplicate vector commit");
-        uop.committed = true; ++commits; return true;
+    bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions) {
+        require(!transactions.empty(), "empty vector retirement");
+        auto &work = find(transactions.front().rob, transactions.front().rob_flag);
+        require(work.id == retired && complete(work) && transactions.size() == work.uops.size(),
+            "vector retirement outside complete instruction");
+        require(tick >= completion_edge(work) + 3U, "vector retirement preceded backend readiness");
+        capture_store_edge();
+        for (const auto &t : transactions) {
+            auto &uop = work.uops.at(t.vuop_idx);
+            require(!uop.committed, "duplicate vector retirement");
+            uop.committed = true; ++commits;
+            register_retired_store(uop.sq_target, work.id, true);
+        }
+        return true;
     }
     bool set_rob_head_state(std::uint8_t rob, bool flag, bool pending_store) {
         synchronize_retirement();
+        const bool advanced = retired != head_retirement_marker;
+        if (advanced) {
+            const auto &old = instructions.at(retired - 1U);
+            const unsigned delay = old.kind == 1 || old.kind == 3 ? 5U : 4U;
+            require(tick + 1U >= completion_edge(old) + delay,
+                "public ROB head advanced before backend writeback pipeline");
+        }
+        head_retirement_marker = retired;
         if (retired == instructions.size()) {
             require(!pending_store, "pending-store level escaped empty stream");
-            installed_head.reset(); pending_store_level = false; return true;
+            installed_head.reset(); pending_store_level = false;
+            capture_store_edge(); retired_pending_heads += advanced && retirement_stats.pending_before_last_edge != 0;
+            return true;
         }
-        const auto &head = instructions.at(retired);
+        auto &head = instructions.at(retired);
         if (recovery_enabled && active_group && retired == first_graph && anchor_identity == identity(rob, flag)) {
             require(!pending_store, "nonmemory recovery anchor asserted pendingst");
             at_anchor = true;
         } else {
-            require(head.rob == rob && head.flag == flag && pending_store == head.is_store(),
+            if (head.is_store() && head.needs_restart_flush() && !pending_store && !head.restart_boundary) {
+                require(complete(head) && tick + 1U >= completion_edge(head) + 3U,
+                    "VSTART low pendingst preceded completed writeback and ROB flush blocking");
+            }
+            if (head.needs_restart_flush() && !pending_store) head.restart_blocked = true;
+            const bool flush_blocked = head.restart_blocked &&
+                (!head.restart_boundary || tick < *head.restart_boundary + 6U);
+            require(head.rob == rob && head.flag == flag && pending_store == (head.is_store() && !flush_blocked),
                 "installed ROB head or pending-store level disagreed with oldest live instruction");
             if (recovery_enabled && active_group && retired == first_graph) {
                 for (const auto &work : instructions) if (work.group == active_group)
@@ -650,7 +785,9 @@ struct SyntheticEnvironment {
             }
             at_anchor = false;
         }
-        installed_head = retired; pending_store_level = pending_store; return true;
+        installed_head = retired; pending_store_level = pending_store;
+        capture_store_edge(); retired_pending_heads += advanced && retirement_stats.pending_before_last_edge != 0;
+        return true;
     }
     bool run_cycles(unsigned count) { synchronize_retirement(); tick += count; return true; }
     bool run_until_all_complete(unsigned) {
@@ -658,7 +795,10 @@ struct SyntheticEnvironment {
         return std::all_of(instructions.begin() + retired, instructions.end(), [&](const auto &work) { return complete(work); });
     }
     bool run_until_queues_retired(unsigned) {
-        synchronize_retirement(); return lq_used == lq_done + canceled_lq && sq_used == sq_done;
+        synchronize_retirement();
+        for (const auto &store : retired_stores) tick = std::max(tick, store.due) + 1U;
+        refresh_sq();
+        return lq_used == lq_done + canceled_lq && sq_used == sq_done && retired_stores.empty();
     }
     void finish(unsigned count, const MixedCoverage &coverage, const ConstraintCoverage &constraints) {
         synchronize_retirement();
@@ -686,6 +826,25 @@ struct SyntheticEnvironment {
             require(producer_counts[work.id] == count, "producer conservation failed");
         }
         require(coverage.stream_ops == operations, "retired operation-kind accounting disagreed");
+        std::array<std::uint64_t, 2> restart_counts{};
+        for (const auto &work : instructions) if (work.needs_restart_flush()) {
+            ++restart_counts[work.is_store() ? 1U : 0U];
+            require(work.restart_boundary.has_value(), "VSTART instruction missed flush-after");
+        }
+        require(coverage.stream_vstart_flush[0] == restart_counts[0] &&
+            coverage.stream_vstart_flush[1] == restart_counts[1] &&
+            coverage.stream_vstart_flush[2] == restart_counts[0] + restart_counts[1],
+            "VSTART flush accounting disagreed with independent instruction history");
+        const std::array<std::uint64_t, 10> expected_retirement{
+            operations[2], operations[3], retirement_stats.vector_uops,
+            retirement_stats.pending_at_retirement, retirement_stats.already_dequeued,
+            retirement_stats.max_pending, retired_pending_admissions, retired_pending_issues,
+            retired_pending_heads, retirement_stats.drained};
+        for (unsigned i = 0; i < expected_retirement.size(); ++i)
+            require(coverage.stream_store_retirement[i] == expected_retirement[i],
+                "store retirement/drain overlap bin " + std::to_string(i) + " actual=" +
+                std::to_string(coverage.stream_store_retirement[i]) + " expected=" +
+                std::to_string(expected_retirement[i]));
         require(coverage.stream_history == std::array<std::uint64_t, 4>{
             unsigned(count > 32U), count, late_overlap_admissions, rob_reuses},
             "sustained history observations disagree with independent admissions");
@@ -899,6 +1058,14 @@ int main(int argc, char **argv) {
                 << ",\"stream_sta\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_sta.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_sta[i];
+            std::cout << "]" << ",\"vstart_cross_page\":" << std::count_if(env.instructions.begin(), env.instructions.end(),
+                [](const auto &work) { return work.needs_restart_flush() && work.needs_pending_store; });
+            std::cout << ",\"stream_vstart_flush\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_vstart_flush.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_vstart_flush[i];
+            std::cout << "]" << ",\"stream_store_retirement\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_store_retirement.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_store_retirement[i];
             std::cout << "]"
                 << ",\"address_misses\":" << env.address_misses
                 << ",\"dependency_edges\":" << env.dependencies.size()

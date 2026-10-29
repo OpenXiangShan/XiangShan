@@ -188,9 +188,22 @@ edges; every sampled redirect high blocks admission for six further edges,
 conservatively covering queue rollback and producer restart. Acceptance remains
 producer-owned because there is no generated ready pin. The passive schema3 LSQ
 monitor records consecutive valid-input edges, older outstanding queue work and
-longest run. Blocking issue handshakes/retirement and synchronous unresolved graph
-operands still restrict density. Same-cycle heterogeneous issue and decoupled
-commit/SQ lifecycle remain high priorities.
+longest run. Ordinary store retirement separates architectural prefix progress
+from physical SQ drain: per-instruction backend-readiness guards, scalar-count
+versus vector completion rules and retained absolute targets preserve legality.
+`stream_store_retirement` measures accepted work and head updates while committed
+records remain queued. Blocking issue handshakes, synchronous unresolved operands,
+same-cycle heterogeneous issue and special-store lifecycle separation remain
+high priorities. Nonzero-VSTART
+vectors retain their required whole-instruction flush-after through a serialized
+suffix barrier with low `pendingst`, zero cancellation and conservative local
+recovery; `stream_vstart_flush` records that lifecycle. This direction does not
+establish general mixed-suffix cancellation. Ordinary scalar/vector input groups
+are independently registered before acceptance and authorized by public head;
+whole-line version checking supports eviction before reference commit. Entry and
+exit SBuffer/link drains isolate these epochs from untracked legacy classes;
+there is no such barrier within an epoch. Unintegrated legacy pre-notification
+releases and exact early-effect timing remain oracle gaps.
 
 Ordinary mixed streams vary producer counts and instruction ages, choose ready
 operand/uop and completed-head retirement events, and admit new work after a completed prefix retires while
@@ -199,7 +212,8 @@ helpers. A zero `concurrent-stream` rate retains the fixed legacy prefix;
 legacy windows also remain for clean NC/MMIO overlaps. Dispatch now freezes scalar-store opposite-
 queue value/wrap snapshots; selected store/vector-list waits retain unrelated
 obligations. Heterogeneous head movement waits for older special-load completion,
-and vector retirement uses recorded SQ targets without scalar commit pulses.
+and ordinary vector architectural retirement uses complete allocation groups
+without scalar commit pulses while their physical SQ targets may remain live.
 The stream holds a single architectural head and independent byte-prefix oracle,
 with distinct live class destinations. Ordinary admissions can independently
 sample address and scalar-store data edges from older live integer loads.
@@ -258,10 +272,12 @@ Priority work, each requiring executable stimulus and an independent check:
    legal dense/same-cycle issue combinations. Ordinary enqueue already replaces
    unconditional settling with both capacity watermarks, matured public credits
    and a redirect recovery guard; cadence counts actual sampled valid-input edges.
-   Separate architectural store retirement from SQ dequeue where the CPU contract
-   permits. Measure actual accepted issue-port sets and committed-but-still-queued
-   stores. Per-store STA feedback state removes another global wait; blocking
-   handshake, retirement and unresolved-operand paths remain explicit work.
+   Normal scalar/vector stream retirement already retains physical SQ targets
+   after architectural progress and reports committed-pending overlap. Measure
+   actual accepted issue-port sets and extend lifecycle separation to other
+   legal store classes. Per-store STA feedback removes another global wait;
+   blocking issue handshakes, legacy/special retirement and unresolved-operand
+   paths remain explicit work.
 2. Extend unfinished cancellation beyond the bounded youngest cold role in
    isolated and integrated sliding graphs; add broader temporal/address dependencies,
    and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable

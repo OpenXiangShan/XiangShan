@@ -3264,6 +3264,11 @@ struct MixedCoverage {
     // admission/load/other STA/other STD/vector/prefetch while awaiting another
     // ordinary STA's feedback; maximum concurrent feedback waits.
     std::array<std::uint64_t, 11> stream_sta{};
+    // Scalar/vector architectural commits, vector uop records; records still
+    // queued/already dequeued at retirement; pending peak; accepted admission/
+    // producer and head-update edges with committed pending work; drained records.
+    std::array<std::uint64_t, 10> stream_store_retirement{};
+    std::array<std::uint64_t, 4> stream_vstart_flush{};
     // Admission / producer selections while a completed head could retire.
     std::array<std::uint64_t, 2> stream_waiting_head{};
     // Address/data edges, consumed address/data, pending sources at selection,
@@ -3651,6 +3656,8 @@ struct MixedCoverage {
                " stream_scalar_retries=" + std::to_string(stream_scalar_retries) +
                " stream_waiting_head=" + csv(stream_waiting_head) +
                " stream_sta=" + csv(stream_sta) +
+               " stream_store_retirement=" + csv(stream_store_retirement) +
+               " stream_vstart_flush=" + csv(stream_vstart_flush) +
                " stream_history=" + csv(stream_history) +
                " stream_dependencies=" + csv(stream_dependencies) +
                " stream_recovery=" + csv(stream_recovery) +

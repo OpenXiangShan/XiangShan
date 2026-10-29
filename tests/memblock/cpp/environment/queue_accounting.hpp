@@ -20,6 +20,11 @@ public:
     bool observe_redirect_cancellation(std::uint64_t lq_canceled, std::uint64_t sq_canceled);
     std::optional<std::uint64_t> scalar_store_target(std::uint64_t key) const;
     std::optional<std::uint64_t> vector_store_target(std::uint64_t key) const;
+    bool valid_store_retirement_target(std::uint64_t target) const;
+    bool retire_scalar_store(std::uint64_t key);
+    bool retire_vector_store(std::uint64_t key);
+    bool complete_vector_store_group(const std::set<std::uint64_t> &keys) const;
+    const Environment::StoreRetirementStats &store_retirement_stats() const { return store_retirement_stats_; }
     void forget_scalar_store(std::uint64_t key) { scalar_store_sq_targets_.erase(key); }
     void forget_vector_store(std::uint64_t key) { vector_store_sq_targets_.erase(key); }
     std::uint64_t lq_allocated() const { return lq_allocated_; }
@@ -39,6 +44,14 @@ public:
     const auto &lsq_enqueue_widths_observed() const { return lsq_enqueue_widths_observed_; }
     const auto &lsq_enqueue_lanes_observed() const { return lsq_enqueue_lanes_observed_; }
 private:
+    bool retain_committed_store(std::uint64_t key, std::uint64_t target, bool vector);
+    struct CommittedStore {
+        std::uint64_t key, target;
+        bool vector;
+    };
+    std::deque<CommittedStore> committed_stores_;
+    std::uint64_t last_committed_target_ = 0;
+    Environment::StoreRetirementStats store_retirement_stats_;
     void stage_admission_credit(std::uint64_t lq, std::uint64_t sq);
     struct AdmissionCredit {
         std::uint64_t ready_edge, lq, sq;

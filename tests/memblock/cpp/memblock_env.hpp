@@ -267,6 +267,13 @@ public:
         std::uint64_t last_uncache_address = 0;
     };
 
+    struct StoreRetirementStats {
+        std::uint64_t scalar = 0, vector_uops = 0;
+        std::uint64_t pending_at_retirement = 0, already_dequeued = 0;
+        std::uint64_t drained = 0, max_pending = 0;
+        std::uint64_t pending = 0, pending_before_last_edge = 0;
+    };
+
     struct TopDownStats {
         std::uint64_t replay_allocate_cycles = 0;
         std::uint64_t sq_full_cycles = 0;
@@ -1321,6 +1328,17 @@ public:
     bool account_sq_cancellation(unsigned count);
 
     bool run_until_queues_retired(unsigned timeout = 512);
+
+    // Caller holds the completed architectural head and observes backend
+    // writeback-to-retirement timing. Normal cacheable stores only; physical
+    // SQ obligations survive this architectural transition until dequeue.
+    bool begin_store_release_epoch(unsigned timeout = 4096);
+    bool end_store_release_epoch(unsigned timeout = 4096);
+    bool track_store_release_inputs(const StoreTransaction &transaction);
+    bool track_vector_release_inputs(const VectorMemoryTransaction &transaction);
+    bool retire_store(const StoreTransaction &transaction);
+    bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions);
+    const StoreRetirementStats &store_retirement_stats() const;
 
     bool commit_store(const StoreTransaction &transaction, unsigned timeout = 512);
 

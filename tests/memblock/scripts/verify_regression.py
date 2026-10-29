@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4732,9 +4732,38 @@ def _check_scalar_dependency_accounting(result: dict[str, Any]) -> None:
                  "scalar dependency interleaved windows disagree with early loads")
 
 
+def _check_stream_store_retirement(result: dict[str, Any]) -> None:
+    scalar, vector, uops, queued, predequeued, peak, admissions, issues, heads, drained = _csv_counts(
+        result, "stream_store_retirement", 10
+    )
+    operations = _csv_counts(result, "stream_ops", 5)
+    vector_uops = _csv_counts(result, "stream_vector_uops", 2)
+    stream = _csv_counts(result, "stream", 12)
+    restart_loads, restart_stores, flushes, pending_flushes = _csv_counts(result, "stream_vstart_flush", 4)
+    _require(restart_loads <= operations[1] and restart_stores <= operations[3] and
+             flushes == restart_loads + restart_stores and pending_flushes <= flushes,
+             "stream nonzero-VSTART flush-after accounting is inconsistent")
+    retries = result.get("stream_scalar_retries")
+    _require(type(retries) is int and retries >= 0, "invalid stream_scalar_retries")
+    _require(scalar == operations[2] and vector == operations[3] and uops == vector_uops[1],
+             "stream architectural store retirements disagree with completed instructions/uops")
+    _require(queued + predequeued == drained == scalar + uops,
+             "stream committed store drain records are not conserved")
+    _require((queued == 0 and peak == admissions == issues == heads == 0) or
+             (queued > 0 and 1 <= peak <= min(queued, 52) and
+              (queued + 7) // 8 <= heads <= stream[2]),
+             "stream committed store pending/peak/head observations are inconsistent")
+    _require(admissions <= stream[1] - stream[0] and
+             issues <= stream[8] + retries +
+             _csv_counts(result, "stream_recovery", 20)[8],
+             "stream committed store overlap exceeds accepted work")
+
+
 def _check_stream_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 62:
         return
+    if result.get("constraint_schema", 0) >= 74:
+        _check_stream_store_retirement(result)
     rate = result.get("target_concurrent_stream")
     _require(type(rate) is int and 0 <= rate <= 1000, "invalid target_concurrent_stream")
     epochs, admitted, retired, overlap, sliding, prefix, live, pending, events, replays, after_serial, last = _csv_counts(result, "stream", 12)

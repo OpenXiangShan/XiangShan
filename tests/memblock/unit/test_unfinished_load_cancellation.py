@@ -30,10 +30,10 @@ struct Pin { std::uint64_t v=0; void set(std::uint64_t value){v=value;} std::uin
 struct CancelFixture {
     struct { struct { struct { Pin rob_idx_flag,rob_idx_value,level,is_vls_exception,valid; } redirect;
         struct { Pin lq_cancel_cnt,sq_cancel_cnt; } retirement; } queues; void refresh_comb(){}; } dut_;
-    struct { bool observe_redirect_cancellation(std::uint64_t,std::uint64_t){return true;} } queues_;
+    struct { std::uint64_t sq_allocated()const{return 0;} bool observe_redirect_cancellation(std::uint64_t,std::uint64_t){return true;} } queues_;
     FailureState error_{"fixture","contract"};
     LoadScoreboard scoreboard_;
-    struct ScalarRedirectBoundary { unsigned rob;bool flag,flush_itself;std::uint64_t cycle,remaining; };
+    struct ScalarRedirectBoundary { unsigned rob;bool flag,flush_itself;std::uint64_t cycle,remaining,sq_allocation_limit; };
     std::optional<ScalarRedirectBoundary> scalar_redirect_boundary_;
     unsigned ticks=0,complete_tick=0;
     generated::ScalarLoadWriteback completion;

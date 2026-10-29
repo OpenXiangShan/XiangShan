@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=73`.
+`constraint_schema=74`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -647,8 +647,10 @@ Array order and sampling code are authoritative in
 | `concurrent_ops` | Legacy-window producer counts: scalar load, vector load, scalar store, vector store, prefetch. |
 | `stream` | Epochs, admitted instructions, retired instructions, admissions with older accepted work pending, admissions after a prefix retired while older work remains live, prefix retirements with younger live work, maximum live instructions, maximum accepted-and-pending instructions, initial issue events, vector replay issues, epochs after serial work, last global action index. These are driver/scoreboard observations, not an internal pipeline occupancy oracle. |
 | `stream_ops`, `stream_issue`, `stream_vector_uops`, `stream_scalar_retries` | Retired instruction counts in the same five-class order; initial scalar-load/STA/STD/vector-load-uop/vector-store-uop/prefetch issues; admitted vector-load/store uops; repeated STA issues excluded from initial counts. Schema 62 requires conservation and bounds in both verifier modes without a positive-bin gate. The opt-in strict checker retains minimum epoch/action/overlap observations for a stream-only configuration. |
-| `stream_waiting_head` | Schema 67: admission and operand/uop event selections while the oldest architectural instruction is complete and eligible to retire. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
+| `stream_waiting_head` | Admission and operand/uop event selections while the oldest architectural instruction has completed. From schema 74 this includes its required backend retirement-readiness guard; it does not imply immediate legal retirement. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
 | `stream_sta` | Schema 73: ordinary first STA attempts, retries, matched hits, misses; accepted admission/scalar load/other STA/other STD/vector uop/prefetch during another ordinary store's feedback wait; maximum simultaneous ordinary feedback waits at accepted issue boundaries. Each overlap is counted once per accepted event if at least one other attempt is outstanding at its edge, excluding feedback already observed by that edge. First attempts and hits equal ordinary scalar-store retirements (excluding recovery roles); retries and misses equal `stream_scalar_retries`. These are scheduling/feedback relations, not a per-request PTW or translation-hit oracle. |
+| `stream_store_retirement` | Schema 74: scalar architectural retirements, vector instruction retirements, vector uop drain records; records still in SQ at retirement, records already dequeued; maximum pending committed records; accepted initial-admission completion edges, regular producer acceptance edges, and retirement-driven head-update edges with pending committed records; records drained by public SQ dequeue. Record totals conserve scalar retirements plus vector uops, and physical records must drain at epoch end. Recovery-store STA/STD and vector replay helper edges are excluded from the producer-overlap count; strict refetch load acceptance is included. |
+| `stream_vstart_flush` | Schema 74: admitted nonzero-VSTART vector load/store instructions, completed same-instruction flush-after redirects, and those redirects with pending committed SQ records. Load plus store counts equal redirects; cancellation must be zero at each boundary. The serialized suffix is a conservative stimulus constraint. |
 | `stream_history` | Schema 72: epochs longer than 32 instructions, maximum actual epoch length, admissions after the first 32 with older accepted work pending, and reuse of a full ROB value/wrap identity within one epoch. These observations distinguish sustained queue overlap from repeated short epochs; lifetime reuse is driver history, not an oracle excluding arbitrary stale responses. Sparse accounting checks length/overlap bounds without requiring positive bins. |
 | `stream_dependencies` | Schema 71: address/data edges, consumed address/data edges, pending address/data sources at selection, consumption before/after source retirement, maximum chain depth. Both accounting modes require exactly-once consumption, lifetime conservation, source/consumer eligibility and depth bounds. Disabled dependencies and all-FP sources cannot produce edges. |
 | `stream_recovery` | Schema 68: started windows, conflict windows, controls, graph stores/loads admitted, initial strictly checked loads, returned rounds, invalidated completed executions, strictly checked refetches, graph stores/loads retired, starts with accepted pending prefix, prefix retirements during the barrier, ordinary admissions after release with graph roles live, observed LQ cancellations, invalidated FP executions, maximum stores/loads/rounds, resolved windows. Refetch executions do not add architectural initial issue/action counts. Both verifier modes enforce sparse conservation, suffix/capacity/shape and emitter-domain bounds, including graph-role counts versus the observed maximum live instructions. |
@@ -1175,11 +1177,11 @@ those actual sample cycles rather than counting every selected helper as
 concurrent. No fixed feedback latency is an expected CPU result.
 
 This removes one global scheduling barrier. Ordinary admission uses the
-capacity and recovery guards below. Issue handshakes and retirement helpers
-still advance time, and unresolved graph operand resolution still uses its
-focused blocking helper. Broad same-cycle heterogeneous issue, independent architectural commit
-versus SQ dequeue, general recovery populations and an accepted-generation
-ledger remain gaps. More seeds cannot remove those control-flow restrictions.
+capacity and recovery guards below. Issue handshakes and unresolved graph
+operand resolution still use blocking helpers. Normal store retirement uses the
+nonblocking physical-drain contract below. Broad same-cycle heterogeneous issue,
+special-store lifecycle separation, general recovery populations and a general
+accepted-generation ledger remain gaps. More seeds cannot remove those control-flow restrictions.
 
 
 ### Ordinary enqueue cadence
@@ -1209,4 +1211,65 @@ edge. Lane holes and vector flow counts retain their existing prefix identities.
 an enqueue sample, so an unmonitored edge breaks a reported consecutive run.
 The verifier checks width/edge conservation, feasible adjacent-run lengths and
 older-work intersection bounds. These observations do not establish simultaneous
-heterogeneous issue or independent store commit/SQ lifetimes.
+heterogeneous issue; store lifecycle observations use their separate ledger.
+
+
+### Architectural store retirement and physical drain
+
+Ordinary streams retire completed scalar and nonsegment vector stores without
+waiting for SQ dequeue. Per-instruction readiness preserves the backend path
+between public writeback and registered ROB outputs. Let E be the edge sampling
+the last required successful public writeback: a scalar `scommit` cannot be
+sampled before E+3, and a changed scalar or vector `pendingPtr` before E+4.
+The executor selects E+5 for vector head changes as an extra conservative edge. The executor conservatively starts age at its completion
+observation, which may occur later than E. Other ready producers may execute
+during that instruction's guard. These are stimulus legality bounds, not expected
+DUT completion latencies.
+
+The retirement helper consumes one old-head edge. Scalar retirement always
+emits exactly one `scommit`, including stores already dequeued at that point;
+vector retirement emits none. The software prefix then advances and samples its
+next public head on the following edge. Vector retirement validates the complete
+same-ROB/flag allocation group, all successful memory-uop writebacks and the
+last-uop marker. Nonmemory vector preparation uops are abstracted as completed
+because their source operands are supplied by the UT. Nonzero-VSTART prep uops
+also require whole-instruction flush-after. The stream stops younger admission
+at this instruction and retires its older prefix. Once the vector is completed
+head, a chosen 8..16-edge guard precedes a same-instruction flush-after redirect,
+with `isVlsException=false` and zero LQ/SQ cancellations. The public head identity
+is held. Stores retain high `pendingst` while executing, including page-crossing
+misalignment; after complete observation, two further cycles guard the first
+low flush-block edge (earliest E+3). It stays low through the chosen redirect wait
+and six extra local recovery edges. Its store level is restored only for post-flush retirement. Serializing
+the suffix is a chosen constraint, not a nonsegment decode `blockBackward`
+requirement; this does not cover general mixed-suffix cancellation or exact
+ROB/RAB recovery timing. A refetch resets the instruction's retirement-readiness
+timestamp.
+
+An ordinary epoch explicitly drains SBuffer and the public memory link on entry
+and exit to isolate tracked inputs from unintegrated legacy actions. Within the
+epoch, there is no per-store physical-drain barrier. Each store's release-image
+inputs are tracked after allocation, registered before its accepting scalar
+operands/vector uop edge, and authorized by its matching public head. The manager
+keeps grouped independent versions across eviction/refill and validates a frozen
+whole-line candidate at first C. This covers old images and applied store bytes
+before architectural reference commit; it makes no exact early-effect timing
+claim. General canceled-store journals and legacy pre-notification images remain
+outside the scope.
+
+Architectural retirement applies predicted input bytes once to the reference
+image. The queue ledger retains each scalar/full-vector-uop identity and absolute
+SQ dequeue target. Public dequeue retires those physical obligations in order;
+architectural pop supplies no queue credit, and cancellation cannot release a
+committed record. Partial vector dequeue cannot drain a later uop target.
+Independent admission-order load expectations, manager byte checks and final
+word readback remain separate oracles. Every retained target must drain at epoch
+end, with no latency upper-bound assertion beyond the existing progress watchdog.
+
+`stream_store_retirement` measures pending records at each actual acceptance or
+head-update edge, using state before that edge's public dequeue. A vector counts
+one initial admission at its final enqueue edge and one physical record per
+memory uop, distinct from its one architectural instruction. Pending-record peak
+may exceed the architectural live-window depth. These observations cover the
+ordinary stream only; CBO/CMO, MMIO/NC, exceptional stores, segments and legacy
+blocking commit helpers retain their separate contracts.

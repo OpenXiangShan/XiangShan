@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 
 // Private implementation boundary. Scenarios must include memblock_env.hpp.
 #include "memblock_env.hpp"
@@ -984,6 +985,14 @@ public:
 
     bool run_until_queues_retired(unsigned timeout = 512);
 
+    bool begin_store_release_epoch(unsigned timeout = 4096);
+    bool end_store_release_epoch(unsigned timeout = 4096);
+    bool track_store_release_inputs(const StoreTransaction &transaction);
+    bool track_vector_release_inputs(const VectorMemoryTransaction &transaction);
+    bool retire_store(const StoreTransaction &transaction);
+    bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions);
+    const StoreRetirementStats &store_retirement_stats() const;
+
     bool commit_store(const StoreTransaction &transaction, unsigned timeout = 512);
 
     bool commit_vector_store(
@@ -1515,13 +1524,26 @@ private:
     static std::uint64_t vector_store_key(
         const VectorMemoryTransaction &transaction);
 
+    struct ReleaseInputGroup {
+        std::uint64_t order, physical, virtual_address;
+        std::vector<unsigned char> bytes;
+    };
+    struct ReleaseStoreInputs {
+        unsigned rob;
+        bool flag, address = false, data = false, registered = false, authorized = false;
+        std::vector<ReleaseInputGroup> groups;
+    };
+    std::map<std::uint64_t, ReleaseStoreInputs> scalar_release_inputs_, vector_release_inputs_;
+    bool accept_release_store_input(std::uint64_t key, bool vector, bool address);
+    bool authorize_release_store_inputs();
+
     DutAdapter dut_;
     FailureState error_{"environment", "environment-contract"};
     std::optional<std::uint64_t> last_reset_completed_cycle_;
     struct ScalarRedirectBoundary {
         unsigned rob;
         bool flag, flush_itself;
-        std::uint64_t cycle, remaining;
+        std::uint64_t cycle, remaining, sq_allocation_limit;
     };
     std::optional<ScalarRedirectBoundary> scalar_redirect_boundary_;
     SparseMemory bus_memory_;

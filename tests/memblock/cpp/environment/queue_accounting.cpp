@@ -56,12 +56,18 @@ void QueueAccounting::stage_admission_credit(std::uint64_t lq, std::uint64_t sq)
 
 void QueueAccounting::sample_after_edge(DutAdapter &dut_, bool redirect)
 {
+    store_retirement_stats_.pending_before_last_edge = committed_stores_.size();
     ++completed_edges_;
     const auto lq_dequeued = dut_.queues.retirement.lq_deq.value();
     const auto sq_dequeued = dut_.queues.retirement.sq_deq.value();
     lq_dequeued_ += lq_dequeued;
     sq_dequeued_ += sq_dequeued;
     stage_admission_credit(lq_dequeued, sq_dequeued);
+    while (!committed_stores_.empty() && committed_stores_.front().target <= sq_dequeued_) {
+        committed_stores_.pop_front();
+        ++store_retirement_stats_.drained;
+    }
+    store_retirement_stats_.pending = committed_stores_.size();
     while (!admission_credits_.empty() &&
            admission_credits_.front().ready_edge <= completed_edges_) {
         lq_admission_retired_ += admission_credits_.front().lq;
@@ -75,6 +81,11 @@ void QueueAccounting::sample_after_edge(DutAdapter &dut_, bool redirect)
 
 void QueueAccounting::check_driver_accounting()
 {
+    const auto &retired = store_retirement_stats_;
+    if (retired.scalar + retired.vector_uops != retired.drained + retired.pending ||
+        retired.pending_at_retirement + retired.already_dequeued != retired.scalar + retired.vector_uops) {
+        error_.record("architecturally retired store drain obligations are not conserved");
+    }
     if (lq_enqueued_observed_ != lq_allocated_ ||
         sq_enqueued_observed_ != sq_allocated_) {
         std::ostringstream message;
@@ -174,5 +185,65 @@ std::optional<std::uint64_t> QueueAccounting::vector_store_target(std::uint64_t 
     const auto it = vector_store_sq_targets_.find(key);
     if (it == vector_store_sq_targets_.end()) return std::nullopt;
     return it->second;
+}
+bool QueueAccounting::valid_store_retirement_target(std::uint64_t target) const
+{
+    return target > last_committed_target_ && target <= sq_allocated_ - sq_canceled_;
+}
+
+bool QueueAccounting::retain_committed_store(std::uint64_t key, std::uint64_t target, bool vector)
+{
+    if (!valid_store_retirement_target(target)) {
+        error_.record("store architectural retirement is not an increasing allocated SQ prefix");
+        return false;
+    }
+    last_committed_target_ = target;
+    auto &stats = store_retirement_stats_;
+    ++(vector ? stats.vector_uops : stats.scalar);
+    if (target <= sq_dequeued_) {
+        ++stats.already_dequeued;
+        ++stats.drained;
+    } else {
+        ++stats.pending_at_retirement;
+        committed_stores_.push_back({key, target, vector});
+        stats.pending = committed_stores_.size();
+        stats.max_pending = std::max(stats.max_pending, stats.pending);
+    }
+    return true;
+}
+
+bool QueueAccounting::retire_scalar_store(std::uint64_t key)
+{
+    const auto found = scalar_store_sq_targets_.find(key);
+    if (found == scalar_store_sq_targets_.end()) {
+        error_.record("scalar store architectural retirement has no allocation target");
+        return false;
+    }
+    if (!retain_committed_store(key, found->second, false)) return false;
+    scalar_store_sq_targets_.erase(found);
+    return true;
+}
+
+bool QueueAccounting::complete_vector_store_group(const std::set<std::uint64_t> &keys) const
+{
+    if (keys.empty()) return false;
+    const auto rob = *keys.begin() & 0x1ffU;
+    std::set<std::uint64_t> allocated;
+    for (const auto &[key, target] : vector_store_sq_targets_) {
+        if ((key & 0x1ffU) == rob) allocated.insert(key);
+    }
+    return keys == allocated;
+}
+
+bool QueueAccounting::retire_vector_store(std::uint64_t key)
+{
+    const auto found = vector_store_sq_targets_.find(key);
+    if (found == vector_store_sq_targets_.end()) {
+        error_.record("vector store architectural retirement has no allocation target");
+        return false;
+    }
+    if (!retain_committed_store(key, found->second, true)) return false;
+    vector_store_sq_targets_.erase(found);
+    return true;
 }
 } // namespace memblock

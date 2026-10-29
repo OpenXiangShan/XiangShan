@@ -226,7 +226,12 @@ int main(int argc, char **argv) {
             input >> transactions >> coverage.stream_scalar_retries;
             std::string extra;
             if (input.fail() || input >> extra) return 1;
-            std::cout << "MEMBLOCK_CONSTRAINED_RANDOM_PASS transactions=" << transactions
+            coverage.stream_store_retirement[0] = coverage.stream_ops[2];
+        coverage.stream_store_retirement[1] = coverage.stream_ops[3];
+        coverage.stream_store_retirement[2] = coverage.stream_vector_uops[1];
+        coverage.stream_store_retirement[4] = coverage.stream_ops[2] + coverage.stream_vector_uops[1];
+        coverage.stream_store_retirement[9] = coverage.stream_store_retirement[4];
+        std::cout << "MEMBLOCK_CONSTRAINED_RANDOM_PASS transactions=" << transactions
                       << ' ' << constraints.summary() << ' ' << coverage.summary() << '\n';
         }
         return 0;
@@ -311,7 +316,7 @@ class StreamDependencyAccountingTest(unittest.TestCase):
             for field in FIELDS:
                 self.assertEqual(report[field], original[field], field)
             self.assertEqual(report["target_stream_dependency"], rate)
-            self.assertEqual(report["constraint_schema"], 73)
+            self.assertEqual(report["constraint_schema"], 74)
             self.assertEqual(report["transactions"], original["transactions"])
             self.assertEqual(report["stream_scalar_retries"], original["stream_scalar_retries"])
             report["constraint_schema"] = original["constraint_schema"]
@@ -356,7 +361,7 @@ class StreamDependencyAccountingTest(unittest.TestCase):
                 if expected is not None:
                     report = self.modules["run_regression"].parse_summary(ran.stdout)
                     self.assertEqual(report["target_stream_dependency"], expected)
-                    self.assertEqual(report["constraint_schema"], 73)
+                    self.assertEqual(report["constraint_schema"], 74)
 
     def test_all_consumer_classes_pending_ready_and_source_lifetimes(self):
         histories = [pair(kind, pending=pending, after=after)

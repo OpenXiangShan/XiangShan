@@ -497,6 +497,11 @@ auto Environment::Impl::lsq_enqueue_lanes_observed() const -> const std::array<s
     return queues_.lsq_enqueue_lanes_observed();
 }
 
+auto Environment::Impl::store_retirement_stats() const -> const StoreRetirementStats &
+{
+    return queues_.store_retirement_stats();
+}
+
 auto Environment::Impl::lsq_enqueue_cadence() const -> const std::array<std::uint64_t, 6> &
 {
     return queues_.lsq_enqueue_cadence();
@@ -709,6 +714,32 @@ auto Environment::Impl::run_until_sbuffer_empty(unsigned timeout)  -> bool
 } // namespace memblock
 
 namespace memblock {
+auto Environment::Impl::begin_store_release_epoch(unsigned timeout) -> bool
+{
+    if (!scalar_release_inputs_.empty() || !vector_release_inputs_.empty()) {
+        error_.record("ordinary release epoch starts with live input trackers");
+        return false;
+    }
+    if (!run_until_all_complete(timeout) || !run_until_queues_retired(timeout) ||
+        !pulse_sbuffer_flush() || !run_until_sbuffer_empty(timeout) ||
+        !run_until_dcache_release_idle(timeout) || !run_until_dcache_idle(timeout)) return false;
+    const bool began = memory_agent_.begin_release_input_epoch();
+    return check_components() && began;
+}
+
+auto Environment::Impl::end_store_release_epoch(unsigned timeout) -> bool
+{
+    if (!scalar_release_inputs_.empty() || !vector_release_inputs_.empty()) {
+        error_.record("ordinary release epoch ends with live input trackers");
+        return false;
+    }
+    if (!run_until_all_complete(timeout) || !run_until_queues_retired(timeout) ||
+        !pulse_sbuffer_flush() || !run_until_sbuffer_empty(timeout) ||
+        !run_until_dcache_release_idle(timeout) || !run_until_dcache_idle(timeout)) return false;
+    const bool ended = memory_agent_.end_release_input_epoch();
+    return check_components() && ended;
+}
+
 auto Environment::Impl::checkpoint_dcache_alias_reference(std::uint64_t base,
     std::uint64_t bytes) -> bool
 {

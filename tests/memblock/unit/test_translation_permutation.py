@@ -23,6 +23,10 @@ namespace memblock {
 void trace_reference_store(const SparseMemory &, const char *, std::uint64_t,
     unsigned, std::uint64_t, unsigned, bool, unsigned, bool, const char *) {}
 struct StoreFixture {
+    // This fixture exercises legacy record-only callers with no tracked inputs.
+    std::set<std::uint64_t> scalar_release_inputs_, vector_release_inputs_;
+    static std::uint64_t scalar_store_key(const StoreTransaction &) { return 0; }
+    static std::uint64_t vector_store_key(const VectorMemoryTransaction &) { return 0; }
     SparseMemory bus_memory_;
     SparseMemory memory_{&bus_memory_};
     struct {

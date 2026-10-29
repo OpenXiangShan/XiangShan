@@ -359,7 +359,8 @@ auto Environment::Impl::run_until_queues_retired(unsigned timeout)  -> bool
         }
     }
     if (queues_.lq_dequeued() + queues_.lq_canceled() < queues_.lq_allocated() ||
-        queues_.sq_dequeued() + queues_.sq_canceled() < queues_.sq_allocated()) {
+        queues_.sq_dequeued() + queues_.sq_canceled() < queues_.sq_allocated() ||
+        queues_.store_retirement_stats().pending != 0) {
         std::ostringstream message;
         message << "timed out waiting for mixed LSQ retirement"
                 << " lq=" << queues_.lq_dequeued() << '+' << queues_.lq_canceled()
@@ -483,6 +484,193 @@ auto Environment::Impl::track_final_observation_bytes(
         final_observation_words_.insert(word);
     }
     final_observation_bytes_ += bytes;
+}
+
+auto Environment::Impl::track_store_release_inputs(const StoreTransaction &transaction) -> bool
+{
+    const auto key = scalar_store_key(transaction);
+    const auto target = queues_.scalar_store_target(key);
+    if (!target || !transaction.cacheable || static_cast<unsigned>(transaction.op) > 3U ||
+        transaction.expected_exception_mask || transaction.input_exception_mask ||
+        transaction.input_flush_pipe || transaction.input_trigger != kTriggerNone ||
+        transaction.expected_output_flush_pipe.value_or(false) ||
+        transaction.expected_debug_is_mmio.value_or(false) ||
+        transaction.expected_debug_is_ncio.value_or(false) || scalar_release_inputs_.contains(key)) {
+        error_.record("release input tracking requires a newly allocated normal cacheable scalar store");
+        return false;
+    }
+    ReleaseStoreInputs inputs{transaction.rob, transaction.rob_flag};
+    const unsigned width = 1U << static_cast<unsigned>(transaction.op);
+    // Aligned scalar writes are indivisible. Split misalignment conservatively
+    // into byte groups; this value oracle makes no early-effect timing claim.
+    const bool aligned = (transaction.address & (width - 1U)) == 0;
+    for (unsigned offset = 0; offset < width; offset += aligned ? width : 1U) {
+        ReleaseInputGroup group{*target * 1024U + offset,
+            reference_byte_address(transaction, transaction.address + offset), transaction.address + offset, {}};
+        for (unsigned b = 0; b < (aligned ? width : 1U); ++b)
+            group.bytes.push_back(transaction.data >> (8U * (offset + b)));
+        inputs.groups.push_back(std::move(group));
+    }
+    scalar_release_inputs_.emplace(key, std::move(inputs));
+    return true;
+}
+
+auto Environment::Impl::track_vector_release_inputs(const VectorMemoryTransaction &transaction) -> bool
+{
+    const auto key = vector_store_key(transaction);
+    const auto target = queues_.vector_store_target(key);
+    if (!target || !transaction.store || transaction.segment || !transaction.cacheable ||
+        transaction.expected_exception_mask || transaction.allowed_additional_exception_mask ||
+        transaction.input_exception_mask || transaction.input_flush_pipe ||
+        transaction.input_trigger != kTriggerNone || transaction.exception_may_defer ||
+        !transaction.check_data || transaction.expected_debug_is_mmio.value_or(false) ||
+        transaction.expected_debug_is_ncio.value_or(false) || vector_release_inputs_.contains(key)) {
+        error_.record("release input tracking requires a newly allocated normal cacheable vector store");
+        return false;
+    }
+    ReleaseStoreInputs inputs{transaction.rob, transaction.rob_flag};
+    const unsigned width = 1U << vector_data_eew(transaction);
+    const auto active = active_vector_elements(transaction);
+    for (unsigned element = 0; element < 16U / width; ++element) {
+        if (!((active >> element) & 1U)) continue;
+        const auto address = vector_element_virtual_address(transaction, element);
+        const bool aligned = (address & (width - 1U)) == 0;
+        for (unsigned offset = 0; offset < width; offset += aligned ? width : 1U) {
+            ReleaseInputGroup group{*target * 1024U + element * 32U + offset,
+                vector_byte_address(transaction, element, offset), address + offset, {}};
+            for (unsigned b = 0; b < (aligned ? width : 1U); ++b)
+                group.bytes.push_back(transaction.data[element * width + offset + b]);
+            inputs.groups.push_back(std::move(group));
+        }
+    }
+    vector_release_inputs_.emplace(key, std::move(inputs));
+    return true;
+}
+
+auto Environment::Impl::accept_release_store_input(std::uint64_t key, bool vector, bool address) -> bool
+{
+    auto &tracked = vector ? vector_release_inputs_ : scalar_release_inputs_;
+    const auto found = tracked.find(key);
+    if (found == tracked.end()) return true; // Legacy and exceptional callers.
+    auto &inputs = found->second;
+    if (vector) inputs.address = inputs.data = true;
+    else (address ? inputs.address : inputs.data) = true;
+    if (inputs.address && inputs.data && !inputs.registered) {
+        for (const auto &group : inputs.groups)
+            if (!memory_agent_.register_release_store(group.order, group.physical,
+                group.virtual_address, group.bytes)) {
+                error_.merge(memory_agent_.failures());
+                return false;
+            }
+        inputs.registered = true;
+    }
+    return true;
+}
+
+auto Environment::Impl::authorize_release_store_inputs() -> bool
+{
+    for (auto *tracked : {&scalar_release_inputs_, &vector_release_inputs_})
+        for (auto &[key, inputs] : *tracked) {
+            if (!inputs.registered || inputs.authorized ||
+                dut_.queues.backend.pending_ptr_value.value() != inputs.rob ||
+                dut_.queues.backend.pending_ptr_flag.value() != inputs.flag) continue;
+            // Normal cacheable SQ effects use the public oldest identity.
+            // pendingst controls special-store/ROB modes and is not a further
+            // normal scalar/vector SQ eligibility condition.
+            for (const auto &group : inputs.groups)
+                if (!memory_agent_.authorize_release_store(group.order)) {
+                    error_.merge(memory_agent_.failures());
+                    return false;
+                }
+            inputs.authorized = true;
+        }
+    return true;
+}
+
+auto Environment::Impl::retire_store(const StoreTransaction &transaction) -> bool
+{
+    const auto target = queues_.scalar_store_target(scalar_store_key(transaction));
+    if (static_cast<unsigned>(transaction.op) > static_cast<unsigned>(StoreOp::sd) ||
+        !transaction.cacheable || transaction.expected_exception_mask ||
+        transaction.input_exception_mask || transaction.input_flush_pipe ||
+        transaction.input_trigger != kTriggerNone ||
+        transaction.expected_output_flush_pipe.value_or(false) ||
+        transaction.expected_debug_is_mmio.value_or(false) ||
+        transaction.expected_debug_is_ncio.value_or(false) ||
+        store_scoreboard_.pending(transaction) ||
+        dut_.queues.backend.pending_ptr_value.value() != transaction.rob ||
+        dut_.queues.backend.pending_ptr_flag.value() != transaction.rob_flag ||
+        !dut_.queues.backend.pendingst.boolean() ||
+        !target || !queues_.valid_store_retirement_target(*target)) {
+        error_.record("scalar architectural retirement requires a completed normal cacheable store at the held head");
+        return false;
+    }
+    // ROB emits exactly one scalar scommit even if this ordinary SQ entry
+    // already drained while it was the head. Dequeue is not the commit event.
+    if (!commit_stores_through(transaction, 1) ||
+        !queues_.retire_scalar_store(scalar_store_key(transaction))) return false;
+    record_committed_store(transaction);
+    scalar_release_inputs_.erase(scalar_store_key(transaction));
+    return check_components();
+}
+
+auto Environment::Impl::retire_vector_stores(
+    const std::vector<VectorMemoryTransaction> &transactions) -> bool
+{
+    if (transactions.empty()) {
+        error_.record("vector architectural retirement requires a complete instruction");
+        return false;
+    }
+    const auto &first = transactions.front();
+    std::set<std::uint64_t> keys;
+    unsigned last_uops = 0;
+    std::uint64_t previous_target = 0;
+    for (const auto &transaction : transactions) {
+        const auto key = vector_store_key(transaction);
+        const auto target = queues_.vector_store_target(key);
+        if (!transaction.store || transaction.segment || !transaction.cacheable ||
+            transaction.expected_exception_mask || transaction.allowed_additional_exception_mask ||
+            transaction.input_exception_mask || transaction.input_flush_pipe ||
+            transaction.input_trigger != kTriggerNone || !transaction.check_data ||
+            transaction.expected_debug_is_mmio.value_or(false) ||
+            transaction.expected_debug_is_ncio.value_or(false) ||
+            transaction.exception_may_defer || vector_scoreboard_.pending(transaction) ||
+            transaction.rob != first.rob || transaction.rob_flag != first.rob_flag ||
+            !keys.insert(key).second || !target || *target <= previous_target ||
+            !queues_.valid_store_retirement_target(*target)) {
+            error_.record("vector architectural retirement requires completed normal same-instruction uops in SQ order");
+            return false;
+        }
+        previous_target = *target;
+        last_uops += transaction.last_uop;
+    }
+    const bool restart_flush = std::any_of(transactions.begin(), transactions.end(),
+        [](const auto &transaction) { return transaction.vstart != 0; });
+    if (restart_flush && (!scalar_redirect_boundary_ ||
+        scalar_redirect_boundary_->rob != first.rob || scalar_redirect_boundary_->flag != first.rob_flag ||
+        scalar_redirect_boundary_->flush_itself || scalar_redirect_boundary_->remaining != 0 ||
+        previous_target > scalar_redirect_boundary_->sq_allocation_limit || cycle() < scalar_redirect_boundary_->cycle + 6U)) {
+        error_.record("nonzero-VSTART vector retirement requires a recovered same-instruction flush-after");
+        return false;
+    }
+    if (last_uops != 1 || !transactions.back().last_uop ||
+        !queues_.complete_vector_store_group(keys) ||
+        dut_.queues.backend.pending_ptr_value.value() != first.rob ||
+        dut_.queues.backend.pending_ptr_flag.value() != first.rob_flag ||
+        !dut_.queues.backend.pendingst.boolean()) {
+        error_.record("vector architectural retirement lacks the complete last-uop head");
+        return false;
+    }
+    // Preserve the old head for its retirement edge. Vector ROB retirement
+    // emits no scalar scommit; the SQ uses checked merge-buffer completion.
+    tick();
+    if (!check_components()) return false;
+    for (const auto &transaction : transactions) {
+        if (!queues_.retire_vector_store(vector_store_key(transaction))) return false;
+        record_committed_vector_store(transaction);
+        vector_release_inputs_.erase(vector_store_key(transaction));
+    }
+    return check_components();
 }
 
 auto Environment::Impl::commit_store(const StoreTransaction &transaction,
@@ -698,13 +886,13 @@ auto Environment::Impl::record_committed_store(const StoreTransaction &transacti
                 ? 0
                 : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
         if (transaction.reference_pages) {
-            if (bytes <= 8U && (transaction.address & (bytes - 1U)) == 0) {
+            if (!scalar_release_inputs_.contains(scalar_store_key(transaction)) && bytes <= 8U && (transaction.address & (bytes - 1U)) == 0) {
                 if (byte == 0) {
                     std::vector<unsigned char> update(bytes);
                     for (unsigned b = 0; b < bytes; ++b) update[b] = transaction.data >> (8U * b);
                     memory_agent_.note_reference_store(physical, transaction.address, update);
                 }
-            } else {
+            } else if (!scalar_release_inputs_.contains(scalar_store_key(transaction))) {
                 memory_agent_.note_reference_write(physical, transaction.address + byte,
                     memory_.read_byte(physical));
             }
@@ -750,7 +938,7 @@ auto Environment::Impl::record_committed_vector_store(const VectorMemoryTransact
             memory_.write_reference_byte(
                 vector_byte_address(transaction, element, byte),
                 transaction.data[element * element_bytes + byte]);
-            if (transaction.reference_pages) {
+            if (transaction.reference_pages && !vector_release_inputs_.contains(vector_store_key(transaction))) {
                 const auto virtual_address = vector_element_virtual_address(transaction, element);
                 if ((virtual_address & (element_bytes - 1U)) == 0) {
                     if (byte == 0) memory_agent_.note_reference_store(
@@ -946,7 +1134,7 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
     if (!queues_.observe_redirect_cancellation(lq_canceled, sq_canceled)) return false;
     if (!check_components()) return false;
     scalar_redirect_boundary_ = ScalarRedirectBoundary{rob_value, rob_flag,
-        flush_itself, cycle(), lq_canceled};
+        flush_itself, cycle(), lq_canceled, queues_.sq_allocated()};
     return true;
 }
 

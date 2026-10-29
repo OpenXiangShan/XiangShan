@@ -322,6 +322,8 @@ auto Environment::Impl::issue_vector(const VectorMemoryTransaction &transaction,
         dut_.drive_vector_memory_issue(transaction.lane, issue);
         dut_.refresh_comb();
         const bool ready = dut_.vector_memory_issue_ready(transaction.lane);
+        if (ready && transaction.store &&
+            !accept_release_store_input(vector_store_key(transaction), true, true)) return false;
         tick();
         if (ready) {
             dut_.clear_vector_memory_issue_valids();
@@ -519,6 +521,7 @@ auto Environment::Impl::issue_store_address(const StoreTransaction &transaction,
             dut_.clear_scalar_store_issue_valids();
             return false;
         }
+        if (ready && !accept_release_store_input(scalar_store_key(transaction), false, true)) return false;
         tick();
         if (ready) {
             dut_.clear_scalar_store_issue_valids();
@@ -1012,6 +1015,7 @@ auto Environment::Impl::issue_store_data(const StoreTransaction &transaction,
             dut_.clear_scalar_store_issue_valids();
             return false;
         }
+        if (ready && !accept_release_store_input(scalar_store_key(transaction), false, false)) return false;
         tick();
         if (ready) {
             dut_.clear_scalar_store_issue_valids();

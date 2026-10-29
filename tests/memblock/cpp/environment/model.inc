@@ -24,6 +24,11 @@ constexpr unsigned kLsqAdmissionCreditDelay = 3;
 // Redirect pointer rollback needs three boundary edges. Conservatively allow
 // the same producer stages to restart afterwards; repeated highs restart this.
 constexpr unsigned kLsqRedirectRecoveryEdges = 6;
+// Conservative changed-head guards after successful public writeback. The
+// earliest producer path permits E+4 for scalar and vector; vector selects one
+// extra edge. These are stimulus constraints, not response-latency oracles.
+constexpr unsigned kStreamScalarWritebackToHead = 4;
+constexpr unsigned kStreamVectorWritebackToHead = 5;
 constexpr unsigned kRobEntries = 160;
 constexpr unsigned kDcacheMissEntries = 16;
 constexpr unsigned kDcacheReleaseEntries = 18;

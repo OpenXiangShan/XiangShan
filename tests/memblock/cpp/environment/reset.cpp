@@ -34,6 +34,8 @@ auto Environment::Impl::reset()  -> bool
     // XSTileWrap applies the same child reset to the core and tile-local
     // managers. Model that reset domain by discarding every in-flight
     // protocol transaction before the DUT can reuse source identifiers.
+    scalar_release_inputs_.clear();
+    vector_release_inputs_.clear();
     memory_agent_.reset_link_state();
     ptw_agent_.reset_link_state();
     uncache_agent_.reset_link_state();

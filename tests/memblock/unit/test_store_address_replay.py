@@ -290,6 +290,11 @@ int main() {
         input >> transactions >> coverage.stream_scalar_retries;
         std::string extra;
         if (input.fail() || input >> extra) return 1;
+        coverage.stream_store_retirement[0] = coverage.stream_ops[2];
+        coverage.stream_store_retirement[1] = coverage.stream_ops[3];
+        coverage.stream_store_retirement[2] = coverage.stream_vector_uops[1];
+        coverage.stream_store_retirement[4] = coverage.stream_ops[2] + coverage.stream_vector_uops[1];
+        coverage.stream_store_retirement[9] = coverage.stream_store_retirement[4];
         std::cout << "MEMBLOCK_CONSTRAINED_RANDOM_PASS transactions=" << transactions
                   << ' ' << constraints.summary() << ' ' << coverage.summary() << '\n';
     }
@@ -392,7 +397,7 @@ class StoreAddressReplayTest(unittest.TestCase):
         reports = []
         for original, line in zip(expected, lines):
             report = self.parser.parse_summary(line)
-            self.assertEqual(report["constraint_schema"], 73)
+            self.assertEqual(report["constraint_schema"], 74)
             for field, value in original.items():
                 self.assertEqual(report[field], value, field)
             reports.append(report)
@@ -582,7 +587,7 @@ class StoreAddressReplayTest(unittest.TestCase):
 
     def test_schema72_compatibility_omits_new_field(self):
         current = self.baseline()
-        line = current["summary"].replace("constraint_schema=73", "constraint_schema=72")
+        line = current["summary"].replace("constraint_schema=74", "constraint_schema=72")
         line = " ".join(word for word in line.split() if not word.startswith("stream_sta="))
         legacy = self.parser.parse_summary(line)
         self.assertNotIn("stream_sta", legacy)

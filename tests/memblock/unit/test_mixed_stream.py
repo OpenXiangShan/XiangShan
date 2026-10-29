@@ -57,6 +57,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.dependencies = []
         cls.sustained = []
         cls.feedback = []
+        cls.retirement = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -156,6 +157,7 @@ class MixedStreamTest(unittest.TestCase):
                 'dependency_cases': cls.dependencies,
                 'sustained_cases': cls.sustained,
                 'feedback_cases': cls.feedback,
+                'retirement_cases': cls.retirement,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
@@ -229,6 +231,25 @@ class MixedStreamTest(unittest.TestCase):
         for bin in range(11):
             self.assertGreater(sum(run['stream_sta'][bin] for run in results), 0, bin)
         self.assertGreaterEqual(max(run['stream_sta'][10] for run in results), 2)
+
+    def test_architectural_store_retirement_preserves_independent_sq_drain(self):
+        results = []
+        for seed in range(1, 33):
+            for timing in (0, 1):
+                for family in (0, 3, 4):
+                    result = self.run_fixture('sustained', seed, timing, family, 128)
+                    results.append(result)
+                    self.retirement.append(dict(seed=seed, timing=timing, family=family, result=result))
+        for result in results:
+            scalar, vector, uops, queued, early, peak, admission, issue, heads, drained = result['stream_store_retirement']
+            self.assertEqual(scalar + uops, queued + early)
+            self.assertEqual(scalar + uops, drained)
+            self.assertGreaterEqual(heads, (queued + 7) // 8)
+        self.assertTrue(all(sum(run['stream_store_retirement'][i] for run in results) > 0
+                            for i in (0, 1, 2, 3, 5, 6, 7, 8, 9)))
+        self.assertGreaterEqual(max(run['stream_store_retirement'][5] for run in results), 2)
+        self.assertGreaterEqual(len({run['schedule'] for run in results}), 128)
+        self.assertEqual(results[0], self.run_fixture('sustained', 1, 0, 0, 128))
 
     def test_sustained_epochs_reuse_terminal_identities_without_drains(self):
         for length in (1, 32, 33, 256, 641, 1024):
@@ -600,18 +621,63 @@ class MixedStreamTest(unittest.TestCase):
         self.mutations['serial_admission'] = {'rejected': True, 'peak_live': max(run['peak_live'] for run in results),
                                              'overlap_admissions': sum(run['overlap_admissions'] for run in results)}
 
-    def test_private_greedy_retirement_loses_ready_head_interleaving(self):
+    def test_private_eager_retirement_before_backend_readiness_is_rejected(self):
         old = 'const auto event = ready[random() % ready.size()];'
         self.assertEqual(self.source.count(old), 1)
         binary = self.compile(self.source.replace(old,
             'const auto event = completed_head ? Event{5, 0, 0} : ready[random() % ready.size()];'),
-            'greedy-retirement')
-        results = [self.stream(seed, timing=0, binary=binary) for seed in range(1, 17)]
-        with self.assertRaises(AssertionError):
-            self.assert_retirement_interleaving(results)
-        self.mutations['greedy_retirement'] = {'rejected': True,
-            'admissions_with_completed_head': sum(run['admissions_with_completed_head'] for run in results),
-            'issues_with_completed_head': sum(run['issues_with_completed_head'] for run in results)}
+            'eager-retirement')
+        result = subprocess.run([str(binary), 'stream', '1', '0', '0', '32'],
+                                capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('backend', result.stderr)
+        self.mutations['early_backend_retirement'] = {'rejected': True,
+            'diagnostic': result.stderr.strip()}
+
+    def test_nonzero_vstart_vectors_preserve_whole_instruction_flush(self):
+        results = [self.stream(seed, timing, family, 32)
+                   for seed in range(1, 33) for timing in (0, 1) for family in (2, 4)]
+        for result in results:
+            loads, stores, flushes, pending = result['stream_vstart_flush']
+            self.assertEqual(loads + stores, flushes)
+            self.assertLessEqual(pending, flushes)
+        self.assertGreater(sum(r['stream_vstart_flush'][0] for r in results), 0)
+        self.assertGreater(sum(r['stream_vstart_flush'][1] for r in results), 0)
+        for name, before, after in (
+            ('missing_restart_barrier', '!restart_barrier && admitted < length', 'admitted < length'),
+            ('missing_restart_redirect', '!environment.redirect_after(head.rob(), head.flag(), false)', 'false'),
+            ('short_restart_recovery', '!environment.run_cycles(6)', '!environment.run_cycles(0)'),
+        ):
+            self.assertEqual(self.source.count(before), 1)
+            binary = self.compile(self.source.replace(before, after), name)
+            rejected = None
+            for seed in range(1, 17):
+                result = subprocess.run([str(binary), 'stream', str(seed), '1', '4', '32'],
+                                        capture_output=True, text=True, timeout=10)
+                if result.returncode:
+                    rejected = {'seed': seed, 'diagnostic': result.stderr.strip()}
+                    break
+            self.assertIsNotNone(rejected, name + ' escaped independent lifecycle checks')
+            self.assertRegex(rejected['diagnostic'], 'VSTART|pending-store')
+            self.mutations[name] = rejected
+
+    def test_vstart_store_execution_retains_pendingst_until_completion(self):
+        results = [self.run_fixture('sustained', seed, 1, 4, 128) for seed in range(1, 33)]
+        self.assertGreater(sum(r['vstart_cross_page'] for r in results), 0)
+        for name, before, after in (
+            ('premature_pendingst_low',
+             '(!live.front().restart_blocked || live.front().restart_flushed)',
+             '(!live.front().needs_restart_flush() || live.front().restart_flushed)'),
+            ('early_flush_block', 'work.restart_block_cycle = environment.cycle() + 2U;',
+             'work.restart_block_cycle = environment.cycle();'),
+        ):
+            self.assertEqual(self.source.count(before), 1)
+            binary = self.compile(self.source.replace(before, after), name)
+            result = subprocess.run([str(binary), 'sustained', '29', '1', '4', '128'],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('VSTART low pendingst', result.stderr)
+            self.mutations[name] = {'rejected': True, 'diagnostic': result.stderr.strip()}
 
     def test_private_missing_older_address_guard_is_rejected(self):
         scalar = '(work.kind == 4 || older_addresses_known)'

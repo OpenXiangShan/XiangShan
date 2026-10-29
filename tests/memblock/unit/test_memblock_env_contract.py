@@ -1667,7 +1667,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "ptw_agent_(bus_memory_)",
             "uncache_agent_(bus_memory_)",
             "memory_.write_reference_byte(",
-            "reference_memory_.read_byte(",
+            "reference_memory_.read_beat(",
             "bus_expected_load",
         ):
             self.assertIn(contract, environment)

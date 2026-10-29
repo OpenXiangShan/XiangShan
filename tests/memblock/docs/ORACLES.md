@@ -103,8 +103,11 @@ independently validate how an explicit expected value was calculated.
 
 `commit_store`, `commit_vector_store`, `record_committed_store`,
 `record_committed_vector_store`, and `record_atomic_result` apply predicted
-post-state to the reference image. Ordinary store helpers use a recorded SQ
-dequeue target and backend commit stimulus; record-only helpers trust their
+post-state to the reference image. Blocking store helpers wait for a recorded SQ
+dequeue target. Ordinary stream `retire_store`/`retire_vector_stores` instead
+validate successful completed head work, consume its architectural retirement
+edge and retain its identity/target as a physical drain obligation. Both paths
+apply independent input bytes exactly once; record-only helpers trust their
 caller to select a legal point. CBO.ZERO writes 64 zero bytes at the containing
 line base; CMO changes no reference bytes. These functions are
 [reference-state transitions](../cpp/environment/completion.cpp), not passive
@@ -269,9 +272,29 @@ readback remains a separate externally visible check.
 
 The [executor](../cpp/scenarios/mixed_stream.cpp) keeps architectural age in one
 deque, holds head/pending-store levels atomically, and retires only a complete
-prefix. A completed head becomes a ready retirement event alongside admission
-and issue; delaying its selection preserves the actual head, live destinations
-and all outstanding obligations. Scalar STA/STD acknowledgements and vector uop completions match their
+prefix. A completed head first ages through its backend retirement-readiness
+guard, then becomes a retirement event alongside admission and issue. Selection
+can be delayed while the registered head, destinations and obligations remain.
+With E the final successful public writeback sampling edge, scalar retirement
+count sampling is no earlier than E+3; changed scalar/vector head sampling is no
+earlier than E+4/E+5 in this executor. The producer minimum is E+4 for both;
+the vector guard selects an extra edge. Completion is observed at or after E,
+so poll delays are conservative. Each store helper consumes one old-head edge, then the executor
+samples the next head on the following edge. Nonstore retirement uses its own
+one-edge head update. These are legal producer constraints, not latency oracles.
+A refetch clears prior completion age. Vector nonmemory preparation uops are
+abstracted as complete because the UT supplies their sources. Nonzero-VSTART
+preparation also records a whole-instruction flush obligation: the stream blocks
+younger admission, holds its head identity, and sends
+same-instruction flush-after with `isVlsException=false` after completion and a
+chosen 8..16-edge guard. Stores retain high `pendingst` through memory execution,
+including page-crossing misalignment. Once complete, the ROB flush-block level
+may first be sampled low at E+3; the executor waits two further cycles from its
+completion observation before driving that low edge. Zero LQ/SQ cancellation is
+required; six extra local
+recovery edges precede restoring the store level and retirement. These are
+conservative generator constraints, not exact ROB/RAB recovery timing. General
+mixed-suffix cancellation remains outside this direction. Scalar STA/STD acknowledgements and vector uop completions match their
 scoreboards; prefetch queries require the prefetch class as well as ROB value
 and wrap. Exact vector replay service consumes only its matching feedback,
 rejects an already-completed target and preserves unrelated replay obligations.
@@ -430,9 +453,13 @@ ROB/flag/uop/destination obligation and retains unissued sibling expectations.
 Vector-store replay feedback cannot match a load by its LQ snapshot. The
 list overload waits only for members of that list and leaves unrelated replay
 requests queued. Pending-store replay eligibility emits no scalar `scommit`.
-Vector-store commit waits for the uop's recorded SQ target, using its ROB head
-and merge-buffer completion eligibility; partial dequeue does not retire the
-whole instruction. Callers must retire older instructions first. Complete
+The directed blocking vector-store commit helper waits for the uop's recorded
+SQ target, using its ROB head and merge-buffer completion eligibility. Ordinary
+stream retirement instead preflights the entire same-ROB/flag allocation group,
+all successful memory-uop completions and the last-uop marker. It emits no scalar
+`scommit`, records predicted bytes once and retains each physical target until
+public SQ dequeue reaches it. Partial dequeue does not finish the whole vector
+instruction or a later physical target. Callers retire older instructions first. Complete
 allocation history remains outside this model; the bounded ordinary stream
 reserves destinations across its live instructions and retires only completed
 architectural prefixes.
@@ -683,7 +710,7 @@ forbidden operation.
 | E GrantAck | Sink must match a queued expectation; matching consumes exactly one entry. An E is accepted only after the first corresponding Grant/GrantData D beat, or in that same cycle, and every sink stays busy from first D acceptance until E. Drains check expected E entries separately from D response queues. | The expectation entry is still created when `respond` constructs Grant/GrantData; the first-D/sink-busy check supplies the causal eligibility gate. A same-cycle D/E is accepted. A sink's A source may still be reused only after its final D, which is separately checked. |
 | Probe lifecycle | Rotating 6-bit B sources, accepted-B provenance and source reuse/wrap/depth accounting. Same-PA B presentation is serialized through final matching C and waits for prior final D plus E. Standalone and automatic Probes use the recorded old VA alias. | This is a single-client manager schedule; broad manager reordering remains outside the current direction. |
 | ProbeAck/Data | Match one accepted same-PA B; C source is client-owned and fixed across beats. Exact scenario-owned expectations remain exact. Forced-data automatic toN accepts present TtoN/BtoN with full data or absent NtoN without data, rejects a B-to-T report, and checks all data bytes against the frozen independent owner image. Size/address/report/opcode/corrupt and multibeat identity are checked. | C user/echo fields do not carry reliable alias identity. NtoN does not remove an unobserved voluntary Release obligation. Arbitrary in-flight versioned data images are not modeled. |
-| Release/Data | Full-line Release validates size/alignment/shrink param before ReleaseAck. ReleaseData compares explicit declared bytes, else validates a complete independent owner version, else compares architectural reference. Backing bytes change only after complete validation. Stable raw address/size/source/param/beat count are checked. Completed shrink updates ownership; a racing release is acked without waiting for its outstanding Probe. | Versioned images cover checkpointed legacy owners and opt-in ordinary input journals. The first C freezes baseline and eligible whole-update records; independent same-alias transaction bytes add aligned store/element updates, while other-alias commits leave them unchanged. C user/echo fields are not used as identity. Uncheckpointed owners retain the current-reference fallback; pre-notification segment releases and long update-history search cost remain unqualified. |
+| Release/Data | Full-line Release validates size/alignment/shrink param before ReleaseAck. ReleaseData compares exact declared bytes, else checks a complete independent version for tracked ordinary inputs or checkpointed mapped traffic, else compares architectural reference. Backing bytes change only after complete validation. Raw address/size/source/param/beat count remain fixed. Completed shrink updates ownership; a racing release can complete before its outstanding Probe. | Ordinary input groups are registered at accepted scalar operands/vector uops and authorized by matching public head identity. First C freezes eligibility, including before-reference-commit effects. Aligned store/element groups stay indivisible; misaligned pieces can vary by byte. C user/echo fields supply no identity. Unintegrated legacy classes retain their existing fallback/notification limits, including pre-notification releases; bounded search exhaustion is a manager-contract limitation. |
 | C under stall | A snapshot includes all sampled C fields and data. Dropped valid or a changed payload after a stalled cycle fails. Target release windows count attributed stalls and comparisons. | Stability between stalled cycles is distinct from multibeat identity across accepted beats. The latter is incomplete. |
 
 All DCache lifecycle details above come from
@@ -691,6 +718,31 @@ All DCache lifecycle details above come from
 `capture_before_tick`, `update_after_tick`, `respond`, `request_probe`,
 `accept_probe_response`, `accept_release`, and the idle predicates. A manager
 response drain does not imply cache-byte observation or coherence closure.
+
+Ordinary mixed epochs isolate their input journal from untracked legacy actions.
+Entry drains LSQ, SBuffer and the public memory link before enabling the journal;
+exit does the same after every architectural instruction and physical SQ record
+finishes. There is no such drain between ordinary instructions within the epoch.
+The initial line anchor is independent reference memory certified by that entry
+drain. Every ordinary write in the epoch is registered before it can change that
+reference. A scalar group requires both accepted STA and STD; a vector group
+requires its accepted uop. Registration precedes the accepting edge, and matching
+public `pendingPtr` authorizes it before a head-eligible edge. Normal cacheable SQ
+eligibility does not additionally require `pendingst`. Absolute SQ targets plus
+element/byte positions order groups even when inputs arrive out of order.
+
+The [manager](../cpp/environment/dcache_agent.inc) retains eligible groups across
+owner absence, Release and reacquire. It freezes one candidate set at first C,
+validates all beats together, then consumes only a least applied-update witness.
+The new baseline is reconstructed from independent inputs; omitted updates remain
+possible. This retains ABA alternatives while rejecting observable rollback.
+Exact scenario overrides stay exact. Registration/authorization do not mutate
+architectural memory; retirement does so exactly once, without duplicate legacy
+notifications. This is a byte-value oracle, not an exact early-effect timing
+oracle. Ordinary stream store cancellation is outside this bounded direction.
+Epoch exit clears covered records only after the explicit drain; existing exact
+alias checkpoints are refreshed for covered owners. Uncheckpointed legacy owners
+retain their separate oracle contract.
 
 The reference checkpoint follows producer retirement, an explicit SBuffer flush
 and an idle D/E link. It reads only independent architectural reference bytes.
@@ -708,24 +760,12 @@ expectations. Final Bare word readback remains an independent end-to-end check.
 A new-colour store may commit its reference bytes before its Acquire; comparing
 the old owner's response with that newer global image would be a false oracle.
 
-The manager also exposes an opt-in ordinary-store input journal. Callers register
-immutable aligned store/element groups before their acceptance edge and authorize
-them at a legal public head. Absolute order tokens preserve overlap precedence
-when acceptance is out of order. The first C freezes baseline, eligible groups
-and exact overrides. Complete-line validation promotes an independently rebuilt
-least applied-update witness; omitted groups survive Release and reacquire, while
-per-byte progress floors reject an older late registration after visible progress.
-
-An explicit epoch begins only after the caller certifies retired producers,
-SBuffer drain and an idle public link. Every write during that epoch must use the
-input journal. Its first line anchor is independent drained reference memory;
-legacy updates covered by that boundary are discarded. Epoch exit requires
-another certified drain and no unauthorized input work. Uncheckpointed legacy
-owner behavior is preserved. These are caller contracts, not assertions inferred
-from DUT internal state. Registration and authorization never mutate architectural
-reference bytes. Unintegrated pre-notification legacy releases retain the gap
-above. The bounded implementation permits 1,048,576 groups per line and
-67,108,864 order IDs/solver work units; exhaustion fails as a manager limitation.
+Per-byte applied-order floors reject an older late registration after visible
+same-byte progress. Certified epoch entry discards pre-epoch legacy updates
+already covered by the drained reference anchor; epoch exit also requires no
+unauthorized input work. The implementation permits 1,048,576 groups per line
+and 67,108,864 order IDs/solver work units. Budget exhaustion is a manager-contract
+limitation, not a DUT functional result.
 
 `cancel_release_stores` removes only registered, still unauthorized input
 orders after the caller certifies a completed legal redirect boundary. It
@@ -797,14 +837,26 @@ Canonical scalar-store transactions freeze the opposite LQ cursor at dispatch,
 including wrap, before younger loads are constructed. Typed enqueue validates
 both queue snapshots against allocation minus cancellation and drives the saved
 LQ flag. Explicit-pointer overloads remain for focused legacy callers and rely
-on those callers to preserve the same architectural prefix. `pendingPtr` names
-the oldest unretired instruction; completion-driven LQ dequeue alone cannot
-advance it. The ordinary stream admits/retire prefixes within a bounded epoch
-and holds the actual oldest instruction and its store level. The legacy
+on those callers to preserve the same architectural prefix. `pendingPtr` is a
+registered oldest-unretired identity and deliberately lags ROB dequeue. The
+ordinary stream represents that lag with an old-head retirement edge followed
+by the next public-head edge; completion-driven LQ dequeue alone cannot advance
+it. The stream admits/retires prefixes within a bounded epoch and holds the
+selected registered identity and its store level. The legacy
 heterogeneous helper waits for an older special load before
 moving to the scalar load and preserves distinct live integer destinations.
+Normal architectural retirement moves accepted SQ targets into a separate
+committed-record ledger. Targets increase in SQ order and retain class and full
+ROB/SQ value/wrap identity; actual public dequeue alone removes them. Already
+removed targets complete immediately but still count one scalar `scommit` where
+required. Admission continues to use physical dequeue/cancellation credits, never
+architectural pop. Registration, pending and drain totals conserve exactly; an
+epoch cannot finish with retained committed work. This is ordered aggregate
+SQ-target attribution, not a passive per-entry dequeue identity or a general
+accepted-generation ledger.
+
 `run_until_queues_retired` waits until aggregate dequeue plus cancellation
-reaches allocation; its local final comparison checks only for a shortfall,
+reaches allocation and all retained committed targets drain; its local final comparison checks only for a shortfall,
 not an excess. Exact equality is checked separately by selected scenario gates.
 A known redirect is driven, then retained cancellation counts are sampled after the driver's fixed interface latency; those are aggregate output
 counts, not transaction IDs. Software cancellation is separately counted as

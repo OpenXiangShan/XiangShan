@@ -22,6 +22,11 @@ struct StreamWork {
     std::uint64_t expected_scalar = 0;
     unsigned recovery_id = 0, recovery_index = 0;
     bool refetch = false, checked = false;
+    std::optional<std::uint64_t> retire_ready_cycle, restart_ready_cycle, restart_block_cycle;
+    bool restart_blocked = false, restart_flushed = false;
+    bool needs_restart_flush() const {
+        return !vectors.empty() && vectors.front().vstart != 0;
+    }
     // A producer's checked-completion lifetime can outlive its deque entry.
     struct Producer { bool complete = false, retired = false; unsigned depth = 0; };
     std::shared_ptr<Producer> result = std::make_shared<Producer>();
@@ -59,7 +64,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     if (!enter_translation_context(translation) ||
         !issue_constrained_fence(RandomConstraints::scalar_load) ||
         !environment.run_until_all_complete(constrained_completion_timeout) ||
-        !environment.run_until_queues_retired(constrained_completion_timeout)) return false;
+        !environment.run_until_queues_retired(constrained_completion_timeout) ||
+        !environment.begin_store_release_epoch(constrained_completion_timeout)) return false;
     const auto ptw_before = environment.ptw_requests();
     const auto requests_before = environment.tilelink_requests();
     const auto arena = constrained_cacheable_address(64, translation, leaf, false);
@@ -75,6 +81,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     auto expected_violations = environment.memory_violation_stats().count;
     auto &recovery_counts = coverage.stream_recovery;
     auto &inflight = coverage.stream_recovery_inflight;
+    const auto drained_before = environment.store_retirement_stats().drained;
     auto last_progress = environment.cycle();
     const auto deadline = environment.cycle() + std::uint64_t{length} * constrained_completion_timeout * 4U;
     const auto start_action = actions;
@@ -121,7 +128,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (barrier_at_front()) return environment.set_rob_head_state(
             memblock::rob_pointer_value(recovery->anchor), memblock::rob_pointer_flag(recovery->anchor), false);
         return live.empty() || environment.set_rob_head_state(
-            live.front().rob(), live.front().flag(), live.front().is_store());
+            live.front().rob(), live.front().flag(), live.front().is_store() &&
+                (!live.front().restart_blocked || live.front().restart_flushed));
     };
     const auto graph_work = [&](unsigned index, bool store) -> StreamWork & {
         const auto found = std::find_if(live.begin(), live.end(), [&](const auto &work) {
@@ -223,6 +231,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             load_work.load = load;
             load_work.expected_scalar = episode.expected(index);
             load_work.issued[0] = load_work.checked = false;
+            load_work.retire_ready_cycle.reset();
             load_work.refetch = true;
             environment.expect_load_data(load_work.load, load_work.expected_scalar);
             if (!environment.enqueue_load(load_work.load)) return false;
@@ -245,9 +254,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             ++recovery_counts[12];
             inflight[10] += recovery->old_response_active();
         }
-        if (work.kind == 2 && !environment.commit_store(work.store, constrained_completion_timeout)) return false;
-        if (work.kind == 3) for (const auto &uop : work.vectors)
-            if (!environment.commit_vector_store(uop, constrained_completion_timeout)) return false;
+        if (work.kind == 2 && !environment.retire_store(work.store)) return false;
+        if (work.kind == 3 && !environment.retire_vector_stores(work.vectors)) return false;
+        coverage.stream_store_retirement[0] += work.kind == 2;
+        coverage.stream_store_retirement[1] += work.kind == 3;
+        coverage.stream_store_retirement[2] += work.kind == 3 ? work.vectors.size() : 0;
         if (work.kind == 0) destinations[work.load.fp_wen ? 1U : 0U].erase(work.load.pdest);
         if (work.kind == 1) for (const auto &uop : work.vectors) destinations[2].erase(uop.pdest);
         const auto old_rob = work.rob(); const auto old_flag = work.flag();
@@ -272,6 +283,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (live.empty()) {
             if (!environment.set_rob_head_state(old_rob, old_flag, false)) return false;
         } else if (!install_head()) return false;
+        coverage.stream_store_retirement[8] +=
+            environment.store_retirement_stats().pending_before_last_edge != 0;
         last_progress = environment.cycle();
         return true;
     };
@@ -283,7 +296,24 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (environment.cycle() > deadline) { phase += ":epoch-deadline"; return false; }
 
         if (environment.memory_violation_stats().count != expected_violations) {
-            phase += ":unexpected-redirect"; return false;
+            const auto &violation = environment.memory_violation_stats();
+            std::ostringstream detail;
+            detail << ":unexpected-redirect:cycle=" << violation.last_cycle
+                << ":rob=" << unsigned(violation.last.rob_value) << '/' << violation.last.rob_flag
+                << ":ftq=" << unsigned(violation.last.ftq_value) << '/' << unsigned(violation.last.ftq_offset)
+                << ":level=" << violation.last.level;
+            for (const auto &item : live) {
+                detail << ":live={rob=" << unsigned(item.rob()) << '/' << item.flag()
+                    << ",kind=" << item.kind << ",issued=" << all_issued(item)
+                    << ",pending=" << pending(item) << ",recovery=" << item.recovery_id;
+                if (item.kind == 0) detail << ",address=" << item.load.address;
+                if (item.kind == 2) detail << ",address=" << item.store.address;
+                for (const auto &uop : item.vectors)
+                    detail << ",vector=" << uop.address << '/' << unsigned(uop.vuop_idx)
+                        << '/' << unsigned(uop.vstart);
+                detail << '}';
+            }
+            phase += detail.str(); return false;
         }
         unsigned waiting_addresses = 0;
         for (auto &work : live) if (work.kind == 2 && !work.recovery_id) {
@@ -414,13 +444,49 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (fits) weights[kind] = constraints.operation_weights[stream_operations[kind]];
         }
         // 0 = admission, 1 = scalar load/prefetch, 2 = STA, 3 = STD,
-        // 4 = vector uop, 5 = completed architectural head retirement.
+        // 4 = vector uop, 5 = architectural retirement, 8 = VSTART flush-after.
         // Candidates are regenerated from current obligations.
         struct Event { unsigned kind, instruction, uop; };
         std::vector<Event> ready;
-        const bool completed_head = !barrier_at_front() && !live.empty() && all_issued(live.front()) && !pending(live.front());
-        if (completed_head) ready.push_back({5, 0, 0});
-        if (admitted < length && live.size() < depth &&
+        // Completion and backend retirement are separate producer states.
+        // A scalar scommit edge precedes changed pendingPtr by one edge; vector
+        // stores emit no scommit but use the same explicit retirement edge.
+        // Prep/nonmemory vector uops are abstracted as already completed.
+        for (auto &work : live) {
+            if (!all_issued(work) || pending(work)) continue;
+            if (!work.retire_ready_cycle) {
+                const auto latency = work.kind == 1 || work.kind == 3
+                    ? memblock::kStreamVectorWritebackToHead : memblock::kStreamScalarWritebackToHead;
+                work.retire_ready_cycle = environment.cycle() + latency - (work.is_store() ? 2U : 1U);
+                if (work.needs_restart_flush()) work.restart_block_cycle = environment.cycle() + 2U;
+            }
+        }
+        const bool completed_head = !barrier_at_front() && !live.empty() &&
+            all_issued(live.front()) && !pending(live.front());
+        const bool restart_pending = completed_head && live.front().needs_restart_flush() &&
+            !live.front().restart_flushed;
+        if (restart_pending) {
+            auto &head = live.front();
+            // Keep pendingst high while memory execution needs the oldest
+            // store (notably cross-page misalignment). ROB flush blocking can
+            // first be sampled low at E+3, after its final successful WB.
+            if (!head.restart_blocked && head.restart_block_cycle &&
+                environment.cycle() >= *head.restart_block_cycle) {
+                head.restart_blocked = true;
+                if (!install_head()) return false;
+                head.restart_ready_cycle = environment.cycle() + 8U + random() % 9U;
+            }
+            if (head.restart_ready_cycle && environment.cycle() >= *head.restart_ready_cycle)
+                ready.push_back({8, 0, 0});
+        }
+        const bool retire_ready = completed_head && !restart_pending && live.front().retire_ready_cycle &&
+            environment.cycle() >= *live.front().retire_ready_cycle;
+        if (retire_ready) ready.push_back({5, 0, 0});
+        // A nonzero-VSTART prep uop records a full-instruction flush-after.
+        // Serialize its suffix as a chosen constraint; retain older work.
+        const bool restart_barrier = std::any_of(live.begin(), live.end(),
+            [](const auto &work) { return work.needs_restart_flush(); });
+        if (!restart_barrier && admitted < length && live.size() < depth &&
             (!recovery || recovery->phase == StreamRecovery::Phase::admission) &&
             std::accumulate(weights.begin(), weights.end(), std::uint64_t{0}) != 0)
             ready.push_back({0, 0, 0});
@@ -513,10 +579,25 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         const auto event = ready[random() % ready.size()];
         if (recovery && recovery->old_response_active() && event.kind >= 1 && event.kind <= 4)
             ++inflight[9];
-        if (completed_head && event.kind != 5 && event.kind != 7)
+        if (completed_head && event.kind != 5 && event.kind != 7 && event.kind != 8)
             ++coverage.stream_waiting_head[event.kind == 0 ? 0U : 1U];
         if (event.kind == 5) {
             if (!retire_head()) return false;
+        } else if (event.kind == 8) {
+            auto &head = live.front();
+            if (live.size() != 1 || recovery || !restart_pending) return false;
+            const auto lq_cancel = environment.lq_redirect_canceled_observed();
+            const auto sq_cancel = environment.sq_redirect_canceled_observed();
+            // pendingPtr stays at this instruction, with pendingst low during
+            // the ROB flush block and conservative local recovery guard.
+            if (!environment.redirect_after(head.rob(), head.flag(), false) ||
+                environment.lq_redirect_canceled_observed() != lq_cancel ||
+                environment.sq_redirect_canceled_observed() != sq_cancel ||
+                !environment.run_cycles(6)) return false;
+            head.restart_flushed = true;
+            ++coverage.stream_vstart_flush[2];
+            coverage.stream_vstart_flush[3] += environment.store_retirement_stats().pending != 0;
+            if (!install_head()) return false;
         } else if (event.kind == 7) {
             if (!environment.release_held_dcache_response_at(*recovery->cold_physical)) return false;
             recovery->phase = StreamRecovery::Phase::drain_old;
@@ -689,7 +770,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 }
                 oracle.store(work.store);
                 environment.expect_store(work.store);
-                if (!environment.enqueue_store(work.store)) return false;
+                if (!environment.enqueue_store(work.store) ||
+                    !environment.track_store_release_inputs(work.store)) return false;
             } else if (work.kind == 4) {
                 work.prefetch = make_prefetch(dependent_address(line), static_cast<memblock::PrefetchOp>(8U + random() % 3U),
                     random() % memblock::kScalarLoadLanes);
@@ -703,6 +785,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.vectors = make_random_vector_uops(store, dependent_address(constrained_window_address(line, 1U << eew)),
                     work.shape, random() % 1000U < constraints.vector_corner_per_mille);
                 work.issued.assign(work.vectors.size(), false);
+                if (work.needs_restart_flush()) ++coverage.stream_vstart_flush[store ? 1U : 0U];
                 if (!store) {
                     for (auto &uop : work.vectors) uop.pdest = allocate_destination(2);
                     oracle.prepare_vector_load(work.vectors);
@@ -719,7 +802,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     }
                     if (store) { oracle.store(uop); environment.expect_vector(uop); }
                     else environment.expect_vector_data(uop, oracle.vector_load(uop));
-                    if (!environment.enqueue_vector(uop)) return false;
+                    if (!environment.enqueue_vector(uop) ||
+                        (store && !environment.track_vector_release_inputs(uop))) return false;
                 }
                 coverage.stream_vector_uops[store ? 1U : 0U] += work.vectors.size();
             }
@@ -731,7 +815,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 unsigned(work.rob()) + (work.flag() ? memblock::kRobEntries : 0U)).second;
             const bool was_empty = live.empty();
             live.push_back(std::move(work));
-            note_wait_overlap(4); ++admitted; ++coverage.stream[1];
+            note_wait_overlap(4);
+            coverage.stream_store_retirement[6] +=
+                environment.store_retirement_stats().pending_before_last_edge != 0; ++admitted; ++coverage.stream[1];
             if (was_empty && !install_head()) return false;
             if (graph_admission && recovery->loads.size() == recovery->group.loads.size()) {
                 recovery->obligation.emplace(recovery->loads, recovery->stores.size(), recovery->group.unfinished);
@@ -792,6 +878,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 ++coverage.stream_issue[work.kind == 1 ? 3U : 4U];
             }
             coverage.stream[8] += initial_event;
+            coverage.stream_store_retirement[7] +=
+                (work.kind != 2 || !work.recovery_id) &&
+                environment.store_retirement_stats().pending_before_last_edge != 0;
             note_wait_overlap(event.kind == 1 ? (work.kind == 0 ? 5U : 9U) :
                 event.kind == 2 ? 6U : event.kind == 3 ? 7U : 8U, &work);
         }
@@ -805,12 +894,18 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     phase = "mixed-stream-drain";
     if (recovery || environment.memory_violation_stats().count != expected_violations ||
         !environment.run_until_queues_retired(constrained_completion_timeout)) return false;
+    const auto &store_retirement = environment.store_retirement_stats();
+    if (store_retirement.pending != 0) return false;
+    coverage.stream_store_retirement[3] = store_retirement.pending_at_retirement;
+    coverage.stream_store_retirement[4] = store_retirement.already_dequeued;
+    coverage.stream_store_retirement[5] = store_retirement.max_pending;
+    coverage.stream_store_retirement[9] += store_retirement.drained - drained_before;
     coverage.stream_history[0] += retired > 32U;
     coverage.stream_history[1] = std::max<std::uint64_t>(coverage.stream_history[1], retired);
     coverage.stream[11] = actions;
     constraint_coverage.sample_dcache(requests_before, environment.tilelink_requests());
     constraint_coverage.sample_translation(translation, leaf, ptw_before,
         environment.ptw_requests(), actions - start_action, actions - start_action);
-    return environment.run_cycles(8);
+    return environment.end_store_release_epoch(constrained_completion_timeout) && environment.run_cycles(8);
 }
 } // namespace memblock::scenarios::mixed

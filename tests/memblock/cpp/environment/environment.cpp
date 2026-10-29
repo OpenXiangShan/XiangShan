@@ -2043,6 +2043,33 @@ auto Environment::run_until_queues_retired(unsigned timeout)  -> bool
     return impl_->run_until_queues_retired(timeout);
 }
 
+auto Environment::begin_store_release_epoch(unsigned timeout) -> bool
+{ return impl_->begin_store_release_epoch(timeout); }
+
+auto Environment::end_store_release_epoch(unsigned timeout) -> bool
+{ return impl_->end_store_release_epoch(timeout); }
+
+auto Environment::track_store_release_inputs(const StoreTransaction &transaction) -> bool
+{ return impl_->track_store_release_inputs(transaction); }
+
+auto Environment::track_vector_release_inputs(const VectorMemoryTransaction &transaction) -> bool
+{ return impl_->track_vector_release_inputs(transaction); }
+
+auto Environment::retire_store(const StoreTransaction &transaction) -> bool
+{
+    return impl_->retire_store(transaction);
+}
+
+auto Environment::retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions) -> bool
+{
+    return impl_->retire_vector_stores(transactions);
+}
+
+auto Environment::store_retirement_stats() const -> const StoreRetirementStats &
+{
+    return impl_->store_retirement_stats();
+}
+
 auto Environment::commit_store(const StoreTransaction &transaction,
     unsigned timeout)  -> bool
 {
