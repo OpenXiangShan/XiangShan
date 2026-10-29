@@ -66,7 +66,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     std::deque<StreamWork> live;
     std::array<std::set<unsigned>, 3> destinations;
     const unsigned depth = 2U + random() % 7U;
-    const unsigned length = std::min(instruction_limit, 8U + unsigned(random() % 25U));
+    const unsigned length = std::min(instruction_limit, constraints.stream_min_instructions +
+        unsigned(random() % (constraints.stream_max_instructions - constraints.stream_min_instructions + 1U)));
+    std::set<unsigned> admitted_rob_identities;
     unsigned admitted = 0, retired = 0, recovery_serial = 0;
     std::optional<StreamRecovery> recovery;
     auto expected_violations = environment.memory_violation_stats().count;
@@ -568,6 +570,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             const bool had_accepted_pending = std::any_of(live.begin(), live.end(),
                 [&](const auto &work) { return work.accepted() && pending(work); });
             coverage.stream[3] += had_accepted_pending;
+            coverage.stream_history[2] += admitted >= 32U && had_accepted_pending;
             coverage.stream[4] += retired != 0 && !live.empty();
             StreamWork work;
             if (!recovery) {
@@ -695,6 +698,12 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 }
                 coverage.stream_vector_uops[store ? 1U : 0U] += work.vectors.size();
             }
+            // Reuse is legal only after the previous architectural lifetime.
+            if (std::any_of(live.begin(), live.end(), [&](const auto &older) {
+                return work.rob() == older.rob() && work.flag() == older.flag();
+            })) { phase += ":live-rob-identity-reuse"; return false; }
+            coverage.stream_history[3] += !admitted_rob_identities.insert(
+                unsigned(work.rob()) + (work.flag() ? memblock::kRobEntries : 0U)).second;
             const bool was_empty = live.empty();
             live.push_back(std::move(work)); ++admitted; ++coverage.stream[1];
             if (was_empty && !install_head()) return false;
@@ -761,6 +770,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     phase = "mixed-stream-drain";
     if (recovery || environment.memory_violation_stats().count != expected_violations ||
         !environment.run_until_queues_retired(constrained_completion_timeout)) return false;
+    coverage.stream_history[0] += retired > 32U;
+    coverage.stream_history[1] = std::max<std::uint64_t>(coverage.stream_history[1], retired);
     coverage.stream[11] = actions;
     constraint_coverage.sample_dcache(requests_before, environment.tilelink_requests());
     constraint_coverage.sample_translation(translation, leaf, ptw_before,

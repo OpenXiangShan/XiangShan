@@ -48,7 +48,8 @@ struct SyntheticEnvironment {
     mutable bool successor_recorded = false;
     struct Dependency { unsigned consumer, producer; bool data; };
     std::vector<Dependency> dependencies;
-    unsigned dependency_operand_checks = 0;
+    unsigned dependency_operand_checks = 0, late_overlap_admissions = 0, rob_reuses = 0;
+    std::set<unsigned> rob_history;
     void bind_dependency(unsigned consumer, const LoadTransaction &source, bool data, std::uint64_t value) {
         const auto &producer = find(source.rob, source.rob_flag);
         require(producer.kind == 0 && !producer.load.fp_wen && producer.id < consumer,
@@ -258,6 +259,12 @@ struct SyntheticEnvironment {
                 for (const auto &uop : work.uops)
                     require(destinations[domain].erase(uop.destination) == 1, "destination released twice");
             }
+            const unsigned obligations = work.kind == 2 ? 1U : work.uops.size();
+            for (unsigned uop = 0; uop < obligations; ++uop) {
+                const auto terminal = std::make_tuple(identity(work.rob, work.flag), work.kind, uop);
+                require(expected.erase(terminal) == 1 && enqueued.erase(terminal) == 1,
+                    "terminal identity lacked exactly one expectation and dispatch");
+            }
             if (work.is_store()) sq_done += work.flows;
             else if (!recovery_enabled) lq_done += work.flows;
             prefix_old_retirements += old_response_active() && work.group != active_group;
@@ -327,6 +334,8 @@ struct SyntheticEnvironment {
             for (unsigned index = retired; index < instructions.size(); ++index)
                 had_pending |= accepted(instructions[index]) && !complete(instructions[index]);
             overlap_admissions += had_pending;
+            late_overlap_admissions += next >= 32U && had_pending;
+            rob_reuses += !rob_history.insert(received).second;
             continued_admissions += retired != 0 && retired != instructions.size();
             instructions.push_back(Instruction{.kind = kind, .id = next, .group = active_group, .rob = t.rob, .flag = t.rob_flag});
             trace.push_back("A" + std::to_string(next) + ":" + std::to_string(kind));
@@ -617,7 +626,7 @@ struct SyntheticEnvironment {
     void finish(unsigned count, const MixedCoverage &coverage, const ConstraintCoverage &constraints) {
         synchronize_retirement();
         require(retired == count && instructions.size() == count, "lost or excess architectural work");
-        require(expected == enqueued, "expectation/dispatch conservation failed");
+        require(expected.empty() && enqueued.empty(), "expectation/dispatch conservation failed");
         require(lq_used == lq_done + canceled_lq && sq_used == sq_done, "queue conservation failed");
         for (const auto &domain : destinations) require(domain.empty(), "physical destination leaked");
         require(coverage.stream[1] == count && coverage.stream[2] == count && constraints.actions == count,
@@ -640,6 +649,9 @@ struct SyntheticEnvironment {
             require(producer_counts[work.id] == count, "producer conservation failed");
         }
         require(coverage.stream_ops == operations, "retired operation-kind accounting disagreed");
+        require(coverage.stream_history == std::array<std::uint64_t, 4>{
+            unsigned(count > 32U), count, late_overlap_admissions, rob_reuses},
+            "sustained history observations disagree with independent admissions");
         const std::array<unsigned, 5> mapping{{RandomConstraints::scalar_load, RandomConstraints::vector_load,
             RandomConstraints::scalar_store, RandomConstraints::vector_store, RandomConstraints::prefetch}};
         for (unsigned kind = 0; kind < mapping.size(); ++kind)
@@ -666,6 +678,7 @@ public:
         for (unsigned index = 0; index < operations.size(); ++index)
             constraints.operation_weights[operations[index]] = validated_profile ? ((family >> index) & 1U) :
                 family == 0 ? (index == 0 ? 7 : 3) : (family == index + 1 ? 1 : 0);
+        constraints.stream_max_instructions = 32;
         constraints.stream_unresolved_per_mille = 0;
         constraints.stream_unresolved_inflight_per_mille = 0;
         constraints.misaligned_per_mille = 450;
@@ -792,10 +805,15 @@ int main(int argc, char **argv) {
             require(rejected == 2 * presets, "stream rate above 1000 was accepted");
             std::cout << "{\"presets\":" << presets << ",\"boundary_overrides\":" << boundaries
                 << ",\"out_of_range_rejections\":" << rejected << "}\n";
-        } else if (mode == "stream" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent") {
+        } else if (mode == "stream" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained") {
             require(argc == 6 || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "sustained") {
+                fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = std::max(1U, limit);
+                fixture.constraints.stream_dependency_per_mille = 1000;
+                fixture.constraints.scalar_fp_per_mille = 0;
+            }
             if (mode == "dependency") {
                 fixture.constraints.stream_dependency_per_mille = 1000;
                 if (std::stoul(argv[4]) == 1) fixture.constraints.scalar_fp_per_mille = 0;
@@ -838,6 +856,8 @@ int main(int argc, char **argv) {
                 << ",\"surviving_prefix_redirects\":" << env.surviving_prefix_redirects
                 << ",\"checked_scalar_values\":" << env.checked_scalar_values
                 << ",\"lq_canceled\":" << env.canceled_lq
+                << ",\"stream_history\":[" << fixture.coverage.stream_history[0] << "," << fixture.coverage.stream_history[1]
+                << "," << fixture.coverage.stream_history[2] << "," << fixture.coverage.stream_history[3] << "]"
                 << ",\"dependency_edges\":" << env.dependencies.size()
                 << ",\"dependency_operand_checks\":" << env.dependency_operand_checks
                 << ",\"dependency_counts\":[";

@@ -18,6 +18,18 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema 72 extends ordinary stream epochs from the former 8..32 draw to
+  configurable inclusive bounds, default 8..256 and maximum 4096, clipped to
+  remaining action budget. One byte image and translation context persist
+  across prefix retirement without an intermediate per-32-instruction drain.
+  Live depth stays 2..8 and existing vector-flow/head/replay gates remain.
+  Admission rejects duplicate live ROB value/wrap identities; history reports
+  extended epochs, longest length, late accepted overlap and terminal identity
+  reuse. Dependency depth is bounded by observed epoch length, not just the
+  configured cap. Existing declaration-before-issue, SQ-only replay generation
+  and bare scalar STD attribution gaps remain explicit; longer histories do
+  not establish universal stale-response detection or full CPU timing.
+
 - Schema 71 adds ordinary integer-load producer edges inside canonical streams.
   Independent address/data edge draws choose older live producers, freeze values
   from the admission-order byte image and gate each consumer operand on checked
@@ -27,7 +39,7 @@ None.
   scalar stores can independently consume full predicted data. Existing scalar
   stores crossing a page end retain their final-address clamp. No observed DUT
   value advances expected state. This improves workload-style dependency timing;
-  general vector-result/index graphs, full rename history and longer continuous
+  general vector-result/index graphs, full rename history and unbounded continuous
   epochs remain gaps.
 
 - Schema 70 separates legacy-window and sliding-stream eligibility. Legacy
@@ -41,7 +53,8 @@ None.
   epoch/context drains remain ordinary-workload priorities.
 
 - Ordinary mixed streams sample variable scalar/FP load, vector load, scalar
-  store, vector store and prefetch composition in 1..32-instruction epochs with
+  store, vector store and prefetch composition in configured 1..4096-instruction
+  epochs (default draw 8..256) with
   2..8 live instructions. Ready events interleave independent STA/STD, vector
   uops and completed-head retirement; new admission continues after prefix retirement while younger work stays
   live. One deque holds the actual oldest ROB head, with distinct live register
@@ -291,7 +304,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 485 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 496 tests pass | Unit checks do not establish DUT functional coverage |
+| Sustained stream DUT qualification | Frozen runtime-v1: 18/18 finite current-runtime cases pass 59408 actions; all ten artifact verifiers pass, including two previous-runtime controls | `build/memblock/sustained-stream-20261029/qualification-v1.json`; spec/coverage/corner defaults, forced 641, cold recovery, exact 4096 mixed/load-only and short compatibility. 47 epochs exceed 32, maximum 4096, 13142 accepted-overlap admissions after ordinal 32 and 21247 full ROB identity reuses; 32055 stream retirements, 21244 address/3117 data edges consumed exactly once, maximum depth 164, 36 held/canceled/drained cold roles and 14098/14098 final words. The two 8192-action cap runs clip to 4095; 8200-action controls exercise exact 4096. Functional/accounting development qualification only |
+| Sustained host and compatibility contracts | 28 compiled scheduler methods pass, including 19 sustained histories up to 4096 and exact long replay; ten independent history/accounting methods pass 167 serialized rows and 173 accepted/148 rejected accounting cases | `build/memblock/sustained-stream-20261029/scheduler-tests/report-v4.json`, `accounting-tests/report.json`; actual parser accepts 7/rejects 19 boundary configurations. Old schema 71 retains 32/depth 31 behavior; two min 8/max 32 DUT cases match 395 semantic fields each against the preceding runtime. Fixtures erase exactly one expectation/dispatch per independently complete terminal uop before identity reuse. Synthetic host timing/ports and sampled replay compatibility do not prove full CPU reachability |
+| Sustained stream independent review | Fresh non-author actual-diff review accepts the bounded development slice with no open findings | `build/memblock/sustained-stream-20261029/review-v2/independent-review.md`; observed-epoch dependency-depth bound and stale length documentation findings resolved and re-reviewed. Reviewer independently reruns ten history tests and all ten artifact verifiers, reconciles all 18 current cases and both 395-field compatibility comparisons. Repeated-identity, replay-generation and scalar STD attribution limits remain explicit; no closure claim |
 | Producer-dependency DUT qualification | Frozen runtime-v1: 22/22 finite DUT cases pass 19456 actions; eleven artifact verifiers accept including two previous-runtime controls | `build/memblock/dependency-stream-20261029/qualification-v1.json`; forced spec/coverage/corner dependencies, default profiles, integrated cold recovery, pure load chains, disabled and all-FP controls. 3729 address and 622 data edges each consumed once, 3043 pending sources selected, maximum depth 20, 2535 consumptions before and 1816 after producer retirement, 9110 retired stream instructions, 5247 accepted-overlap admissions and 8763/8763 final words. Functional/accounting development evidence only; no strict coverage or closure |
 | Producer-dependency structural and accounting checks | 27 compiled scheduler methods pass; fixed eight-integer-load samples produce 55 distinct edge graphs in 64 seeds, excluding addresses/payload/timing. Private early-release, wrong-ALU, wrong-source and wrong-data mutations reject. Nine independent accounting methods pass 284 accepted/66 rejected records and 281 serialized rows | `build/memblock/dependency-stream-20261029/scheduler-tests/report-v3.json`, `accounting-tests/evidence-v2.json`; same-seed replay, disabled/FP-only controls, depth0..31, five consumer classes and producer-lifetime checking. Two disabled-rate DUT cases match 393 semantic fields each against the previous runtime. Host mutations are not RTL mutation evidence |
 | Producer-dependency independent review | Fresh non-author actual-diff review accepts the bounded development slice with no open findings | `build/memblock/dependency-stream-20261029/review-v2/independent-review.md`; source eligibility/depth accounting, direct producer/consumer edge uniqueness, bound-source arithmetic sensitivity, page-clamp contract and preset-table findings resolved. Reviewer reruns eleven artifact verifiers, nine accounting tests, all64 fixed-eight-load cases and selected exact replays. No closure, CPU timing or RTL mutation claim |

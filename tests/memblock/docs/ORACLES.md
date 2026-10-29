@@ -297,6 +297,18 @@ consumers only when its exact scoreboard obligation is no longer pending and
 normal monitor comparison has succeeded. Dependency depth/edges and pending-source
 selection are observed; they do not prove arbitrary rename or ALU timing.
 
+Epoch length is independently configurable up to 4096 instructions, with a
+single reference-byte image and 2..8 live instructions. Admission checks current
+flow capacity and rejects duplicate live ROB value/wrap identities. Prefix
+retirement frees destinations; absolute queue cursors carry through repeated
+wraps. Full identity reuse is counted after retirement, but the existing
+expectation-before-issue model is not a generation-aware accepted-operation
+ledger. Arbitrarily late old completions could alias a reused expected identity;
+vector-store replay records carry SQ value/wrap ranges without absolute issue
+generation, and bare scalar STD pulses lack ROB wrap. The same strict byte,
+exactly-once and final-observation rules apply within those attribution limits.
+Longer epochs do not close these gaps or remove context-boundary drains.
+
 The integrated `stream-unresolved` graph snapshots physical bytes from this
 same admission-order image before any graph store overlay. Thus older ordinary
 unretired stores enter its initial expected bytes, while unresolved graph stores

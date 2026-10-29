@@ -55,6 +55,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.cold_recoveries = []
         cls.profiles = []
         cls.dependencies = []
+        cls.sustained = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -152,6 +153,7 @@ class MixedStreamTest(unittest.TestCase):
                 'recovery_cases': cls.recoveries,
                 'validated_profile_cases': cls.profiles,
                 'dependency_cases': cls.dependencies,
+                'sustained_cases': cls.sustained,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
@@ -211,6 +213,25 @@ class MixedStreamTest(unittest.TestCase):
             self.assertGreater(sum(run['dependency_counts'][index] for run in results), 0)
         self.assertGreaterEqual(max(run['dependency_counts'][8] for run in results), 2)
         self.assertGreaterEqual(len({tuple(run['dependency_counts']) for run in results}), 32)
+
+    def test_sustained_epochs_reuse_terminal_identities_without_drains(self):
+        for length in (1, 32, 33, 256, 641, 1024):
+            for family in (0, 1, 3):
+                with self.subTest(length=length, family=family):
+                    result = self.run_fixture('sustained', 17, 1, family, length)
+                    self.sustained.append(dict(length=length, family=family, result=result))
+                    self.assertEqual(result['actions'], length)
+                    self.assertEqual(result['stream_history'][:2], [int(length > 32), length])
+                    if length > 320:
+                        self.assertEqual(result['stream_history'][3], length - 320)
+                    if length >= 256:
+                        self.assertGreater(result['stream_history'][2], 0)
+        result = self.run_fixture('sustained', 9, 1, 1, 4096)
+        self.sustained.append(dict(length=4096, family=1, result=result))
+        self.assertEqual(result['actions'], 4096)
+        self.assertEqual(result['stream_history'][3], 4096 - 320)
+        self.assertGreater(result['dependency_counts'][8], 31)
+        self.assertEqual(result, self.run_fixture('sustained', 9, 1, 1, 4096))
 
     def test_fixed_load_population_varies_dependency_edges_and_replays(self):
         results = [self.run_fixture('dependency', seed, 1, 1, 8) for seed in range(1, 65)]

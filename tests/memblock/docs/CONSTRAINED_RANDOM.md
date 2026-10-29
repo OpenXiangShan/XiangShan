@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=71`.
+`constraint_schema=72`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -76,6 +76,7 @@ they do not imply arbitrary numeric suffix support.
 | `concurrent` | Rate allocating the mixed concurrency action budget, subject to the serial reservation capped at half the initial available budget. |
 | `concurrent-stream` | Rate selecting a variable ordinary mixed stream instead of a fixed heterogeneous window at an eligible concurrency site. Default 750 in all presets; 0 preserves the legacy prefix schedule, 1000 selects streams only. A residual budget below seven actions always uses a stream when enabled. |
 | `stream-unresolved-inflight` | Conditional conflicting stream-graph rate, default 250 in all presets, selecting one youngest held cold scalar/FP role when at least two load slots fit. Requires a same-page physical line without accepted A coverage, explicit reference bytes or older admitted store bytes. Unavailable attempts retain the completed-load path; zero disables selection. |
+| `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the current 4-KiB page; scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
 | `stream-unresolved` | Conditional rate (default 125 in all presets) replacing an eligible scalar-store admission with a variable unresolved-store/scalar-load graph inside the same sliding stream. Needs at least two remaining live/budget slots and actual LQ/SQ capacity. Zero disables it; `scalar-unresolved-conflict` controls conflict/control geometry. |
 | `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
@@ -226,6 +227,8 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | Fence global/selective | all 1 | 95/5 | all 1 | all 1 |
 | `concurrent` | 1000 | 100 | 500 | 0 |
 | `concurrent-stream` | 750 | 750 | 750 | 750 |
+| `stream-min-instructions` | 8 | 8 | 8 | 8 |
+| `stream-max-instructions` | 256 | 256 | 256 | 256 |
 | `stream-dependency` | 250 | 250 | 250 | 250 |
 | `stream-unresolved` | 125 | 125 | 125 | 125 |
 | `stream-unresolved-inflight` | 250 | 250 | 250 | 250 |
@@ -397,8 +400,8 @@ Other profiles may require explicitly disabling unrelated feature prerequisites
 when removing their governing operation weights.
 
 The ordinary [stream executor](../cpp/scenarios/mixed_stream.cpp) draws an epoch
-of 8..32 architectural instructions, clipped to the remaining budget (so 1..7
-are legal), and a live depth of 2..8. It repeatedly samples from current legal
+uniformly within `stream-min-instructions`..`stream-max-instructions` (default
+8..256), clipped to the remaining budget (so shorter tails are legal), and a live depth of 2..8. It repeatedly samples from current legal
 admission, scalar load/prefetch, STA, STD, vector-uop and completed-head
 retirement events. Retirement competes with every other eligible event; it is
 not a greedy completed-prefix drain. Younger admissions and producer selections
@@ -640,6 +643,7 @@ Array order and sampling code are authoritative in
 | `stream` | Epochs, admitted instructions, retired instructions, admissions with older accepted work pending, admissions after a prefix retired while older work remains live, prefix retirements with younger live work, maximum live instructions, maximum accepted-and-pending instructions, initial issue events, vector replay issues, epochs after serial work, last global action index. These are driver/scoreboard observations, not an internal pipeline occupancy oracle. |
 | `stream_ops`, `stream_issue`, `stream_vector_uops`, `stream_scalar_retries` | Retired instruction counts in the same five-class order; initial scalar-load/STA/STD/vector-load-uop/vector-store-uop/prefetch issues; admitted vector-load/store uops; repeated STA issues excluded from initial counts. Schema 62 requires conservation and bounds in both verifier modes without a positive-bin gate. The opt-in strict checker retains minimum epoch/action/overlap observations for a stream-only configuration. |
 | `stream_waiting_head` | Schema 67: admission and operand/uop event selections while the oldest architectural instruction is complete and eligible to retire. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
+| `stream_history` | Schema 72: epochs longer than 32 instructions, maximum actual epoch length, admissions after the first 32 with older accepted work pending, and reuse of a full ROB value/wrap identity within one epoch. These observations distinguish sustained queue overlap from repeated short epochs; lifetime reuse is driver history, not an oracle excluding arbitrary stale responses. Sparse accounting checks length/overlap bounds without requiring positive bins. |
 | `stream_dependencies` | Schema 71: address/data edges, consumed address/data edges, pending address/data sources at selection, consumption before/after source retirement, maximum chain depth. Both accounting modes require exactly-once consumption, lifetime conservation, source/consumer eligibility and depth bounds. Disabled dependencies and all-FP sources cannot produce edges. |
 | `stream_recovery` | Schema 68: started windows, conflict windows, controls, graph stores/loads admitted, initial strictly checked loads, returned rounds, invalidated completed executions, strictly checked refetches, graph stores/loads retired, starts with accepted pending prefix, prefix retirements during the barrier, ordinary admissions after release with graph roles live, observed LQ cancellations, invalidated FP executions, maximum stores/loads/rounds, resolved windows. Refetch executions do not add architectural initial issue/action counts. Both verifier modes enforce sparse conservation, suffix/capacity/shape and emitter-domain bounds, including graph-role counts versus the observed maximum live instructions. |
 | `stream_recovery_inflight` | Schema 69: attempts, unavailable fresh lines, selected cold roles, observed held initial roles, explicit initial cancellations, target old Grant drained plus quiet completion, strict cold refetch completions, selected FP cold roles, release-gap sum, and prefix producer/retirement selections during release/drain phases. Sparse runs require conservation without nonzero coverage gates. |
@@ -1023,7 +1027,7 @@ contiguous-PA results against production scoreboards.
   by this random interface. The segment FOF encoding is unit-stride only.
 - Legacy heterogeneous windows have a fixed five-producer composition, optional
   clean NC/MMIO load and a drain between windows. Sliding streams vary ordinary
-  producer composition and interleave admission/retirement within 1..32-instruction
+  producer composition and interleave admission/retirement within configured 1..4096-instruction
   epochs, with 2..8 live instructions, but still drain at each epoch. Serial
   helpers supply local Probe/refill/pressure overlaps.
   The scalar dependency direction adds variable ordinary store/load chains;
@@ -1099,5 +1103,24 @@ arithmetic retains the input byte offset/alignment before scalar stores crossing
 the page end are clamped to `page+4096-width`, potentially changing alignment;
 expectations use the final injected address. The base stays within one page; it is an external ALU model, not a claim to execute pointer-chasing code.
 Expected bytes remain frozen in admission order, independently of DUT responses.
-Epoch length/depth and drains remain unchanged; general vector-result/index
-chains and longer continuous histories remain gaps.
+Live depth and boundary drains retain their existing rules; schema 72 extends
+configurable epoch lengths as described below. General vector-result/index
+chains and unbounded continuous histories remain gaps.
+
+### Sustained ordinary histories
+
+Schema 72 permits up to 4096 memory instructions in one ordinary context and
+byte-image lifetime; no per-32-instruction queue, completion, translation or
+SBuffer drain occurs. Configuring min/max to 8/32 retains the preceding length
+draw and can be combined with the same dependency/recovery rates for replay.
+Prefix retirement and current flow capacity continue to control admission;
+live instruction depth remains 2..8. Each admission rejects a duplicate live ROB
+value/wrap identity. `stream_history` records full-identity reuse after terminal
+retirement, and dependency depths may exceed 31 within the configured length.
+Context/epoch boundaries still drain. Repeated identity generations have no
+general accepted-operation ledger: late completions can alias a matching reused
+expectation, vector-store replay feedback carries SQ range rather than an
+absolute generation, and scalar STD pulses omit ROB wrap. Exact current
+scoreboard comparison, queue conservation, replay servicing and final byte
+readback remain active; these explicit attribution limits prohibit claiming
+universal stale-response detection or full CPU timing equivalence.

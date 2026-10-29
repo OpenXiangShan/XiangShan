@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4741,7 +4741,28 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
     vector_uops = _csv_counts(result, "stream_vector_uops", 2)
     retries = result.get("stream_scalar_retries")
     _require(type(retries) is int and retries >= 0, "invalid stream_scalar_retries")
-    _require(admitted == retired == sum(operations) and epochs <= retired <= 32 * epochs,
+    maximum = 32
+    if result.get("constraint_schema", 0) >= 72:
+        minimum, maximum = result.get("target_stream_min_instructions"), result.get("target_stream_max_instructions")
+        _require(type(minimum) is int and type(maximum) is int and 1 <= minimum <= maximum <= 4096,
+                 "invalid stream instruction bounds")
+        extended, longest, late_overlap, reused = _csv_counts(result, "stream_history", 4)
+        _require(extended <= epochs and late_overlap <= overlap and reused <= admitted - epochs,
+                 "stream history observations exceed eligible admissions")
+        if epochs == 0:
+            _require(extended == longest == late_overlap == reused == 0, "empty stream has history")
+        else:
+            _require(1 <= longest <= maximum and longest <= retired <= epochs * longest,
+                     "stream longest epoch disagrees with retired work")
+            _require((extended == 0 and longest <= 32) or (extended > 0 and longest > 32),
+                     "stream extended epoch count disagrees with maximum")
+            _require(retired >= longest + max(0, extended - 1) * 33 + (epochs - max(1, extended)) and
+                     retired <= extended * longest + (epochs - extended) * min(32, longest),
+                     "stream extended epoch lengths disagree with total")
+            _require(late_overlap <= retired - 32 * extended - (epochs - extended) and
+                     late_overlap <= extended * max(0, longest - 32),
+                     "stream late overlap exceeds extended tails")
+    _require(admitted == retired == sum(operations) and epochs <= retired <= maximum * epochs,
              "stream admission/retirement/epoch counts disagree")
     _require(0 <= pending <= live <= 8 and overlap <= admitted - epochs and sliding <= admitted - epochs,
              "stream live overlap or sliding admissions exceed their bounds")
@@ -4790,13 +4811,15 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
         _require(address <= admitted - epochs and data <= operations[2] and
                  pending_address <= address and pending_data <= data,
                  "stream dependency counts exceed eligible instructions")
+        if result.get("constraint_schema", 0) >= 72:
+            _require(depth <= max(0, longest - 1), "stream dependency depth exceeds observed epoch length")
         _require(depth <= operations[0], "stream dependency depth exceeds scalar load producers")
         if operations[0] == 0 or result.get("target_scalar_fp") == 1000:
             _require(address == data == 0, "stream dependencies have no eligible integer load producer")
         _require(live_source + retired_source == address + data,
                  "stream dependency source lifetimes disagree")
         _require((address + data == 0 and depth == 0) or
-                 (address + data > 0 and 1 <= depth <= 31 and depth <= address + data),
+                 (address + data > 0 and 1 <= depth < maximum and depth <= address + data),
                  "stream dependency chain depth disagrees")
         if dependency_rate == 0:
             _require(address == data == 0, "disabled stream dependencies generated edges")

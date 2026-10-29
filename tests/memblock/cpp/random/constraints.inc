@@ -186,6 +186,8 @@ struct RandomConstraints {
     std::array<unsigned, 2> fence_scope_weights{};
     unsigned concurrent_actions_per_mille = 1000;
     unsigned concurrent_stream_per_mille = 750;
+    unsigned stream_min_instructions = 8;
+    unsigned stream_max_instructions = 256;
     unsigned stream_dependency_per_mille = 250;
     unsigned stream_unresolved_per_mille = 125;
     unsigned stream_unresolved_inflight_per_mille = 250;
@@ -1109,6 +1111,10 @@ struct RandomConstraints {
             concurrent_actions_per_mille = parsed;
         } else if (key == "concurrent-stream") {
             concurrent_stream_per_mille = parsed;
+        } else if (key == "stream-min-instructions") {
+            stream_min_instructions = parsed;
+        } else if (key == "stream-max-instructions") {
+            stream_max_instructions = parsed;
         } else if (key == "stream-dependency") {
             stream_dependency_per_mille = parsed;
         } else if (key == "stream-unresolved") {
@@ -1802,6 +1808,10 @@ struct RandomConstraints {
                              0ULL) == 0)) {
             throw std::invalid_argument(
                 "nested VS/G mode constraint weights cannot all be zero");
+        }
+        if (stream_min_instructions == 0 || stream_min_instructions > stream_max_instructions ||
+            stream_max_instructions > 4096) {
+            throw std::invalid_argument("stream instruction bounds require 1 <= min <= max <= 4096");
         }
         if (concurrent_actions_per_mille > 1000 ||
             concurrent_stream_per_mille > 1000 ||
@@ -3051,7 +3061,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=71 constraints=" << name
+        stream << "constraint_schema=72 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3160,6 +3170,8 @@ struct RandomConstraints {
                << fence_scope_weights[1]
                << " target_concurrent=" << concurrent_actions_per_mille
                << " target_concurrent_stream=" << concurrent_stream_per_mille
+               << " target_stream_min_instructions=" << stream_min_instructions
+               << " target_stream_max_instructions=" << stream_max_instructions
                << " target_stream_dependency=" << stream_dependency_per_mille
                << " target_stream_unresolved=" << stream_unresolved_per_mille
                << " target_stream_unresolved_inflight=" << stream_unresolved_inflight_per_mille
