@@ -1,11 +1,11 @@
-# Memblock mother integration status - 2026-10-29
+# Memblock mother integration status - 2026-10-30
 
 ## Mother
 
 - Worktree: `.codex_mother_integration_20261028`
 - Branch: `codex/memblock-csr-prefix-fix-20261025`
-- 当前生产源码提交：`60dcca7c6`（B1母集成），源单Bug提交`5a4dc2df4d`；保留c976及更早修复。
-- 当前执行状态：旧WIP审计/必要修复/专项及独立最终review通过，随本提交关闭门禁；接下来恢复非strict-NC矩阵。
+- 当前母分支实现提交：`3bd0e9934`（PBMT回归profile修复），SV/TB/DUT输入仍为`60dcca7c6`的B1集成版本；源B1为5a4dc2df4d。
+- 当前执行状态：旧WIP门禁已随60dcca7c6关闭；非strict-NC覆盖率回归已恢复，当前组10运行中。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -28,24 +28,26 @@
   独立`FINAL_DYNAMIC_REVIEW_PASS`，全部controller退出、unknown0；随本提交落地关闭旧WIP门禁。
 - 母专项目录：`mem_ut/ver/ut/memblock/sim/mother_csr_hs_fence_gate_20261029_results`，含验收JSON、2540项实际输入及六批结果。
   source旧Sv39邻接FAIL/ABORTED保留，独立确认为缺母已修a13d；母本轮相同seed和参数再次PASS。
-- 原矩阵BasicTest现为70/120、其他0/140；门禁专项不替代固定原参数10-seed矩阵。
+- 原矩阵BasicTest现为80/120、其他0/140；门禁专项不替代固定原参数10-seed矩阵。
   下一步组8–12，跳过strict-NC组7；随后其他非strict-NC组及最终统一覆盖率。
 - source保持证据存档，不表示仍有应合未合Bug。后续修改只在mother顺序完成；仿真可并行。
   当前唯一远端为公共上游origin，未指定任务推送目标前只本地提交。
 
 ### 门禁后批量恢复
 
-母集成提交`60dcca7c6`已落地，旧WIP门禁关闭；现从组8启动新coverage mode
+母集成提交`60dcca7c6`已落地，旧WIP门禁关闭；从组8起依次恢复的新coverage mode为
 `mother_post_wip_cov_20261029`，原10 seed并发、MAIN1000/CHECK_TRIGGER0/timeout1000000000ns。
 结果根目录：`mem_ut/ver/ut/memblock/sim/mother_post_wip_cov_20261029_results`；
 `campaign_state.tsv`逐组维护，组7仍延期不运行。新coverage编译已PASS，组8原10 seed已严格10/10 PASS，
-组9已联停收敛：8 FAIL、2 NOT_RUN、unknown0，均为发送前`PBMT RF cfg snapshot does not match directed contract`。
+组9旧错参首轮曾联停收敛：8 FAIL、2 NOT_RUN、unknown0，均为发送前`PBMT RF cfg snapshot does not match directed contract`。
 现已确认任务参数/矩阵profile缺陷：当前PBMT固定B/C两UID，统一MAIN1000覆盖了正确cfg2。
 原seed原MAIN1000带波形仍201ns fatal；只修两个shell后，单元和原seed cfg2正向严格PASS，独立实现review PASS。
-本Bug提交后才恢复组9新批次：原8FAIL加新26012919/26012920替换2个NOT_RUN；组10–12尚未启动。
+本Bug已单独提交`3bd0e9934`，组9修正profile后的新批次10/10严格PASS：原8FAIL加新26012919/26012920，
+原2个NOT_RUN名额已替换，原失败归档保留。所有有效plusargs相比旧批次仅MAIN1000→2不同。
+现启动组10原10seed，MAIN1000/CHECK0恢复普通随机合同；组11–12尚未启动。
 SV/cfg/RM/RTL不改，不将MAIN2通过说成原1000参数通过。方案/证据见W44 Buglist最新章节。
 组8的summary/results、逐日志六项计数、TEST_PASS/finish均已核验，
-报告见组目录`strict_acceptance.json`；本轮coverage矩阵完成10 seed，不冒称最终完整覆盖率已完成。
+报告见各组目录`strict_acceptance.json`；本轮coverage矩阵已验收20 seed，不冒称最终完整覆盖率已完成。
 
 后续继续母任务时，直接进入以下 worktree，不创建新的 Bug worktree：
 
@@ -104,7 +106,7 @@ strict-NC本组获得修复后的历史执行顺序（当前其他组恢复顺�
 
 - 母任务目标仍为：逐个修复本轮失败并单 Bug 提交，完成全部回归、Bug 分析/方案记录、总 review，
   最终交付所有用例通过后的完整覆盖率目录。本轮完成B1门禁不表示整个母任务完成，RTL仍无coding授权。
-- 原始 functional matrix 共 26 组、每组 10 seed；其中 BasicTest 为 12 组。当前 BasicTest 70/120
+- 原始 functional matrix 共 26 组、每组 10 seed；其中 BasicTest 为 12 组。当前 BasicTest 80/120
   已通过，其余 14 组 0/140 完成本轮矩阵验收。不同版本专项 PASS 不代替最终统一源码验收。
 - 已修复集成和证据见下面提交表；最新 `c9763bd7d` 的 later-split cancel 已通过定向和真实 DUT 39/39
   专项，不能继续当成待修问题。统一最终版本、fault3 100-seed、覆盖率、总 review 均未完成。
@@ -205,8 +207,8 @@ worktree。2026-10-29 用户允许并发仿真加速：配置逐组推进，组�
 | 6 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | `PASS` | 10/10 |
 | 7 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_strict_nc_100k` | `FAIL/STOPPED_RTL_CONFIRMED` | 0/10 |
 | 8 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | `PASS` | 10/10 |
-| 9 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | 原8FAIL＋2NOT_RUN保留；profile已修专项PASS，待提交后恢复 | 0/10 |
-| 10 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | `NOT_RUN` | 0/10 |
+| 9 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | `PASS r2 fixed_cfg`；旧错参失败保留 | 10/10 |
+| 10 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | `RUNNING` | 0/10 |
 | 11 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_10k` | `NOT_RUN` | 0/10 |
 | 12 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_1k` | `NOT_RUN` | 0/10 |
 
@@ -242,7 +244,7 @@ controller 无失败/未完成/远端未知任务。该结果未触发静态审�
 该后续问题现已按 `memblock_redirect_later_split_cancel_integration_plan_20261029.md` 完成确定性复现、修复和专项验证，
 提交为`c9763bd7d`；第7组strict-NC仍因独立RTL问题延期，不是later-split cancel未修，也不阻塞已授权的其他组。
 
-其余14组functional matrix、fault3 100-seed专项和最终完整覆盖率尚未完成。当前BasicTest70/120，已关闭前六组及组8，
+其余14组functional matrix、fault3 100-seed专项和最终完整覆盖率尚未完成。当前BasicTest80/120，已关闭前六组及组8/9，
 不能解释为母任务全部完成；发生源码修复后需要重新评估已通过组的相邻复测范围和最终统一版本验收。
 
 ## 当前单 Bug 闭环
