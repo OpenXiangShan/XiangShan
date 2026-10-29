@@ -283,6 +283,20 @@ oracles. These are bounded external
 backend models: no general rename/cancellation ledger or full-CPU timing
 equivalence is claimed.
 
+`stream-dependency` samples older live ordinary integer loads as producers.
+Expected producer results come from this byte image, never observed DUT values.
+For address edges the external ALU adds `(result & 63) * 64` to the independently
+sampled page offset modulo 4096, preserving byte alignment before the existing
+scalar-store clamp: a store crossing the page end moves to `page+4096-width`
+and can become aligned. Expectations use that final injected address. Scalar store-data
+edges use the full predicted integer result. Values are frozen before enqueue;
+address and data issue separately require producer checked completion. The
+producer lifetime token survives deque retirement, so a consumer cannot lose a
+dependency or bind a reused ROB/destination identity. A load completion releases
+consumers only when its exact scoreboard obligation is no longer pending and
+normal monitor comparison has succeeded. Dependency depth/edges and pending-source
+selection are observed; they do not prove arbitrary rename or ALU timing.
+
 The integrated `stream-unresolved` graph snapshots physical bytes from this
 same admission-order image before any graph store overlay. Thus older ordinary
 unretired stores enter its initial expected bytes, while unresolved graph stores

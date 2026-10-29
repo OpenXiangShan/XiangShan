@@ -24,7 +24,7 @@ vector-segment-noncanonical and translation-alias are catalogued but not
 benchmark-selected. This
 is registration, not passing-run or coverage evidence. MixedScenario implements
 the canonical constrained-random catalog entry. Constraint input/output uses
-constraint_schema=70. The legal field definitions and per-run observed counters
+constraint_schema=71. The legal field definitions and per-run observed counters
 are in [CONSTRAINED_RANDOM.md](CONSTRAINED_RANDOM.md), not duplicated here.
 
 ## Generated interface inventory

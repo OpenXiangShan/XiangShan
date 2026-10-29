@@ -18,6 +18,18 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema 71 adds ordinary integer-load producer edges inside canonical streams.
+  Independent address/data edge draws choose older live producers, freeze values
+  from the admission-order byte image and gate each consumer operand on checked
+  producer completion. Shared producer lifetimes survive prefix retirement;
+  unresolved graph roles remain excluded. Address edges feed scalar/FP/vector
+  loads, stores and prefetch bases through a bounded external ALU calculation;
+  scalar stores can independently consume full predicted data. Existing scalar
+  stores crossing a page end retain their final-address clamp. No observed DUT
+  value advances expected state. This improves workload-style dependency timing;
+  general vector-result/index graphs, full rename history and longer continuous
+  epochs remain gaps.
+
 - Schema 70 separates legacy-window and sliding-stream eligibility. Legacy
   windows retain their required five producer classes and reserved queue budgets;
   stream-only profiles accept any nonempty ordinary scalar/FP, vector or prefetch
@@ -25,7 +37,7 @@ None.
   stream queue headroom. Empty populations and non-fitting directions reject
   before traffic. Sparse accounting rejects disabled stream classes and legacy
   observations in stream-only mode. Expected bytes and completion/retirement
-  oracles stay unchanged. Longer producer/address dependencies and bounded
+  oracles stay unchanged. Broader producer graphs and bounded
   epoch/context drains remain ordinary-workload priorities.
 
 - Ordinary mixed streams sample variable scalar/FP load, vector load, scalar
@@ -279,7 +291,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 472 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 485 tests pass | Unit checks do not establish DUT functional coverage |
+| Producer-dependency DUT qualification | Frozen runtime-v1: 22/22 finite DUT cases pass 19456 actions; eleven artifact verifiers accept including two previous-runtime controls | `build/memblock/dependency-stream-20261029/qualification-v1.json`; forced spec/coverage/corner dependencies, default profiles, integrated cold recovery, pure load chains, disabled and all-FP controls. 3729 address and 622 data edges each consumed once, 3043 pending sources selected, maximum depth 20, 2535 consumptions before and 1816 after producer retirement, 9110 retired stream instructions, 5247 accepted-overlap admissions and 8763/8763 final words. Functional/accounting development evidence only; no strict coverage or closure |
+| Producer-dependency structural and accounting checks | 27 compiled scheduler methods pass; fixed eight-integer-load samples produce 55 distinct edge graphs in 64 seeds, excluding addresses/payload/timing. Private early-release, wrong-ALU, wrong-source and wrong-data mutations reject. Nine independent accounting methods pass 284 accepted/66 rejected records and 281 serialized rows | `build/memblock/dependency-stream-20261029/scheduler-tests/report-v3.json`, `accounting-tests/evidence-v2.json`; same-seed replay, disabled/FP-only controls, depth0..31, five consumer classes and producer-lifetime checking. Two disabled-rate DUT cases match 393 semantic fields each against the previous runtime. Host mutations are not RTL mutation evidence |
+| Producer-dependency independent review | Fresh non-author actual-diff review accepts the bounded development slice with no open findings | `build/memblock/dependency-stream-20261029/review-v2/independent-review.md`; source eligibility/depth accounting, direct producer/consumer edge uniqueness, bound-source arithmetic sensitivity, page-clamp contract and preset-table findings resolved. Reviewer reruns eleven artifact verifiers, nine accounting tests, all64 fixed-eight-load cases and selected exact replays. No closure, CPU timing or RTL mutation claim |
 | Stream operation-subset qualification | Frozen runtime-v1: 34/34 finite DUT cases pass 10896 actions; all fourteen artifact verifiers accept | `build/memblock/stream-profiles-20261029/qualification-v2.json`; twenty-two newly legal subset cases, default spec/coverage/corner, legacy and serialized controls. 4657 retired stream instructions, 2599 accepted-overlap admissions, 3471 continued admissions, 1447 FP checks and 6344/6344 final words. Load-only indexed e8/LMUL4 instructions exercise 64-flow admission; a serialized 128-flow control completes in queue-bounded uop windows. Four CLI controls reject empty/segment-only populations and oversized stream directions before traffic. The 64-flow profiles have one live instruction at a time; capacity evidence does not prove inter-instruction overlap. Functional/accounting development qualification, not strict coverage or closure |
 | Stream endpoint and accounting contracts | Twelve independent host tests pass 344 validation and 224 accounting cases; production executor tests pass 248 cases over all 31 nonempty ordinary producer masks | `build/memblock/stream-profiles-20261029/constraint-tests/evidence.json`, `scheduler-tests/report-v2.json`; actual parser/validator, literal 32/64/128-flow instructions, executor boundaries, fitting-plus-oversized shape unions, disabled directions, malformed inputs and schema 69 compatibility. Synthetic executor checks retain distinct destinations, exactly-once issue/retirement and input-byte expectations; no full-CPU timing claim |
 | Default-profile compatibility | Eight default spec/coverage/corner cases match 393 parsed semantic fields per seed against the preceding frozen runtime | `build/memblock/stream-profiles-20261029/default-compatibility-v1.json`; schema/controller metadata excluded. This supports unchanged seeded behavior for sampled cases, not all seeds or profiles |

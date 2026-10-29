@@ -46,6 +46,40 @@ struct SyntheticEnvironment {
     std::set<std::uint64_t> requested_lines;
     mutable std::map<std::uint64_t, std::uint64_t> request_counts;
     mutable bool successor_recorded = false;
+    struct Dependency { unsigned consumer, producer; bool data; };
+    std::vector<Dependency> dependencies;
+    unsigned dependency_operand_checks = 0;
+    void bind_dependency(unsigned consumer, const LoadTransaction &source, bool data, std::uint64_t value) {
+        const auto &producer = find(source.rob, source.rob_flag);
+        require(producer.kind == 0 && !producer.load.fp_wen && producer.id < consumer,
+            "dependency source was not an older integer load");
+        require(value == load_expectations.at(identity(source.rob, source.rob_flag)),
+            "dependency value was not frozen from the older load expectation");
+        dependencies.push_back({consumer, producer.id, data});
+        trace.push_back("D" + std::to_string(consumer) + ":" + std::to_string(producer.id) + (data ? ":data" : ":address"));
+    }
+    void check_dependency(unsigned consumer, bool data) {
+        for (const auto &edge : dependencies) if (edge.consumer == consumer && edge.data == data) {
+            require(complete(instructions.at(edge.producer)), "consumer issued before independent producer completion");
+            if (data) require(instructions.at(consumer).store.data ==
+                load_expectations.at(identity(instructions.at(edge.producer).rob, instructions.at(edge.producer).flag)),
+                "dependent store data disagrees with producer expectation");
+            ++dependency_operand_checks;
+        }
+    }
+    std::uint64_t check_dependent_address(std::uint64_t before, std::uint64_t after, std::uint64_t expected) {
+        const auto edge = std::find_if(dependencies.begin(), dependencies.end(), [&](const auto &item) {
+            return item.consumer == instructions.size() && !item.data;
+        });
+        require(edge != dependencies.end(), "dependent address lacked recorded producer");
+        const auto &producer = instructions.at(edge->producer);
+        const auto wanted_value = load_expectations.at(identity(producer.rob, producer.flag));
+        require(expected == wanted_value, "dependent address value disagrees with bound producer expectation");
+        const auto displacement = (wanted_value % 64U) * 64U;
+        const auto wanted = (before & ~std::uint64_t{4095}) + ((before % 4096U + displacement) % 4096U);
+        require(after == wanted, "dependent ALU address disagrees with input model");
+        return after;
+    }
     unsigned cold_cancellations = 0, cold_releases = 0, cold_refetches = 0;
     unsigned prefix_old_producers = 0, prefix_old_retirements = 0;
     std::uint64_t grant_idle_at = 0;
@@ -419,6 +453,7 @@ struct SyntheticEnvironment {
     void issue(Instruction &work, unsigned index, const char *tag) {
         check_installed_head();
         note_producer();
+        check_dependency(work.id, false);
         auto &uop = work.uops.at(index);
         require(!uop.issued, "duplicate uop acceptance");
         uop.issued = true; uop.due = due(work, index); ++producer_counts[work.id]; ++issues;
@@ -483,6 +518,7 @@ struct SyntheticEnvironment {
                     "graph STA preceded a strict initial/refetch completion");
             }
         }
+        if (!work.address) check_dependency(work.id, false);
         if (!work.address) { work.address = true; work.address_due = latency ? due(work) : tick + 1U; ++producer_counts[work.id]; ++issues; }
         else require(tick < work.address_due, "reissued an already completed store address");
         trace.push_back("SA" + std::to_string(work.id)); sample_accepted(); ++tick;
@@ -506,6 +542,7 @@ struct SyntheticEnvironment {
     bool issue_store_data(const StoreTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag); check_installed_head(); require(!work.data, "duplicate scalar store data");
         note_producer();
+        check_dependency(work.id, true);
         work.data = true; work.data_due = due(work, 1); ++producer_counts[work.id]; ++issues;
         trace.push_back("SD" + std::to_string(work.id)); sample_accepted(); ++tick; return true;
     }
@@ -755,10 +792,15 @@ int main(int argc, char **argv) {
             require(rejected == 2 * presets, "stream rate above 1000 was accepted");
             std::cout << "{\"presets\":" << presets << ",\"boundary_overrides\":" << boundaries
                 << ",\"out_of_range_rejections\":" << rejected << "}\n";
-        } else if (mode == "stream" || mode == "recovery" || mode == "profile") {
+        } else if (mode == "stream" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent") {
             require(argc == 6 || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "dependency") {
+                fixture.constraints.stream_dependency_per_mille = 1000;
+                if (std::stoul(argv[4]) == 1) fixture.constraints.scalar_fp_per_mille = 0;
+            }
+            if (mode == "independent") fixture.constraints.stream_dependency_per_mille = 0;
             if (mode == "recovery") {
                 fixture.environment.recovery_enabled = true;
                 fixture.constraints.stream_unresolved_per_mille = 1000;
@@ -796,6 +838,12 @@ int main(int argc, char **argv) {
                 << ",\"surviving_prefix_redirects\":" << env.surviving_prefix_redirects
                 << ",\"checked_scalar_values\":" << env.checked_scalar_values
                 << ",\"lq_canceled\":" << env.canceled_lq
+                << ",\"dependency_edges\":" << env.dependencies.size()
+                << ",\"dependency_operand_checks\":" << env.dependency_operand_checks
+                << ",\"dependency_counts\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_dependencies.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_dependencies[i];
+            std::cout << "]"
                 << ",\"cold_attempts\":" << fixture.coverage.stream_recovery_inflight[0]
                 << ",\"cold_unavailable\":" << fixture.coverage.stream_recovery_inflight[1]
                 << ",\"cold_selected\":" << fixture.coverage.stream_recovery_inflight[2]

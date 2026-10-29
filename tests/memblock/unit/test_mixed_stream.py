@@ -54,6 +54,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.recoveries = []
         cls.cold_recoveries = []
         cls.profiles = []
+        cls.dependencies = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -76,6 +77,13 @@ class MixedStreamTest(unittest.TestCase):
         source = source.replace('// PRODUCTION_BUILDERS_AND_VECTOR_PRODUCERS', '\n'.join(builders + vectors))
         stream = (ROOT / 'cpp/scenarios/mixed_stream.cpp').read_text()
         stream = '\n'.join(line for line in stream.splitlines() if not line.startswith('#include'))
+        # Observe selected edges and operand arithmetic, never the ready list.
+        stream = stream.replace('const auto &source = *sources[random() % sources.size()];',
+            'const auto &source = *sources[random() % sources.size()];\n'
+            '                    environment.bind_dependency(admitted, source.load, data, source.expected_scalar);')
+        stream = stream.replace('return (address & ~std::uint64_t{0xfff}) | offset;',
+            'return environment.check_dependent_address(address, '
+            '(address & ~std::uint64_t{0xfff}) | offset, *address_value);')
         source = source.replace('// PRODUCTION_STREAM', stream)
         execute = method('cpp/scenarios/mixed_scheduler.cpp', 'bool MixedScenario::execute()')
         source = source.replace('// PRODUCTION_EXECUTE', execute.replace('MixedScenario::', 'BudgetFixture::'))
@@ -143,6 +151,7 @@ class MixedStreamTest(unittest.TestCase):
                 'reservations': cls.reservations,
                 'recovery_cases': cls.recoveries,
                 'validated_profile_cases': cls.profiles,
+                'dependency_cases': cls.dependencies,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
@@ -188,6 +197,69 @@ class MixedStreamTest(unittest.TestCase):
         self.assert_sliding_observations(results)
         self.assertGreater(sum(run['head_checks'] for run in results), 0)
         self.assertGreater(sum(run['dependency_checks'] for run in results), 0)
+
+    def test_dependent_streams_gate_operands_and_vary_graph_structure(self):
+        results = [self.run_fixture('dependency', seed, timing, 0, 32)
+                   for timing in (0, 1) for seed in range(1, 65)]
+        self.dependencies.extend(results)
+        for run in results:
+            counts = run['dependency_counts']
+            self.assertEqual(counts[0:2], counts[2:4])
+            self.assertEqual(run['dependency_edges'], sum(counts[:2]))
+            self.assertGreaterEqual(run['dependency_operand_checks'], run['dependency_edges'])
+        for index in (0, 1, 4, 5, 6, 7):
+            self.assertGreater(sum(run['dependency_counts'][index] for run in results), 0)
+        self.assertGreaterEqual(max(run['dependency_counts'][8] for run in results), 2)
+        self.assertGreaterEqual(len({tuple(run['dependency_counts']) for run in results}), 32)
+
+    def test_fixed_load_population_varies_dependency_edges_and_replays(self):
+        results = [self.run_fixture('dependency', seed, 1, 1, 8) for seed in range(1, 65)]
+        self.dependencies.extend(results)
+        edges = [tuple(event for event in run['schedule'].split(',') if event.startswith('D'))
+                 for run in results]
+        # Same instruction count/class: compare actual consumer/source identities
+        # and directions, excluding addresses, payloads, delays and event times.
+        self.assertGreaterEqual(len(set(edges)), 24)
+        for seed in (1, 7, 19):
+            self.assertEqual(results[seed - 1], self.run_fixture('dependency', seed, 1, 1, 8))
+        for seed in range(1, 17):
+            control = self.run_fixture('independent', seed, 1, 0, 32)
+            self.assertEqual(control['dependency_counts'], [0] * 9)
+            self.assertEqual(control['dependency_edges'], 0)
+
+    def test_private_wrong_dependency_operand_is_rejected(self):
+        for name, original, replacement, message in (
+            ('wrong-bound-source', '= source.expected_scalar;', '= source.expected_scalar ^ 1U;',
+             'dependent address value disagrees with bound producer expectation'),
+            ('wrong-address', '((*address_value & 63U) << 6U)', '((*address_value & 63U) << 5U)',
+             'dependent ALU address disagrees'),
+            ('wrong-data', 'data_value ? *data_value : random()', 'data_value ? (*data_value ^ 1U) : random()',
+             'dependent store data disagrees'),
+        ):
+            self.assertIn(original, self.source)
+            binary = self.compile(self.source.replace(original, replacement), name)
+            rejected = 0
+            for seed in range(1, 17):
+                run = subprocess.run([str(binary), 'dependency', str(seed), '1', '0', '32'],
+                                     capture_output=True, text=True, timeout=10)
+                if run.returncode:
+                    self.assertIn(message, run.stderr)
+                    rejected += 1
+            self.assertGreater(rejected, 0)
+
+    def test_private_early_dependency_release_is_rejected(self):
+        source = self.source
+        # Release every live producer before the independent shell completes it.
+        source = source.replace('work.issued[0] && !pending(work)', 'true')
+        binary = self.compile(source, 'early-dependency')
+        rejected = 0
+        for seed in range(1, 33):
+            run = subprocess.run([str(binary), 'dependency', str(seed), '1', '0', '32'],
+                                 capture_output=True, text=True, timeout=10)
+            if run.returncode:
+                self.assertIn('consumer issued before independent producer completion', run.stderr)
+                rejected += 1
+        self.assertGreater(rejected, 0)
 
     def test_fixed_eight_load_population_varies_event_schedule(self):
         results = [self.stream(seed, timing=0, family=1, limit=8) for seed in range(1, 65)]

@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4780,6 +4780,26 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
         if admitted == epochs:
             _require(waiting_admissions == waiting_issues == 0,
                      "empty or singleton-only stream has completed-head selections")
+    if result.get("constraint_schema", 0) >= 71:
+        dependency_rate = result.get("target_stream_dependency")
+        _require(type(dependency_rate) is int and 0 <= dependency_rate <= 1000,
+                 "invalid target_stream_dependency")
+        address, data, used_address, used_data, pending_address, pending_data, live_source, retired_source, depth = _csv_counts(result, "stream_dependencies", 9)
+        _require(address == used_address and data == used_data,
+                 "stream dependency edges were not consumed exactly once")
+        _require(address <= admitted - epochs and data <= operations[2] and
+                 pending_address <= address and pending_data <= data,
+                 "stream dependency counts exceed eligible instructions")
+        _require(depth <= operations[0], "stream dependency depth exceeds scalar load producers")
+        if operations[0] == 0 or result.get("target_scalar_fp") == 1000:
+            _require(address == data == 0, "stream dependencies have no eligible integer load producer")
+        _require(live_source + retired_source == address + data,
+                 "stream dependency source lifetimes disagree")
+        _require((address + data == 0 and depth == 0) or
+                 (address + data > 0 and 1 <= depth <= 31 and depth <= address + data),
+                 "stream dependency chain depth disagrees")
+        if dependency_rate == 0:
+            _require(address == data == 0, "disabled stream dependencies generated edges")
     if rate == 0 or result.get("target_concurrent") == 0:
         _require(epochs == 0, "disabled stream generated traffic")
 

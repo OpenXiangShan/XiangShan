@@ -104,6 +104,7 @@ def singleton(kind, schema=70, mask=31, stream_rate=1000):
     return dict(
         constraint_schema=schema, transactions=1,
         target_concurrent=1000, target_concurrent_stream=stream_rate,
+        **({'target_stream_dependency': 250, 'stream_dependencies': ','.join(['0'] * 9)} if schema >= 71 else {}),
         target_ops=','.join(str(int(name in enabled)) for name in OPERATIONS),
         concurrent='0,0,0,0,0', concurrent_ops='0,0,0,0,0',
         stream=f'1,1,1,0,0,0,1,0,{events},0,0,1',

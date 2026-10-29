@@ -21,6 +21,10 @@ struct StreamWork {
     std::uint64_t expected_scalar = 0;
     unsigned recovery_id = 0, recovery_index = 0;
     bool refetch = false, checked = false;
+    // A producer's checked-completion lifetime can outlive its deque entry.
+    struct Producer { bool complete = false, retired = false; unsigned depth = 0; };
+    std::shared_ptr<Producer> result = std::make_shared<Producer>();
+    std::shared_ptr<Producer> address_source, data_source;
     std::uint8_t rob() const {
         if (kind == 0) return load.rob;
         if (kind == 2) return store.rob;
@@ -249,6 +253,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             sample_constrained_vector_instruction(work.kind == 3, work.shape, work.vectors);
         }
         ++coverage.cacheable;
+        work.result->retired = true;
         live.pop_front();
         if (live.empty()) {
             if (!environment.set_rob_head_state(old_rob, old_flag, false)) return false;
@@ -392,6 +397,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             ready.push_back({0, 0, 0});
         if (recovery && recovery->phase == StreamRecovery::Phase::release_old && environment.cycle() >= recovery->ready_cycle)
             ready.push_back({7, 0, 0});
+        // Never feed observed DUT data back into generation. The scoreboard
+        // validates a producer before this external backend releases consumers.
+        for (auto &work : live)
+            if (work.kind == 0 && !work.recovery_id && work.issued[0] && !pending(work))
+                work.result->complete = true;
         bool older_addresses_known = true, prefix_addresses_known = true;
         if (recovery && recovery->phase == StreamRecovery::Phase::operands &&
             recovery->operand < recovery->plan.after_provisional.size() && environment.cycle() >= recovery->ready_cycle) {
@@ -409,6 +419,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             auto &work = live[i];
             const bool graph_role = recovery && work.recovery_id == recovery->id;
             const bool head_eligible = !work.requires_head || (i == 0 && !barrier_at_front());
+            const bool address_ready = !work.address_source || work.address_source->complete;
+            const bool data_ready = !work.data_source || work.data_source->complete;
             if (work.kind == 0 && graph_role) {
                 const auto &episode = *recovery;
                 const bool executing = episode.phase == StreamRecovery::Phase::initial ||
@@ -423,7 +435,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     episode.issue < episode.issue_order().size() &&
                     episode.issue_order()[episode.issue] == work.recovery_index && environment.cycle() >= episode.ready_cycle)
                     ready.push_back({1, i, 0});
-            } else if ((work.kind == 0 || work.kind == 4) && !work.issued[0] && head_eligible &&
+            } else if ((work.kind == 0 || work.kind == 4) && !work.issued[0] && head_eligible && address_ready &&
                 (work.kind == 4 || older_addresses_known)) ready.push_back({1, i, 0});
             if (work.kind == 2 && graph_role) {
                 const auto &episode = *recovery;
@@ -433,15 +445,15 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 if (!work.data_issued && (early || promote)) ready.push_back({3, i, 0});
             } else if (work.kind == 2) {
                 // Beat-crossing STA must not block older retirement.
-                if (head_eligible && (!work.address_issued ||
+                if (head_eligible && address_ready && (!work.address_issued ||
                     (environment.scalar_store_address_pending(work.store) &&
                      environment.cycle() - work.last_address_issue >= 32))) ready.push_back({2, i, 0});
-                if (!work.data_issued) ready.push_back({3, i, 0});
+                if (!work.data_issued && data_ready) ready.push_back({3, i, 0});
             }
             if (work.kind == 1 || work.kind == 3) {
                 const bool ordered_load = work.kind == 1 && work.vectors.front().addressing ==
                     memblock::VectorAddressingMode::indexed_ordered;
-                if (head_eligible && (!ordered_load || i == 0) && (work.kind == 3 || older_addresses_known)) {
+                if (head_eligible && address_ready && (!ordered_load || i == 0) && (work.kind == 3 || older_addresses_known)) {
                     for (unsigned u = 0; u < work.vectors.size(); ++u) {
                         if (work.issued[u]) continue;
                         if (work.vectors[u].addressing != memblock::VectorAddressingMode::indexed_unordered &&
@@ -576,12 +588,40 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 line = recovery->base;
             } else recovery_counts[13] += std::any_of(live.begin(), live.end(),
                 [](const auto &older) { return older.recovery_id != 0; });
+            std::optional<std::uint64_t> address_value, data_value;
+            if (!graph_admission && constraints.stream_dependency_per_mille != 0) {
+                std::vector<const StreamWork *> sources;
+                for (const auto &older : live)
+                    if (older.kind == 0 && !older.load.fp_wen && !older.recovery_id)
+                        sources.push_back(&older);
+                const auto choose_source = [&](bool data) {
+                    if (sources.empty() || random() % 1000U >= constraints.stream_dependency_per_mille) return;
+                    const auto &source = *sources[random() % sources.size()];
+                    (data ? work.data_source : work.address_source) = source.result;
+                    (data ? data_value : address_value) = source.expected_scalar;
+                    work.result->depth = std::max(work.result->depth, source.result->depth + 1U);
+                    auto &counts = coverage.stream_dependencies;
+                    ++counts[data ? 1U : 0U];
+                    counts[data ? 5U : 4U] += !source.result->complete;
+                    counts[8] = std::max<std::uint64_t>(counts[8], work.result->depth);
+                };
+                choose_source(false);
+                if (work.kind == 2) choose_source(true);
+            }
+            // Model a bounded integer ALU address calculation in this page.
+            // Preserve the independently chosen byte/alignment class. The seed
+            // supplies the addend, the producer supplies the line displacement.
+            const auto dependent_address = [&](std::uint64_t address) {
+                if (!address_value) return address;
+                const auto offset = ((address & 0xfffU) + ((*address_value & 63U) << 6U)) & 0xfffU;
+                return (address & ~std::uint64_t{0xfff}) | offset;
+            };
             if (work.kind == 0) {
                 const auto format = graph_admission ? ScalarLoadShape{recovery->group.loads[work.recovery_index].op,
                     recovery->group.loads[work.recovery_index].fp} : constraints.scalar_load_policy().choose(random);
                 const bool cold_role = graph_admission && recovery->group.unfinished && work.recovery_index == *recovery->group.unfinished;
                 work.load = make_load(cold_role ? *recovery->cold_address : graph_admission ? line + recovery->group.loads[work.recovery_index].offset :
-                    constrained_window_address(line, 1U << (format.op & 3U)),
+                    dependent_address(constrained_window_address(line, 1U << (format.op & 3U))),
                     static_cast<memblock::LoadOp>(format.op), random() % memblock::kScalarLoadLanes, format.fp);
                 work.load.pdest = allocate_destination(format.fp ? 1U : 0U);
                 if (graph_admission) {
@@ -609,10 +649,10 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     std::countr_zero(recovery->bytes[work.recovery_index].width) : random() % 4U);
                 const unsigned width = 1U << static_cast<unsigned>(op);
                 auto address = graph_admission ? line + recovery->bytes[work.recovery_index].offset :
-                    constrained_window_address(line, width);
+                    dependent_address(constrained_window_address(line, width));
                 if ((address & 0xfffU) + width > 0x1000U)
                     address = (address & ~std::uint64_t{0xfff}) | (0x1000U - width);
-                work.store = make_store(address, graph_admission ? recovery->bytes[work.recovery_index].data : random(),
+                work.store = make_store(address, graph_admission ? recovery->bytes[work.recovery_index].data : data_value ? *data_value : random(),
                     op, random() % memblock::kScalarStoreLanes);
                 if (graph_admission) { recovery->stores.push_back(work.store); ++recovery_counts[3]; }
                 if ((address & 15U) + width > 16U) {
@@ -623,7 +663,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 environment.expect_store(work.store);
                 if (!environment.enqueue_store(work.store)) return false;
             } else if (work.kind == 4) {
-                work.prefetch = make_prefetch(line, static_cast<memblock::PrefetchOp>(8U + random() % 3U),
+                work.prefetch = make_prefetch(dependent_address(line), static_cast<memblock::PrefetchOp>(8U + random() % 3U),
                     random() % memblock::kScalarLoadLanes);
                 work.issued.assign(1, false);
                 environment.expect_prefetch(work.prefetch);
@@ -632,7 +672,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 const bool store = work.kind == 3;
                 work.shape = choose_vector_shape(store ? 1U : 0U, store ? sq_free : lq_free, false);
                 const auto eew = work.shape.addressing >= 2 ? work.shape.vsew : work.shape.eew;
-                work.vectors = make_random_vector_uops(store, constrained_window_address(line, 1U << eew),
+                work.vectors = make_random_vector_uops(store, dependent_address(constrained_window_address(line, 1U << eew)),
                     work.shape, random() % 1000U < constraints.vector_corner_per_mille);
                 work.issued.assign(work.vectors.size(), false);
                 if (!store) {
@@ -666,6 +706,17 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         } else {
             auto &work = live[event.instruction];
             bool initial_event = true;
+            const auto consume = [&](const std::shared_ptr<StreamWork::Producer> &source, bool data) {
+                if (!source) return true;
+                if (!source->complete) { phase += ":dependency-before-producer-completion"; return false; }
+                ++coverage.stream_dependencies[data ? 3U : 2U];
+                ++coverage.stream_dependencies[source->retired ? 7U : 6U];
+                return true;
+            };
+            const bool first_address = event.kind == 1 || (event.kind == 2 && !work.address_issued) ||
+                (event.kind == 4 && std::find(work.issued.begin(), work.issued.end(), true) == work.issued.end());
+            if (first_address && !consume(work.address_source, false)) return false;
+            if (event.kind == 3 && !consume(work.data_source, true)) return false;
             if (event.kind == 1) {
                 if (work.kind == 0 ? !environment.issue_load(work.load, constrained_completion_timeout) :
                     !environment.issue_prefetch(work.prefetch, constrained_completion_timeout)) return false;
