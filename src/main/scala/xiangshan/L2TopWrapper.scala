@@ -360,7 +360,13 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
         upstream = cchiUpstream,
         pfSrcID = 2
       )
-      val oceanusL2 = Module(new L2Top(l2cfg))
+      // XiangShan freezes its parameter lookup before module construction.
+      // Give L2 a regular lookup view so its local observation keys can be
+      // overlaid; every inherited parameter still comes from the frozen view.
+      val l2Parameters = Parameters((_, _, _) => {
+        case key: Field[_] if p.lift(key).isDefined => p(key)
+      })
+      val oceanusL2 = Module(new L2Top(l2cfg)(l2Parameters))
 
       require(oceanusL2.io.t1p.size == io.dcache_cchi.size)
       oceanusL2.io.t1p.zip(io.dcache_cchi).foreach { case (t1, l1) => CCHIConnect.type1(t1, l1) }
