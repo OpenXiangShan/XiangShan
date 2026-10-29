@@ -33,7 +33,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
-  with HasPerfEvents
+  with HasPerfEventInfos
 {
   val io = IO(new Bundle() {
     // control
@@ -370,9 +370,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   QueuePerf(LoadQueueRAWSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enqs", canEnqCount)
   XSPerfAccumulate("stld_rollback", rollbaclValid)
-  val perfEvents: Seq[(String, UInt)] = Seq(
-    ("enq ", canEnqCount),
-    ("stld_rollback", rollbaclValid),
+  val perfEvents = Seq(
+    ("enq"          , canEnqCount).withDescription("Entries allocated in the load RAW violation queue."),
+    ("stld_rollback", rollbaclValid).withDescription("Store-load ordering violations that request rollback from the RAW queue."),
   )
   generatePerfEvent()
   // end

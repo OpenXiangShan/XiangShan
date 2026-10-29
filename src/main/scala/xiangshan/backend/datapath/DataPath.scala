@@ -37,7 +37,7 @@ class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule
 }
 
 class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params: BackendParams)
-  extends LazyModuleImp(wrapper) with HasXSParameter with HasPerfEvents {
+  extends LazyModuleImp(wrapper) with HasXSParameter with HasPerfEventInfos {
 
   val io = IO(new DataPathIO())
 
@@ -865,12 +865,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   XSPerfAccumulate("mem_stall_l3miss",   memStallL3Miss)
 
   val perfEvents = Seq(
-    ("EXEC_STALL_CYCLE",  fewUopsIssued),
-    ("MEMSTALL_ANY_LOAD", memStallAnyLoad),
-    ("MEMSTALL_STORE",    memStallStore),
-    ("MEMSTALL_L1MISS",   memStallL1Miss),
-    ("MEMSTALL_L2MISS",   memStallL2Miss),
-    ("MEMSTALL_L3MISS",   memStallL3Miss),
+    ("EXEC_STALL_CYCLE" , fewUopsIssued).withDescription("Cycles with fewer issued micro-operations than the execution-stall threshold."),
+    ("MEMSTALL_ANY_LOAD", memStallAnyLoad).withDescription("Execution-stall cycles attributed to an outstanding load at the ROB head."),
+    ("MEMSTALL_STORE"   , memStallStore).withDescription("Store-stall cycles for which the store queue or store buffer is full."),
+    ("MEMSTALL_L1MISS"  , memStallL1Miss).withDescription("Load-stall cycles that also have an L1 data-cache miss."),
+    ("MEMSTALL_L2MISS"  , memStallL2Miss).withDescription("L1-miss stall cycles that also miss in L2."),
+    ("MEMSTALL_L3MISS"  , memStallL3Miss).withDescription("L2-miss stall cycles that also miss in L3."),
   )
   generatePerfEvent()
 }
