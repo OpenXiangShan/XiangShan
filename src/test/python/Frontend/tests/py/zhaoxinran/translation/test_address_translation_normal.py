@@ -606,3 +606,43 @@ def test_address_translation_normal(env, scenario: TranslationScenario, expected
         )
 
     assert not env.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_all_stage_vs_mmio_overrides_g_uncache(env) -> None:
+    scenario, expected_paths = _scenario(
+        "translation-normal-all-stage-vs-mmio-g-uncache",
+        mode="sv39",
+        stage2_mode="sv39",
+        s2xlate=3,
+        gpa=_GPA,
+        s1_pte=TranslationPte(asid=5, vmid=7, pbmt=2),
+        s2_pte=TranslationPte(vmid=7, pbmt=1),
+        vsatp_asid=5,
+        hgatp_vmid=7,
+        priv_virt=1,
+        expected_paths=("uncache", "uncache"),
+    )
+    mmio_lo = scenario.pa & ~(_PAGE_SIZE - 1)
+    mmio_hi = mmio_lo + scenario.page_count * _PAGE_SIZE - 1
+    env.memory.mmio_ranges.append((mmio_lo, mmio_hi))
+    scenario = _randomize_normal_ptw_timing(env, scenario, expected_paths)
+    sequence = TranslationScenarioSequence(actions=(TranslationScenarioPhase(scenario=scenario),))
+    sequence.initialize_first_phase(env)
+    with pytest.raises(AssertionError, match="translated_pbmt_mismatch"):
+        sequence.run(env)
+
+    mismatches = [
+        error for error in env.translation_checker.errors
+        if error["reason"] == "translated_pbmt_mismatch"
+    ]
+    assert mismatches
+    assert {(error["expected_mem_page_type_nc"], error["actual_mem_page_type_nc"]) for error in mismatches} == {(1, 0)}
+    requests = [
+        record for record in env.uncache_agent.request_records
+        if mmio_lo <= int(record["address"]) <= mmio_hi
+    ]
+    assert requests, "no InstrUncache request reached the MMIO memory region"
+    assert all(env.memory.is_mmio(int(record["address"])) for record in requests)
+    assert {int(record["mem_page_type_nc"]) for record in requests} == {0}, requests
+    assert {int(record["mem_back_type_mm"]) for record in requests} == {0}, requests

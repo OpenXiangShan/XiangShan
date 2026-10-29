@@ -122,6 +122,33 @@ def test_oracle_aligns_uncache_requests_to_the_eight_byte_beat() -> None:
     assert env.assert_translation_scenario()["error_count"] == 0
 
 
+def test_oracle_detects_all_stage_nc_vs_mmio_request_mismatch() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-all-stage-pbmt-conflict",
+            va=0x8020_0004,
+            gpa=0x8030_0004,
+            pa=0x8040_0004,
+            payload=bytes.fromhex("13000000"),
+            mode="sv39",
+            s2xlate=3,
+            s1_pte=TranslationPte(pbmt=2),
+            s2_pte=TranslationPte(pbmt=1),
+            expected_path="uncache",
+        )
+    )
+    env.arm_translation_scenario(state)
+    _observe_matching_ptw(env, state)
+    env.translation_oracle.observe_fetch_request(
+        12, path="uncache", pa=state.expected_outcome["pa"] & ~0x7, mem_page_type_nc=0
+    )
+
+    error = env.translation_oracle.errors[0]
+    assert error["reason"] == "translated_pbmt_mismatch"
+    assert (error["expected_mem_page_type_nc"], error["actual_mem_page_type_nc"]) == (1, 0)
+
+
 def test_oracle_requires_each_cacheable_fetch_block_covered_by_the_payload() -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     state = TranslationScenarioBuilder(env).build(

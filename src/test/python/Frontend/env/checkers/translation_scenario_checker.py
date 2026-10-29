@@ -372,7 +372,7 @@ class TranslationScenarioChecker:
         if int(actual["vpn"]) not in self.active["responded_ptw_vpns"]:
             self.active["responded_ptw_vpns"].append(int(actual["vpn"]))
 
-    def observe_fetch_request(self, cycle: int, *, path: str, pa: int) -> None:
+    def observe_fetch_request(self, cycle: int, *, path: str, pa: int, mem_page_type_nc: Optional[int] = None) -> None:
         if self.active is None:
             return
         actual_path = str(path)
@@ -409,6 +409,20 @@ class TranslationScenarioChecker:
                     actual_pa=actual_pa,
                 )
                 return
+            if actual_path == "uncache" and mem_page_type_nc is not None:
+                outcome = self.active["expected_page_outcomes"][self.active["selected_pages"].index(expected["page"])]
+                expected_nc = int(outcome.get("fetch_path") == "uncache")
+                if int(mem_page_type_nc) != expected_nc:
+                    self._error(
+                        cycle,
+                        "translated_pbmt_mismatch",
+                        page=expected["page"],
+                        pa=actual_pa,
+                        expected_fetch_path=outcome.get("fetch_path"),
+                        expected_mem_page_type_nc=expected_nc,
+                        actual_mem_page_type_nc=int(mem_page_type_nc),
+                    )
+                    return
             self.active["fetched_pages"].append(int(expected["page"]))
             self.active["observed_fetch_pas"].append(actual_pa)
             self.active["fetch_seen"] = True
@@ -586,10 +600,15 @@ class TranslationScenarioChecker:
         for record in icache_records[self._icache_cursor :]:
             self.observe_fetch_request(record["cycle"], path="icache", pa=record["address"])
         self._icache_cursor = len(icache_records)
-        uncache_addrs = self.env.uncache_agent.request_addrs
-        for pa in uncache_addrs[self._uncache_cursor :]:
-            self.observe_fetch_request(cycle, path="uncache", pa=pa)
-        self._uncache_cursor = len(uncache_addrs)
+        uncache_records = self.env.uncache_agent.request_records
+        for record in uncache_records[self._uncache_cursor :]:
+            self.observe_fetch_request(
+                record["cycle"],
+                path="uncache",
+                pa=record["address"],
+                mem_page_type_nc=record["mem_page_type_nc"],
+            )
+        self._uncache_cursor = len(uncache_records)
         for slot in range(8):
             sampled_cfvec = snapshot.cfvec.slots[slot]
             if not sampled_cfvec.valid:
