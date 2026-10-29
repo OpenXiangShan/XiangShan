@@ -53,7 +53,7 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
-  HasZicfilp: Boolean = true, // Zicfilp
+  HasZicfilp: Boolean = false, // Zicfilp
   HasMptCheck: Boolean = false, //enable mpt
   HasBitmapCheck: Boolean = true,
   HasMExtension: Boolean = true,
