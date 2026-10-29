@@ -311,7 +311,7 @@ class StreamDependencyAccountingTest(unittest.TestCase):
             for field in FIELDS:
                 self.assertEqual(report[field], original[field], field)
             self.assertEqual(report["target_stream_dependency"], rate)
-            self.assertEqual(report["constraint_schema"], 72)
+            self.assertEqual(report["constraint_schema"], 73)
             self.assertEqual(report["transactions"], original["transactions"])
             self.assertEqual(report["stream_scalar_retries"], original["stream_scalar_retries"])
             report["constraint_schema"] = original["constraint_schema"]
@@ -356,7 +356,7 @@ class StreamDependencyAccountingTest(unittest.TestCase):
                 if expected is not None:
                     report = self.modules["run_regression"].parse_summary(ran.stdout)
                     self.assertEqual(report["target_stream_dependency"], expected)
-                    self.assertEqual(report["constraint_schema"], 72)
+                    self.assertEqual(report["constraint_schema"], 73)
 
     def test_all_consumer_classes_pending_ready_and_source_lifetimes(self):
         histories = [pair(kind, pending=pending, after=after)

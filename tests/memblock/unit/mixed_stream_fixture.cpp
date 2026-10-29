@@ -5,6 +5,7 @@
 #include "scenarios/mixed/vector_operands.hpp"
 #include "scenarios/mixed/stream_oracle.hpp"
 #include "scenarios/mixed/stream_recovery.hpp"
+#include "scenarios/mixed/store_address_replay.hpp"
 #include <functional>
 #include <map>
 #include <tuple>
@@ -33,6 +34,7 @@ struct SyntheticEnvironment {
         std::uint8_t rob = 0;
         bool flag = false, address = false, data = false, committed = false;
         bool last_uop_seen = false, needs_head = false;
+        unsigned address_attempts = 0, address_retries = 0;
         std::uint64_t address_due = 0, data_due = 0;
         std::vector<Uop> uops;
         bool is_store() const { return kind == 2 || kind == 3; }
@@ -149,6 +151,20 @@ struct SyntheticEnvironment {
     unsigned overlap_admissions = 0, continued_admissions = 0;
     unsigned loads_before_older_std = 0, head_checks = 0, dependency_checks = 0;
     unsigned issues = 0, commits = 0;
+    bool delayed_store_feedback = false;
+    mutable Environment::IqSlowFeedbackStats store_feedback;
+    mutable std::vector<Environment::StoreSlowFeedbackSample> future_store_feedback;
+    std::map<unsigned, std::uint64_t> address_retry_after;
+    unsigned address_misses = 0;
+    const Environment::IqSlowFeedbackStats &iq_slow_feedback_stats() const {
+        for (auto it = future_store_feedback.begin(); it != future_store_feedback.end();) {
+            if (it->cycle > tick) { ++it; continue; }
+            store_feedback.sta_samples.push_back(*it);
+            it = future_store_feedback.erase(it);
+        }
+        return store_feedback;
+    }
+
     unsigned admissions_with_completed_head = 0, issues_with_completed_head = 0;
     std::optional<unsigned> installed_head;
     bool pending_store_level = false;
@@ -242,7 +258,7 @@ struct SyntheticEnvironment {
             });
     }
     bool accepted(const Instruction &work) const {
-        return work.address || work.data || std::any_of(work.uops.begin(), work.uops.end(),
+        return work.address_attempts || work.address || work.data || std::any_of(work.uops.begin(), work.uops.end(),
             [](const auto &uop) { return uop.issued; });
     }
     void synchronize_retirement() {
@@ -515,6 +531,27 @@ struct SyntheticEnvironment {
     bool issue_prefetch(const PrefetchTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag); issue(work, 0, "P"); return true;
     }
+    bool issue_store_address(const StoreTransaction &t, unsigned timeout) {
+        auto &work = find(t.rob, t.rob_flag);
+        iq_slow_feedback_stats();
+        require(!work.address, "STA retried after successful address acceptance");
+        require(!address_retry_after.count(work.id) || tick >= address_retry_after.at(work.id),
+            "STA retried before its own miss feedback/cooldown");
+        const bool miss = delayed_store_feedback && work.address_attempts == 0;
+        const auto accepted_at = tick;
+        if (miss) {
+            check_installed_head(); check_head(work); check_dependency(work.id, false); note_producer();
+            ++issues; ++producer_counts[work.id]; ++address_misses;
+            trace.push_back("SM" + std::to_string(work.id)); ++tick;
+        } else if (!issue_store_address_until_tlb_hit(t, timeout)) return false;
+        work.address_retries += work.address_attempts != 0;
+        ++work.address_attempts;
+        const auto feedback_at = delayed_store_feedback ? accepted_at + 19U + (work.id % 7U) : tick;
+        future_store_feedback.push_back({.lane=t.address_lane, .hit=!miss,
+            .sq_flag=t.sq_flag, .sq_value=t.sq, .cycle=feedback_at});
+        address_retry_after[work.id] = miss ? feedback_at + 8U : std::numeric_limits<std::uint64_t>::max();
+        return true;
+    }
     bool issue_store_address_until_tlb_hit(const StoreTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag);
         check_installed_head(); check_head(work); note_producer();
@@ -636,7 +673,7 @@ struct SyntheticEnvironment {
         require(coverage.stream_waiting_head == std::array<std::uint64_t, 2>{
             admissions_with_completed_head, issues_with_completed_head},
             "production completed-head choices disagreed with independent observations");
-        require(coverage.stream[8] + refetch_issues == issues, "production issue count disagreed with accepted producers");
+        require(coverage.stream[8] + refetch_issues + coverage.stream_scalar_retries == issues, "production issue count disagreed with accepted producers");
         require(coverage.stream_recovery_inflight[2] == cold_cancellations && cold_cancellations == cold_releases &&
             cold_releases == cold_refetches, "unfinished stream lifecycle accounting disagreed");
         require(coverage.stream_recovery_inflight[9] == prefix_old_producers &&
@@ -645,7 +682,7 @@ struct SyntheticEnvironment {
         std::array<std::uint64_t, 5> operations{};
         for (const auto &work : instructions) {
             ++operations[work.kind];
-            const auto count = work.kind == 2 ? 2 : work.kind == 0 ? 1U + work.epoch : work.uops.size();
+            const auto count = work.kind == 2 ? 2U + work.address_retries : work.kind == 0 ? 1U + work.epoch : work.uops.size();
             require(producer_counts[work.id] == count, "producer conservation failed");
         }
         require(coverage.stream_ops == operations, "retired operation-kind accounting disagreed");
@@ -805,7 +842,7 @@ int main(int argc, char **argv) {
             require(rejected == 2 * presets, "stream rate above 1000 was accepted");
             std::cout << "{\"presets\":" << presets << ",\"boundary_overrides\":" << boundaries
                 << ",\"out_of_range_rejections\":" << rejected << "}\n";
-        } else if (mode == "stream" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained") {
+        } else if (mode == "stream" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback") {
             require(argc == 6 || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
@@ -818,6 +855,7 @@ int main(int argc, char **argv) {
                 fixture.constraints.stream_dependency_per_mille = 1000;
                 if (std::stoul(argv[4]) == 1) fixture.constraints.scalar_fp_per_mille = 0;
             }
+            if (mode == "feedback") fixture.environment.delayed_store_feedback = true;
             if (mode == "independent") fixture.constraints.stream_dependency_per_mille = 0;
             if (mode == "recovery") {
                 fixture.environment.recovery_enabled = true;
@@ -858,6 +896,11 @@ int main(int argc, char **argv) {
                 << ",\"lq_canceled\":" << env.canceled_lq
                 << ",\"stream_history\":[" << fixture.coverage.stream_history[0] << "," << fixture.coverage.stream_history[1]
                 << "," << fixture.coverage.stream_history[2] << "," << fixture.coverage.stream_history[3] << "]"
+                << ",\"stream_sta\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_sta.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_sta[i];
+            std::cout << "]"
+                << ",\"address_misses\":" << env.address_misses
                 << ",\"dependency_edges\":" << env.dependencies.size()
                 << ",\"dependency_operand_checks\":" << env.dependency_operand_checks
                 << ",\"dependency_counts\":[";

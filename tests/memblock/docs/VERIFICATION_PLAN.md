@@ -65,7 +65,7 @@ combinations have occurred or establishes a coverage percentage.
 | Domain | Executable subset and source | Remaining scope |
 | --- | --- | --- |
 | Scalar/FP loads | Canonical integer/FLH/FLW/FLD format selection in ordinary/concurrent/SQ-dependency/unresolved graphs, byte-wise memory and older-store overlay boxing, payload sign bins, class/destination bounds and strict correct-data refetch; directed selected NC/MMIO/fault cases | Complete rename allocation history, other helper formats and exceptional misaligned FP enable semantics; wider timing/error interactions |
-| Ordinary mixed execution | Weighted variable scalar/FP load, vector load, scalar store, vector store and prefetch composition; configured 1..4096-instruction epochs (default draw 8..256) and 2..8 live instructions; ready-event operand/uop/retirement scheduling, sliding admission after prefix retirement, randomized integer-load-to-address/scalar-store-data edges with checked producer lifetimes, independent admission-order byte overlays, exact replay, bounded retained-prefix scalar/FP recovery with an optional held cold role and final readback; mixed_stream.cpp | Epoch/context drains, full rename/cancellation history, broader unfinished sliding overlap, general vector-result/index dependencies, unbounded histories and special/atomic/CMO/fault overlap |
+| Ordinary mixed execution | Weighted variable scalar/FP load, vector load, scalar store, vector store and prefetch composition; configured 1..4096-instruction epochs (default draw 8..256) and 2..8 live instructions; ready-event operand/uop/retirement scheduling with per-store ordinary STA feedback/retry state, sliding admission after prefix retirement, randomized integer-load-to-address/scalar-store-data edges with checked producer lifetimes, independent admission-order byte overlays, exact replay, bounded retained-prefix scalar/FP recovery with an optional held cold role and final readback; mixed_stream.cpp | Epoch/context drains, full rename/cancellation history, broader unfinished sliding overlap, general vector-result/index dependencies, unbounded histories and special/atomic/CMO/fault overlap |
 | Stores/forwarding | Random 1..4 older-store/1..3 younger-load chains with shuffled operand arrival, partial byte overlays and optional younger-store exclusion; address/data order, masks, commit, cross-producer forwarding, directed readback, constrained-random final word readback for cacheable identity-mapped and declared permuted-page commits and same-context hypervisor readback for permitted/aligned cacheable stores | Output-only pulses, remaining aliased/non-cacheable/fault-path final state. A naturally aligned cross-page scalar store is not modeled as one legal top-level uop; the backend split is absent, so cross-page scalar split-store fault effects are untested and a single-uop completion is not an RTL claim. |
 | Vector addressing | Unit/strided/indexed/segment/whole-register shapes, bounded random index spacing/permutation and repeated gathers with disjoint scatter spans, class-bounded distinct per-uop destinations, repeated-Vd source chains and randomized dependency-preserving indexed issue, data/identity/policy, full 128-bit mask operand with directed high-element load/store/indexed cases; cache_queue.inc, vector_memory.inc | Ordered side-effect targets, all concurrent shapes, and reserved/illegal mask-shape combinations remain |
 | Vector faults/FOF | First/later faults, prefix data, selected VA/GPA, final VL/fix completions, a two-uop page fault with `vstart=8` and exact VA, single-uop later-element/masked `vstart=1` faults with exact faulting-element addresses, legal two-uop segment noncanonical loads/stores whose later uop must expose the fault with no forbidden traffic, masked, unmasked, first-element, segment (field-1, element-1 and first-field) PMP-denied masked/unmasked vector loads, and PMP-denied (including masked, cross-page, both segment field orders and EEW 1/2) vector store faults whose inactive/read-only/writable target pages are read back unchanged, a partially masked load with an inactive unmapped element, and an all-masked unmapped control that observes no PTW/DCache traffic | Default exceptional vstart skip for other shapes, arbitrary restart/progress, broader fault-address attribution, and canonical-alias sensitivity. Per-uop success order is not an architectural oracle when a later uop of the same instruction exposes the fault before commit. |
@@ -177,6 +177,18 @@ touched word receives a strict terminal readback. Bounded random indexed vectors
 now vary offset spacing/permutation and repeated gathers for ordinary and
 segment operations; partial byte overlap and overlapping scatters remain open.
 
+Ordinary scalar streams return to event selection after an accepted STA rather
+than synchronously waiting for its slow feedback. One per-store attempt cursor
+matches lane/SQ value/wrap, preserves miss cooldown and suppresses retries after
+hit; independent ready work can progress meanwhile. `stream_sta` measures
+accepted admission and producer events during those waits. The fixed 16-cycle
+enqueue settle, blocking issue handshakes/retirement and synchronous unresolved
+graph operands still restrict density. Source audit finds no ordinary receiver
+minimum enqueue gap; removing that wait requires explicit retirement-credit
+maturity and redirect-rollback guards because acceptance is producer-owned and
+there is no generated ready pin. Same-cycle heterogeneous issue and decoupled
+commit/SQ lifecycle remain high priorities.
+
 Ordinary mixed streams vary producer counts and instruction ages, choose ready
 operand/uop and completed-head retirement events, and admit new work after a completed prefix retires while
 younger instructions remain live. Epochs are randomly placed among serial
@@ -221,7 +233,15 @@ guarantee a CPU bug.
 
 Priority work, each requiring executable stimulus and an independent check:
 
-1. Extend unfinished cancellation beyond the bounded youngest cold role in
+1. Remove unconditional enqueue settling with independently tracked capacity,
+   mature producer retirement credits and redirect-rollback guards; allow
+   independent ready producers to progress across stalled peers and form legal
+   dense/same-cycle issue combinations. Separate architectural store retirement
+   from SQ dequeue where the CPU contract permits. Measure actual accepted port
+   sets, consecutive-cycle work and committed-but-still-queued stores. Ordinary
+   per-store STA feedback state removes one global wait; blocking handshake,
+   retirement and unresolved-operand paths remain explicit work.
+2. Extend unfinished cancellation beyond the bounded youngest cold role in
    isolated and integrated sliding graphs; add broader temporal/address dependencies,
    and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable
    identity-mapped and declared permuted-page commits to remaining legal aliases, non-cacheable/device effects and
@@ -241,16 +261,16 @@ Priority work, each requiring executable stimulus and an independent check:
    PMP page-crossing load now checks accepted demand through redirect recovery,
    allowing only its readable prefix line and independent prefetch; a cold
    both-readable control observes the second page and checks its returned data.
-2. Preserve accepted-B provenance, same-PA serialization, C multibeat identity,
+3. Preserve accepted-B provenance, same-PA serialization, C multibeat identity,
    DCache E first-D/sink and PTW/Uncache source-lifetime checks. Broaden legal
    ordering/reset qualification and independent owner-version handling beyond
    the checkpointed pool.
-3. Repair verifier schema/backpressure/statistic validation. Regression and
+4. Repair verifier schema/backpressure/statistic validation. Regression and
    benchmark sidecars now use distinct campaign run-ID namespaces, including
    reruns that replace an aggregate file; the unique-parent controller-isolation
    requirement remains. Sidecar creation errors remain recorded
    diagnostics rather than an acceptance gate.
-4. Expand the now-full 128-bit vector mask to more fault/index/mapping and
+5. Expand the now-full 128-bit vector mask to more fault/index/mapping and
    concurrency crosses, plus reset/protection crosses.  A driver-truncation
    mutation is detected by the directed high-mask case; RTL mutation
    sensitivity of actual random paths remains open.

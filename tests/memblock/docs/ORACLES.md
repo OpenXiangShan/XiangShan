@@ -278,6 +278,16 @@ rejects an already-completed target and preserves unrelated replay obligations.
 It does not move ROB head or emit scalar commit. Stream populations use only
 nonzero configured scalar/FP, vector or prefetch classes; disabled classes cannot
 appear in `stream_ops`. Stream-only concurrency cannot generate legacy windows.
+Ordinary scalar stores now retain one accepted address attempt awaiting slow
+feedback. The scheduler matches only post-attempt samples with the same lane
+and SQ value/wrap; a miss enables retry after eight cycles, while a hit suppresses
+further attempts. Other ready events remain schedulable. This is backend replay
+progress, not an independent translation or fixed-latency oracle. Store address
+and data results still require their existing scoreboards, and younger loads
+still wait for checked older store addresses. Unresolved graph operands retain
+their synchronous helper. `stream_sta` counts another accepted event only before
+that attempt's matching feedback cycle, even when its helper advances time.
+
 Subset profiles retain the same data, identity, exactly-once and final-byte
 oracles. These are bounded external
 backend models: no general rename/cancellation ledger or full-CPU timing

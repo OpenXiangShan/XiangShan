@@ -24,7 +24,7 @@ INPUTS = (
     'cpp/scenarios/mixed/state.hpp', 'cpp/scenarios/shared.hpp',
     'cpp/scenarios/mixed/scalar_load.hpp', 'cpp/scenarios/mixed/vector_indices.hpp',
     'cpp/scenarios/mixed/vector_operands.hpp', 'cpp/scenarios/mixed/stream_oracle.hpp',
-    'cpp/scenarios/mixed/stream_recovery.hpp', 'cpp/scenarios/mixed/unresolved_load_group.hpp',
+    'cpp/scenarios/mixed/stream_recovery.hpp', 'cpp/scenarios/mixed/store_address_replay.hpp', 'cpp/scenarios/mixed/unresolved_load_group.hpp',
     'cpp/scenarios/mixed/unresolved_epochs.hpp', 'unit/mixed_stream_fixture.cpp',
     'cpp/random/constraints.inc', 'cpp/random/coverage.inc',
     'cpp/environment/model.inc', 'cpp/memblock_env.hpp',
@@ -56,6 +56,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.profiles = []
         cls.dependencies = []
         cls.sustained = []
+        cls.feedback = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -154,6 +155,7 @@ class MixedStreamTest(unittest.TestCase):
                 'validated_profile_cases': cls.profiles,
                 'dependency_cases': cls.dependencies,
                 'sustained_cases': cls.sustained,
+                'feedback_cases': cls.feedback,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
@@ -213,6 +215,20 @@ class MixedStreamTest(unittest.TestCase):
             self.assertGreater(sum(run['dependency_counts'][index] for run in results), 0)
         self.assertGreaterEqual(max(run['dependency_counts'][8] for run in results), 2)
         self.assertGreaterEqual(len({tuple(run['dependency_counts']) for run in results}), 32)
+
+    def test_other_producers_progress_during_per_store_feedback_waits(self):
+        results = [self.run_fixture('feedback', seed, 1, 0, 32) for seed in range(1, 65)]
+        self.feedback.extend(results)
+        self.assertGreaterEqual(len({run['schedule'] for run in results}), 32)
+        self.assertEqual(results[0], self.run_fixture('feedback', 1, 1, 0, 32))
+        for run in results:
+            counts = run['stream_sta']
+            self.assertEqual(counts[0], counts[2])
+            self.assertEqual(counts[1], counts[3])
+            self.assertEqual(counts[1], run['address_misses'])
+        for bin in range(11):
+            self.assertGreater(sum(run['stream_sta'][bin] for run in results), 0, bin)
+        self.assertGreaterEqual(max(run['stream_sta'][10] for run in results), 2)
 
     def test_sustained_epochs_reuse_terminal_identities_without_drains(self):
         for length in (1, 32, 33, 256, 641, 1024):

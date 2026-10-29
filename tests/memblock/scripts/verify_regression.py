@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4741,6 +4741,20 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
     vector_uops = _csv_counts(result, "stream_vector_uops", 2)
     retries = result.get("stream_scalar_retries")
     _require(type(retries) is int and retries >= 0, "invalid stream_scalar_retries")
+    if result.get("constraint_schema", 0) >= 73:
+        sta = _csv_counts(result, "stream_sta", 11)
+        ordinary = operations[2] - _csv_counts(result, "stream_recovery", 20)[9]
+        _require(sta[0] == sta[2] == ordinary and sta[1] == sta[3] == retries,
+                 "stream STA attempts/feedback are not conserved")
+        _require(sta[4] <= admitted - epochs and sta[5] <= issues[0] +
+                 _csv_counts(result, "stream_recovery", 20)[8] and
+                 sta[6] <= sta[0] + sta[1] and sta[7] <= issues[2] and
+                 sta[8] <= sum(vector_uops) and sta[9] <= issues[5],
+                 "stream STA wait overlaps exceed accepted work")
+        _require((ordinary == 0 and not any(sta)) or
+                 (ordinary > 0 and 1 <= sta[10] <= min(ordinary, live) and
+                  (sta[6] == 0 or sta[10] >= 2)),
+                 "stream STA waits exceed eligible stores or miss accepted overlap")
     maximum = 32
     if result.get("constraint_schema", 0) >= 72:
         minimum, maximum = result.get("target_stream_min_instructions"), result.get("target_stream_max_instructions")

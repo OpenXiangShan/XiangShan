@@ -3260,6 +3260,10 @@ struct MixedCoverage {
     std::array<std::uint64_t, 6> stream_issue{};
     std::array<std::uint64_t, 2> stream_vector_uops{};
     std::uint64_t stream_scalar_retries = 0;
+    // Ordinary STA initial/retry attempts, matching hits/misses; accepted
+    // admission/load/other STA/other STD/vector/prefetch while awaiting another
+    // ordinary STA's feedback; maximum concurrent feedback waits.
+    std::array<std::uint64_t, 11> stream_sta{};
     // Admission / producer selections while a completed head could retire.
     std::array<std::uint64_t, 2> stream_waiting_head{};
     // Address/data edges, consumed address/data, pending sources at selection,
@@ -3646,6 +3650,7 @@ struct MixedCoverage {
                " stream_issue=" + csv(stream_issue) + " stream_vector_uops=" + csv(stream_vector_uops) +
                " stream_scalar_retries=" + std::to_string(stream_scalar_retries) +
                " stream_waiting_head=" + csv(stream_waiting_head) +
+               " stream_sta=" + csv(stream_sta) +
                " stream_history=" + csv(stream_history) +
                " stream_dependencies=" + csv(stream_dependencies) +
                " stream_recovery=" + csv(stream_recovery) +

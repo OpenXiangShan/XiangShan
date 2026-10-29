@@ -18,6 +18,18 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema 73 keeps ordinary scalar-store address feedback and retry state per
+  instruction. An accepted STA returns to the ready-event scheduler; only its
+  matching lane/SQ value/wrap feedback advances that attempt, a miss preserves
+  the eight-cycle cooldown, and a hit suppresses further attempts. Other ready
+  producer events may progress during the wait. Expected bytes, checked older
+  address gating and terminal scoreboards remain active. `stream_sta` conserves
+  attempts/hits/misses, measures accepted work during another store's wait and
+  samples the pending high watermark at every increasing acceptance boundary.
+  The fixed enqueue settle, blocking handshakes/retirement and synchronous
+  unresolved-graph operand helper remain open density limits. This removes one
+  ordinary-workload barrier, without claiming complete producer independence.
+
 - Schema 72 extends ordinary stream epochs from the former 8..32 draw to
   configurable inclusive bounds, default 8..256 and maximum 4096, clipped to
   remaining action budget. One byte image and translation context persist
@@ -304,7 +316,10 @@ The current qualification is:
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
-| Infrastructure unit | 496 tests pass | Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 513 tests pass | Unit checks do not establish DUT functional coverage |
+| Ordinary store feedback DUT qualification | Frozen runtime-v2: 14/14 finite cases pass 24576 actions; six current-runtime artifact verifiers and one prior-schema72 control pass; 8/8 adjacent direct scenarios pass | `build/memblock/store-feedback-20261030/qualification-v2.json`, `artifact-verifiers-v2.json`, `directed-direct-v2/results.json`; spec/coverage/corner defaults, forced dependency streams, integrated recovery and store-only 641-instruction epochs. 5498 ordinary stores yield 5498 hits, 892 misses and 892 retries; accepted other work during waits: 10 loads, 227 STA, 193 STD, 28 vector uops and 12 prefetches. Maximum pending ordinary feedback attempts is two. Admission-during-wait remains zero. 12493 stream retirements, 2776 full ROB identity reuses and 10469/10469 final words. Functional/accounting development evidence, not closure |
+| Store feedback structural and sensitivity checks | 29 scheduler methods and 16 independent replay/accounting methods pass; 64/64 focused seeds produce distinct structural schedules and seed1 replays exactly; 44 serialization round trips and 15 private faults detected | `build/memblock/store-feedback-20261030/scheduler-v3.json`, `independent-tests/summary-v2.json`, `unit-v3.log`; structural schedules exclude addresses/payload/cycles/delays. Tests cover source cursor/lane/SQ wrap, own miss cooldown, hit suppression, duplicate feedback, unrelated work, timing intervals and old schema72 omission compatibility. Host pending peak three is synthetic; DUT observed two. Private faults affect UT state/checking, not RTL |
+| Store feedback independent review | Fresh non-author actual-diff review accepts the bounded change with no open blocking findings | `build/memblock/store-feedback-20261030/review-v1/review.md`, `review-disposition.json`; transient pending-peak undercount fixed at acceptance edges and guarded by independent ledger corruption tests, then rebuilt and requalified. Reviewed live-store identity and unchanged independent byte checks. No CPU bug or universal stale-generation claim |
 | Sustained stream DUT qualification | Frozen runtime-v1: 18/18 finite current-runtime cases pass 59408 actions; all ten artifact verifiers pass, including two previous-runtime controls | `build/memblock/sustained-stream-20261029/qualification-v1.json`; spec/coverage/corner defaults, forced 641, cold recovery, exact 4096 mixed/load-only and short compatibility. 47 epochs exceed 32, maximum 4096, 13142 accepted-overlap admissions after ordinal 32 and 21247 full ROB identity reuses; 32055 stream retirements, 21244 address/3117 data edges consumed exactly once, maximum depth 164, 36 held/canceled/drained cold roles and 14098/14098 final words. The two 8192-action cap runs clip to 4095; 8200-action controls exercise exact 4096. Functional/accounting development qualification only |
 | Sustained host and compatibility contracts | 28 compiled scheduler methods pass, including 19 sustained histories up to 4096 and exact long replay; ten independent history/accounting methods pass 167 serialized rows and 173 accepted/148 rejected accounting cases | `build/memblock/sustained-stream-20261029/scheduler-tests/report-v4.json`, `accounting-tests/report.json`; actual parser accepts 7/rejects 19 boundary configurations. Old schema 71 retains 32/depth 31 behavior; two min 8/max 32 DUT cases match 395 semantic fields each against the preceding runtime. Fixtures erase exactly one expectation/dispatch per independently complete terminal uop before identity reuse. Synthetic host timing/ports and sampled replay compatibility do not prove full CPU reachability |
 | Sustained stream independent review | Fresh non-author actual-diff review accepts the bounded development slice with no open findings | `build/memblock/sustained-stream-20261029/review-v2/independent-review.md`; observed-epoch dependency-depth bound and stale length documentation findings resolved and re-reviewed. Reviewer independently reruns ten history tests and all ten artifact verifiers, reconciles all 18 current cases and both 395-field compatibility comparisons. Repeated-identity, replay-generation and scalar STD attribution limits remain explicit; no closure claim |
@@ -406,6 +421,24 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Fresh-context non-author review accepts schema73 ordinary store feedback
+interleaving for bounded development qualification. One pending-peak measurement
+finding was corrected and re-reviewed: a positive other-STA overlap now requires
+at least two pending attempts. The reviewer independently reruns the sixteen
+replay/accounting methods, private fault checks, focused 64-seed scheduler case
+and all six current-runtime artifact verifiers; it checks the eight direct
+scenario logs against their commands, terminals and recorded hashes. Main
+integration passes all 513 host tests, `check-rtl`/`check-docs` and the schema72
+artifact control. Evidence and primary disposition are
+`build/memblock/store-feedback-20261030/review-v1/review.md` and
+`review-disposition.json`; finite DUT totals are in `qualification-v2.json`.
+No admission-during-feedback overlap was observed; enqueue cadence, same-cycle
+heterogeneous issue, commit/SQ separation and accepted-generation attribution
+remain priorities. The enqueue contract audit is at workspace
+`build/memblock/enqueue-cadence-20261030/audit/enqueue-cadence.md`: removing the
+unconditional wait must preserve both queue watermarks, producer credit timing
+and event-specific redirect rollback.
 
 Fresh-context non-author review accepts schema 70 stream operation-subset
 validation and accounting for bounded development qualification, with no blocking

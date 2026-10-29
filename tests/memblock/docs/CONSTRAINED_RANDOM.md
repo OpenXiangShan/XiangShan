@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=72`.
+`constraint_schema=73`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -423,10 +423,15 @@ order. Loads wait until all older store addresses are known; older scalar STD
 may remain unissued. Vector-store address readiness conservatively waits for
 its checked writebacks. Beat-crossing loads and scalar STA, ordered-indexed loads and
 misaligned vector stores wait for the actual head. STD remains independently
-eligible; a blocking hit wait cannot prevent older work from retiring while a
-misaligned STA waits for SQ-head eligibility. Exact vector replay service
-retains unrelated requests and does not move the head. Scalar address retries
-apply only while its STA obligation remains pending. The address pool biases
+eligible. Ordinary scalar stores keep per-instruction slow-feedback state:
+accepted STA returns to event selection, a matching miss enables retry no earlier
+than eight cycles after that feedback, and a matching hit suppresses further
+attempts while STD/writeback remain independent. Matching uses the post-attempt
+sample cursor, lane and full SQ value/wrap. Feedback waits do not block other
+ready events; older-address gating still requires checked address completion.
+The unresolved graph operand path and focused helpers retain their synchronous
+hit wait. Exact vector replay service retains unrelated requests and does not
+move the head. The address pool biases
 three of four line choices toward eight lines near a seeded arena and otherwise
 uses the configured cacheable pool; per-access offsets, shapes and data vary.
 The conditional `stream-unresolved` direction reserves a complete fitting graph
@@ -643,6 +648,7 @@ Array order and sampling code are authoritative in
 | `stream` | Epochs, admitted instructions, retired instructions, admissions with older accepted work pending, admissions after a prefix retired while older work remains live, prefix retirements with younger live work, maximum live instructions, maximum accepted-and-pending instructions, initial issue events, vector replay issues, epochs after serial work, last global action index. These are driver/scoreboard observations, not an internal pipeline occupancy oracle. |
 | `stream_ops`, `stream_issue`, `stream_vector_uops`, `stream_scalar_retries` | Retired instruction counts in the same five-class order; initial scalar-load/STA/STD/vector-load-uop/vector-store-uop/prefetch issues; admitted vector-load/store uops; repeated STA issues excluded from initial counts. Schema 62 requires conservation and bounds in both verifier modes without a positive-bin gate. The opt-in strict checker retains minimum epoch/action/overlap observations for a stream-only configuration. |
 | `stream_waiting_head` | Schema 67: admission and operand/uop event selections while the oldest architectural instruction is complete and eligible to retire. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
+| `stream_sta` | Schema 73: ordinary first STA attempts, retries, matched hits, misses; accepted admission/scalar load/other STA/other STD/vector uop/prefetch during another ordinary store's feedback wait; maximum simultaneous ordinary feedback waits at accepted issue boundaries. Each overlap is counted once per accepted event if at least one other attempt is outstanding at its edge, excluding feedback already observed by that edge. First attempts and hits equal ordinary scalar-store retirements (excluding recovery roles); retries and misses equal `stream_scalar_retries`. These are scheduling/feedback relations, not a per-request PTW or translation-hit oracle. |
 | `stream_history` | Schema 72: epochs longer than 32 instructions, maximum actual epoch length, admissions after the first 32 with older accepted work pending, and reuse of a full ROB value/wrap identity within one epoch. These observations distinguish sustained queue overlap from repeated short epochs; lifetime reuse is driver history, not an oracle excluding arbitrary stale responses. Sparse accounting checks length/overlap bounds without requiring positive bins. |
 | `stream_dependencies` | Schema 71: address/data edges, consumed address/data edges, pending address/data sources at selection, consumption before/after source retirement, maximum chain depth. Both accounting modes require exactly-once consumption, lifetime conservation, source/consumer eligibility and depth bounds. Disabled dependencies and all-FP sources cannot produce edges. |
 | `stream_recovery` | Schema 68: started windows, conflict windows, controls, graph stores/loads admitted, initial strictly checked loads, returned rounds, invalidated completed executions, strictly checked refetches, graph stores/loads retired, starts with accepted pending prefix, prefix retirements during the barrier, ordinary admissions after release with graph roles live, observed LQ cancellations, invalidated FP executions, maximum stores/loads/rounds, resolved windows. Refetch executions do not add architectural initial issue/action counts. Both verifier modes enforce sparse conservation, suffix/capacity/shape and emitter-domain bounds, including graph-role counts versus the observed maximum live instructions. |
@@ -1124,3 +1130,24 @@ absolute generation, and scalar STD pulses omit ROB wrap. Exact current
 scoreboard comparison, queue conservation, replay servicing and final byte
 readback remain active; these explicit attribution limits prohibit claiming
 universal stale-response detection or full CPU timing equivalence.
+
+### Ordinary store feedback interleaving
+
+Schema 73 replaces the ordinary stream's synchronous STA-to-hit wait with
+[per-store replay state](../cpp/scenarios/mixed/store_address_replay.hpp).
+Independent ready events may execute during another store's feedback wait.
+Every attempt records its accepted-edge cycle and the current feedback sample
+cursor. Wrong lane/SQ value/wrap and pre-attempt samples cannot release it;
+duplicate matching feedback is rejected. A successful hit never causes a retry
+while data or terminal writeback remains pending. Misses retain the same input
+transaction and may retry after the existing eight-cycle cooldown. Feedback can
+arrive while a different blocking helper advances time; overlap reporting scans
+those actual sample cycles rather than counting every selected helper as
+concurrent. No fixed feedback latency is an expected CPU result.
+
+This removes one global scheduling barrier. Admission still waits the existing
+16 enqueue-settle cycles, issue handshakes and retirement helpers still advance
+time, and unresolved graph operand resolution still uses its focused blocking
+helper. Broad same-cycle heterogeneous issue, independent architectural commit
+versus SQ dequeue, general recovery populations and an accepted-generation
+ledger remain gaps. More seeds cannot remove those control-flow restrictions.

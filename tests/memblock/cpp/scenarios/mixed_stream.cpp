@@ -1,6 +1,7 @@
 #include "mixed/scenario.hpp"
 #include "mixed/stream_oracle.hpp"
 #include "mixed/stream_recovery.hpp"
+#include "mixed/store_address_replay.hpp"
 
 namespace memblock::scenarios::mixed {
 namespace {
@@ -17,7 +18,7 @@ struct StreamWork {
     bool data_issued = false;
     bool requires_head = false;
     bool data_first = false;
-    std::uint64_t last_address_issue = 0;
+    StoreAddressReplay address_replay;
     std::uint64_t expected_scalar = 0;
     unsigned recovery_id = 0, recovery_index = 0;
     bool refetch = false, checked = false;
@@ -87,8 +88,19 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         return std::any_of(work.vectors.begin(), work.vectors.end(),
             [&](const auto &uop) { return environment.vector_memory_pending(uop); });
     };
+    const auto feedback_waits_at = [&](std::uint64_t edge, const StreamWork *actor = nullptr) {
+        const auto &samples = environment.iq_slow_feedback_stats().sta_samples;
+        return std::count_if(live.begin(), live.end(), [&](const auto &work) {
+            return &work != actor && work.kind == 2 && !work.recovery_id &&
+                work.address_replay.waiting_at(edge, samples, work.store);
+        });
+    };
+    const auto note_wait_overlap = [&](unsigned bin, const StreamWork *actor = nullptr) {
+        if (feedback_waits_at(environment.cycle() - 1U, actor)) ++coverage.stream_sta[bin];
+    };
     const auto all_issued = [](const StreamWork &work) {
-        if (work.kind == 2) return work.address_issued && work.data_issued;
+        if (work.kind == 2) return work.address_issued && work.data_issued &&
+            (work.recovery_id || work.address_replay.translated());
         return std::find(work.issued.begin(), work.issued.end(), false) == work.issued.end();
     };
     const auto allocate_destination = [&](unsigned domain) {
@@ -273,6 +285,21 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (environment.memory_violation_stats().count != expected_violations) {
             phase += ":unexpected-redirect"; return false;
         }
+        unsigned waiting_addresses = 0;
+        for (auto &work : live) if (work.kind == 2 && !work.recovery_id) {
+            const auto observation = work.address_replay.observe(
+                environment.iq_slow_feedback_stats().sta_samples, work.store);
+            if (observation == StoreAddressReplay::Observation::invalid) {
+                phase += ":unexpected-store-address-feedback"; return false;
+            }
+            coverage.stream_sta[2] += observation == StoreAddressReplay::Observation::hit;
+            coverage.stream_sta[3] += observation == StoreAddressReplay::Observation::miss;
+            if (work.address_replay.timed_out(environment.cycle(), constrained_completion_timeout)) {
+                phase += ":store-address-feedback-timeout"; return false;
+            }
+            waiting_addresses += work.address_replay.waiting();
+        }
+        coverage.stream_sta[10] = std::max<std::uint64_t>(coverage.stream_sta[10], waiting_addresses);
         if (recovery) {
             auto &episode = *recovery;
             if (environment.sq_dequeued() > episode.sq_dequeue_limit ||
@@ -447,9 +474,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 if (!work.data_issued && (early || promote)) ready.push_back({3, i, 0});
             } else if (work.kind == 2) {
                 // Beat-crossing STA must not block older retirement.
-                if (head_eligible && address_ready && (!work.address_issued ||
-                    (environment.scalar_store_address_pending(work.store) &&
-                     environment.cycle() - work.last_address_issue >= 32))) ready.push_back({2, i, 0});
+                if (!work.recovery_id && head_eligible && address_ready && work.address_replay.ready(environment.cycle()))
+                    ready.push_back({2, i, 0});
                 if (!work.data_issued && data_ready) ready.push_back({3, i, 0});
             }
             if (work.kind == 1 || work.kind == 3) {
@@ -508,7 +534,6 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 if (work.address_issued || !environment.issue_store_address_until_tlb_hit(work.store, constrained_completion_timeout) ||
                     !episode.image->resolve(operand.store)) return false;
                 work.address_issued = true;
-                work.last_address_issue = environment.cycle();
                 ++coverage.stream_issue[1];
                 unsigned victim = episode.loads.size();
                 for (unsigned index = 0; index < episode.group.loads.size(); ++index)
@@ -705,7 +730,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             coverage.stream_history[3] += !admitted_rob_identities.insert(
                 unsigned(work.rob()) + (work.flag() ? memblock::kRobEntries : 0U)).second;
             const bool was_empty = live.empty();
-            live.push_back(std::move(work)); ++admitted; ++coverage.stream[1];
+            live.push_back(std::move(work));
+            note_wait_overlap(4); ++admitted; ++coverage.stream[1];
             if (was_empty && !install_head()) return false;
             if (graph_admission && recovery->loads.size() == recovery->group.loads.size()) {
                 recovery->obligation.emplace(recovery->loads, recovery->stores.size(), recovery->group.unfinished);
@@ -741,8 +767,15 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 const bool first = !work.address_issued;
                 initial_event = first;
                 coverage.stream_scalar_retries += !first;
-                if (!environment.issue_store_address_until_tlb_hit(work.store, constrained_completion_timeout)) return false;
-                work.address_issued = true; work.last_address_issue = environment.cycle();
+                const auto first_sample = environment.iq_slow_feedback_stats().sta_samples.size();
+                if (!environment.issue_store_address(work.store, constrained_completion_timeout) ||
+                    !work.address_replay.accept(first_sample, environment.cycle() - 1U)) return false;
+                work.address_issued = true;
+                ++coverage.stream_sta[first ? 0U : 1U];
+                // Feedback waits increase only at accepted STA edges. Sampling
+                // just after the next poll can miss a wait resolved in between.
+                coverage.stream_sta[10] = std::max<std::uint64_t>(coverage.stream_sta[10],
+                    1U + feedback_waits_at(environment.cycle() - 1U, &work));
                 coverage.stream_issue[1] += first;
             } else if (event.kind == 3) {
                 work.data_first = !work.address_issued;
@@ -759,6 +792,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 ++coverage.stream_issue[work.kind == 1 ? 3U : 4U];
             }
             coverage.stream[8] += initial_event;
+            note_wait_overlap(event.kind == 1 ? (work.kind == 0 ? 5U : 9U) :
+                event.kind == 2 ? 6U : event.kind == 3 ? 7U : 8U, &work);
         }
         coverage.stream[6] = std::max<std::uint64_t>(coverage.stream[6], live.size());
         const auto accepted_pending = std::count_if(live.begin(), live.end(),
