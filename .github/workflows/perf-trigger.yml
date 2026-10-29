@@ -56,6 +56,11 @@ on:
         description: Constantin file path (empty for default init setting, or file path for specific file)
         required: false
         type: string
+      disable_diff:
+        description: Disable difftest
+        required: false
+        type: boolean
+        default: false
       enable_db:
         description: Enable ChiselDB dump (High disk usage, 4~16G/ckpt, use with caution!)
         required: false
@@ -101,6 +106,7 @@ jobs:
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         cst_file: ${{ github.event.inputs.cst_file }}
+        disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
         servers: ${{ github.event.inputs.servers }}
