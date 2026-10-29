@@ -231,7 +231,7 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
       entries(w).entry           := snapshot.req.bits.evicted
       entries(w).setIdx          := snapshot.req.bits.setIdx
       entries(w).internalBankIdx := snapshot.req.bits.internalBankIdx
-      entries(w).counter         := TakenCounter.WeakPositive
+      entries(w).counter         := TakenCounter.WeakNegative
     }
   }
 
