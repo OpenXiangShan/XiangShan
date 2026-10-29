@@ -229,13 +229,20 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     (mbtbHit, baseCtr, meta)
   }.unzip3
 
-  // Meta stores provider and alternate state for training correct predictions.
-  // Re-read SRAM only on a misprediction to re-match entries and obtain allocation state.
+  // Use meta only when both TAGE's selected direction and the overall prediction were correct.
+  // Re-read even when SC corrected TAGE, to re-match entries and train their current state.
   private val t0_needRead = t0_branches.zipWithIndex.map { case (branch, i) =>
-    val mbtbHit      = t0_mbtbHitMask(i)
-    val isCond       = t0_condMask(i)
-    val mispredicted = branch.bits.mispredict
-    mbtbHit && isCond && mispredicted
+    val mbtbHit = t0_mbtbHitMask(i)
+    val isCond  = t0_condMask(i)
+    val meta    = t0_meta(i)
+    val tagePred = Mux(
+      meta.useProvider,
+      meta.providerTakenCtr.isPositive,
+      Mux(meta.hasAlt, meta.altTakenCtr.isPositive, t0_baseCtr(i).isPositive)
+    )
+    val tageMispredicted = tagePred =/= branch.bits.taken
+    val mispredicted     = branch.bits.mispredict
+    mbtbHit && isCond && (tageMispredicted || mispredicted)
   }.reduce(_ || _)
   private val t0_useMeta = !t0_needRead
 
