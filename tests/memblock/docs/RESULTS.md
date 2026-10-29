@@ -18,6 +18,13 @@ None.
 
 ## Current Changes Qualified Below
 
+- The DCache manager provides independently grouped ordinary-input ReleaseData
+  versions, with first-C snapshots, least-witness promotion, retained omitted
+  updates, visible-progress floors, exact overrides and certified epoch anchors.
+  Pre-epoch legacy updates cannot be replayed after certified epoch entry. This is a manager
+  capability checkpoint; mixed-driver integration and its native qualification
+  remain separate work.
+
 - LSQ monitor schema 3 adds passive enqueue cadence while constraint schema
   remains 73. Ordinary admission uses both post-admission watermarks without a
   fixed quiet interval, ages public dequeue/reconciled cancellation credits by
@@ -326,6 +333,8 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| Ordinary-input manager host contracts | Seven methods pass in isolation against the pre-change headers; 58 passing modes, 729 independent histories/10,193 two-release transitions, 524,288 input-group stress and 9/9 compiled private faults | `build/memblock/store-retirement-20261030/manager-checkpoint-isolated/unit.log`, `manager-audit/final-evidence.json`; independent non-author forward model matches 4,000 additional decisions and rejects the stale-legacy counterexample. Synthetic manager ports do not establish native integration or full coherence coverage |
+| Current alias diagnostic | `translation-alias` fails identically in pre-change and current frozen runtimes at cycle 365 with a load-byte mismatch | `build/memblock/store-retirement-20261030/alias-comparison/replay-k2l5u1ac/comparison.json`; same model and byte-for-byte identical output. Origin remains unclassified; no CPU RTL bug or current pass claim |
 | Infrastructure unit | 533 tests pass | Unit checks do not establish DUT functional coverage |
 | Admission/ledger host contracts | 20 independent methods pass: 13 production C++ schedules, 20 compiled private faults detected, 50 ledger records; non-author review independently enumerates 4803 arithmetic cases | `build/memblock/enqueue-admission-20261030/independent-tests/{summary.txt,evidence.json,ledger-evidence.json}`, `review-v1/review.md`; exact credit/redirect boundaries, repeated highs, both watermarks, unmonitored ticks, immediate conservation, holey batches, cadence and schema 2 compatibility. Synthetic public ports/edges; no DUT mutation claim |
 | Ordinary enqueue/feedback DUT qualification | Frozen runtime-v1: 12/12 finite cases pass 22528 actions; six current-runtime artifact verifiers and one prior-monitor2 control pass; 9/9 adjacent directed scenarios pass | `build/memblock/enqueue-admission-20261030/qualification-v1.json`, `artifact-verifiers-v1.json`, `directed-v1/results.json`; spec/coverage/corner defaults, ordinary dependency streams, integrated recovery and store-only 641-instruction epochs. Whole-run cadence: 51092 enqueue edges, 8969 adjacent edges with older work, maximum run 19; this includes legacy/final readback and has no per-stream attribution. Stream-specific feedback overlap includes 315 admissions, 14 loads, 227 STA, 182 STD, 35 vector uops and 7 prefetches. 5478 ordinary hits, 715 misses/retries, maximum pending 2; 12303 stream retirements, 2748 full ROB identity reuses and 9929/9929 final words. Exact corner replays pass at 333.5/336.6s with 900s budget; initial 180s timeouts and malformed-constraint attempts are excluded. Functional/accounting development evidence, not closure |
@@ -432,6 +441,16 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Fresh-context non-author review accepts the ordinary-input manager source and
+host contracts for bounded development use. It independently compares 4,000
+multi-release decisions, checks exact overrides and epoch anchors, and rejects
+an independent stale-legacy example. The covered-legacy-history defect was
+corrected and re-reviewed. This checkpoint also passes its isolated seven-method
+suite using the pre-change public headers, without the pending mixed-driver
+patch. Evidence is `build/memblock/store-retirement-20261030/review-v2/reviewer/`
+and `manager-checkpoint-isolated/`. Native integration, the replay/cancellation
+boundary and the baseline alias diagnostic remain outside this acceptance.
 
 Fresh-context non-author review accepts the LSQ schema 3 admission/cadence
 source, independent tests and contract documentation for bounded development

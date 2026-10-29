@@ -241,6 +241,12 @@ public:
     {
         b_beats_.clear();
         owners_.clear();
+        release_input_epoch_ = false;
+        release_input_lines_.clear();
+        release_input_orders_.clear();
+        retired_release_input_orders_.clear();
+        expected_release_line_ids_.clear();
+        next_expected_release_line_id_ = 0;
         pending_acquires_.clear();
         grants_.clear();
         d_beats_.clear();
@@ -966,6 +972,135 @@ public:
             expected_data, alias, false, 0);
     }
 
+    // The caller certifies a producer/LSQ/SBuffer drain plus idle D/E/B at
+    // both boundaries. Link idle is checked here; the stronger producer drain
+    // is an Environment contract. Every write while active must be registered.
+    bool begin_release_input_epoch()
+    {
+        if (release_input_epoch_ || !responses_idle() || !grant_acks_idle() ||
+            !probes_idle() || !release_input_lines_.empty() || !release_input_orders_.empty()) {
+            error_.record("ordinary ReleaseData epoch begin requires an idle untracked boundary");
+            return false;
+        }
+        retired_release_input_orders_.clear();
+        release_input_epoch_ = true;
+        return true;
+    }
+
+    bool end_release_input_epoch()
+    {
+        if (!release_input_epoch_ || !responses_idle() || !grant_acks_idle() || !probes_idle()) {
+            error_.record("ordinary ReleaseData epoch end requires an active idle boundary");
+            return false;
+        }
+        for (const auto &[line, version] : release_input_lines_) {
+            if (std::any_of(version.inputs.begin(), version.inputs.end(),
+                [](const auto &input) { return !input.authorized; })) {
+                error_.record("ordinary ReleaseData epoch ended with non-authorized input work");
+                return false;
+            }
+        }
+        for (const auto &[line, version] : release_input_lines_) {
+            const auto owner = owners_.find(line);
+            if (owner != owners_.end() && !owner->second.expected_data.empty()) {
+                owner->second.expected_data = reference_memory_.read_beat(line, kLineBytes);
+                owner->second.updates.clear();
+            }
+        }
+        release_input_lines_.clear();
+        release_input_orders_.clear();
+        retired_release_input_orders_.clear();
+        release_input_epoch_ = false;
+        return true;
+    }
+
+    // Inputs are immutable accepted ordinary-store groups. Registration may
+    // arrive out of architectural order; order defines overlap precedence.
+    // Authorize before a public head-eligible edge. Neither method changes the
+    // architectural reference image. Same-input retries are idempotent.
+    bool register_release_store(std::uint64_t order, std::uint64_t physical,
+        std::uint64_t virtual_address, const std::vector<unsigned char> &bytes)
+    {
+        const auto line = physical & ~(kLineBytes - 1U);
+        if (bytes.empty() || bytes.size() > kLineBytes - (physical - line)) {
+            error_.record("invalid ordinary ReleaseData input group");
+            return false;
+        }
+        const auto existing = release_input_orders_.find(order);
+        if (existing != release_input_orders_.end()) {
+            const auto &inputs = release_input_lines_.at(existing->second).inputs;
+            const auto found = std::lower_bound(inputs.begin(), inputs.end(), order,
+                [](const auto &input, auto value) { return input.order < value; });
+            if (found != inputs.end() && found->physical == physical &&
+                found->virtual_address == virtual_address && found->data == bytes) return true;
+            error_.record("ordinary ReleaseData input order changed its immutable group");
+            return false;
+        }
+        if (retired_release_input_orders_.contains(order)) {
+            error_.record("ordinary ReleaseData input reused a retired order");
+            return false;
+        }
+        if (release_input_orders_.size() + retired_release_input_orders_.size() >= kMaxReleaseInputOrders) {
+            error_.record("DCache ordinary ReleaseData input order budget exhausted");
+            return false;
+        }
+        auto [position, inserted] = release_input_lines_.try_emplace(line);
+        auto &version = position->second;
+        if (inserted) {
+            const auto owner = owners_.find(line);
+            version.baseline = release_input_epoch_
+                ? reference_memory_.read_beat(line, kLineBytes)
+                : owner != owners_.end() && !owner->second.expected_data.empty()
+                    ? owner->second.expected_data : memory_.read_beat(line, kLineBytes);
+            if (owner != owners_.end()) {
+                version.legacy_alias = owner->second.alias;
+                // Epoch entry certified all pre-epoch producers drained. Their
+                // legacy records are already in the reference anchor and must
+                // not reintroduce an older same-byte value as a future version.
+                if (!release_input_epoch_) version.legacy_updates = std::move(owner->second.updates);
+                owner->second.updates.clear();
+            }
+        }
+        if (version.inputs.size() + version.legacy_updates.size() >= kMaxReleaseInputsPerLine) {
+            error_.record("DCache ordinary ReleaseData line journal budget exhausted");
+            return false;
+        }
+        for (unsigned byte = 0; byte < bytes.size(); ++byte) {
+            const unsigned offset = physical - line + byte;
+            if (((version.applied_order_mask >> offset) & 1U) && order <= version.applied_order[offset]) {
+                error_.record("ordinary ReleaseData input registered behind observed same-byte progress");
+                return false;
+            }
+        }
+        ReleaseStoreInput input{order, physical, virtual_address, bytes};
+        input.update.input_order = order;
+        for (unsigned byte = 0; byte < bytes.size(); ++byte) {
+            const unsigned offset = physical - line + byte;
+            input.update.mask |= std::uint64_t{1} << offset;
+            input.update.bytes[offset] = bytes[byte];
+        }
+        const auto at = std::lower_bound(version.inputs.begin(), version.inputs.end(), order,
+            [](const auto &candidate, auto value) { return candidate.order < value; });
+        version.inputs.insert(at, std::move(input));
+        release_input_orders_.emplace(order, line);
+        return true;
+    }
+
+    bool authorize_release_store(std::uint64_t order)
+    {
+        if (retired_release_input_orders_.contains(order)) return true;
+        const auto found = release_input_orders_.find(order);
+        if (found == release_input_orders_.end()) {
+            error_.record("ordinary ReleaseData authorization has no registered input");
+            return false;
+        }
+        auto &inputs = release_input_lines_.at(found->second).inputs;
+        const auto input = std::lower_bound(inputs.begin(), inputs.end(), order,
+            [](const auto &candidate, auto value) { return candidate.order < value; });
+        input->authorized = true;
+        return true;
+    }
+
     // The caller has retired producers, drained SBuffer and all D/E traffic.
     // Freeze only independent architectural bytes, before the next context's
     // stores can advance the global reference beyond the old cache owner.
@@ -979,6 +1114,20 @@ public:
             if (line >= base && line - base < bytes && owner.present) {
                 owner.expected_data = reference_memory_.read_beat(line, kLineBytes);
                 owner.updates.clear();
+                const auto tracked = release_input_lines_.find(line);
+                if (tracked != release_input_lines_.end()) {
+                    // This explicit drained checkpoint proves every authorized
+                    // same-alias group visible. Preserve future/noneligible or
+                    // other-alias work; a queue dequeue alone is never this proof.
+                    auto &version = tracked->second;
+                    version.baseline = owner.expected_data;
+                    if (version.legacy_alias == owner.alias) version.legacy_updates.clear();
+                    std::erase_if(version.inputs, [&](const auto &input) {
+                        if (!input.authorized || ((input.virtual_address >> 12U) & 3U) != owner.alias) return false;
+                        retire_release_input_order(line, input);
+                        return true;
+                    });
+                }
             }
         }
         return true;
@@ -1005,7 +1154,17 @@ public:
             update.mask |= std::uint64_t{1} << offset;
             update.bytes[offset] = bytes[b];
         }
-        owner->second.updates.push_back(update);
+        const auto tracked = release_input_lines_.find(line);
+        if (tracked != release_input_lines_.end()) {
+            // Unintegrated legacy classes have no architectural order token.
+            // Do not guess an ordering when such a class overlaps live inputs.
+            if (!tracked->second.inputs.empty()) {
+                error_.record("legacy reference update overlaps an ordinary ReleaseData input journal");
+                return;
+            }
+            tracked->second.legacy_alias = owner->second.alias;
+            tracked->second.legacy_updates.push_back(update);
+        } else owner->second.updates.push_back(update);
     }
 
     void note_reference_write(std::uint64_t physical, std::uint64_t virtual_address,
@@ -1102,11 +1261,13 @@ public:
             return;
         }
         expected_release_lines_[base] = bytes;
+        expected_release_line_ids_[base] = ++next_expected_release_line_id_;
     }
 
     void clear_release_line_expectations()
     {
         expected_release_lines_.clear();
+        expected_release_line_ids_.clear();
     }
 
     bool verify_memory_bytes(
@@ -1246,7 +1407,29 @@ private:
     struct OwnerUpdate {
         std::uint64_t mask = 0;
         std::array<unsigned char, 64> bytes{};
+        std::optional<std::uint64_t> input_order;
     };
+    struct ReleaseStoreInput {
+        std::uint64_t order, physical, virtual_address;
+        std::vector<unsigned char> data;
+        bool authorized = false;
+        OwnerUpdate update;
+    };
+    struct ReleaseInputLine {
+        std::vector<unsigned char> baseline;
+        std::vector<ReleaseStoreInput> inputs;
+        std::uint8_t legacy_alias = 0;
+        std::vector<OwnerUpdate> legacy_updates;
+        std::uint64_t applied_order_mask = 0;
+        std::array<std::uint64_t, 64> applied_order{};
+    };
+    // Explicit model budgets, not hardware capacity or acceptance thresholds:
+    // 1,048,576 pending groups/line (>=4096 instructions*128 active elements),
+    // 67,108,864 lifetime order IDs, and 67,108,864 solver work units per C.
+    // Exhaustion is a manager-contract failure; history is never dropped.
+    static constexpr std::size_t kMaxReleaseInputsPerLine = 1U << 20;
+    static constexpr std::size_t kMaxReleaseInputOrders = 1U << 26;
+    static constexpr std::size_t kMaxReleaseVersionSearchStates = 1U << 26;
 
     struct ReleaseDataState {
         std::uint64_t base;
@@ -1259,6 +1442,10 @@ private:
         std::vector<unsigned char> baseline;
         std::vector<OwnerUpdate> updates;
         std::vector<unsigned char> actual;
+        std::vector<unsigned char> exact;
+        bool input_versioned = false;
+        bool declared_exact = false;
+        std::uint64_t exact_id = 0;
     };
 
     struct ProbeResponseState {
@@ -1281,6 +1468,7 @@ private:
         bool present = true;
         std::vector<unsigned char> expected_data;
         std::vector<OwnerUpdate> updates;
+        std::vector<unsigned char> refill_data;
     };
     struct PendingAcquire { ARequest request; bool recall_started; };
     struct GrantLifetime {
@@ -1326,7 +1514,13 @@ private:
                 owner->second.present && owner->second.alias != request.alias;
             if (different_alias) {
                 if (!it->recall_started) {
-                    if (owner->second.expected_data.empty() || !owner->second.updates.empty()) {
+                    const auto tracked = release_input_lines_.find(line);
+                    const bool tracked_pending = tracked != release_input_lines_.end() &&
+                        ((!tracked->second.legacy_updates.empty() && tracked->second.legacy_alias == owner->second.alias) ||
+                         std::any_of(tracked->second.inputs.begin(), tracked->second.inputs.end(), [&](const auto &input) {
+                             return input.authorized && ((input.virtual_address >> 12U) & 3U) == owner->second.alias;
+                         }));
+                    if (owner->second.expected_data.empty() || !owner->second.updates.empty() || tracked_pending) {
                         error_.record("DCache cross-alias Acquire requires a drained reference checkpoint");
                         return;
                     }
@@ -1428,6 +1622,7 @@ private:
             expected_grant_acks_.emplace_back(sink, denied || corrupt);
             grants_.push_back({request_line, sink});
             if (!denied && !corrupt) {
+                const auto refill = memory_.read_beat(request_line, kLineBytes);
                 auto owner = owners_.find(request_line);
                 if (owner == owners_.end() || !owner->second.present ||
                     owner->second.alias != request.alias) {
@@ -1435,6 +1630,9 @@ private:
                 } else {
                     owner->second.permission = cap;
                 }
+                owners_.at(request_line).refill_data = refill;
+                const auto tracked = release_input_lines_.find(request_line);
+                if (tracked != release_input_lines_.end()) tracked->second.baseline = refill;
             }
             break;
         }
@@ -1607,34 +1805,125 @@ private:
     // Each naturally aligned update is indivisible. If a later selected update
     // overlaps an older one, the older update must also have taken effect.
     // Disjoint updates may propagate independently. Payloads are input-derived.
-    static bool permitted_release_image(const ReleaseDataState &state)
+    static bool permitted_release_image(const ReleaseDataState &state,
+        std::vector<std::size_t> *included = nullptr, bool *budget_exhausted = nullptr)
     {
-        std::set<std::pair<std::size_t, std::uint64_t>> rejected;
-        const auto search = [&](auto &&self, std::size_t count,
-                                std::uint64_t resolved) -> bool {
-            if (count == 0) {
-                for (unsigned b = 0; b < kLineBytes; ++b) {
-                    if (((resolved >> b) & 1U) == 0 &&
-                        state.actual[b] != state.baseline[b]) return false;
-                }
-                return true;
-            }
-            const auto key = std::make_pair(count, resolved);
-            if (rejected.contains(key)) return false;
-            const auto &update = state.updates[count - 1U];
-            const bool required = (update.mask & resolved) != 0;
-            bool matches = true;
-            for (unsigned b = 0; b < kLineBytes; ++b) {
-                if (((update.mask & ~resolved) >> b) & 1U) {
-                    matches &= state.actual[b] == update.bytes[b];
-                }
-            }
-            if (matches && self(self, count - 1U, resolved | update.mask)) return true;
-            if (!required && self(self, count - 1U, resolved)) return true;
-            rejected.insert(key);
+        const auto absent = state.updates.size();
+        std::array<std::vector<std::size_t>, kLineBytes> writers;
+        for (std::size_t index = 0; index < state.updates.size(); ++index) {
+            for (unsigned byte = 0; byte < kLineBytes; ++byte)
+                if ((state.updates[index].mask >> byte) & 1U) writers[byte].push_back(index);
+        }
+        std::array<std::size_t, kLineBytes> visible, cursor{};
+        visible.fill(absent);
+        std::vector<bool> selected(state.updates.size(), false);
+        std::vector<unsigned> dirty;
+        for (unsigned byte = 0; byte < kLineBytes; ++byte) dirty.push_back(byte);
+        std::size_t work = 0;
+        const auto within_budget = [&]() {
+            if (++work <= kMaxReleaseVersionSearchStates) return true;
+            if (budget_exhausted) *budget_exhausted = true;
             return false;
         };
-        return search(search, state.updates.size(), 0);
+        while (!dirty.empty()) {
+            const unsigned byte = dirty.back(); dirty.pop_back();
+            const auto value = visible[byte] == absent ? state.baseline[byte]
+                : state.updates[visible[byte]].bytes[byte];
+            if (value == state.actual[byte]) continue;
+            // Every feasible extension needs a later matching writer for this
+            // byte. The first such writer is required by every later choice,
+            // because all writers of the same byte are ordered.
+            auto &next = cursor[byte];
+            const auto &list = writers[byte];
+            while (next < list.size() &&
+                ((visible[byte] != absent && list[next] <= visible[byte]) ||
+                 state.updates[list[next]].bytes[byte] != state.actual[byte])) {
+                if (!within_budget()) return false;
+                ++next;
+            }
+            if (next == list.size()) return false;
+            std::vector<std::size_t> required{list[next]};
+            while (!required.empty()) {
+                const auto index = required.back(); required.pop_back();
+                if (selected[index]) continue;
+                if (!within_budget()) return false;
+                selected[index] = true;
+                const auto &update = state.updates[index];
+                for (unsigned changed = 0; changed < kLineBytes; ++changed) {
+                    if (((update.mask >> changed) & 1U) == 0) continue;
+                    const auto &prior = writers[changed];
+                    const auto position = std::lower_bound(prior.begin(), prior.end(), index);
+                    if (position != prior.begin()) required.push_back(*(position - 1));
+                    if (visible[changed] == absent || index > visible[changed]) {
+                        visible[changed] = index;
+                        dirty.push_back(changed);
+                    }
+                }
+            }
+        }
+        // The fixed point is the least feasible witness. Applying a required
+        // group also requires every older overlapping group, while disjoint
+        // groups remain optional. No recursion or historical-image search.
+        if (included) {
+            included->clear();
+            for (std::size_t index = 0; index < selected.size(); ++index)
+                if (selected[index]) included->push_back(index);
+        }
+        return true;
+    }
+
+    void retire_release_input_order(std::uint64_t line, const ReleaseStoreInput &input)
+    {
+        auto &version = release_input_lines_.at(line);
+        for (unsigned byte = 0; byte < kLineBytes; ++byte) {
+            if ((input.update.mask >> byte) & 1U) {
+                version.applied_order_mask |= std::uint64_t{1} << byte;
+                version.applied_order[byte] = std::max(version.applied_order[byte], input.order);
+            }
+        }
+        release_input_orders_.erase(input.order);
+        retired_release_input_orders_.insert(input.order);
+    }
+
+    void retain_validated_release_image(const ReleaseDataState &state,
+        const std::vector<std::size_t> &included)
+    {
+        // Reconstruct from independent bytes; received C payload never becomes
+        // an unchecked expectation. Drop exactly the least proved witness.
+        auto promoted = state.baseline;
+        for (const auto index : included) {
+            const auto &update = state.updates[index];
+            for (unsigned byte = 0; byte < kLineBytes; ++byte) {
+                if ((update.mask >> byte) & 1U) promoted[byte] = update.bytes[byte];
+            }
+        }
+        if (state.input_versioned) {
+            auto &version = release_input_lines_.at(state.base);
+            version.baseline = promoted;
+            std::set<std::uint64_t> consumed;
+            std::set<std::size_t> consumed_legacy;
+            for (const auto index : included) {
+                const auto &update = state.updates[index];
+                if (update.input_order) consumed.insert(*update.input_order);
+                else consumed_legacy.insert(index);
+            }
+            std::erase_if(version.inputs, [&](const auto &input) {
+                if (!consumed.contains(input.order)) return false;
+                retire_release_input_order(state.base, input);
+                return true;
+            });
+            std::size_t legacy_index = 0;
+            std::erase_if(version.legacy_updates, [&](const auto &) {
+                return consumed_legacy.contains(legacy_index++);
+            });
+        } else {
+            const auto owner = owners_.find(state.base);
+            if (owner != owners_.end()) {
+                owner->second.expected_data = promoted;
+                for (auto at = included.rbegin(); at != included.rend(); ++at)
+                    owner->second.updates.erase(owner->second.updates.begin() + *at);
+            }
+        }
     }
 
     void accept_release(const CRequest &request)
@@ -1680,77 +1969,93 @@ private:
             return;
         }
 
-        const std::uint64_t transfer_bytes = std::uint64_t{1} << request.size;
-        const std::uint64_t base = request.address & ~(transfer_bytes - 1);
-        const std::size_t beats = static_cast<std::size_t>(
-            transfer_bytes > kBeatBytes ? transfer_bytes / kBeatBytes : 1);
+        if (request.size != 6 || (request.address & (kLineBytes - 1U)) != 0 ||
+            request.param > 2 || request.corrupt || request.data.size() != kBeatBytes) {
+            error_.record("invalid DCache ReleaseData identity");
+            return;
+        }
+        const std::uint64_t base = request.address;
+        const std::size_t beats = kLineBytes / kBeatBytes;
         if (!release_data_) {
             release_data_ = ReleaseDataState{
                 base, request.address, request.size, request.source,
                 request.param, beats, 0, {}, {}, {}};
             const auto owner = owners_.find(base);
-            if (!expected_release_lines_.contains(base) && owner != owners_.end() &&
+            const auto tracked = release_input_lines_.find(base);
+            if (tracked != release_input_lines_.end()) {
+                if (owner == owners_.end()) {
+                    error_.record("ordinary ReleaseData input line has no acquired owner");
+                    return;
+                }
+                auto &state = *release_data_;
+                state.input_versioned = true;
+                state.baseline = tracked->second.baseline;
+                if (tracked->second.legacy_alias == owner->second.alias)
+                    state.updates = tracked->second.legacy_updates;
+                for (const auto &input : tracked->second.inputs) {
+                    if (input.authorized && ((input.virtual_address >> 12U) & 3U) == owner->second.alias)
+                        state.updates.push_back(input.update);
+                }
+            } else if (!expected_release_lines_.contains(base) && owner != owners_.end() &&
                 !owner->second.expected_data.empty()) {
                 release_data_->baseline = owner->second.expected_data;
                 release_data_->updates = owner->second.updates;
             }
+            const auto exact = expected_release_lines_.find(base);
+            if (exact != expected_release_lines_.end()) {
+                release_data_->exact = exact->second;
+                release_data_->declared_exact = true;
+                release_data_->exact_id = expected_release_line_ids_.at(base);
+            } else if (release_data_->baseline.empty()) {
+                // Legacy unintegrated paths retain their exact-reference
+                // contract, frozen once rather than mixed across C beats.
+                release_data_->exact = reference_memory_.read_beat(base, kLineBytes);
+            }
         }
-        if (release_data_->base != base ||
-            release_data_->address != request.address ||
-            release_data_->size != request.size ||
-            release_data_->source != request.source ||
-            release_data_->param != request.param ||
-            release_data_->beats != beats) {
+        if (release_data_->base != base || release_data_->address != request.address ||
+            release_data_->size != request.size || release_data_->source != request.source ||
+            release_data_->param != request.param || release_data_->beats != beats) {
             error_.record("interleaved or inconsistent DCache ReleaseData transaction");
             return;
         }
-        const auto expected = expected_release_lines_.find(base);
-        const bool has_expected_line = expected != expected_release_lines_.end();
-        const std::size_t offset = release_data_->received * kBeatBytes;
-        if (has_expected_line && offset + kBeatBytes > expected->second.size()) {
-            error_.record("ReleaseData exceeded expected immutable line image");
-            return;
-        }
-        for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
-            const unsigned char expected_byte = has_expected_line
-                ? expected->second[offset + byte]
-                : reference_memory_.read_byte(base + offset + byte);
-            if (release_data_->baseline.empty() && request.data.at(byte) != expected_byte) {
-                std::ostringstream message;
-                message << "ReleaseData byte mismatch base=0x" << std::hex
-                        << base << " beat=" << std::dec
-                        << release_data_->received << " byte=" << byte
-                        << " expected=0x" << std::hex
-                        << static_cast<unsigned>(expected_byte)
-                        << " actual=0x"
-                        << static_cast<unsigned>(request.data.at(byte));
-                error_.record(message.str());
-                return;
-            }
-        }
-        release_data_->actual.insert(release_data_->actual.end(),
-            request.data.begin(), request.data.end());
+        release_data_->actual.insert(release_data_->actual.end(), request.data.begin(), request.data.end());
         ++release_data_->received;
         if (release_data_->received == release_data_->beats) {
-            if (!release_data_->baseline.empty() &&
-                (release_data_->actual.size() != kLineBytes ||
-                 !permitted_release_image(*release_data_))) {
-                error_.record("ReleaseData is not a permitted independent owner image");
+            const auto &state = *release_data_;
+            if (state.actual.size() != kLineBytes ||
+                (!state.exact.empty() && state.actual != state.exact)) {
+                error_.record("ReleaseData does not match its frozen exact line image");
                 return;
             }
-            for (unsigned byte = 0; byte < release_data_->actual.size(); ++byte) {
-                memory_.write_byte(base + byte, release_data_->actual[byte]);
+            std::vector<std::size_t> included;
+            bool budget_exhausted = false;
+            if (!state.baseline.empty()) {
+                if (!permitted_release_image(state, &included, &budget_exhausted)) {
+                    error_.record(budget_exhausted
+                        ? "DCache ReleaseData bounded version search exhausted"
+                        : "ReleaseData is not a permitted independent owner image");
+                    return;
+                }
+                retain_validated_release_image(state, included);
             }
+            for (unsigned byte = 0; byte < state.actual.size(); ++byte)
+                memory_.write_byte(base + byte, state.actual[byte]);
             push_response(DBeat{
                 6, 0, request.size, request.source, 0, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
             }, true);
             shrink_owner(base, request.param);
+            const bool has_expected_line = state.declared_exact;
+            const auto exact_id = state.exact_id;
             release_data_.reset();
             ++release_data_verified_count_;
             if (has_expected_line) {
                 ++expected_release_data_verified_count_;
-                expected_release_lines_.erase(base);
+                const auto current = expected_release_line_ids_.find(base);
+                if (current != expected_release_line_ids_.end() && current->second == exact_id) {
+                    expected_release_lines_.erase(base);
+                    expected_release_line_ids_.erase(current);
+                }
             }
             if (observe_releases_) {
                 release_observation_.push_back(
@@ -1889,6 +2194,10 @@ private:
     SparseMemory &memory_;
     const SparseMemory &reference_memory_;
     std::unordered_map<std::uint64_t, Owner> owners_;
+    bool release_input_epoch_ = false;
+    std::unordered_map<std::uint64_t, ReleaseInputLine> release_input_lines_;
+    std::unordered_map<std::uint64_t, std::uint64_t> release_input_orders_;
+    std::set<std::uint64_t> retired_release_input_orders_;
     std::deque<PendingAcquire> pending_acquires_;
     std::vector<GrantLifetime> grants_;
     std::uint64_t alias_recall_count_ = 0;
@@ -1911,6 +2220,8 @@ private:
     std::optional<ReleaseDataState> release_data_;
     std::unordered_map<std::uint64_t, std::vector<unsigned char>>
         expected_release_lines_;
+    std::unordered_map<std::uint64_t, std::uint64_t> expected_release_line_ids_;
+    std::uint64_t next_expected_release_line_id_ = 0;
     bool a_fire_ = false;
     bool b_fire_ = false;
     bool c_fire_ = false;

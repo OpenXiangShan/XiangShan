@@ -309,10 +309,199 @@ void line_grants_lifecycle(const std::string &test)
     f.ok();
 }
 
+
+static void input_owner(Fixture &f, bool initialize=true, unsigned alias=0) {
+    if (initialize) for(unsigned b=0;b<64;++b)f.bus.write_byte(line+b,f.old_image[b]);
+    f.acquire(alias);f.step();f.ack();f.ok();
+}
+static void input_group(Fixture &f,std::uint64_t order,unsigned offset,unsigned count,
+    unsigned char value,bool authorize=true,unsigned alias=0) {
+    require(f.manager.register_release_store(order,line+offset,line+(alias<<12)+offset,
+        std::vector<unsigned char>(count,value)),f.manager.error());
+    if(authorize)require(f.manager.authorize_release_store(order),f.manager.error());
+}
+static void input_release(Fixture &f,const std::vector<unsigned char> &image,bool accepted=true,unsigned report=1) {
+    const auto before=f.bus.read_beat(line,64);
+    f.c(7,report,0,9,&image);
+    require(f.bus.read_beat(line,64)==before,"partial C changed backing before whole-line validation");
+    f.c(7,report,1,9,&image);
+    require(f.manager.ok()==accepted,"ordinary input release decision incorrect: "+f.manager.error());
+    if(accepted){require(f.bus.read_beat(line,64)==image,"validated release did not update backing");f.step();f.ok();}
+    else require(f.bus.read_beat(line,64)==before,"rejected whole-line C changed backing");
+}
+static void input_versions(const std::string &test) {
+    Fixture f;
+    if(test=="large-history") {
+        input_owner(f);require(f.manager.begin_release_input_epoch(),f.manager.error());
+        // Budget stress only: 4096 instructions' maximum128 element records,
+        // distributed over two physical lines. This is not CPU timing evidence.
+        constexpr unsigned groups=4096U*128U;
+        for(unsigned order=0;order<groups;++order) {
+            const auto address=line+(order%128U);
+            require(f.manager.register_release_store(order+1,address,address,{0xa7}),f.manager.error());
+            require(f.manager.authorize_release_store(order+1),f.manager.error());
+        }
+        auto image=f.old_image;std::fill(image.begin(),image.end(),0xa7);
+        input_release(f,image);
+        for(unsigned byte=0;byte<128;++byte)f.reference.write_reference_byte(line+byte,0xa7);
+        require(f.manager.end_release_input_epoch(),f.manager.error());
+        std::cout<<"ordinary input budget groups="<<groups<<'\n';return;
+    }
+    if(test=="epoch-legacy-history") {
+        input_owner(f);require(f.manager.checkpoint_alias_reference(line,64),f.manager.error());
+        f.reference.write_reference_byte(line+8,0xa7);f.manager.note_reference_store(line+8,line+8,{0xa7});
+        f.reference.write_reference_byte(line+8,0xb8);f.manager.note_reference_store(line+8,line+8,{0xb8});
+        require(f.manager.begin_release_input_epoch(),f.manager.error());
+        input_group(f,1024,40,8,0xc9);
+        auto stale=f.old_image;stale[8]=0xa7;
+        input_release(f,stale,false);return;
+    }
+    if(test=="epoch-boundary") {
+        input_owner(f);
+        auto prior=f.old_image;prior[3]=0x9a;
+        f.reference.write_reference_byte(line+3,0x9a); // prior unnotified legacy store, certified drained
+        require(f.manager.begin_release_input_epoch(),f.manager.error());
+        input_group(f,1024,8,8,0xa7);
+        auto applied=prior;std::fill(applied.begin()+8,applied.begin()+16,0xa7);
+        for(unsigned b=8;b<16;++b)f.reference.write_reference_byte(line+b,0xa7);
+        input_release(f,prior); // legal old cache image; backing was still older
+        input_owner(f,false);input_release(f,applied);
+        require(f.manager.end_release_input_epoch(),f.manager.error());
+        input_owner(f,false); // bare owner must retain legacy exact-reference behavior
+        f.reference.write_reference_byte(line+20,0xbc);applied[20]=0xbc;
+        input_release(f,applied);
+        require(f.manager.begin_release_input_epoch(),f.manager.error());
+        require(f.manager.end_release_input_epoch(),f.manager.error());
+        return;
+    }
+    if(test=="epoch-noneligible") {
+        input_owner(f);require(f.manager.begin_release_input_epoch(),f.manager.error());
+        input_group(f,1024,8,8,0xa7,false);
+        require(!f.manager.end_release_input_epoch(),"epoch silently discarded unaccepted future eligibility");return;
+    }
+    if(test=="before-acquire") {
+        input_group(f,1024,8,8,0xa7);
+        // Cold registration uses the independent backing supplied by the grant.
+        // Initialize backing before acquire, as a real input image does.
+        input_owner(f); // acquire refreshes the frozen input line's backing baseline
+    } else input_owner(f);
+    auto updated=f.old_image;std::fill(updated.begin()+8,updated.begin()+16,0xa7);
+    if(test=="before-acquire" || test=="old" || test=="applied" || test=="torn" || test=="noneligible") {
+        if(test!="before-acquire")input_group(f,1024,8,8,0xa7,test!="noneligible");
+        for(unsigned b=8;b<16;++b)f.reference.write_reference_byte(line+b,0xa7);
+        if(test=="torn") {auto torn=updated;std::fill(torn.begin()+12,torn.begin()+16,0x31+12);
+            input_release(f,torn,false);return;}
+        if(test=="noneligible"){input_release(f,updated,false);return;}
+        input_release(f,test=="applied"?updated:f.old_image);
+        if(test!="applied"){input_owner(f,false);input_release(f,updated);}
+    } else if(test=="registration-order" || test=="overlap-torn") {
+        input_group(f,20,8,2,0xb8);input_group(f,10,8,8,0xa7);
+        updated[8]=updated[9]=0xb8;
+        if(test=="overlap-torn")std::copy(f.old_image.begin()+10,f.old_image.begin()+16,updated.begin()+10);
+        input_release(f,updated,test!="overlap-torn");
+    } else if(test=="midbeat" || test=="late-value") {
+        const auto before=f.bus.read_beat(line,64);
+        input_group(f,10,8,8,0xa7);
+        f.c(7,1,0,9,&f.old_image);
+        input_group(f,20,40,8,0xc9);
+        auto late=f.old_image;if(test=="late-value")std::fill(late.begin()+40,late.begin()+48,0xc9);
+        f.c(7,1,1,9,&late);
+        require(f.manager.ok()==(test=="midbeat"),"first-C eligibility snapshot changed between beats");
+        if(test=="late-value"){require(f.bus.read_beat(line,64)==before,"late-version rejection changed backing");return;}
+        f.step();input_owner(f,false);
+        std::fill(updated.begin()+40,updated.begin()+48,0xc9);input_release(f,updated);
+    } else if(test=="retained-owner-rollback") {
+        input_group(f,10,8,8,0xa7);
+        input_release(f,updated,true,0);
+        f.acquire(0,0,2,line,7);f.step();f.ack();f.ok();
+        input_release(f,f.old_image,false);
+    } else if(test=="residual" || test=="rollback") {
+        input_group(f,10,8,8,0xa7);input_group(f,20,40,8,0xc9);
+        auto disjoint=f.old_image;std::fill(disjoint.begin()+40,disjoint.begin()+48,0xc9);
+        input_release(f,disjoint);input_owner(f,false);
+        if(test=="rollback")input_release(f,f.old_image,false);
+        else {std::fill(updated.begin()+40,updated.begin()+48,0xc9);input_release(f,updated);}
+    } else if(test=="aba") {
+        input_group(f,10,8,1,0xa7);input_group(f,20,8,1,f.old_image[8]);
+        input_release(f,f.old_image);input_owner(f,false);
+        auto intermediate=f.old_image;intermediate[8]=0xa7;
+        input_release(f,intermediate);input_owner(f,false);
+        input_release(f,f.old_image);input_owner(f,false);
+        input_release(f,intermediate,false);
+    } else if(test=="explicit" || test=="explicit-midbeat") {
+        input_group(f,10,8,8,0xa7);f.manager.expect_release_line(line,f.old_image);
+        if(test=="explicit"){input_release(f,updated,false);return;}
+        f.c(7,1,0,9,&f.old_image);f.manager.expect_release_line(line,updated);
+        f.c(7,1,1,9,&f.old_image);f.ok();f.step();input_owner(f,false);
+        input_release(f,updated);
+    } else if(test=="checkpoint-protection") {
+        input_group(f,10,8,8,0xa7);input_group(f,20,40,8,0xc9,false);
+        input_group(f,30,56,8,0xd0,true,1);
+        for(unsigned b=8;b<16;++b)f.reference.write_reference_byte(line+b,0xa7);
+        require(f.manager.checkpoint_alias_reference(line,64),f.manager.error());
+        require(f.manager.authorize_release_store(20),f.manager.error());
+        std::fill(updated.begin()+40,updated.begin()+48,0xc9);input_release(f,updated);
+        input_owner(f,false,1);std::fill(updated.begin()+56,updated.end(),0xd0);input_release(f,updated);
+    } else if(test=="retired-order" || test=="late-older-order") {
+        input_group(f,20,8,8,0xa7);input_release(f,updated);
+        require(!f.manager.register_release_store(test=="retired-order"?20:10,line+8,line+8,{0xb8}),
+            "registration reintroduced already observed same-byte history");
+    } else if(test=="immutable-order") {
+        input_group(f,20,8,8,0xa7);
+        require(f.manager.register_release_store(20,line+8,line+8,std::vector<unsigned char>(8,0xa7)),"identical registration was not idempotent");
+        require(!f.manager.register_release_store(20,line+8,line+8,{0xb8}),"input registration changed immutable bytes");
+    } else if(test=="reset") {
+        input_group(f,20,8,8,0xa7);f.manager.reset_link_state();
+        input_group(f,20,8,8,0xa7);input_owner(f);input_release(f,updated);
+    } else throw std::runtime_error("unknown input-version case");
+}
+static void exhaustive_input_versions() {
+    struct Update {unsigned mask;unsigned char value;};
+    std::uint64_t histories=0,transitions=0;
+    for(unsigned code=0;code<729;++code) {
+        unsigned value=code;std::array<Update,3> updates;
+        for(auto &u:updates){const auto digit=value%9;value/=9;u={1+digit/3,static_cast<unsigned char>(digit%3==0?0x31:digit%3==1?0xa1:0xb2)};}
+        Fixture baseline;
+        std::vector<std::pair<unsigned,std::vector<unsigned char>>> states;
+        for(unsigned selected=0;selected<8;++selected) {
+            auto image=baseline.old_image;bool valid=true;
+            for(unsigned i=0;i<3;++i)if((selected>>i)&1) {
+                for(unsigned j=0;j<i;++j)if((updates[i].mask&updates[j].mask) && !((selected>>j)&1))valid=false;
+                for(unsigned b=0;b<2;++b)if((updates[i].mask>>b)&1)image[b]=updates[i].value;
+            }
+            if(valid)states.push_back({selected,image});
+        }
+        std::set<std::vector<unsigned char>> images;
+        for(const auto &[mask,image]:states)images.insert(image);
+        for(const auto &first:images) {
+            unsigned least=7;
+            for(const auto &[mask,image]:states)if(image==first)least&=mask;
+            for(const auto &second:images) {
+                const bool expected=std::any_of(states.begin(),states.end(),[&](const auto &state){
+                    return state.second==second && (state.first&least)==least;
+                });
+                Fixture f;input_owner(f);
+                for(unsigned i=0;i<3;++i) {
+                    if(updates[i].mask==3)input_group(f,i+1,0,2,updates[i].value);
+                    else input_group(f,i+1,updates[i].mask==1?0:1,1,updates[i].value);
+                }
+                input_release(f,first,true,0);
+                f.acquire(0,0,2,line,7);f.step();f.ack();f.ok();
+                input_release(f,second,expected);
+                ++transitions;
+            }
+        }
+        ++histories;
+    }
+    std::cout<<"input-version histories="<<histories<<" transitions="<<transitions<<'\n';
+}
+
 int main(int argc, char **argv)
 {
     try {
         const std::string test = argc>1 ? argv[1] : "dirty";
+        if (test == "release-input-exhaustive") {exhaustive_input_versions();return 0;}
+        if (test.starts_with("release-input-")) {input_versions(test.substr(14));return 0;}
         if (test == "release-version-exhaustive") {
             exhaustive_versions(); return 0;
         }

@@ -677,7 +677,7 @@ forbidden operation.
 | E GrantAck | Sink must match a queued expectation; matching consumes exactly one entry. An E is accepted only after the first corresponding Grant/GrantData D beat, or in that same cycle, and every sink stays busy from first D acceptance until E. Drains check expected E entries separately from D response queues. | The expectation entry is still created when `respond` constructs Grant/GrantData; the first-D/sink-busy check supplies the causal eligibility gate. A same-cycle D/E is accepted. A sink's A source may still be reused only after its final D, which is separately checked. |
 | Probe lifecycle | Rotating 6-bit B sources, accepted-B provenance and source reuse/wrap/depth accounting. Same-PA B presentation is serialized through final matching C and waits for prior final D plus E. Standalone and automatic Probes use the recorded old VA alias. | This is a single-client manager schedule; broad manager reordering remains outside the current direction. |
 | ProbeAck/Data | Match one accepted same-PA B; C source is client-owned and fixed across beats. Exact scenario-owned expectations remain exact. Forced-data automatic toN accepts present TtoN/BtoN with full data or absent NtoN without data, rejects a B-to-T report, and checks all data bytes against the frozen independent owner image. Size/address/report/opcode/corrupt and multibeat identity are checked. | C user/echo fields do not carry reliable alias identity. NtoN does not remove an unobserved voluntary Release obligation. Arbitrary in-flight versioned data images are not modeled. |
-| Release/Data | Full-line Release validates size/alignment/shrink param before ReleaseAck. ReleaseData compares explicit declared bytes, else validates a complete independent owner version, else compares architectural reference. Backing bytes change only after complete validation. Stable raw address/size/source/param/beat count are checked. Completed shrink updates ownership; a racing release is acked without waiting for its outstanding Probe. | Versioned images exist only for checkpointed mapped traffic. The first C freezes baseline and eligible whole-update records; independent same-alias transaction bytes add aligned store/element updates, while other-alias commits leave them unchanged. C user/echo fields are not used as identity. Uncheckpointed owners retain the current-reference fallback; pre-notification segment releases and long update-history search cost remain unqualified. |
+| Release/Data | Full-line Release validates size/alignment/shrink param before ReleaseAck. ReleaseData compares explicit declared bytes, else validates a complete independent owner version, else compares architectural reference. Backing bytes change only after complete validation. Stable raw address/size/source/param/beat count are checked. Completed shrink updates ownership; a racing release is acked without waiting for its outstanding Probe. | Versioned images cover checkpointed legacy owners and opt-in ordinary input journals. The first C freezes baseline and eligible whole-update records; independent same-alias transaction bytes add aligned store/element updates, while other-alias commits leave them unchanged. C user/echo fields are not used as identity. Uncheckpointed owners retain the current-reference fallback; pre-notification segment releases and long update-history search cost remain unqualified. |
 | C under stall | A snapshot includes all sampled C fields and data. Dropped valid or a changed payload after a stalled cycle fails. Target release windows count attributed stalls and comparisons. | Stability between stalled cycles is distinct from multibeat identity across accepted beats. The latter is incomplete. |
 
 All DCache lifecycle details above come from
@@ -690,7 +690,7 @@ The reference checkpoint follows producer retirement, an explicit SBuffer flush
 and an idle D/E link. It reads only independent architectural reference bytes.
 Store-reference notifications use declared mapped PA/VA and input data. They
 retain the baseline plus grouped update records rather than overwriting its
-bytes: voluntary eviction may precede pending SBuffer propagation. A backwards
+bytes: voluntary eviction may precede pending SBuffer propagation. A least-witness
 whole-line feasibility check permits subsets of known updates, preserves atomic
 aligned store/element groups and requires older overlapping updates before later
 ones. Disjoint updates may propagate independently; misaligned byte pieces need
@@ -701,6 +701,25 @@ C bytes update operational backing memory only; they never change architectural
 expectations. Final Bare word readback remains an independent end-to-end check.
 A new-colour store may commit its reference bytes before its Acquire; comparing
 the old owner's response with that newer global image would be a false oracle.
+
+The manager also exposes an opt-in ordinary-store input journal. Callers register
+immutable aligned store/element groups before their acceptance edge and authorize
+them at a legal public head. Absolute order tokens preserve overlap precedence
+when acceptance is out of order. The first C freezes baseline, eligible groups
+and exact overrides. Complete-line validation promotes an independently rebuilt
+least applied-update witness; omitted groups survive Release and reacquire, while
+per-byte progress floors reject an older late registration after visible progress.
+
+An explicit epoch begins only after the caller certifies retired producers,
+SBuffer drain and an idle public link. Every write during that epoch must use the
+input journal. Its first line anchor is independent drained reference memory;
+legacy updates covered by that boundary are discarded. Epoch exit requires
+another certified drain and no unauthorized input work. Uncheckpointed legacy
+owner behavior is preserved. These are caller contracts, not assertions inferred
+from DUT internal state. Registration and authorization never mutate architectural
+reference bytes. Unintegrated pre-notification legacy releases retain the gap
+above. The bounded implementation permits 1,048,576 groups per line and
+67,108,864 order IDs/solver work units; exhaustion fails as a manager limitation.
 
 C-source attribution follows TileLink 1.9.3 section 6.4's explicit independent
 client C namespace rule, consistent with the connected DCache WBQ and the existing

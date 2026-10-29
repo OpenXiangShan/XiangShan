@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Exercise the production manager's alias directory, protocol and byte oracle."""
 from pathlib import Path
+import hashlib
+import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -10,26 +13,121 @@ ROOT = Path(__file__).resolve().parents[1]
 class DcacheManagerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.workspace = tempfile.TemporaryDirectory(prefix="memblock-manager-")
-        cls.addClassCleanup(cls.workspace.cleanup)
-        cls.binary = Path(cls.workspace.name) / "manager"
-        result = subprocess.run(["c++", "-std=c++20", "-O0", "-I", str(ROOT / "cpp"),
-            str(ROOT / "unit/dcache_manager_fixture.cpp"), "-o", str(cls.binary)],
-            text=True, capture_output=True, timeout=60)
+        parent = os.environ.get("MEMBLOCK_DCACHE_MANAGER_TEST_OUT")
+        if parent:
+            Path(parent).mkdir(parents=True, exist_ok=True)
+            cls.work = Path(tempfile.mkdtemp(prefix="host-", dir=parent))
+        else:
+            cls.workspace = tempfile.TemporaryDirectory(prefix="memblock-manager-")
+            cls.addClassCleanup(cls.workspace.cleanup)
+            cls.work = Path(cls.workspace.name)
+        cls.results, cls.commands = [], []
+        cls.paths = [ROOT / "cpp/environment/dcache_agent.inc",
+                     ROOT / "unit/dcache_manager_fixture.cpp", Path(__file__).resolve()]
+        cls.before = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in cls.paths}
+        cls.binary = cls.compile("manager", ROOT / "unit/dcache_manager_fixture.cpp")
+
+    @classmethod
+    def compile(cls, name, source):
+        binary = cls.work / name
+        command = [os.environ.get("CXX", "c++"), "-std=c++20", "-O0", "-I", str(ROOT / "cpp"),
+                   str(source), "-o", str(binary)]
+        cls.commands.append(command)
+        result = subprocess.run(command, text=True, capture_output=True, timeout=60)
+        (cls.work / (name + ".compile.log")).write_text(result.stdout + result.stderr)
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
+        return binary
+
+    @classmethod
+    def tearDownClass(cls):
+        after = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in cls.paths}
+        (cls.work / "summary.json").write_text(json.dumps(dict(
+            source_hashes_before=cls.before, source_hashes_after=after,
+            compile_commands=cls.commands, results=cls.results), indent=2) + "\n")
+        if cls.before != after:
+            raise AssertionError("manager inputs changed during host tests")
+
+    def run_case(self, name, *, binary=None, timeout=20):
+        command = [str(binary or self.binary), name]
+        result = subprocess.run(command, text=True, capture_output=True, timeout=timeout)
+        self.results.append(dict(command=command, returncode=result.returncode,
+                                 stdout=result.stdout, stderr=result.stderr))
+        return result
 
     def test_grouped_release_versions_match_independent_forward_enumeration(self):
-        result = subprocess.run([str(self.binary), "release-version-exhaustive"],
-            text=True, capture_output=True, timeout=10)
+        result = self.run_case("release-version-exhaustive")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_ordinary_input_versions_and_lifetimes(self):
+        for name in ("old", "applied", "torn", "before-acquire", "noneligible",
+                     "registration-order", "overlap-torn", "midbeat", "late-value",
+                     "residual", "rollback", "aba", "explicit", "explicit-midbeat",
+                     "checkpoint-protection", "retired-order", "late-older-order",
+                     "immutable-order", "reset", "epoch-boundary", "epoch-noneligible",
+                     "epoch-legacy-history", "retained-owner-rollback"):
+            with self.subTest(case=name):
+                result = self.run_case("release-input-" + name)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_ordinary_input_compaction_matches_forward_histories(self):
+        result = self.run_case("release-input-exhaustive", timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("histories=729", result.stdout)
+
+    def test_input_journal_sustains_full_epoch_element_budget(self):
+        result = self.run_case("release-input-large-history", timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("groups=524288", result.stdout)
+
+    def test_private_input_version_faults_are_detected(self):
+        production = (ROOT / "cpp/environment/dcache_agent.inc").read_text()
+        fixture = (ROOT / "unit/dcache_manager_fixture.cpp").read_text()
+        faults = (
+            ("unauthorized_input", "if (input.authorized && ((input.virtual_address >> 12U) & 3U) == owner->second.alias)",
+             "if (((input.virtual_address >> 12U) & 3U) == owner->second.alias)",
+             "noneligible", "ordinary input release decision incorrect"),
+            ("drop_residual_on_acquire", "if (tracked != release_input_lines_.end()) tracked->second.baseline = refill;",
+             "if (tracked != release_input_lines_.end()) { tracked->second.baseline = refill; tracked->second.inputs.clear(); }",
+             "residual", "ordinary input release decision incorrect"),
+            ("forget_validated_progress", "            version.baseline = promoted;",
+             "            /* private fault: retain historical baseline */",
+             "retained-owner-rollback", "ordinary input release decision incorrect"),
+            ("discard_ambiguous_aba", "            version.baseline = promoted;",
+             "            version.baseline = promoted; if (included.empty()) version.inputs.clear();",
+             "aba", "ordinary input release decision incorrect"),
+            ("relax_exact_override", "(!state.exact.empty() && state.actual != state.exact)", "false",
+             "explicit", "ordinary input release decision incorrect"),
+            ("reverse_registered_order", "[](const auto &candidate, auto value) { return candidate.order < value; });\n        version.inputs.insert",
+             "[](const auto &candidate, auto value) { return true; });\n        version.inputs.insert",
+             "registration-order", "ordinary input release decision incorrect"),
+            ("stale_epoch_backing", "? reference_memory_.read_beat(line, kLineBytes)",
+             "? memory_.read_beat(line, kLineBytes)",
+             "epoch-boundary", "ordinary input release decision incorrect"),
+            ("import_pre_epoch_legacy", "if (!release_input_epoch_) version.legacy_updates = std::move(owner->second.updates);",
+             "version.legacy_updates = std::move(owner->second.updates);",
+             "epoch-legacy-history", "ordinary input release decision incorrect"),
+            ("permit_late_older_input", "((version.applied_order_mask >> offset) & 1U) && order <= version.applied_order[offset]",
+             "false", "late-older-order", "registration reintroduced already observed same-byte history"),
+        )
+        for name, before, after, case, diagnostic in faults:
+            with self.subTest(fault=name):
+                self.assertEqual(production.count(before), 1, "fault anchor changed: " + name)
+                mutant = self.work / (name + ".inc")
+                mutant.write_text(production.replace(before, after, 1))
+                source = self.work / (name + ".cpp")
+                source.write_text(fixture.replace('#include "environment/dcache_agent.inc"',
+                                                 '#include "' + str(mutant) + '"'))
+                binary = self.compile(name, source)
+                result = self.run_case("release-input-" + case, binary=binary)
+                self.assertNotEqual(result.returncode, 0, "private fault escaped: " + name)
+                self.assertIn(diagnostic, result.stderr)
 
     def test_line_grant_lifecycle_uses_manager_transaction_provenance(self):
         for name in ("holds", "final-d-before-e", "e-before-final-d", "same-pa-pending",
                      "recall-pending", "acquire-perm", "scope", "reset"):
             with self.subTest(case=name):
-                result = subprocess.run([str(self.binary), "line-grants-" + name],
-                    text=True, capture_output=True, timeout=10)
+                result = self.run_case("line-grants-" + name)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_alias_protocol_and_independent_epoch_data(self):
@@ -40,8 +138,7 @@ class DcacheManagerTest(unittest.TestCase):
                      "release-version-midbeat", "release-version-late-value", "release-version-torn",
                      "release-version-overlap-order", "release-version-disjoint", "release-version-explicit"):
             with self.subTest(case=name):
-                result = subprocess.run([str(self.binary), name], text=True,
-                    capture_output=True, timeout=10)
+                result = self.run_case(name)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 if __name__ == "__main__":
