@@ -17,6 +17,7 @@
 | `5c131a18d` | PBMT response-fault directed audit | compile; main production 44/44 strict PASS; NC/IO gate 20/20 clean legacy PASS; post-commit original1 strict PASS | deleted; branch retained |
 | `9a2df3d7e` | CSR scalar 独立 cfg 前置条件 | 四 cfg dry-run 门禁通过；与 prefix 修复共同合入后，四个 10k 原始 seed 全部 strict PASS | source worktree 不再作为后续修改目标 |
 | `4948d291e` | CSR redirect preserved barrier prefix invariant | mother full compile；prefix directed 1/1 PASS；四个 CSR scalar 10k 原始 seed 4/4 strict PASS | 既有 `.codex_csr_prefix_fix_20261025` 已停止开发，待清理 |
+| `c9763bd7d` | redirect 提交遗漏 later-split cancel | 修复前定向稳定 FAIL；修复后定向 PASS，真实 DUT 固定/随机 39/39 严格 PASS，独立 `REVIEW_PASS` | 直接在 mother 完成 |
 
 Sv39 source commit `52f2d0a57` and PBMT source commit `43669b2d3` were not cherry-picked because each included
 excluded software-only changes. Their production logic was reconstructed on the mother branch and independently
@@ -88,7 +89,7 @@ worktree。2026-10-29 用户允许并发仿真加速：配置逐组推进，组�
 | 4 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | `PASS` | 10/10 |
 | 5 | `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | `PASS` | 10/10 |
 | 6 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | `PASS` | 10/10 |
-| 7 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_strict_nc_100k` | `NOT_RUN` | 0/10 |
+| 7 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_strict_nc_100k` | `FAIL/PAUSED_ANALYSIS` | 0/10 |
 | 8 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | `NOT_RUN` | 0/10 |
 | 9 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | `NOT_RUN` | 0/10 |
 | 10 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | `NOT_RUN` | 0/10 |
@@ -133,7 +134,8 @@ controller 无失败/未完成/远端未知任务。该结果未触发静态审�
 
 | 问题 | 责任与复现 | 当前修改 | 状态与恢复条件 |
 |---|---|---|---|
-| redirect 集成遗漏 later-split cancel | 静态 review 发现；定向 seed `2601029` 在 201ns 报 `LATER_SPLIT_TLB completion provenance mismatch`，修复前 1/1 FAIL | mother 中恢复旧 epoch 的现有 cancel 调用，补 4 个确定性场景及前置失败原子性检查 | `FINAL_PASS`；定向 PASS、真实 DUT 固定/随机 39/39 严格 PASS；独立最终 `REVIEW_PASS`，随本条单 Bug commit 提交，提交后恢复第 7 组 |
+| redirect 集成遗漏 later-split cancel | 静态 review 发现；定向 seed `2601029` 在 201ns 报 `LATER_SPLIT_TLB completion provenance mismatch`，修复前 1/1 FAIL | mother 中恢复旧 epoch 的现有 cancel 调用，补 4 个确定性场景及前置失败原子性检查 | `FINAL_PASS`；定向 PASS、真实 DUT 固定/随机 39/39 严格 PASS；独立最终 `REVIEW_PASS`，单 Bug commit=`c9763bd7d` |
+| strict-NC 写回找不到活动 UID | `basicTest / memblock_dispatch_real_smoke_vseq / tc_dispatch_real_mmu_sv39_strict_nc_100k / seed=846339364`，787.300ns `INT_WB_ATTACH no active uid for ROB key=0/14` | 尚无代码修改；当前只分析，未判定 RTL/RM/框架责任 | `PAUSED_ANALYSIS`；原批次 1 FAIL、5 ABORTED、4 NOT_RUN，unknown=0，原 seed 正强制编译 debug 波形复现 |
 
 修复前结果目录：
 `mem_ut/ver/ut/memblock/sim/.eda_regression/basicTest_default_20261029_112338_2626771_13498`。
@@ -141,6 +143,11 @@ controller 无失败/未完成/远端未知任务。该结果未触发静态审�
 没有创建新 worktree；生产修改始终在本 mother worktree 顺序完成。
 原计划 34 个真实 DUT 固定 seed 和追加新随机 5-seed 均已严格通过，合计 39/39；fresh5 结果目录为
 `mem_ut/ver/ut/memblock/sim/mother_split_cancel_fresh5_20261029_results`；最终 review 已通过。
+
+第 7 组首轮结果目录：`mem_ut/ver/ut/memblock/sim/mother_basic_matrix_20261029_results/tc_dispatch_real_mmu_sv39_strict_nc_100k`。
+ABORTED seeds：`874181294,2113203111,202201584,1595761652,203579979`；未启动 seeds：
+`1733858606,1807727296,1728147241,1940125520`。首错 seed 先专项闭环，后续恢复清单按执行规则记录。
+debug 复现目录：`mem_ut/ver/ut/memblock/sim/mother_strict_nc_wb_debug_20261029_results`。
 
 ## 其余 14 组原始矩阵
 
