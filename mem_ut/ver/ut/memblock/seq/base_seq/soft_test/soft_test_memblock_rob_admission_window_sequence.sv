@@ -310,6 +310,12 @@ class soft_test_memblock_rob_admission_window_sequence extends memblock_dispatch
     extern function new(string name = "soft_test_memblock_rob_admission_window_sequence");
     extern virtual task body();
     extern virtual task run_boundary_checks();
+    extern virtual task run_redirect_later_split_cancel_checks();
+    extern virtual function memblock_later_split_tlb_record build_later_split_pending_owner(
+        input memblock_uid_t uid,
+        input longint unsigned token,
+        input longint unsigned sample_seq
+    );
     extern virtual task run_redirect_caught_fatal_atomicity_checks();
     extern virtual task run_redirect_caught_fatal_atomicity_case(
         input bit inject_late_prefix_failure,
@@ -371,6 +377,7 @@ task soft_test_memblock_rob_admission_window_sequence::body();
     lsq_ctrl.reset();
     build_boundary_main_table();
     run_boundary_checks();
+    run_redirect_later_split_cancel_checks();
     run_redirect_caught_fatal_atomicity_checks();
     run_control_lifecycle_duplicate_checks();
     `uvm_info(get_type_name(), "ROB admission window boundary checks completed", UVM_LOW)
@@ -437,6 +444,118 @@ task soft_test_memblock_rob_admission_window_sequence::run_boundary_checks();
     end
 endtask:run_boundary_checks
 
+function memblock_later_split_tlb_record
+soft_test_memblock_rob_admission_window_sequence::build_later_split_pending_owner(
+    input memblock_uid_t uid,
+    input longint unsigned token,
+    input longint unsigned sample_seq
+);
+    bit [63:0] split_va;
+    memblock_rob_key_t rob_key;
+    memblock_tlb_lookup_key_t lookup_key;
+    memblock_later_split_tlb_record owner;
+
+    split_va = (data.main_table_by_uid[uid].vaddr & 64'hfffffffffffff000) + 64'h1000;
+    rob_key = data.main_table_by_uid[uid].get_rob_key();
+    // 通过实际 observer 和 token 绑定入口建立在途记录，保留与 pending response 相同的对象句柄。
+    data.observe_later_split_tlb_sample(
+        1'b1, rob_key, split_va, 1'b1, 1'b1, 1'b0,
+        rob_key, split_va, 1'b1, split_va[49:12], 2'b00, sample_seq);
+    lookup_key = '{default:'0};
+    lookup_key.vpn = split_va[63:12];
+    owner = data.bind_later_split_l2_request_token(lookup_key, token, sample_seq + 1);
+    if (owner == null || owner.uid != uid || owner.response_token != token ||
+        owner.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE) begin
+        `uvm_fatal(get_type_name(), "failed to build exact pending later-split owner")
+    end
+    return owner;
+endfunction:build_later_split_pending_owner
+
+task soft_test_memblock_rob_admission_window_sequence::run_redirect_later_split_cancel_checks();
+    memblock_later_split_tlb_record old_owner;
+    memblock_later_split_tlb_record new_owner;
+    memblock_later_split_tlb_record older_owner;
+    memblock_tlb_entry response;
+    memblock_redirect_payload_t redirect;
+    int unsigned old_epoch;
+
+    // 普通 reissue 与未提交 fault 两条路径，分别覆盖迟到 completion 在新 owner 建立前、后到达。
+    for (int scenario = 0; scenario < 4; scenario++) begin
+        build_random_main_table(4);
+        for (memblock_uid_t uid = 0; uid < 3; uid++) begin
+            data.main_table_by_uid[uid].op_class = MEMBLOCK_OP_CLASS_INT_LOAD;
+            data.main_table_by_uid[uid].numLsElem = 1;
+            data.status_by_uid[uid].snapshot_from_main(data.main_table_by_uid[uid]);
+            data.activate_uid(uid, 1'b0, 1'b0);
+            data.mark_uid_enqueued(uid);
+        end
+        older_owner = build_later_split_pending_owner(0, 101, 10);
+        old_owner = build_later_split_pending_owner(1, 102, 12);
+        old_epoch = old_owner.dynamic_epoch;
+        // 非当前 epoch 和无记录 UID 不得改变现有记录或创建新记录。
+        data.cancel_later_split_tlb_record_for_uid(0, older_owner.dynamic_epoch + 1, "epoch_mismatch_probe");
+        data.cancel_later_split_tlb_record_for_uid(3, 0, "missing_record_probe");
+        if (older_owner.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE ||
+            data.later_split_tlb_record_by_uid.num() != 2) begin
+            `uvm_fatal(get_type_name(), "nonmatching later-split cancel changed records")
+        end
+        if (scenario >= 2) begin
+            data.status_by_uid[1].fault = 1'b1;
+            data.status_by_uid[1].exception_pending = 1'b1;
+            data.status_by_uid[1].load_fault = 1'b1;
+        end
+        redirect = '{default:'0};
+        redirect.valid = 1'b1;
+        redirect.rob_key = data.main_table_by_uid[0].get_rob_key();
+        data.request_redirect_flush(redirect);
+        data.cancel_record_q[0].redirect_anchor_valid = 1'b1;
+        data.cancel_record_q[0].redirect_sample_seq = 0;
+        data.cancel_record_q[0].redirect_lsq_sample_seq = 0;
+        data.latest_drained_cancel_sample_seq = 0;
+        if (!data.apply_redirect_flush(redirect)) begin
+            `uvm_fatal(get_type_name(), "later-split redirect wrapper failed")
+        end
+        if (data.status_by_uid[1].dynamic_epoch != old_epoch + 1 ||
+            older_owner.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE ||
+            older_owner.response_token != 101 || older_owner.response_sample_seq != 0) begin
+            `uvm_fatal(get_type_name(), "redirect changed an unrelated later-split owner or failed to advance epoch")
+        end
+        new_owner = null;
+        if (scenario % 2 == 1) begin
+            data.activate_uid(1, 1'b0, 1'b0);
+            data.mark_uid_enqueued(1);
+            new_owner = build_later_split_pending_owner(1, 202, 30);
+        end
+        response = memblock_tlb_entry::type_id::create("late_split_response");
+        response.lookup_key = old_owner.request_lookup_key;
+        response.entry_generation = 7;
+        response.s1_entry_pbmt = 1;
+        // 旧 completion 必须走原有 canceled-stale 路径，不能写入旧 payload 或新 canonical owner。
+        data.complete_later_split_l2_response(old_owner, 102, old_owner.request_lookup_key,
+                                              response.lookup_key, 7, response, 40);
+        if (old_owner.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED ||
+            old_owner.dynamic_epoch != old_epoch || old_owner.response_token != 102 ||
+            old_owner.response_sample_seq != 0 || old_owner.entry_generation != 0 ||
+            old_owner.payload.entry_generation != 0 || old_owner.payload.s1_entry_pbmt != 0) begin
+            `uvm_fatal(get_type_name(), "late completion changed canceled owner payload")
+        end
+        if (new_owner != null &&
+            (data.later_split_tlb_record_by_uid[1] != new_owner ||
+             new_owner.dynamic_epoch != old_epoch + 1 || new_owner.response_token != 202 ||
+             new_owner.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE ||
+             new_owner.response_sample_seq != 0 || new_owner.payload.entry_generation != 0)) begin
+            `uvm_fatal(get_type_name(), "old completion changed the new-epoch owner")
+        end
+        data.cancel_later_split_tlb_record_for_uid(0, older_owner.dynamic_epoch, "cleanup_probe");
+        data.cancel_later_split_tlb_record_for_uid(0, older_owner.dynamic_epoch, "already_canceled_probe");
+        if (older_owner.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_CANCELED ||
+            older_owner.response_token != 101 || older_owner.response_sample_seq != 0) begin
+            `uvm_fatal(get_type_name(), "repeated cancel changed completed identity")
+        end
+    end
+    `uvm_info("REDIRECT_SPLIT_CANCEL", "all four redirect/later-split completion scenarios passed", UVM_LOW)
+endtask:run_redirect_later_split_cancel_checks
+
 task soft_test_memblock_rob_admission_window_sequence::run_redirect_caught_fatal_atomicity_checks();
     run_redirect_caught_fatal_atomicity_case(
         1'b0, "redirect_before_scan_atomicity");
@@ -461,6 +580,7 @@ task soft_test_memblock_rob_admission_window_sequence::run_redirect_caught_fatal
     memblock_ptw_wait_replay_t ptw_item;
     memblock_lsq_cancel_record_t cancel_before;
     status_transaction victim_status;
+    memblock_later_split_tlb_record victim_split_owner;
     memblock_control_owner_t owner_before;
     memblock_rob_admission_expected_fatal_catcher catcher;
     int unsigned active_rob_count_before;
@@ -529,6 +649,7 @@ task soft_test_memblock_rob_admission_window_sequence::run_redirect_caught_fatal
     victim_status.lsq_reservation_sample_seq = 0;
     victim_status.load_dispatched = 1'b1;
     victim_status.queued_load = 1'b1;
+    victim_split_owner = build_later_split_pending_owner(victim_uid, 501, 10);
 
     issue_item = '{default:'0};
     issue_item.uid = victim_uid;
@@ -677,6 +798,10 @@ task soft_test_memblock_rob_admission_window_sequence::run_redirect_caught_fatal
         victim_status.active_lq_mapped != victim_lq_mapped_before ||
         victim_status.active_sq_mapped != victim_sq_mapped_before ||
         victim_status.queued_load != victim_queued_load_before ||
+        victim_split_owner.state != memblock_later_split_tlb_record::MEMBLOCK_LATER_SPLIT_WAIT_RESPONSE ||
+        victim_split_owner.dynamic_epoch != victim_dynamic_epoch_before ||
+        victim_split_owner.response_token != 501 ||
+        victim_split_owner.response_sample_seq != 0 ||
         data.control_barrier_prefix_external_provenance_valid != provenance_valid_before ||
         data.control_barrier_prefix_external_provenance_uid != provenance_uid_before ||
         !data.redirect_payload_equal(data.control_barrier_prefix_external_origin_redirect,

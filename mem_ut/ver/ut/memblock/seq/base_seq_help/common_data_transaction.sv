@@ -11631,6 +11631,8 @@ class common_data_transaction extends uvm_object;
         record_idx = find_cancel_record_index_by_id(active_cancel_record_id);
         commit_capture_redirect_deleted_owner_for_redirect_range(uid, record_idx);
         commit_note_lsq_cancel_for_redirect_range(uid, record_idx);
+        // 旧 pending response 仍持有记录句柄，必须在递增 epoch 前标记取消，供迟到 completion 精确丢弃。
+        cancel_later_split_tlb_record_for_uid(uid, old_dynamic_epoch, "redirect_reissue");
         commit_cancel_waiting_uid_tlb_record_for_redirect_range(uid);
         // redirect命中的旧动态实例不再等待writeback/commit；pending fault 未 commit 时
         // 必须完整清理 fault 证据与所有 target 状态，之后从同一 UID 重新 admission。

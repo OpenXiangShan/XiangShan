@@ -43,6 +43,11 @@
 - `clear_replay_target_after_fire()`：replay target 重新发射后清 mask；所有 mask 清完后清 replay pending。
 - `request_redirect_flush()`、`push_redirect_drive()`、`try_pop_redirect_drive()`、`mark_redirect_drive_done()`、`apply_redirect_flush()`：分阶段处理 redirect，先冻结 admission/issue/commit，再等待 redirect sequence 真实驱动 DUT，最后调用 `apply_redirect_flush_range()` 在 `[terminal_done_uid, max_enqueued_uid + 1)` 内按 `rob_order_util::rob_need_flush()` 判断 flush。被 flush 的 uid 不再作为终态，而是进入 `redirect_pending/flushed` 中间态，等待同 uid reissue。
 - `prepare_uid_for_redirect_reissue(uid, redirect)`：清理旧动态实例的 issue queue、active map、writeback/pass/fault/commit/deq 状态，置 `redirect_pending/flushed` 并递增 `dynamic_epoch`。主表 transaction 保留，后续 admission 沿用主表 ROB/LQ/SQ key。
+- 当前 redirect 提交入口 `commit_uid_for_redirect_reissue()`：在全量只读预检查之后，用旧 epoch 调用
+  `cancel_later_split_tlb_record_for_uid()`，再清普通 waiting UID-TLB record 和旧实例状态，最后递增
+  `dynamic_epoch`。旧 pending response 保留的 later-split owner 因此进入 canceled-stale 路径；只递增
+  status epoch 不能替代对旧 owner 的显式取消。2026-10-29 定向测试曾在遗漏调用时复现 201ns fatal，
+  恢复调用后四场景通过。详细顺序见 `AI_DOC/mem_ut_flow_doc/redirect_flow.md` 第 6.2.1 节。
 - `issue_blocked_by_global_flush()`：统一判断 admission、issue、commit 是否应因 redirect/flush 暂停。
 - `arm_scheduled_flushsb()`、`request_scheduled_flushsb_if_due()`、`scheduled_flushsb_pending()`、`request_flushsb()`、`mark_flushsb_driven()`、`update_sb_is_empty()`、`flushsb_timed_out()`：directed flushSb/sbIsEmpty 等待状态管理。`request_flushsb()` 只在 `MEMBLOCK_FLUSHSB_SEQ_EN=1` 时接受请求；scheduled 状态放在公共数据层，避免 real smoke 在未来 request cycle 到达前提前收尾。若 due cycle 遇到 redirect/global flush，scheduled 状态保持 pending，等 flush 解除后再驱动。
 - `push_ptw_wait_replay()`、`pop_ready_ptw_wait_replay()`、`clear_ptw_wait_replay_by_redirect()`：可选 PTW-back replay 等待队列管理。

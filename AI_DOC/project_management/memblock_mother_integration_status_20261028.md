@@ -75,7 +75,8 @@ worktree。2026-10-29 用户允许并发仿真加速：配置逐组推进，组�
 
 ## BasicTest 原始矩阵逐组进度
 
-以下为源码 `4948d291e` 上的原始 12 组、120 个 seed 的核验台账；CSR scalar 四项属于额外专项，
+以下为母任务原始 12 组、120 个 seed 的核验台账：前六组首先在源码 `4948d291e` 上通过；
+第 4/5/6 组又在 later-split cancel 修复后分别通过 10/10，后续使用修复后的源码。CSR scalar 四项属于额外专项，
 不计入这 120 项。每组 seed 和临时参数来自原始 `functional_cfg_cov_20261023_results/<cfg>/config.txt`
 及 `seeds.txt`；使用 mother 中已经修正的 cfg。历史其他源码的 PASS 不计入本表。
 
@@ -127,3 +128,40 @@ controller 无失败/未完成/远端未知任务。该结果未触发静态审�
 
 其余 14 组 functional matrix、fault3 100-seed 专项和最终覆盖率尚未完成。当前共 60/120 关闭前六组，
 不能解释为母任务全部完成；发生源码修复后需要重新评估已通过组的相邻复测范围和最终统一版本验收。
+
+## 当前单 Bug 闭环
+
+| 问题 | 责任与复现 | 当前修改 | 状态与恢复条件 |
+|---|---|---|---|
+| redirect 集成遗漏 later-split cancel | 静态 review 发现；定向 seed `2601029` 在 201ns 报 `LATER_SPLIT_TLB completion provenance mismatch`，修复前 1/1 FAIL | mother 中恢复旧 epoch 的现有 cancel 调用，补 4 个确定性场景及前置失败原子性检查 | `FINAL_PASS`；定向 PASS、真实 DUT 固定/随机 39/39 严格 PASS；独立最终 `REVIEW_PASS`，随本条单 Bug commit 提交，提交后恢复第 7 组 |
+
+修复前结果目录：
+`mem_ut/ver/ut/memblock/sim/.eda_regression/basicTest_default_20261029_112338_2626771_13498`。
+正式记录在 W44 Buglist 的“Redirect 提交 helper 集成遗漏 later-split 旧记录取消”章节。
+没有创建新 worktree；生产修改始终在本 mother worktree 顺序完成。
+原计划 34 个真实 DUT 固定 seed 和追加新随机 5-seed 均已严格通过，合计 39/39；fresh5 结果目录为
+`mem_ut/ver/ut/memblock/sim/mother_split_cancel_fresh5_20261029_results`；最终 review 已通过。
+
+## 其余 14 组原始矩阵
+
+以下均待 BasicTest 阶段结束后执行本轮统一版本回归。集成时的局部专项结果仍保留在前表，
+不自动替代这里每组原计划的 10 个 seed。
+
+| tc | ts | cfg | 本轮状态 | 已验收/计划 |
+|---|---|---|---|---:|
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `default` | `NOT_RUN` | 0/10 |
+| `tc_boundary_addr_reuse_gate` | `virtual_base_sequence` | `tc_boundary_addr_reuse_store_cross8_gate` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_l2cache_model` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_mixed_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_sta_wb_smoke` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_mixed_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_wb_smoke` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_multi_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_multi_store_wb_smoke` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke_flushsb` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_store_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_smoke` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_store_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_sta_wb_smoke` | `NOT_RUN` | 0/10 |
+| `tc_dispatch_real_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_wb_smoke` | `NOT_RUN` | 0/10 |
+| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_io` | `NOT_RUN` | 0/10 |
+| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_nc` | `NOT_RUN` | 0/10 |
+| `tc_l2tlb_ppn_reuse_smoke` | `virtual_base_sequence` | `tc_l2tlb_ppn_reuse_smoke` | `NOT_RUN` | 0/10 |
+
+最终交付还需完成独立 fault3 100-seed、统一稳定源码的覆盖率数据库与合并报告、问题/方案总 review。

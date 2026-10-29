@@ -34,6 +34,7 @@ IQ feedback/replay 的专项边界见
 | `cancel record` | 一个 redirect epoch 的 software cancel、资源回退和 DUT observed 对账生命周期 | `memblock_lsq_cancel_record_t`、`cancel_record_q` | `software_applied` 与 `observed_valid` 都成立后才删除 |
 | `active mapping` | 当前动态实例拥有的 ROB/LQ/SQ key 到 uid 映射 | `uid_by_active_rob`、`uid_by_lq`、`uid_by_sq` | redirect scan 在清 map 前登记 software cancel |
 | `observed cancel` | DUT 在目标 sample 输出的 cancel 数量 | `observed_cancel_lq_count/sq_count` | 只核对，不再次调用 `cancel_lq/cancel_sq` |
+| `later-split owner` | 跨页 Load 后续拆分请求的 UID/动态代次/翻译 token 记录 | `later_split_tlb_record_by_uid` | redirect 后旧 response 仍持有原对象句柄，必须显式标记取消 |
 
 本 flow 的 recovery 来源仍是 DUT output `memoryViolation`。redirect agent monitor 采样的是测试框架
 已经驱动到 DUT input 的 `io_redirect_*`，它只产生独立 timing anchor，不能再次进入
@@ -405,6 +406,27 @@ status.dynamic_epoch++;
 清queued/dispatched/writeback/pass/fault/commit/deq等旧实例状态；
 设置redirect_pending/flushed并递增dynamic_epoch，等待同uid重新admission。
 ```
+
+### 6.2.1 当前提交阶段的 later-split 取消（2026-10-29）
+
+抽象功能描述：`common_data_transaction::commit_uid_for_redirect_reissue()` 在 redirect 全量只读预检查
+成功后，统一提交旧实例的资源与翻译记录取消，再推进动态代次。当前主路径由
+`apply_redirect_flush_range()` 调用该 helper；`prepare_uid_for_redirect_reissue()` 同样委托它提交。
+上节旧逻辑摘要用于解释 cancel 记账，具体提交顺序以此处和当前源码为准。
+
+源码：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`，
+`commit_uid_for_redirect_reissue()`，在旧 epoch 保存后和状态代次递增前：
+
+```systemverilog
+cancel_later_split_tlb_record_for_uid(uid, old_dynamic_epoch, "redirect_reissue");
+commit_cancel_waiting_uid_tlb_record_for_redirect_range(uid);
+```
+
+中文伪代码：本段在已经通过全部 redirect 检查的提交阶段，先按 UID 和旧动态代次取消后续拆分翻译
+记录，再取消普通等待翻译记录。later-split helper 无记录、代次不匹配、已取消时直接返回；匹配时只把
+记录改为已取消并打印 INFO，不产生新的 fatal。后续状态重置才增加 `dynamic_epoch`。旧 response
+保留的句柄据此进入 `complete_later_split_l2_response()` 的 canceled-stale 分支；新代次当前记录和
+payload 不被覆盖。前置检查失败时不会进入本段，所以记录必须保持原 state/token/epoch。
 
 ### 6.3 `apply_pending_lsq_cancels()`
 
