@@ -37,6 +37,7 @@ import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.ICacheToIfuIO
+import xiangshan.frontend.TwoPrefetchCase
 
 class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   class ICacheIO(implicit p: Parameters) extends ICacheBundle {
@@ -175,7 +176,12 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   prefetcher.io.fromFtq.valid       := softPrefetchValid || io.fromFtq.toPrefetch.valid
   prefetcher.io.fromFtq.bits        := io.fromFtq.toPrefetch.bits
   prefetcher.io.fromFtq.bits.req(0) := Mux(softPrefetchValid, softPrefetch, io.fromFtq.toPrefetch.bits.req(0))
-  io.fromFtq.toPrefetch.ready       := prefetcher.io.fromFtq.ready && !softPrefetchValid
+  prefetcher.io.fromFtq.bits.twoPrefetchCase := Mux(
+    softPrefetchValid,
+    TwoPrefetchCase.Conflict,
+    io.fromFtq.toPrefetch.bits.twoPrefetchCase
+  )
+  io.fromFtq.toPrefetch.ready := prefetcher.io.fromFtq.ready && !softPrefetchValid
 
   missUnit.io.hartId := io.hartId
   missUnit.io.fencei := io.fencei
