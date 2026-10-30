@@ -49,6 +49,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val vtag_update = Flipped(DecoupledIO(new TagWriteReq))
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReqWithMask)
+    val banked_data_lookahead = ValidIO(new L1BankedDataLookAheadReq)
+    val banked_data_valid = Output(Bool())
     val is128Req = Output(Bool())
     val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult()))
     val read_error_delayed = Input(Vec(VLEN/DCacheSRAMRowBits, Bool()))
@@ -131,6 +133,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_bank_mask_128b = bankMaskFromBase(s0_base_bank, DCacheVWordBankCount)
   val s0_bank_mask_normal = byteMaskToBankMask(s0_vaddr, s0_req.mask)
   val s0_bank_oh = Mux(s0_load128Req, s0_bank_mask_128b, s0_bank_mask_normal)
+  // This request cannot backpressure S0; the array may simply decline it.
+  io.banked_data_lookahead.valid := s0_fire && !io.nack &&
+    s0_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U && s0_bank_oh.orR
+  io.banked_data_lookahead.bits.addr := s0_vaddr
+  io.banked_data_lookahead.bits.addr_dup := Mux(s0_load128Req,
+    Cat(s0_req.vaddr_dup(VAddrBits - 1, 4), 0.U(4.W)), s0_req.vaddr_dup)
+  io.banked_data_lookahead.bits.bankMask := s0_bank_oh
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
@@ -295,6 +304,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // data read
   io.banked_data_read.valid := s1_fire && !s1_nack && !s1_is_prefetch
+  io.banked_data_valid := io.banked_data_read.valid && s1_hit && !io.lsu.s1_kill
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.addr_dup := s1_vaddr_dup
   io.banked_data_read.bits.way_en := s1_pred_tag_match_way_dup_dc

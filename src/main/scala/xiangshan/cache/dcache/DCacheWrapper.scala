@@ -68,7 +68,9 @@ case class DCacheParameters
   // Channel selection strategy
   // true = select by address set低位
   // false = select by MSHR ID
-  channelSelByAddr: Boolean = true
+  channelSelByAddr: Boolean = true,
+  // Use idle data banks to read an accepted S0 load one cycle early.
+  enableDataLookAhead: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -1034,6 +1036,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset)
   println("  DcacheMaxPrefetchEntry: " + MaxPrefetchEntry)
   println("  WPUEnable: " + dwpuParam.enWPU)
+  println("  DataLookAheadEnable: " + (cacheParams.enableDataLookAhead && !dwpuParam.enWPU))
   println("  WPUEnableCfPred: " + dwpuParam.enCfPred)
   println("  WPUAlgorithm: " + dwpuParam.algoName)
   println("  HasCMO: " + HasCMO)
@@ -1351,6 +1354,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
+    bankedDataArray.io.lookahead_read(i) := ldu(i).io.banked_data_lookahead
+    bankedDataArray.io.read_data_valid(i) := ldu(i).io.banked_data_valid
+    bankedDataArray.io.read_s2_kill(i) := ldu(i).io.lsu.s2_kill
     bankedDataArray.io.is128Req(i) <> ldu(i).io.is128Req
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
