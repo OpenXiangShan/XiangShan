@@ -34,6 +34,7 @@ import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants, TLError}
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
+import xiangshan.frontend.tracertl.TraceRTLChoose
 import difftest._
 
 class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule
@@ -148,7 +149,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   when (state === s_invalid) {
     when (io.in.fire) {
       uop := io.in.bits.toDynInst()
-      rs1 := io.in.bits.src(0)
+      rs1 := TraceRTLChoose(io.in.bits.src(0), SignExt(io.in.bits.toDynInst().traceInfo.get.memoryAddrVA, XLEN))
       state := s_tlb_and_flush_sbuffer_req
       have_sent_first_tlb_req := false.B
     }
@@ -255,9 +256,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     have_sent_first_tlb_req := true.B
 
     when (io.dtlb.resp.fire && have_sent_first_tlb_req) {
-      paddr   := io.dtlb.resp.bits.paddr(0)
-      gpaddr  := io.dtlb.resp.bits.gpaddr(0)
-      vaddr   := io.dtlb.resp.bits.fullva
+      paddr   := TraceRTLChoose(io.dtlb.resp.bits.paddr(0), SignExt(uop.traceInfo.get.memoryAddrPA, PAddrBits))
+      gpaddr  := TraceRTLChoose(io.dtlb.resp.bits.gpaddr(0), SignExt(uop.traceInfo.get.memoryAddrPA, PAddrBits))
+      vaddr   := TraceRTLChoose(io.dtlb.resp.bits.fullva, vaddr)
       isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling
       val addrAligned = LookupTree(amoSize, List(
@@ -366,6 +367,16 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val dcache_resp_data  = Reg(UInt())
   val dcache_resp_id    = Reg(UInt())
   val dcache_resp_tl_error = Reg(new TLError())
+
+  // TraceRTL has no memory data: skip the dcache access
+  if (env.TraceRTLMode) {
+    when (state === s_cache_req) {
+      dcache_resp_data := 0.U
+      dcache_resp_id := true.B
+      dcache_resp_tl_error := 0.U.asTypeOf(dcache_resp_tl_error)
+      state := s_cache_resp_latch
+    }
+  }
 
   when (state === s_cache_resp) {
     // when not miss
@@ -552,6 +563,11 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     !io.dcache.block_lr, // block lr to survive in lr storm
     data_valid // wait until src(1) is ready
   ) && state === s_cache_req
+  if (env.TraceRTLMode) {
+    exceptionVec := 0.U.asTypeOf(exceptionVec)
+    atom_override_xtval := false.B
+    io.dcache.req.valid := false.B
+  }
   val pipe_req = io.dcache.req.bits
   pipe_req := DontCare
   val amoOpcode = LSUOpType.getAmoOp(uop.fuOpType)

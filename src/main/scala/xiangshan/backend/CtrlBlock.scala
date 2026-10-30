@@ -34,6 +34,7 @@ import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, Snapsh
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.tracertl.TraceRTLDontCareValue
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
@@ -460,9 +461,9 @@ class CtrlBlockImp(
   val s4_trapTargetIGPF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIGPF
   when (s5_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.target := RegEnable(flushTarget, s4_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIAF := RegEnable(s4_trapTargetIAF, s4_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIPF := RegEnable(s4_trapTargetIPF, s4_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIGPF := RegEnable(s4_trapTargetIGPF, s4_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIAF := TraceRTLDontCareValue(RegEnable(s4_trapTargetIAF, s4_flushFromRobValidAhead))
+    io.frontend.toFtq.redirect.bits.backendIPF := TraceRTLDontCareValue(RegEnable(s4_trapTargetIPF, s4_flushFromRobValidAhead))
+    io.frontend.toFtq.redirect.bits.backendIGPF := TraceRTLDontCareValue(RegEnable(s4_trapTargetIGPF, s4_flushFromRobValidAhead))
   }
 
   for (i <- 0 until DecodeWidth) {

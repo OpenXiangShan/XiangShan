@@ -340,6 +340,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     req.bankSel       := fetchReq(i).bankSel
     req.ftqIdx        := fetchPtr(i)
     req.vSetIdx       := fetchReq(i).vSetIdx
+    req.nextStartVAddr.foreach(_ := entryQueue(fetchPtr(i + 1).value).startPc)
     if (i == 0) {
       req.hasBackendException := backendFlagPtr === fetchPtr(i) && backendException.hasException
       req.hasSatpFlush        := backendFlagPtr === fetchPtr(i) && hasSatpFlush
@@ -375,6 +376,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toIfu.redirect.valid := backendRedirect.valid
   // TODO: only valid should be needed
   io.toIfu.redirect.bits := DontCare
+  // TraceRTL rewinds the trace to the redirecting instruction.
+  if (env.TraceRTLMode) io.toIfu.redirect.bits := backendRedirect.bits
 
   io.toBpu.redirect.valid          := redirect.valid
   io.toBpu.redirect.bits.cfiPc     := getCfiPcFromOffset(GuardedPcInit(redirect.bits.pc), redirect.bits.ftqOffset)

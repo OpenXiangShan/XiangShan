@@ -35,7 +35,7 @@ import xiangshan.backend.vector.VecRegionModule._
 import xiangshan.backend.vector.fu.VecFuConfig
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
-import xiangshan.mem.StoreQueueDataWrite
+import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 
 class VecRegionModule(val regionParam: RegionParam)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -242,6 +242,7 @@ class VecRegionImp(
       pipe.in.is0RdFail := false.B // Todo
       pipe.in.is0WtFail := false.B // Todo
       pipe.in.is0LdCancel := false.B // Todo
+      pipe.in.sqDeqPtr.foreach(_ := in.fromMem.sqDeqPtr.get)
       pipe.in.is2VpRdDataNext.foreach { case rdata =>
         rdata.data := vpRdata(rdata.rdConfig.port)
       }
@@ -540,6 +541,7 @@ object VecRegionModule {
     val vldS3VpWbNext: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.vpPregParams)
     val vldS3RobWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
     val v0Wb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.v0PregParams)
+    val sqDeqPtr = Option.when(env.TraceRTLMode)(new SqPtr)
   }
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {

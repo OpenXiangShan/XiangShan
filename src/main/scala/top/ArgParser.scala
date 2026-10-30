@@ -56,6 +56,7 @@ object ArgParser {
       |--enable-simfrontend
       |--imsic-bus-type <NONE|TL|AXI>
       |--dump-csr
+      |--trace-rtl
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -173,6 +174,10 @@ object ArgParser {
         case "--enable-simfrontend" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableSimFrontend = true)
+          }), tail)
+        case "--trace-rtl" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(TraceRTLMode = true)
           }), tail)
         case "--xstop-prefix" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {

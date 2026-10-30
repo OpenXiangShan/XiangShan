@@ -8,6 +8,7 @@ import xiangshan.backend.fu.{FuConfig, PipedFuncUnit}
 import xiangshan.frontend.{PcInit, PrunedAddrInit}
 import xiangshan.frontend.bpu.BranchAttribute.BranchType
 import xiangshan.{JumpOpType, Redirect, RedirectLevel}
+import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
 
 class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   // associated with AddrData's position of NJmpCfg.srcData
@@ -20,7 +21,11 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   // j:  pc       + imm -> pc
   // ja: GPR[rs1] + imm -> pc
   private val isJr = JumpOpType.jumpUopisjr(func)
-  private val jumpTarget = Mux(isJr, src, pc) + SignExt(imm, XLEN)
+  // TraceRTL has no GPR values: take the target from the trace
+  private val jumpTarget = TraceRTLChoose(
+    Mux(isJr, src, pc) + SignExt(imm, XLEN),
+    SignExt(io.in.bits.ctrl.traceInfo.get.target, XLEN)
+  )
 
   private val predTaken = io.in.bits.ctrl.predictInfo.get.predTaken
   private val jmpPredictTarget = io.in.bits.ctrl.predictInfo.get.target
@@ -43,10 +48,11 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.target := jumpTarget
   redirect.pc := pc(VAddrBits, 0)
   redirect.isMisPred := needRedirect
-  redirect.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpTarget)
-  redirect.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpTarget)
-  redirect.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpTarget)
+  redirect.backendIAF := TraceRTLDontCareValue(io.instrAddrTransType.get.checkAccessFault(jumpTarget))
+  redirect.backendIPF := TraceRTLDontCareValue(io.instrAddrTransType.get.checkPageFault(jumpTarget))
+  redirect.backendIGPF := TraceRTLDontCareValue(io.instrAddrTransType.get.checkGuestPageFault(jumpTarget))
   redirect.attribute := io.toFrontendBJUResolve.get.bits.attribute
+  redirect.traceInfo.foreach(_ := io.in.bits.ctrl.traceInfo.get)
   //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready

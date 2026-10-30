@@ -76,6 +76,8 @@ class FetchBlock(implicit p: Parameters) extends IfuBundle {
   val takenCfiOffset: Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
   val size:           UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
 
+  val nextStartVAddr: Option[GuardedPc] = Option.when(env.TraceRTLMode)(GuardedPc())
+
   val pcUpperBitsPlus1: UInt = UInt((GuardedVAddrBits - PcCutPoint).W)
 
   def pcUpperBits: UInt = startVAddr(GuardedVAddrBits - 1, PcCutPoint)
@@ -87,6 +89,7 @@ class FetchBlock(implicit p: Parameters) extends IfuBundle {
     takenCfiOffset   := req.takenCfiOffset
     size             := req.size
     pcUpperBitsPlus1 := req.startVAddr(GuardedVAddrBits - 1, PcCutPoint) + 1.U
+    nextStartVAddr.foreach(_ := req.nextStartVAddr.get)
     this
   }
 }

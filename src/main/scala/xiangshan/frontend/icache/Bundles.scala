@@ -261,6 +261,8 @@ class FetchBlockInfo(implicit p: Parameters) extends ICacheBundle {
   val icacheMeta:       ICacheMeta  = new ICacheMeta
   val perf_isCrossLine: Bool        = Bool()
 
+  val nextStartVAddr: Option[GuardedPc] = Option.when(env.TraceRTLMode)(GuardedPc())
+
   def endIndex: UInt =
     startVAddr(log2Ceil(MaxInstNumPerBlock), instOffsetBits) + takenCfiOffset.bits
 }

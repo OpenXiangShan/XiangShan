@@ -614,6 +614,13 @@ class PMPChecker
   val resp_keyid = keyid_check(leaveHitMux, io.req.valid, req.addr)
 
   val resp = if (pmpUsed) (resp_pmp | resp_pma | resp_keyid) else (resp_pma | resp_keyid)
+  // TraceRTL raises access faults from the trace only.
+  if (p(DebugOptionsKey).TraceRTLMode) {
+    resp.ld     := false.B
+    resp.st     := false.B
+    resp.instr  := false.B
+    resp.atomic := false.B
+  }
 
   if (sameCycle || leaveHitMux) {
     io.resp := resp

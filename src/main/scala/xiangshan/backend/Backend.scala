@@ -222,6 +222,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   println(s"[Backend] ctrlBlock.io.fromWB.wbData.size = ${ctrlBlock.io.fromWB.wbData.size}, wbDataPathToCtrlBlock.size = ${wbDataPathToCtrlBlock.size}")
   assert(ctrlBlock.io.fromWB.wbData.size == wbDataPathToCtrlBlock.size, "ctrlBlock.io.fromWB.wbData.size == wbDataPathToCtrlBlock.size")
   ctrlBlock.io.fromWB.wbData.zip(wbDataPathToCtrlBlock.sortBy(_.bits.params.exuIdx)).map(x => x._1 := x._2)
+  // TraceRTL raises exceptions only from the trace (at decode)
+  if (env.TraceRTLMode) ctrlBlock.io.fromWB.wbData.foreach(wb => wb.bits.exceptionVec := 0.U.asTypeOf(wb.bits.exceptionVec))
   ctrlBlock.io.fromWB.delayedOldestExuRedirect := intRegion.io.wbDataPathToCtrlBlock.delayedOldestExuRedirect.get
   ctrlBlock.io.fromMem.stIn <> io.mem.stIn
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation
@@ -496,6 +498,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   }
 
   vecRegion.in.fromMem.vldS3WakeUp := io.mem.vldS3WakeUp
+  vecRegion.in.fromMem.sqDeqPtr.foreach(_ := io.mem.sqDeqPtr)
 
   vecRegion.in.diff.foreach(_.diffVlRat := ctrlBlock.io.diff_vl_rat.get)
   vecRegion.in.fromVecExcpMod.r := vecExcpMod.o.toVPRF.r

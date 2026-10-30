@@ -68,6 +68,7 @@ import xiangshan.frontend.icache.ICache
 import xiangshan.frontend.ifu.Ifu
 import xiangshan.frontend.instruncache.InstrUncache
 import xiangshan.frontend.simfrontend.SimFrontendInlinedImp
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val hartId:       UInt             = Input(UInt(hartIdLen.W))
@@ -251,7 +252,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ifu.io.backendEmpty := io.backend.backendEmpty
   io.backend.fromIfu  := ifu.io.toBackend
 
-  ibuffer.io.flush       := needFlush
+  ibuffer.io.flush       := needFlush || TraceRTLChoose(false.B, io.backend.toFtq.redirect.valid)
   ibuffer.io.fromBackend := io.backend.toIBuf
 
   // Topdown analysis

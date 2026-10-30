@@ -445,6 +445,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     req.size                 := s1_takenCfiOffset(i) +& 1.U
     req.data                 := s1_data(i)
     req.perf_isCrossLine     := s1_isCrossLine(i)
+    req.nextStartVAddr.foreach(_ := s1_req(i).nextStartVAddr.get)
 
     req.icacheMeta.exception          := s1_exceptionOut(i)
     req.icacheMeta.pmpMmio            := s1_pmpMmio

@@ -103,7 +103,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     }
     else {
       deps.zip(wakeup.bits.loadDependency).map{ case (sink, source) =>
-        sink := source << 1
+        sink := (source << 1)(LoadDependencyWidth - 1, 0)
       }
     }
   }
@@ -128,7 +128,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
       ldDp := (if (wakeUpIn.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
     }
       .elsewhen(ldDp.map(x => x.orR).reduce(_ | _)) {
-        ldDp := VecInit(ldDp.map(x => x << 1))
+        ldDp := VecInit(ldDp.map(x => (x << 1)(LoadDependencyWidth - 1, 0)))
       }
   }
 

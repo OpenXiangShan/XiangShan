@@ -606,6 +606,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits.ftqIdx      := reqSelUops(i).ftqPtr
     redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
     redirect.bits.level       := RedirectLevel.flush
+    redirect.bits.traceInfo.foreach(_ := reqSelUops(i).traceInfo.get)
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).perfDebugInfo.runahead_checkpoint_id
     redirect
   })
