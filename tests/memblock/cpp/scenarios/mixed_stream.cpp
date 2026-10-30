@@ -939,7 +939,13 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             }
         } else {
             auto &work = live[event.instruction];
-            bool initial_event = true;
+            unsigned initial_events = 1;
+            const bool pair_operands = work.kind == 2 && !work.recovery_id && !work.address_issued &&
+                !work.data_issued && (event.kind == 2 || event.kind == 3) &&
+                std::any_of(ready.begin(), ready.end(), [&](const auto &other) {
+                    return other.instruction == event.instruction && other.kind == (event.kind == 2 ? 3U : 2U);
+                }) && constraints.stream_store_pair_per_mille != 0 &&
+                random() % 1000U < constraints.stream_store_pair_per_mille;
             const auto consume = [&](const std::shared_ptr<StreamWork::Producer> &source, bool data) {
                 if (!source) return true;
                 if (!source->complete) { phase += ":dependency-before-producer-completion"; return false; }
@@ -948,16 +954,37 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 (data ? work.data_consumed : work.address_consumed) = true;
                 return true;
             };
-            const bool first_address = event.kind == 1 || (event.kind == 2 && !work.address_issued) ||
+            const bool first_address = pair_operands || event.kind == 1 || (event.kind == 2 && !work.address_issued) ||
                 (event.kind == 4 && std::find(work.issued.begin(), work.issued.end(), true) == work.issued.end());
             if (first_address && !consume(work.address_source, false)) return false;
-            if (event.kind == 3 && !consume(work.data_source, true)) return false;
-            if (event.kind == 1) {
+            if ((pair_operands || event.kind == 3) && !consume(work.data_source, true)) return false;
+            if (pair_operands) {
+                const auto first_sample = environment.iq_slow_feedback_stats().sta_samples.size();
+                memblock::Environment::StoreOperandAcceptances acceptances;
+                const auto &edges = acceptances.edges;
+                if (!environment.issue_store_operands(work.store, acceptances, constrained_completion_timeout) ||
+                    !work.address_replay.accept(first_sample, edges[0])) return false;
+                work.address_issued = work.data_issued = true;
+                work.data_first = edges[1] < edges[0];
+                ++coverage.stream_sta[0];
+                ++coverage.stream_issue[1]; ++coverage.stream_issue[2];
+                initial_events = 2;
+                coverage.stream_sta[10] = std::max<std::uint64_t>(coverage.stream_sta[10],
+                    1U + feedback_waits_at(edges[0], &work));
+                for (unsigned operand = 0; operand < 2; ++operand)
+                    coverage.stream_sta[6U + operand] += feedback_waits_at(edges[operand], &work) != 0;
+                auto &pairs = coverage.stream_store_pair;
+                ++pairs[edges[0] == edges[1] ? 0U : edges[0] < edges[1] ? 1U : 2U];
+                const auto skew = std::max(edges[0], edges[1]) - std::min(edges[0], edges[1]);
+                pairs[3] += skew;
+                pairs[4] = std::max(pairs[4], skew);
+                coverage.stream_store_retirement[7] += acceptances.committed_pending;
+            } else if (event.kind == 1) {
                 if (work.kind == 0 ? !environment.issue_load(work.load, constrained_completion_timeout) :
                     !environment.issue_prefetch(work.prefetch, constrained_completion_timeout)) return false;
                 work.issued[0] = true;
-                initial_event = !work.refetch;
-                coverage.stream_issue[work.kind == 0 ? 0U : 5U] += initial_event;
+                initial_events = !work.refetch;
+                coverage.stream_issue[work.kind == 0 ? 0U : 5U] += initial_events;
                 if (recovery && work.recovery_id == recovery->id) {
                     ++recovery->issue;
                     if (recovery->issue < recovery->issue_order().size())
@@ -965,7 +992,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 }
             } else if (event.kind == 2) {
                 const bool first = !work.address_issued;
-                initial_event = first;
+                initial_events = first;
                 coverage.stream_scalar_retries += !first;
                 work.address_retries += !first;
                 const auto first_sample = environment.iq_slow_feedback_stats().sta_samples.size();
@@ -992,11 +1019,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.issued[event.uop] = true;
                 ++coverage.stream_issue[work.kind == 1 ? 3U : 4U];
             }
-            coverage.stream[8] += initial_event;
-            coverage.stream_store_retirement[7] +=
+            coverage.stream[8] += initial_events;
+            if (!pair_operands) coverage.stream_store_retirement[7] +=
                 (work.kind != 2 || !work.recovery_id) &&
                 environment.store_retirement_stats().pending_before_last_edge != 0;
-            note_wait_overlap(event.kind == 1 ? (work.kind == 0 ? 5U : 9U) :
+            if (!pair_operands) note_wait_overlap(event.kind == 1 ? (work.kind == 0 ? 5U : 9U) :
                 event.kind == 2 ? 6U : event.kind == 3 ? 7U : 8U, &work);
         }
         coverage.stream[6] = std::max<std::uint64_t>(coverage.stream[6], live.size());

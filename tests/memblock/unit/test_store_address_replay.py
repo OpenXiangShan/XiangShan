@@ -399,7 +399,7 @@ class StoreAddressReplayTest(unittest.TestCase):
         reports = []
         for original, line in zip(expected, lines):
             report = self.parser.parse_summary(line)
-            self.assertEqual(report["constraint_schema"], 75)
+            self.assertEqual(report["constraint_schema"], 76)
             for field, value in original.items():
                 self.assertEqual(report[field], value, field)
             reports.append(report)
@@ -589,7 +589,7 @@ class StoreAddressReplayTest(unittest.TestCase):
 
     def test_schema72_compatibility_omits_new_field(self):
         current = self.baseline()
-        line = current["summary"].replace("constraint_schema=75", "constraint_schema=72")
+        line = current["summary"].replace("constraint_schema=76", "constraint_schema=72")
         line = " ".join(word for word in line.split() if not word.startswith("stream_sta="))
         legacy = self.parser.parse_summary(line)
         self.assertNotIn("stream_sta", legacy)

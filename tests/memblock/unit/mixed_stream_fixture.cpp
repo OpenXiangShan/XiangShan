@@ -159,6 +159,7 @@ struct SyntheticEnvironment {
     mutable std::vector<Environment::StoreSlowFeedbackSample> future_store_feedback;
     std::map<unsigned, std::uint64_t> address_retry_after;
     unsigned address_misses = 0;
+    std::vector<std::array<std::uint64_t, 2>> accepted_operand_pairs;
     const Environment::IqSlowFeedbackStats &iq_slow_feedback_stats() const {
         for (auto it = future_store_feedback.begin(); it != future_store_feedback.end();) {
             if (it->cycle > tick) { ++it; continue; }
@@ -186,10 +187,11 @@ struct SyntheticEnvironment {
         }
         retirement_stats.pending = retired_stores.size();
     }
+    bool defer_producer_edge = false, suppress_producer_note = false;
     void capture_store_edge() {
         refresh_sq();
         retirement_stats.pending_before_last_edge = retired_stores.size();
-        ++tick;
+        if (!defer_producer_edge) ++tick;
         refresh_sq();
     }
     const Environment::StoreRetirementStats &store_retirement_stats() const {
@@ -572,6 +574,7 @@ struct SyntheticEnvironment {
         return tick + (cold_enabled && !work.group && (work.kind == 1 || work.kind == 3) ? 143U : latency ? 37U + ((work.id * 7U + uop * 11U) % 31U) : 3U + (work.id + uop) % 5U);
     }
     void note_producer() {
+        if (suppress_producer_note) return;
         prefix_old_producers += old_response_active();
         issues_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
     }
@@ -696,6 +699,36 @@ struct SyntheticEnvironment {
         trace.push_back("SD" + std::to_string(work.id)); sample_accepted(); capture_store_edge();
         retired_pending_issues += !work.group && retirement_stats.pending_before_last_edge != 0; return true;
     }
+    bool issue_store_operands(const StoreTransaction &t, Environment::StoreOperandAcceptances &acceptances, unsigned timeout) {
+        // Independent test shell varies accepted edge order using instruction
+        // identity; production retained-pin timing has separate host contracts.
+        acceptances = {};
+        const auto mode = find(t.rob, t.rob_flag).id % 3U;
+        note_producer();
+        suppress_producer_note = true;
+        defer_producer_edge = mode == 0U;
+        if (mode == 2U) {
+            acceptances.edges[1] = tick;
+            const auto before = retired_pending_issues;
+            if (!issue_store_data(t, timeout)) return false;
+            acceptances.committed_pending += retired_pending_issues - before;
+        }
+        acceptances.edges[0] = tick;
+        auto before = retired_pending_issues;
+        if (!issue_store_address(t, timeout)) return false;
+        acceptances.committed_pending += retired_pending_issues - before;
+        if (mode != 2U) {
+            acceptances.edges[1] = tick;
+            before = retired_pending_issues;
+            if (!issue_store_data(t, timeout)) return false;
+            acceptances.committed_pending += retired_pending_issues - before;
+        }
+        defer_producer_edge = false;
+        suppress_producer_note = false;
+        if (mode == 0U) capture_store_edge();
+        accepted_operand_pairs.push_back(acceptances.edges);
+        return true;
+    }
     bool issue_vector(const VectorMemoryTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag);
         const unsigned index = t.vuop_idx;
@@ -816,6 +849,17 @@ struct SyntheticEnvironment {
             admissions_with_completed_head, issues_with_completed_head},
             "production completed-head choices disagreed with independent observations");
         require(coverage.stream[8] + refetch_issues + coverage.stream_scalar_retries == issues, "production issue count disagreed with accepted producers");
+        std::array<std::uint64_t, 5> expected_pairs{};
+        for (const auto &edges : accepted_operand_pairs) {
+            if (edges[0] == edges[1]) ++expected_pairs[0];
+            else if (edges[0] < edges[1]) ++expected_pairs[1];
+            else ++expected_pairs[2];
+            const auto distance = edges[0] > edges[1] ? edges[0] - edges[1] : edges[1] - edges[0];
+            expected_pairs[3] += distance;
+            if (expected_pairs[4] < distance) expected_pairs[4] = distance;
+        }
+        require(coverage.stream_store_pair == expected_pairs,
+            "production operand-pair direction/skew disagreed with independent accepted edges");
         require(coverage.stream_recovery_inflight[2] == cold_cancellations && cold_cancellations == cold_releases &&
             cold_releases == cold_refetches, "unfinished stream lifecycle accounting disagreed");
         require(coverage.stream_recovery_inflight[9] == prefix_old_producers &&
@@ -1024,10 +1068,11 @@ int main(int argc, char **argv) {
                 "oracle checkpoint failed to remove canceled-store bytes");
             std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
                 << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
-        } else if (mode == "stream" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback") {
-            require(argc == 6 || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
+        } else if (mode == "stream" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback") {
+            require(argc == 6 || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "pair-rate") fixture.constraints.apply(std::string("stream-store-pair=") + argv[6]);
             if (mode == "sustained") {
                 fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = std::max(1U, limit);
                 fixture.constraints.stream_dependency_per_mille = 1000;
@@ -1081,6 +1126,9 @@ int main(int argc, char **argv) {
                 << ",\"stream_sta\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_sta.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_sta[i];
+            std::cout << "],\"stream_store_pair\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_store_pair.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_store_pair[i];
             std::cout << "]" << ",\"vstart_cross_page\":" << std::count_if(env.instructions.begin(), env.instructions.end(),
                 [](const auto &work) { return work.needs_restart_flush() && work.needs_pending_store; });
             std::cout << ",\"stream_vstart_flush\":[";

@@ -1255,6 +1255,13 @@ public:
 
     bool issue_store_address(const StoreTransaction &transaction, unsigned timeout = 32);
 
+    struct StoreOperandAcceptances {
+        std::array<std::uint64_t, 2> edges{};
+        unsigned committed_pending = 0;
+    };
+    bool issue_store_operands(const StoreTransaction &transaction,
+        StoreOperandAcceptances &acceptances, unsigned timeout = 32);
+
     bool issue_store_address_batch(
         const std::vector<StoreTransaction> &transactions,
         unsigned timeout = 64);

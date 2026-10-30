@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4855,6 +4855,22 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
                  (eligible_stores > 0 and 1 <= sta[10] <= min(eligible_stores, live) and
                   (sta[6] == 0 or sta[10] >= 2)),
                  "stream STA waits exceed eligible stores or miss accepted overlap")
+    if result.get("constraint_schema", 0) >= 76:
+        pair_rate = result.get("target_stream_store_pair")
+        _require(type(pair_rate) is int and 0 <= pair_rate <= 1000,
+                 "invalid target_stream_store_pair")
+        together, address_first, data_first, skew_sum, skew_max = _csv_counts(result, "stream_store_pair", 5)
+        _require(all(value <= (1 << 64) - 1 for value in
+                     (together, address_first, data_first, skew_sum, skew_max)),
+                 "stream store operand-pair counters exceed the emitter uint64 domain")
+        split = address_first + data_first
+        _require(together + split <= ordinary + min(canceled[7], canceled[8]) and
+                 together + split <= issues[2] and
+                 ((split == 0 and skew_sum == skew_max == 0) or
+                  (split > 0 and 1 <= skew_max <= skew_sum and
+                   skew_max + split - 1 <= skew_sum <= skew_max * split)) and
+                 (pair_rate != 0 or together + split == 0),
+                 "stream store operand-pair acceptances/skews disagree")
     maximum = 32
     if result.get("constraint_schema", 0) >= 72:
         minimum, maximum = result.get("target_stream_min_instructions"), result.get("target_stream_max_instructions")

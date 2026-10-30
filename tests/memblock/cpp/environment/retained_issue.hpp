@@ -1,6 +1,7 @@
 #pragma once
 
 #include "memblock_env.hpp"
+#include <functional>
 #include <variant>
 
 namespace memblock {
@@ -8,12 +9,13 @@ namespace memblock {
 // Owns all ordinary producer issue pins during an explicitly bound interval.
 // This is a pin driver, not an IQ, scoreboard, or cancellation authorization.
 // Call capture_before_edge only after manager drive and combinational refresh;
-// call advance_after_edge exactly once after that edge. Store acceptance still
-// needs the environment's separate pre-edge scoreboard/release authorization.
+// call advance_after_edge exactly once after that edge. Accepted store offers
+// use caller-provided pre-edge scoreboard/release authorization callbacks.
 class RetainedIssueDriver {
 public:
     enum class Kind { load, store_address, store_data, vector };
     enum class Outcome { accepted, retry, canceled };
+    using Acceptance = std::function<bool(std::uint64_t)>;
     struct Redirect {
         bool valid = false;
         std::uint8_t rob = 0;
@@ -37,14 +39,17 @@ public:
     void offer_load(std::uint64_t tag, unsigned lane, const generated::ScalarLoadIssue &issue) {
         offer(tag, Kind::load, lane, issue);
     }
-    void offer_store_address(std::uint64_t tag, unsigned lane, const generated::ScalarStoreIssue &issue) {
-        offer(tag, Kind::store_address, lane, issue);
+    void offer_store_address(std::uint64_t tag, unsigned lane, const generated::ScalarStoreIssue &issue,
+                             Acceptance acceptance = {}) {
+        offer(tag, Kind::store_address, lane, issue, std::move(acceptance));
     }
-    void offer_store_data(std::uint64_t tag, unsigned lane, const generated::ScalarStoreIssue &issue) {
-        offer(tag, Kind::store_data, lane, issue);
+    void offer_store_data(std::uint64_t tag, unsigned lane, const generated::ScalarStoreIssue &issue,
+                          Acceptance acceptance = {}) {
+        offer(tag, Kind::store_data, lane, issue, std::move(acceptance));
     }
-    void offer_vector(std::uint64_t tag, unsigned lane, const generated::VectorMemoryIssue &issue) {
-        offer(tag, Kind::vector, lane, issue);
+    void offer_vector(std::uint64_t tag, unsigned lane, const generated::VectorMemoryIssue &issue,
+                      Acceptance acceptance = {}) {
+        offer(tag, Kind::vector, lane, issue, std::move(acceptance));
     }
 
     template<class Adapter> static void clear_pins(Adapter &dut) {
@@ -97,10 +102,35 @@ public:
         sampled_redirect_ = redirect;
         sampled_edge_ = edge;
         sampled_ = true;
+        authorization_called_ = false;
+        authorization_ok_ = true;
+    }
+
+    // Acceptance is a sampled pin fact; callbacks declare matching obligations
+    // before same-edge combinational STD writeback and manager capture. They
+    // run only for an accepted offer, including a legal killed-acceptance tail.
+    bool authorize_before_edge() {
+        if (!sampled_ || authorization_called_)
+            throw std::logic_error("producer acceptance authorization out of phase");
+        authorization_called_ = true;
+        for (const auto &event : sampled_events_) {
+            if (event.outcome != Outcome::accepted) continue;
+            const auto &callback = slots_[index(event.kind, event.lane)]->acceptance;
+            if (callback && !callback(event.edge)) {
+                authorization_ok_ = false;
+                return false;
+            }
+        }
+        return true;
     }
 
     template<class Adapter> void advance_after_edge(Adapter &dut) {
         if (!sampled_) throw std::logic_error("producer edge advanced without capture");
+        if (!authorization_ok_ || (!authorization_called_ && std::any_of(sampled_events_.begin(),
+            sampled_events_.end(), [&](const auto &event) {
+                return event.outcome == Outcome::accepted &&
+                    bool(slots_[index(event.kind, event.lane)]->acceptance);
+            }))) throw std::logic_error("producer edge advanced without accepted-input authorization");
         for (const auto &event : sampled_events_) {
             slots_[index(event.kind, event.lane)].reset();
             events_.push_back(event);
@@ -127,6 +157,7 @@ private:
         Kind kind;
         unsigned lane;
         Payload payload;
+        Acceptance acceptance;
         unsigned stalled_edges = 0;
     };
     static unsigned index(Kind kind, unsigned lane) {
@@ -154,7 +185,8 @@ private:
             return younger || (same && redirect.flush_itself);
         }, request.payload);
     }
-    template<class Issue> void offer(std::uint64_t tag, Kind kind, unsigned lane, const Issue &issue) {
+    template<class Issue> void offer(std::uint64_t tag, Kind kind, unsigned lane, const Issue &issue,
+                                    Acceptance acceptance = {}) {
         if (sampled_) throw std::logic_error("producer offer between capture and edge");
         const auto position = index(kind, lane);
         if (issue.rob_value >= kRobEntries) throw std::invalid_argument("producer ROB out of range");
@@ -162,7 +194,7 @@ private:
         if (std::any_of(slots_.begin(), slots_.end(), [&](const auto &slot) { return slot && slot->tag == tag; }) ||
             std::any_of(events_.begin(), events_.end(), [&](const auto &event) { return event.tag == tag; }))
             throw std::logic_error("producer tag already outstanding");
-        slots_[position] = Request{tag, kind, lane, issue};
+        slots_[position] = Request{tag, kind, lane, issue, std::move(acceptance)};
     }
     std::array<std::optional<Request>, kScalarLoadLanes + 2U * kScalarStoreLanes + kVectorMemoryLanes> slots_{};
     std::vector<Event> events_, sampled_events_;
@@ -170,6 +202,7 @@ private:
     std::optional<std::uint64_t> last_edge_;
     std::uint64_t sampled_edge_ = 0;
     bool sampled_ = false;
+    bool authorization_called_ = false, authorization_ok_ = true;
 };
 
 } // namespace memblock

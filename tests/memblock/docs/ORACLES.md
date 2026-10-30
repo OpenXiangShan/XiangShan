@@ -708,8 +708,14 @@ complete meanwhile. `last_load_vector_pair_same_cycle()` is true only when both
 accepted events share an edge, and resets on each call and reset. `coissue`
 uses this observation, never helper completion alone. Independent scalar/vector
 data and identity scoreboards own terminal correctness. Split-edge acceptance
-remains legal. Ordinary sliding-stream issue and pre-edge store acceptance
-authorization have not yet migrated to this binding.
+remains legal. Scalar STA/STD helpers and ordinary initial same-store operand
+pairs now use the binding. Each accepted operand marks its independent store
+scoreboard obligation before same-edge writeback sampling, registers release
+input groups when both operands have accepted and authorizes only the public
+head owner before manager capture. Same-store STA/STD may accept together or
+on different edges. The slow-feedback cursor begins at the actual STA edge;
+miss retries remain separate. Ordinary sliding load/vector issue and independent
+admission during a stalled operand pair have not yet migrated.
 
 [BridgeMonitor](../cpp/environment/bridge_monitor.cpp) compares independently
 captured inputs against explicit combinational, one-cycle, two-cycle or

@@ -57,6 +57,7 @@ auto Environment::Impl::tick(bool monitor)  -> void
         static_cast<std::uint8_t>(dut_.queues.redirect.rob_idx_value.value()),
         dut_.queues.redirect.rob_idx_flag.boolean(),
         dut_.queues.redirect.level.boolean()});
+    if (retained_issue_driver_ && !retained_issue_driver_->authorize_before_edge()) return;
     memory_agent_.capture_before_tick(dut_);
     ptw_agent_.capture_before_tick(dut_);
     uncache_agent_.capture_before_tick(dut_);

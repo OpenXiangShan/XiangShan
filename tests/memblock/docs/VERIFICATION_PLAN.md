@@ -196,7 +196,7 @@ records remain queued. Legacy heterogeneous windows can now offer a legal
 scalar/FP load and first vector-load uop together, with `coissue` requiring both
 handshakes on one sampled edge. The ordinary sliding stream still selects one
 blocking producer helper at a time. Blocking issue handshakes, synchronous
-unresolved operands, simultaneous ordinary producer issue and special-store
+unresolved operands, heterogeneous ordinary producer issue and special-store
 lifecycle separation remain high priorities. Nonzero-VSTART
 vectors retain their required whole-instruction flush-after through a serialized
 suffix barrier with low `pendingst`, zero cancellation and conservative local
@@ -217,12 +217,14 @@ queue value/wrap snapshots; selected store/vector-list waits retain unrelated
 obligations. Heterogeneous head movement waits for older special-load completion,
 and ordinary vector architectural retirement uses complete allocation groups
 without scalar commit pulses while their physical SQ targets may remain live.
-The scalar/vector load pair now uses independent retained lane slots and
+The scalar/vector load pair and ordinary initial STA/STD pair use independent retained lane slots and
 post-manager pre-edge acceptance events. Host contracts check scalar retention,
 fourteen-edge vector timeout/retry and delayed age-specific redirect tails.
-This shared driver is a prerequisite for ordinary independent producer issue;
-the sliding scheduler and pre-edge store acceptance authorization remain to be
-migrated. Existing independent data and identity scoreboards remain separate.
+Scalar-store accepted operands now mark their scoreboard and register/authorize
+release input groups before same-edge writeback/manager capture. Pair coverage
+records actual same/split accepted edges and skew; both remain distinct issue
+events. General sliding load/vector scheduling and admission during a stalled
+pair remain to be migrated. Independent byte and identity scoreboards stay active.
 The stream holds a single architectural head and independent byte-prefix oracle,
 with distinct live class destinations. Ordinary admissions can independently
 sample address and scalar-store data edges from older live integer loads.

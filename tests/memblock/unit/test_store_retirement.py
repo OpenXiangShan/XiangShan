@@ -452,7 +452,7 @@ class StreamStoreRetirementAccountingTest(unittest.TestCase):
                              text=True, capture_output=True, timeout=20)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         report = self.modules['run_regression'].parse_summary(ran.stdout)
-        self.assertEqual(report['constraint_schema'], 75)
+        self.assertEqual(report['constraint_schema'], 76)
         for field in RETIREMENT_FIELDS:
             self.assertEqual(report[field], ','.join(map(lambda n: str(int(n)), rows[field])), field)
         self.records.append({'kind': 'serialized-history', 'store_retirement': report['stream_store_retirement'],

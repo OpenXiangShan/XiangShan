@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=75`.
+`constraint_schema=76`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -78,6 +78,7 @@ they do not imply arbitrary numeric suffix support.
 | `stream-unresolved-inflight` | Conditional conflicting stream-graph rate, default 250 in all presets, selecting one youngest held cold scalar/FP role when at least two load slots fit. Requires a same-page physical line without accepted A coverage, explicit reference bytes or older admitted store bytes. Unavailable attempts retain the completed-load path; zero disables selection. |
 | `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the current 4-KiB page; scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
+| `stream-store-pair` | Conditional rate offering an ordinary scalar store's initial STA and STD together when both operand events are ready. Independent retained lane handshakes permit same-edge, STA-first or STD-first acceptance. Default 500 in all presets; zero retains separate scheduling. Graph operands and STA retries remain separate. |
 | `stream-unresolved` | Conditional rate (default 125 in all presets) replacing an eligible scalar-store admission with a variable unresolved-store/scalar-load graph inside the same sliding stream. Needs at least two remaining live/budget slots and actual LQ/SQ capacity. Zero disables it; `scalar-unresolved-conflict` controls conflict/control geometry. |
 | `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
 | `translation-switch` | Rate for resampling the translation context after required context/leaf/fence observations. |
@@ -230,6 +231,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | `stream-min-instructions` | 8 | 8 | 8 | 8 |
 | `stream-max-instructions` | 256 | 256 | 256 | 256 |
 | `stream-dependency` | 250 | 250 | 250 | 250 |
+| `stream-store-pair` | 500 | 500 | 500 | 500 |
 | `stream-unresolved` | 125 | 125 | 125 | 125 |
 | `stream-unresolved-inflight` | 250 | 250 | 250 | 250 |
 | `special-concurrent` | 500 | 20 | 750 | 0 |
@@ -667,6 +669,7 @@ Array order and sampling code are authoritative in
 | `stream_cancel` | Schema 75: mixed redirects; canceled generations in scalar-load/vector-load/scalar-store/vector-store/prefetch order; their accepted initial scalar-load/STA/STD/vector-load-uop/vector-store-uop/prefetch events; canceled admitted vector-load/store uops; canceled unflushed VSTART load/store instructions; unconsumed address/data dependencies; canceled STA final translated/retry-ready/feedback-pending states; canceled accepted STA retries; maximum canceled generations per epoch, epochs with cancellation, maximum admitted generations per epoch, and epochs with more than 32 admitted generations; canceled generated vector-load source chains, vector-store source reuses, and unconsumed vector-load source chains. Ordinary admission equals retirement plus cancellation by class; admitted vector uops and accepted issue events remain counted even after cancellation. These are generator lifecycle records, reconciled with the independent scoreboards and physical queue cancellation, not proof of CPU retirement or a passive port monitor. |
 | `stream_waiting_head` | Admission and operand/uop event selections while the oldest architectural instruction has completed. From schema 74 this includes its required backend retirement-readiness guard; it does not imply immediate legal retirement. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
 | `stream_sta` | Schema 73: ordinary first STA attempts, retries, matched hits, misses; accepted admission/scalar load/other STA/other STD/vector uop/prefetch during another ordinary store's feedback wait; maximum simultaneous ordinary feedback waits at accepted issue boundaries. Each overlap is counted once per accepted event if at least one other attempt is outstanding at its edge, excluding feedback already observed by that edge. Without mixed cancellation, first attempts and hits equal ordinary scalar-store retirements (excluding recovery roles), and retries and misses equal `stream_scalar_retries`. Schema 75 adds canceled first attempts and final translated states; total attempts equal hits plus misses plus canceled feedback-pending attempts. A canceled final miss can remain un-retried, so misses equal retries plus canceled retry-ready states. These are scheduling/feedback relations, not a per-request PTW or translation-hit oracle. |
+| `stream_store_pair` | Schema 76: ordinary stores with same-edge initial STA/STD acceptance, STA-first acceptance, STD-first acceptance, total split-edge skew and maximum skew. Each operand remains one accepted issue event; the pair contributes two. Feedback-wait overlap and committed-SQ coexistence use each operand's accepted edge. Pairs exclude graph roles and retries; pair selection is not proof of same-edge acceptance. |
 | `stream_store_retirement` | Schema 74: scalar architectural retirements, vector instruction retirements, vector uop drain records; records still in SQ at retirement, records already dequeued; maximum pending committed records; accepted initial-admission completion edges, regular producer acceptance edges, and retirement-driven head-update edges with pending committed records; records drained by public SQ dequeue. Record totals conserve scalar retirements plus retired vector uops (admitted uops minus canceled uops), and physical records must drain at epoch end. Recovery-store STA/STD and vector replay helper edges are excluded from the producer-overlap count; strict refetch load acceptance is included. |
 | `stream_vstart_flush` | Schema 74: admitted nonzero-VSTART vector load/store instructions, completed same-instruction flush-after redirects, and those redirects with pending committed SQ records. Admitted load plus store counts equal completed flush-after redirects plus canceled unflushed VSTART obligations; physical cancellation must be zero at each completed flush-after boundary. The serialized suffix is a conservative stimulus constraint. |
 | `stream_history` | Schema 72: epochs longer than 32 instructions, maximum actual epoch length, admissions after the first 32 with older accepted work pending, and reuse of a full ROB value/wrap identity within one epoch. These observations distinguish sustained queue overlap from repeated short epochs; lifetime reuse is driver history, not an oracle excluding arbitrary stale responses. Sparse accounting checks length/overlap bounds without requiring positive bins. |
@@ -1127,8 +1130,9 @@ Broader temporal locality/dependent-address streams and scalar/vector SQ
 forwarding follow these. Rare error/protection/CMO crosses remain secondary.
 
 The ready-event scheduler still executes one blocking producer helper per turn.
-Same-cycle issue across different producer classes, or issue alongside admission,
-has no ordinary-stream path. Ordinary loads conservatively wait for older scalar
+An eligible ordinary scalar store can offer its initial STA and STD together;
+actual same/split-edge outcomes and skew are observed per operand. Heterogeneous
+ordinary load/vector issue and issue alongside admission remain absent. Ordinary loads conservatively wait for older scalar
 addresses and complete older vector stores; unresolved scalar graphs provide a
 bounded exception. Ordinary U-mode permissions with live mixed work, general
 scalar/vector/store suffix cancellation and cross-page pointer chains remain

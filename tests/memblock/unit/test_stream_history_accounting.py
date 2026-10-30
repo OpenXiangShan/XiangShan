@@ -308,7 +308,7 @@ class StreamHistoryAccountingTest(unittest.TestCase):
             for field in ("transactions", "stream_scalar_retries", "target_stream_min_instructions",
                           "target_stream_max_instructions"):
                 self.assertEqual(report[field], original[field], field)
-            self.assertEqual(report["constraint_schema"], 75)
+            self.assertEqual(report["constraint_schema"], 76)
             report["constraint_schema"] = original["constraint_schema"]
         self.records.append(dict(test=self.id(), command=command, serialized_rows=len(expected), returncode=ran.returncode))
         return actual
@@ -356,7 +356,7 @@ class StreamHistoryAccountingTest(unittest.TestCase):
                 self.assertEqual(ran.returncode, 0 if expected else 2, ran.stdout + ran.stderr)
                 if expected:
                     report = self.modules["run_regression"].parse_summary(ran.stdout)
-                    self.assertEqual(report["constraint_schema"], 75)
+                    self.assertEqual(report["constraint_schema"], 76)
                     self.assertEqual((report["target_stream_min_instructions"], report["target_stream_max_instructions"]), expected)
 
     def test_empty_singleton_clipped_and_default_bounds(self):

@@ -522,6 +522,10 @@ auto Environment::Impl::issue_store_address(const StoreTransaction &transaction,
         error_.record("scalar store immediate exceeds signed 12-bit range");
         return false;
     }
+    if (retained_issue_driver_ || transaction.address_lane >= kScalarStoreLanes || transaction.rob >= kRobEntries) {
+        error_.record("invalid or nested scalar store-address producer binding");
+        return false;
+    }
     generated::ScalarStoreIssue issue;
     issue.fu_type = kFuTypeStore;
     issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
@@ -532,27 +536,90 @@ auto Environment::Impl::issue_store_address(const StoreTransaction &transaction,
     issue.imm = static_cast<std::uint32_t>(transaction.immediate);
     issue.src = scalar_issue_base_address(
         transaction.address, transaction.immediate);
+    RetainedIssueDriver driver;
+    driver.offer_store_address(0, transaction.address_lane, issue, [&](std::uint64_t edge) {
+        return store_scoreboard_.mark_address_issued(transaction, edge) &&
+            accept_release_store_input(scalar_store_key(transaction), false, true) &&
+            authorize_release_store_inputs();
+    });
+    retained_issue_driver_ = &driver;
+    struct Binding {
+        RetainedIssueDriver *&bound;
+        decltype(dut_) &adapter;
+        ~Binding() { bound = nullptr; RetainedIssueDriver::clear_pins(adapter); }
+    } binding{retained_issue_driver_, dut_};
     for (unsigned cycle = 0; cycle < timeout; ++cycle) {
-        dut_.drive_scalar_store_address(transaction.address_lane, issue);
-        dut_.refresh_comb();
-        const bool ready = dut_.scalar_store_address_ready(transaction.address_lane);
-        if (ready && !store_scoreboard_.mark_address_issued(
-                transaction, this->cycle())) {
-            dut_.clear_scalar_store_issue_valids();
-            return false;
-        }
-        if (ready && !accept_release_store_input(scalar_store_key(transaction), false, true)) return false;
+        const auto before = this->cycle();
         tick();
-        if (ready) {
-            dut_.clear_scalar_store_issue_valids();
-            return check_components();
-        }
-        if (!check_components()) {
-            return false;
+        if (this->cycle() == before || !check_components()) return false;
+        for (const auto &event : driver.take_events()) {
+            if (event.outcome != RetainedIssueDriver::Outcome::accepted || event.killed) {
+                error_.record("scalar store-address producer canceled");
+                return false;
+            }
+            return true;
         }
     }
-    dut_.clear_scalar_store_issue_valids();
     error_.record("scalar store-address issue timed out waiting for ready");
+    return false;
+}
+
+auto Environment::Impl::issue_store_operands(const StoreTransaction &transaction,
+    StoreOperandAcceptances &acceptances, unsigned timeout) -> bool
+{
+    acceptances = {};
+    if (retained_issue_driver_ || !scalar_immediate_is_valid(transaction.immediate) ||
+        transaction.address_lane >= kScalarStoreLanes || transaction.data_lane != transaction.address_lane ||
+        transaction.rob >= kRobEntries) {
+        error_.record("invalid or nested scalar store operand producer binding");
+        return false;
+    }
+    generated::ScalarStoreIssue address, data;
+    address.fu_type = data.fu_type = kFuTypeStore;
+    address.fu_op_type = data.fu_op_type = static_cast<std::uint16_t>(transaction.op);
+    address.rob_flag = data.rob_flag = transaction.rob_flag;
+    address.rob_value = data.rob_value = transaction.rob;
+    address.sq_flag = data.sq_flag = transaction.sq_flag;
+    address.sq_value = data.sq_value = transaction.sq;
+    address.imm = static_cast<std::uint32_t>(transaction.immediate);
+    address.src = scalar_issue_base_address(transaction.address, transaction.immediate);
+    data.src = transaction.data;
+    RetainedIssueDriver driver;
+    driver.offer_store_address(0, transaction.address_lane, address, [&](std::uint64_t edge) {
+        acceptances.committed_pending += queues_.store_retirement_stats().pending != 0;
+        return store_scoreboard_.mark_address_issued(transaction, edge) &&
+            accept_release_store_input(scalar_store_key(transaction), false, true) &&
+            authorize_release_store_inputs();
+    });
+    driver.offer_store_data(1, transaction.data_lane, data, [&](std::uint64_t edge) {
+        acceptances.committed_pending += queues_.store_retirement_stats().pending != 0;
+        return store_scoreboard_.mark_data_issued(transaction, transaction.data_lane, edge) &&
+            accept_release_store_input(scalar_store_key(transaction), false, false) &&
+            authorize_release_store_inputs();
+    });
+    retained_issue_driver_ = &driver;
+    struct Binding {
+        RetainedIssueDriver *&bound;
+        decltype(dut_) &adapter;
+        ~Binding() { bound = nullptr; RetainedIssueDriver::clear_pins(adapter); }
+    } binding{retained_issue_driver_, dut_};
+    std::array<bool, 2> accepted{};
+    for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+        const auto before = this->cycle();
+        tick();
+        if (this->cycle() == before || !check_components()) return false;
+        for (const auto &event : driver.take_events()) {
+            if (event.outcome != RetainedIssueDriver::Outcome::accepted || event.killed ||
+                event.tag >= accepted.size() || accepted[event.tag]) {
+                error_.record("scalar store operand producer canceled or duplicated");
+                return false;
+            }
+            accepted[event.tag] = true;
+            acceptances.edges[event.tag] = event.edge;
+        }
+        if (accepted[0] && accepted[1]) return true;
+    }
+    error_.record("scalar store operands timed out waiting for independent handshakes");
     return false;
 }
 
@@ -1019,6 +1086,10 @@ auto Environment::Impl::issue_store_data(const StoreTransaction &transaction,
     unsigned timeout)  -> bool
 {
     trace_store_issue("store-data-issue", transaction);
+    if (retained_issue_driver_ || transaction.data_lane >= kScalarStoreLanes || transaction.rob >= kRobEntries) {
+        error_.record("invalid or nested scalar store-data producer binding");
+        return false;
+    }
     generated::ScalarStoreIssue issue;
     issue.fu_type = kFuTypeStore;
     issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
@@ -1026,26 +1097,30 @@ auto Environment::Impl::issue_store_data(const StoreTransaction &transaction,
     issue.sq_flag = transaction.sq_flag;
     issue.sq_value = transaction.sq;
     issue.src = transaction.data;
+    RetainedIssueDriver driver;
+    driver.offer_store_data(0, transaction.data_lane, issue, [&](std::uint64_t edge) {
+        return store_scoreboard_.mark_data_issued(transaction, transaction.data_lane, edge) &&
+            accept_release_store_input(scalar_store_key(transaction), false, false) &&
+            authorize_release_store_inputs();
+    });
+    retained_issue_driver_ = &driver;
+    struct Binding {
+        RetainedIssueDriver *&bound;
+        decltype(dut_) &adapter;
+        ~Binding() { bound = nullptr; RetainedIssueDriver::clear_pins(adapter); }
+    } binding{retained_issue_driver_, dut_};
     for (unsigned cycle = 0; cycle < timeout; ++cycle) {
-        dut_.drive_scalar_store_data(transaction.data_lane, issue);
-        dut_.refresh_comb();
-        const bool ready = dut_.scalar_store_data_ready(transaction.data_lane);
-        if (ready && !store_scoreboard_.mark_data_issued(
-                transaction, transaction.data_lane, this->cycle())) {
-            dut_.clear_scalar_store_issue_valids();
-            return false;
-        }
-        if (ready && !accept_release_store_input(scalar_store_key(transaction), false, false)) return false;
+        const auto before = this->cycle();
         tick();
-        if (ready) {
-            dut_.clear_scalar_store_issue_valids();
-            return check_components();
-        }
-        if (!check_components()) {
-            return false;
+        if (this->cycle() == before || !check_components()) return false;
+        for (const auto &event : driver.take_events()) {
+            if (event.outcome != RetainedIssueDriver::Outcome::accepted || event.killed) {
+                error_.record("scalar store-data producer canceled");
+                return false;
+            }
+            return true;
         }
     }
-    dut_.clear_scalar_store_issue_valids();
     error_.record("scalar store-data issue timed out waiting for ready");
     return false;
 }

@@ -1890,6 +1890,12 @@ auto Environment::issue_store_address(const StoreTransaction &transaction,
     return impl_->issue_store_address(transaction, timeout);
 }
 
+auto Environment::issue_store_operands(const StoreTransaction &transaction,
+    StoreOperandAcceptances &acceptances, unsigned timeout) -> bool
+{
+    return impl_->issue_store_operands(transaction, acceptances, timeout);
+}
+
 auto Environment::issue_store_address_batch(const std::vector<StoreTransaction> &transactions,
     unsigned timeout)  -> bool
 {

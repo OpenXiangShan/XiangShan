@@ -28,7 +28,7 @@ struct TrackingDut {
     void refresh_comb() {}
     void drive_scalar_load_issue(unsigned, const generated::ScalarLoadIssue &) { throw std::logic_error("unexpected load binding"); }
     bool scalar_load_issue_ready(unsigned) const { throw std::logic_error("unexpected load binding"); }
-    void clear_scalar_load_issue_valids() { throw std::logic_error("unexpected load binding"); }
+    void clear_scalar_load_issue_valids() {}
     void drive_scalar_store_address(unsigned, const generated::ScalarStoreIssue &) { sta_valid = true; }
     void drive_scalar_store_data(unsigned, const generated::ScalarStoreIssue &) { std_valid = true; }
     void drive_vector_memory_issue(unsigned, const generated::VectorMemoryIssue &) { vec_valid = true; }
@@ -88,6 +88,8 @@ struct TrackingManager : TrackingAgent {
     void reset_link_state() { groups.clear(); ++resets; }
 };
 struct TrackingQueue : TrackingAgent {
+    Environment::StoreRetirementStats stats;
+    const Environment::StoreRetirementStats &store_retirement_stats() const { return stats; }
     std::map<std::uint64_t,std::uint64_t> scalar, vector;
     auto scalar_store_target(std::uint64_t key) const -> std::optional<std::uint64_t> {
         auto it=scalar.find(key); return it==scalar.end()?std::nullopt:std::optional{it->second};
@@ -116,6 +118,7 @@ void trace_reference_store(const SparseMemory &, const char *, std::uint64_t, un
 
 class ReleaseInputFixture {
 public:
+    using StoreOperandAcceptances = Environment::StoreOperandAcceptances;
     FailureState error_{"host-release-inputs", "contract"};
     TrackingDut dut_;
     RetainedIssueDriver *retained_issue_driver_ = nullptr;
@@ -157,6 +160,7 @@ public:
     bool authorize_release_store_inputs();
     bool issue_store_address(const StoreTransaction &,unsigned=10);
     bool issue_store_data(const StoreTransaction &,unsigned=10);
+    bool issue_store_operands(const StoreTransaction &,StoreOperandAcceptances &,unsigned=10);
     bool issue_vector(const VectorMemoryTransaction &,unsigned=10);
     void tick(bool=true);
     bool reset();
@@ -203,7 +207,7 @@ static void scalar_orders(bool data_first) {
     };
     require(data_first?e.issue_store_data(t):e.issue_store_address(t),"first scalar issue rejected");
     require(data_first?e.issue_store_address(t):e.issue_store_data(t),"second scalar issue rejected");
-    require(e.events==std::vector<std::string>{"manager-drive","edge","register","authorize","manager-drive","edge"},"before-edge registration/authorization order changed");
+    require(e.events==std::vector<std::string>{"manager-drive","edge","manager-drive","register","authorize","edge"},"before-edge registration/authorization order changed");
 }
 static void pressure_replay() {
     ReleaseInputFixture e; auto t=scalar(); e.allocate(t,1); e.head(7);

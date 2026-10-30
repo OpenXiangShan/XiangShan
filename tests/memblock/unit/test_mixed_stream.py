@@ -536,6 +536,32 @@ class MixedStreamTest(unittest.TestCase):
                     self.assertEqual(first, self.stream(seed, timing))
                     type(self).replays += 1
 
+    def test_store_pair_rate_endpoints_and_independent_direction_skew(self):
+        enabled = [self.run_fixture('pair-rate', seed, timing, 3, 32, 1000)
+                   for seed in range(1, 33) for timing in (0, 1)]
+        disabled = [self.run_fixture('pair-rate', seed, 0, 3, 32, 0) for seed in range(1, 17)]
+        self.assertTrue(all(run['stream_store_pair'] == [0] * 5 for run in disabled))
+        self.assertTrue(all(sum(run['stream_store_pair'][:3]) > 0 for run in enabled))
+        self.assertTrue(all(sum(run['stream_store_pair'][i] for run in enabled) > 0 for i in range(5)))
+        first = self.run_fixture('pair-rate', 7, 0, 3, 32, 1000)
+        self.assertEqual(first, self.run_fixture('pair-rate', 7, 0, 3, 32, 1000))
+
+    def test_private_store_pair_direction_and_skew_faults_reject(self):
+        faults = [
+            ('all_together', '++pairs[edges[0] == edges[1] ? 0U : edges[0] < edges[1] ? 1U : 2U];', '++pairs[0];'),
+            ('missing_skew', 'pairs[3] += skew;', 'pairs[3] += 0;'),
+            ('sum_as_max', 'pairs[4] = std::max(pairs[4], skew);', 'pairs[4] += skew;'),
+        ]
+        for name, before, after in faults:
+            with self.subTest(name=name):
+                self.assertEqual(self.source.count(before), 1)
+                binary = self.compile(self.source.replace(before, after), name)
+                result = subprocess.run([str(binary), 'pair-rate', '7', '0', '3', '32', '1000'],
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0, f'private pair fault {name} escaped')
+                self.assertIn('operand-pair direction/skew', result.stderr)
+                self.mutations[name] = result.stderr.strip()
+
     def test_load_can_issue_after_older_address_before_older_scalar_data(self):
         results = [self.stream(seed, timing=0) for seed in range(1, 65)]
         self.assertGreater(sum(run['loads_before_older_std'] for run in results), 0)
