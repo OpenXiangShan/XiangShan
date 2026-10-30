@@ -649,15 +649,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   io.debugRolling := ctrlBlock.io.debugRolling
 
   // Top-Down
-  topDownMod.io.intTopDown.uopsIssued    := intRegion.io.uopTopDown.uopsIssued
-  topDownMod.io.intTopDown.uopsIssuedCnt := intRegion.io.uopTopDown.uopsIssuedCnt
-  topDownMod.io.intTopDown.noStoreIssued := intRegion.io.uopTopDown.noStoreIssued
-  topDownMod.io.fpTopDown.uopsIssued     := fpRegion.out.toTopDownMod.uopTopDown.uopsIssued
-  topDownMod.io.fpTopDown.uopsIssuedCnt  := fpRegion.out.toTopDownMod.uopTopDown.uopsIssuedCnt
-  topDownMod.io.fpTopDown.noStoreIssued  := fpRegion.out.toTopDownMod.uopTopDown.noStoreIssued
-  topDownMod.io.vecTopDown.uopsIssued    := 0.U
-  topDownMod.io.vecTopDown.uopsIssuedCnt := 0.U
-  topDownMod.io.vecTopDown.noStoreIssued := 0.U
+  topDownMod.io.intTopDown := intRegion.io.uopTopDown
+  topDownMod.io.fpTopDown  := fpRegion.out.toTopDownMod.uopTopDown
+  topDownMod.io.vecTopDown := vecRegion.out.toTopDownMod.uopTopDown
   topDownMod.io.topDownInfo.replayAllocate := DelayN(io.topDownInfo.replayAllocate, 2)
   topDownMod.io.topDownInfo.sqFull  := DelayN(io.topDownInfo.sqFull, 2)
   topDownMod.io.topDownInfo.sbFull  := DelayN(io.topDownInfo.sbFull, 2)

@@ -383,7 +383,11 @@ class FltRegionImp(
   }
   out.toVecRegion.wb0 := fpWbDataPath.out.wb0.map(_.data)
   out.toRob.debugIQDeqRobIdxVec.foreach(_ := 0.U.asTypeOf(out.toRob.debugIQDeqRobIdxVec.get))
-  out.toTopDownMod := 0.U.asTypeOf(out.toTopDownMod)
+  // IQ dequeue is a Valid interface: each valid pulse is an issue attempt.
+  val issued = issuePipes.flatten.map(_.in.is0Next.valid)
+  val storesIssued = issuePipes.flatten.filter(pipe => pipe.param.hasSta || pipe.param.hasStd || pipe.param.hasVStd)
+    .map(_.in.is0Next.valid)
+  out.toTopDownMod.uopTopDown := UopTopDown(issued, storesIssued)
   out.fpWb := fpWbDataPath.out.wb0
 
   require(
