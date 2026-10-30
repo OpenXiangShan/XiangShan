@@ -977,7 +977,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         }
       }
       is(CboState.writeZero) {
-        when(io.writeToSbuffer.req.head.fire) {
+        when(dataQueue.io.fromDeqModule.head.fire) {
           cboStateNext := CboState.flushSb
         }
       }
