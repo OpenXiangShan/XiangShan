@@ -81,6 +81,9 @@ auto Environment::Impl::activate_two_stage_modes(ReferencePageMode vs_mode,
     std::uint16_t asid,
     std::uint16_t vmid)  -> bool
 {
+    const bool vs_asid_changed = dut_.translation.csr.vsatp_asid.value() != asid;
+    const bool vmid_changed = dut_.translation.csr.hgatp_vmid.value() != vmid;
+    const bool virtual_changed = !dut_.translation.csr.priv_virt.boolean();
     if (!write_distributed_csr(0x3b0, ~std::uint64_t{0}) ||
         !write_distributed_csr(0x3a0, 0x1f)) {
         return false;
@@ -96,9 +99,9 @@ auto Environment::Impl::activate_two_stage_modes(ReferencePageMode vs_mode,
     dut_.translation.csr.hgatp_ppn.set(g_root_page_table >> 12);
     dut_.translation.csr.priv_dmode.set(std::uint64_t{1});
     dut_.translation.csr.priv_virt.set(std::uint64_t{1});
-    dut_.translation.csr.vsatp_changed.set(std::uint64_t{1});
-    dut_.translation.csr.hgatp_changed.set(std::uint64_t{1});
-    dut_.translation.csr.priv_virt_changed.set(std::uint64_t{1});
+    dut_.translation.csr.vsatp_changed.set(vs_asid_changed);
+    dut_.translation.csr.hgatp_changed.set(vmid_changed);
+    dut_.translation.csr.priv_virt_changed.set(virtual_changed);
     tick(false);
     dut_.translation.csr.vsatp_changed.set(std::uint64_t{0});
     dut_.translation.csr.hgatp_changed.set(std::uint64_t{0});
@@ -110,11 +113,12 @@ auto Environment::Impl::update_stage_one_context(ReferencePageMode mode,
     std::uint64_t root_page_table,
     std::uint16_t asid)  -> bool
 {
+    const bool asid_changed = dut_.translation.csr.satp_asid.value() != asid;
     dut_.translation.csr.satp_mode.set(
         static_cast<std::uint64_t>(mode));
     dut_.translation.csr.satp_asid.set(asid);
     dut_.translation.csr.satp_ppn.set(root_page_table >> 12);
-    dut_.translation.csr.satp_changed.set(std::uint64_t{1});
+    dut_.translation.csr.satp_changed.set(asid_changed);
     tick(false);
     dut_.translation.csr.satp_changed.set(std::uint64_t{0});
     return run_cycles(16) && check_components();
@@ -124,11 +128,12 @@ auto Environment::Impl::update_vs_context(ReferencePageMode mode,
     std::uint64_t root_page_table,
     std::uint16_t asid)  -> bool
 {
+    const bool asid_changed = dut_.translation.csr.vsatp_asid.value() != asid;
     dut_.translation.csr.vsatp_mode.set(
         static_cast<std::uint64_t>(mode));
     dut_.translation.csr.vsatp_asid.set(asid);
     dut_.translation.csr.vsatp_ppn.set(root_page_table >> 12);
-    dut_.translation.csr.vsatp_changed.set(std::uint64_t{1});
+    dut_.translation.csr.vsatp_changed.set(asid_changed);
     tick(false);
     dut_.translation.csr.vsatp_changed.set(std::uint64_t{0});
     return run_cycles(16) && check_components();
@@ -141,6 +146,8 @@ auto Environment::Impl::update_two_stage_context(ReferencePageMode vs_mode,
     std::uint16_t asid,
     std::uint16_t vmid)  -> bool
 {
+    const bool vs_asid_changed = dut_.translation.csr.vsatp_asid.value() != asid;
+    const bool vmid_changed = dut_.translation.csr.hgatp_vmid.value() != vmid;
     dut_.translation.csr.vsatp_mode.set(
         static_cast<std::uint64_t>(vs_mode));
     dut_.translation.csr.vsatp_asid.set(asid);
@@ -149,8 +156,8 @@ auto Environment::Impl::update_two_stage_context(ReferencePageMode vs_mode,
         static_cast<std::uint64_t>(g_mode));
     dut_.translation.csr.hgatp_vmid.set(vmid);
     dut_.translation.csr.hgatp_ppn.set(g_root_page_table >> 12);
-    dut_.translation.csr.vsatp_changed.set(std::uint64_t{1});
-    dut_.translation.csr.hgatp_changed.set(std::uint64_t{1});
+    dut_.translation.csr.vsatp_changed.set(vs_asid_changed);
+    dut_.translation.csr.hgatp_changed.set(vmid_changed);
     tick(false);
     dut_.translation.csr.vsatp_changed.set(std::uint64_t{0});
     dut_.translation.csr.hgatp_changed.set(std::uint64_t{0});
@@ -161,11 +168,12 @@ auto Environment::Impl::update_g_context(ReferencePageMode mode,
     std::uint64_t root_page_table,
     std::uint16_t vmid)  -> bool
 {
+    const bool vmid_changed = dut_.translation.csr.hgatp_vmid.value() != vmid;
     dut_.translation.csr.hgatp_mode.set(
         static_cast<std::uint64_t>(mode));
     dut_.translation.csr.hgatp_vmid.set(vmid);
     dut_.translation.csr.hgatp_ppn.set(root_page_table >> 12);
-    dut_.translation.csr.hgatp_changed.set(std::uint64_t{1});
+    dut_.translation.csr.hgatp_changed.set(vmid_changed);
     tick(false);
     dut_.translation.csr.hgatp_changed.set(std::uint64_t{0});
     return run_cycles(16) && check_components();
@@ -208,6 +216,7 @@ auto Environment::Impl::set_hypervisor_access_permissions(ReferencePrivilegeMode
     bool vsum,
     ReferencePrivilegeMode current_privilege)  -> bool
 {
+    const bool virtual_changed = dut_.translation.csr.priv_virt.boolean();
     dut_.translation.csr.priv_dmode.set(
         static_cast<std::uint64_t>(current_privilege));
     dut_.translation.csr.priv_virt.set(std::uint64_t{0});
@@ -216,7 +225,7 @@ auto Environment::Impl::set_hypervisor_access_permissions(ReferencePrivilegeMode
     dut_.translation.csr.priv_mxr.set(mxr);
     dut_.translation.csr.priv_vmxr.set(vmxr);
     dut_.translation.csr.priv_vsum.set(vsum);
-    dut_.translation.csr.priv_virt_changed.set(std::uint64_t{1});
+    dut_.translation.csr.priv_virt_changed.set(virtual_changed);
     tick(false);
     dut_.translation.csr.priv_virt_changed.set(std::uint64_t{0});
     return run_cycles(16) && check_components();

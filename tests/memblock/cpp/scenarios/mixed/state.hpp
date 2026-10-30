@@ -159,6 +159,10 @@ struct AddressConstants {
         0xe2000000ULL, 0xe3000000ULL}};
     static constexpr std::array<std::uint64_t, 2> random_g_roots{{
         0xe4000000ULL, 0xe5000000ULL}};
+    static constexpr std::array<std::uint64_t, 2> user_stage1_roots{{
+        0xe6000000ULL, 0xe7000000ULL}};
+    static constexpr std::array<std::uint64_t, 2> user_vs_roots{{
+        0xe8000000ULL, 0xe9000000ULL}};
 };
 
 struct RandomVectorShape {

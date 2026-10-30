@@ -199,6 +199,8 @@ struct SyntheticEnvironment {
     std::vector<OrdinaryIssueEvent> transport_events;
     std::set<unsigned> selected_pairs;
     std::array<std::uint64_t, 10> observed_transport{};
+    std::array<std::uint64_t, 18> observed_access_issue{};
+    unsigned prefix_retirements = 0;
     std::map<std::uint64_t, unsigned> observed_ports;
     std::optional<bool> retirement_had_stall;
     bool held_live() const {
@@ -270,6 +272,14 @@ struct SyntheticEnvironment {
                 }
             }, it->payload);
             require(tick == edge, "synthetic acceptance advanced a hidden edge");
+            const auto access_kind = std::visit([&](const auto &transaction) -> unsigned {
+                using T = std::decay_t<decltype(transaction)>;
+                if constexpr (std::is_same_v<T, LoadTransaction>) return 0;
+                else if constexpr (std::is_same_v<T, PrefetchTransaction>) return 5;
+                else if constexpr (std::is_same_v<T, VectorMemoryTransaction>) return transaction.store ? 4 : 3;
+                else return it->kind == OrdinaryIssueKind::store_address ? 1 : 2;
+            }, it->payload);
+            ++observed_access_issue[access_kind];
             ++observed_transport[1];
             observed_ports[edge] |= 1U << unsigned(it->kind);
             transport_events.push_back({it->tag, edge, it->kind, it->lane,
@@ -443,6 +453,7 @@ struct SyntheticEnvironment {
             require(tick >= completion_edge(work) + age,
                 "architectural retirement preceded backend writeback readiness");
             prefix_old_retirements += old_response_active() && work.group != active_group;
+            prefix_retirements += retired + 1U < instructions.size();
             trace.push_back("R" + std::to_string(work.id));
             ++retired;
         }
@@ -962,6 +973,13 @@ struct SyntheticEnvironment {
             "production operand-pair direction/skew disagreed with independent accepted edges");
         require(coverage.stream_transport == observed_transport,
             "production transport coverage disagreed with independent offered/accepted boundaries");
+        std::array<std::uint64_t, 9> access_epochs{};
+        access_epochs[0] = count != 0;
+        require(coverage.stream_access_epochs == access_epochs &&
+            coverage.stream_access_issue == observed_access_issue &&
+            coverage.stream_access_overlap == std::array<std::uint64_t, 6>{
+                overlap_admissions, prefix_retirements, 0, 0, 0, 0},
+            "production access-profile counters disagreed with independent boundaries");
         std::array<std::uint64_t, 16> port_sets{};
         for (const auto &[edge, mask] : observed_ports) ++port_sets[mask];
         require(coverage.stream_issue_ports == port_sets,
@@ -1008,7 +1026,7 @@ struct SyntheticEnvironment {
 };
 
 namespace memblock::scenarios::mixed {
-class MixedScenario : public IdentityState, public ProgressState, public VectorShapeState {
+class MixedScenario : public IdentityState, public ProgressState, public VectorShapeState, public AddressConstants {
 public:
     RandomConstraints constraints;
     SyntheticEnvironment environment;
@@ -1042,9 +1060,13 @@ public:
     }
     bool run_concurrent_stream(unsigned);
     void report_progress(bool = false) { environment.synchronize_retirement(); }
+    unsigned choose_stream_access() { return 0; }
     TranslationContext choose_translation_context() { return {}; }
     TranslationLeafTopology choose_translation_leaf(const TranslationContext &) { return {}; }
     bool enter_translation_context(const TranslationContext &) { return true; }
+    bool validate_translation_byte(std::uint64_t va, std::uint64_t pa, bool, const TranslationContext &) {
+        require(va == pa, "synthetic bare translation changed byte address"); return true;
+    }
     bool issue_constrained_fence(unsigned) { return true; }
     std::uint64_t constrained_cacheable_address(unsigned, const TranslationContext &, const TranslationLeafTopology &,
         std::optional<bool> = {}, bool = true) { return 0x80010000 + (random() % 128U) * 64U; }

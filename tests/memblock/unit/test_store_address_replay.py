@@ -400,7 +400,7 @@ class StoreAddressReplayTest(unittest.TestCase):
         reports = []
         for original, line in zip(expected, lines):
             report = self.parser.parse_summary(line)
-            self.assertEqual(report["constraint_schema"], 77)
+            self.assertEqual(report["constraint_schema"], 78)
             # This independent event ledger describes synchronous producers.
             # Preserve its schema76 compatibility contract; persistent-session
             # offers and edge masks have their own independent ledger tests.

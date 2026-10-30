@@ -8,6 +8,8 @@ auto Environment::Impl::configure_sv39(std::uint64_t virtual_address,
     bool writable,
     bool noncacheable)  -> bool
 {
+    const bool asid_changed = dut_.translation.csr.satp_asid.value() != 0;
+    const bool virtual_changed = dut_.translation.csr.priv_virt.boolean();
     constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
     constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
     constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
@@ -40,8 +42,8 @@ auto Environment::Impl::configure_sv39(std::uint64_t virtual_address,
     dut_.translation.csr.satp_ppn.set(root_page_table >> 12);
     dut_.translation.csr.m_pbmte.set(std::uint64_t{1});
     dut_.translation.csr.priv_virt.set(std::uint64_t{0});
-    dut_.translation.csr.satp_changed.set(std::uint64_t{1});
-    dut_.translation.csr.priv_virt_changed.set(std::uint64_t{1});
+    dut_.translation.csr.satp_changed.set(asid_changed);
+    dut_.translation.csr.priv_virt_changed.set(virtual_changed);
     tick(false);
     dut_.translation.csr.satp_changed.set(std::uint64_t{0});
     dut_.translation.csr.priv_virt_changed.set(std::uint64_t{0});
@@ -406,6 +408,9 @@ auto Environment::Impl::activate_stage_one(ReferencePageMode mode,
     std::uint64_t root_page_table,
     std::uint16_t asid)  -> bool
 {
+    // CPU changed pins describe identity/dvirt transitions, not root writes.
+    const bool asid_changed = dut_.translation.csr.satp_asid.value() != asid;
+    const bool virtual_changed = dut_.translation.csr.priv_virt.boolean();
     if (!write_distributed_csr(0x3b0, ~std::uint64_t{0}) ||
         !write_distributed_csr(0x3a0, 0x1f)) {
         return false;
@@ -417,8 +422,8 @@ auto Environment::Impl::activate_stage_one(ReferencePageMode mode,
     dut_.translation.csr.satp_ppn.set(root_page_table >> 12);
     dut_.translation.csr.m_pbmte.set(std::uint64_t{1});
     dut_.translation.csr.priv_virt.set(std::uint64_t{0});
-    dut_.translation.csr.satp_changed.set(std::uint64_t{1});
-    dut_.translation.csr.priv_virt_changed.set(std::uint64_t{1});
+    dut_.translation.csr.satp_changed.set(asid_changed);
+    dut_.translation.csr.priv_virt_changed.set(virtual_changed);
     tick(false);
     dut_.translation.csr.satp_changed.set(std::uint64_t{0});
     dut_.translation.csr.priv_virt_changed.set(std::uint64_t{0});

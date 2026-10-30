@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=77`.
+`constraint_schema=78`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -79,6 +79,7 @@ they do not imply arbitrary numeric suffix support.
 | `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the current 4-KiB page; scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
 | `stream-store-pair` | Conditional rate offering an ordinary scalar store's initial STA and STD together when both operand events are ready. Independent retained lane handshakes permit same-edge, STA-first or STD-first acceptance. Default 500 in all presets; zero retains separate scheduling. Graph operands and STA retries remain separate. |
+| `stream-access-s`, `stream-access-u`, `stream-access-sum` | Relative epoch weights for legacy S data privilege, ordinary U/VU, and S/VS accessing U pages with SUM/vSUM. Choose once per ordinary stream at a drained context boundary; a single enabled class needs no random draw. U/SUM roots preserve the independently declared identity/NAPOT/permuted PA map. These weights select epochs, not instruction or handshake percentages. Serial/special helpers retain their prior context contract. |
 | `stream-unresolved` | Conditional rate (default 125 in all presets) replacing an eligible scalar-store admission with a variable unresolved-store/scalar-load graph inside the same sliding stream. Needs at least two remaining live/budget slots and actual LQ/SQ capacity. Zero disables it; `scalar-unresolved-conflict` controls conflict/control geometry. |
 | `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
 | `translation-switch` | Rate for resampling the translation context after required context/leaf/fence observations. |
@@ -228,6 +229,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | Fence global/selective | all 1 | 95/5 | all 1 | all 1 |
 | `concurrent` | 1000 | 100 | 500 | 0 |
 | `concurrent-stream` | 750 | 750 | 750 | 750 |
+| Stream access S/U/SUM | 2/1/1 | 1/8/1 | 1/1/1 | 1/0/0 |
 | `stream-min-instructions` | 8 | 8 | 8 | 8 |
 | `stream-max-instructions` | 256 | 256 | 256 | 256 |
 | `stream-dependency` | 250 | 250 | 250 | 250 |
@@ -1153,8 +1155,8 @@ are observed per operand. Vector preaccept timeouts retain their obligation and
 wait eight further edges before reoffer; accepted LSU replay retains its
 identified lane/mask/merge entry and is counted separately. Ordinary loads conservatively wait for older scalar
 addresses and complete older vector stores; unresolved scalar graphs provide a
-bounded exception. Ordinary U-mode permissions with live mixed work and
-cross-page pointer chains remain absent; mixed-suffix cancellation has only the
+bounded exception. Ordinary U/VU and S/VS+SUM epochs now retain that same mixed
+traffic and its oracles. Cross-page pointer chains remain absent; mixed-suffix cancellation has only the
 bounded memory-violation path below. These are generation limits; more seeds or larger weights cannot reach
 those combinations. Distinct synthetic schedules establish variation within the
 implemented grammar, not DUT joint coverage or full-CPU input legality.
@@ -1200,6 +1202,53 @@ minus synchronous graph operand-helper calls:
 `stream_transport[1] = stream[8] + stream_scalar_retries + stream[9] + stream_recovery[8] - stream_transport[8]`.
 This ties transport to the separate issue/recovery ledgers; a self-consistent
 transport histogram alone cannot satisfy the contract.
+
+### Ordinary user privilege epochs
+
+Schema 78 adds access choices to the existing sliding generator. The U and SUM
+profiles use separate stage-one/VS roots with U=1 data leaves; ordinary G leaves
+and implicit VS page-table reads retain their independent G U/R/A requirements.
+Normal roots remain unchanged. All six Sv39/Sv48 and VS/G mode pairs retain
+identity, 64-KiB NAPOT and declared page permutations. Software permission walks
+validate installed relations, while expected bytes continue to come from the
+declared map and independent admission-order byte image.
+
+The existing context boundary drains terminal, LSQ and committed SBuffer/cache
+obligations before changing privilege. An M instruction-privilege boundary
+(MPRV/MPP and MPV where applicable) owns root writes and covering SFENCE/HFENCE.
+ASID/VMID changed pins pulse only when their identities change, and dvirt changed
+pulses only for an effective virtualization transition. A root/mode-only write
+with a reused identity supplies no artificial identity-change flush; the covering
+fences remain necessary. Activation then installs the complete U or S+SUM bundle; U epochs use matching
+instruction/data mode U, and SUM epochs use matching S modes. SUM/vSUM are both
+clear for U and both set for SUM; MXR/vMXR remain clear. Privilege stays stable
+through the epoch. Random in-epoch translation fences are skipped for these
+profiles; the setup fences still run at the legal boundary. Subsequent ordinary
+serial actions explicitly select the legacy context again.
+
+Every actual session acceptance captures data/instruction privilege,
+virtualization, SUM/MXR/vSUM/vMXR, and SATP/VSATP/HGATP roots/modes at the pre-edge
+boundary. The stream rejects a mismatch with its selected profile, including an
+incorrect active U-page root for S+SUM that could otherwise return correct data.
+`stream_access_epochs[access*3+regime]` counts epochs by S/U/SUM and
+Bare/stage1/nested. `stream_access_issue[access*6+kind]` counts accepted session
+scalar-load/STA/STD/vector-load/vector-store/prefetch attempts, including accepted
+retry/replay/refetch. Synchronous graph helper activity is excluded.
+`stream_access_overlap[access*2+kind]` counts admissions with older accepted work
+pending and prefix retirements with younger live work. The verifier conserves
+these arrays against stream epoch/transport/overlap totals and rejects disabled
+profiles/regimes, empty-profile observations and counter-domain errors. Summed
+scalar-load/prefetch, STA, STD and vector-load/store populations must also agree
+with the actual accepted-kind histogram: each kind has at least one and at most
+3/2/2/2 lane acceptances respectively on each edge containing that kind. These
+bounds do not reconstruct per-profile or per-identity ownership.
+
+Bare cells are privilege controls and do not exercise PTE U permissions.
+Current mixed U/SUM leaves are permissive R/W/X/A/D; permission-denied requests,
+X-only/MXR and varying R/W/A/D with live mixed work remain gaps. Context switches
+with live translations or committed stores, arbitrary ASID/VMID histories and
+fault-address arbitration remain separate work. Positive user-epoch coverage
+does not close those temporal and exception relations.
 
 ### Ordinary producer dependencies
 

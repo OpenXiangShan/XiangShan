@@ -69,7 +69,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
 {
     if (instruction_limit == 0) return true;
     phase = "mixed-stream-enter";
-    const auto translation = choose_translation_context();
+    auto translation = choose_translation_context();
+    translation.access = choose_stream_access();
     const auto leaf = choose_translation_leaf(translation);
     if (!enter_translation_context(translation) ||
         !issue_constrained_fence(RandomConstraints::scalar_load) ||
@@ -105,6 +106,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     std::uint64_t deadline = environment.cycle() + std::uint64_t{target_admissions} * constrained_completion_timeout * 4U;
     const auto start_action = actions;
     ++coverage.stream[0];
+    ++coverage.stream_access_epochs.at(translation.access * 3U + translation.regime);
     coverage.stream[10] += actions > coverage.concurrent_actions + coverage.stream[2];
 
     const auto pending = [&](const StreamWork &work) {
@@ -161,6 +163,24 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 continue;
             }
             if (recovery && recovery->old_response_active()) ++inflight[9];
+            if (event.privilege != translation.expected_privilege()) {
+                phase += ":accepted-producer-privilege-context"; return false;
+            }
+            const auto &roots = event.translation_roots;
+            const auto &modes = event.translation_modes;
+            const auto host_root = (translation.user_pages() ? user_stage1_roots : random_stage1_roots).at(translation.stage1_mode) >> 12;
+            const auto vs_root = (translation.user_pages() ? user_vs_roots : random_vs_roots).at(translation.vs_mode) >> 12;
+            if ((translation.regime == RandomConstraints::translation_bare && modes[0] != 0) ||
+                (translation.regime == RandomConstraints::translation_stage1 &&
+                 (roots[0] != host_root || modes[0] != 8U + translation.stage1_mode)) ||
+                (translation.regime == RandomConstraints::translation_nested &&
+                 (modes[0] != 0 || roots[1] != vs_root || roots[2] != (random_g_roots.at(translation.g_mode) >> 12) ||
+                  modes[1] != 8U + translation.vs_mode || modes[2] != 8U + translation.g_mode))) {
+                phase += ":accepted-producer-translation-root"; return false;
+            }
+            const unsigned access_issue = attempt.kind == 1 ? (work.kind == 0 ? 0U : 5U) :
+                attempt.kind == 2 ? 1U : attempt.kind == 3 ? 2U : work.kind == 1 ? 3U : 4U;
+            ++coverage.stream_access_issue.at(translation.access * 6U + access_issue);
             ++coverage.stream_transport[1];
             coverage.stream_transport[4] += event.killed;
             accepted_ports[event.edge] |= 1U << unsigned(event.kind);
@@ -370,6 +390,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         auto &work = live.front();
         coverage.stream_transport[7] += held_offer();
         coverage.stream[5] += live.size() > 1;
+        coverage.stream_access_overlap[translation.access * 2U + 1U] += live.size() > 1;
         if (work.recovery_id) ++recovery_counts[work.kind == 2 ? 9U : 10U];
         if (recovery) {
             ++recovery_counts[12];
@@ -931,6 +952,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             const bool had_accepted_pending = std::any_of(live.begin(), live.end(),
                 [&](const auto &work) { return work.accepted() && pending(work); });
             coverage.stream[3] += had_accepted_pending;
+            coverage.stream_access_overlap[translation.access * 2U] += had_accepted_pending;
             coverage.stream_history[2] += admitted >= 32U && had_accepted_pending;
             coverage.stream[4] += retired != 0 && !live.empty();
             StreamWork work;
@@ -1008,6 +1030,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.requires_head = (work.load.address & 15U) + (1U << (format.op & 3U)) > 16U;
                 work.issued.assign(1, false);
                 work.offered.assign(1, false);
+                for (unsigned byte = 0; byte < (1U << (static_cast<unsigned>(work.load.op) & 3U)); ++byte) {
+                    if (!validate_translation_byte(work.load.address + byte,
+                            memblock::reference_byte_address(work.load, work.load.address + byte),
+                            false, translation)) return false;
+                }
                 environment.expect_load_data(work.load, work.expected_scalar);
                 if (!environment.enqueue_load(work.load)) return false;
             } else if (work.kind == 2) {
@@ -1026,6 +1053,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     work.store.expected_address_writeback_lane = 0;
                     work.requires_head = true;
                 }
+                for (unsigned byte = 0; byte < width; ++byte) {
+                    if (!validate_translation_byte(work.store.address + byte,
+                            memblock::reference_byte_address(work.store, work.store.address + byte),
+                            true, translation)) return false;
+                }
                 oracle.store(work.store);
                 environment.expect_store(work.store);
                 if (!environment.enqueue_store(work.store) ||
@@ -1035,6 +1067,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     random() % memblock::kScalarLoadLanes);
                 work.issued.assign(1, false);
                 work.offered.assign(1, false);
+                if (!validate_translation_byte(work.prefetch.address,
+                        memblock::reference_byte_address(work.prefetch, work.prefetch.address), false, translation)) return false;
                 environment.expect_prefetch(work.prefetch);
                 if (!environment.enqueue_prefetch(work.prefetch)) return false;
             } else {

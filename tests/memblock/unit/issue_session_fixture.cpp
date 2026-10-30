@@ -3,18 +3,26 @@
 // compiled below; the synthetic manager controls only externally sampled pins.
 // PIN_WITNESSES
 #include "environment/scoreboards.hpp"
+#include <cstdlib>
 #include <functional>
 #include <numeric>
 
 struct Adapter : PinAdapter {
     struct Fire { std::uint64_t edge; unsigned slot; Bytes bits; };
     std::vector<Fire> fires;
-    std::function<void()> on_edge;
+    std::function<void()> on_edge, after_edge;
+    struct {
+        struct {
+            Port priv_dmode, priv_imode, priv_virt, priv_sum, priv_mxr, priv_vsum, priv_vmxr;
+            Port satp_ppn, vsatp_ppn, hgatp_ppn, satp_mode, vsatp_mode, hgatp_mode;
+        } csr;
+    } translation;
     void step() {
         if (on_edge) on_edge();
         for (unsigned slot = 0; slot < valid.size(); ++slot)
             if (valid[slot] && ready[slot]) fires.push_back({edge, slot, payload[slot]});
         PinAdapter::step();
+        if (after_edge) after_edge();
     }
 };
 struct Agent {
@@ -209,6 +217,124 @@ void finish_store(Harness &h, const StoreTransaction &t) {
     wb.valid = true; wb.rob_value = t.rob; wb.rob_flag = t.rob_flag;
     h.store_scoreboard_.observe_address(t.address_lane, wb, h.cycle());
     assert(h.store_scoreboard_.done() && h.store_scoreboard_.observed() == 1 && h.check_components());
+}
+
+// This table describes the externally scripted CSR pins, independently of the
+// event type and the production acceptance callback. Distinct instruction/data
+// modes and host/virtual bits make field substitutions observable.
+struct ExpectedAcceptancePins {
+    unsigned data_mode, instruction_mode;
+    bool virtualized, sum, mxr, vsum, vmxr;
+    std::array<std::uint64_t, 3> roots;
+    std::array<unsigned, 3> modes;
+};
+void drive_acceptance_pins(Adapter &dut, const ExpectedAcceptancePins &pins) {
+    auto &csr = dut.translation.csr;
+    csr.priv_dmode.data = pins.data_mode; csr.priv_imode.data = pins.instruction_mode;
+    csr.priv_virt.data = pins.virtualized; csr.priv_sum.data = pins.sum; csr.priv_mxr.data = pins.mxr;
+    csr.priv_vsum.data = pins.vsum; csr.priv_vmxr.data = pins.vmxr;
+    csr.satp_ppn.data = pins.roots[0]; csr.vsatp_ppn.data = pins.roots[1]; csr.hgatp_ppn.data = pins.roots[2];
+    csr.satp_mode.data = pins.modes[0]; csr.vsatp_mode.data = pins.modes[1]; csr.hgatp_mode.data = pins.modes[2];
+}
+void translation_is(const OrdinaryIssueEvent &event, const ExpectedAcceptancePins &expected) {
+    // Assert every input snapshot, including roots/modes that are inactive for
+    // this edge's privilege. No expected field comes from the returned event.
+    for (unsigned slot = 0; slot < 3; ++slot) {
+        if (event.translation_roots[slot] != expected.roots[slot] ||
+            event.translation_modes[slot] != expected.modes[slot]) {
+            std::cerr << "issue-session-translation-check tag=" << event.tag << " edge=" << event.edge
+                      << " slot=" << slot << '\n';
+            std::abort();
+        }
+    }
+}
+void privilege_is(const OrdinaryIssueEvent &event, const ExpectedAcceptancePins &expected) {
+    const auto &actual = event.privilege;
+    if (actual.data_mode != expected.data_mode || actual.instruction_mode != expected.instruction_mode ||
+        actual.virtualized != expected.virtualized || actual.sum != expected.sum || actual.mxr != expected.mxr ||
+        actual.vsum != expected.vsum || actual.vmxr != expected.vmxr) {
+        std::cerr << "issue-session-privilege-check tag=" << event.tag << " edge=" << event.edge << '\n';
+        std::abort();
+    }
+}
+
+void acceptance_privilege_capture() {
+    Harness h;
+    const auto l = load(0), younger = load(2, 32); const auto s = store(); const auto v = vector(0);
+    PrefetchTransaction p; p.lane = 1;
+    h.expect_store(s); assert(h.begin_issue_session());
+    const ExpectedAcceptancePins offered{3, 3, false, false, false, false, false,
+        {0x9aa00110ULL, 0x9bb00220ULL, 0x9cc00330ULL}, {0, 0, 0}};
+    const ExpectedAcceptancePins pre_manager{3, 0, true, true, true, true, true,
+        {0x8aa00110ULL, 0x8bb00220ULL, 0x8cc00330ULL}, {8, 0, 8}};
+    const ExpectedAcceptancePins after_edge{3, 1, false, true, true, false, false,
+        {0x7aa00110ULL, 0x7bb00220ULL, 0x7cc00330ULL}, {0, 8, 0}};
+    // Offer and consumption deliberately have identical roots/modes; neither
+    // can substitute for any of the actual manager-driven acceptance inputs.
+    const ExpectedAcceptancePins consumed{3, 3, true, false, false, true, false,
+        {0x9aa00110ULL, 0x9bb00220ULL, 0x9cc00330ULL}, {0, 0, 0}};
+    const std::array<ExpectedAcceptancePins, 6> pins{{
+        {1, 3, false, false, true, true, false,
+            {0x123456610ULL, 0x234567620ULL, 0x345678630ULL}, {0, 8, 0}}, // Fully stalled edge.
+        {0, 3, false, false, true, false, true,
+            {0x123456710ULL, 0x234567720ULL, 0x345678730ULL}, {8, 0, 0}}, // U load.
+        {1, 0, false, true, false, false, true,
+            {0x123456810ULL, 0x234567820ULL, 0x345678830ULL}, {8, 0, 8}}, // S+SUM prefetch and STD.
+        {0, 1, true, false, false, true, false,
+            {0x123456910ULL, 0x234567920ULL, 0x345678930ULL}, {0, 8, 8}}, // VU vector load.
+        {1, 3, true, false, true, true, true,
+            {0x123456a10ULL, 0x234567a20ULL, 0x345678a30ULL}, {8, 8, 0}}, // VS+vSUM STA.
+        {1, 0, false, false, false, false, false,
+            {0x123456b10ULL, 0x234567b20ULL, 0x345678b30ULL}, {0, 0, 8}},
+    }};
+    drive_acceptance_pins(h.dut_, offered);
+    assert(h.offer_load(201, l) && h.offer_prefetch(202, p));
+    assert(h.offer_store_address(203, s) && h.offer_store_data(204, s));
+    assert(h.offer_vector(205, v) && h.offer_load(206, younger));
+    // A pre-tick sample sees a decoy. Later manager drive changes both ready
+    // and privilege before the actual acceptance callback.
+    h.memory_agent_.drive_hook = [&] { drive_acceptance_pins(h.dut_, pre_manager); };
+    h.ptw_agent_.drive_hook = [&] {
+        const auto edge = h.cycle(); assert(edge < pins.size());
+        drive_acceptance_pins(h.dut_, pins[edge]); h.dut_.ready.fill(false);
+        h.dut_.ready[0] = edge == 1; h.dut_.ready[1] = h.dut_.ready[6] = edge == 2;
+        h.dut_.ready[7] = edge == 3; h.dut_.ready[4] = edge == 4; h.dut_.ready[2] = edge == 5;
+        h.queues_.stats.pending = edge == 2 || edge == 4;
+    };
+    h.dut_.after_edge = [&] { drive_acceptance_pins(h.dut_, after_edge); };
+    for (unsigned edge = 0; edge < pins.size(); ++edge) {
+        drive_acceptance_pins(h.dut_, offered);
+        h.tick(); assert(h.cycle() == edge + 1 && h.check_components());
+        if (!edge) assert(h.take_issue_events().empty() && h.dut_.fires.empty());
+    }
+    // All accepted events stay queued across subsequent CSR changes and are
+    // consumed together only after the last acceptance edge.
+    drive_acceptance_pins(h.dut_, consumed);
+    const auto events = h.take_issue_events();
+    assert(events.size() == 6 && h.dut_.fires.size() == 6 && h.take_issue_events().empty());
+    std::map<std::uint64_t, OrdinaryIssueEvent> seen;
+    for (const auto &event : events) assert(seen.emplace(event.tag, event).second);
+    event_is(seen.at(201), 201, 1, PublicKind::load, 0, PublicOutcome::accepted);
+    event_is(seen.at(202), 202, 2, PublicKind::load, 1, PublicOutcome::accepted);
+    event_is(seen.at(203), 203, 4, PublicKind::store_address, 1, PublicOutcome::accepted);
+    event_is(seen.at(204), 204, 2, PublicKind::store_data, 1, PublicOutcome::accepted);
+    event_is(seen.at(205), 205, 3, PublicKind::vector, 0, PublicOutcome::accepted);
+    event_is(seen.at(206), 206, 5, PublicKind::load, 2, PublicOutcome::accepted);
+    for (const auto &[tag, event] : seen) {
+        privilege_is(event, pins[event.edge]);
+        translation_is(event, pins[event.edge]);
+        assert(event.feedback_cursor == event.edge);
+        assert(event.committed_pending == (event.edge == 2 || event.edge == 4));
+    }
+    // Consumed value copies also survive subsequent public CSR pin changes.
+    drive_acceptance_pins(h.dut_, offered);
+    for (const auto &[tag, event] : seen) {
+        privilege_is(event, pins[event.edge]); translation_is(event, pins[event.edge]);
+    }
+    finish_store(h, s); assert(h.issue_session_empty() && h.end_issue_session());
+    std::cout << "privilege_acceptances=6 manager_pin_boundaries=6 stalled_edges=1 same_edge_contexts=2 "
+                 "delayed_event_consumption=6 privilege_fields=7 translation_roots=3 translation_modes=3 "
+                 "S_SUM_active_SATP=2 U=1 VU=1 S_SUM=2 VS_vSUM=1\n";
 }
 
 void progress_and_value_capture() {
@@ -463,6 +589,7 @@ void misuse() {
 int main(int argc, char **argv) {
     assert(argc == 2); const std::string mode = argv[1];
     if (mode == "progress") progress_and_value_capture();
+    else if (mode == "privilege") acceptance_privilege_capture();
     else if (mode == "stores") store_head_and_failures();
     else if (mode == "redirect") wrapped_redirects();
     else if (mode == "replay") retries_and_replay();

@@ -190,6 +190,8 @@ struct RandomConstraints {
     unsigned stream_max_instructions = 256;
     unsigned stream_dependency_per_mille = 250;
     unsigned stream_store_pair_per_mille = 500;
+    // Relative epoch weights: legacy S-data, ordinary U, S accessing U pages.
+    std::array<unsigned, 3> stream_access_weights{{2, 1, 1}};
     unsigned stream_unresolved_per_mille = 125;
     unsigned stream_unresolved_inflight_per_mille = 250;
     unsigned special_concurrent_per_mille = 0;
@@ -311,6 +313,7 @@ struct RandomConstraints {
                 .fence_kind_weights = {1, 1, 1},
                 .fence_scope_weights = {1, 1},
                 .concurrent_actions_per_mille = 0,
+                .stream_access_weights = {1, 0, 0},
                 .special_concurrent_per_mille = 0,
                 .translation_switches_per_mille = 500,
                 .tlb_flushes_per_mille = 50,
@@ -413,6 +416,7 @@ struct RandomConstraints {
                 .fence_kind_weights = {1, 1, 1},
                 .fence_scope_weights = {1, 1},
                 .concurrent_actions_per_mille = 1000,
+                .stream_access_weights = {2, 1, 1},
                 .special_concurrent_per_mille = 500,
                 .translation_switches_per_mille = 500,
                 .tlb_flushes_per_mille = 50,
@@ -519,6 +523,7 @@ struct RandomConstraints {
                 .fence_kind_weights = {98, 1, 1},
                 .fence_scope_weights = {95, 5},
                 .concurrent_actions_per_mille = 100,
+                .stream_access_weights = {1, 8, 1},
                 .special_concurrent_per_mille = 20,
                 .translation_switches_per_mille = 1,
                 .tlb_flushes_per_mille = 20,
@@ -623,6 +628,7 @@ struct RandomConstraints {
                 .fence_kind_weights = {1, 1, 1},
                 .fence_scope_weights = {1, 1},
                 .concurrent_actions_per_mille = 500,
+                .stream_access_weights = {1, 1, 1},
                 .special_concurrent_per_mille = 750,
                 .translation_switches_per_mille = 750,
                 .tlb_flushes_per_mille = 100,
@@ -1120,6 +1126,12 @@ struct RandomConstraints {
             stream_dependency_per_mille = parsed;
         } else if (key == "stream-store-pair") {
             stream_store_pair_per_mille = parsed;
+        } else if (key == "stream-access-s") {
+            stream_access_weights[0] = parsed;
+        } else if (key == "stream-access-u") {
+            stream_access_weights[1] = parsed;
+        } else if (key == "stream-access-sum") {
+            stream_access_weights[2] = parsed;
         } else if (key == "stream-unresolved") {
             stream_unresolved_per_mille = parsed;
         } else if (key == "stream-unresolved-inflight") {
@@ -1812,6 +1824,9 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "nested VS/G mode constraint weights cannot all be zero");
         }
+        if (std::accumulate(stream_access_weights.begin(), stream_access_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument("stream access weights cannot all be zero");
+        }
         if (stream_min_instructions == 0 || stream_min_instructions > stream_max_instructions ||
             stream_max_instructions > 4096) {
             throw std::invalid_argument("stream instruction bounds require 1 <= min <= max <= 4096");
@@ -2285,6 +2300,11 @@ struct RandomConstraints {
             }
         }
         return 0;
+    }
+
+    unsigned choose_stream_access(std::uint64_t random) const
+    {
+        return choose_weighted(stream_access_weights, random);
     }
 
     unsigned choose_translation_regime(std::uint64_t random) const
@@ -3065,7 +3085,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=77 constraints=" << name
+        stream << "constraint_schema=78 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3178,6 +3198,8 @@ struct RandomConstraints {
                << " target_stream_max_instructions=" << stream_max_instructions
                << " target_stream_dependency=" << stream_dependency_per_mille
                << " target_stream_store_pair=" << stream_store_pair_per_mille
+               << " target_stream_access=" << stream_access_weights[0] << ','
+               << stream_access_weights[1] << ',' << stream_access_weights[2]
                << " target_stream_unresolved=" << stream_unresolved_per_mille
                << " target_stream_unresolved_inflight=" << stream_unresolved_inflight_per_mille
                << " target_special_concurrent="

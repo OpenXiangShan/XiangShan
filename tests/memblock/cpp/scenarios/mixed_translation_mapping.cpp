@@ -127,18 +127,21 @@ bool MixedScenario::validate_translation_byte(std::uint64_t virtual_address,
     bool valid = virtual_address == physical_address;
     if (context.regime == RandomConstraints::translation_stage1) {
         const auto reference = memblock::reference_page_walk_permissions(
-            environment.memory(), random_stage1_roots.at(context.stage1_mode),
+            environment.memory(), (context.user_pages() ? user_stage1_roots : random_stage1_roots).at(context.stage1_mode),
             virtual_address, page_mode(context.stage1_mode));
         valid = reference.walk.translated &&
             reference.walk.physical_address == physical_address &&
             reference.leaf_permissions && memblock::reference_memory_access_permitted(
                 access, *reference.leaf_permissions,
-                memblock::ReferencePrivilegeMode::supervisor, false, false);
+                static_cast<memblock::ReferencePrivilegeMode>(context.expected_privilege().data_mode),
+                context.access == 2, false);
     } else if (context.regime == RandomConstraints::translation_nested) {
         const auto reference = memblock::reference_two_stage_access(
-            environment.memory(), random_vs_roots.at(context.vs_mode),
+            environment.memory(), (context.user_pages() ? user_vs_roots : random_vs_roots).at(context.vs_mode),
             random_g_roots.at(context.g_mode), virtual_address, access,
-            page_mode(context.vs_mode), page_mode(context.g_mode));
+            page_mode(context.vs_mode), page_mode(context.g_mode),
+            static_cast<memblock::ReferencePrivilegeMode>(context.expected_privilege().data_mode),
+            context.access == 2);
         valid = reference.translated && reference.physical_address == physical_address;
     }
     if (!valid) {
@@ -210,6 +213,73 @@ bool MixedScenario::prepare_permuted_translation_pages()
                     if (!validate_translation_byte(va, pages->physical_address(va),
                             store, translation)) return false;
                 }
+            }
+        }
+    }
+    return true;
+}
+
+bool MixedScenario::prepare_user_translation_pages()
+{
+    if (constraints.stream_access_weights[1] == 0 && constraints.stream_access_weights[2] == 0) return true;
+    // U roots preserve each separately declared byte map. Supervisor and user
+    // translations occupy distinct page tables; warm leaf permissions are never
+    // edited in place. G-stage data mappings are shared, with mandatory U=1.
+    for (unsigned mode = 0; mode < 2; ++mode) {
+        const auto map_identity = [&](std::uint64_t page) {
+            return map_stage_page(mode, user_stage1_roots[mode], page, page, false, false, true, true) &&
+                map_stage_page(mode, user_vs_roots[mode], page, page, false, false, true, true);
+        };
+        for (std::uint64_t page = cache0_base + 0xf000; page <= cache0_base + 0x92000; page += 0x1000) {
+            if (!map_identity(page)) return false;
+        }
+        for (std::uint64_t page = stage1_napot_base; page < stage1_napot_base + 0x40000; page += 0x1000) {
+            if (!map_identity(page)) return false;
+        }
+        if (!map_stage_napot(mode, user_stage1_roots[mode], stage1_napot_base, std::nullopt, true) ||
+            !map_stage_napot(mode, user_vs_roots[mode], nested_vs_napot_base, std::nullopt, true) ||
+            !map_stage_napot(mode, user_vs_roots[mode], nested_both_napot_base, std::nullopt, true)) return false;
+        if (constraints.translation_permuted_per_mille != 0) {
+            for (unsigned page = 0; page < OrdinaryPageMappings::page_count; ++page) {
+                const auto va = OrdinaryPageMappings::virtual_base + page * 0x1000ULL;
+                if (!map_stage_page(mode, user_stage1_roots[mode], va,
+                        permuted_physical_base + ordinary_pages.host[mode][page] * 0x1000ULL,
+                        false, false, true, true) ||
+                    !map_stage_page(mode, user_vs_roots[mode], va,
+                        OrdinaryPageMappings::guest_base + ordinary_pages.vs[mode][page] * 0x1000ULL,
+                        false, false, true, true)) return false;
+            }
+        }
+    }
+    // Implicit VS page-table reads use G-stage permissions independently of
+    // the ordinary load/store's U/S selection and SUM bits.
+    for (unsigned g_mode = 0; g_mode < 2; ++g_mode) for (const auto root : user_vs_roots) {
+        for (auto page = root; page < root + 0x200000; page += 0x1000) {
+            if (!map_g_page(g_mode, random_g_roots[g_mode], page, page)) return false;
+        }
+    }
+    for (unsigned access : {1U, 2U}) for (unsigned context = 0; context < 6; ++context) {
+        TranslationContext translation;
+        translation.access = access;
+        translation.regime = context < 2 ? RandomConstraints::translation_stage1 : RandomConstraints::translation_nested;
+        translation.stage1_mode = context % 2;
+        translation.vs_mode = context < 2 ? 0 : (context - 2) / 2;
+        translation.g_mode = context < 2 ? 0 : (context - 2) % 2;
+        const auto pages = context < 2 ? ordinary_pages.host_maps[context]
+            : ordinary_pages.nested_maps[(context - 2) / 2][(context - 2) % 2];
+        for (unsigned page = 0; page < OrdinaryPageMappings::page_count; ++page) {
+            for (unsigned offset : {0U, 0xfffU}) for (bool store : {false, true}) {
+                const auto va = cache0_base + 0xf000 + page * 0x1000ULL + offset;
+                if (!validate_translation_byte(va, va, store, translation)) return false;
+                if (constraints.translation_permuted_per_mille != 0) {
+                    const auto mapped = OrdinaryPageMappings::virtual_base + page * 0x1000ULL + offset;
+                    if (!validate_translation_byte(mapped, pages->physical_address(mapped), store, translation)) return false;
+                }
+            }
+        }
+        for (auto base : {stage1_napot_base, nested_g_napot_base, nested_vs_napot_base, nested_both_napot_base}) {
+            for (auto offset : {0ULL, 0xffffULL}) for (bool store : {false, true}) {
+                if (!validate_translation_byte(base + offset, base + offset, store, translation)) return false;
             }
         }
     }
@@ -644,7 +714,7 @@ bool MixedScenario::prepare_random_translation_contexts()
             }
         }
     }
-    if (!prepare_permuted_translation_pages()) return false;
+    if (!prepare_permuted_translation_pages() || !prepare_user_translation_pages()) return false;
     std::vector<std::pair<std::uint64_t, std::uint64_t>>
         reference_addresses{{
             {cache0_base + 0x106a8, cache0_base + 0x106a8},
@@ -742,33 +812,34 @@ bool MixedScenario::prepare_random_translation_contexts()
 
 bool MixedScenario::activate_translation_context(const TranslationContext &context)
 {
+    // A legal privileged boundary (MPRV/MPP, and MPV for nested data) owns
+    // root writes and covering fences. Ordinary U/VS/VU work starts afterward.
+    if (!environment.set_instruction_privilege(memblock::ReferencePrivilegeMode::machine) ||
+        !environment.set_translation_permissions(memblock::ReferencePrivilegeMode::supervisor)) return false;
     if (context.regime == RandomConstraints::translation_bare) {
-        return environment.activate_bare();
-    }
-    // These roots reuse host ASID 23, VS ASID 29 and VMID 31. A root/mode
-    // write does not invalidate an old translation. Fence the newly active
-    // context before any traffic can observe its independently declared map.
-    if (context.regime == RandomConstraints::translation_stage1) {
+        if (!environment.activate_bare()) return false;
+    } else if (context.regime == RandomConstraints::translation_stage1) {
+        const auto root = (context.user_pages() ? user_stage1_roots : random_stage1_roots).at(context.stage1_mode);
         const bool activated = context.stage1_mode == 0
-            ? environment.activate_sv39(random_stage1_roots[context.stage1_mode], 23)
-            : environment.activate_sv48(random_stage1_roots[context.stage1_mode], 23);
-        if (!activated || !environment.issue_sfence(0, 0, true, true, false, false)) {
-            return false;
-        }
+            ? environment.activate_sv39(root, 23) : environment.activate_sv48(root, 23);
+        if (!activated || !environment.issue_sfence(0, 0, true, true, false, false)) return false;
         ++coverage.context_fences[0];
-        return true;
+    } else {
+        if (!environment.activate_two_stage_modes(page_mode(context.vs_mode), page_mode(context.g_mode),
+                (context.user_pages() ? user_vs_roots : random_vs_roots).at(context.vs_mode),
+                random_g_roots.at(context.g_mode), 29, 31) ||
+            !environment.set_page_based_memory_types(true, true) ||
+            !environment.issue_sfence(0, 0, true, true, true, false) ||
+            !environment.issue_sfence(0, 0, true, true, false, true)) return false;
+        ++coverage.context_fences[1]; ++coverage.context_fences[2];
     }
-    if (!environment.activate_two_stage_modes(
-            page_mode(context.vs_mode), page_mode(context.g_mode),
-            random_vs_roots[context.vs_mode], random_g_roots[context.g_mode], 29, 31) ||
-        !environment.set_page_based_memory_types(true, true) ||
-        !environment.issue_sfence(0, 0, true, true, true, false) ||
-        !environment.issue_sfence(0, 0, true, true, false, true)) {
-        return false;
-    }
-    ++coverage.context_fences[1];
-    ++coverage.context_fences[2];
-    return true;
+    if (!context.user_pages()) return true;
+    const auto privilege = context.expected_privilege();
+    return environment.set_translation_permissions(
+            static_cast<memblock::ReferencePrivilegeMode>(privilege.data_mode),
+            false, privilege.sum, false, privilege.vsum) &&
+        environment.set_instruction_privilege(
+            static_cast<memblock::ReferencePrivilegeMode>(privilege.instruction_mode));
 }
 
 } // namespace memblock::scenarios::mixed

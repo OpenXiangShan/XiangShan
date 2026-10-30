@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4296,6 +4296,7 @@ def _check_mixed_coverage(
 ) -> None:
     _check_constraint_coverage(result)
     _check_stream_transport(result)
+    _check_stream_access(result)
     for name, fields in (
         ("load_ops", 7),
         ("store_ops", 4),
@@ -5145,6 +5146,58 @@ def _check_stream_transport(result: dict[str, Any]) -> None:
              "stream session acceptances disagree with architectural issue accounting")
 
 
+def _check_stream_access(result: dict[str, Any]) -> None:
+    """Conserve ordinary access-profile epochs and actual session acceptances.
+
+    Access weights select epochs, not issue events. Unobserved enabled cells
+    are valid in a sparse run; only disabled or impossible populations reject.
+    """
+    if result.get("constraint_schema", 0) < 78:
+        return
+    target = _csv_counts(result, "target_stream_access", 3)
+    _require(sum(target) > 0 and all(weight <= (1 << 32) - 1 for weight in target),
+             "target_stream_access is not a nonempty uint32 weight population")
+    translation = _csv_counts(result, "target_translation", 3)
+    epochs = _csv_counts(result, "stream_access_epochs", 9)
+    issues = _csv_counts(result, "stream_access_issue", 18)
+    overlap = _csv_counts(result, "stream_access_overlap", 6)
+    _require(all(value <= (1 << 64) - 1 for value in epochs + issues + overlap),
+             "stream access counters exceed the emitter uint64 domain")
+    stream = _csv_counts(result, "stream", 12)
+    transport = _csv_counts(result, "stream_transport", 10)
+    _require(sum(epochs) == stream[0],
+             "stream access epochs disagree with stream epoch count")
+    _require(sum(issues) == transport[1],
+             "stream access session acceptances disagree with persistent transport")
+    ports = _csv_counts(result, "stream_issue_ports", 16)
+    class_counts = [sum(issues[index::6]) for index in range(6)]
+    kind_counts = (class_counts[0] + class_counts[5], class_counts[1],
+                   class_counts[2], class_counts[3] + class_counts[4])
+    for kind, (count, lanes) in enumerate(zip(kind_counts, (3, 2, 2, 2))):
+        edges = sum(observed for mask, observed in enumerate(ports)
+                    if mask & (1 << kind))
+        _require(edges <= count <= edges * lanes,
+                 f"stream access kind {kind} acceptance count disagrees with accepted-edge lane bounds")
+    _require(sum(overlap[::2]) == stream[3]
+             and sum(overlap[1::2]) == stream[5],
+             "stream access overlaps disagree with stream admissions/retirements")
+    for access, weight in enumerate(target):
+        epoch_row = epochs[access * 3 : access * 3 + 3]
+        issue_row = issues[access * 6 : access * 6 + 6]
+        overlap_row = overlap[access * 2 : access * 2 + 2]
+        _require(weight != 0 or not any(epoch_row + issue_row + overlap_row),
+                 f"disabled stream access profile {access} has observations")
+        _require(all(enabled != 0 or count == 0
+                     for enabled, count in zip(translation, epoch_row)),
+                 f"stream access profile {access} has a disabled translation regime")
+        if not any(epoch_row):
+            _require(not any(issue_row + overlap_row),
+                     f"empty stream access profile {access} has issue/overlap observations")
+        else:
+            _require(any(issue_row),
+                     f"nonempty stream access profile {access} has no session acceptances")
+
+
 def _check_mixed_accounting(result: dict[str, Any]) -> None:
     """Validate queue/LSQ accounting, not coverage completeness.
 
@@ -5152,6 +5205,7 @@ def _check_mixed_accounting(result: dict[str, Any]) -> None:
     random run is valid: the verifier must not reject it for unobserved bins.
     """
     _check_stream_transport(result)
+    _check_stream_access(result)
     lq_allocated, lq_canceled = _balanced_queue(result, "lq")
     sq_allocated, sq_canceled = _balanced_queue(result, "sq")
     lsq_monitor_schema = result.get("lsq_monitor_schema", 0)

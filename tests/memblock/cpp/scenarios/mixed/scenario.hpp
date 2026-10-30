@@ -145,6 +145,8 @@ private:
         bool io = false);
     bool prepare_random_translation_contexts();
     bool prepare_permuted_translation_pages();
+    bool prepare_user_translation_pages();
+    unsigned choose_stream_access();
     std::shared_ptr<const memblock::ReferencePageMap> reference_pages_for(
         std::uint64_t address) const;
     bool validate_translation_byte(std::uint64_t virtual_address,

@@ -649,6 +649,24 @@ access faults carry the exact PTE GPA and stage marker; a VS PPN that constructs
 an over-width GPA uses the failing VS level for the marker. The PBMT composition
 helper returns non-PMA VS PBMT when present, otherwise G PBMT.
 
+Translation activation/update helpers compare old/new SATP ASID, VSATP ASID and
+HGATP VMID for the corresponding one-edge changed flags. Effective-data-virtual
+changed likewise reflects an actual transition. These pins follow the CPU CSR
+producer; root/mode-only writes with a reused identity do not create extra
+flushes. Covering SFENCE/HFENCE remains the caller's obligation. The helpers
+represent a settled configuration boundary, not every cycle of compound software
+CSR updates.
+
+The canonical ordinary stream also uses access-aware validation for U/VU and
+S/VS+SUM epochs with separate U-page roots. It checks each scalar load/store byte
+and active vector byte against the independently declared PA relation and
+permission walker; expected data remains the independent input-byte oracle.
+Every session handshake records pre-edge privilege and active roots/modes and
+must match the selected epoch. This prevents a wrong supervisor-only root from
+masquerading as S+SUM coverage merely because its data matches. These mixed
+leaves are positive R/W/X/A/D cases; their oracles do not establish a unified
+permission-fault/forbidden-demand rule amid unrelated background traffic.
+
 The address-only walker and access-aware permission walker are separate
 functions. A scenario using `reference_two_stage_walk` has not automatically
 checked every access permission. Selected
@@ -739,6 +757,10 @@ edges, and ending a session rejects live offers or unconsumed events.
 Acceptance callbacks capture the exact pre-edge feedback cursor and committed-
 pending state; STA/STD declarations and release authorization precede same-edge
 terminal/manager sampling. Caller transaction lifetimes cannot change an offer.
+Accepted events also freeze all seven privilege fields and three translation
+root/mode pairs at that boundary; delayed consumption cannot read newer CSR
+values into the event. Active-root/profile comparison remains the caller's
+responsibility.
 
 The final CPU producer registers in `Backend.scala` and
 `datapath/NewPipelineConnect.scala` retain stalled scalar offers. Vector offers

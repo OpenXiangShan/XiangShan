@@ -228,13 +228,27 @@ memblock::scenarios::TranslationContext MixedScenario::choose_translation_contex
     if (translation_context_valid &&
         random() % 1000 >=
             constraints.translation_switches_per_mille) {
-        return current_translation;
+        auto context = current_translation;
+        context.access = 0; // Non-stream actions retain their supervisor-data contract.
+        return context;
     }
     return random_translation_context();
 }
 
+unsigned MixedScenario::choose_stream_access()
+{
+    const auto &weights = constraints.stream_access_weights;
+    unsigned only = 0, enabled = 0;
+    for (unsigned access = 0; access < weights.size(); ++access) {
+        if (weights[access]) { only = access; ++enabled; }
+    }
+    return enabled == 1 ? only : constraints.choose_stream_access(random());
+}
+
 bool MixedScenario::flush_pending_translation_fences()
 {
+    if (pending_translation_fences != 0 &&
+        !environment.set_instruction_privilege(memblock::ReferencePrivilegeMode::machine)) return false;
     const bool fenced =
         ((pending_translation_fences & pending_sfence) == 0 ||
             environment.issue_sfence(
@@ -263,12 +277,14 @@ bool MixedScenario::enter_translation_context(const TranslationContext &context)
         // Different roots permute a common physical pool. Drain committed
         // writes before a context change; general alias redirect/refetch
         // arbitration remains a separate verification direction.
-        (constraints.translation_permuted_per_mille != 0 &&
+        ((constraints.translation_permuted_per_mille != 0 ||
+          context.access != 0 || current_translation.access != 0) &&
             (!environment.pulse_sbuffer_flush() ||
              !environment.run_until_sbuffer_empty(constrained_completion_timeout) ||
              !environment.run_until_dcache_idle(constrained_completion_timeout) ||
-             !environment.checkpoint_dcache_alias_reference(
-                 permuted_physical_base, OrdinaryPageMappings::span))) ||
+             (constraints.translation_permuted_per_mille != 0 &&
+              !environment.checkpoint_dcache_alias_reference(
+                 permuted_physical_base, OrdinaryPageMappings::span)))) ||
         !flush_pending_translation_fences() ||
         !activate_translation_context(context)) {
         return false;
@@ -283,7 +299,8 @@ bool MixedScenario::enter_translation_context(const TranslationContext &context)
 
 bool MixedScenario::issue_constrained_fence(unsigned operation_kind)
 {
-    if (current_translation.regime ==
+    if (current_translation.access != 0 ||
+        current_translation.regime ==
             RandomConstraints::translation_bare ||
         constraints.tlb_flushes_per_mille == 0 ||
         !constraints.has_compatible_fence_kind(

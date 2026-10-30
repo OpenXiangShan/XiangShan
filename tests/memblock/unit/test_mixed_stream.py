@@ -344,6 +344,25 @@ class MixedStreamTest(unittest.TestCase):
                 rejected += 1
         self.assertGreater(rejected, 0)
 
+    def test_private_access_issue_class_swap_is_rejected_by_boundary_ledger(self):
+        # Scalar loads and STA have independent populations. STA/STD counts
+        # can be equal in these no-miss scripts, hiding a marginal-only swap.
+        before = ('attempt.kind == 1 ? (work.kind == 0 ? 0U : 5U) :\n'
+                  '                attempt.kind == 2 ? 1U : attempt.kind == 3 ? 2U : work.kind == 1 ? 3U : 4U;')
+        after = ('attempt.kind == 1 ? (work.kind == 0 ? 1U : 5U) :\n'
+                 '                attempt.kind == 2 ? 0U : attempt.kind == 3 ? 2U : work.kind == 1 ? 3U : 4U;')
+        self.assertEqual(self.source.count(before), 1)
+        binary = self.compile(self.source.replace(before, after), 'access_kind_swap')
+        rejected = 0
+        for seed in range(1, 9):
+            result = subprocess.run([str(binary), 'stream', str(seed), '1', '0', '32'],
+                                    capture_output=True, text=True, timeout=20)
+            if result.returncode:
+                self.assertIn('production access-profile counters disagreed with independent boundaries', result.stderr)
+                rejected += 1
+        self.assertGreater(rejected, 0)
+        self.mutations['access_issue_class_swap'] = {'rejected_cases': rejected}
+
     def test_fixed_eight_load_population_varies_event_schedule(self):
         results = [self.stream(seed, timing=0, family=1, limit=8) for seed in range(1, 65)]
         for run in results:

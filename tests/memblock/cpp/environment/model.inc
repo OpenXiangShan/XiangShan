@@ -348,6 +348,11 @@ inline std::uint64_t reference_byte_address(
 // Producer transport events, distinct from architectural terminal results.
 enum class OrdinaryIssueKind { load, store_address, store_data, vector };
 enum class OrdinaryIssueOutcome { accepted, retry, canceled };
+struct OrdinaryPrivilegeContext {
+    std::uint8_t data_mode = 1, instruction_mode = 3;
+    bool virtualized = false, sum = false, mxr = false, vsum = false, vmxr = false;
+    bool operator==(const OrdinaryPrivilegeContext &) const = default;
+};
 struct OrdinaryIssueEvent {
     std::uint64_t tag = 0, edge = 0;
     OrdinaryIssueKind kind = OrdinaryIssueKind::load;
@@ -356,6 +361,9 @@ struct OrdinaryIssueEvent {
     bool killed = false;
     std::size_t feedback_cursor = 0;
     bool committed_pending = false;
+    OrdinaryPrivilegeContext privilege;
+    std::array<std::uint64_t, 3> translation_roots{}; // SATP/VSATP/HGATP PPNs.
+    std::array<std::uint8_t, 3> translation_modes{};
 };
 
 struct LoadTransaction {

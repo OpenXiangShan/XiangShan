@@ -298,11 +298,18 @@ STD pulse attribution remains open. Exact
 producer/commit ordering, old responses and independent strict refetch checks
 remain required. This mechanism alone is not evidence of an RTL defect.
 
-Ordinary U-mode load/store permissions with live mixed work remain a priority
-alongside recovery and producer density. Current ordinary S/VS contexts and
-permissive non-U mappings do not provide that relation; dedicated permission
-helpers do not substitute for it. Follow actual CSR/fence/redirect producer
-ordering before broadening contexts across outstanding work.
+Ordinary U/VU and S/VS+SUM profiles now use separate U-page roots inside the
+canonical mixed stream, retaining scalar/vector/prefetch, dependencies, recovery,
+architectural retirement and independent byte/identity checks. Accepted events
+capture actual privilege and active roots/modes; profile/epoch/issue/overlap
+arrays have conservation checks. Root fences run in a legal privileged boundary
+before the complete requested bundle is installed. ASID/VMID/dvirt changed flags
+now reflect actual identity/effective-virtualization transitions; root-only reuse
+gets no artificial flush. Normal roots remain intact.
+These positive R/W/X/A/D leaves do not cover permission-denied or X-only/MXR
+traffic amid live mixed work. Dynamic privilege/root/ASID/VMID transitions across
+outstanding translations or committed stores remain high priorities and still
+require actual CSR/fence/redirect producer ordering.
 
 Priority work, each requiring executable stimulus and an independent check:
 

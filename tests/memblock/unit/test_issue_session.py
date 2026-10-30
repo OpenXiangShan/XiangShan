@@ -61,7 +61,7 @@ class IssueSessionTest(unittest.TestCase):
             raise AssertionError(result.stdout + result.stderr)
         return binary
 
-    def run_mode(self, mode, binary=None, passing=True):
+    def run_mode(self, mode, binary=None, passing=True, failure_marker=None):
         binary = binary or self.binary
         result = subprocess.run([str(binary), mode], cwd=binary.parent,
                                 capture_output=True, text=True, timeout=20)
@@ -71,9 +71,15 @@ class IssueSessionTest(unittest.TestCase):
             print('issue_session_evidence=' + result.stdout.strip())
         else:
             self.assertNotEqual(result.returncode, 0, 'private persistent API fault escaped')
+            if failure_marker:
+                self.assertIn(failure_marker, result.stdout + result.stderr,
+                              'private fault failed outside the designated checker')
 
     def test_independent_lanes_captured_values_and_actual_edge_context(self):
         self.run_mode('progress')
+
+    def test_privilege_and_translation_pins_are_captured_on_acceptance_and_survive_delayed_consumption(self):
+        self.run_mode('privilege')
 
     def test_same_edge_STD_head_authorization_and_callback_rejection(self):
         self.run_mode('stores')
@@ -112,6 +118,57 @@ class IssueSessionTest(unittest.TestCase):
         wrong = retained.replace(old, 'if (event.outcome != Outcome::accepted || event.killed) continue;')
         self.run_mode('redirect', self.compile(self.source, 'missing_killed_callback', wrong), passing=False)
         print('issue_session_fault=missing_killed_callback')
+
+    def test_private_privilege_omissions_field_substitutions_and_late_read_reject(self):
+        late_read = '''converted.privilege = {
+                static_cast<std::uint8_t>(dut_.translation.csr.priv_dmode.value()),
+                static_cast<std::uint8_t>(dut_.translation.csr.priv_imode.value()),
+                dut_.translation.csr.priv_virt.boolean(), dut_.translation.csr.priv_sum.boolean(),
+                dut_.translation.csr.priv_mxr.boolean(), dut_.translation.csr.priv_vsum.boolean(),
+                dut_.translation.csr.priv_vmxr.boolean()};'''
+        mutations = [
+            ('missing_privilege_context', 'converted.privilege = context->second.privilege;', ''),
+            ('wrong_data_privilege_mode', 'csr.priv_dmode.value()', 'csr.priv_imode.value()'),
+            ('wrong_instruction_privilege_mode', 'csr.priv_imode.value()', 'csr.priv_dmode.value()'),
+            ('missing_virtualized_privilege', 'csr.priv_virt.boolean()', 'false'),
+            ('missing_SUM_privilege', 'csr.priv_sum.boolean()', 'false'),
+            ('missing_MXR_privilege', 'csr.priv_mxr.boolean()', 'false'),
+            ('vSUM_uses_host_SUM', 'csr.priv_vsum.boolean()', 'csr.priv_sum.boolean()'),
+            ('vMXR_uses_host_MXR', 'csr.priv_vmxr.boolean()', 'csr.priv_mxr.boolean()'),
+            ('late_privilege_pin_read', 'converted.privilege = context->second.privilege;', late_read),
+        ]
+        for name, old, new in mutations:
+            with self.subTest(name=name):
+                self.assertEqual(self.source.count(old), 1)
+                self.run_mode('privilege', self.compile(self.source.replace(old, new), name),
+                              passing=False, failure_marker='issue-session-privilege-check')
+                print('issue_session_privilege_fault=' + name)
+
+    def test_private_translation_omissions_wrong_roots_modes_and_late_reads_reject(self):
+        late_roots = '''converted.translation_roots = {dut_.translation.csr.satp_ppn.value(),
+                dut_.translation.csr.vsatp_ppn.value(), dut_.translation.csr.hgatp_ppn.value()};'''
+        late_modes = '''converted.translation_modes = {
+                static_cast<std::uint8_t>(dut_.translation.csr.satp_mode.value()),
+                static_cast<std::uint8_t>(dut_.translation.csr.vsatp_mode.value()),
+                static_cast<std::uint8_t>(dut_.translation.csr.hgatp_mode.value())};'''
+        mutations = [
+            ('missing_translation_roots', 'converted.translation_roots = context->second.translation_roots;', ''),
+            ('missing_translation_modes', 'converted.translation_modes = context->second.translation_modes;', ''),
+            ('wrong_SATP_root', 'csr.satp_ppn.value()', 'csr.vsatp_ppn.value()'),
+            ('wrong_VSATP_root', 'csr.vsatp_ppn.value()', 'csr.hgatp_ppn.value()'),
+            ('wrong_HGATP_root', 'csr.hgatp_ppn.value()', 'csr.satp_ppn.value()'),
+            ('wrong_SATP_mode', 'csr.satp_mode.value()', 'csr.vsatp_mode.value()'),
+            ('wrong_VSATP_mode', 'csr.vsatp_mode.value()', 'csr.hgatp_mode.value()'),
+            ('wrong_HGATP_mode', 'csr.hgatp_mode.value()', 'csr.satp_mode.value()'),
+            ('late_translation_root_read', 'converted.translation_roots = context->second.translation_roots;', late_roots),
+            ('late_translation_mode_read', 'converted.translation_modes = context->second.translation_modes;', late_modes),
+        ]
+        for name, old, new in mutations:
+            with self.subTest(name=name):
+                self.assertEqual(self.source.count(old), 1)
+                self.run_mode('privilege', self.compile(self.source.replace(old, new), name),
+                              passing=False, failure_marker='issue-session-translation-check')
+                print('issue_session_translation_fault=' + name)
 
 
 if __name__ == '__main__':

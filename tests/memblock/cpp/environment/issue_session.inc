@@ -50,6 +50,13 @@ auto Environment::Impl::capture_issue_acceptance(std::uint64_t tag, std::uint64_
 {
     OrdinaryIssueEvent context;
     context.edge = edge;
+    const auto &csr = dut_.translation.csr;
+    context.privilege = {static_cast<std::uint8_t>(csr.priv_dmode.value()),
+        static_cast<std::uint8_t>(csr.priv_imode.value()), csr.priv_virt.boolean(),
+        csr.priv_sum.boolean(), csr.priv_mxr.boolean(), csr.priv_vsum.boolean(), csr.priv_vmxr.boolean()};
+    context.translation_roots = {csr.satp_ppn.value(), csr.vsatp_ppn.value(), csr.hgatp_ppn.value()};
+    context.translation_modes = {static_cast<std::uint8_t>(csr.satp_mode.value()),
+        static_cast<std::uint8_t>(csr.vsatp_mode.value()), static_cast<std::uint8_t>(csr.hgatp_mode.value())};
     context.feedback_cursor = feedback_.iq_slow_feedback_stats().sta_samples.size();
     context.committed_pending = queues_.store_retirement_stats().pending != 0;
     if (!issue_acceptance_context_.emplace(tag, context).second) {
@@ -155,6 +162,9 @@ auto Environment::Impl::take_issue_events() -> std::vector<OrdinaryIssueEvent>
             }
             converted.feedback_cursor = context->second.feedback_cursor;
             converted.committed_pending = context->second.committed_pending;
+            converted.privilege = context->second.privilege;
+            converted.translation_roots = context->second.translation_roots;
+            converted.translation_modes = context->second.translation_modes;
             issue_acceptance_context_.erase(context);
         } else if (context != issue_acceptance_context_.end()) {
             error_.record("ordinary unaccepted event has an acceptance context"); return {};
