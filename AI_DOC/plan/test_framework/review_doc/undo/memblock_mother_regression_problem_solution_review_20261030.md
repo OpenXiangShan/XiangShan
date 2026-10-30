@@ -98,8 +98,8 @@ fresh compile、软件专项及20/20真实DUT专项通过（18邻接加原170574
 Turing最终独立`FINAL_IMPLEMENTATION_REVIEW_PASS`，本Bug方案移do，随本记录单Bug提交；当前修复版350项最终批量仍待执行，不把旧源码的51项或250项历史PASS迁移到新版本验收。
 后续计划为当前两根完整PASS后，保留最新19颗ABORTED原seed并构造79颗新seed恢复98项；同时在另一独立mode重验25组250项。
 当前专项review：`AI_DOC/plan/test_framework/review_doc/undo/memblock_rollback_same_sample_provenance_implementation_review_20261030.md`。
-实际单Bug提交`bba3008ba`已在mother；随后恢复98和250两个独立mode，当前矩阵前15组150/150严格/clean通过（含原计划软件10），fault3恢复98仍运行。
-当前新源码最终清单只验收152/350（上述150＋两个原根），BasicTest非RTL11组110/110全通过；不复用旧1343的通过名额，没有新建worktree或修改RTL。
+实际单Bug提交`bba3008ba`已在mother；随后恢复98和250两个独立mode，当前矩阵25组250/250严格/clean通过（210真实DUT＋40软件），controller rc0退出，独立矩阵复核进行中；fault3恢复98仍运行。
+当前新源码最终清单只验收252/350（上述250＋两个原根），BasicTest非RTL11组110/110全通过；不复用旧1343的通过名额，没有新建worktree或修改RTL。
 分析入口：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
 当前25组250个通过记录的SV基线覆盖率已过滤合并，目录`mem_ut/ver/ut/memblock/sim/mother_matrix_pass_coverage_20261030`，
 有效`urgReport_r2`/`merged_r2.vdb`确认250 tests/records及精确白名单一致，工具日志无ERROR/WARNING；

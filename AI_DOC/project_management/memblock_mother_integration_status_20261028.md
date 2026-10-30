@@ -9,9 +9,9 @@
 - 当前执行状态：旧WIP门禁已关闭；原矩阵非strict-NC共25组250/250通过，strict-NC10项延期；25组通过SV基线覆盖率已过滤合并。
   新fault3问题已独立确认为RM并通过方案review。r5 fresh compile及相同临时参数最小真实DUT用例严格PASS，
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
-  本BugTuring最终独立review PASS并已提交；fault3恢复99出现新ROLLBACK_XMR，当前跨轮1/100、`PAUSED_ANALYSIS`；
+  本BugTuring最终独立review PASS并已提交；1343版fault3恢复99曾出现新ROLLBACK_XMR并进入`PAUSED_ANALYSIS`，该新Bug现已专项闭环并提交bba3008；
   1343基线矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。新rollback责任/方案/最终实现review均PASS，软件1/1及真实DUT20/20专项通过（18邻接加两个原根各10000笔），已提交bba3008ba。
-  当前已恢复新SV最终批量：fault3剩98（jobs20）与25组250矩阵（每组jobs10）独立mode并行；当前最终名额已确认152/350（两个原根加矩阵前15组150项），不用旧51或250项填充；BasicTest非RTL 11组110/110全部通过。
+  新SV矩阵25组250/250已全部严格/clean通过，controller rc0退出；fault3剩98（jobs20）继续运行。当前最终名额已确认252/350（两个原根加矩阵250项），不用旧51或250项填充；BasicTest非RTL 11组110/110全部通过。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -518,7 +518,8 @@ fault3余98入口：`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fa
 
 矩阵结果根目录`mem_ut/ver/ut/memblock/sim/mother_post_rollback_matrix_20261030_results`，根manifest及campaign逐组写入实际入口、seed、源码commit及失败原因；
 共25组250项，含210真实DUT与40原计划软件用例。仅执行这些既有软件别名，不扩展修复无关soft_test。
-下表是启动时状态；后续每组以对应strict/clean验收及根campaign更新，不将controller运行中的PASS计入严格验收。
+下表为当前已验收状态：25组250/250通过，controller rc0退出；每组strict/clean验收及根campaign均已落盘。
+其中210真实DUT＋40软件，两个原10k根seed另计；独立矩阵复核进行中，不等于余98或最终coverage已完成。
 
 | tc | ts | cfg | bba3008状态 | 已验收/计划 |
 |---|---|---|---|---:|
@@ -537,16 +538,16 @@ fault3余98入口：`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fa
 | `tc_boundary_addr_reuse_gate` | `virtual_base_sequence` | `tc_boundary_addr_reuse_store_cross8_gate` | CLEAN_LEGACY_PASS（软件） | 10/10 |
 | `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_l2cache_model` | CLEAN_LEGACY_PASS | 10/10 |
 | `tc_dispatch_real_mixed_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_sta_wb_smoke` | CLEAN_LEGACY_PASS | 10/10 |
-| `tc_dispatch_real_mixed_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_wb_smoke` | RUNNING | 0/10 |
-| `tc_dispatch_real_multi_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_multi_store_wb_smoke` | 待执行 | 0/10 |
-| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke` | 待执行 | 0/10 |
-| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke_flushsb` | 待执行 | 0/10 |
-| `tc_dispatch_real_store_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_smoke` | 待执行 | 0/10 |
-| `tc_dispatch_real_store_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_sta_wb_smoke` | 待执行 | 0/10 |
-| `tc_dispatch_real_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_wb_smoke` | 待执行 | 0/10 |
-| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_io` | 待执行（软件） | 0/10 |
-| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_nc` | 待执行（软件） | 0/10 |
-| `tc_l2tlb_ppn_reuse_smoke` | `virtual_base_sequence` | `tc_l2tlb_ppn_reuse_smoke` | 待执行（软件） | 0/10 |
+| `tc_dispatch_real_mixed_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_wb_smoke` | CLEAN_LEGACY_PASS | 10/10 |
+| `tc_dispatch_real_multi_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_multi_store_wb_smoke` | CLEAN_LEGACY_PASS | 10/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke` | CLEAN_LEGACY_PASS | 10/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke_flushsb` | CLEAN_LEGACY_PASS | 10/10 |
+| `tc_dispatch_real_store_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_smoke` | CLEAN_LEGACY_PASS | 10/10 |
+| `tc_dispatch_real_store_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_sta_wb_smoke` | CLEAN_LEGACY_PASS | 10/10 |
+| `tc_dispatch_real_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_wb_smoke` | CLEAN_LEGACY_PASS | 10/10 |
+| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_io` | CLEAN_LEGACY_PASS（软件） | 10/10 |
+| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_nc` | CLEAN_LEGACY_PASS（软件） | 10/10 |
+| `tc_l2tlb_ppn_reuse_smoke` | `virtual_base_sequence` | `tc_l2tlb_ppn_reuse_smoke` | CLEAN_LEGACY_PASS（软件） | 10/10 |
 
 最终PASS白名单应精确350条＝310真实DUT＋40软件，strict-NC10继续`STOPPED_RTL_CONFIRMED`，不计PASS。
 最终覆盖率尚未生成；旧`mother_matrix_pass_coverage_20261030`不能代替新版本。仅当新350项全验收才执行最终collector及独立报告review。
