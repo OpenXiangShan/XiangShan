@@ -87,4 +87,16 @@ Turing于2026-10-30独立执行三份机器断言并复核源码，正式`RESPON
 下一步必须形成并独立review最小方案，精确区分仍可能影响当前record计数的迟到deq与不相关阻塞raw；不能直接删除全局保护。
 必须保留完整record/epoch/anchor、窗口时序、相关deq归属/计数扣减、联合预检原子性、FIFO事实及exactly-once释放，
 保留STA/STD真实WB屏障、精确target与取消计数比较，不提高14、不丢snapshot、不用DUT数反填软件。
-已正式登记W44测试框架章节，状态方案待review；尚未编码、专项修复验证或单Bug提交，母任务未完成。
+已正式登记W44测试框架章节。上述为责任确认时的历史状态；最新修复进展见第7节，母任务未完成。
+
+## 7. 修复执行进展（2026-10-30）
+
+正式方案`AI_DOC/plan/test_framework/plan/do/memblock_cancel_window_deferred_dependency_formal_plan_20261030.md`已经Boole独立review PASS并由主agent复核，coding/文档/动态验证完成后归档do。
+生产三处顺序修改：LSQ handler只读顺推FIFO覆盖位置，公共窗口收尾接收关联依赖，service在原事件消费顺序接入；不改真实FIFO/head/free、STD屏障或严格取消对账。
+相关或不能证明身份的出队仍阻塞；零deq事实不遮住后续依赖；无关旧store不再阻止当前取消数冻结。
+
+Bug专项软件契约在`mother_cancel_dependency_protocol_20261030_results` fresh compile通过四组合，六项ERROR/FATAL全零，371ns结束，controller rc0/unknown0。
+这验证FIFO无副作用、相关扣减、剩余取消、完整raw原子性及旧store后续释放，不代表原seed或母回归通过。
+原551576067完整10000笔coverage fresh compile及原参严格验收已PASS，结果`mother_cancel_dependency_original551576067_20261030_results/strict_acceptance.json`，2524588.5ns finish、六项错误0、controller rc0/unknown0；Boole最终独立实现review PASS，随本记录单Bug提交。
+补充负例在独立fixture进行，r2因表数量变化触发既有RM合同拒绝，修fixture保持6条后r3通过四组合及18只读探针，391ns结束、六项错误0、unknown0；Boole独立`SOFTWARE_CONTRACT_REVIEW_PASS`。
+8个真实Sv39/CSR/PBMT/SFENCE/cancel邻接及前两原10000笔根1705742557/1992896882全部严格PASS；基础virtual与MAIN1 real smoke亦通过。统一动态门禁12真实DUT＋1空virtual＋四软件组合＋18只读负例PASS，全部controller退出、unknown0；Boole最终独立FINAL_IMPLEMENTATION_REVIEW_PASS，随本记录单Bug提交后恢复非RTL批量。

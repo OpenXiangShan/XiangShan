@@ -8,6 +8,9 @@
 `ifndef SOFT_TEST_MEMBLOCK_PENDING_MMIO_DIRECTED_SEQUENCE__SV
 `define SOFT_TEST_MEMBLOCK_PENDING_MMIO_DIRECTED_SEQUENCE__SV
 
+// 中文注释：生产enqueue类在同package稍后定义，专项复用其正式cancel应用入口。
+typedef class memblock_lsqenq_dispatch_base_sequence;
+
 // 中文注释：仅在 ambiguous/new-owner directed 场景的单次 resolver 调用期间
 // 捕获预期 MMIO_RESOLVE fatal；ID相同但消息原因不同的 fatal 仍继续抛出。
 class memblock_pending_mmio_expected_fatal_catcher extends uvm_report_catcher;
@@ -75,6 +78,8 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task run_rollback_xmr_path_scenario();
     extern virtual task run_rollback_subtype_decode_scenario();
     extern virtual task run_rollback_cross_sample_cache_scenario();
+    extern virtual task run_cancel_window_deferred_dependency_scenario(
+        input bit wrap_keys, input bit related_deq);
     extern virtual task run_stale_load_overlap_scenario(input bit one_cycle_late);
     extern virtual task run_surviving_load_overlap_scenario(input bit one_cycle_late);
     extern virtual task run_mixed_wrap_overlap_fatal_scenario(input bit one_cycle_late);
@@ -207,6 +212,218 @@ task soft_test_memblock_pending_mmio_directed_sequence::ensure_directed_helpers(
     // directed 场景与 monitor adapter 必须观察同一个 commit/deq/head owner。
     commit_handler = monitor_commit_handler;
 endtask:ensure_directed_helpers
+
+// 中文注释：仅验证本Bug的依赖与资源守恒合同。窗口和owner均由生产
+// admission/reservation/redirect入口创建；人工raw只在本软件专项中注入。
+task soft_test_memblock_pending_mmio_directed_sequence::run_cancel_window_deferred_dependency_scenario(
+    input bit wrap_keys, input bit related_deq
+);
+    memblock_issue_q_item_t fired_items[$];
+    memblock_uid_t victim_uids[$];
+    memblock_redirect_payload_t redirect;
+    memblock_sync_pkg::dispatch_raw_ctrl_t raw;
+    memblock_sync_pkg::dispatch_raw_ctrl_t saved_raw;
+    memblock_sync_pkg::dispatch_raw_ctrl_t empty_raw;
+    memblock_sync_pkg::dispatch_raw_ctrl_t pending[$];
+    memblock_lq_key_t lq_head;
+    memblock_sq_key_t sq_head;
+    memblock_lq_key_t lq_tail;
+    memblock_sq_key_t sq_tail;
+    memblock_lq_key_t lq_next;
+    memblock_lsqenq_dispatch_base_sequence enq;
+    status_transaction status;
+    longint unsigned anchor_sample;
+    int record_idx;
+    int unsigned expected_cancel;
+
+    ensure_directed_helpers();
+    reset_directed_owner_state();
+    clear_manual_main_table();
+    for (int unsigned uid = 0; uid < 6; uid++) begin
+        set_manual_main_transaction(uid,
+            make_directed_transaction($sformatf("cancel_dependency_%0d", uid),
+                (uid % 2 == 0) ? MEMBLOCK_OP_CLASS_STORE : MEMBLOCK_OP_CLASS_INT_LOAD,
+                uid, 64'h0000_0000_8400_1000 + uid * 64'h1000));
+    end
+    import_manual_main_table();
+    if (wrap_keys) begin
+        lsq_ctrl.lq_enq_ptr = '{flag:1'b0, value:MEMBLOCK_LQ_SIZE-1};
+        lsq_ctrl.lq_deq_ptr = lsq_ctrl.lq_enq_ptr;
+        lsq_ctrl.sq_enq_ptr = '{flag:1'b0, value:MEMBLOCK_SQ_SIZE-1};
+        lsq_ctrl.sq_deq_ptr = lsq_ctrl.sq_enq_ptr;
+    end
+    admit_lsq_and_route_issue();
+    fire_all_issue_items(fired_items);
+    if (commit_handler.deferred_ctrl_blocks_deleted_owner_window()) begin
+        `uvm_fatal(get_type_name(), "empty/no-window dependency unexpectedly blocked")
+    end
+    for (int unsigned uid = 2; uid < 6; uid++) victim_uids.push_back(uid);
+    redirect = '{default:'0};
+    redirect.valid = 1'b1;
+    redirect.flush_itself = 1'b1;
+    redirect.level = 1'b1;
+    redirect.rob_key = data.get_status(2).get_rob_key();
+    prepare_redirect_deleted_owner_window(victim_uids, redirect,
+        "cancel-deferred-dependency", anchor_sample);
+    record_idx = data.find_cancel_record_index_by_id(data.redirect_deleted_owner_record_id);
+    if (record_idx < 0 ||
+        data.cancel_record_q[record_idx].software_cancel_lq_count != 2 ||
+        data.cancel_record_q[record_idx].software_cancel_sq_count != 2) begin
+        `uvm_fatal(get_type_name(), "production redirect did not preserve two victims per queue")
+    end
+    status = data.get_status(0);
+    data.set_status_field(0, MEMBLOCK_STATUS_STA_WRITEBACK, 1'b1);
+    data.set_status_field(0, MEMBLOCK_STATUS_STA_FAULT, 1'b1);
+    if (!data.capture_pending_store_fault(0, MEMBLOCK_ISSUE_TARGET_STA,
+            status.sta_issue_epoch, status.replay_seq, 24'h8000, $time)) begin
+        `uvm_fatal(get_type_name(), "failed to establish old store real-WB barrier")
+    end
+    lq_head = lsq_ctrl.lq_deq_ptr;
+    sq_head = lsq_ctrl.sq_deq_ptr;
+    lq_tail = lsq_ctrl.lq_enq_ptr;
+    sq_tail = lsq_ctrl.sq_enq_ptr;
+    raw = memblock_sync_pkg::make_empty_raw_ctrl();
+    raw.valid = 1'b1;
+    raw.lq_deq = 1;
+    raw.sq_deq = 1;
+    lq_next = lsq_ctrl_model::advance_lq_key(lq_head, 1);
+    raw.lq_deq_ptr_flag = lq_next.flag;
+    raw.lq_deq_ptr_value = lq_next.value;
+    raw.cycle = $time;
+    memblock_sync_pkg::push_deferred_raw_ctrl(raw);
+    data.service_redirect_deleted_owner_window(
+        data.redirect_deleted_owner_expire_sample - 1,
+        commit_handler.deferred_ctrl_blocks_deleted_owner_window());
+    if (data.cancel_record_q[record_idx].software_count_finalized) begin
+        `uvm_fatal(get_type_name(), "owner window finalized before expiry")
+    end
+    wait_for_dut_sample_watermark(data.redirect_deleted_owner_expire_sample,
+        "cancel-dependency-expire");
+    if (commit_handler.deferred_ctrl_blocks_deleted_owner_window()) begin
+        `uvm_fatal(get_type_name(), "unrelated live old store blocked cancel finalization")
+    end
+    saved_raw = raw;
+    // 负向只改变注入事实；查询不得修改真实资源、FIFO或取消数。
+    memblock_sync_pkg::deferred_raw_ctrl_q[0].lq_deq_ptr_flag = ~raw.lq_deq_ptr_flag;
+    if (!commit_handler.deferred_ctrl_blocks_deleted_owner_window()) begin
+        `uvm_fatal(get_type_name(), "discontinuous LQ pointer was accepted as unrelated")
+    end
+    memblock_sync_pkg::deferred_raw_ctrl_q[0] = saved_raw;
+    memblock_sync_pkg::deferred_raw_ctrl_q[0].lq_deq = 4;
+    if (!commit_handler.deferred_ctrl_blocks_deleted_owner_window()) begin
+        `uvm_fatal(get_type_name(), "over-capacity LQ count was accepted as unrelated")
+    end
+    memblock_sync_pkg::deferred_raw_ctrl_q[0] = saved_raw;
+    if (!MEMBLOCK_DUT_HAS_SQ_DEQ_PTR) begin
+        memblock_sync_pkg::deferred_raw_ctrl_q[0].sq_deq_ptr_valid = 1'b1;
+        if (!commit_handler.deferred_ctrl_blocks_deleted_owner_window()) begin
+            `uvm_fatal(get_type_name(), "V2 unexpected SQ pointer was accepted")
+        end
+        memblock_sync_pkg::deferred_raw_ctrl_q[0] = saved_raw;
+    end
+    empty_raw = memblock_sync_pkg::make_empty_raw_ctrl();
+    empty_raw.valid = 1'b1;
+    memblock_sync_pkg::push_deferred_raw_ctrl(empty_raw);
+    raw = empty_raw;
+    raw.sq_deq = 1;
+    memblock_sync_pkg::push_deferred_raw_ctrl(raw);
+    if (!commit_handler.deferred_ctrl_blocks_deleted_owner_window() ||
+        memblock_sync_pkg::deferred_raw_ctrl_q.size() != 3) begin
+        `uvm_fatal(get_type_name(), "zero-deq raw hid a later related SQ dequeue")
+    end
+    void'(memblock_sync_pkg::deferred_raw_ctrl_q.pop_back());
+    raw = empty_raw;
+    raw.lq_deq = 1;
+    lq_next = lsq_ctrl_model::advance_lq_key(lq_head, 2);
+    raw.lq_deq_ptr_flag = lq_next.flag;
+    raw.lq_deq_ptr_value = lq_next.value;
+    memblock_sync_pkg::push_deferred_raw_ctrl(raw);
+    if (!commit_handler.deferred_ctrl_blocks_deleted_owner_window()) begin
+        `uvm_fatal(get_type_name(), "zero-deq raw hid a later related LQ dequeue")
+    end
+    void'(memblock_sync_pkg::deferred_raw_ctrl_q.pop_back());
+    void'(memblock_sync_pkg::deferred_raw_ctrl_q.pop_back());
+    raw = saved_raw;
+    if (related_deq) begin
+        raw.lq_deq = 2;
+        raw.sq_deq = 2;
+        lq_next = lsq_ctrl_model::advance_lq_key(lq_head, 2);
+        raw.lq_deq_ptr_flag = lq_next.flag;
+        raw.lq_deq_ptr_value = lq_next.value;
+        memblock_sync_pkg::deferred_raw_ctrl_q[0] = raw;
+    end
+    if (commit_handler.deferred_ctrl_blocks_deleted_owner_window() != related_deq) begin
+        `uvm_fatal(get_type_name(), "mixed raw dependency did not match deleted-owner overlap")
+    end
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample(),
+        commit_handler.deferred_ctrl_blocks_deleted_owner_window());
+    if (data.cancel_record_q[record_idx].software_count_finalized == related_deq) begin
+        `uvm_fatal(get_type_name(), "window finalization ignored related-deq dependency")
+    end
+    monitor_adapter.apply_deferred_ctrl_updates_batch(pending);
+    if (lsq_ctrl.lq_deq_ptr != lq_head || lsq_ctrl.sq_deq_ptr != sq_head ||
+        lsq_ctrl.lq_free_count != MEMBLOCK_LQ_SIZE - 3 ||
+        lsq_ctrl.sq_free_count != MEMBLOCK_SQ_SIZE - 3 ||
+        lsq_ctrl.lq_enq_ptr != lq_tail || lsq_ctrl.sq_enq_ptr != sq_tail ||
+        memblock_sync_pkg::deferred_raw_ctrl_q.size() != 1 ||
+        memblock_sync_pkg::deferred_raw_ctrl_q[0] != raw ||
+        data.pending_lq_cancel_count != 2 || data.pending_sq_cancel_count != 2 ||
+        data.redirect_deleted_lq_owner_by_key.num() != 2 ||
+        data.redirect_deleted_sq_owner_by_key.num() != 2) begin
+        `uvm_fatal(get_type_name(), "blocked full raw partially released or dependency query mutated state")
+    end
+    if (related_deq) begin
+        data.set_status_field(0, MEMBLOCK_STATUS_STD_WRITEBACK, 1'b1);
+        monitor_adapter.apply_deferred_ctrl_updates_batch(pending);
+        if (memblock_sync_pkg::deferred_raw_ctrl_q.size() != 0 ||
+            data.pending_lq_cancel_count != 1 || data.pending_sq_cancel_count != 1 ||
+            data.cancel_record_q[record_idx].software_cancel_lq_count != 1 ||
+            data.cancel_record_q[record_idx].software_cancel_sq_count != 1 ||
+            data.redirect_deleted_lq_owner_by_key.num() != 1 ||
+            data.redirect_deleted_sq_owner_by_key.num() != 1) begin
+            `uvm_fatal(get_type_name(), "related late-deq did not subtract exactly one deleted owner per queue")
+        end
+        data.service_redirect_deleted_owner_window(
+            memblock_sync_pkg::peek_current_dut_global_sample(),
+            commit_handler.deferred_ctrl_blocks_deleted_owner_window());
+    end
+    expected_cancel = related_deq ? 1 : 2;
+    lq_head = lsq_ctrl.lq_deq_ptr;
+    sq_head = lsq_ctrl.sq_deq_ptr;
+    enq = memblock_lsqenq_dispatch_base_sequence::type_id::create("cancel_dependency_enq");
+    enq.apply_pending_lsq_cancels();
+    enq.apply_pending_lsq_cancels();
+    if (!data.cancel_record_q[record_idx].software_applied ||
+        lsq_ctrl.lq_deq_ptr != lq_head || lsq_ctrl.sq_deq_ptr != sq_head ||
+        lsq_ctrl.lq_enq_ptr != lsq_ctrl_model::rewind_lq_key(lq_tail, expected_cancel) ||
+        lsq_ctrl.sq_enq_ptr != lsq_ctrl_model::rewind_sq_key(sq_tail, expected_cancel) ||
+        lsq_ctrl.lq_free_count != MEMBLOCK_LQ_SIZE - (related_deq ? 0 : 1) ||
+        lsq_ctrl.sq_free_count != MEMBLOCK_SQ_SIZE - (related_deq ? 0 : 1) ||
+        data.pending_lq_cancel_count != 0 || data.pending_sq_cancel_count != 0) begin
+        `uvm_fatal(get_type_name(), "cancel did not apply only the remaining tail/free amount exactly once")
+    end
+    if (!related_deq) begin
+        data.set_status_field(0, MEMBLOCK_STATUS_STD_WRITEBACK, 1'b1);
+        monitor_adapter.apply_deferred_ctrl_updates_batch(pending);
+    end
+    monitor_adapter.apply_deferred_ctrl_updates_batch(pending);
+    if (memblock_sync_pkg::deferred_raw_ctrl_q.size() != 0 ||
+        lsq_ctrl.lq_free_count != MEMBLOCK_LQ_SIZE ||
+        lsq_ctrl.sq_free_count != MEMBLOCK_SQ_SIZE) begin
+        `uvm_fatal(get_type_name(), "old store dequeue after cancel leaked or double-released capacity")
+    end
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample(),
+        commit_handler.deferred_ctrl_blocks_deleted_owner_window());
+    if (data.redirect_deleted_owner_window_active ||
+        data.redirect_deleted_lq_owner_by_key.num() != 0 ||
+        data.redirect_deleted_sq_owner_by_key.num() != 0) begin
+        `uvm_fatal(get_type_name(), "applied cancel left deleted-owner state behind")
+    end
+    `uvm_info("CANCEL_DEPENDENCY_TEST",
+        $sformatf("cancel dependency contract completed wrap=%0d related=%0d", wrap_keys, related_deq), UVM_LOW)
+endtask:run_cancel_window_deferred_dependency_scenario
 
 task soft_test_memblock_pending_mmio_directed_sequence::run_rollback_xmr_path_scenario();
     string paths[$];

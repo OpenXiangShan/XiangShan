@@ -86,9 +86,7 @@ NPI事实提取/断言确认低段corrupt后取消高段，正式RM责任分类�
 真实DUT专项/邻接合计21/21，四类必要软件专项另计PASS，Turing最终独立实现review PASS；单Bug提交`1343dbce3`后已恢复99项并独立重验矩阵250项。
 专项实现review入口：`AI_DOC/plan/rm_review_doc/undo/memblock_first_split_data_error_termination_implementation_review_20261030.md`。
 分析入口：`AI_DOC/analysis/framework_design/memblock_fault3_cross_page_query_miss_seed1992896882_20261030.md`。
-fault3跨轮当前1/100，原1FAIL/19ABORTED/80NOT_RUN历史保留；
-待完成：单Bug提交后的剩99seed每seed10000笔恢复及统一修复SV基线25组250项重验；
-最终独立结果review和修复后稳定版本边界确认。
+1343修复时的历史fault3跨轮为1/100，原1FAIL/19ABORTED/80NOT_RUN保留；当时待恢复99和重验250，后续已执行并遇到下一Bug，非当前待办。
 恢复批次现已收敛为0PASS/1FAIL/19ABORTED/79NOT_RUN，unknown0，新首错seed1705742557在724655.8ns报ROLLBACK_XMR来源冲突；
 不是首段异常修复复发。新矩阵前5组50/50严格通过，第6组由主agent首错管理联停为9PASS/1ABORTED、0功能FAIL。
 原参数带波形已同时间/身份复现；NPI证明sample144892 winner4与144894 winner5各自本拍输出正确，旧resolver错误地比较跨拍payload。
@@ -96,17 +94,20 @@ Turing正式责任分类和正式方案review均PASS：测试框架问题，不�
 修复已在mother顺序完成，仅修改resolver精确sample条件及一个相关软件定向task，未修改RTL/RM/cfg或请求生成。
 fresh compile、软件专项及20/20真实DUT专项通过（18邻接加原1705742557与1992896882各10000笔），Turing独立静态实现review PASS；所有专项controller已退出、unknown0。
 Turing最终独立`FINAL_IMPLEMENTATION_REVIEW_PASS`，本Bug方案移do，随本记录单Bug提交；当前修复版350项最终批量仍待执行，不把旧源码的51项或250项历史PASS迁移到新版本验收。
-后续计划为当前两根完整PASS后，保留最新19颗ABORTED原seed并构造79颗新seed恢复98项；同时在另一独立mode重验25组250项。
+历史bba恢复计划为当时两根完整PASS后，保留19颗ABORTED原seed并构造79颗新seed恢复98项；该轮现已执行并产生551576067新问题，不再作为当前恢复清单。
 当前专项review：`AI_DOC/plan/test_framework/review_doc/undo/memblock_rollback_same_sample_provenance_implementation_review_20261030.md`。
 实际单Bug提交`bba3008ba`已在mother；随后恢复98和250两个独立mode，当前矩阵25组250/250严格/clean通过（210真实DUT＋40软件），controller rc0退出，Turing独立`MATRIX_250_INDEPENDENT_REVIEW_PASS`。
-fault3恢复98随后新首错551576067于411428.500ns报cancel snapshot depth15>14，最终20PASS/1FAIL/19ABORTED/58NOT_RUN、unknown0；当前仅原参数debug复现与责任分析，不恢复批量或生成最终coverage。
+fault3恢复98随后新首错551576067于411428.500ns报cancel snapshot depth15>14，最终20PASS/1FAIL/19ABORTED/58NOT_RUN、unknown0；当时只做原参debug与责任分析，当前修复验证进展见下文，不改写原失败。
 后续原参波形及只读observer均同点复现并退出，469443生产关键事件hash一致；Turing正式责任review PASS确认测试框架全局deferred门禁阻止record1658收口，不是瞬时staging或缺anchor。
-当前无活动仿真；新Bug正式方案待review、未编码、未修复验证，保留原252/350严格验收和20条controller PASS的区别。
+责任确认时无活动仿真；之后正式方案已获Boole独立`PLAN_REVIEW_PASS`，母worktree顺序完成三个生产修改及本Bug软件专项。
+软件fresh compile后四组合严格零错误通过；原551576067的coverage fresh compile及完整10000笔原参数严格PASS。
+静态实现review通过，18负例已在r3补齐并获独立SOFTWARE_CONTRACT_REVIEW_PASS；8邻接及三个10000笔原根严格PASS、基础两入口通过，统一动态门禁12真实DUT＋1空virtual PASS、所有controller退出，Boole最终独立review PASS，随本记录单Bug提交后才恢复批量。
+保留旧bba版252/350严格验收和20条controller PASS的区别；新源码变化后这些记录只作为历史，不冒称新版本通过。
 分析入口：`AI_DOC/analysis/framework_design/memblock_cancel_snapshot_depth_seed551576067_20261030.md`；不把旧legacy topology根因或早期staging猜测当作本次正式结论。
-当前新源码最终清单只验收252/350（上述250＋两个原根），BasicTest非RTL11组110/110全通过；不复用旧1343的通过名额，没有新建worktree或修改RTL。
+旧bba版最终清单验收252/350（上述250＋两个原根），BasicTest非RTL11组110/110全通过；本次cancel依赖修复新版本尚未建立最终350验收。没有新建worktree或修改RTL。
 分析入口：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
-当前25组250个通过记录的SV基线覆盖率已过滤合并，目录`mem_ut/ver/ut/memblock/sim/mother_matrix_pass_coverage_20261030`，
-有效`urgReport_r2`/`merged_r2.vdb`确认250 tests/records及精确白名单一致，工具日志无ERROR/WARNING；
+历史bba版25组250个通过记录的SV基线覆盖率已过滤合并，目录`mem_ut/ver/ut/memblock/sim/mother_matrix_pass_coverage_20261030`，
+有效`urgReport_r2`对应实际`sim/mother_matrix_pass_coverage_20261030.vdb`、聚合测试`merged_r2`，确认250 tests/records及精确白名单一致，工具日志无ERROR/WARNING；
 DUT line80.38%、condition59.51%、toggle37.90%、FSM3.55%，fcov关闭、不启用branch。
 该基线排除所有fault3及main旧PBMT，不能冒称新Bug修复后稳定版本的最终母任务覆盖率或原260/260通过。
 最新任务状态以`AI_DOC/project_management/memblock_mother_integration_status_20261028.md`及结果根目录
@@ -127,7 +128,9 @@ PBMT路由方案为`AI_DOC/plan/test_framework/plan/do/memblock_pbmt_matrix_fixe
 
 ### Plan未说明但Coding落实的细节
 
-本轮汇总阶段没有生产coding。结果目录验收工具增加legacy完成标志/数量、原入口及六种计数唯一性检查，
+最初汇总阶段没有生产coding；本次cancel依赖修复的生产改动、专项及执行中补充另见
+`AI_DOC/plan/test_framework/review_doc/undo/memblock_cancel_window_deferred_dependency_implementation_review_20261030.md`，尚非最终验收。
+结果目录验收工具增加legacy完成标志/数量、原入口及六种计数唯一性检查，
 仅用于证据核验，不改变TB或DUT行为；不作为新的生产Bug修复。
 阶段独立文档review首轮发现四处事实/索引问题：遗漏17e2f2d67、Basic/legacy marker混写、B1修前混入A1、
 已完成PBMT仍列待完成；已逐项修订，Turing复核四项全部关闭，结论`PASS`。这不等于批准fault3新问题coding或母任务最终关闭。

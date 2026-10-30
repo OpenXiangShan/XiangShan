@@ -11,9 +11,22 @@
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
   本BugTuring最终独立review PASS并已提交；1343版fault3恢复99曾出现新ROLLBACK_XMR并进入`PAUSED_ANALYSIS`，该新Bug现已专项闭环并提交bba3008；
   1343基线矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。新rollback责任/方案/最终实现review均PASS，软件1/1及真实DUT20/20专项通过（18邻接加两个原根各10000笔），已提交bba3008ba。
-  新SV矩阵25组250/250已全部严格/clean通过，controller rc0退出并获独立review PASS；fault3恢复98出现新cancel-depth首错551576067，已联停收敛为20PASS/1FAIL/19ABORTED/58NOT_RUN、unknown0。原参波形及只读观察均复现并退出，正式review确认测试框架全局deferred依赖过宽；当前无活动仿真，`PAUSED_ANALYSIS`等待方案review，未编码，不恢复批量或收集最终coverage。
+  bba版矩阵25组250/250已全部严格/clean通过，controller rc0退出并获独立review PASS；fault3恢复98出现新cancel-depth首错551576067，已联停收敛为20PASS/1FAIL/19ABORTED/58NOT_RUN、unknown0。原参波形及只读观察均复现并退出，正式review确认测试框架全局deferred依赖过宽；正式方案已review PASS并完成顺序coding，软件四组合+18负例、三个原根各10000笔、8邻接及基础两入口全部通过。统一动态门禁12真实DUT＋1空virtual PASS，全部controller退出。Boole最终独立实现review PASS，随本记录单Bug提交后恢复；尚未恢复批量或收集最终coverage。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
+
+### 2026-10-30续接：551576067修复门禁
+
+| 任务 | 当前状态 | 下一步与验收 |
+|---|---|---|
+| 根因与责任分类 | 已完成，独立review PASS | 证据仍为原波形及只读observer，不重复归因于瞬时staging |
+| 正式方案 | Boole独立PLAN_REVIEW_PASS、主agent复核通过，coding/文档/动态验收完成后归档do | `AI_DOC/plan/test_framework/plan/do/memblock_cancel_window_deferred_dependency_formal_plan_20261030.md`；补齐三项资源闭环断言后通过，不跳过门禁 |
+| 顺序coding及契约测试 | 三生产文件及本Bug测试task已修改；四组合+18只读负例PASS，Boole独立SOFTWARE_CONTRACT_REVIEW_PASS | r3 fresh compile、controller rc0/unknown0、391ns finish、六项错误0；r2 fixture表数量变化失败保留，仅修fixture不改生产/RM |
+| 原seed及邻接验证 | 原551576067、1705742557、1992896882各完整10000笔及8邻接全部严格PASS；基础两入口通过 | 原mode=`mother_cancel_dependency_original551576067_20261030`；邻接结果`mother_cancel_dependency_focused_20261030_results`；统一动态门禁12真实DUT＋1空virtual、六项错误0，所有controller退出、unknown0 |
+| 单Bug提交与批量恢复 | Boole最终FINAL_IMPLEMENTATION_REVIEW_PASS，随本记录单Bug提交后恢复 | 新源码最终350必须重新绑定验证，不沿用旧250冒充新版本；运行进度权威表为新结果目录campaign_state.tsv |
+
+没有新增worktree，记录时没有活动仿真。专项动态验证及最终独立review已完成，随本记录单Bug提交；母任务仍未完成。
+最终源码重验清单仅已准备、未启动：原551当前coverage1＋两个前原根重验2＋旧版本20PASS重验＋19原ABORTED＋58新seed＝fault3总100；另外固定矩阵25组250均须新源码重验。只读readiness review及单Bug提交门禁通过后才能启动，不能拿旧252/350当新版本通过。
 
 ## 续接入口（2026-10-29）
 
@@ -557,12 +570,12 @@ fault3余98入口：`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fa
 fault3 98条恢复队列已结束：20PASS/1FAIL/19ABORTED/58NOT_RUN，unknown0；20条controller PASS尚未完成整批严格验收，不加入252/350最终验收数。
 新首错seed551576067在411428.500ns报local cancel snapshot depth15>14；原参数独立debug fresh compile已启动。
 分析入口：`AI_DOC/analysis/framework_design/memblock_cancel_snapshot_depth_seed551576067_20261030.md`。
-当前只做原seed复现及责任分析，不修改深度、不放宽检查、不新建worktree；新Bug关闭/专项/单Bug提交前不继续批量。
+此段为首错时历史状态，彼时只做原seed复现及责任分析；最新修复及验证见文首551576067门禁表。不修改深度、不放宽检查、不新建worktree；单Bug提交前不继续批量。
 
 最新责任门禁：原参波形/observer均同411428.5ns复现且退出，469443条关键生产事件hash完全相同。
 record1658已有anchor/scan/sw2/6；旧UID1679等待STD使deferred FIFO不空，全局门禁阻止当前record收口，local目标快照82232之后逐拍积压至15。
-Turing正式`RESPONSIBILITY_REVIEW_PASS`，确认测试框架责任；已登记W44 Buglist，方案待review、未coding，所有本轮仿真controller已收敛。
-截至本状态只有rollback问题完成新单Bug提交bba3008ba；新cancel问题仍未修复，不能列入已修复数量。
+Turing正式`RESPONSIBILITY_REVIEW_PASS`，确认测试框架责任；已登记W44 Buglist。责任确认时方案待review、未coding，此为历史状态。
+当前cancel生产修复已完成，12真实DUT＋1空virtual及软件契约统一动态门禁PASS，Boole最终独立review PASS，随本记录单Bug提交；不能把历史“仍未修复”作为当前结论。
 
 覆盖率交付工具核对：旧基线实际数据库在sim同级`mother_matrix_pass_coverage_20261030.vdb`，r2聚合测试名为`merged_r2`，不是旧README所写的目录内`merged_r2.vdb`；数据库未丢失。
 本机URG help和实际单记录探针确认`-dbname 目录/测试名`语义；最终collector已改用`<输出>/merged/accepted350`并检查`<输出>/merged.vdb`及URG读回唯一聚合测试。

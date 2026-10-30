@@ -5027,7 +5027,8 @@ class common_data_transaction extends uvm_object;
     endfunction:commit_redirect_deleted_deq
 
     function void service_redirect_deleted_owner_window(
-        input longint unsigned current_sample);
+        input longint unsigned current_sample,
+        input bit deferred_deq_blocks);
         int record_idx;
 
         if (!redirect_deleted_owner_window_active) begin
@@ -5040,7 +5041,9 @@ class common_data_transaction extends uvm_object;
         end
         if (!cancel_record_q[record_idx].software_count_finalized &&
             current_sample >= redirect_deleted_owner_expire_sample) begin
-            if (memblock_sync_pkg::deferred_raw_ctrl_q.size() != 0) begin
+            // 中文注释：只等待仍可能扣减本记录取消数的延迟出队；无关旧store
+            // 等STD不能阻塞当前redirect冻结。依赖由唯一LSQ owner只读推导。
+            if (deferred_deq_blocks) begin
                 return;
             end
             cancel_record_q[record_idx].software_count_finalized = 1'b1;

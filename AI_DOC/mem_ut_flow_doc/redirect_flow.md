@@ -28,13 +28,15 @@ IQ feedback/replay 的专项边界见
 | `semantic batch` | 同一采样拍的 writeback、IQ feedback 和 memoryViolation 统一仲裁集合 | `collect_monitor_event_batch()`、`dispatch_monitor_batch_handler` | redirect-first 决定同批 normal event 是否允许落状态 |
 | `redirect epoch` | 每次 `request_redirect_flush()` 递增的恢复代次 | `memblock_sync_pkg::dispatch_flush_epoch` | 被 flush uid 的 software cancel 归入该 epoch |
 | `reservation token` | 某 uid 一次真实 LSQ launch 的动态实例凭证 | `lsq_reservation_launch_epoch`、`lsq_reservation_sample_seq` | redirect scan 只统计已成为 `DUT_VISIBLE` 的 mapping |
-| `DUT sample sequence` | 多个 monitor/sequence 对同一仿真采样时刻共享的单调序号 | `get_dut_sample_seq($time)` | reservation、redirect anchor 和 cancel snapshot 使用同一时序坐标 |
+| `DUT sample sequence` | 多个 monitor/sequence 对同一仿真采样时刻共享的单调序号 | `wait_for_l2tlb_sample_anchor($time, sample_seq)` | reservation、redirect anchor 和 cancel snapshot 使用同一时序坐标 |
 | `redirect anchor` | `io_redirect_*` 真正被 monitor 采样到的 payload 和 sample 序号 | `dispatch_raw_redirect_anchor_t`、`raw_redirect_anchor_q` | 只锚定时序，不形成第二个 recovery event |
 | `cancel snapshot` | ctrl monitor 每个 sample 保存的 `lqCancelCnt/sqCancelCnt` 电平 | `dispatch_raw_cancel_snapshot_t`、`raw_cancel_snapshot_q` | 两个 count 都为 0 时也必须保存 |
 | `cancel record` | 一个 redirect epoch 的 software cancel、资源回退和 DUT observed 对账生命周期 | `memblock_lsq_cancel_record_t`、`cancel_record_q` | `software_applied` 与 `observed_valid` 都成立后才删除 |
 | `active mapping` | 当前动态实例拥有的 ROB/LQ/SQ key 到 uid 映射 | `uid_by_active_rob`、`uid_by_lq`、`uid_by_sq` | redirect scan 在清 map 前登记 software cancel |
 | `observed cancel` | DUT 在目标 sample 输出的 cancel 数量 | `observed_cancel_lq_count/sq_count` | 只核对，不再次调用 `cancel_lq/cancel_sq` |
 | `later-split owner` | 跨页 Load 后续拆分请求的 UID/动态代次/翻译 token 记录 | `later_split_tlb_record_by_uid` | redirect 后旧 response 仍持有原对象句柄，必须显式标记取消 |
+| `deleted owner window` | redirect删除前保存的LSQ位置及旧实例身份的临时窗口 | `redirect_deleted_*_owner_by_key` | 晚到deq扣减本记录暂定取消量 |
+| `deferred FIFO` | 等待完整LQ/SQ联合应用的ctrl事实队列 | `deferred_raw_ctrl_q` | 旧store等待STD时保留，不要求它阻塞无关取消记录 |
 
 本 flow 的 recovery 来源仍是 DUT output `memoryViolation`。redirect agent monitor 采样的是测试框架
 已经驱动到 DUT input 的 `io_redirect_*`，它只产生独立 timing anchor，不能再次进入
@@ -66,7 +68,10 @@ flowchart TD
     G --> H[select_oldest_redirect]
     H --> I[push_feedback_event -> exception_event_q]
     G --> J[apply_raw_ctrl_deq after semantic batch]
-    A --> K[exception_redirect_replay_task]
+    J --> AA2[deferred_ctrl_blocks_deleted_owner_window after full-raw apply]
+    AA2 --> AA3[service_redirect_deleted_owner_window at expiry]
+    AA3 --> SF[finalize_pending_store_faults]
+    SF --> K[exception_redirect_replay_task]
     K --> L[process_pending_events]
     L --> M[service_ptw_wait_replay and advance_active_redirect]
     M --> N{active redirect exists before advance?}
@@ -75,11 +80,15 @@ flowchart TD
     V -->|no| L0[second drain_lsq_timing_sidebands]
     V -->|yes| W[apply_redirect_flush]
     W --> X[apply_redirect_flush_range]
-    X --> Y[note_lsq_cancel_for_uid before mapping release]
-    Y --> Z[prepare_uid_for_redirect_reissue]
-    X --> AA[finalize software count]
+    X --> Z[commit_uid_for_redirect_reissue]
+    Z --> Y[commit_capture_redirect_deleted_owner_for_redirect_range and commit_note_lsq_cancel_for_redirect_range]
+    X --> AA0{saved deleted owners?}
+    AA0 -->|no| AA[finalize software count]
+    AA0 -->|yes| AA1[open deleted-owner window]
+    AA1 --> AA3
+    AA3 -->|no related deferred deq| AA
     AA --> AB[apply_pending_lsq_cancels once]
-    Z --> AF[rollback admission and reissue]
+    Y --> AF[rollback admission and reissue]
     AF --> O
     O --> O1{oldest redirect found?}
     O1 -->|no| L0
@@ -97,7 +106,8 @@ flowchart TD
     L1 --> AC[compare exact target snapshot]
     AB --> AD{software_applied and observed_valid}
     AC --> AD
-    AD --> AE[cleanup_completed_cancel_records]
+    AD --> AE0{deleted-owner window and fault resource references cleared?}
+    AE0 -->|yes| AE[cleanup_completed_cancel_records]
 ```
 
 ### 2.1 函数调用 Flow 图整体文字伪代码
@@ -113,7 +123,9 @@ flowchart TD
    convert_raw_memory_violation把有效memoryViolation转换为redirect wb_event；
    process_monitor_event_batch先选同批最老redirect，被覆盖的normal pass/fault/replay直接drop；
    selected redirect经push_feedback_event进入exception_event_q；
-   semantic batch结束后才按FIFO应用deferred_ctrl中的LQ/SQ deq。
+   semantic batch结束后才按FIFO应用deferred_ctrl中的LQ/SQ deq；
+   随后只读查询当前窗口关联出队并service窗口、finalize pending store fault，再进入exception处理；
+   exception处理之后第二次drain timing并执行一次reconcile。
 
 3. 建立active redirect与record：
    process_pending_events从exception_event_q再次选择最老redirect；
@@ -128,8 +140,9 @@ flowchart TD
 5. flush scan与software cancel：
    advance_active_redirect同时要求redirect_drive_done_for和cancel_redirect_scan_ready；
    apply_redirect_flush_range只扫描active uid窗口；
-   每个命中uid在清mapping前调用note_lsq_cancel_for_uid，校验reservation sample并累加本record的software count；
-   scan结束后finalize software count、回滚admission高水位并清全局freeze；
+   每个命中uid由commit_uid_for_redirect_reissue先保存旧LSQ owner，再由commit_note_lsq_cancel_for_redirect_range累加本record的software count；
+   scan结束后若保存了deleted owner则开启临时窗口，否则立即finalize software count；回滚admission高水位并清全局freeze；
+   下一service在完整raw出队尝试后，只读按FIFO连续位置判断与本窗口的关联；窗口到期且没有相关延迟deq才冻结；
    LSQ enqueue sequence按record顺序只执行一次cancel_lq/cancel_sq并置software_applied。
 
 6. DUT对账与收敛：
@@ -137,7 +150,7 @@ flowchart TD
    该入口调用service_cancel_reconcile并选择record定义的精确target snapshot；
    snapshot count必须等于同一record的software count，否则fatal；
    observed count只置observed_valid，不二次回退资源；
-   software_applied和observed_valid都成立后，record才从FIFO头删除；
+   software_applied和observed_valid都成立、且deleted-owner window及fault resource均不再引用该record后，才从FIFO头删除；
    global stop必须继续等待record、anchor、snapshot和raw timing sideband全部收敛。
 ```
 
@@ -155,7 +168,8 @@ flowchart TD
 ```systemverilog
 cancel_snapshot.lq_cancel_count = io_mem_to_ooo_lqCancelCnt;
 cancel_snapshot.sq_cancel_count = io_mem_to_ooo_sqCancelCnt;
-cancel_snapshot.sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
+cancel_snapshot.sample_seq = sample_seq;
 cancel_snapshot.cycle = $time;
 memblock_sync_pkg::push_raw_cancel_snapshot(cancel_snapshot);
 
@@ -310,7 +324,8 @@ if (io_redirect_valid === 1'b1) begin
     anchor.level = io_redirect_bits_level;
     anchor.rob_flag = io_redirect_bits_robIdx_flag;
     anchor.rob_value = io_redirect_bits_robIdx_value;
-    anchor.sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+    memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
+    anchor.sample_seq = sample_seq;
     memblock_sync_pkg::push_raw_redirect_anchor(anchor);
 end
 
@@ -346,11 +361,14 @@ end
 
 for (memblock_uid_t uid = begin_uid; uid < end_uid; uid++) begin
     if (rob_order_util::rob_need_flush(status.get_rob_key(), redirect)) begin
-        prepare_uid_for_redirect_reissue(uid, redirect);
+        commit_uid_for_redirect_reissue(uid);
     end
 end
 cancel_record_q[record_idx].active_scan_done = 1'b1;
-cancel_record_q[record_idx].software_count_finalized = 1'b1;
+if (start_deleted_owner_window)
+    commit_start_redirect_deleted_owner_window(record_idx);
+else
+    cancel_record_q[record_idx].software_count_finalized = 1'b1;
 active_cancel_record_id_valid = 1'b0;
 ```
 
@@ -361,12 +379,49 @@ advance_active_redirect要求drive done和cancel_redirect_scan_ready同时成立
 scan-ready要求record已有anchor，最新DUT sample和已drain cancel snapshot watermark都不早于redirect LSQ cutoff；
 freeze timeout只warning并继续等待，由统一no-progress/UVM timeout最终兜底；
 apply_redirect_flush_range扫描terminal_done_uid到max_enqueued_uid形成的active window，不做历史全表扫描；
-每个ROB命中uid调用prepare_uid_for_redirect_reissue；
-scan结束后把record的software count标为finalized，清active record id并回滚最老flushed admission边界；
+全量预检成功后，每个ROB命中uid调用commit_uid_for_redirect_reissue；
+scan结束后，有保存的deleted owner则开启窗口等待相关晚deq，否则把software count标为finalized；
+清active record id并回滚最老flushed admission边界；
 apply_redirect_flush最后清PTW wait replay、drive queue和global freeze状态。
 ```
 
-### 6.2 `note_lsq_cancel_for_uid()` / `prepare_uid_for_redirect_reissue()`
+### 6.1.1 延迟出队依赖与窗口收尾
+
+抽象功能描述：`lsq_commit_handler::deferred_ctrl_blocks_deleted_owner_window()`在窗口到期、取消数尚未冻结时，判断已采集但未应用的出队是否还会影响本记录；它只读，不代替正式出队。
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`。
+
+```systemverilog
+if (data.lookup_redirect_deleted_sq_owner(sq_head, owner) ||
+    !data.lookup_active_uid_by_sq(sq_head, uid)) return 1'b1;
+status = data.get_status(uid);
+if (!status.active || !status.active_sq_mapped ||
+    status.sqIdx_flag != sq_head.flag || status.sqIdx_value != sq_head.value)
+    return 1'b1;
+sq_head = lsq_ctrl_model::advance_sq_key(sq_head, 1);
+```
+
+中文伪代码：查询先排除无窗口、空FIFO、未到期及已冻结状态；从唯一LSQ模型读取局部出队head和已分配容量，按FIFO顺序解释每条raw。
+LQ用出队后指针回退count，核对局部head；V2 SQ只用局部head与count。逐entry查询当前窗口record/epoch的deleted owner，命中即仍相关；没有唯一有效live owner或完整位置不匹配也保守阻塞。每步仅推进局部head，零deq不推进但继续看后续raw。
+`lookup_redirect_deleted_*_owner()`不消费临时身份；`lookup_active_uid_by_*()`按完整物理位置定位当前UID；`advance_*_key()`单步处理回绕。累计count超过当前分配容量或指针能力不符均不能证明无关。
+查询不调用STD屏障来判断相关性：无关store可以继续等待真实WB，但不因此阻塞年轻取消记录。真实FIFO、head/free、owner和计数保持不变。
+
+抽象功能描述：`common_data_transaction::service_redirect_deleted_owner_window()`管理窗口到期、软件数冻结和应用后的owner清理，不拥有LSQ出队或资源回退。
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`。
+
+```systemverilog
+if (!cancel_record_q[record_idx].software_count_finalized &&
+    current_sample >= redirect_deleted_owner_expire_sample) begin
+    if (deferred_deq_blocks) return;
+    cancel_record_q[record_idx].software_count_finalized = 1'b1;
+    check_cancel_pending_aggregate();
+end
+```
+
+中文伪代码：service在本拍完整raw消费后传入只读依赖结论；到期时相关或不确定则等待，无关则冻结软件数并核对pending守恒。
+相关晚deq仍先经`preflight_redirect_deleted_deq()`验证完整身份，再由`commit_redirect_deleted_deq()`从record/pending同量扣减并消费对应owner。
+之后enqueue只应用剩余取消量，窗口必须等software_applied才删除owner；reconcile仍严格核对精确目标snapshot，不扩大深度、不丢事实、不复制DUT数修正软件期望。
+
+### 6.2 当前取消记账及兼容入口
 
 抽象功能描述：`note_lsq_cancel_for_uid()`必须在mapping释放前保存该动态实例的cancel事实；
 `prepare_uid_for_redirect_reissue()`随后清旧map、issue项和执行状态，为同uid新动态实例重新admission做准备。
@@ -387,12 +442,11 @@ if (status.active_sq_mapped)
     cancel_record_q[record_idx].software_cancel_sq_count += main_tr.numLsElem;
 status.lsq_reservation_state = MEMBLOCK_LSQ_RESERVATION_CANCEL_ACCOUNTED;
 
-note_lsq_cancel_for_uid(uid, dispatch_flush_epoch);
-retire_active_uid(uid);
-clear_uid_dispatch_result(uid);
-status.redirect_pending = 1'b1;
-status.flushed = 1'b1;
-status.dynamic_epoch++;
+// 上述为计数条件摘要；当前提交入口的真实顺序如下。
+commit_capture_redirect_deleted_owner_for_redirect_range(uid, record_idx);
+commit_note_lsq_cancel_for_redirect_range(uid, record_idx);
+cancel_later_split_tlb_record_for_uid(uid, old_dynamic_epoch, "redirect_reissue");
+// 随后由当前分支的commit helper释放旧映射并重置实例状态。
 ```
 
 文字伪代码：
@@ -402,7 +456,7 @@ status.dynamic_epoch++;
 无LQ/SQ mapping的uid只记录已accounted，不增加count；
 有mapping时要求scalar numLsElem=1、reservation为DUT_VISIBLE且sample_seq不晚于本次cutoff；
 按active_lq_mapped/active_sq_mapped分别累加本record的software count；
-先完成上述登记，再调用retire_active_uid释放active ROB/LQ/SQ map；
+当前主路径先保存deleted owner并由commit_note_lsq_cancel_for_redirect_range登记，再经提交阶段helper释放active ROB/LQ/SQ map；
 清queued/dispatched/writeback/pass/fault/commit/deq等旧实例状态；
 设置redirect_pending/flushed并递增dynamic_epoch，等待同uid重新admission。
 ```
@@ -412,7 +466,7 @@ status.dynamic_epoch++;
 抽象功能描述：`common_data_transaction::commit_uid_for_redirect_reissue()` 在 redirect 全量只读预检查
 成功后，统一提交旧实例的资源与翻译记录取消，再推进动态代次。当前主路径由
 `apply_redirect_flush_range()` 调用该 helper；`prepare_uid_for_redirect_reissue()` 同样委托它提交。
-上节旧逻辑摘要用于解释 cancel 记账，具体提交顺序以此处和当前源码为准。
+`note_lsq_cancel_for_uid()`及`prepare_uid_for_redirect_reissue()`为兼容入口，不代表当前全量预检后的生产scan逐项提交链；具体顺序以此处和当前源码为准。
 
 源码：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`，
 `commit_uid_for_redirect_reissue()`，在旧 epoch 保存后和状态代次递增前：
@@ -468,7 +522,7 @@ observed_cancel_lq/sq_count不参与资源回退，避免DUT snapshot导致二�
 
 顺序约束是：先创建record，再取得redirect anchor；sample cutoff到达后才能scan并finalize software
 count；只有software count finalized后才允许比较target snapshot。`software_applied`和`observed_valid`
-在finalize之后可以先后独立完成，源码不要求二者同拍；cleanup只要求二者最终都成立。无论observed
+在finalize之后可以先后独立完成，源码不要求二者同拍；cleanup要求二者成立且deleted-owner window与fault resource都不再引用该record。无论observed
 先到还是software apply先到，observed路径都不能调用资源回退API。
 
 真实逻辑摘要：
@@ -508,7 +562,7 @@ target snapshot已到但software count未finalize时暂停，不能提前比较�
 target sample丢失、越过deadline或count不一致均fatal；
 匹配时保存observed count、置observed_valid并更新仅用于directed coverage的match计数；
 该函数不调用release/cancel、不写pass/fail/terminal；
-cleanup_completed_cancel_records只从FIFO头删除同时software_applied且observed_valid的record。
+cleanup_completed_cancel_records只从FIFO头删除同时software_applied且observed_valid的record，且必须不再被deleted-owner window或fault resource引用。
 ```
 
 ## 8. Reissue、global stop 与真实 cancel vseq
@@ -566,9 +620,11 @@ memoryViolation redirect：
   -> monitor redirect anchor
   -> cancel_redirect_scan_ready
   -> active-window flush scan
-  -> software cancel finalized/applied
+  -> saved deleted-owner window (if needed)
+  -> full-raw attempt then dependency query/window expiry service
+  -> software cancel finalized/applied (remaining count only)
   -> exact DUT cancel snapshot compare
-  -> record cleanup
+  -> clear deleted-owner window/fault resource references then record cleanup
   -> uid re-admission/reissue
 
 同批被redirect覆盖的normal event：
@@ -579,13 +635,14 @@ memoryViolation redirect：
 
 逐epochcancel：
   DUT-visible reservation mapping
-  -> note_lsq_cancel_for_uid
+  -> commit_capture_redirect_deleted_owner_for_redirect_range
+  -> commit_note_lsq_cancel_for_redirect_range
   -> record.software_cancel_*
   -> apply_pending_lsq_cancels一次
   -> record.software_applied
   -> service_lsq_timing_reconcile唯一调用service_cancel_reconcile比较observed snapshot
   -> record.observed_valid
-  -> 两条进度都完成后pop record
+  -> 两条进度完成且deleted-owner window/fault resource引用解除后pop record
 
 真实cancel场景退出：
   all uid terminal
@@ -604,7 +661,7 @@ memoryViolation先参与同拍redirect-first仲裁，防止旧动态实例的pas
 
 软件scan结果既是资源回退量，也是DUT cancel期望值。LSQ sequence只按software count回退一次；
 DUT observed count只在精确target sample对账，不会再次改变pointer/free count。record必须等软件应用和
-DUT观察两条独立进度都结束才能删除。
+DUT观察两条独立进度都结束、且deleted-owner window与fault resource不再引用该record才能删除。
 
 最后，即使所有uid已经terminal，公共stop仍等待cancel record、anchor、snapshot及raw timing queue清空。
 这样真实cancel vseq可以让所有responder在无inflight边界自然退出，而不是依赖phase结束强制杀线程。

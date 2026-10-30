@@ -1386,6 +1386,103 @@ class lsq_commit_handler extends uvm_object;
         sync_modeled_head_after_fault_terminal();
     endfunction:apply_dut_sq_deq_count_only
 
+    // 中文注释：只读证明FIFO中的完整出队事实是否涉及当前redirect删除的owner。
+    // 局部head仅用于按顺序解释count；不消费raw，不释放资源，不绕过STD屏障。
+    function bit deferred_ctrl_blocks_deleted_owner_window();
+        memblock_lq_key_t lq_head;
+        memblock_sq_key_t sq_head;
+        int unsigned lq_allocated;
+        int unsigned sq_allocated;
+        int record_idx;
+
+        ensure_handles();
+        if (!data.redirect_deleted_owner_window_active ||
+            memblock_sync_pkg::deferred_raw_ctrl_q.size() == 0) begin
+            return 1'b0;
+        end
+        record_idx = data.find_cancel_record_index_by_id(
+            data.redirect_deleted_owner_record_id);
+        if (record_idx < 0 || !data.cancel_record_q[record_idx].valid) begin
+            return 1'b1;
+        end
+        if (data.cancel_record_q[record_idx].software_count_finalized ||
+            memblock_sync_pkg::peek_current_dut_global_sample() <
+                data.redirect_deleted_owner_expire_sample) begin
+            return 1'b0;
+        end
+        lq_head = lsq_ctrl.lq_deq_ptr;
+        sq_head = lsq_ctrl.sq_deq_ptr;
+        lq_allocated = MEMBLOCK_LQ_SIZE - lsq_ctrl.lq_free_count;
+        sq_allocated = MEMBLOCK_SQ_SIZE - lsq_ctrl.sq_free_count;
+        // 扫描限于当前FIFO；entry累计不超过当前LQ/SQ容量。零deq控制事实
+        // 仍留在FIFO中，不能遮住其后的相关出队或改变局部head。
+        foreach (memblock_sync_pkg::deferred_raw_ctrl_q[raw_idx]) begin
+            memblock_sync_pkg::dispatch_raw_ctrl_t raw;
+            memblock_lq_key_t lq_ptr;
+            memblock_sq_key_t sq_ptr;
+
+            raw = memblock_sync_pkg::deferred_raw_ctrl_q[raw_idx];
+            if (!raw.valid || raw.lq_deq > lq_allocated ||
+                raw.sq_deq > sq_allocated ||
+                raw.sq_deq > MEMBLOCK_DUT_ENSBUFFER_WIDTH ||
+                (raw.sq_deq_ptr_valid &&
+                 (!MEMBLOCK_DUT_HAS_SQ_DEQ_PTR || raw.sq_deq == 0)) ||
+                (MEMBLOCK_DUT_HAS_SQ_DEQ_PTR && raw.sq_deq != 0 &&
+                 !raw.sq_deq_ptr_valid)) begin
+                return 1'b1;
+            end
+            lq_ptr = '{flag:raw.lq_deq_ptr_flag, value:raw.lq_deq_ptr_value};
+            sq_ptr = '{flag:raw.sq_deq_ptr_flag, value:raw.sq_deq_ptr_value};
+            if (raw.lq_deq != 0 &&
+                (!data.is_valid_lq_key(lq_ptr) ||
+                 lq_deq_start_key(lq_ptr, raw.lq_deq, 1'b1) != lq_head)) begin
+                return 1'b1;
+            end
+            if (MEMBLOCK_DUT_HAS_SQ_DEQ_PTR && raw.sq_deq != 0 &&
+                (!data.is_valid_sq_key(sq_ptr) ||
+                 sq_deq_start_key(sq_ptr, raw.sq_deq, 1'b1) != sq_head)) begin
+                return 1'b1;
+            end
+            for (int unsigned idx = 0; idx < raw.lq_deq; idx++) begin
+                memblock_uid_t uid;
+                memblock_redirect_deleted_owner_t owner;
+                status_transaction status;
+
+                if (data.lookup_redirect_deleted_lq_owner(lq_head, owner) ||
+                    !data.lookup_active_uid_by_lq(lq_head, uid)) begin
+                    return 1'b1;
+                end
+                status = data.get_status(uid);
+                if (!status.active || !status.active_lq_mapped ||
+                    status.lqIdx_flag != lq_head.flag ||
+                    status.lqIdx_value != lq_head.value) begin
+                    return 1'b1;
+                end
+                lq_head = lsq_ctrl_model::advance_lq_key(lq_head, 1);
+            end
+            for (int unsigned idx = 0; idx < raw.sq_deq; idx++) begin
+                memblock_uid_t uid;
+                memblock_redirect_deleted_owner_t owner;
+                status_transaction status;
+
+                if (data.lookup_redirect_deleted_sq_owner(sq_head, owner) ||
+                    !data.lookup_active_uid_by_sq(sq_head, uid)) begin
+                    return 1'b1;
+                end
+                status = data.get_status(uid);
+                if (!status.active || !status.active_sq_mapped ||
+                    status.sqIdx_flag != sq_head.flag ||
+                    status.sqIdx_value != sq_head.value) begin
+                    return 1'b1;
+                end
+                sq_head = lsq_ctrl_model::advance_sq_key(sq_head, 1);
+            end
+            lq_allocated -= raw.lq_deq;
+            sq_allocated -= raw.sq_deq;
+        end
+        return 1'b0;
+    endfunction:deferred_ctrl_blocks_deleted_owner_window
+
     // 返回值表示 full raw 的 LQ/SQ 预检和提交是否完成。resync 模式下 mismatch
     // 只返回失败，调用者必须保留 raw 队首并在后续 service tick 重试。
     function bit apply_raw_ctrl_deq(input memblock_sync_pkg::dispatch_raw_ctrl_t raw);
