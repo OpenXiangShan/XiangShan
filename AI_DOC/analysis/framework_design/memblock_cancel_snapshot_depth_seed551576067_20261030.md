@@ -1,6 +1,6 @@
 # fault3新seed的cancel快照深度失败分析
 
-日期：2026-10-30。状态：`PAUSED_ANALYSIS`；批量已联停收敛，原参数带波形fresh compile专项已启动，尚未正式责任分类或修改生产源码。
+日期：2026-10-30。状态：`PAUSED_ANALYSIS`，等待正式修复方案及独立review；原参数波形/只读运行态复现均完成，正式责任review确认测试框架，生产源码未修改，无活动仿真。
 
 ## 1. 术语与证据边界
 
@@ -45,3 +45,46 @@ Turing只读候选分析已启动；正式责任review必须等待本次复现�
 从原批次frozen cfg读取，原seed、MAIN10000、timeout和UVM_LOW保持一致，仅增加波形，fresh compile，不覆盖已有稳定simv。
 两目录`effective_plusargs.txt`已用cmp确认逐字节一致。
 未新建worktree、未修改RTL或测试框架生产代码。复现后按责任review、同周Buglist、最小方案独立review、授权coding、专项及单Bug提交闭环。
+
+## 5. 原参数复现与波形事实
+
+上述debug已完整复现同411428.500ns/depth15，1FAIL、unknown0，controller退出；不是仅相似症状或不同请求数复现。
+波形绝对路径：`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_mother_integration_20261028/mem_ut/ver/ut/memblock/sim/mother_cancel_depth_551576067_debug_20261030/wave/tc=basicTest_ts=memblock_dispatch_real_smoke_vseq_cfg=tc_l2tlb_fault_2pct_no_trigger_seed=551576067_rtl_eda_reg_20261030_094031_1533629_26089.fsdb`。
+NPI按posedge前1ps保存原生位宽binary/hex；trace及断言在debug结果目录，trace SHA256为f529a7b9aa795b5d35697b390aaa8086bc99bb6c0641b0467ee68f12ef9e2e69。
+
+| 时间 | 波形事实 |
+|---|---|
+| 411336ns | DUT redirect开始为valid1，ROB1/77、level1、非VLS |
+| 411340.999ns | 下一posedge前1ps，redirect本拍有效，完整payload已知 |
+| 411351ns | DUT LQ/SQ cancel从42/56更新为2/6，之后保持 |
+| 全抽样窗口 | DUT cancel输出与ctrl interface镜像完全一致 |
+
+这削弱“没有实际驱动redirect”的候选，但尚未证明本地record已绑定anchor或software count状态，不能仅据波形判定RTL或框架根因。
+Turing独立候选分析更偏向C：旧UID1679等待STD使持久deferred FIFO非空，而owner窗口收尾以整个FIFO为空为前置，可能阻止当前record的software_count_finalized。
+本次窗口UID1679从411283.5ns起连续29次deq屏障等待，早于新rollback411328.5ns；这个旧等待与当前record的因果关系仍需运行期状态证明。
+
+已准备并独立review通过只读`cancel_depth_observer.sv`：仅在411304–411424ns每5ns读取已有singleton、队列首尾、record与UID1679；
+不new、不randomize、不调用变更方法、不写接口或已有状态。通过既有TB_LIST bootstrap追加到独立mode，核心2540生产输入不变。
+observer mode=`mother_cancel_depth_551576067_observer_20261030`，结果`mother_cancel_depth_551576067_observer_20261030_results`，fresh compile启动。
+此项是必要只读取证，不计修复或正式方案；缺runtime证据前保持PAUSED_ANALYSIS，不正式登记Buglist。
+
+## 6. 最终责任分类与修复边界
+
+第3–5节保留取证过程；现在observer已fresh compile并在相同411428.500ns复现，controller退出、unknown0。
+原批次与observer的469443条生产关键事件逐字节hash一致，SHA256为c5e8a4fcc4f483b0748a0b049624c8ce709f6dc064d991d78cf257aab3ae230d；
+observer只增加打印，未改变该seed已观察的事件轨迹。runtime_acceptance.json及observer_event_parity_acceptance.json位于observer结果目录。
+
+运行态明确：record1658在sample82229绑定anchor，82230完成scan，软件取消2/6；compare82232、窗口到期82233。
+旧deferred队首来自411281ns的SQ deq，关联UID1679/epoch83/ROB0/146/SQ0/10，仍等待STD；队列共两项。
+到期后全局deferred非空使`service_redirect_deleted_owner_window()`直接return，record的finalized/applied/observed始终0。
+reconcile保留精确目标82232的2/6快照，之后深度逐拍1→14，下一拍15 fatal；raw snapshot/anchor及local anchor均为空。
+因此不是本次单轮搬运瞬时峰值，也不是缺redirect驱动或anchor。
+
+Turing于2026-10-30独立执行三份机器断言并复核源码，正式`RESPONSIBILITY_REVIEW_PASS`：测试框架收尾依赖过宽。
+结论不证明UID1679的STD等待本身正确，不泛称所有RTL无Bug；只确认本次取消记录被不相关全局FIFO状态阻塞的直接因果。
+`WAVE_FACTS_REVIEW_PASS`与`COVERAGE_PATH_READINESS_PASS`另计，不当作本Bug修复验收。
+
+下一步必须形成并独立review最小方案，精确区分仍可能影响当前record计数的迟到deq与不相关阻塞raw；不能直接删除全局保护。
+必须保留完整record/epoch/anchor、窗口时序、相关deq归属/计数扣减、联合预检原子性、FIFO事实及exactly-once释放，
+保留STA/STD真实WB屏障、精确target与取消计数比较，不提高14、不丢snapshot、不用DUT数反填软件。
+已正式登记W44测试框架章节，状态方案待review；尚未编码、专项修复验证或单Bug提交，母任务未完成。

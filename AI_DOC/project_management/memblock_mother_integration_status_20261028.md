@@ -11,7 +11,7 @@
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
   本BugTuring最终独立review PASS并已提交；1343版fault3恢复99曾出现新ROLLBACK_XMR并进入`PAUSED_ANALYSIS`，该新Bug现已专项闭环并提交bba3008；
   1343基线矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。新rollback责任/方案/最终实现review均PASS，软件1/1及真实DUT20/20专项通过（18邻接加两个原根各10000笔），已提交bba3008ba。
-  新SV矩阵25组250/250已全部严格/clean通过，controller rc0退出并获独立review PASS；fault3恢复98出现新cancel-depth首错551576067，已联停收敛为20PASS/1FAIL/19ABORTED/58NOT_RUN、unknown0。当前`PAUSED_ANALYSIS`，仅运行原seed带波形复现；新Bug未修复，不恢复批量或收集最终coverage。
+  新SV矩阵25组250/250已全部严格/clean通过，controller rc0退出并获独立review PASS；fault3恢复98出现新cancel-depth首错551576067，已联停收敛为20PASS/1FAIL/19ABORTED/58NOT_RUN、unknown0。原参波形及只读观察均复现并退出，正式review确认测试框架全局deferred依赖过宽；当前无活动仿真，`PAUSED_ANALYSIS`等待方案review，未编码，不恢复批量或收集最终coverage。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -558,6 +558,11 @@ fault3 98条恢复队列已结束：20PASS/1FAIL/19ABORTED/58NOT_RUN，unknown0�
 新首错seed551576067在411428.500ns报local cancel snapshot depth15>14；原参数独立debug fresh compile已启动。
 分析入口：`AI_DOC/analysis/framework_design/memblock_cancel_snapshot_depth_seed551576067_20261030.md`。
 当前只做原seed复现及责任分析，不修改深度、不放宽检查、不新建worktree；新Bug关闭/专项/单Bug提交前不继续批量。
+
+最新责任门禁：原参波形/observer均同411428.5ns复现且退出，469443条关键生产事件hash完全相同。
+record1658已有anchor/scan/sw2/6；旧UID1679等待STD使deferred FIFO不空，全局门禁阻止当前record收口，local目标快照82232之后逐拍积压至15。
+Turing正式`RESPONSIBILITY_REVIEW_PASS`，确认测试框架责任；已登记W44 Buglist，方案待review、未coding，所有本轮仿真controller已收敛。
+截至本状态只有rollback问题完成新单Bug提交bba3008ba；新cancel问题仍未修复，不能列入已修复数量。
 
 覆盖率交付工具核对：旧基线实际数据库在sim同级`mother_matrix_pass_coverage_20261030.vdb`，r2聚合测试名为`merged_r2`，不是旧README所写的目录内`merged_r2.vdb`；数据库未丢失。
 本机URG help和实际单记录探针确认`-dbname 目录/测试名`语义；最终collector已改用`<输出>/merged/accepted350`并检查`<输出>/merged.vdb`及URG读回唯一聚合测试。

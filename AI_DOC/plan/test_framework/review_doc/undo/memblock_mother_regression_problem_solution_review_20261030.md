@@ -100,6 +100,8 @@ Turing最终独立`FINAL_IMPLEMENTATION_REVIEW_PASS`，本Bug方案移do，随�
 当前专项review：`AI_DOC/plan/test_framework/review_doc/undo/memblock_rollback_same_sample_provenance_implementation_review_20261030.md`。
 实际单Bug提交`bba3008ba`已在mother；随后恢复98和250两个独立mode，当前矩阵25组250/250严格/clean通过（210真实DUT＋40软件），controller rc0退出，Turing独立`MATRIX_250_INDEPENDENT_REVIEW_PASS`。
 fault3恢复98随后新首错551576067于411428.500ns报cancel snapshot depth15>14，最终20PASS/1FAIL/19ABORTED/58NOT_RUN、unknown0；当前仅原参数debug复现与责任分析，不恢复批量或生成最终coverage。
+后续原参波形及只读observer均同点复现并退出，469443生产关键事件hash一致；Turing正式责任review PASS确认测试框架全局deferred门禁阻止record1658收口，不是瞬时staging或缺anchor。
+当前无活动仿真；新Bug正式方案待review、未编码、未修复验证，保留原252/350严格验收和20条controller PASS的区别。
 分析入口：`AI_DOC/analysis/framework_design/memblock_cancel_snapshot_depth_seed551576067_20261030.md`；不把旧legacy topology根因或早期staging猜测当作本次正式结论。
 当前新源码最终清单只验收252/350（上述250＋两个原根），BasicTest非RTL11组110/110全通过；不复用旧1343的通过名额，没有新建worktree或修改RTL。
 分析入口：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
