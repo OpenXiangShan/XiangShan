@@ -124,19 +124,11 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   io.mptIn.valid    := false.B
   io.l1TLB.valid    := false.B
   nextState         := curState
-  switch(curState) {
-    is(s_idle) {
-      when(io.mptOut.valid && io.mptOut.bits.mptOnly) { //mptonly mode
-        // mpt valid without merge arb first implies that it is mpt only request.try change later
-        io.l1TLB.valid := true.B
-        when(io.l1TLB.ready) {
-          io.mergeArb.ready := true.B
-          nextState         := s_idle
-        }.otherwise {
-          nextState := s_send_l1_tlb
-        }
-      }.elsewhen(io.mergeArb.valid) { // normal mode, two modes are mutually exclusive
-        when(io.mergeArb.bits.fault || !mptEn) {
+  when(!flush) {
+    switch(curState) {
+      is(s_idle) {
+        when(io.mptOut.valid && io.mptOut.bits.mptOnly) { //mptonly mode
+          // mpt valid without merge arb first implies that it is mpt only request.try change later
           io.l1TLB.valid := true.B
           when(io.l1TLB.ready) {
             io.mergeArb.ready := true.B
@@ -144,33 +136,43 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
           }.otherwise {
             nextState := s_send_l1_tlb
           }
-        }.otherwise {
-          io.mptIn.valid := true.B
-          when(io.mptIn.ready) {
-            nextState := s_send_mpt
+        }.elsewhen(io.mergeArb.valid) { // normal mode, two modes are mutually exclusive
+          when(io.mergeArb.bits.fault || !mptEn) {
+            io.l1TLB.valid := true.B
+            when(io.l1TLB.ready) {
+              io.mergeArb.ready := true.B
+              nextState         := s_idle
+            }.otherwise {
+              nextState := s_send_l1_tlb
+            }
+          }.otherwise {
+            io.mptIn.valid := true.B
+            when(io.mptIn.ready) {
+              nextState := s_send_mpt
+            }
           }
         }
       }
-    }
 
-    is(s_send_mpt) { // delay+1+mptclk
-      io.mptIn.valid := false.B
-      when(io.mptOut.valid) {
+      is(s_send_mpt) { // delay+1+mptclk
+        io.mptIn.valid := false.B
+        when(io.mptOut.valid) {
+          io.l1TLB.valid := true.B
+          when(io.l1TLB.ready) {
+            io.mergeArb.ready := true.B
+            nextState         := s_idle
+          }.otherwise {
+            nextState := s_send_l1_tlb
+          }
+        }
+      }
+
+      is(s_send_l1_tlb) {
         io.l1TLB.valid := true.B
         when(io.l1TLB.ready) {
           io.mergeArb.ready := true.B
           nextState         := s_idle
-        }.otherwise {
-          nextState := s_send_l1_tlb
         }
-      }
-    }
-
-    is(s_send_l1_tlb) {
-      io.l1TLB.valid := true.B
-      when(io.l1TLB.ready) {
-        io.mergeArb.ready := true.B
-        nextState         := s_idle
       }
     }
   }
@@ -756,10 +758,10 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val respHitReg = RegEnable(hitPerms & stageCheck.bits.dataValid, false.B, pipeFlowEn)
   // Data is latched regardless of dataValid. If dataValid is low, the hit signal is also considered invalid.
   // In this case, hitPerms actually holds the result from the previous pipeline stage.
-  
+
   respHitRegTmp    := respHitReg || overRangeFaultReg
   io.respHit.valid := (respHitReg || overRangeFaultReg) && !refilling && !fencePA && !flushPipeOnly
-  
+
   val (sphitReg, l0hitReg) = (RegEnable(sphit, pipeFlowEn), RegEnable(l0Hit, pipeFlowEn))
   val cacheHitPerm = Mux1H(
     Seq(sphitReg, l0hitReg),
@@ -1131,14 +1133,22 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   // max 3 level or gate on top of mem.resp，NON ZERO error of mtpe
   val rsvZeroError1 = RegEnable(mem.resp.bits(62, 58).orR, false.B, memRespAccepted)
   val rsvZeroError2 = false.B
-  when(io.req.fire) {
+  when(io.req.fire) { //updated before s_addr_proc
     mpteData.apply(io.req.bits.hitAddr)
   }.elsewhen(memRespAccepted) {
     mpteData := mpteResp.data
   }
 
+  val rootAddr = Cat(io.csr.mmpt.ppn(ppnLen - 1, 0),0.U(12.W))
+  val checkRootPMP = Wire(Bool())
+  val rootLevel = Mux(
+    io.csr.mmpt.mode === 2.U,
+    "b1000".U, // Smmpt52
+    "b0100".U  // Smmpt43
+  )
+
   val pn = Wire(UInt(9.W))
-  pn := Mux1H(Seq(
+  pn := Mux1H(Seq( //level updated at s_addr_proc
     level(3) -> Cat(0.U(4.W), pa(47 - mptOff, 43 - mptOff)),
     level(2) -> pa(42 - mptOff, 34 - mptOff),
     level(1) -> pa(33 - mptOff, 25 - mptOff),
@@ -1147,13 +1157,14 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
 
   // 3 layers of gate logic select the coresponding PN[i] based on cur level, just a onehot mux
   val memAddr = mpteData.getAddr(pn) // gen addr 0 delay
-  io.mem.req.bits.addr := memAddr
+  // used at s_addr_proc
   io.pmp.req.valid := DontCare
-  io.pmp.req.bits.addr := Mux(memRespAccepted, mpteResp.getAddr(pn), memAddr)
-  // should be safer than just := memAddr
+  io.pmp.req.bits.addr := Mux(checkRootPMP, rootAddr, mpteData.getAddr(0.U(9.W)))
+  // Mux(memRespAccepted, mpteResp.getAddr(pn), memAddr))
 
+  io.mem.req.bits.addr := memAddr // used at s_mem_req
   // accessFault logic
-  val pmpFail = (!isLeafMpte) && (io.pmp.resp.ld || io.pmp.resp.mmio)
+  val pmpFail = (!isLeafMpte || checkRootPMP) && (io.pmp.resp.ld || io.pmp.resp.mmio)
   // PMP delay unknown
   val entryError = mpteInvalid || rsvZeroError0 || rsvZeroError1 || rsvZeroError2 || ((!isLeafMpte) && level === 1.U)
   // level == 0 non leaf, zero = / = 0,pmp fail,invalid casue accessFault
@@ -1180,16 +1191,27 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   nextLevel         := level >> 1.U // onehotcounter-1 no aflevel
   nextPmpCheckLevel := pmpCheckLevel >> 1.U
   io.refill.valid   := false.B
+  checkRootPMP      := false.B
   // default val
   switch(curState) {
     is(s_idle) {
+      checkRootPMP := true.B
       io.req.ready := true.B
       when(io.req.fire) {
-        setPmpCheckLevel  := true.B
-        nextLevel         := io.req.bits.hitLevel
-        nextPmpCheckLevel := io.req.bits.hitLevel
-        nextState         := s_mem_req // to mem req if fire
-        setLevel          := true.B
+        when(pmpFail){
+          io.refill.valid           := true.B
+          io.refill.bits.isAf       := true.B
+          io.refill.bits.isLeafMpte := false.B
+          io.refill.bits.pa         := io.req.bits.reqPA
+          io.refill.bits.level      := rootLevel
+          nextState                 := s_idle
+        }.otherwise{
+          setPmpCheckLevel  := true.B
+          nextLevel         := io.req.bits.hitLevel
+          nextPmpCheckLevel := io.req.bits.hitLevel
+          nextState         := s_mem_req // to mem req if fire
+          setLevel          := true.B
+        }
       }
     }
     is(s_mem_req) {

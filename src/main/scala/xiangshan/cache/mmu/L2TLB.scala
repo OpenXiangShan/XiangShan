@@ -1190,7 +1190,8 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     io.csr.tlb.satp.changed ||
     io.csr.tlb.vsatp.changed ||
     io.csr.tlb.hgatp.changed ||
-    io.csr.tlb.priv.virt_changed
+    io.csr.tlb.priv.virt_changed ||
+    (if (HasMptCheck) io.csr.tlb.mmpt.changed else false.B)
   flush(0) := DelayN(flushCond, itlbParams.fenceDelay)
   flush(1) := DelayN(flushCond, ldtlbParams.fenceDelay)
 
