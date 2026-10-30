@@ -128,8 +128,9 @@ class TageMeta(implicit p: Parameters) extends TageBundle {
 }
 
 class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val forIdx: UInt      = UInt(SetIdxWidth.W)
-  val forTag: Vec[UInt] = Vec(2, UInt(TagWidth.W))
+  val forBankIdx: UInt      = UInt(BankIdxWidth.W)
+  val forSetIdx:  UInt      = UInt(SetIdxWidth.W)
+  val forTag:     Vec[UInt] = Vec(2, UInt(TagWidth.W))
 }
 
 class PredictTagMatchResult(implicit p: Parameters) extends TageBundle {
