@@ -27,6 +27,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.GTimer
 import utility.LowerMask
+import utility.ParallelORR
 import utility.ParallelSelectTwo
 import utility.SelectTwoInterRes
 import utility.XSDebug
@@ -206,15 +207,24 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val t0_trainBranchMask = VecInit(io.train.branches.map(b =>
     b.valid && b.bits.attribute.needIttage && b.bits.taken
   ))
-  private val t0_hasTrainBranch = t0_trainBranchMask.asUInt.orR
-  private val t0_trainBranchIdx = PriorityEncoder(t0_trainBranchMask)
+  private val t0_hasTrainBranch = ParallelORR(t0_trainBranchMask)
   private val t0_meta           = io.train.meta.ittage
-  private val t0_updateMisPred = t0_hasTrainBranch &&
-    io.train.branches(t0_trainBranchIdx).bits.mispredict
+  // The mask is at most one-hot, so reduce the selected mispredict bits directly
+  // instead of serializing a priority encoder and a dynamic mux on trainReady.
+  private val t0_updateMisPred = ParallelORR(t0_trainBranchMask.zip(io.train.branches).map {
+    case (selected, branch) => selected && branch.bits.mispredict
+  })
+
+  when(io.enable && io.stageCtrl.t0_fire) {
+    assert(
+      PopCount(t0_trainBranchMask) <= 1.U,
+      "ITTAGE training accepts at most one valid, taken indirect branch without a RAS pop"
+    )
+  }
 
   // Re-read for every provider update and for allocation after a misprediction.
   // Training selects providers and allocation candidates from the current entries.
-  private val t0_needRead = t0_hasTrainBranch && (t0_updateMisPred || t0_meta.provider.valid)
+  private val t0_needRead = (t0_hasTrainBranch && t0_meta.provider.valid) || t0_updateMisPred
 
   // ITTAGE prediction reads occur in s1, rather than TAGE's s0.  A bank
   // conflict blocks the FTQ training handshake; prediction keeps priority.
@@ -319,10 +329,12 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val trainBranchIdxVec: Vec[Bool] = VecInit(t2_train.branches.map(b =>
     b.valid && b.bits.attribute.needIttage && b.bits.taken
   ))
-  assert(
-    PopCount(trainBranchIdxVec) <= 1.U,
-    "At most one branch in branches should be valid and isOtherIndirect for ITTAGE update"
-  )
+  when(t2_fire) {
+    assert(
+      PopCount(trainBranchIdxVec) === 1.U,
+      "An active ITTAGE training transaction must contain exactly one selected branch"
+    )
+  }
   private val trainBranchIdx: UInt = PriorityEncoder(trainBranchIdxVec)
   private val hasTrainBranch: Bool = trainBranchIdxVec.asUInt.orR
 
