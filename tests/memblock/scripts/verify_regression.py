@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4998,6 +4998,31 @@ def _check_stream_disjoint_bypass(result: dict[str, Any]) -> None:
         _require(not any(counts), "disabled disjoint bypass generated choices")
 
 
+def _check_stream_byte_bypass(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 85:
+        return
+    # Identical exactly-once layout, separate mode and observed population.
+    _check_stream_disjoint_bypass(dict(result,
+        target_stream_disjoint_bypass=result.get("target_stream_byte_bypass"),
+        stream_disjoint_bypass=result.get("stream_byte_bypass")))
+    byte = _csv_counts(result, "stream_byte_bypass", 18)
+    spatial = _csv_counts(result, "stream_byte_bypass_granules", 9)
+    line = _csv_counts(result, "stream_disjoint_bypass", 18)
+    operations = _csv_counts(result, "stream_ops", 5)
+    canceled = _csv_counts(result, "stream_cancel", 29)
+    _require(sum(byte[:2]) + sum(line[:2]) <= operations[0] + canceled[1] and
+             byte[2] + line[2] <= operations[1] + canceled[2] and
+             sum(byte[6:8]) + sum(line[6:8]) <= canceled[1] and
+             byte[8] + line[8] <= canceled[2],
+             "exclusive byte/line bypass populations exceed eligible loads")
+    for cls in range(3):
+        line, vword, word = spatial[cls*3:cls*3+3]
+        relations = byte[9+cls*3:12+cls*3]
+        _require(word <= vword <= line <= byte[3+cls] and
+                 max(relations) <= line <= sum(relations),
+                 "byte bypass granule relations disagree with unresolved witnesses")
+
+
 def _check_stream_dependency_pages(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 83:
         return
@@ -5543,6 +5568,7 @@ def _check_result(
         _check_stream_accounting(result)
         _check_stream_dependency_pages(result)
         _check_stream_disjoint_bypass(result)
+        _check_stream_byte_bypass(result)
         _check_stream_recovery_accounting(result)
         _check_scalar_dependency_accounting(result)
         _check_vector_index_accounting(result)

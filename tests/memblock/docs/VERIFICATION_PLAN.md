@@ -184,12 +184,15 @@ touched word receives a strict terminal readback. Bounded random indexed vectors
 now vary offset spacing/permutation and repeated gathers for ordinary and
 segment operations; partial byte overlap and overlapping scatters remain open.
 
-Ordinary physically line-disjoint integer/FP/vector loads can now be selected
+Ordinary physically line- or active-byte-disjoint integer/FP/vector loads can be selected
 to issue past unresolved scalar STA/translation or unissued vector siblings.
-A declared input footprint covers every active translated byte; same-line,
-recovery-graph, permission and auxiliary-witness accesses retain prior rules.
+A declared input footprint covers every active translated byte; byte mode
+requires a shared line but excludes every actual older-store byte. Recovery-graph,
+permission and auxiliary-witness accesses retain prior rules.
 Cold scalar predictor metadata is coupled and frozen before dispatch. Actual
 first-acceptance and blocker relations conserve selected/canceled generations;
+byte mode additionally records unresolved same-line/16-byte-region/word witnesses
+using the accepted load uop and unresolved older store-sibling bytes;
 there is no fixed-latency or early-completion requirement. Broader conflicting
 speculation, vector-result dependencies, predictor histories and general
 context/mapping overlap remain gaps. CPU producer trace and bounded qualification

@@ -191,6 +191,7 @@ struct RandomConstraints {
     unsigned stream_dependency_per_mille = 250;
     unsigned stream_dependency_pages_per_mille = 250;
     unsigned stream_disjoint_bypass_per_mille = 250;
+    unsigned stream_byte_bypass_per_mille = 250;
     unsigned stream_store_pair_per_mille = 500;
     unsigned stream_arena_per_mille = 750;
     unsigned ptw_response_reorder_per_mille = 250;
@@ -1137,6 +1138,8 @@ struct RandomConstraints {
             stream_dependency_pages_per_mille = parsed;
         } else if (key == "stream-disjoint-bypass") {
             stream_disjoint_bypass_per_mille = parsed;
+        } else if (key == "stream-byte-bypass") {
+            stream_byte_bypass_per_mille = parsed;
         } else if (key == "stream-store-pair") {
             stream_store_pair_per_mille = parsed;
         } else if (key == "stream-arena") {
@@ -1859,6 +1862,7 @@ struct RandomConstraints {
             stream_dependency_per_mille > 1000 ||
             stream_dependency_pages_per_mille > 1000 ||
             stream_disjoint_bypass_per_mille > 1000 ||
+            stream_byte_bypass_per_mille > 1000 ||
             stream_store_pair_per_mille > 1000 ||
             stream_arena_per_mille > 1000 || ptw_response_reorder_per_mille > 1000 ||
             dcache_response_reorder_per_mille > 1000 ||
@@ -3113,7 +3117,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=84 constraints=" << name
+        stream << "constraint_schema=85 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3227,6 +3231,7 @@ struct RandomConstraints {
                << " target_stream_dependency=" << stream_dependency_per_mille
                << " target_stream_dependency_pages=" << stream_dependency_pages_per_mille
                << " target_stream_disjoint_bypass=" << stream_disjoint_bypass_per_mille
+               << " target_stream_byte_bypass=" << stream_byte_bypass_per_mille
                << " target_stream_store_pair=" << stream_store_pair_per_mille
                << " target_stream_arena=" << stream_arena_per_mille
                << " target_dcache_response_reorder=" << dcache_response_reorder_per_mille

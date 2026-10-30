@@ -207,16 +207,18 @@ struct SyntheticEnvironment {
     unsigned loads_before_older_std = 0, head_checks = 0, dependency_checks = 0;
     unsigned issues = 0, commits = 0;
     bool allow_disjoint_bypass = false;
+    bool allow_byte_bypass = false;
+    unsigned byte_bypass_acceptances = 0;
     unsigned disjoint_acceptances = 0, disjoint_relations = 0;
     std::set<std::pair<unsigned, unsigned>> disjoint_pairs;
-    static std::set<std::uint64_t> input_lines(const Instruction &work) {
+    static std::set<std::uint64_t> input_lines(const Instruction &work, unsigned granule = 64) {
         std::set<std::uint64_t> lines;
         const auto add = [&](const auto &t, std::uint64_t address, unsigned width) {
             for (unsigned byte = 0; byte < width; ++byte) {
                 const auto va = address + byte;
                 const auto pa = t.reference_pages ? t.reference_pages->physical_address(va) :
                     t.oracle_address ? *t.oracle_address + va - t.address : va;
-                lines.insert(pa / 64U);
+                lines.insert(pa / granule);
             }
         };
         if (work.kind == 0) add(work.load, work.load.address, 1U << (unsigned(work.load.op) % 4U));
@@ -865,10 +867,15 @@ struct SyntheticEnvironment {
         bool bypassed = false;
         for (unsigned index = retired; index < work.id; ++index) {
             const auto &older = instructions[index];
-            if (allow_disjoint_bypass && older.is_store()) {
+            if ((allow_disjoint_bypass || allow_byte_bypass) && older.is_store()) {
                 const auto load_lines = input_lines(work), store_lines = input_lines(older);
-                const bool disjoint = std::none_of(load_lines.begin(), load_lines.end(),
+                const bool line_disjoint = std::none_of(load_lines.begin(), load_lines.end(),
                     [&](auto line) { return store_lines.count(line); });
+                const auto load_bytes = input_lines(work, 1), store_bytes = input_lines(older, 1);
+                const bool byte_disjoint = std::none_of(load_bytes.begin(), load_bytes.end(),
+                    [&](auto byte) { return store_bytes.count(byte); });
+                const bool disjoint = (allow_disjoint_bypass && line_disjoint) ||
+                    (allow_byte_bypass && byte_disjoint);
                 if (disjoint) {
                     if (work.kind == 0) require(!work.load.store_set_hit && !work.load.load_wait_bit &&
                         !work.load.load_wait_strict && !work.load.wait_for_rob_flag && !work.load.wait_for_rob_value,
@@ -877,6 +884,7 @@ struct SyntheticEnvironment {
                     if (unresolved) {
                         bypassed = true;
                         disjoint_relations += disjoint_pairs.emplace(work.id, older.id).second;
+                        byte_bypass_acceptances += allow_byte_bypass && !line_disjoint;
                     }
                     continue;
                 }
@@ -1340,6 +1348,7 @@ public:
         constraints.stream_max_instructions = 32;
         constraints.stream_dependency_pages_per_mille = 0;
         constraints.stream_disjoint_bypass_per_mille = 0;
+        constraints.stream_byte_bypass_per_mille = 0;
         constraints.stream_unresolved_per_mille = 0;
         constraints.stream_unresolved_inflight_per_mille = 0;
         constraints.misaligned_per_mille = 450;
@@ -1505,10 +1514,18 @@ int main(int argc, char **argv) {
                 "oracle checkpoint failed to remove canceled-store bytes");
             std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
                 << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
-        } else if (mode == "stream" || mode == "disjoint-bypass" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
+        } else if (mode == "stream" || mode == "byte-bypass" || mode == "disjoint-bypass" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
             require(argc == 6 || (mode == "permission" && argc == 7) || (mode == "independent" && argc == 7) || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "byte-bypass") {
+                fixture.constraints.stream_byte_bypass_per_mille = 1000;
+                fixture.constraints.stream_dependency_per_mille = 0;
+                fixture.constraints.stream_disjoint_bypass_per_mille = 1000;
+                fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = limit;
+                fixture.environment.allow_disjoint_bypass = fixture.environment.allow_byte_bypass = true;
+                fixture.environment.delayed_store_feedback = true;
+            }
             if (mode == "disjoint-bypass") {
                 fixture.constraints.stream_disjoint_bypass_per_mille = 1000;
                 fixture.constraints.stream_dependency_per_mille = 0;
@@ -1578,6 +1595,7 @@ int main(int argc, char **argv) {
                 << ",\"loads_before_older_std\":" << env.loads_before_older_std << ",\"head_checks\":" << env.head_checks
                 << ",\"dependency_checks\":" << env.dependency_checks << ",\"issues\":" << env.issues
                 << ",\"replay_bound_checks\":" << env.replay_bound_checks
+                << ",\"byte_bypass_acceptances\":" << env.byte_bypass_acceptances
                 << ",\"disjoint_acceptances\":" << env.disjoint_acceptances
                 << ",\"disjoint_relations\":" << env.disjoint_relations
                 << ",\"replay_retry_bound_checks\":" << env.replay_retry_bound_checks
@@ -1640,6 +1658,12 @@ int main(int argc, char **argv) {
             std::cout << "],\"stream_disjoint_bypass\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_disjoint_bypass.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_disjoint_bypass[i];
+            std::cout << "],\"stream_byte_bypass\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_byte_bypass.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_byte_bypass[i];
+            std::cout << "],\"stream_byte_bypass_granules\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_byte_bypass_granules.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_byte_bypass_granules[i];
             std::cout << "]"
                 << ",\"cold_attempts\":" << fixture.coverage.stream_recovery_inflight[0]
                 << ",\"cold_unavailable\":" << fixture.coverage.stream_recovery_inflight[1]

@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=84`.
+`constraint_schema=85`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -80,6 +80,7 @@ they do not imply arbitrary numeric suffix support.
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the page offset; `stream-dependency-pages` may also select a page within the declared mapping. Scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
 | `stream-dependency-pages` | Conditional page-displacement ALU rate for an already selected address edge, default 250 in all presets. Result bits above bit5 select a cyclic page displacement inside the ordinary identity/permuted window or selected 64-KiB NAPOT region, reserving one guard page at each end. A selected ALU may retain the page; only actual page changes count as cross-page edges. Zero preserves the preceding RNG draws and same-page addresses. |
 | `stream-disjoint-bypass` | Conditional admission rate for ordinary scalar integer/FP or vector loads disjoint in physical cache lines from every live older store; default 250 in every preset. Selected loads may issue past unresolved older scalar STA/translation or vector sibling issue, retaining operand/head/VSTART/ordered-indexed constraints and exact normal data. Scalar metadata uses a reachable cold predictor with no store-set/wait/strict bits. Graph, permission and auxiliary survival roles are excluded. Zero preserves preceding RNG/scheduling. This rate selects capability, not a promised issue/completion ratio. |
+| `stream-byte-bypass` | Conditional admission rate for ordinary scalar integer/FP or vector loads sharing a physical line with at least one live older store but no active physical byte with any live older store; default 250 in every preset. Line- and byte-mode selection are exclusive. Uses the same cold predictor, dependency, head/VSTART, vector and strict byte rules as line bypass. Zero adds no draws and preserves preceding scheduling. |
 | `stream-store-pair` | Conditional rate offering an ordinary scalar store's initial STA and STD together when both operand events are ready. Independent retained lane handshakes permit same-edge, STA-first or STD-first acceptance. Default 500 in all presets; zero retains separate scheduling. Graph operands and STA retries remain separate. |
 | `stream-arena` | Ordinary eight-line stream-arena selection rate; default 750 preserves the previous seeded draw. Zero uses the configured locality/working set for every ordinary selection; 1000 always selects the eight-line arena. Dependencies, permission reservations and unresolved-graph addresses retain their own constraints. This is an address-choice rate, not an observed cache-miss percentage. |
 | `stream-permission-load` | Conditional scalar/FP load admission rate for immutable execute-only pages in translated ordinary streams; default 50, zero for cmo-stress. A seeded 1..4-probe epoch budget bounds canceled/replacement work; one denied probe may be live. Bare epochs and unresolved graph roles are excluded. |
@@ -1453,7 +1454,8 @@ Schema84 removes the blanket older-store-address wait for selected ordinary
 integer/FP/vector loads whose declared physical cache-line footprint is disjoint
 from every older live store. Every active vector byte and each scalar byte is
 translated by the independent declared map; inactive elements contribute no
-footprint. Same-line disjoint-byte accesses retain the prior wait. Store operands
+footprint. The separate byte-bypass mode permits same-line active-byte-disjoint
+accesses as described below. Store operands
 may remain unavailable in the emulated backend even though the independent
 model knows their eventual values. Scalar selected metadata is frozen before
 enqueue/issue as an untrained predictor: hit/wait/strict and wait target are zero.
@@ -1481,6 +1483,26 @@ active. A separate native partial-PA witness checks surviving store bytes and
 absence of the killed store's write. A conservative redirect alone is no CPU bug.
 This direction does not remove context drains or generate general overlapping
 speculation, predictor histories, segment/FOF speculation or arbitrary synonyms.
+
+Schema85 adds `stream-byte-bypass`. Independent physical-byte sets cover scalar
+widths and every active vector byte, including translated page crossings, masks
+and VSTART. Duplicate gather bytes collapse only for intersection; destination
+element data expectations remain unchanged. A candidate must share a physical
+line with a live older store and be byte-disjoint from every such store. This
+retains same-line 16-byte-region/word interactions without permitting a true
+store-byte overlap. No address or expected value is changed to manufacture a
+candidate. Legal conservative replay/redirect remains permitted.
+
+`stream_byte_bypass` uses the same 18-counter layout. Its nine blocker bins
+count only currently accepted load-uop bytes sharing a physical line with an
+unresolved older store. For vector stores, only still-unaccepted sibling-uop
+bytes supply witnesses; already accepted siblings do not. The
+additional nine `stream_byte_bypass_granules` bins are once-per-load unresolved
+relations at 64-, 16- and 8-byte granules, in integer/FP/vector class order. They
+obey word <= region <= line <= accepted and line is the union of the three
+blocker classes. No positive bins are required for sparse runs. The verifier
+also checks exclusive line/byte-mode selections against eligible/canceled
+populations. These are accepted-edge relations, not evidence of early completion.
 
 ### Sustained ordinary histories
 

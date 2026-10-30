@@ -61,6 +61,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.feedback = []
         cls.retirement = []
         cls.bypass = []
+        cls.byte_bypass = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -180,6 +181,7 @@ class MixedStreamTest(unittest.TestCase):
                 'feedback_cases': cls.feedback,
                 'retirement_cases': cls.retirement,
                 'disjoint_bypass_cases': cls.bypass,
+                'byte_bypass_cases': cls.byte_bypass,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
@@ -293,6 +295,52 @@ class MixedStreamTest(unittest.TestCase):
                         'older vector-store address', 'disjoint-bypass-physical-overlap', 'non-cold predictor')), r.stderr)
             self.assertTrue(failures, name + ' escaped')
             self.mutations[name] = failures
+
+    def test_same_line_byte_disjoint_bypass_has_variable_legal_schedules(self):
+        results = [self.run_fixture('byte-bypass', seed, timing, 0, 64)
+                   for timing in (0, 1) for seed in range(1, 33)]
+        self.byte_bypass.extend(results)
+        self.assertGreater(sum(r['byte_bypass_acceptances'] for r in results), 0)
+        self.assertGreater(len({r['schedule'] for r in results}), 32)
+        for cls in range(3):
+            self.assertGreater(sum(r['stream_byte_bypass'][cls] for r in results), 0)
+        for r in results:
+            c = r['stream_byte_bypass']
+            self.assertEqual(c[:3], [a+b for a,b in zip(c[3:6],c[6:9])])
+        self.assertEqual(results[0], self.run_fixture('byte-bypass', 1, 0, 0, 64))
+
+    def test_private_byte_overlap_and_predictor_faults_reject(self):
+        old = 'return !older.is_store() || (!older.recovery_id && stream_disjoint(work.byte_footprint, older.byte_footprint));'
+        self.assertEqual(self.source.count(old), 1)
+        binary = self.compile(self.source.replace(old, 'return true;'), 'byte-overlap')
+        detected = []
+        for seed in range(1, 17):
+            r = subprocess.run([str(binary), 'byte-bypass', str(seed), '1', '0', '64'],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode:
+                self.assertTrue(any(text in r.stderr for text in ('older scalar-store address',
+                    'older vector-store address', 'disjoint-bypass-physical-overlap')), r.stderr)
+                detected.append(seed)
+        self.assertTrue(detected, 'byte-overlap mutant escaped independent shell')
+        self.mutations['byte_overlap_bypass'] = detected
+        # Mutate only byte mode: line-mode sensitivity cannot certify this
+        # separate admission branch's reachable cold predictor contract.
+        cold = 'work.load.store_set_hit = work.load.load_wait_bit = work.load.load_wait_strict = false;'
+        branch = self.source.index('// The independent byte image proves')
+        end = self.source.index('            // Reserve a separate', branch)
+        block = self.source[branch:end]
+        self.assertEqual(block.count(cold), 1)
+        mutant = self.source[:branch] + block.replace(cold, cold.replace('false', 'true')) + self.source[end:]
+        binary = self.compile(mutant, 'byte-predictor')
+        detected = []
+        for seed in range(1, 33):
+            r = subprocess.run([str(binary), 'byte-bypass', str(seed), '1', '0', '64'],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode:
+                self.assertIn('non-cold predictor', r.stderr)
+                detected.append(seed)
+        self.assertTrue(detected, 'byte-only predictor mutant escaped independent shell')
+        self.mutations['byte_predictor'] = detected
 
     def test_dependent_streams_gate_operands_and_vary_graph_structure(self):
         results = [self.run_fixture('dependency', seed, timing, 0, 32)
@@ -964,9 +1012,11 @@ class MixedStreamTest(unittest.TestCase):
 
     def test_private_missing_older_address_guard_is_rejected(self):
         scalar = ('(work.fault() || work.kind == 4 || older_addresses_known ||\n'
-                  '                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)))')
+                  '                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)) ||\n'
+                  '                    (work.byte_bypass && stream_disjoint(work.byte_footprint, unresolved_store_bytes)))')
         vector = ('(work.kind == 3 || older_addresses_known ||\n'
-                  '                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)))')
+                  '                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)) ||\n'
+                  '                    (work.byte_bypass && stream_disjoint(work.byte_footprint, unresolved_store_bytes)))')
         self.assertEqual(self.source.count(scalar), 1)
         self.assertEqual(self.source.count(vector), 1)
         binary = self.compile(self.source.replace(scalar, 'true').replace(vector, 'true'), 'unknown-address-load')

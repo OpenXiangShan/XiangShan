@@ -3311,6 +3311,13 @@ struct MixedCoverage {
     // STA unaccepted / scalar translation unacknowledged / vector sibling
     // uop unaccepted. Repeated vector uops do not recount a relation.
     std::array<std::uint64_t, 18> stream_disjoint_bypass{};
+    // Same-line physical-byte-disjoint mode: same lifecycle layout, with
+    // blocker relations restricted to older stores sharing a physical line
+    // at actual acceptance. Line- and byte-mode selections are exclusive.
+    std::array<std::uint64_t, 18> stream_byte_bypass{};
+    // Integer/FP/vector: once-per-load unresolved older store sharing 64/16/8
+    // physical-byte granules. Every witness remains active-byte-disjoint.
+    std::array<std::uint64_t, 9> stream_byte_bypass_granules{};
     // Epochs exceeding32, maximum epoch retirements, admissions after ordinal32
     // with older accepted pending work, ROB value/wrap identity reuse admissions.
     std::array<std::uint64_t, 4> stream_history{};
@@ -3707,6 +3714,8 @@ struct MixedCoverage {
                " stream_dependencies=" + csv(stream_dependencies) +
                " stream_dependency_pages=" + csv(stream_dependency_pages) +
                " stream_disjoint_bypass=" + csv(stream_disjoint_bypass) +
+               " stream_byte_bypass=" + csv(stream_byte_bypass) +
+               " stream_byte_bypass_granules=" + csv(stream_byte_bypass_granules) +
                " stream_recovery=" + csv(stream_recovery) +
                " stream_recovery_shapes=" + csv(stream_recovery_shapes) +
                " stream_recovery_victims=" + csv(stream_recovery_victims) +

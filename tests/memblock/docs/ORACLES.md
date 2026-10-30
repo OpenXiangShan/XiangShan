@@ -465,8 +465,11 @@ selection are observed; they do not prove arbitrary rename or ALU timing.
 
 Ordinary selected disjoint-bypass loads retain exact admission-order byte
 expectations. Independent scalar and active-vector byte translation builds a
-physical cache-line footprint; it must be disjoint from every live older store.
-This deliberately excludes same-line byte-disjoint cases. A reachable cold
+physical cache-line footprint; line mode must be disjoint from every live older
+store. Byte mode instead requires no active physical-byte intersection with any
+older store and at least one shared physical line. Independent byte sets include
+page crossings and all active vector elements; deduplicating gather identities
+does not remove repeated destination-element expectations. A reachable cold
 scalar predictor clears hit/wait/strict/target metadata before dispatch. Issue
 may pass an older unaccepted STA, unacknowledged translation or unissued vector
 sibling; operand completion, full queue identities, head constraints and normal
@@ -476,7 +479,13 @@ The whole pending acceptance batch is frozen before classification. A sampled
 hit at boundary E is available before a new acceptance labeled E; cursor-based
 per-attempt matching excludes older reused SQ feedback. These counters do not
 independently reconstruct a passive address transcript or require completion
-before the older store. RAW partial-PA matches and unaligned SQ forwarding may
+before the older store. Byte-mode temporal bins require the currently accepted
+load-uop bytes to share a line with unresolved older store bytes. Only
+still-unaccepted vector-store siblings supply those bytes; future load uops and
+already accepted store siblings cannot supply a witness. Full-instruction byte
+sets remain authoritative for admission and all-older safety. The
+64/16/8-byte spatial relations deduplicate per load and retain subset/union
+bounds. RAW partial-PA matches and unaligned SQ forwarding may
 legally replay; existing explicit cancellation/strict replacement expectations
 remain required, without weakening data or side-effect checking.
 

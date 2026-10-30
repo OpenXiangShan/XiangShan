@@ -30,9 +30,11 @@ struct StreamWork {
     bool data_first = false;
     bool address_consumed = false, data_consumed = false;
     bool cross_page_address = false;
-    StreamFootprint footprint;
+    StreamFootprint footprint, byte_footprint;
     bool disjoint_bypass = false, bypass_accepted = false;
+    bool byte_bypass = false;
     unsigned bypass_relations = 0;
+    unsigned bypass_spatial_relations = 0;
     std::optional<std::uint64_t> first_address_edge;
     unsigned address_retries = 0;
     StoreAddressReplay address_replay;
@@ -287,27 +289,56 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.vectors[attempt.uop].replay_not_before = event.edge;
                 work.replay[attempt.uop].reset();
             }
-            if (work.disjoint_bypass && initial_events) {
+            if ((work.disjoint_bypass || work.byte_bypass) && initial_events) {
                 const unsigned cls = work.kind == 1 ? 2U : unsigned(work.load.fp_wen);
-                auto &counts = coverage.stream_disjoint_bypass;
+                auto &counts = work.byte_bypass ? coverage.stream_byte_bypass : coverage.stream_disjoint_bypass;
                 if (!work.bypass_accepted) { work.bypass_accepted = true; ++counts[3U + cls]; }
-                unsigned relations = 0;
+                // A vector instruction's future uops cannot witness this
+                // acceptance. Likewise only unresolved older store siblings
+                // can witness a same-line temporal relation. Admission/safety
+                // still uses the entire instruction's immutable byte set.
+                const auto accepted_bytes = work.byte_bypass && work.kind == 1
+                    ? stream_byte_footprint(std::vector{work.vectors.at(attempt.uop)}) : work.byte_footprint;
+                unsigned relations = 0, spatial = 0;
                 for (auto older = live.begin(); older != live.end() && &*older != &work; ++older) {
                     if (!older->is_store()) continue;
-                    if (!stream_disjoint(work.footprint, older->footprint)) {
+                    if (work.byte_bypass ? !stream_disjoint(work.byte_footprint, older->byte_footprint) :
+                        !stream_disjoint(work.footprint, older->footprint)) {
                         phase += ":disjoint-bypass-physical-overlap"; return false;
                     }
+                    unsigned blockers = 0;
+                    StreamFootprint unresolved_bytes;
                     if (older->kind == 2) {
-                        if (!older->first_address_edge || *older->first_address_edge > event.edge) relations |= 1U;
+                        if (!older->first_address_edge || *older->first_address_edge > event.edge) blockers = 1U;
                         else if (!older->recovery_id && !older->address_replay.translated_at(event.edge,
-                            environment.iq_slow_feedback_stats().sta_samples, older->store)) relations |= 2U;
-                    } else if (std::any_of(older->vector_first_edges.begin(), older->vector_first_edges.end(), [&](const auto &edge) {
-                        return !edge || *edge > event.edge;
-                    })) relations |= 4U;
+                            environment.iq_slow_feedback_stats().sta_samples, older->store)) blockers = 2U;
+                        if (work.byte_bypass && blockers) unresolved_bytes = older->byte_footprint;
+                    } else for (unsigned u = 0; u < older->vector_first_edges.size(); ++u) {
+                        const auto &edge = older->vector_first_edges[u];
+                        if (edge && *edge <= event.edge) continue;
+                        blockers |= 4U;
+                        if (work.byte_bypass) {
+                            const auto bytes = stream_byte_footprint(std::vector{older->vectors.at(u)});
+                            unresolved_bytes.insert(bytes.begin(), bytes.end());
+                        }
+                    }
+                    if (work.byte_bypass && !stream_shares_granule(accepted_bytes, unresolved_bytes, 64U)) continue;
+                    relations |= blockers;
+                    if (work.byte_bypass && blockers) {
+                        spatial |= 1U;
+                        spatial |= stream_shares_granule(accepted_bytes, unresolved_bytes, 16U) ? 2U : 0U;
+                        spatial |= stream_shares_granule(accepted_bytes, unresolved_bytes, 8U) ? 4U : 0U;
+                    }
                 }
                 for (unsigned blocker = 0; blocker < 3; ++blocker)
                     if ((relations & ~work.bypass_relations) & (1U << blocker)) ++counts[9U + cls * 3U + blocker];
                 work.bypass_relations |= relations;
+                if (work.byte_bypass) {
+                    for (unsigned granule = 0; granule < 3; ++granule)
+                        if ((spatial & ~work.bypass_spatial_relations) & (1U << granule))
+                            ++coverage.stream_byte_bypass_granules[cls * 3U + granule];
+                    work.bypass_spatial_relations |= spatial;
+                }
             }
             if (work.paired_initial && work.pair_edges[0] && work.pair_edges[1]) {
                 const auto a = *work.pair_edges[0], d = *work.pair_edges[1];
@@ -633,8 +664,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             record.sample(coverage.stream_cancel);
             if (item.cross_page_address && !item.address_consumed)
                 ++coverage.stream_dependency_pages[10U + item.kind];
-            if (item.disjoint_bypass && !item.bypass_accepted)
-                ++coverage.stream_disjoint_bypass[6U + (item.kind == 1 ? 2U : unsigned(item.load.fp_wen))];
+            if ((item.disjoint_bypass || item.byte_bypass) && !item.bypass_accepted)
+                ++(item.byte_bypass ? coverage.stream_byte_bypass : coverage.stream_disjoint_bypass)
+                    [6U + (item.kind == 1 ? 2U : unsigned(item.load.fp_wen))];
         }
         canceled += killed;
         const auto lq_canceled = environment.lq_redirect_canceled_observed() - lq_before;
@@ -979,7 +1011,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (work.kind == 0 && !work.fault() && !work.recovery_id && work.issued[0] && !pending(work))
                 work.result->complete = true;
         bool older_addresses_known = true, prefix_addresses_known = true;
-        StreamFootprint unresolved_store_lines;
+        StreamFootprint unresolved_store_lines, unresolved_store_bytes;
         if (recovery && recovery->phase == StreamRecovery::Phase::operands &&
             recovery->operand < recovery->plan.after_provisional.size() && environment.cycle() >= recovery->ready_cycle) {
             const auto &operand = recovery->plan.after_provisional[recovery->operand];
@@ -1018,7 +1050,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 // The reserved fault page is disjoint from every older store.
                 // CPU load issue can speculate before older store addresses.
                 (work.fault() || work.kind == 4 || older_addresses_known ||
-                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)))) ready.push_back({1, i, 0});
+                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)) ||
+                    (work.byte_bypass && stream_disjoint(work.byte_footprint, unresolved_store_bytes)))) ready.push_back({1, i, 0});
             if (work.kind == 2 && graph_role) {
                 const auto &episode = *recovery;
                 const bool early = (episode.phase == StreamRecovery::Phase::admission ||
@@ -1039,7 +1072,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 const bool ordered_load = work.kind == 1 && work.vectors.front().addressing ==
                     memblock::VectorAddressingMode::indexed_ordered;
                 if (head_eligible && address_ready && (!ordered_load || i == 0) && (work.kind == 3 || older_addresses_known ||
-                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)))) {
+                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)) ||
+                    (work.byte_bypass && stream_disjoint(work.byte_footprint, unresolved_store_bytes)))) {
                     for (unsigned u = 0; u < work.vectors.size(); ++u) {
                         if (work.offered[u] || environment.cycle() < work.vector_ready[u]) continue;
                         const auto &offer = work.replay[u] ? *work.replay[u] : work.vectors[u];
@@ -1060,12 +1094,14 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 const bool known = work.address_issued && !environment.scalar_store_address_pending(work.store);
                 older_addresses_known &= known;
                 if (!known) unresolved_store_lines.insert(work.footprint.begin(), work.footprint.end());
+                if (!known) unresolved_store_bytes.insert(work.byte_footprint.begin(), work.byte_footprint.end());
                 if (!graph_role) prefix_addresses_known &= known;
             }
             if (work.kind == 3) {
                 const bool known = all_issued(work) && !pending(work);
                 older_addresses_known &= known;
                 if (!known) unresolved_store_lines.insert(work.footprint.begin(), work.footprint.end());
+                if (!known) unresolved_store_bytes.insert(work.byte_footprint.begin(), work.byte_footprint.end());
                 prefix_addresses_known &= all_issued(work) && !pending(work);
             }
         }
@@ -1273,6 +1309,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             };
             const auto select_disjoint_bypass = [&]() {
                 work.footprint = work.kind == 0 ? stream_footprint(work.load) : stream_footprint(work.vectors);
+                work.byte_footprint = work.kind == 0 ? stream_byte_footprint(work.load) : stream_byte_footprint(work.vectors);
                 if (!graph_admission &&
                     !work.permission_probe && !work.store_survival_probe && constraints.stream_disjoint_bypass_per_mille != 0 &&
                     std::any_of(live.begin(), live.end(), [](const auto &older) { return older.is_store(); }) &&
@@ -1283,6 +1320,25 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     work.disjoint_bypass = true;
                     ++coverage.stream_disjoint_bypass[work.kind == 1 ? 2U : unsigned(work.load.fp_wen)];
                     // A reachable cold/untrained predictor has no store-set wait.
+                    if (work.kind == 0) {
+                        work.load.store_set_hit = work.load.load_wait_bit = work.load.load_wait_strict = false;
+                        work.load.wait_for_rob_flag = false; work.load.wait_for_rob_value = 0;
+                    }
+                }
+                // The independent byte image proves active-byte disjointness
+                // even while the backend operands/translation remain unknown.
+                // Same-line candidates are separate from the existing mode,
+                // so disabling this extension adds no random draws.
+                if (!graph_admission && !work.permission_probe && !work.store_survival_probe &&
+                    !work.disjoint_bypass && constraints.stream_byte_bypass_per_mille != 0 &&
+                    std::any_of(live.begin(), live.end(), [&](const auto &older) {
+                        return older.is_store() && !stream_disjoint(work.footprint, older.footprint);
+                    }) && std::all_of(live.begin(), live.end(), [&](const auto &older) {
+                        return !older.is_store() || (!older.recovery_id && stream_disjoint(work.byte_footprint, older.byte_footprint));
+                    }) && (constraints.stream_byte_bypass_per_mille == 1000 ||
+                        random() % 1000U < constraints.stream_byte_bypass_per_mille)) {
+                    work.byte_bypass = true;
+                    ++coverage.stream_byte_bypass[work.kind == 1 ? 2U : unsigned(work.load.fp_wen)];
                     if (work.kind == 0) {
                         work.load.store_set_hit = work.load.load_wait_bit = work.load.load_wait_strict = false;
                         work.load.wait_for_rob_flag = false; work.load.wait_for_rob_value = 0;
@@ -1371,6 +1427,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                             true, translation)) return false;
                 }
                 work.footprint = stream_footprint(work.store);
+                work.byte_footprint = stream_byte_footprint(work.store);
                 oracle.store(work.store);
                 environment.expect_store(work.store);
                 if (!environment.enqueue_store(work.store) ||
@@ -1400,7 +1457,10 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     for (auto &uop : work.vectors) uop.pdest = allocate_destination(2);
                     oracle.prepare_vector_load(work.vectors);
                 }
-                if (store) work.footprint = stream_footprint(work.vectors);
+                if (store) {
+                    work.footprint = stream_footprint(work.vectors);
+                    work.byte_footprint = stream_byte_footprint(work.vectors);
+                }
                 else select_disjoint_bypass();
                 for (const auto &uop : work.vectors) {
                     if (!validate_vector_translation(uop)) return false;

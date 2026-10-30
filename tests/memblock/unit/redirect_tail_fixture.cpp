@@ -419,7 +419,7 @@ struct StoreWork {
     bool address_issued = true, data_issued = false, restart_flushed = false;
     bool address_source = false, data_source = false, address_consumed = false, data_consumed = false;
     bool cross_page_address = false;
-    bool disjoint_bypass = false, bypass_accepted = false;
+    bool disjoint_bypass = false, byte_bypass = false, bypass_accepted = false;
     LoadTransaction load;
     std::vector<bool> issued;
     std::vector<VectorMemoryTransaction> vectors;
@@ -431,6 +431,7 @@ struct CancellationCoverage {
     std::array<std::uint64_t, 29> stream_cancel{};
     std::array<std::uint64_t, 15> stream_dependency_pages{};
     std::array<std::uint64_t, 18> stream_disjoint_bypass{};
+    std::array<std::uint64_t, 18> stream_byte_bypass{};
     std::array<std::uint64_t, 11> stream_sta{};
 };
 static bool return_and_classify(Harness &environment, std::vector<StoreWork> &live,

@@ -18,6 +18,17 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema85 adds ordinary same-line, active-physical-byte-disjoint integer/FP
+  and vector load bypass within the canonical mixed stream. Natural address,
+  width, mask and index choices determine eligibility; no address or expected
+  data is rewritten to create a candidate. Full-instruction footprints exclude
+  every live older-store byte. Temporal/spatial witnesses instead use the
+  currently accepted load uop against unresolved scalar bytes or unaccepted
+  older vector siblings, with once-per-load union/deduplication. Strict data,
+  cancellation and final visibility checks remain active. General overlapping
+  speculation, predictor histories and passive accepted-address reconstruction
+  remain gaps. This is ordinary-workload-style block stimulus, not SPEC execution.
+
 - Schema84 adds ordinary physically line-disjoint integer/FP/vector loads past
   unresolved older STA/translation and vector siblings, with a reachable cold
   scalar predictor and unchanged strict byte expectations. Actual accepted-edge
@@ -506,6 +517,9 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| Ordinary same-line byte-disjoint bypass | Frozen runtime-v2 passes 20 finite cases / 22528 actions across forced SPEC-profile, U-mode translated, mixed permission/cancellation and unmodified spec/corner profiles. All five complete finite artifact verifiers pass. 213 selections conserve 212 first acceptances and one unaccepted vector cancellation. All nine class/blocker and all nine 64/16/8-byte spatial bins are positive across the aggregate; all 10058 tracked final words compare. Seed8501 replay matches and disabling byte bypass matches 422 preceding semantic fields. | `build/memblock/byte-bypass-20261031/{qualification-v2.json,artifact-verifiers-v2.json,replay-compat-v2.json,provenance-v2.json}`. All 101 prepared sources match; model/RTL/dependency hashes match the preceding runtime. Corrected coverage attribution leaves 428 other fields unchanged in each of20 same-seed comparisons. Default SPEC-profile cases select five byte-mode loads but observe no unresolved same-line witness; selection alone is not temporal coverage. Finite block-level evidence, not SPEC execution, broad overlapping speculation or closure. Superseded runtime-v1 witness counts are excluded. |
+| Byte footprints and temporal coverage sensitivity | 64 seed/timing host histories produce64 distinct event-only schedules; 104 selected loads conserve104 acceptances (44 integer,25 FP,35 vector). Literal physical aliases, every scalar offset, masks/VSTART, translated vector element crossings and repeated indexed gathers pass; nine destinations retain checks despite six unique bytes. Ten private temporal mutants reject; byte-overlap mutant rejects and a byte-only predictor mutant rejects23/32 seeds. | `build/memblock/byte-bypass-20261031/{host-report-final-v2.json,footprint-host-v2-final.log,temporal-host-v2-final.log,host-predictor-v2-final.json,review-v2/review.json}`. Host schedule signatures exclude addresses/data/cycles/delays. Independent review adds24576 masked/duplicate/same-edge/future-uop witness cases. Synthetic completion timing and instruction-level shell counts are distinct from native uop-specific witnesses. |
+| Current schema85 integration checks | The complete stable-source host suite passes717 tests. Generated-interface, semantic mapping, documentation, catalog and prepared-RTL checks pass. Non-author decision and final evidence audits approve the bounded contract and recompute all five native aggregates. Four adjacent forwarding/recovery directed cases pass. | `build/memblock/byte-bypass-20261031/{full-unit-final-v2.log,host-report-final-v2.json,check-rtl-final-v2.log,directed-v2.json,final-evidence-review-v2/review.json}`. The independent audit left the host terminal pending; the completed log supplies the separate final PASS. Superseded/interrupted source-drift and pre-fix test runs are excluded. Finite development qualification, not closure. |
 | Current schema84 integration checks | The complete host suite passes 712 tests. Generated-interface, semantic mapping, documentation, scenario catalog and prepared-RTL checks pass. Non-author final evidence audit independently recomputes all five native aggregates and reruns their artifact verifiers. | `build/memblock/disjoint-bypass-20261031/{full-unit-v6.log,check-rtl-v6-final.log,final-evidence-review-v6/review.json}`. The evidence review initially left the host terminal result pending; the completed log supplies the separate final PASS. Finite development qualification, not closure. |
 | Ordinary disjoint-load bypass | Frozen runtime-v6 passes 20 finite cases / 22528 actions: forced SPEC, U-mode translated, permission/cancellation mixtures and unmodified spec/corner profiles. All five full finite artifact verifiers pass. 1633 selections conserve 1631 first acceptances plus two unaccepted vector-load cancellations. All nine class/blocker relation bins are positive; all 12438 tracked final words compare. Exact seed8401 replay matches and disabled bypass matches 420 preceding semantic fields. | `build/memblock/disjoint-bypass-20261031/{qualification-v6.json,artifact-verifiers-v6.json,replay-compat-v6.json,provenance-v6.json}`. All 101 prepared source pairs match. Finite development evidence; no SPEC executable, early-completion, passive transcript, general overlapping speculation or closure claim. Superseded/interrupted runtime campaigns are excluded from these totals. |
 | Bypass host structure and temporal oracles | 64 seed/timing scheduler histories record 943 selected/accepted integer/FP/vector loads (467/213/263); independent event checks see 775 bypassed acceptances and 923 distinct load/store pairs in their separate scopes. The fixed eight-load population retains 64/64 event-only schedules, 41 admission/retirement interleavings and 43 issue orders after excluding dependency-choice records. Literal physical aliases, page crossing, mask/VSTART and same-edge/translation-boundary cases pass; overlap, metadata and temporal mutants reject. | `build/memblock/disjoint-bypass-20261031/{host-report-v6.json,footprint-host-v1.log,temporal-host-v2.log}`. Addresses/data/timing are excluded from structural diversity. Host synthetic timing is distinct from DUT reachability. The model still uses bounded epochs, a 2..8 live window and serialized special helpers. |
@@ -648,6 +662,20 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Schema85 has non-author actual-diff approval for byte-disjoint admission, cold
+predictor legality, immutable active-byte mapping, unchanged value oracles and
+per-accepted-uop temporal/spatial attribution. Both future-load-uop and resolved
+older-store-sibling false witnesses are excluded by the reviewed decision rule.
+Literal races, ten temporal mutants, 24576 independent masked/duplicate/same-edge
+cases, repeated-gather destination checks and a byte-only predictor mutant
+support this bounded approval. The extracted cancellation fixture and current
+serializer expectations are synchronized. Decision review and primary
+disposition: `build/memblock/byte-bypass-20261031/{review-v2/review.json,review-disposition-v2.json}`.
+The final evidence audit independently recomputes all native totals, verifies
+sidecars/runtime/source hashes and reruns all five finite artifact verifiers:
+`build/memblock/byte-bypass-20261031/final-evidence-review-v2/review.json`.
+Native and host evidence remain finite; this is not CPU RTL-bug or closure evidence.
 
 Schema84 has non-author actual-diff approval for the documented bounded ordinary
 bypass/recovery contract. The review checks physical footprints, cold predictor
