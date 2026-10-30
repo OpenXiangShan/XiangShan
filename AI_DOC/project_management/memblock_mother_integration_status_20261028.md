@@ -519,7 +519,7 @@ fault3余98入口：`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fa
 矩阵结果根目录`mem_ut/ver/ut/memblock/sim/mother_post_rollback_matrix_20261030_results`，根manifest及campaign逐组写入实际入口、seed、源码commit及失败原因；
 共25组250项，含210真实DUT与40原计划软件用例。仅执行这些既有软件别名，不扩展修复无关soft_test。
 下表为当前已验收状态：25组250/250通过，controller rc0退出；每组strict/clean验收及根campaign均已落盘。
-其中210真实DUT＋40软件，两个原10k根seed另计；独立矩阵复核进行中，不等于余98或最终coverage已完成。
+其中210真实DUT＋40软件，两个原10k根seed另计；Turing独立`MATRIX_250_INDEPENDENT_REVIEW_PASS`，不等于余98或最终coverage已完成。
 
 | tc | ts | cfg | bba3008状态 | 已验收/计划 |
 |---|---|---|---|---:|
@@ -552,3 +552,7 @@ fault3余98入口：`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fa
 最终PASS白名单应精确350条＝310真实DUT＋40软件，strict-NC10继续`STOPPED_RTL_CONFIRMED`，不计PASS。
 最终覆盖率尚未生成；旧`mother_matrix_pass_coverage_20261030`不能代替新版本。仅当新350项全验收才执行最终collector及独立报告review。
 当前只本地提交：没有指定私有push目标，不向公共upstream origin上传。
+
+2026-10-30矩阵独立复核：250份日志/六计数/正常finish、25组成对campaign状态、精确入口/seed/参数/冻结cfg、2540输入与bba提交/已验二进制绑定全部PASS。
+fault3 98条恢复队列阶段观察为controller 7PASS/0FAIL，仍有活动任务；这些未完成整批严格验收，不加入当前252/350最终验收数。
+继续保持jobs20滚动补充待执行seed，无新worktree或源码修改；实际最新计数以该结果目录progress/results为准。
