@@ -125,7 +125,7 @@ PSV_new = PSV_old OR 新增事件 mask
 
 ## 5. 采样节奏和状态分类
 
-构建时 `WITH_TEA=1` 独立控制 TEA tracker、selector 和数据库记录逻辑是否 elaboration。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 1，period 为 0 时当前实现也逐周期采样。重新启用时 countdown 为零，会立即开始采样。
+构建时 `WITH_TEA=1` 独立控制 TEA tracker、selector 和数据库记录逻辑是否 elaboration。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 256（详细验证可设为 1），period 为 0 时当前实现也逐周期采样。重新启用时 countdown 为零，会立即开始采样。
 
 采样间隔按周期推进，不等待先前目标退休。关闭采样后，debug 成员和恢复原因仍继续跟踪，已采样目标及待处理的 Drained 后继仍可产生终结记录。
 
@@ -223,7 +223,7 @@ W(pc, psv) = 所有归给该静态 PC、该 PSV 组合的权重之和
 
 脚本输出单位是 captured sample equivalents（采样当量），没有自动乘上采样周期。period=1 时每个样本对应一个采集周期；固定 period=P 时，可用 `P * W` 估计相应周期数。更稀疏的周期采样是估计，不是逐周期精确记录。
 
-事件 bit 热图统计签名出现次数占所选归因条目数的比例，使用未加权的条目计数；它既不是互斥时间分解，也不是独立硬件事件发生次数。多个 bit 可重叠，不能直接把热图比例相加当作总周期比例。状态图统计所选边界中的状态比例。
+事件 bit 热图使用与 PICS 相同的采样权重，统计带有该 bit 的权重占所选总权重的比例；原始条目计数仍在汇总中保留。多个 bit 可重叠，不能把热图比例相加当作互斥周期分解或独立硬件事件数。状态图也使用采样权重。提供有效 SPEC 日志和采样周期时，脚本另输出每千条已退休指令的采样周期当量，与实际 ROB 周期计数单列对照；不补齐丢样，也不据此声称可回收周期。
 
 ### 7.1 四条压缩指令的计算示例
 
@@ -299,3 +299,72 @@ python3 scripts/tea_visualize.py build/tea.db \
 这些检查没有穷尽全部压缩边界。混合 RVC 的逐条 PC 对照、SC/CS/CC 各类型独立定向验证、Latter 真实异常以及向新分配 Entry 专门注入旧 flag 事件，尚未全部做专项覆盖。也未完成全套 SPEC、长程压力或 vector 端到端验证。
 
 当前没有评估宽 Computing 日志的长期采集开销、综合面积与时序。TEA 开关对照验证的是所测路径的执行行为，不能用来判断 ROB 压缩本身的性能收益。
+
+## 11. 低开销周期统计与队首上下文
+
+新增逻辑仅在 `WITH_TEA=1` 下生成，不改变功能 ROB、PSV、成员完成或延迟关联规则。
+`TeaCycleStats` 使用固定数量的计数器，不增加按 ROB 大小增长的存储，也不增加逐指令时间戳。
+
+### 配置
+
+| 模式 | Constantin 配置（hart 0） | 行为 |
+| --- | --- | --- |
+| Summary | `enableTeaStats0 1`、`enableTea0 0` | 精确周期计数和区间摘要，不写 TEA 边界样本 |
+| Sample | `enableTea0 1`、`teaSamplePeriod0 256` | 自动启用周期统计，同时稀疏采样 |
+| Detail | `enableTea0 1`、`teaSamplePeriod0 1` | 逐周期采样，用于短窗口验证 |
+
+默认采样周期为 256；现有 Constantin 文件中的显式周期（如 1000）保持生效。
+`teaGapThreshold0` 默认 128，只控制完整无提交区间的明细输出阈值，不影响直方图。
+Summary 是采集模式，现有 TEA tracker 仍然 elaboration 并跟踪成员；它主要节省数据库写入，
+不承诺消除 tracker 的计算成本。若不需要任何 TEA 功能，构建时不设置 `WITH_TEA=1`。
+
+数据库导出需包含四张表：
+
+```text
+--dump-select-db 'Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0'
+```
+
+### 统计口径与边界
+
+- `TeaCycleSummary` 在统计 enable 开启/关闭边界，以及每 4096 个连续启用周期写一条累计快照。
+  enable 为 `enableTeaStats || enableTea`。重新开启累计值不清零，但无提交区间不会跨过关闭窗口。
+- `STATES_0..3` 是启用期间 Computing/Stalled/Flushed/Drained 的精确周期数，
+  `RETIRED` 是架构指令数；不是物理 Entry 数。`CYCLE` 是已观察前缀的右开边界。
+- `GAPS_0..4` 统计完整无提交区间的 1–7、8–31、32–127、128–511、512+ 周期直方图。
+  采集开启时已经无提交的区间标为 left-censored，关闭时尚未结束的区间标为 right-censored；
+  二者均不进入完整区间直方图，而是计入 `CENSOREDGAPS`。截断区间不受明细阈值限制。
+- `TeaNoCommit` 保存 `[START, END)` 和区间内 Stalled/Flushed/Drained 周期数；三者之和等于区间长度。
+  区间可能跨越多个队首或恢复原因，不把整个区间归给恢复提交的 PC。可按 CYCLE 查找附近 TEA 样本。
+- 关闭采集后必须再执行一个采样时钟，才能写出关闭快照及截断区间。
+  若仿真直接结束，最后快照只覆盖其 `CYCLE` 之前的启用周期，最多可能漏掉 4095 个尾部周期；
+  `PENDING` 保留快照时尚未结束的无提交长度，`CLOSED=0` 表明未观察到采集关闭。
+  重新开启立即写入 CLOSED=0 的快照，避免沿用上一窗口的关闭标记。不能将未关闭结果当作完整切片统计。
+
+### 原因快照
+
+`Tea_0.CONTEXT_*` 保存当周期实际退休数、队首指针/有效/完成状态及原有 Top-down 原因。
+`COMMITBLOCKMASK` 的 bit 0..8 依次为 misPredBlock、lastCycleFlush、WFI、redirect、
+待处理 deq flush、deqFlushBlock、criticalError、traceBlock、walk。
+原始 mask 保留重叠条件；离线主分类优先 Computing，其次最低有效 mask bit，最后是有效队首原因。
+
+Top-down 原因固定为 Entry 级证据，不能证明它属于 TEA 选中的 rank；PSV 仍为最终历史签名，
+不表示当前还在等对应事件。headReady 表示物理队首完成状态，不表示必然允许提交。
+`head_context.csv` 同时保留原始 mask、原因 ID、静态作用范围和采样权重，不合并成可消除周期。
+原因 ID 的名称来自分析脚本所在 checkout 的 `TopDownCounters`，分析时使用与采集匹配的版本。
+
+### 分析与验证
+
+沿用 `scripts/tea_visualize.py` 命令。每个输入额外生成 `head_context.csv`、
+`cycle_summary.json` 和 `no_commit_intervals.csv`。后两者覆盖全部已采集的启用窗口，
+不应用 `--cycle-range` 或 PC 排除条件；JSON 的 scope/observed_end/collection_closed 显式记录该口径。
+旧数据库仍可分析，没有新增字段时上下文表为空，不生成精确周期结果。
+Summary 模式分析仍需保留四表 schema；`--spec-log-dir` 要求 ROI 内存在 TEA 样本，
+因此纯 Summary 使用普通分析入口。全启用窗口摘要不能直接作为 SPEC 测量 ROI 的精确计数。
+
+```bash
+python3 scripts/test_tea_visualize.py
+proxychains -q mill -i xiangshan.test.testOnly xiangshan.TeaCycleStatsTest
+```
+
+RTL 测试覆盖采集边界、区间长度、直方图边界、关闭后重新开启和周期快照的包含关系。
+实际仿真速度和数据库体积仍需使用相同切片测量；没有预设已达到某个开销百分比。
