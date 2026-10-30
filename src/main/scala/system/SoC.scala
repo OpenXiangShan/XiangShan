@@ -63,7 +63,6 @@ case class SoCParameters
     PMAConfigEntry(0x3A000000L, a = 1),
     PMAConfigEntry(0x39002000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x39000000L, a = 1, w = true, r = true),
-    PMAConfigEntry(0x38022000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x38021000L, a = 1, x = true, w = true, r = true),
     PMAConfigEntry(0x38020000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x30050000L, a = 1, w = true, r = true), // FIXME: GPU space is cacheable?
@@ -74,7 +73,7 @@ case class SoCParameters
   ),
   TIMERRange: AddressSet = AddressSet(0x38000000L, TIMERConsts.size - 1),
   SYSCNTRange: AddressSet = AddressSet(0x38040000L, SYSCNTConsts.size - 1),
-  BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
+  RERIRange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
   APLICRange: AddressSet = AddressSet(0x31100000L, 0x3ffff),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
@@ -255,7 +254,7 @@ trait HasPeripheralRanges {
   def onChipPeripheralRanges: Map[String, AddressSet] = Map(
     "TIMER" -> soc.TIMERRange,
     "SYSCNT" -> soc.SYSCNTRange,
-    "BEU"   -> soc.BEURange,
+    "RERI"  -> soc.RERIRange,
     "PLIC"  -> soc.PLICRange,
     "APLIC" -> soc.APLICRange,
     "PLL"   -> soc.PLLRange,

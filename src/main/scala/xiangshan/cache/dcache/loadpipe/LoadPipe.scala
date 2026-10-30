@@ -19,13 +19,13 @@ package xiangshan.cache
 import chisel3._
 import freechips.rocketchip.tilelink.ClientMetadata
 import chisel3.util._
-import freechips.rocketchip.tilelink.TLPermissions
+import freechips.rocketchip.tilelink.{ClientStates, TLPermissions}
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.XSCoreParamsKey
 
 class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
   val paddr = UInt(PAddrBits.W)
@@ -43,7 +43,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val load128Req = Input(Bool())
     // req got nacked in stage 0?
     val nack      = Input(Bool())
-
     // meta and data array read port
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, new Meta))
@@ -56,7 +55,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val banked_data_read = DecoupledIO(new L1BankedDataReadReqWithMask)
     val is128Req = Output(Bool())
     val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult()))
-    val read_error_delayed = Input(Vec(VLEN/DCacheSRAMRowBits, Bool()))
+    val read_correctable_delayed = Input(Bool())
+    val read_uncorrectable_delayed = Input(Bool())
 
     // access bit update
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
@@ -87,12 +87,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
 
-    // ecc error
-    val error = Output(ValidIO(new L1CacheErrorInfo))
-    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
-    val pseudo_tag_error_inj_done = Output(Bool())
-    val pseudo_data_error_inj_done = Output(Bool())
-
+    val tag_evict = DecoupledIO(new EccEvictReq)
+    val data_evict = DecoupledIO(new EccEvictReq)
     val prefetch_stat = Output(new PipePrefetchStatBundle)
 
     val bloom_filter_query = new Bundle {
@@ -109,7 +105,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_ready = Wire(Bool())
   val s2_ready = Wire(Bool())
   // LSU requests
-  // it you got nacked, you can directly passdown
+  // if you got nacked, you can directly pass down
   val not_nacked_ready = io.meta_read.ready && io.tag_read.ready && s1_ready
   val nacked_ready     = true.B
 
@@ -208,29 +204,25 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // tag check
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val meta_resp = io.meta_resp
-  // pseudo enc ecc tag
-  val pseudo_tag_toggle_mask = Mux(
-                                io.pseudo_error.valid && io.pseudo_error.bits(0).valid,
-                                io.pseudo_error.bits(0).mask(tagBits - 1, 0),
-                                0.U(tagBits.W)
-                            )
-  val s1_enctag_resp = Wire(io.tag_resp.cloneType)
-  s1_enctag_resp.zip(io.tag_resp).map {
-    case (pseudo_enc, real_enc) =>
-    if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
-      val ecc = real_enc(encTagBits - 1, tagBits)
-      val toggleTag = real_enc(tagBits - 1, 0) ^ pseudo_tag_toggle_mask
-      pseudo_enc := Cat(ecc, toggleTag)
-    }  else {
-      pseudo_enc := real_enc
-    }
-  }
+  val s1_enctag_resp = io.tag_resp
 
   // resp in s1
   val s1_tag_resp = s1_enctag_resp.map(encTag => encTag(tagBits - 1, 0))
-  val s1_tag_errors = wayMap((w: Int) => meta_resp(w).coh.isValid() && dcacheParameters.tagCode.decode(s1_enctag_resp(w)).error).asUInt
-  val s1_tag_match_way_dup_dc = wayMap((w: Int) => s1_tag_resp(w) === get_tag(s1_paddr_dup_dcache) && meta_resp(w).coh.isValid()).asUInt
-  val s1_tag_match_way_dup_lsu = wayMap((w: Int) => s1_tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt
+  val tagDecoders = (0 until nWays).map { w =>
+    val decoder = Module(new DCacheEccDetect(tagBits, dcacheParameters.tagCode))
+    decoder.io.encoded := s1_enctag_resp(w)
+    decoder.io.valid := EnableTagEcc.B && meta_resp(w).coh.isValid()
+    decoder
+  }
+  val s1_tag_correctable = VecInit(tagDecoders.map(_.io.correctable)).asUInt
+  val s1_tag_uncorrectable = VecInit(tagDecoders.map(_.io.uncorrectable)).asUInt
+  val s1_tag_errors = s1_tag_correctable | s1_tag_uncorrectable
+  // A corrupted raw tag may alias another valid way. Keep errored ways out of
+  // hit/data selection; the ECC recovery path below still evicts or reports them.
+  val s1_tag_match_way_dup_dc = wayMap((w: Int) =>
+    s1_tag_resp(w) === get_tag(s1_paddr_dup_dcache) && meta_resp(w).coh.isValid() && !s1_tag_errors(w)).asUInt
+  val s1_tag_match_way_dup_lsu = wayMap((w: Int) =>
+    s1_tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid() && !s1_tag_errors(w)).asUInt
   val s1_wpu_pred_valid = RegEnable(io.dwpu.resp(0).valid, s0_fire)
   val s1_wpu_pred_way_en = RegEnable(io.dwpu.resp(0).bits.s0_pred_way_en, s0_fire)
 
@@ -257,7 +249,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     io.dwpu.cfpred(0).s0_vaddr := s0_vaddr
     io.dwpu.cfpred(0).s1_vaddr := s1_vaddr
     // whether direct_map_way miss with valid tag value
-    io.dwpu.cfpred(0).s1_dm_hit := wayMap((w: Int) => w.U === s1_direct_map_way_num && s1_tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt.orR
+    io.dwpu.cfpred(0).s1_dm_hit := wayMap((w: Int) =>
+      w.U === s1_direct_map_way_num && s1_tag_resp(w) === get_tag(s1_paddr_dup_lsu) &&
+        meta_resp(w).coh.isValid() && !s1_tag_errors(w)).asUInt.orR
   }else{
     io.dwpu.cfpred(0) := DontCare
   }
@@ -282,8 +276,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_tag_match_dup_dc = ParallelORR(s1_tag_match_way_dup_dc)
   val s1_tag_match_dup_lsu = ParallelORR(s1_tag_match_way_dup_lsu)
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
-  io.pseudo_tag_error_inj_done := s1_fire && wayMap((w: Int) => meta_resp(w).coh.isValid()).asUInt.orR
-
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
   val s1_hit_meta = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => meta_resp(w)))
@@ -345,7 +337,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   val s2_vaddr_alias = RegEnable(get_alias(s1_vaddr), s1_fire)
   val s2_vaddr_set = RegEnable(addr_to_dcache_set(s1_vaddr), s1_fire)
-  val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
   val s2_bank_oh_dup_0 = RegEnable(s1_bank_oh, s1_fire)
   val s2_wpu_pred_fail = RegEnable(s1_wpu_pred_fail, s1_fire)
   val s2_real_way_en = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
@@ -379,6 +370,19 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // hit, miss, nack, permission checking
   // dcache side tag match
   val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
+  val s2_tag_correctable = RegEnable(s1_tag_correctable, s1_fire)
+  val s2_tag_uncorrectable = RegEnable(s1_tag_uncorrectable, s1_fire)
+  io.tag_evict.valid := s2_valid &&
+    s2_tag_correctable.orR && !s2_tag_uncorrectable.orR &&
+    !io.lsu.s2_kill
+  io.tag_evict.bits.addr := get_block_addr(s2_paddr)
+  io.tag_evict.bits.vaddr := get_block_addr(s2_vaddr)
+  io.tag_evict.bits.way_en := PriorityEncoderOH(s2_tag_correctable)
+  val s2_enc_tag_resp = RegEnable(s1_enctag_resp, s1_fire)
+  io.tag_evict.bits.enc_tag := ParallelMux(io.tag_evict.bits.way_en.asBools, s2_enc_tag_resp)
+  io.tag_evict.bits.clean_only := false.B
+  io.tag_evict.bits.probe := false.B
+  io.tag_evict.bits.probe_id := 0.U
   val s2_tag_match_way = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match_dup_dc, s1_fire)
   val s2_tag_error = WireInit(false.B)
@@ -415,7 +419,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_miss_req_fire = io.miss_req.fire
 
   // when req got nacked, upper levels should replay this request
-  // nacked or not
   val s2_nack_hit = RegEnable(s1_nack, s1_fire)
   // can no allocate mshr for load miss
   val s2_nack_no_mshr = s2_miss_req_valid_dup && !io.miss_req.ready
@@ -450,10 +453,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
   if(EnableTagEcc) {
-    s2_tag_error := s2_tag_errors.orR // error reported by tag ecc check
+    s2_tag_error := s2_valid && s2_tag_errors.orR // error reported by tag ecc check
   }
-  io.pseudo_data_error_inj_done := s2_fire && s2_hit && !io.bank_conflict_slow
-  io.pseudo_error.ready := false.B
 
   // send load miss to miss queue
   io.miss_req.valid := s2_miss_req_valid
@@ -582,26 +583,51 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report ecc error and get selected dcache data
 
   val s3_valid = RegNext(s2_valid)
-  val s3_load128Req = RegEnable(s2_load128Req, s2_fire)
-  val s3_read_error_lane_mask = RegEnable(bankMaskToReadErrorLaneMask(s2_bank_oh, addrToVWordBankBase(s2_vaddr)), s2_fire)
   val s3_vaddr = RegEnable(s2_vaddr, s2_fire)
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
+  // Keep data ECC off these request-level permission paths.  The qualifying
+  // tag, flag, and coherence state are all known in S2.
+  val s3_data_ce_permission = RegEnable(
+    !s2_tag_uncorrectable.orR && !s2_tl_error.asUInt.orR,
+    s2_fire
+  )
+  val s3_clean_data_uec_permission = RegEnable(
+    s2_hit_coh.state =/= ClientStates.Dirty && !s2_tag_error && !s2_tl_error.asUInt.orR,
+    s2_fire
+  )
   val s3_tag_match_way = RegEnable(s2_tag_match_way, s2_fire)
+  val s3_selected_enc_tag = RegEnable(ParallelMux(s2_tag_match_way.asBools, s2_enc_tag_resp), s2_fire)
   val s3_req_instrtype = RegEnable(s2_req.instrtype, s2_fire)
   val s3_is_prefetch = s3_req_instrtype === DCACHE_PREFETCH_SOURCE.U
 
   val s3_banked_data_resp_word = RegEnable(s2_resp_data, s2_fire)
-  val s3_data_error = Mux(
-    s3_load128Req,
-    io.read_error_delayed.asUInt.orR,
-    (io.read_error_delayed.asUInt & s3_read_error_lane_mask).orR
-  ) && s3_hit
+  val s3_data_correctable = io.read_correctable_delayed && s3_hit
+  val s3_data_uncorrectable = io.read_uncorrectable_delayed && s3_hit
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
+  val s3_tag_correctable = RegEnable(s2_tag_correctable.orR, s2_fire)
+  val s3_tag_uncorrectable = RegEnable(s2_tag_uncorrectable.orR, s2_fire)
   val s3_tl_error = RegEnable(s2_tl_error, s2_fire)
   val s3_flag_error = s3_tl_error.asUInt.orR
   val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
-  val s3_error = s3_tag_error || s3_flag_error || s3_data_error
+  val s3_uec = s3_tag_uncorrectable || s3_data_uncorrectable
+  val s3_ce = (s3_tag_correctable || s3_data_correctable) &&
+    !s3_data_uncorrectable && s3_data_ce_permission
+  // A clean line can be reacquired from L2. Poison and tag faults must retain
+  // their architectural error behavior; they cannot use this data-only repair.
+  val s3_clean_data_uec = s3_data_uncorrectable && s3_clean_data_uec_permission
+
+  io.data_evict.valid := s3_valid && (
+    s3_data_correctable && !s3_data_uncorrectable && !s3_tag_correctable && s3_data_ce_permission ||
+      s3_clean_data_uec
+  )
+  io.data_evict.bits.addr := get_block_addr(s3_paddr)
+  io.data_evict.bits.vaddr := get_block_addr(s3_vaddr)
+  io.data_evict.bits.way_en := s3_tag_match_way
+  io.data_evict.bits.enc_tag := s3_selected_enc_tag
+  io.data_evict.bits.clean_only := s3_clean_data_uec
+  io.data_evict.bits.probe := false.B
+  io.data_evict.bits.probe_id := 0.U
 
   // Register the S2 kill (includes load breakpoint trigger exception) so that
   // hit-side replacement/access-flag metadata updates in S3 can be suppressed
@@ -609,22 +635,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_kill = RegEnable(io.lsu.s2_kill, s2_fire)
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
-  resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
+  resp.bits.error_delayed := ((s3_uec && !s3_clean_data_uec) || s3_flag_error) && (s3_hit || s3_tag_error) && s3_valid
+  resp.bits.ecc_replay_delayed := (s3_ce || s3_clean_data_uec) && s3_valid
   resp.bits.tl_error_delayed.tl_denied := s3_tl_error.tl_denied & s3_valid
   resp.bits.tl_error_delayed.tl_corrupt := s3_tl_error.tl_corrupt & s3_valid
   resp.bits.data_delayed := s3_banked_data_resp_word
   resp.bits.replacementUpdated := io.replace_access.valid
-
-  // report tag / data / l2 error (with paddr) to bus error unit
-  io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
-  io.error.bits.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid
-  io.error.bits.paddr := s3_paddr
-  io.error.bits.source.tag := s3_tag_error
-  io.error.bits.source.data := s3_data_error
-  io.error.bits.source.l2 := s3_flag_error
-  io.error.bits.opType.load := true.B
-  // report tag error / l2 corrupted to CACHE_ERROR csr
-  io.error.valid := s3_error && s3_valid
 
   io.replace_access.valid := s3_valid && s3_hit && !s3_kill
   io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))

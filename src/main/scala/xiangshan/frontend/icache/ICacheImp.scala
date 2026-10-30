@@ -49,7 +49,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     // iTLB
     val itlb:          TlbRequestIO = new TlbRequestIO
     val itlbFlushPipe: Bool         = Bool()
-    // backend/BEU
+    // RERI error reporting
     val error: Valid[L1CacheErrorInfo] = ValidIO(new L1CacheErrorInfo)
     // backend/CSR
     val csrPfEnable: Bool = Input(Bool())
@@ -209,7 +209,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   bus.a <> missUnit.io.memAcquire
 
-  // send parity error to BEU
+  // Send parity errors to RERI.
   io.error <> RegNextWithEnable(mainPipe.io.error)
 
   val perfEvents: Seq[(String, Bool)] = Seq(
