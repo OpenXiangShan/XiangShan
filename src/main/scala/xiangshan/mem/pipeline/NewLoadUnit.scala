@@ -909,7 +909,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     */
   val redirect = io.redirect
   val kill = io.kill || robIdx.needFlush(redirect)
-  val endPipe = isHwPrefetch
+  val endPipe = isPrefetch
 
   /**
     * PMP result & exception handling
@@ -1144,8 +1144,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     * 1. `wakeup` should not asserted when exception occurs
     * 2. `wakeup` should not asserted in case of a vaddr / paddr mismatch (debatable yet)
     */
-  val shouldWakeup = !shouldReplay && !isUncache && !exception && !isSwPrefetch
-  val shouldWriteback = shouldWakeup || exception || matchInvalid || isSwPrefetch
+  val shouldWakeup = !shouldReplay && !isUncache && !exception && !isPrefetch
+  val shouldWriteback = shouldWakeup || exception || matchInvalid
 
   /**
     * Pipeline connect
@@ -1375,7 +1375,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val causeOrR = in.causeOrR.get
   val shouldReplay = causeOrR || in.shouldFastReplay.get
 
-  assert(!pipeIn.valid || !accessType.isHwPrefetch(), "HwPrefetch should be killed in S2")
+  assert(!pipeIn.valid || !accessType.isPrefetch(), "Prefetch should be killed in S2")
 
   /**
     * Redirect
