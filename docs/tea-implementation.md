@@ -324,6 +324,8 @@ Summary 是采集模式，现有 TEA tracker 仍然 elaboration 并跟踪成员�
 --dump-select-db 'Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0'
 ```
 
+GSIM 分支的 CI 在 TEA-only 模式下自动导出上述四表，继续使用现有 GSIM utility 接口和显式采样周期。
+
 ### 统计口径与边界
 
 - `TeaCycleSummary` 在统计 enable 开启/关闭边界，以及每 4096 个连续启用周期写一条累计快照。

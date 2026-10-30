@@ -291,7 +291,7 @@ jobs:
           cd $SCRIPTS_HOME/perf_trigger
           DB_OPTS=()
           if [[ "${{ inputs.enable_tea }}" == "true" && "${{ inputs.enable_db }}" != "true" && "${{ inputs.enable_rolling }}" != "true" ]]; then
-            DB_OPTS+=(--dump-select-db "Tea_0 TeaDelayedFinal_0")
+            DB_OPTS+=(--dump-select-db "Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0")
           elif [[ "${{ inputs.enable_db }}" == "true" || "${{ inputs.enable_rolling }}" == "true" ]]; then
             DB_OPTS+=(--dump-db)
           fi
