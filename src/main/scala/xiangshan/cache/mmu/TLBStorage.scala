@@ -101,6 +101,66 @@ class TLBFA(
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
+  val refillEntry = Wire(new TlbSectorEntry(normalPage, superPage))
+  refillEntry.apply(io.w.bits.data)
+  val hRefill = (!HasMptCheck).B && (refillEntry.s2xlate === allStage || refillEntry.s2xlate === onlyStage2)
+  // Only normal 4K pages can merge lanes; superpages and NAPOT cannot.
+  val hNormalRefill = hRefill && refillEntry.level.get === 0.U && refillEntry.n === 0.U
+  val refillSuccess = !refillEntry.g_perm.pf && !refillEntry.g_perm.af &&
+    (refillEntry.s2xlate === onlyStage2 || (refillEntry.perm.v && !refillEntry.perm.pf && !refillEntry.perm.af))
+  val mergeWays = Wire(Vec(nWays, Bool()))
+  val overlapWays = Wire(Vec(nWays, Bool()))
+
+  // Check each existing way(48 ways) for lane merge and overlapping translations to clear.
+  for (way <- 0 until nWays) {
+    val old = entries(way)
+    val sameStage = old.s2xlate === refillEntry.s2xlate
+    val sameVmid = old.vmid === refillEntry.vmid
+    val ignoreAsid = refillEntry.s2xlate === onlyStage2
+    val sameAsid = ignoreAsid || old.asid === refillEntry.asid || (old.perm.g && refillEntry.perm.g)
+    val asidOverlap = ignoreAsid || old.asid === refillEntry.asid || old.perm.g || refillEntry.perm.g
+    val normal = old.level.get === 0.U && old.n === 0.U
+    val sameTag = old.tag === refillEntry.tag
+    val sameS1 = ignoreAsid || (old.perm.asUInt === refillEntry.perm.asUInt && old.pbmt === refillEntry.pbmt)
+    val sameS2 = old.g_perm.asUInt === refillEntry.g_perm.asUInt && old.g_pbmt === refillEntry.g_pbmt
+    val overlapNapot = old.n =/= 0.U || refillEntry.n =/= 0.U
+    val overlapTag = Wire(Vec(Level + 1, Bool()))
+    // Check each VPN slice independently so superpage overlap is detected in one cycle.
+    val sameLowTag = old.tag(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth) ===
+      refillEntry.tag(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth)
+    val sameNapotOffset = old.tag(pteNapotBits - sectortlbwidth - 1, 0) ===
+      refillEntry.tag(pteNapotBits - sectortlbwidth - 1, 0)
+    overlapTag(0) := old.level.get > 0.U || refillEntry.level.get > 0.U ||
+      (sameLowTag && (overlapNapot || sameNapotOffset))
+    for (level <- 1 until Level) {
+      val high = vpnnLen * (level + 1) - sectortlbwidth - 1
+      val low = vpnnLen * level - sectortlbwidth
+      overlapTag(level) := old.level.get > level.U || refillEntry.level.get > level.U ||
+        old.tag(high, low) === refillEntry.tag(high, low)
+    }
+    overlapTag(Level) := (old.tag >> (vpnnLen * Level - sectortlbwidth)) ===
+      (refillEntry.tag >> (vpnnLen * Level - sectortlbwidth))
+    val laneOverlap = old.level.get =/= 0.U || refillEntry.level.get =/= 0.U || overlapNapot ||
+      (old.valididx.asUInt & refillEntry.valididx.asUInt).orR
+    mergeWays(way) := v(way) && hNormalRefill && refillSuccess && normal && sameStage && sameVmid &&
+      sameAsid && sameTag && old.ppn === refillEntry.ppn && sameS1 && sameS2
+    overlapWays(way) := v(way) && hRefill && sameStage && sameVmid && asidOverlap &&
+      overlapTag.asUInt.andR && laneOverlap
+  }
+  val mergeHit = mergeWays.asUInt.orR
+  // Keep refill selection one-hot through write enables and lookup masks.
+  val mergeWayOH = mergeWays.asUInt
+  val replacementWayOH = UIntToOH(io.w.bits.wayIdx, nWays)
+  val writeWayOH = Mux(mergeHit, mergeWayOH, replacementWayOH)
+  val writeWay = Mux(mergeHit, OHToUInt(mergeWayOH), io.w.bits.wayIdx)
+  // UIntToOH(_, 1) is always one, so preserve the original single-way write condition.
+  val writeWaySelect = if (nWays == 1) Seq(writeWay === 0.U) else writeWayOH.asBools
+  val writeValid = io.w.valid && !io.sfence.valid
+  when(writeValid) {
+    assert(PopCount(mergeWays) <= 1.U, s"${parentName} H-sector refill has multiple merge candidates")
+  }
+  val changedWays = Mux(writeValid, writeWayOH | overlapWays.asUInt, 0.U(nWays.W))
+
   for (i <- 0 until ports) {
     val req = io.r.req(i)
     val resp = io.r.resp(i)
@@ -111,7 +171,7 @@ class TLBFA(
     val hasS2xlate = req.bits.s2xlate =/= noS2xlate
     val OnlyS2 = req.bits.s2xlate === onlyStage2
     val OnlyS1 = req.bits.s2xlate === onlyStage1
-    val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
+    val refill_mask = changedWays
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
         val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
@@ -121,6 +181,8 @@ class TLBFA(
     })
 
     hitVec.suggestName("hitVec")
+    val hLookup = (!HasMptCheck).B && (req.bits.s2xlate === allStage || req.bits.s2xlate === onlyStage2)
+    assert(!(req.fire && hLookup && PopCount(hitVec) > 1.U), s"${parentName} H-sector lookup has multiple hits")
 
     val hitVecReg = RegEnable(hitVec, req.fire)
     // Sector tlb may trigger multi-hit, see def "wbhit"
@@ -182,17 +244,34 @@ class TLBFA(
     resp.bits.g_perm.suggestName("g_perm")
   }
 
-  when (io.w.valid) {
-    v(io.w.bits.wayIdx) := true.B
-    entries(io.w.bits.wayIdx).apply(io.w.bits.data)
+  for (way <- 0 until nWays) {
+    when(writeValid && writeWaySelect(way)) {
+      v(way) := true.B
+      entries(way) := refillEntry
+      when(mergeHit) {
+        entries(way).valididx := (entries(way).valididx.asUInt | refillEntry.valididx.asUInt).asBools
+        entries(way).pteidx := (entries(way).pteidx.asUInt | refillEntry.pteidx.asUInt).asBools
+        for (lane <- 0 until tlbcontiguous) {
+          entries(way).ppn_low(lane) := Mux(
+            refillEntry.valididx(lane), refillEntry.ppn_low(lane), entries(way).ppn_low(lane)
+          )
+        }
+      }
+    }.elsewhen(writeValid && overlapWays(way)) {
+      val partial = hNormalRefill && entries(way).level.get === 0.U && entries(way).n === 0.U
+      val remaining = Mux(partial, entries(way).valididx.asUInt & ~refillEntry.valididx.asUInt, 0.U)
+      entries(way).valididx := remaining.asBools
+      entries(way).pteidx := (entries(way).pteidx.asUInt & remaining).asBools
+      v(way) := remaining.orR
+    }
   }
   // write assert, should not duplicate with the existing entries
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi })
-  XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
+  XSError(writeValid && !hRefill && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
-  val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
-  val refill_wayIdx_reg = RegEnable(io.w.bits.wayIdx, io.w.valid)
-  when (RegNext(io.w.valid)) {
+  val refill_vpn_reg = RegEnable(refillEntry.tag, writeValid)
+  val refill_wayIdx_reg = RegEnable(writeWay, writeValid)
+  when (RegNext(writeValid, false.B)) {
     io.access.map { access =>
       access.sets := get_set_idx(refill_vpn_reg, nSets)
       access.touch_ways.valid := true.B
@@ -309,8 +388,11 @@ class TLBFA(
       a.valid && a.bits.hit && b(i)}.fold(0.U)(_.asUInt + _.asUInt))
   }
   for (i <- 0 until nWays) {
-    XSPerfAccumulate(s"refill${i}", io.w.valid && io.w.bits.wayIdx === i.U)
+    XSPerfAccumulate(s"refill${i}", writeValid && writeWaySelect(i))
   }
+  XSPerfAccumulate("h_sector_refill", writeValid && hNormalRefill)
+  XSPerfAccumulate("h_sector_refill_slots", Mux(writeValid && hNormalRefill, PopCount(refillEntry.valididx), 0.U))
+  XSPerfAccumulate("h_sector_append", writeValid && mergeHit)
 
   val perfEvents = Seq(
     ("tlbstore_access", io.r.resp.map(_.valid.asUInt).fold(0.U)(_ + _)                            ),
