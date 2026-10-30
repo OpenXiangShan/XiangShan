@@ -900,6 +900,8 @@ public:
         const VectorMemoryTransaction &vector,
         unsigned timeout = 64);
 
+    bool last_load_vector_pair_same_cycle() const;
+
     bool issue_store_address(const StoreTransaction &transaction, unsigned timeout = 32);
 
     bool issue_store_address_batch(
@@ -1542,6 +1544,7 @@ private:
     DutAdapter dut_;
     FailureState error_{"environment", "environment-contract"};
     std::optional<std::uint64_t> last_reset_completed_cycle_;
+    bool last_load_vector_pair_same_cycle_ = false;
     struct ScalarRedirectBoundary {
         unsigned rob;
         bool flag, flush_itself;

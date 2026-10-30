@@ -670,6 +670,13 @@ observations. Redirect valid is captured before the edge even in that mode.
 Claims of continuous
 monitoring apply only while the corresponding monitor is enabled.
 
+The legacy mixed scalar/vector pair driver samples each pending request's ready
+with its valid held before `tick()`. `last_load_vector_pair_same_cycle()` is
+true only if both handshakes occurred on that edge, and resets on each call and
+reset. `coissue` uses this observation, never helper completion alone. This is
+coverage evidence; independent scalar/vector data and identity scoreboards own
+terminal correctness. Split-edge acceptance remains legal.
+
 [BridgeMonitor](../cpp/environment/bridge_monitor.cpp) compares independently
 captured inputs against explicit combinational, one-cycle, two-cycle or
 valid/hold relations. These include L2 flush, hart ID, reset vector, halt/error,

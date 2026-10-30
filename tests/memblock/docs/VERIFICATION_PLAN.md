@@ -192,9 +192,12 @@ longest run. Ordinary store retirement separates architectural prefix progress
 from physical SQ drain: per-instruction backend-readiness guards, scalar-count
 versus vector completion rules and retained absolute targets preserve legality.
 `stream_store_retirement` measures accepted work and head updates while committed
-records remain queued. Blocking issue handshakes, synchronous unresolved operands,
-same-cycle heterogeneous issue and special-store lifecycle separation remain
-high priorities. Nonzero-VSTART
+records remain queued. Legacy heterogeneous windows can now offer a legal
+scalar/FP load and first vector-load uop together, with `coissue` requiring both
+handshakes on one sampled edge. The ordinary sliding stream still selects one
+blocking producer helper at a time. Blocking issue handshakes, synchronous
+unresolved operands, simultaneous ordinary producer issue and special-store
+lifecycle separation remain high priorities. Nonzero-VSTART
 vectors retain their required whole-instruction flush-after through a serialized
 suffix barrier with low `pendingst`, zero cancellation and conservative local
 recovery; `stream_vstart_flush` records that lifecycle. This direction does not

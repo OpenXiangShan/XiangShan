@@ -1879,6 +1879,11 @@ auto Environment::issue_load_vector_pair(const LoadTransaction &load,
     return impl_->issue_load_vector_pair(load, vector, timeout);
 }
 
+auto Environment::last_load_vector_pair_same_cycle() const -> bool
+{
+    return impl_->last_load_vector_pair_same_cycle();
+}
+
 auto Environment::issue_store_address(const StoreTransaction &transaction,
     unsigned timeout)  -> bool
 {

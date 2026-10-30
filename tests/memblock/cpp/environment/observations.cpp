@@ -5,6 +5,11 @@ namespace memblock {
 auto Environment::Impl::cycle() const -> std::uint64_t
 { return dut_.cycle(); }
 
+auto Environment::Impl::last_load_vector_pair_same_cycle() const -> bool
+{
+    return last_load_vector_pair_same_cycle_;
+}
+
 auto Environment::Impl::tilelink_requests() const -> std::uint64_t
 { return memory_agent_.request_count(); }
 

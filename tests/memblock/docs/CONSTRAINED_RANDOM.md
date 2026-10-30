@@ -382,7 +382,16 @@ A heterogeneous window requires seven available actions, or eight with its
 optional clean NC/MMIO load. It includes scalar load, vector load, scalar
 store, vector store, and prefetch producers, plus scalar/vector store readbacks.
 Issue order is randomized subject to ordered-indexed-load dependencies; vector
-shapes are restricted to the concurrent flow budget. Store dispatch retains the
+shapes are restricted to the concurrent flow budget. A window without a special
+NC/MMIO load may offer its scalar/FP load and first vector-load uop together,
+with a conditional rate of `min(250, concurrent)` per mille. Ordered-indexed
+loads and first vector elements crossing a 16-byte beat are excluded. The pair
+preserves each request until its own handshake and issues remaining vector uops
+once under their existing predecessor dependencies. `coissue` counts the pair
+only when both requests handshake on the same sampled edge; split-edge
+acceptance does not increment it. The pair retains the scalar frontend and
+dependency metadata used by ordinary load issue. This bounded legacy direction
+does not add simultaneous issue to the sliding-stream executor. Store dispatch retains the
 architectural-prefix LQ snapshot and wrap bit. The pending ROB head cannot pass
 an older incomplete special load, and simultaneous integer destinations are
 distinct. Scalar-store and vector-list waits select only their declared
@@ -526,7 +535,10 @@ completion does not assert complete shape, opcode, crossing, latency, Probe,
 or mixed-overlap coverage. Shape support, enabled bins, requested traffic,
 accepted requests, terminal completions, and reached observations are distinct
 claims. Neither runtime duration nor a profile name substitutes for counters
-and a corresponding oracle.
+and a corresponding oracle. In particular, `coissue` reports accepted
+scalar/vector pairs on one edge in legacy windows, rather than the number of
+pair-helper calls or a complete port-set histogram. Independent scalar/vector
+scoreboards still check both results and identities.
 
 The in-process PASS decision checks completion and protocol/oracle errors,
 requested action count, an empty expected GrantAck queue, queue allocation/dequeue/legal

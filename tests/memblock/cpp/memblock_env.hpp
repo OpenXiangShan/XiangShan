@@ -1251,6 +1251,8 @@ public:
         const VectorMemoryTransaction &vector,
         unsigned timeout = 64);
 
+    bool last_load_vector_pair_same_cycle() const;
+
     bool issue_store_address(const StoreTransaction &transaction, unsigned timeout = 32);
 
     bool issue_store_address_batch(

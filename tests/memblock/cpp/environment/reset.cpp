@@ -27,6 +27,7 @@ auto Environment::Impl::check_pin_space()  -> bool
 auto Environment::Impl::reset()  -> bool
 {
     last_reset_completed_cycle_.reset();
+    last_load_vector_pair_same_cycle_ = false;
     scalar_redirect_boundary_.reset();
     // Re-assert external reset for every invocation.  Relying on the
     // constructor's initial value made repeated-reset scenarios silently

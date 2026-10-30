@@ -121,6 +121,7 @@ public:
     TrackingScoreboard scoreboard_, store_scoreboard_, vector_scoreboard_;
     SparseMemory memory_;
     std::optional<std::uint64_t> last_reset_completed_cycle_;
+    bool last_load_vector_pair_same_cycle_ = false;
     struct RedirectBoundary { unsigned rob; bool flag,flush_itself; std::uint64_t cycle,remaining,sq_allocation_limit; };
     std::optional<RedirectBoundary> scalar_redirect_boundary_;
     unsigned ifetch_ptw_pending_ = 0;

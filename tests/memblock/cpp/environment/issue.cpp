@@ -406,12 +406,16 @@ auto Environment::Impl::issue_load_vector_pair(const LoadTransaction &load,
     const VectorMemoryTransaction &vector,
     unsigned timeout)  -> bool
 {
+    last_load_vector_pair_same_cycle_ = false;
     if (!scalar_immediate_is_valid(load.immediate)) {
         error_.record("scalar load immediate exceeds signed 12-bit range");
         return false;
     }
     generated::ScalarLoadIssue scalar_issue;
     scalar_issue.pc = load.pc.value_or(0x1000 + load.rob * 4);
+    scalar_issue.predecode_rvc = load.predecode_rvc;
+    scalar_issue.ftq_ptr = load.ftq_ptr;
+    scalar_issue.ftq_offset = load.ftq_offset;
     scalar_issue.fu_op_type = static_cast<std::uint16_t>(load.op);
     scalar_issue.rf_wen = load.rf_wen;
     scalar_issue.fp_wen = load.fp_wen;
@@ -422,6 +426,11 @@ auto Environment::Impl::issue_load_vector_pair(const LoadTransaction &load,
     scalar_issue.lq_value = load.lq;
     scalar_issue.sq_flag = load.sq_flag;
     scalar_issue.sq_value = load.sq;
+    scalar_issue.store_set_hit = load.store_set_hit;
+    scalar_issue.wait_for_rob_flag = load.wait_for_rob_flag;
+    scalar_issue.wait_for_rob_value = load.wait_for_rob_value;
+    scalar_issue.load_wait_bit = load.load_wait_bit;
+    scalar_issue.load_wait_strict = load.load_wait_strict;
     scalar_issue.imm = static_cast<std::uint32_t>(load.immediate);
     scalar_issue.src = scalar_issue_base_address(
         load.address, load.immediate);
@@ -443,6 +452,9 @@ auto Environment::Impl::issue_load_vector_pair(const LoadTransaction &load,
             dut_.scalar_load_issue_ready(load.lane);
         const bool vector_accepted = vector_pending &&
             dut_.vector_memory_issue_ready(vector.lane);
+        if (scalar_accepted && vector_accepted) {
+            last_load_vector_pair_same_cycle_ = true;
+        }
         tick();
         if (scalar_accepted) {
             scalar_pending = false;

@@ -194,6 +194,21 @@ bool MixedScenario::run_concurrent_windows()
 
         std::array<unsigned, 5> issue_order{{0, 1, 2, 3, 4}};
         std::shuffle(issue_order.begin(), issue_order.end(), random);
+        const unsigned pair_rate = std::min(250U, constraints.concurrent_actions_per_mille);
+        bool pair_scalar_vector = !special_load && pair_rate != 0 &&
+            random() % 1000U < pair_rate &&
+            vector_load_shape.addressing != static_cast<unsigned>(
+                memblock::VectorAddressingMode::indexed_ordered);
+        bool paired_scalar_vector = false;
+        if (pair_scalar_vector) {
+            const auto width = 1U << memblock::vector_data_eew(vector_load_uops.front());
+            pair_scalar_vector = (vector_load_uops.front().address & 15U) + width <= 16U;
+            if (pair_scalar_vector) {
+                auto scalar_position = std::find(issue_order.begin(), issue_order.end(), 0U);
+                auto vector_position = std::find(issue_order.begin(), issue_order.end(), 1U);
+                if (vector_position < scalar_position) std::iter_swap(vector_position, scalar_position);
+            }
+        }
         // Ordered indexed vector loads wait for all older LQ entries.
         // Keep the dependency legal while retaining a randomized order
         // for the remaining independent classes.
@@ -217,8 +232,17 @@ bool MixedScenario::run_concurrent_windows()
             case 0:
                 if ((special_load && !environment.run_until_load_complete(
                         *special_load, constrained_completion_timeout)) ||
-                    !environment.set_rob_head(scalar.rob, scalar.rob_flag) ||
-                    !environment.issue_load(scalar, 2048)) {
+                    !environment.set_rob_head(scalar.rob, scalar.rob_flag)) {
+                    return false;
+                }
+                if (pair_scalar_vector) {
+                    if (!environment.issue_load_vector_pair(
+                            scalar, vector_load_uops.front(), 2048)) return false;
+                    paired_scalar_vector = true;
+                    if (environment.last_load_vector_pair_same_cycle()) {
+                        ++coverage.simultaneous_scalar_vector;
+                    }
+                } else if (!environment.issue_load(scalar, 2048)) {
                     return false;
                 }
                 break;
@@ -237,6 +261,7 @@ bool MixedScenario::run_concurrent_windows()
                     return false;
                 }
                 for (const unsigned index : vector_uop_issue_order(vector_load_uops, random)) {
+                    if (paired_scalar_vector && index == 0) continue;
                     const auto &uop = vector_load_uops[index];
                     if (index != 0 && vector_load_depends_on_previous(
                             vector_load_uops[index - 1U], uop)) {
