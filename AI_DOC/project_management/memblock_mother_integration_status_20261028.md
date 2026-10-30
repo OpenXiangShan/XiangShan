@@ -4,13 +4,14 @@
 
 - Worktree: `.codex_mother_integration_20261028`
 - Branch: `codex/memblock-csr-prefix-fix-20261025`
-- 最近已提交实现：`1343dbce3`（跨页Load首段数据错误RM修复，单Bug commit）；旧PBMT profile为`3bd0e9934`、旧已通过SV基线为`60dcca7c6`。
-  该1343修复的2540项编译输入中仅计划内10个SV变化；当前未提交rollback修复相对1343另变2个SV。RTL未变，四项无关知识库脏文档未纳入提交。
+- 最近已提交实现：`bba3008ba`（rollback同拍来源绑定，单Bug commit）；前一RM修复`1343dbce3`、PBMT profile `3bd0e9934`、旧SV基线`60dcca7c6`均保留。
+  1343修复的2540项编译输入中仅计划内10个SV变化；bba3008修复相对1343另变2个SV。RTL未变，四项无关知识库脏文档未纳入提交。
 - 当前执行状态：旧WIP门禁已关闭；原矩阵非strict-NC共25组250/250通过，strict-NC10项延期；25组通过SV基线覆盖率已过滤合并。
   新fault3问题已独立确认为RM并通过方案review。r5 fresh compile及相同临时参数最小真实DUT用例严格PASS，
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
   本BugTuring最终独立review PASS并已提交；fault3恢复99出现新ROLLBACK_XMR，当前跨轮1/100、`PAUSED_ANALYSIS`；
-  1343基线矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。新rollback责任/方案/最终实现review均PASS，已顺序修改2个SV并fresh compile；软件1/1及真实DUT20/20专项通过（18邻接加两个原根各10000笔）。方案移do，随本记录单Bug提交后才恢复批量，当前新版最终350项尚未验收。
+  1343基线矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。新rollback责任/方案/最终实现review均PASS，软件1/1及真实DUT20/20专项通过（18邻接加两个原根各10000笔），已提交bba3008ba。
+  当前已恢复新SV最终批量：fault3剩98（jobs20）与25组250矩阵（每组jobs10）独立mode并行；当前最终名额只确认两个原根2/350，不用旧51或250项填充。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -504,3 +505,49 @@ Turing最终独立`FINAL_IMPLEMENTATION_REVIEW_PASS`，无源码阻塞；20真�
 最终批量启动/覆盖率artifact独立review发现二进制绑定、精确350项和验收异常状态记录三处缺口；
 已补ignored脚本，Turing独立`READINESS_REVIEW_PASS`，三项全部关闭；汇总门禁也已`FINAL_ROLLBACK_IMPLEMENTATION_GATE_PASS`。
 未修改生产SV或提前启动批量，不把这些证据工具问题另算DUT/RM Bug；旧source四项快照hash再次全部OK。
+
+### bba3008修复后最终批量台账（最新）
+
+单Bug提交`bba3008baa01b1faf50cc0037053cd54693e6792`已在mother，源码冻结，无新worktree、无RTL修改。
+回归前`FINAL_ROLLBACK_IMPLEMENTATION_GATE_PASS`及独立`READINESS_REVIEW_PASS`均通过。
+两个原根完整10000笔PASS占最终fault3 100项的2项；18项邻接和1软件专项不占最终350名额。
+fault3余98入口：`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fault_2pct_no_trigger`，MAIN10000、timeout1e8、无临时plusarg；
+最新19颗ABORTED原seed＋79颗未重复新seed均在`mother_rollback_same_sample_gate_fixture_20261030/recovery98_manifest.json`。
+结果目录`mem_ut/ver/ut/memblock/sim/mother_post_rollback_fault3_recovery98_20261030_results`，jobs20、当前运行中。
+其跨轮`campaign_state.tsv`保留在`mother_post_wip_cov_20261029_results/fault3_final100_20261030`，开始记录为2PASS/98剩余。
+
+矩阵结果根目录`mem_ut/ver/ut/memblock/sim/mother_post_rollback_matrix_20261030_results`，根manifest及campaign逐组写入实际入口、seed、源码commit及失败原因；
+共25组250项，含210真实DUT与40原计划软件用例。仅执行这些既有软件别名，不扩展修复无关soft_test。
+下表是启动时状态；后续每组以对应strict/clean验收及根campaign更新，不将controller运行中的PASS计入严格验收。
+
+| tc | ts | cfg | bba3008状态 | 已验收/计划 |
+|---|---|---|---|---:|
+| `basicTest` | `memblock_dispatch_manual_control_vseq` | `csr_sfence_check_store_manual_control` | RUNNING | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `csr_sfence_check_store_rob_control` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 待执行（矩阵原10颗、MAIN1000） | 0/10 |
+| `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | 待执行（保留cfg2） | 0/10 |
+| `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_10k` | 待执行 | 0/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_1k` | 待执行 | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `default` | 待执行 | 0/10 |
+| `tc_boundary_addr_reuse_gate` | `virtual_base_sequence` | `tc_boundary_addr_reuse_store_cross8_gate` | 待执行（软件） | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_l2cache_model` | 待执行 | 0/10 |
+| `tc_dispatch_real_mixed_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_sta_wb_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_mixed_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_mixed_wb_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_multi_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_multi_store_wb_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_smoke` | `virtual_base_sequence` | `tc_dispatch_real_smoke_flushsb` | 待执行 | 0/10 |
+| `tc_dispatch_real_store_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_store_sta_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_sta_wb_smoke` | 待执行 | 0/10 |
+| `tc_dispatch_real_store_wb_smoke` | `virtual_base_sequence` | `tc_dispatch_real_store_wb_smoke` | 待执行 | 0/10 |
+| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_io` | 待执行（软件） | 0/10 |
+| `tc_l2tlb_pbmt_csr_gate` | `virtual_base_sequence` | `tc_l2tlb_pbmt_csr_gate_nc` | 待执行（软件） | 0/10 |
+| `tc_l2tlb_ppn_reuse_smoke` | `virtual_base_sequence` | `tc_l2tlb_ppn_reuse_smoke` | 待执行（软件） | 0/10 |
+
+最终PASS白名单应精确350条＝310真实DUT＋40软件，strict-NC10继续`STOPPED_RTL_CONFIRMED`，不计PASS。
+最终覆盖率尚未生成；旧`mother_matrix_pass_coverage_20261030`不能代替新版本。仅当新350项全验收才执行最终collector及独立报告review。
+当前只本地提交：没有指定私有push目标，不向公共upstream origin上传。
