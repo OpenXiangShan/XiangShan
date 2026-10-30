@@ -11,7 +11,7 @@
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
   本BugTuring最终独立review PASS并已提交；fault3恢复99出现新ROLLBACK_XMR，当前跨轮1/100、`PAUSED_ANALYSIS`；
   1343基线矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。新rollback责任/方案/最终实现review均PASS，软件1/1及真实DUT20/20专项通过（18邻接加两个原根各10000笔），已提交bba3008ba。
-  当前已恢复新SV最终批量：fault3剩98（jobs20）与25组250矩阵（每组jobs10）独立mode并行；当前最终名额只确认两个原根2/350，不用旧51或250项填充。
+  当前已恢复新SV最终批量：fault3剩98（jobs20）与25组250矩阵（每组jobs10）独立mode并行；当前最终名额已确认62/350（两个原根加矩阵前6组60项），不用旧51或250项填充。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -522,13 +522,13 @@ fault3余98入口：`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fa
 
 | tc | ts | cfg | bba3008状态 | 已验收/计划 |
 |---|---|---|---|---:|
-| `basicTest` | `memblock_dispatch_manual_control_vseq` | `csr_sfence_check_store_manual_control` | RUNNING | 0/10 |
-| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `csr_sfence_check_store_rob_control` | 待执行 | 0/10 |
-| `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | 待执行 | 0/10 |
-| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | 待执行 | 0/10 |
-| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | 待执行 | 0/10 |
-| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | 待执行 | 0/10 |
-| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 待执行（矩阵原10颗、MAIN1000） | 0/10 |
+| `basicTest` | `memblock_dispatch_manual_control_vseq` | `csr_sfence_check_store_manual_control` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `csr_sfence_check_store_rob_control` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | STRICT_PASS | 10/10 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | RUNNING（矩阵原10颗、MAIN1000） | 0/10 |
 | `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | 待执行（保留cfg2） | 0/10 |
 | `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | 待执行 | 0/10 |
 | `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_10k` | 待执行 | 0/10 |
