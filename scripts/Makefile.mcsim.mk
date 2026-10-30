@@ -7,8 +7,8 @@ MCSIM_EMU_DEPS :=
 MCSIM_DIFTEST_ARGS :=
 
 ifeq ($(WITH_MCSIM),1)
-ifndef MCSIM_HOME
-$(error MCSIM_HOME is not set)
+ifeq ($(wildcard $(MCSIM_HOME)/Makefile),)
+$(error MCSIM_HOME is invalid: $(MCSIM_HOME))
 endif
 override SIM_ARGS += --with-mcsim
 MCSIM_EMU_DEPS += mcsim-verilator-lib
