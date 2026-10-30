@@ -30,6 +30,16 @@ constexpr unsigned kLsqRedirectRecoveryEdges = 6;
 constexpr unsigned kStreamScalarWritebackToHead = 4;
 constexpr unsigned kStreamVectorWritebackToHead = 5;
 constexpr unsigned kRobEntries = 160;
+constexpr unsigned kRabEntries = 256;
+constexpr unsigned kVTypeBufferEntries = 64;
+// One ordinary redirect, legal bounded occupancy, no new admission/nested
+// recovery: each ROB walk advances; RAB/VType drain at least one entry/edge.
+// Deliberately add the nonoverlapping phase bounds and pipeline allowance.
+constexpr unsigned kStreamOrdinaryWalkBound =
+    kRobEntries + 2U * kRabEntries + 2U * kVTypeBufferEntries + 16U;
+// Input-owned backend/trace busy hold, not a DUT response deadline.
+constexpr unsigned kStreamOrdinaryRecoveryBusy = 1024;
+static_assert(kStreamOrdinaryRecoveryBusy > kStreamOrdinaryWalkBound);
 constexpr unsigned kDcacheMissEntries = 16;
 constexpr unsigned kDcacheReleaseEntries = 18;
 // DCacheWrapper: IdRange(0, miss + release + one CMO entry + one).

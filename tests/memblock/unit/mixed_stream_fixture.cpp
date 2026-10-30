@@ -8,6 +8,7 @@
 #include "scenarios/mixed/store_address_replay.hpp"
 #include "scenarios/mixed/stream_cancellation.hpp"
 #include "scenarios/mixed/stream_dependency.hpp"
+#include "scenarios/mixed/stream_footprint.hpp"
 #include "scenarios/mixed/translation_permutation.hpp"
 #include <functional>
 #include <map>
@@ -44,6 +45,7 @@ struct SyntheticEnvironment {
         bool needs_restart_flush() const { return !uops.empty() && uops.front().vector.vstart != 0; }
         unsigned address_attempts = 0, address_retries = 0;
         std::uint64_t address_due = 0, data_due = 0, sq_target = 0;
+        std::uint64_t translation_due = 0;
         std::vector<Uop> uops;
         bool is_store() const { return kind == 2 || kind == 3; }
     };
@@ -204,6 +206,29 @@ struct SyntheticEnvironment {
     unsigned overlap_admissions = 0, continued_admissions = 0;
     unsigned loads_before_older_std = 0, head_checks = 0, dependency_checks = 0;
     unsigned issues = 0, commits = 0;
+    bool allow_disjoint_bypass = false;
+    unsigned disjoint_acceptances = 0, disjoint_relations = 0;
+    std::set<std::pair<unsigned, unsigned>> disjoint_pairs;
+    static std::set<std::uint64_t> input_lines(const Instruction &work) {
+        std::set<std::uint64_t> lines;
+        const auto add = [&](const auto &t, std::uint64_t address, unsigned width) {
+            for (unsigned byte = 0; byte < width; ++byte) {
+                const auto va = address + byte;
+                const auto pa = t.reference_pages ? t.reference_pages->physical_address(va) :
+                    t.oracle_address ? *t.oracle_address + va - t.address : va;
+                lines.insert(pa / 64U);
+            }
+        };
+        if (work.kind == 0) add(work.load, work.load.address, 1U << (unsigned(work.load.op) % 4U));
+        else if (work.kind == 2) add(work.store, work.store.address, 1U << unsigned(work.store.op));
+        else for (const auto &uop : work.uops) {
+            const auto &v = uop.vector; const unsigned width = 1U << vector_data_eew(v);
+            const auto active = active_vector_elements(v);
+            for (unsigned element = 0; element < 16U / width; ++element)
+                if ((active >> element) & 1U) add(v, vector_element_virtual_address(v, element), width);
+        }
+        return lines;
+    }
     bool inject_vector_replay = false;
     unsigned replay_bound_checks = 0, replay_retry_bound_checks = 0, vector_retries = 0;
     bool delayed_store_feedback = false;
@@ -383,7 +408,7 @@ struct SyntheticEnvironment {
         retirement_stats.max_pending = std::max(retirement_stats.max_pending, retirement_stats.pending);
     }
     std::uint64_t completion_edge(const Instruction &work) const {
-        if (work.kind == 2) return std::max(work.address_due, work.data_due);
+        if (work.kind == 2) return std::max({work.address_due, work.data_due, work.translation_due});
         std::uint64_t edge = 0;
         for (const auto &uop : work.uops) edge = std::max(edge, uop.due);
         return edge;
@@ -458,7 +483,8 @@ struct SyntheticEnvironment {
         captured_vaddr = *trap_address;
         return true;
     }
-    bool redirect_after(std::uint8_t rob, bool flag, bool itself) {
+    bool redirect_after(std::uint8_t rob, bool flag, bool itself, bool = false, bool ordinary_walk = false) {
+        require(!ordinary_walk || !recovery_enabled, "graph unexpectedly requested generic walk");
         if (!itself) {
             auto &head = find(rob, flag);
             check_installed_head();
@@ -559,7 +585,7 @@ struct SyntheticEnvironment {
     bool complete(const Instruction &work) const {
         if (work.initial_cold && work.epoch == 0) return false;
         if (work.kind == 2)
-            return work.address && work.data && tick >= work.address_due && tick >= work.data_due;
+            return work.address && work.data && tick >= work.address_due && tick >= work.data_due && tick >= work.translation_due;
         if (recovery_enabled && work.kind == 0 && !work.uops.empty() && !work.uops[0].completed) {
             const unsigned width = 1U << (unsigned(work.load.op) & 3U);
             for (unsigned index = 0; index < work.id; ++index) {
@@ -836,8 +862,25 @@ struct SyntheticEnvironment {
     }
     void check_load_age(const Instruction &work) {
         if (permission_enabled && work.kind == 0 && work.load.expected_exception_mask) return;
+        bool bypassed = false;
         for (unsigned index = retired; index < work.id; ++index) {
             const auto &older = instructions[index];
+            if (allow_disjoint_bypass && older.is_store()) {
+                const auto load_lines = input_lines(work), store_lines = input_lines(older);
+                const bool disjoint = std::none_of(load_lines.begin(), load_lines.end(),
+                    [&](auto line) { return store_lines.count(line); });
+                if (disjoint) {
+                    if (work.kind == 0) require(!work.load.store_set_hit && !work.load.load_wait_bit &&
+                        !work.load.load_wait_strict && !work.load.wait_for_rob_flag && !work.load.wait_for_rob_value,
+                        "disjoint bypass retained non-cold predictor metadata");
+                    const bool unresolved = older.kind == 2 ? !older.address || tick < older.address_due : !complete(older);
+                    if (unresolved) {
+                        bypassed = true;
+                        disjoint_relations += disjoint_pairs.emplace(work.id, older.id).second;
+                    }
+                    continue;
+                }
+            }
             if (older.kind == 2) {
                 if (work.group && work.group == older.group && work.load.pc) continue;
                 require(older.address && tick >= older.address_due,
@@ -847,6 +890,7 @@ struct SyntheticEnvironment {
             if (older.kind == 3) require(complete(older),
                 "younger load issued before an older vector-store address set was complete");
         }
+        disjoint_acceptances += bypassed;
     }
     void check_installed_head() const {
         require(installed_head && *installed_head == retired, "accepted producer without current architectural ROB head");
@@ -953,6 +997,7 @@ struct SyntheticEnvironment {
         work.address_retries += work.address_attempts != 0;
         ++work.address_attempts;
         const auto feedback_at = delayed_store_feedback ? accepted_at + 19U + (work.id % 7U) : tick;
+        if (!miss) work.translation_due = feedback_at;
         future_store_feedback.push_back({.lane=t.address_lane, .hit=!miss,
             .sq_flag=t.sq_flag, .sq_value=t.sq, .cycle=feedback_at});
         address_retry_after[work.id] = miss ? feedback_at + 8U : std::numeric_limits<std::uint64_t>::max();
@@ -1074,11 +1119,12 @@ struct SyntheticEnvironment {
         const auto &uop = find(t.rob, t.rob_flag).uops.at(t.vuop_idx); return !uop.issued || tick < uop.due;
     }
     bool service_vector_replay(const VectorMemoryTransaction &, bool &serviced, unsigned) { serviced = false; return true; }
-    bool retire_store(const StoreTransaction &t) {
+    bool retire_store(const StoreTransaction &t, bool restore_after_walk = false) {
         auto &work = find(t.rob, t.rob_flag);
         require(work.id == retired && complete(work), "scalar retirement outside completed head");
         require(tick >= completion_edge(work) + 2U, "scalar scommit preceded backend readiness");
         require(!work.committed, "duplicate scalar retirement");
+        require(!restore_after_walk, "generic walk restoration is not scripted in this fixture");
         retirement_had_stall = held_live();
         capture_store_edge();
         work.committed = true; ++commits;
@@ -1203,7 +1249,7 @@ struct SyntheticEnvironment {
             "production overlap coverage disagreed with independent admission observations");
         require(coverage.stream_waiting_head == std::array<std::uint64_t, 2>{
             admissions_with_completed_head, issues_with_completed_head},
-            "production completed-head choices disagreed with independent observations");
+            "production completed-head choices disagreed with independent observations: got=" + std::to_string(coverage.stream_waiting_head[0]) + "/" + std::to_string(coverage.stream_waiting_head[1]) + " expected=" + std::to_string(admissions_with_completed_head) + "/" + std::to_string(issues_with_completed_head));
         require(coverage.stream[8] + refetch_issues + coverage.stream_scalar_retries + vector_retries == issues &&
             coverage.stream[9] == vector_retries, "production issue count disagreed with accepted producers");
         std::array<std::uint64_t, 5> expected_pairs{};
@@ -1293,6 +1339,7 @@ public:
                 family == 0 ? (index == 0 ? 7 : 3) : (family == index + 1 ? 1 : 0);
         constraints.stream_max_instructions = 32;
         constraints.stream_dependency_pages_per_mille = 0;
+        constraints.stream_disjoint_bypass_per_mille = 0;
         constraints.stream_unresolved_per_mille = 0;
         constraints.stream_unresolved_inflight_per_mille = 0;
         constraints.misaligned_per_mille = 450;
@@ -1458,10 +1505,18 @@ int main(int argc, char **argv) {
                 "oracle checkpoint failed to remove canceled-store bytes");
             std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
                 << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
-        } else if (mode == "stream" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
+        } else if (mode == "stream" || mode == "disjoint-bypass" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
             require(argc == 6 || (mode == "permission" && argc == 7) || (mode == "independent" && argc == 7) || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "disjoint-bypass") {
+                fixture.constraints.stream_disjoint_bypass_per_mille = 1000;
+                fixture.constraints.stream_dependency_per_mille = 0;
+                fixture.constraints.stream_arena_per_mille = 0;
+                fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = limit;
+                fixture.environment.allow_disjoint_bypass = true;
+                fixture.environment.delayed_store_feedback = true;
+            }
             if (mode == "vector-replay") fixture.environment.inject_vector_replay = true;
             if (mode == "permission") {
                 fixture.environment.permission_enabled = true;
@@ -1523,6 +1578,8 @@ int main(int argc, char **argv) {
                 << ",\"loads_before_older_std\":" << env.loads_before_older_std << ",\"head_checks\":" << env.head_checks
                 << ",\"dependency_checks\":" << env.dependency_checks << ",\"issues\":" << env.issues
                 << ",\"replay_bound_checks\":" << env.replay_bound_checks
+                << ",\"disjoint_acceptances\":" << env.disjoint_acceptances
+                << ",\"disjoint_relations\":" << env.disjoint_relations
                 << ",\"replay_retry_bound_checks\":" << env.replay_retry_bound_checks
                 << ",\"vector_retries\":" << env.vector_retries
                 << ",\"admissions_with_completed_head\":" << env.admissions_with_completed_head
@@ -1580,6 +1637,9 @@ int main(int argc, char **argv) {
             std::cout << "],\"stream_dependency_pages\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_dependency_pages.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_dependency_pages[i];
+            std::cout << "],\"stream_disjoint_bypass\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_disjoint_bypass.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_disjoint_bypass[i];
             std::cout << "]"
                 << ",\"cold_attempts\":" << fixture.coverage.stream_recovery_inflight[0]
                 << ",\"cold_unavailable\":" << fixture.coverage.stream_recovery_inflight[1]

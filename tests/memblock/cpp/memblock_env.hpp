@@ -1380,7 +1380,9 @@ public:
     bool end_store_release_epoch(unsigned timeout = 4096);
     bool track_store_release_inputs(const StoreTransaction &transaction);
     bool track_vector_release_inputs(const VectorMemoryTransaction &transaction);
-    bool retire_store(const StoreTransaction &transaction);
+    // restore_after_walk atomically exposes the first high pendingst/scommit
+    // tuple for an already-completed surviving H after the ordinary busy hold.
+    bool retire_store(const StoreTransaction &transaction, bool restore_after_walk = false);
     bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions);
     const StoreRetirementStats &store_retirement_stats() const;
 
@@ -1419,7 +1421,7 @@ public:
     bool run_cycles(unsigned cycles);
 
     bool redirect_after(std::uint8_t rob_value, bool rob_flag, bool flush_itself,
-                        bool is_vls_exception = false);
+                        bool is_vls_exception = false, bool ordinary_walk = false);
 
     const std::vector<Failure> &failures() const;
     std::string failure_report() const;

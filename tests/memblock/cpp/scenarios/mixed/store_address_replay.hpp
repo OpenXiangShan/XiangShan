@@ -40,6 +40,7 @@ public:
             if (!waiting_ || sample.cycle < accepted_cycle_) return Observation::invalid;
             waiting_ = false;
             translated_ = sample.hit;
+            if (sample.hit) translated_cycle_ = sample.cycle;
             ready_cycle_ = sample.cycle + 8U;
             result = sample.hit ? Observation::hit : Observation::miss;
         }
@@ -55,6 +56,19 @@ public:
             if (matches(samples[index], transaction) && samples[index].cycle <= edge) return false;
         return true;
     }
+    // Public feedback sampled at boundary E already exists before an issue
+    // accepted at pre-step E. Include not-yet-consumed samples from this
+    // attempt, never a matching reused SQ lifetime before its cursor.
+    template<class Samples, class Transaction>
+    bool translated_at(std::uint64_t edge, const Samples &samples, const Transaction &transaction) const {
+        if (translated_cycle_ && *translated_cycle_ <= edge) return true;
+        for (std::size_t index = cursor_; issued_ && index < samples.size(); ++index) {
+            const auto &sample = samples[index];
+            if (matches(sample, transaction) && sample.hit && sample.cycle >= accepted_cycle_ && sample.cycle <= edge)
+                return true;
+        }
+        return false;
+    }
 private:
     template<class Sample, class Transaction>
     static bool matches(const Sample &sample, const Transaction &transaction) {
@@ -64,5 +78,6 @@ private:
     bool issued_ = false, waiting_ = false, translated_ = false;
     std::size_t cursor_ = 0;
     std::uint64_t accepted_cycle_ = 0, ready_cycle_ = 0;
+    std::optional<std::uint64_t> translated_cycle_;
 };
 } // namespace memblock::scenarios::mixed

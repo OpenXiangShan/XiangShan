@@ -16,7 +16,7 @@ struct TrackingPort {
     bool boolean() const { return contents != 0; }
 };
 struct TrackingDut {
-    struct { struct { TrackingPort pending_ptr_value, pending_ptr_flag, pendingst, scommit; } backend;
+    struct { struct { TrackingPort pending_ptr_value, pending_ptr_flag, pendingst, scommit, pending_mmi_old; } backend;
         struct { TrackingPort valid, rob_idx_value, rob_idx_flag, level; } redirect; } queues;
     struct { struct { TrackingPort valid; } ifetch_request;
         struct { TrackingPort ready; } ifetch_response; } translation;
@@ -133,6 +133,7 @@ public:
     bool last_load_vector_pair_same_cycle_ = false;
     struct RedirectBoundary { unsigned rob; bool flag,flush_itself; std::uint64_t cycle,remaining,sq_allocation_limit; };
     std::optional<RedirectBoundary> scalar_redirect_boundary_;
+    std::optional<std::uint64_t> ordinary_walk_resume_cycle_;
     unsigned ifetch_ptw_pending_ = 0;
     // PRODUCTION_TRACKING_STRUCTS
     std::vector<std::string> events;
@@ -166,7 +167,7 @@ public:
     bool issue_vector(const VectorMemoryTransaction &,unsigned=10);
     void tick(bool=true, const std::function<void()> &before_edge = {});
     bool reset();
-    bool retire_store(const StoreTransaction &);
+    bool retire_store(const StoreTransaction &, bool = false);
     bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &);
     bool commit_stores_through(const StoreTransaction &,unsigned);
     void record_committed_store(const StoreTransaction &);

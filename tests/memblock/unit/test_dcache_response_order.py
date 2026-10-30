@@ -81,7 +81,7 @@ class DcacheResponseOrderTest(unittest.TestCase):
             self.assertEqual(r.returncode == 0, valid, r.stdout + r.stderr)
             if valid:
                 self.assertIn('target_dcache_response_reorder=' + value + ' ', r.stdout)
-                self.assertIn('constraint_schema=83', r.stdout)
+                self.assertIn('constraint_schema=84', r.stdout)
 
     def test_independent_deferred_and_release_histories_allow_distinct_inversion_populations(self):
         # Pending A may be delayed by same-line ownership or explicit holds;

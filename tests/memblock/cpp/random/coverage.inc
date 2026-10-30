@@ -3306,6 +3306,11 @@ struct MixedCoverage {
     // Cross-page address edges by scalar load/vector load/scalar store/
     // vector store/prefetch: selected, first accepted, canceled unaccepted.
     std::array<std::uint64_t, 15> stream_dependency_pages{};
+    // Per integer/FP/vector load: selected, first accepted, canceled before
+    // acceptance; then accepted once per load/blocker relation: older scalar
+    // STA unaccepted / scalar translation unacknowledged / vector sibling
+    // uop unaccepted. Repeated vector uops do not recount a relation.
+    std::array<std::uint64_t, 18> stream_disjoint_bypass{};
     // Epochs exceeding32, maximum epoch retirements, admissions after ordinal32
     // with older accepted pending work, ROB value/wrap identity reuse admissions.
     std::array<std::uint64_t, 4> stream_history{};
@@ -3701,6 +3706,7 @@ struct MixedCoverage {
                " stream_history=" + csv(stream_history) +
                " stream_dependencies=" + csv(stream_dependencies) +
                " stream_dependency_pages=" + csv(stream_dependency_pages) +
+               " stream_disjoint_bypass=" + csv(stream_disjoint_bypass) +
                " stream_recovery=" + csv(stream_recovery) +
                " stream_recovery_shapes=" + csv(stream_recovery_shapes) +
                " stream_recovery_victims=" + csv(stream_recovery_victims) +

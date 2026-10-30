@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=83`.
+`constraint_schema=84`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -79,6 +79,7 @@ they do not imply arbitrary numeric suffix support.
 | `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the page offset; `stream-dependency-pages` may also select a page within the declared mapping. Scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
 | `stream-dependency-pages` | Conditional page-displacement ALU rate for an already selected address edge, default 250 in all presets. Result bits above bit5 select a cyclic page displacement inside the ordinary identity/permuted window or selected 64-KiB NAPOT region, reserving one guard page at each end. A selected ALU may retain the page; only actual page changes count as cross-page edges. Zero preserves the preceding RNG draws and same-page addresses. |
+| `stream-disjoint-bypass` | Conditional admission rate for ordinary scalar integer/FP or vector loads disjoint in physical cache lines from every live older store; default 250 in every preset. Selected loads may issue past unresolved older scalar STA/translation or vector sibling issue, retaining operand/head/VSTART/ordered-indexed constraints and exact normal data. Scalar metadata uses a reachable cold predictor with no store-set/wait/strict bits. Graph, permission and auxiliary survival roles are excluded. Zero preserves preceding RNG/scheduling. This rate selects capability, not a promised issue/completion ratio. |
 | `stream-store-pair` | Conditional rate offering an ordinary scalar store's initial STA and STD together when both operand events are ready. Independent retained lane handshakes permit same-edge, STA-first or STD-first acceptance. Default 500 in all presets; zero retains separate scheduling. Graph operands and STA retries remain separate. |
 | `stream-arena` | Ordinary eight-line stream-arena selection rate; default 750 preserves the previous seeded draw. Zero uses the configured locality/working set for every ordinary selection; 1000 always selects the eight-line arena. Dependencies, permission reservations and unresolved-graph addresses retain their own constraints. This is an address-choice rate, not an observed cache-miss percentage. |
 | `stream-permission-load` | Conditional scalar/FP load admission rate for immutable execute-only pages in translated ordinary streams; default 50, zero for cmo-stress. A seeded 1..4-probe epoch budget bounds canceled/replacement work; one denied probe may be live. Bare epochs and unresolved graph roles are excluded. |
@@ -485,7 +486,8 @@ ROB/pdest/PC/class/SQ and fresh LQ/FTQ epochs. Known-address graph STD can be
 promoted before refetch; its planned event is consumed once. All unrelated
 prefix obligations remain live. Conflicting STA events wait until the actual
 head is a non-store or the anchor; this avoids extending the current adapter's
-unqualified store-headed redirect `pendingst` behavior. Prefix SQ dequeue is
+graph-specific store-headed recovery contract. Generic suffix recovery uses
+the separate registered suppression/backend-busy contract below. Prefix SQ dequeue is
 legal up to the first graph allocation boundary; graph dequeue and all SQ cancellation are forbidden. Scalar scoreboard
 cancellation is limited to the selected initial cold role at its exact observed
 redirect boundary. All graph operands and current epochs
@@ -1251,8 +1253,19 @@ reconciles physical LQ/SQ credits, restores the independent byte overlay before
 the first killed instruction, frees killed destinations, and admits replacement
 generations after the local queue-recovery guard. Queue drain before every such
 load would remove the overlap this direction needs to verify. Adjacent returns,
-competing EXU/ROB redirects, scalar late-output histories and store-headed walk
-levels remain outside this bounded path.
+competing EXU/ROB redirects and scalar late-output histories remain outside this
+bounded path. Generic ordinary return occurs at sampled+2 and preserves the
+surviving head H. It retains the old pendingst on redirect R, suppresses pending
+controls from R+1, then declares 1024 backend/trace busy edges plus one registered
+output edge before restoring H and resuming explicit retirement. The conservative
+single-walk capacity bound is 160 + 2*256 + 2*64 + 16 = 816. No admissions,
+retirement, nested redirects or exceptional recovery occur during this hold;
+surviving memory work continues. This input-owned stall does not measure ROB
+latency, impose a memory-drain deadline or model the full CPU commit phase.
+Completed scalar H restores its first high pendingst and scalar scommit on one
+edge after the WB guard, followed by next-edge head advancement. The request
+snapshot cannot be overwritten by later feedback; competing returns during
+the wait, propagation or busy interval fail explicitly.
 
 ### Persistent ordinary producer evidence
 
@@ -1433,6 +1446,41 @@ Expected bytes remain frozen in admission order, independently of DUT responses.
 Live depth and boundary drains retain their existing rules; schema 72 extends
 configurable epoch lengths as described below. General vector-result/index
 chains and unbounded continuous histories remain gaps.
+
+### Disjoint ordinary load bypass
+
+Schema84 removes the blanket older-store-address wait for selected ordinary
+integer/FP/vector loads whose declared physical cache-line footprint is disjoint
+from every older live store. Every active vector byte and each scalar byte is
+translated by the independent declared map; inactive elements contribute no
+footprint. Same-line disjoint-byte accesses retain the prior wait. Store operands
+may remain unavailable in the emulated backend even though the independent
+model knows their eventual values. Scalar selected metadata is frozen before
+enqueue/issue as an untrained predictor: hit/wait/strict and wait target are zero.
+Existing dependent operand, ROB/LSQ identity, vector dependency/head and VSTART
+constraints still apply. No store expectation or byte-prefix image is changed.
+
+`stream_disjoint_bypass` has 18 counters. First come selected, first accepted and
+canceled-before-first-acceptance loads, each ordered integer/FP/vector. The final
+nine are three blocker relations per load class: older scalar STA not yet
+accepted, scalar STA accepted but matching translation-hit feedback not yet
+sampled, or older vector instruction with an unaccepted sibling. Each relation
+counts at most once per selected load, even across multiple vector uops. These
+are actual accepted-edge/feedback relations, not selected-ready intentions.
+Whole batches are frozen before classification, so lane ordering cannot create
+false same-edge unresolved witnesses. Same-edge issue is not before-issue.
+A hit sampled at boundary E is known at a load acceptance labeled E. Exactly-once
+selection/acceptance/cancellation accounting applies without requiring positive
+bins. Acceptance while unresolved does not require early completion: conservative
+SQ unaligned/predicted forwarding replay and legal latency remain permitted.
+The RAW CAM uses a partial physical address; distinct high addresses could
+legally request conservative recovery. Generic suffix cancellation retains H,
+suppresses registered pending controls from R+1 and uses the declared backend
+busy hold above; strict expectations and physical cancellation accounting stay
+active. A separate native partial-PA witness checks surviving store bytes and
+absence of the killed store's write. A conservative redirect alone is no CPU bug.
+This direction does not remove context drains or generate general overlapping
+speculation, predictor histories, segment/FOF speculation or arbitrary synonyms.
 
 ### Sustained ordinary histories
 

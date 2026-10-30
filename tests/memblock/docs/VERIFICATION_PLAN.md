@@ -184,6 +184,17 @@ touched word receives a strict terminal readback. Bounded random indexed vectors
 now vary offset spacing/permutation and repeated gathers for ordinary and
 segment operations; partial byte overlap and overlapping scatters remain open.
 
+Ordinary physically line-disjoint integer/FP/vector loads can now be selected
+to issue past unresolved scalar STA/translation or unissued vector siblings.
+A declared input footprint covers every active translated byte; same-line,
+recovery-graph, permission and auxiliary-witness accesses retain prior rules.
+Cold scalar predictor metadata is coupled and frozen before dispatch. Actual
+first-acceptance and blocker relations conserve selected/canceled generations;
+there is no fixed-latency or early-completion requirement. Broader conflicting
+speculation, vector-result dependencies, predictor histories and general
+context/mapping overlap remain gaps. CPU producer trace and bounded qualification
+belong in RESULTS.md; this capability alone is not coverage closure.
+
 Ordinary scalar streams return to event selection after an accepted STA rather
 than synchronously waiting for its slow feedback. One per-store attempt cursor
 matches lane/SQ value/wrap, preserves miss cooldown and suppresses retries after
@@ -259,7 +270,7 @@ including optional page displacement with guard pages for vector expansion; chec
 producer completion gates each operand, with lifetime retained across producer
 retirement. Seeds vary edge source, direction and chain depth. General vector
 result/index chains remain absent. Its configured 1..4096-instruction epochs (default draw 8..256), 2..8 live
-depth and conservative older-address gating do not implement a complete
+depth and remaining overlapping-address gating do not implement a complete
 ROB/rename/cancellation ledger. The integrated unresolved graph now retains an older mixed prefix, limits
 conflicts to a non-store actual head/anchor, services prefix producer progress,
 checks observed queue recovery and strictly refetches whole scalar/FP suffixes
@@ -276,7 +287,7 @@ Target-line old Grant completion through both final D
 and E plus 32 quiet cycles precedes same-identity refetch; prefix producers and
 retirement remain eligible. That quiet interval is a bounded witness, not a full
 CPU pipeline-empty proof. Next ordinary-workload work should interleave broader
-unfinished recovery and early-release/late-response overlap, model store-headed redirect/walk levels and producer
+unfinished recovery and early-release/late-response overlap, broaden store-headed redirect/walk and producer
 history, and reduce bounded stream/context drains where supported. Canonical FP formats now share
 ordinary/concurrent/dependency/unresolved builders with independent value/boxing
 checks. Vector-data/VL destinations stay within their separate default files;

@@ -9,10 +9,21 @@ namespace memblock::scenarios::mixed {
 // and pending victims only at the completed legal redirect boundary.
 template<class Environment>
 bool return_ordinary_redirect(Environment &environment, std::uint8_t rob,
-                              bool flag, bool flush_itself)
+                              bool flag, bool flush_itself, bool ordinary_walk = false)
 {
-    return environment.redirect_after(rob, flag, flush_itself) &&
+    return environment.redirect_after(rob, flag, flush_itself, false, ordinary_walk) &&
         environment.cancel_pending_for_redirect(rob, flag, flush_itself);
+}
+
+// The generic suffix path represents a single ordinary backend walk plus an
+// explicit trace/commit stall. No admission/retirement occurs here; surviving
+// memory obligations and managers continue ticking. The last low edge models
+// registered pending controls after busy release. Caller then restores the
+// surviving head and resumes the explicit retirement scheduler.
+template<class Environment>
+bool wait_ordinary_redirect_backend(Environment &environment)
+{
+    return environment.run_cycles(memblock::kStreamOrdinaryRecoveryBusy + 1U);
 }
 
 // One bounded speculative episode inside the ordinary architectural deque.

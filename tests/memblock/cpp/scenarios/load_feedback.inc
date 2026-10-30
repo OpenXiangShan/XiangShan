@@ -1296,8 +1296,90 @@ int run_topdown_contracts(int argc, char **argv)
     return 0;
 }
 
+// A conservative partial-PA RAW match can redirect physically disjoint work.
+// Exercise the generic return with a surviving actual store head and a killed
+// unissued store. Bytes and identities stay strict across return and refetch.
+bool disjoint_partial_alias_recovery(int argc, char **argv)
+{
+    memblock::Environment env(argc, argv);
+    constexpr std::uint64_t store_address = 0x8022b000ULL;
+    constexpr std::uint64_t load_address = 0xb022b000ULL;
+    env.memory().fill_incrementing(store_address, 64, 0x25);
+    env.memory().fill_incrementing(load_address, 64, 0xa7);
+    const auto old_load = env.memory().read_u64(load_address);
+    const auto old_canceled = env.memory().read_u64(load_address + 16U);
+    const memblock::StoreTransaction store{.address = store_address,
+        .data = 0x1827364554637281ULL, .op = memblock::StoreOp::sd,
+        .rob = 159, .sq = 0, .address_lane = 0, .data_lane = 1};
+    const memblock::LoadTransaction load{.address = load_address,
+        .op = memblock::LoadOp::ld, .rob = 0, .rob_flag = true, .lq = 0,
+        .sq = 1, .pdest = 92, .lane = 1, .ftq_ptr = 36, .ftq_offset = 2};
+    const memblock::StoreTransaction canceled{.address = load_address + 16U,
+        .data = 0xdeadbeefabcdef01ULL, .op = memblock::StoreOp::sd,
+        .rob = 1, .rob_flag = true, .sq = 1, .address_lane = 1, .data_lane = 0};
+    const char *phase = "reset";
+    const auto run = [&]() {
+        if (!env.reset() || !env.begin_store_release_epoch(4096)) return false;
+        env.expect_store(store); env.expect_store(canceled);
+        env.expect_load_data(load, old_load);
+        phase = "speculative-load";
+        if (!env.set_rob_head_state(store.rob, store.rob_flag, true) ||
+            !env.enqueue_store(store, 0) || !env.track_store_release_inputs(store) ||
+            !env.enqueue_load(load) || !env.enqueue_store(canceled, 1) ||
+            !env.track_store_release_inputs(canceled) || !env.issue_store_data(store, 256) ||
+            !env.issue_load(load, 256) || !env.run_until_complete(4096)) return false;
+        phase = "partial-PA-trigger";
+        const auto before = env.memory_violation_stats().count;
+        const auto sq_cancel = env.sq_redirect_canceled_observed();
+        if (!env.issue_store_address(store, 256)) return false;
+        for (unsigned edge = 0; edge < 4096 && env.memory_violation_stats().count == before; ++edge)
+            if (!env.run_cycles(1)) return false;
+        const auto request = env.memory_violation_stats();
+        if (request.count != before + 1U || !request.last.valid ||
+            request.last.rob_value != load.rob || request.last.rob_flag != load.rob_flag ||
+            request.last.ftq_flag || request.last.ftq_value != load.ftq_ptr ||
+            request.last.ftq_offset != load.ftq_offset || request.last.is_rvc || !request.last.level) return false;
+        phase = "ordinary-store-head-return";
+        const auto return_edge = request.last_cycle + 2U;
+        if (env.cycle() > return_edge || !env.run_cycles(return_edge - env.cycle()) ||
+            !memblock::scenarios::mixed::return_ordinary_redirect(env, load.rob, load.rob_flag, true, true) ||
+            env.sq_redirect_canceled_observed() != sq_cancel + 1U ||
+            !memblock::scenarios::mixed::wait_ordinary_redirect_backend(env)) return false;
+        phase = "surviving-store-retirement";
+        if (!env.run_until_store_complete(4096) ||
+            !env.run_cycles(memblock::kStreamScalarWritebackToHead) ||
+            !env.retire_store(store, true) || !env.set_rob_head_state(2, true, false) ||
+            !env.run_until_queues_retired(4096)) return false;
+        phase = "strict-refetch-and-store-readback";
+        unsigned identity = 162;
+        for (const auto &[address, expected] : std::array<std::pair<std::uint64_t, std::uint64_t>, 3>{{
+                {load_address, old_load}, {store_address, store.data}, {canceled.address, old_canceled}}}) {
+            auto probe = load; probe.address = address; probe.rob = memblock::rob_pointer_value(identity);
+            probe.rob_flag = memblock::rob_pointer_flag(identity++);
+            const auto lq = env.lq_allocated() - env.lq_canceled();
+            probe.lq = memblock::lq_pointer_value(lq); probe.lq_flag = memblock::lq_pointer_flag(lq);
+            const auto sq = env.sq_allocated() - env.sq_canceled();
+            probe.sq = memblock::sq_pointer_value(sq); probe.sq_flag = memblock::sq_pointer_flag(sq);
+            ++probe.pdest;
+            env.expect_load_data(probe, expected);
+            if (!env.set_rob_head_state(probe.rob, probe.rob_flag, false) ||
+                !env.enqueue_load(probe) || !env.issue_load(probe, 256) ||
+                !env.run_until_complete(4096) || !env.run_until_lq_retired(4096) ||
+                !env.run_cycles(memblock::kStreamScalarWritebackToHead)) return false;
+        }
+        return env.memory_violation_stats().count == request.count && env.end_store_release_epoch(4096);
+    };
+    if (!run()) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL phase=disjoint-" << phase
+            << " cycle=" << env.cycle() << " reason=" << env.error() << '\n';
+        return false;
+    }
+    return true;
+}
+
 int run_memory_violation(int argc, char **argv)
 {
+    if (!disjoint_partial_alias_recovery(argc, argv)) return 1;
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x1b000;
     constexpr std::uint64_t conflict_address = base + 24;
@@ -1650,6 +1732,7 @@ int run_memory_violation(int argc, char **argv)
               << " rob_wrap=1"
               << " vector_candidate=1"
               << " concurrent_sources=2"
+              << " partial_pa_store_head_recovery=1"
               << " rob=" << violation.rob_flag << ':'
               << static_cast<unsigned>(violation.rob_value)
               << " ftq=" << violation.ftq_flag << ':'

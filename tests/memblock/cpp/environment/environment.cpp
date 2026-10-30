@@ -2084,9 +2084,9 @@ auto Environment::track_store_release_inputs(const StoreTransaction &transaction
 auto Environment::track_vector_release_inputs(const VectorMemoryTransaction &transaction) -> bool
 { return impl_->track_vector_release_inputs(transaction); }
 
-auto Environment::retire_store(const StoreTransaction &transaction) -> bool
+auto Environment::retire_store(const StoreTransaction &transaction, bool restore_after_walk) -> bool
 {
-    return impl_->retire_store(transaction);
+    return impl_->retire_store(transaction, restore_after_walk);
 }
 
 auto Environment::retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions) -> bool
@@ -2183,9 +2183,9 @@ auto Environment::return_load_exception_after_nonmemory_wb(const LoadTransaction
 auto Environment::redirect_after(std::uint8_t rob_value,
     bool rob_flag,
     bool flush_itself,
-    bool is_vls_exception)  -> bool
+    bool is_vls_exception, bool ordinary_walk)  -> bool
 {
-    return impl_->redirect_after(rob_value, rob_flag, flush_itself, is_vls_exception);
+    return impl_->redirect_after(rob_value, rob_flag, flush_itself, is_vls_exception, nullptr, nullptr, ordinary_walk);
 }
 
 auto Environment::ok() const -> bool

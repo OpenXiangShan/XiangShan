@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4976,6 +4976,28 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
 
 
 
+def _check_stream_disjoint_bypass(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 84:
+        return
+    rate = result.get("target_stream_disjoint_bypass")
+    _require(type(rate) is int and 0 <= rate <= 1000, "invalid target_stream_disjoint_bypass")
+    counts = _csv_counts(result, "stream_disjoint_bypass", 18)
+    selected, accepted, canceled = (counts[i:i+3] for i in (0, 3, 6))
+    _require(all(a == b + c for a, b, c in zip(selected, accepted, canceled)),
+             "disjoint bypass loads were not accepted or canceled exactly once")
+    operations = _csv_counts(result, "stream_ops", 5)
+    cancellations = _csv_counts(result, "stream_cancel", 29)
+    _require(sum(selected[:2]) <= operations[0] + cancellations[1] and
+             selected[2] <= operations[1] + cancellations[2] and
+             sum(canceled[:2]) <= cancellations[1] and canceled[2] <= cancellations[2],
+             "disjoint bypass choices exceed eligible load classes")
+    for cls in range(3):
+        _require(all(n <= accepted[cls] for n in counts[9+cls*3:12+cls*3]),
+                 "disjoint bypass relations exceed unique accepted loads")
+    if rate == 0:
+        _require(not any(counts), "disabled disjoint bypass generated choices")
+
+
 def _check_stream_dependency_pages(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 83:
         return
@@ -5520,6 +5542,7 @@ def _check_result(
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
         _check_stream_accounting(result)
         _check_stream_dependency_pages(result)
+        _check_stream_disjoint_bypass(result)
         _check_stream_recovery_accounting(result)
         _check_scalar_dependency_accounting(result)
         _check_vector_index_accounting(result)

@@ -42,7 +42,7 @@ DEPENDENCIES = (
 )
 CASES = (
     'scalar_retained', 'scalar_already_dequeued', 'scalar_widths',
-    'scalar_invalid', 'vector_retained', 'vector_already_dequeued',
+    'scalar_invalid', 'scalar_walk_restore', 'vector_retained', 'vector_already_dequeued',
     'vector_invalid', 'mixed_prefix', 'cancellation_retains',
     'cumulative_wrap_reuse', 'ledger_rejection', 'invalid_target_order', 'redirect_targets',
 )
@@ -151,6 +151,10 @@ class StoreRetirementTest(unittest.TestCase):
         # translation unit. Require its designated assertion, not a compile or
         # fixture setup failure, to reject it.
         faults = (
+            ('split_walk_restore_commit',
+             '        dut_.queues.backend.pendingst.set(std::uint64_t{1});',
+             '        dut_.queues.backend.pendingst.set(std::uint64_t{1}); tick();',
+             'scalar_walk_restore', 'walk restoration did not couple'),
             ('missing_redirect_target_cleanup',
              '    std::erase_if(vector_store_sq_targets_, kills);',
              '    /* private fault: retain canceled allocation target */',
@@ -458,7 +462,7 @@ class StreamStoreRetirementAccountingTest(unittest.TestCase):
                              text=True, capture_output=True, timeout=20)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         report = self.modules['run_regression'].parse_summary(ran.stdout)
-        self.assertEqual(report['constraint_schema'], 83)
+        self.assertEqual(report['constraint_schema'], 84)
         # These synchronous producer histories predate persistent sessions.
         # Keep their schema76 contract without inventing transport events.
         summary = re.sub(r'\bconstraint_schema=\d+\b', 'constraint_schema=76', ran.stdout)

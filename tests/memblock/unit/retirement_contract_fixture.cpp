@@ -91,6 +91,7 @@ public:
     std::function<void(RetirementFixture &, const StoreTransaction &)> on_address_issue;
     std::function<void(RetirementFixture &, const VectorMemoryTransaction &)> on_vector_issue;
     unsigned head_observations = 0;
+    std::optional<std::uint64_t> ordinary_walk_resume_cycle_;
     std::uint64_t cycle() const { return clock; }
     void tick() {
         const auto &backend = dut_.queues.backend;

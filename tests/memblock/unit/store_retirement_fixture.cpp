@@ -21,7 +21,7 @@ struct FixturePort {
 };
 struct FixtureDut {
     struct {
-        struct { FixturePort pending_ptr_value, pending_ptr_flag, pendingst, scommit; } backend;
+        struct { FixturePort pending_ptr_value, pending_ptr_flag, pendingst, scommit, pending_mmi_old; } backend;
         struct { FixturePort lq_deq, sq_deq; } retirement;
     } queues;
     std::array<generated::LsqEnqueueObservation, generated::kLsqEnqueueLanes> enqueues{};
@@ -43,6 +43,7 @@ public:
     std::map<std::uint64_t, bool> scalar_release_inputs_, vector_release_inputs_;
     struct RedirectBoundary { unsigned rob; bool flag, flush_itself; std::uint64_t cycle, remaining, sq_allocation_limit; };
     std::optional<RedirectBoundary> scalar_redirect_boundary_;
+    std::optional<std::uint64_t> ordinary_walk_resume_cycle_;
     std::uint64_t cycle() const { return samples.size() + 6U; }
     void recovered_restart(unsigned rob, bool flag = false) {
         scalar_redirect_boundary_ = RedirectBoundary{rob, flag, false, 0, 0, queues_.sq_allocated()};
@@ -94,7 +95,7 @@ public:
     void discard_final_observation_range(std::uint64_t, unsigned) {}
     static std::uint64_t scalar_store_key(const StoreTransaction &);
     static std::uint64_t vector_store_key(const VectorMemoryTransaction &);
-    bool retire_store(const StoreTransaction &);
+    bool retire_store(const StoreTransaction &, bool = false);
     bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &);
     bool commit_stores_through(const StoreTransaction &, unsigned);
     void record_committed_store(const StoreTransaction &);
@@ -239,6 +240,33 @@ static void scalar_widths() {
         check_bytes(e,expected[index]);
         require(e.memory_.read_byte(0x80007003)==0,"reference transition wrote virtual instead of oracle address");
         require(e.reference_ranges.size()==1,"scalar width reference event repeated");
+    }
+}
+static void scalar_walk_restore() {
+    for (unsigned fault=0;fault<8;++fault) {
+        StoreRetirementFixture e;initial_bytes(e);auto t=scalar(159,55);
+        t.rob_flag=true;t.sq_flag=true;
+        scalar_allocate(e,t);scalar_expect(e,t);e.head(t.rob,t.rob_flag,false);
+        e.ordinary_walk_resume_cycle_ = 1025;
+        e.samples.resize(1020); // cycle=1026, beyond 1025-edge boundary guard.
+        if(fault==1)e.ordinary_walk_resume_cycle_.reset();
+        if(fault==2)e.ordinary_walk_resume_cycle_=1027;
+        if(fault==3)e.ordinary_walk_resume_cycle_=2048;
+        if(fault==4)e.head(t.rob,t.rob_flag,true);
+        if(fault==5)e.head(0,false,false);
+        if(fault==6)e.dut_.queues.backend.scommit.set(1);
+        if(fault==7)e.dut_.queues.backend.pending_mmi_old.set(1);
+        const auto before=snapshot(e);
+        const bool result=e.retire_store(t,true);
+        if(fault) {require(!result,"invalid walk restoration accepted");
+            require(snapshot(e)==before,"invalid restoration ticked or mutated state");continue;}
+        require(result,"completed scalar walk restoration rejected");
+        require(e.samples.size()==1021 && e.samples.back().rob==159 && e.samples.back().flag &&
+            e.samples.back().pending==1 && e.samples.back().commit==1,
+            "walk restoration did not couple first pendingst with scalar commit");
+        require(e.dut_.queues.backend.scommit.value()==0 && stats(e)[0]==1 && stats(e)[6]==1,
+            "walk restoration lost exactly-once retirement/drain obligation");
+        check_bytes(e,{{0,0x11},{1,0x22},{2,0x33},{3,0x44},{4,0x55},{5,0x66},{6,0x77},{7,0x88}});
     }
 }
 static void scalar_invalid() {
@@ -495,6 +523,7 @@ int main(int argc,char **argv) {
         const std::map<std::string,void(*)()> cases{
             {"scalar_retained",scalar_retained},{"scalar_already_dequeued",scalar_already_dequeued},
             {"scalar_widths",scalar_widths},{"scalar_invalid",scalar_invalid},
+            {"scalar_walk_restore",scalar_walk_restore},
             {"vector_retained",vector_retained},{"vector_already_dequeued",vector_already_dequeued},
             {"vector_invalid",vector_invalid},{"mixed_prefix",mixed_prefix},
             {"cancellation_retains",cancellation_retains},{"cumulative_wrap_reuse",cumulative_wrap_reuse},

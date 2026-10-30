@@ -5,6 +5,7 @@
 #include "mixed/store_address_replay.hpp"
 #include "mixed/stream_cancellation.hpp"
 #include "mixed/stream_dependency.hpp"
+#include "mixed/stream_footprint.hpp"
 
 namespace memblock::scenarios::mixed {
 namespace {
@@ -18,6 +19,7 @@ struct StreamWork {
     RandomVectorShape shape{};
     std::vector<bool> issued, offered;
     std::vector<std::uint64_t> vector_ready;
+    std::vector<std::optional<std::uint64_t>> vector_first_edges;
     std::vector<std::optional<memblock::VectorMemoryTransaction>> replay;
     bool address_offered = false, data_offered = false, paired_initial = false;
     std::array<std::optional<std::uint64_t>, 2> pair_edges;
@@ -28,6 +30,10 @@ struct StreamWork {
     bool data_first = false;
     bool address_consumed = false, data_consumed = false;
     bool cross_page_address = false;
+    StreamFootprint footprint;
+    bool disjoint_bypass = false, bypass_accepted = false;
+    unsigned bypass_relations = 0;
+    std::optional<std::uint64_t> first_address_edge;
     unsigned address_retries = 0;
     StoreAddressReplay address_replay;
     std::uint64_t expected_scalar = 0;
@@ -162,7 +168,20 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         return std::find(work.issued.begin(), work.issued.end(), false) == work.issued.end();
     };
     const auto consume_issue_events = [&]() {
-        for (const auto &event : environment.take_issue_events()) {
+        const auto events = environment.take_issue_events();
+        // Freeze the whole acceptance batch first. Lane iteration order must
+        // not turn a same-edge STA/vector sibling into an unresolved witness.
+        for (const auto &event : events) {
+            if (event.outcome != IssueOutcome::accepted) continue;
+            const auto attempt = attempts.find(event.tag);
+            if (attempt == attempts.end()) continue;
+            for (auto &owner : live) if (owner.generation == attempt->second.generation) {
+                if (attempt->second.kind == 2 && !owner.first_address_edge) owner.first_address_edge = event.edge;
+                if (attempt->second.kind == 4 && !attempt->second.replay)
+                    owner.vector_first_edges[attempt->second.uop] = event.edge;
+            }
+        }
+        for (const auto &event : events) {
             const auto found = attempts.find(event.tag);
             if (found == attempts.end()) { phase += ":unknown-producer-event"; return false; }
             const auto attempt = found->second;
@@ -244,6 +263,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.address_retries += !first;
                 if (!work.address_replay.accept(event.feedback_cursor, event.edge)) return false;
                 work.address_issued = true;
+                if (!work.first_address_edge) work.first_address_edge = event.edge;
                 ++coverage.stream_sta[first ? 0U : 1U];
                 coverage.stream_issue[1] += first;
                 coverage.stream_sta[10] = std::max<std::uint64_t>(coverage.stream_sta[10],
@@ -261,10 +281,33 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     if (attempt.uop && vector_load_depends_on_previous(work.vectors[attempt.uop-1], work.vectors[attempt.uop]))
                         ++coverage.vector_operand_chains[2];
                     work.issued[attempt.uop] = true;
+                    work.vector_first_edges[attempt.uop] = event.edge;
                     ++coverage.stream_issue[work.kind == 1 ? 3U : 4U];
                 }
                 work.vectors[attempt.uop].replay_not_before = event.edge;
                 work.replay[attempt.uop].reset();
+            }
+            if (work.disjoint_bypass && initial_events) {
+                const unsigned cls = work.kind == 1 ? 2U : unsigned(work.load.fp_wen);
+                auto &counts = coverage.stream_disjoint_bypass;
+                if (!work.bypass_accepted) { work.bypass_accepted = true; ++counts[3U + cls]; }
+                unsigned relations = 0;
+                for (auto older = live.begin(); older != live.end() && &*older != &work; ++older) {
+                    if (!older->is_store()) continue;
+                    if (!stream_disjoint(work.footprint, older->footprint)) {
+                        phase += ":disjoint-bypass-physical-overlap"; return false;
+                    }
+                    if (older->kind == 2) {
+                        if (!older->first_address_edge || *older->first_address_edge > event.edge) relations |= 1U;
+                        else if (!older->recovery_id && !older->address_replay.translated_at(event.edge,
+                            environment.iq_slow_feedback_stats().sta_samples, older->store)) relations |= 2U;
+                    } else if (std::any_of(older->vector_first_edges.begin(), older->vector_first_edges.end(), [&](const auto &edge) {
+                        return !edge || *edge > event.edge;
+                    })) relations |= 4U;
+                }
+                for (unsigned blocker = 0; blocker < 3; ++blocker)
+                    if ((relations & ~work.bypass_relations) & (1U << blocker)) ++counts[9U + cls * 3U + blocker];
+                work.bypass_relations |= relations;
             }
             if (work.paired_initial && work.pair_edges[0] && work.pair_edges[1]) {
                 const auto a = *work.pair_edges[0], d = *work.pair_edges[1];
@@ -423,7 +466,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         return true;
     };
 
-    const auto retire_head = [&]() {
+    const auto retire_head = [&](bool restore_after_walk = false) {
         auto &work = live.front();
         if (work.fault()) { phase += ":fault-cannot-retire"; return false; }
         if (work.permission_probe) ++permission[6];
@@ -436,7 +479,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             ++recovery_counts[12];
             inflight[10] += recovery->old_response_active();
         }
-        if (work.kind == 2 && !environment.retire_store(work.store)) return false;
+        if (work.kind == 2 && !environment.retire_store(work.store, restore_after_walk)) return false;
         if (work.kind == 2) retired_scalar_stores.push_back(work.store);
         if (work.kind == 3 && !environment.retire_vector_stores(work.vectors)) return false;
         coverage.stream_store_retirement[0] += work.kind == 2;
@@ -473,6 +516,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     };
 
     const auto cancel_suffix = [&](std::uint8_t rob, bool flag, bool flush_itself, bool trap) {
+        const auto violation_count = environment.memory_violation_stats().count;
         const auto kills = [&](const StreamWork &item) {
             const bool equal = item.rob() == rob && item.flag() == flag;
             const bool younger = item.flag() == flag ? item.rob() > rob : item.rob() < rob;
@@ -512,7 +556,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 live.front().load, memblock::rob_pointer_value(*live.front().exception_anchor),
                 memblock::rob_pointer_flag(*live.front().exception_anchor), captured_fault_va, &trap_stores) &&
                 environment.cancel_pending_for_redirect(rob, flag, flush_itself)
-            : return_ordinary_redirect(environment, rob, flag, flush_itself);
+            : return_ordinary_redirect(environment, rob, flag, flush_itself, true);
         if (!returned) {
             phase += detail.str() + ":redirect-drive-or-terminal-cancellation-failed";
             return false;
@@ -589,12 +633,14 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             record.sample(coverage.stream_cancel);
             if (item.cross_page_address && !item.address_consumed)
                 ++coverage.stream_dependency_pages[10U + item.kind];
+            if (item.disjoint_bypass && !item.bypass_accepted)
+                ++coverage.stream_disjoint_bypass[6U + (item.kind == 1 ? 2U : unsigned(item.load.fp_wen))];
         }
         canceled += killed;
         const auto lq_canceled = environment.lq_redirect_canceled_observed() - lq_before;
         const auto sq_canceled = environment.sq_redirect_canceled_observed() - sq_before;
         if (lq_canceled > lq_offset || sq_canceled > sq_offset ||
-            !environment.run_cycles(6)) {
+            !(trap ? environment.run_cycles(6) : wait_ordinary_redirect_backend(environment))) {
             phase += detail.str() + ":queue-recovery-failed";
             return false;
         }
@@ -617,7 +663,30 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         live.erase(std::remove_if(live.begin(), live.end(), kills), live.end());
         target_admissions += killed;
         deadline += std::uint64_t{killed} * constrained_completion_timeout * 4U;
-        if (!live.empty() && !install_head()) return false;
+        if (environment.memory_violation_stats().count != violation_count) {
+            phase += ":competing-redirect-during-return"; return false;
+        }
+        // Surviving STAs may finish during the monitored return/busy hold.
+        // Consume their current-attempt feedback before testing head readiness
+        // or retiring H; cached translated state must not create a high/zero
+        // restoration edge or lose its final feedback coverage.
+        for (auto &item : live) if (item.kind == 2 && !item.recovery_id) {
+            const auto observation = item.address_replay.observe(
+                environment.iq_slow_feedback_stats().sta_samples, item.store);
+            if (observation == StoreAddressReplay::Observation::invalid) {
+                phase += ":surviving-store-address-feedback"; return false;
+            }
+            coverage.stream_sta[2] += observation == StoreAddressReplay::Observation::hit;
+            coverage.stream_sta[3] += observation == StoreAddressReplay::Observation::miss;
+        }
+        if (!trap && !live.empty() && live.front().kind == 2 &&
+            all_issued(live.front()) && !pending(live.front())) {
+            // Completion may have arrived during walk. Keep busy low for the
+            // backend WB guard, then restore H and scalar scommit atomically.
+            if (!environment.run_cycles(memblock::kStreamScalarWritebackToHead) ||
+                environment.memory_violation_stats().count != violation_count ||
+                !retire_head(true)) return false;
+        } else if (!live.empty() && !install_head()) return false;
         last_progress = environment.cycle();
         phase += ":killed=" + std::to_string(killed) +
             ":lq_cancel=" + std::to_string(lq_canceled) +
@@ -638,7 +707,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (environment.cycle() > deadline) { phase += ":epoch-deadline"; return false; }
 
         if (environment.memory_violation_stats().count != expected_violations) {
-            const auto &violation = environment.memory_violation_stats();
+            const auto violation = environment.memory_violation_stats();
             if (violation.count != expected_violations + 1U) {
                 phase += ":multiple-unhandled-redirects";
                 return false;
@@ -691,7 +760,19 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 phase += detail.str() + ":unmatched-or-nested";
                 return false;
             }
+            // Match the actual two-register backend producer return, as the
+            // focused unresolved graph does. No admissions/retirements while
+            // waiting; retained offers remain subject to the return flush.
+            const auto return_cycle = violation.last_cycle + 2U;
+            if (environment.cycle() > return_cycle ||
+                !environment.run_cycles(static_cast<unsigned>(return_cycle - environment.cycle())) ||
+                environment.memory_violation_stats().count != violation.count) {
+                phase += detail.str() + ":missed-backend-return-edge"; return false;
+            }
             if (!cancel_suffix(violation.last.rob_value, violation.last.rob_flag, violation.last.level, false)) return false;
+            if (environment.memory_violation_stats().count != violation.count) {
+                phase += ":competing-redirect-during-recovery"; return false;
+            }
             expected_violations = violation.count;
             continue;
         }
@@ -898,6 +979,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (work.kind == 0 && !work.fault() && !work.recovery_id && work.issued[0] && !pending(work))
                 work.result->complete = true;
         bool older_addresses_known = true, prefix_addresses_known = true;
+        StreamFootprint unresolved_store_lines;
         if (recovery && recovery->phase == StreamRecovery::Phase::operands &&
             recovery->operand < recovery->plan.after_provisional.size() && environment.cycle() >= recovery->ready_cycle) {
             const auto &operand = recovery->plan.after_provisional[recovery->operand];
@@ -935,7 +1017,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 environment.issue_session_available(IssueKind::load, work.kind == 0 ? work.load.lane : work.prefetch.lane) && head_eligible && address_ready &&
                 // The reserved fault page is disjoint from every older store.
                 // CPU load issue can speculate before older store addresses.
-                (work.fault() || work.kind == 4 || older_addresses_known)) ready.push_back({1, i, 0});
+                (work.fault() || work.kind == 4 || older_addresses_known ||
+                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)))) ready.push_back({1, i, 0});
             if (work.kind == 2 && graph_role) {
                 const auto &episode = *recovery;
                 const bool early = (episode.phase == StreamRecovery::Phase::admission ||
@@ -955,7 +1038,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (work.kind == 1 || work.kind == 3) {
                 const bool ordered_load = work.kind == 1 && work.vectors.front().addressing ==
                     memblock::VectorAddressingMode::indexed_ordered;
-                if (head_eligible && address_ready && (!ordered_load || i == 0) && (work.kind == 3 || older_addresses_known)) {
+                if (head_eligible && address_ready && (!ordered_load || i == 0) && (work.kind == 3 || older_addresses_known ||
+                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)))) {
                     for (unsigned u = 0; u < work.vectors.size(); ++u) {
                         if (work.offered[u] || environment.cycle() < work.vector_ready[u]) continue;
                         const auto &offer = work.replay[u] ? *work.replay[u] : work.vectors[u];
@@ -975,10 +1059,13 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (work.kind == 2) {
                 const bool known = work.address_issued && !environment.scalar_store_address_pending(work.store);
                 older_addresses_known &= known;
+                if (!known) unresolved_store_lines.insert(work.footprint.begin(), work.footprint.end());
                 if (!graph_role) prefix_addresses_known &= known;
             }
             if (work.kind == 3) {
-                older_addresses_known &= all_issued(work) && !pending(work);
+                const bool known = all_issued(work) && !pending(work);
+                older_addresses_known &= known;
+                if (!known) unresolved_store_lines.insert(work.footprint.begin(), work.footprint.end());
                 prefix_addresses_known &= all_issued(work) && !pending(work);
             }
         }
@@ -1184,6 +1271,24 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 if (work.cross_page_address) ++coverage.stream_dependency_pages[work.kind];
                 return target;
             };
+            const auto select_disjoint_bypass = [&]() {
+                work.footprint = work.kind == 0 ? stream_footprint(work.load) : stream_footprint(work.vectors);
+                if (!graph_admission &&
+                    !work.permission_probe && !work.store_survival_probe && constraints.stream_disjoint_bypass_per_mille != 0 &&
+                    std::any_of(live.begin(), live.end(), [](const auto &older) { return older.is_store(); }) &&
+                    std::all_of(live.begin(), live.end(), [&](const auto &older) {
+                        return !older.is_store() || (!older.recovery_id && stream_disjoint(work.footprint, older.footprint));
+                    }) && (constraints.stream_disjoint_bypass_per_mille == 1000 ||
+                        random() % 1000U < constraints.stream_disjoint_bypass_per_mille)) {
+                    work.disjoint_bypass = true;
+                    ++coverage.stream_disjoint_bypass[work.kind == 1 ? 2U : unsigned(work.load.fp_wen)];
+                    // A reachable cold/untrained predictor has no store-set wait.
+                    if (work.kind == 0) {
+                        work.load.store_set_hit = work.load.load_wait_bit = work.load.load_wait_strict = false;
+                        work.load.wait_for_rob_flag = false; work.load.wait_for_rob_value = 0;
+                    }
+                }
+            };
             // Reserve a separate one-uop nonmemory ROB entry before F exists.
             // Its operands may remain unavailable independently of F. It owns
             // no LSQ entry and cannot compress with the noncompressible load.
@@ -1241,6 +1346,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                             memblock::reference_byte_address(work.load, work.load.address + byte),
                             false, translation)) return false;
                 }
+                select_disjoint_bypass();
                 environment.expect_load_data(work.load, work.expected_scalar);
                 if (!environment.enqueue_load(work.load)) return false;
             } else if (work.kind == 2) {
@@ -1264,6 +1370,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                             memblock::reference_byte_address(work.store, work.store.address + byte),
                             true, translation)) return false;
                 }
+                work.footprint = stream_footprint(work.store);
                 oracle.store(work.store);
                 environment.expect_store(work.store);
                 if (!environment.enqueue_store(work.store) ||
@@ -1286,12 +1393,15 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.issued.assign(work.vectors.size(), false);
                 work.offered.assign(work.vectors.size(), false);
                 work.vector_ready.resize(work.vectors.size());
+                work.vector_first_edges.resize(work.vectors.size());
                 work.replay.resize(work.vectors.size());
                 if (work.needs_restart_flush()) ++coverage.stream_vstart_flush[store ? 1U : 0U];
                 if (!store) {
                     for (auto &uop : work.vectors) uop.pdest = allocate_destination(2);
                     oracle.prepare_vector_load(work.vectors);
                 }
+                if (store) work.footprint = stream_footprint(work.vectors);
+                else select_disjoint_bypass();
                 for (const auto &uop : work.vectors) {
                     if (!validate_vector_translation(uop)) return false;
                     const unsigned width = 1U << memblock::vector_data_eew(uop);

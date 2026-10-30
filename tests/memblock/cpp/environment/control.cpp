@@ -377,6 +377,7 @@ auto Environment::Impl::enable_misaligned_accesses(bool load,
 auto Environment::Impl::set_rob_head(std::uint8_t value,
     bool flag)  -> bool
 {
+    ordinary_walk_resume_cycle_.reset();
     dut_.queues.backend.pending_ptr_value.set(value);
     dut_.queues.backend.pending_ptr_flag.set(flag);
     tick();
@@ -386,6 +387,7 @@ auto Environment::Impl::set_rob_head(std::uint8_t value,
 auto Environment::Impl::set_rob_head_state(std::uint8_t value,
     bool flag, bool pending_store) -> bool
 {
+    ordinary_walk_resume_cycle_.reset();
     dut_.queues.backend.pending_ptr_value.set(value);
     dut_.queues.backend.pending_ptr_flag.set(flag);
     dut_.queues.backend.pendingst.set(pending_store);

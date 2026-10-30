@@ -18,7 +18,7 @@ struct Adapter {
     struct {
         struct { Pin valid, rob_idx_value, rob_idx_flag, level, is_vls_exception; } redirect;
         struct { Pin lq_cancel_cnt, sq_cancel_cnt; } retirement;
-        struct { Pin pending_ptr_value, pending_ptr_flag, pendingst, pending_mmi_old; } backend;
+        struct { Pin pending_ptr_value, pending_ptr_flag, pendingst, pending_mmi_old, scommit; } backend;
     } queues;
     std::uint64_t edge = 0;
     std::optional<std::uint64_t> store_path_busy_edge;
@@ -98,6 +98,7 @@ struct Harness : Fixture {
     // PRODUCTION_TYPES
     std::map<std::uint64_t, ReleaseStoreInputs> scalar_release_inputs_, vector_release_inputs_;
     std::optional<ScalarRedirectBoundary> scalar_redirect_boundary_;
+    std::optional<std::uint64_t> ordinary_walk_resume_cycle_;
     Environment::IqSlowFeedbackStats slow_feedback;
     const auto &iq_slow_feedback_stats() const { return slow_feedback; }
     std::uint64_t cycle() const { return dut_.edge; }
@@ -110,7 +111,11 @@ struct Harness : Fixture {
     }
     void tick(bool monitor = true, const std::function<void()> &before_edge = {});
     bool redirect_after(std::uint8_t, bool, bool, bool = false, std::uint64_t * = nullptr,
-        LoadExceptionStoreObservation * = nullptr);
+        LoadExceptionStoreObservation * = nullptr, bool = false);
+    // Public wrapper signature used by ordinary sequence helpers.
+    bool redirect_after(std::uint8_t rob, bool flag, bool self, bool vls, bool walk) {
+        return redirect_after(rob, flag, self, vls, nullptr, nullptr, walk);
+    }
     bool return_load_exception_after_nonmemory_wb(const LoadTransaction &, std::uint8_t, bool, std::uint64_t &,
         LoadExceptionStoreObservation * = nullptr);
     bool run_cycles(unsigned count) { for (unsigned i = 0; i < count; ++i) { tick(); if (!check_components()) return false; } return true; }
@@ -127,6 +132,40 @@ static void install(Harness &h, Obligation entry)
 {
     h.entries.push_back(entry);
     h.expect(entry);
+}
+
+static void ordinary_walk()
+{
+    unsigned cases = 0;
+    for (unsigned head : {0U, 158U, 159U, 160U, 318U, 319U}) {
+        Harness h;
+        h.dut_.edge = 10;
+        h.dut_.queues.backend.pending_ptr_value.set(head % 160U);
+        h.dut_.queues.backend.pending_ptr_flag.set(head / 160U);
+        h.dut_.queues.backend.pendingst.set(1);
+        const auto victim = (head + 1U) % 320U;
+        // Literal CPU contract, deliberately independent of production bound.
+        h.feedback_.sample = [&](auto edge) {
+            require(h.dut_.queues.backend.pending_ptr_value.value() == head % 160U &&
+                h.dut_.queues.backend.pending_ptr_flag.boolean() == bool(head / 160U),
+                "ordinary walk substituted the younger victim for surviving head");
+            require(h.dut_.queues.redirect.valid.boolean() == (edge == 10U),
+                "ordinary redirect pulse moved");
+            require(h.dut_.queues.backend.pendingst.boolean() == (edge == 10U),
+                "ordinary redirect pending-store suppression edge");
+            require(!h.dut_.queues.backend.pending_mmi_old.boolean() &&
+                !h.dut_.queues.backend.scommit.boolean(), "retirement during ordinary walk");
+        };
+        require(memblock::scenarios::mixed::return_ordinary_redirect(h, victim % 160U,
+            victim / 160U, true, true), "ordinary return failed");
+        require(h.cycle() == 13U, "wrong terminal cancellation boundary");
+        require(memblock::scenarios::mixed::wait_ordinary_redirect_backend(h), "ordinary busy hold failed");
+        require(h.cycle() == 1038U && h.feedback_.edges.size() == 1028U,
+            "ordinary walk restored before input-owned busy and register edge");
+        require(!h.dut_.queues.backend.pendingst.boolean(), "ordinary helper restored head implicitly");
+        ++cases;
+    }
+    std::cout << "ordinary_walk_heads=" << cases << " redirect_edges=3 busy_plus_register=1025\n";
 }
 
 static void exception_anchor()
@@ -380,6 +419,8 @@ struct StoreWork {
     bool address_issued = true, data_issued = false, restart_flushed = false;
     bool address_source = false, data_source = false, address_consumed = false, data_consumed = false;
     bool cross_page_address = false;
+    bool disjoint_bypass = false, bypass_accepted = false;
+    LoadTransaction load;
     std::vector<bool> issued;
     std::vector<VectorMemoryTransaction> vectors;
     StoreTransaction store;
@@ -389,6 +430,7 @@ struct StoreWork {
 struct CancellationCoverage {
     std::array<std::uint64_t, 29> stream_cancel{};
     std::array<std::uint64_t, 15> stream_dependency_pages{};
+    std::array<std::uint64_t, 18> stream_disjoint_bypass{};
     std::array<std::uint64_t, 11> stream_sta{};
 };
 static bool return_and_classify(Harness &environment, std::vector<StoreWork> &live,
@@ -461,6 +503,7 @@ int main(int argc, char **argv)
         else if (mode == "inputs") inputs();
         else if (mode == "feedback") feedback_states();
         else if (mode == "exception-anchor") exception_anchor();
+        else if (mode == "ordinary-walk") ordinary_walk();
         else require(false, "unknown mode");
     } catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
 }

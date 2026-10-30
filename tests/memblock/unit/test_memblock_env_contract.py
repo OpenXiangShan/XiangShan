@@ -461,6 +461,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             ("VirtualLoadQueueSize", "kVirtualLoadQueueEntries"),
             ("StoreQueueSize", "kStoreQueueEntries"),
             ("RobSize", "kRobEntries"),
+            ("RabSize", "kRabEntries"),
+            ("VTypeBufferSize", "kVTypeBufferEntries"),
         ):
             scala_match = re.search(rf"{scala_name}: Int = (\d+)", parameters)
             cpp_match = re.search(rf"{cpp_name} = (\d+)", environment)

@@ -18,6 +18,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 INPUTS = (
+    'cpp/scenarios/mixed/stream_footprint.hpp',
     'cpp/scenarios/mixed/stream_dependency.hpp', 'cpp/scenarios/mixed/translation_permutation.hpp',
     'cpp/scenarios/mixed_stream.cpp', 'cpp/scenarios/mixed_scheduler.cpp',
     'cpp/scenarios/mixed_initialization.cpp',
@@ -59,6 +60,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.sustained = []
         cls.feedback = []
         cls.retirement = []
+        cls.bypass = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -177,6 +179,7 @@ class MixedStreamTest(unittest.TestCase):
                 'sustained_cases': cls.sustained,
                 'feedback_cases': cls.feedback,
                 'retirement_cases': cls.retirement,
+                'disjoint_bypass_cases': cls.bypass,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
@@ -256,6 +259,38 @@ class MixedStreamTest(unittest.TestCase):
                 if result.returncode:
                     self.assertIn('scheduler replay bound differs from actual accepted vector edge', result.stderr)
                     failures.append(seed)
+            self.assertTrue(failures, name + ' escaped')
+            self.mutations[name] = failures
+
+    def test_disjoint_loads_issue_across_unresolved_store_inputs(self):
+        results = [self.run_fixture('disjoint-bypass', seed, timing, 0, 64)
+                   for timing in (0, 1) for seed in range(1, 33)]
+        self.bypass.extend(results)
+        self.assertGreater(sum(r['disjoint_acceptances'] for r in results), 0)
+        self.assertGreater(sum(r['disjoint_relations'] for r in results), 0)
+        for cls in range(3):
+            self.assertGreater(sum(r['stream_disjoint_bypass'][cls] for r in results), 0)
+        for r in results:
+            c = r['stream_disjoint_bypass']
+            self.assertEqual(c[:3], [a+b for a,b in zip(c[3:6],c[6:9])])
+        self.assertEqual(results[0], self.run_fixture('disjoint-bypass',1,0,0,64))
+
+    def test_private_disjoint_bypass_scope_and_metadata_faults_reject(self):
+        cases = [
+            ('overlap_bypass', 'return !older.is_store() || (!older.recovery_id && stream_disjoint(work.footprint, older.footprint));', 'return true;'),
+            ('missing_bypass_wait_clear', 'work.load.store_set_hit = work.load.load_wait_bit = work.load.load_wait_strict = false;', 'work.load.store_set_hit = work.load.load_wait_bit = work.load.load_wait_strict = true;'),
+        ]
+        for name, original, replacement in cases:
+            self.assertIn(original, self.source)
+            binary = self.compile(self.source.replace(original, replacement), name)
+            failures = []
+            for seed in range(1, 17):
+                r = subprocess.run([str(binary), 'disjoint-bypass', str(seed), '1', '0', '64'],
+                                   capture_output=True, text=True, timeout=10)
+                if r.returncode:
+                    failures.append(seed)
+                    self.assertTrue(any(marker in r.stderr for marker in ('older scalar-store address',
+                        'older vector-store address', 'disjoint-bypass-physical-overlap', 'non-cold predictor')), r.stderr)
             self.assertTrue(failures, name + ' escaped')
             self.mutations[name] = failures
 
@@ -666,7 +701,8 @@ class MixedStreamTest(unittest.TestCase):
 
     def test_private_recovery_deadline_snapshot_and_suffix_faults_are_rejected(self):
         mutations = (
-            ('late_redirect', 'violation.last_cycle + 2U', 'violation.last_cycle + 3U',
+            ('late_redirect', 'const auto return_cycle = violation.last_cycle + 2U;\n                    if (environment.cycle()',
+             'const auto return_cycle = violation.last_cycle + 3U;\n                    if (environment.cycle()',
              'missed backend redirect deadline'),
             ('lost_refetch_lq_rewind', 'lq_offset -= canceled;', '(void)canceled;',
              'refetch used a stale LQ cursor'),
@@ -927,8 +963,10 @@ class MixedStreamTest(unittest.TestCase):
             self.mutations[name] = {'rejected': True, 'diagnostic': result.stderr.strip()}
 
     def test_private_missing_older_address_guard_is_rejected(self):
-        scalar = '(work.fault() || work.kind == 4 || older_addresses_known)'
-        vector = '(work.kind == 3 || older_addresses_known)'
+        scalar = ('(work.fault() || work.kind == 4 || older_addresses_known ||\n'
+                  '                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)))')
+        vector = ('(work.kind == 3 || older_addresses_known ||\n'
+                  '                    (work.disjoint_bypass && stream_disjoint(work.footprint, unresolved_store_lines)))')
         self.assertEqual(self.source.count(scalar), 1)
         self.assertEqual(self.source.count(vector), 1)
         binary = self.compile(self.source.replace(scalar, 'true').replace(vector, 'true'), 'unknown-address-load')

@@ -1022,7 +1022,7 @@ public:
     bool end_store_release_epoch(unsigned timeout = 4096);
     bool track_store_release_inputs(const StoreTransaction &transaction);
     bool track_vector_release_inputs(const VectorMemoryTransaction &transaction);
-    bool retire_store(const StoreTransaction &transaction);
+    bool retire_store(const StoreTransaction &transaction, bool restore_after_walk = false);
     bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions);
     const StoreRetirementStats &store_retirement_stats() const;
 
@@ -1065,7 +1065,7 @@ public:
 
     bool redirect_after(std::uint8_t rob_value, bool rob_flag, bool flush_itself,
                         bool is_vls_exception = false, std::uint64_t *captured_vaddr = nullptr,
-                        LoadExceptionStoreObservation *stores = nullptr);
+                        LoadExceptionStoreObservation *stores = nullptr, bool ordinary_walk = false);
 
     const std::vector<Failure> &failures() const { return error_.records(); }
     std::string failure_report() const { return error_.json(); }
@@ -1589,6 +1589,7 @@ private:
         std::uint64_t cycle, remaining, sq_allocation_limit;
     };
     std::optional<ScalarRedirectBoundary> scalar_redirect_boundary_;
+    std::optional<std::uint64_t> ordinary_walk_resume_cycle_;
     SparseMemory bus_memory_;
     SparseMemory memory_;
     TileLinkMemoryAgent memory_agent_;

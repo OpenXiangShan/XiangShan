@@ -29,6 +29,7 @@ auto Environment::Impl::reset()  -> bool
     last_reset_completed_cycle_.reset();
     last_load_vector_pair_same_cycle_ = false;
     scalar_redirect_boundary_.reset();
+    ordinary_walk_resume_cycle_.reset();
     scoreboard_.clear_checked_completions();
     // Re-assert external reset for every invocation.  Relying on the
     // constructor's initial value made repeated-reset scenarios silently

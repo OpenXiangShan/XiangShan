@@ -18,6 +18,24 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema84 adds ordinary physically line-disjoint integer/FP/vector loads past
+  unresolved older STA/translation and vector siblings, with a reachable cold
+  scalar predictor and unchanged strict byte expectations. Actual accepted-edge
+  relations exclude same-edge issue and deduplicate vector-uop observations.
+  Selected loads conserve acceptance or explicit unaccepted cancellation.
+  This removes a blanket wait for unrelated memory work; overlapping speculation,
+  dynamic predictor histories and arbitrary context continuity remain gaps.
+
+- Generic ordinary recovery preserves surviving store head H and registered
+  pending suppression from R+1. A capacity-derived, declared backend/trace busy
+  hold precedes resumption; completed scalar H restores pendingst/scommit on
+  one edge. Survivor STA feedback is consumed before this choice. Request
+  snapshots and count-drift guards reject competing recovery; head changes,
+  retirement, reset and a new redirect invalidate restoration permission.
+  Independent review exposed these UT defects and approves their corrections.
+  The native partial-PA witness checks strict refetch, surviving-store bytes and
+  a canceled-store no-write result. These are harness corrections, not CPU bugs.
+
 - Schema83 adds result-derived page displacement for ordinary integer-load
   address consumers, within the declared identity/permuted or selected NAPOT
   mapping. Guard pages retain legal vector expansion; scalar-store page-end
@@ -488,6 +506,10 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| Current schema84 integration checks | The complete host suite passes 712 tests. Generated-interface, semantic mapping, documentation, scenario catalog and prepared-RTL checks pass. Non-author final evidence audit independently recomputes all five native aggregates and reruns their artifact verifiers. | `build/memblock/disjoint-bypass-20261031/{full-unit-v6.log,check-rtl-v6-final.log,final-evidence-review-v6/review.json}`. The evidence review initially left the host terminal result pending; the completed log supplies the separate final PASS. Finite development qualification, not closure. |
+| Ordinary disjoint-load bypass | Frozen runtime-v6 passes 20 finite cases / 22528 actions: forced SPEC, U-mode translated, permission/cancellation mixtures and unmodified spec/corner profiles. All five full finite artifact verifiers pass. 1633 selections conserve 1631 first acceptances plus two unaccepted vector-load cancellations. All nine class/blocker relation bins are positive; all 12438 tracked final words compare. Exact seed8401 replay matches and disabled bypass matches 420 preceding semantic fields. | `build/memblock/disjoint-bypass-20261031/{qualification-v6.json,artifact-verifiers-v6.json,replay-compat-v6.json,provenance-v6.json}`. All 101 prepared source pairs match. Finite development evidence; no SPEC executable, early-completion, passive transcript, general overlapping speculation or closure claim. Superseded/interrupted runtime campaigns are excluded from these totals. |
+| Bypass host structure and temporal oracles | 64 seed/timing scheduler histories record 943 selected/accepted integer/FP/vector loads (467/213/263); independent event checks see 775 bypassed acceptances and 923 distinct load/store pairs in their separate scopes. The fixed eight-load population retains 64/64 event-only schedules, 41 admission/retirement interleavings and 43 issue orders after excluding dependency-choice records. Literal physical aliases, page crossing, mask/VSTART and same-edge/translation-boundary cases pass; overlap, metadata and temporal mutants reject. | `build/memblock/disjoint-bypass-20261031/{host-report-v6.json,footprint-host-v1.log,temporal-host-v2.log}`. Addresses/data/timing are excluded from structural diversity. Host synthetic timing is distinct from DUT reachability. The model still uses bounded epochs, a 2..8 live window and serialized special helpers. |
+| Ordinary store-headed recovery | Native memory-violation case passes a partial-PA conservative redirect across ROB wrap, strict load refetch, surviving-store readback and canceled-unissued-store no-write readback; forwarding/vector-forwarding/store-flush cases also pass. Production-tick host checks cover six wrapped heads and seven timing/control mutants; atomic-retirement, competing-request and survivor-feedback mutants reject. | `build/memblock/disjoint-bypass-20261031/{directed-v6.json,review-v6/review.json,review-disposition-v6.json,generated-capacity-evidence-v6.json}`. The 1024-edge input-owned busy hold exceeds the 816-edge single-ordinary-walk bound for generated 160/256/64 capacities; no exact full-core commit phase, arbitrary walk/configuration or adjacent-redirect support is inferred. |
 | Ordinary mapped-page dependencies | Frozen runtime-v3 passes 20 finite cases / 22528 actions: four forced SPEC-profile dependency cases, four U-mode translated cases, four each unmodified spec/corner profiles, and four stronger U-mode permission/cancellation cases. All five complete artifact verifiers pass. The 3138 actual page-changing edges conserve 3087 first acceptances plus 51 unaccepted cancellations, with both outcomes in all five stream classes. All 13214 final words compare. Exact seed8302 replay passes; disabling page displacement matches 418 prior schema82 parsed semantic fields. | `build/memblock/dependency-pages-20261031/{qualification-v3.json,artifact-verifiers-v3.json,replay-compat-v3.json,provenance-v3.json}`. All 100 prepared source pairs match; model and RTL metadata match the preceding runtime. Counters are lifecycle observations rather than a passive accepted-address transcript. These finite UT runs do not execute SPEC, establish arbitrary pointer chains, or meet closure thresholds. |
 | Dependency diversity and independent checks | All 46 production-scheduler host methods pass. The fixed eight-load population has 64/64 distinct event-only schedules after excluding dependency selections, plus 41 admission/retirement interleavings and 43 load issue orders. The enabled mode checks 2415 dependent address calculations with 2242 actual page changes across 64 seed/timing cases, plus exact replay. The wrong-page target mutant rejects. Literal iterative enumeration checks 1132096 page/offset cases; parser endpoints and all 15 single-counter corruptions reject appropriately. | `build/memblock/dependency-pages-20261031/{host-report-v3.json,host-v3-final.log,address-accounting-v3.log}`. Scheduler observations use synthetic completion/ports and a Bare identity map; native runs provide translated evidence. Unique enabled-mode traces include address choices and are not represented as event-only structural diversity. General vector-result/index dependencies, arbitrary continuous mappings and generation-aware stale-response attribution remain gaps. |
 | Ordinary vector-store replay provenance | Replay requests retain the sampled feedback cycle; ordinary initial/retry acceptances update the bound. Selection drops matching-SQ feedback sampled at or before the accepted pre-step edge, preserving unrelated requests and current feedback lane/mask/merge index. Eleven issue-session methods pass; the production tick/sample witness checks both lanes and wrap values. Sixteen mixed scheduler histories check 16292 bounds, including 7694 after retries and 95 accepted retries. Missing/incorrect bounds, retry-update omission, stale equality cutoff and either lane timestamp omission reject. | `build/memblock/dependency-pages-20261031/{issue-session-v3-final.log,replay-review-v2/reviewer/review-v2.json,triage-disposition.json}`. Original failing seed8343 passes its full 2048-action budget in the runtime-v3 cancellation campaign. This repairs testbench attribution, not CPU RTL. Three adjacent directed contracts pass (`directed-v3.json`); six vector-operand compatibility methods also pass. Arbitrarily late old feedback sampled after replacement acceptance still lacks universal generation attribution; legacy helpers retain their prior matching. |
@@ -626,6 +648,17 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Schema84 has non-author actual-diff approval for the documented bounded ordinary
+bypass/recovery contract. The review checks physical footprints, cold predictor
+reachability, accepted-edge classification, unchanged data expectations and
+registered pending controls. Initial findings on store-headed return, split
+restoration/commit, mutable request statistics, stale survivor feedback and walk
+permit lifetime are resolved and re-reviewed. Private reviewer mutations cover
+both head setters and ordinary-retirement permit invalidation. Final evidence:
+`build/memblock/disjoint-bypass-20261031/{review-v6/review.json,review-disposition-v6.json,review-pins-v6.json}`.
+Review is independent of the finite integration qualification and does not
+establish exact full-CPU timing, a CPU RTL bug or coverage closure.
 
 Schema83 mapped-page and replay-provenance changes have non-author actual-diff
 review approval within their bounded scope. Page review checks producer lifetime

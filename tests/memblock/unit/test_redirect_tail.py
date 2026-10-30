@@ -69,6 +69,39 @@ class RedirectTailTest(unittest.TestCase):
     def test_exact_terminals_through_every_monitored_return_edge(self):
         self.run_mode('tails')
 
+    def test_store_head_survives_ordinary_walk_with_registered_pending_suppression(self):
+        self.run_mode('ordinary-walk')
+
+    def test_private_ordinary_walk_pending_and_pointer_faults_reject(self):
+        block = ('    if (ordinary_walk) {\n'
+                 '        dut_.queues.backend.pendingst.set(std::uint64_t{0});\n'
+                 '        dut_.queues.backend.pending_mmi_old.set(std::uint64_t{0});\n'
+                 '        dut_.queues.backend.scommit.set(std::uint64_t{0});\n'
+                 '    }\n')
+        self.assertEqual(self.source.count(block), 1)
+        faults = {
+            'missing_pending_suppression': self.source.replace(block, ''),
+            'early_pending_suppression': self.source.replace(block, '').replace('    tick(true, [&] {', block + '    tick(true, [&] {'),
+            'late_pending_suppression': self.source.replace(block, '').replace('    tick();\n    // CSR consumes', '    tick();\n' + block + '    // CSR consumes'),
+            'victim_as_head': self.source.replace(block, block + '    if (ordinary_walk) dut_.queues.backend.pending_ptr_value.set(rob_value);\n'),
+            'commit_during_walk': self.source.replace(block, block + '    if (ordinary_walk) dut_.queues.backend.scommit.set(1);\n'),
+        }
+        for name, source in faults.items():
+            with self.subTest(name=name):
+                self.run_mode('ordinary-walk', self.compile(source, name), passing=False)
+
+    def test_private_premature_backend_release_rejects(self):
+        header = (ROOT / 'cpp/scenarios/mixed/stream_recovery.hpp').read_text()
+        anchor = 'environment.run_cycles(memblock::kStreamOrdinaryRecoveryBusy + 1U)'
+        self.assertEqual(header.count(anchor), 1)
+        for name, replacement in [('short_walk', 'environment.run_cycles(6)'),
+                                  ('missing_registered_edge', 'environment.run_cycles(memblock::kStreamOrdinaryRecoveryBusy)')]:
+            path = Path(self.directory.name) / (name + '.hpp')
+            path.write_text(header.replace(anchor, replacement).replace(
+                '#include "unresolved_epochs.hpp"', '#include "scenarios/mixed/unresolved_epochs.hpp"'))
+            source = self.source.replace('#include "scenarios/mixed/stream_recovery.hpp"', '#include "' + str(path) + '"')
+            self.run_mode('ordinary-walk', self.compile(source, name), passing=False)
+
     def test_declared_anchor_exact_head_redirect_and_preedge_fault_capture(self):
         self.run_mode('exception-anchor')
 
@@ -123,12 +156,12 @@ class RedirectTailTest(unittest.TestCase):
 
     def test_private_recovery_phase_reordering_rejects(self):
         header = (ROOT / 'cpp/scenarios/mixed/stream_recovery.hpp').read_text()
-        original = ('return environment.redirect_after(rob, flag, flush_itself) &&\n'
+        original = ('return environment.redirect_after(rob, flag, flush_itself, false, ordinary_walk) &&\n'
                     '        environment.cancel_pending_for_redirect(rob, flag, flush_itself);')
         self.assertEqual(header.count(original), 1)
         faults = {
             'cancellation_before_return': ('return environment.cancel_pending_for_redirect(rob, flag, flush_itself) &&\n'
-                                        '        environment.redirect_after(rob, flag, flush_itself);'),
+                                        '        environment.redirect_after(rob, flag, flush_itself, false, ordinary_walk);'),
         }
         for name, replacement in faults.items():
             with self.subTest(name=name):

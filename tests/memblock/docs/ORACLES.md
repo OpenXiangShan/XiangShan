@@ -334,8 +334,32 @@ the inspected ordinary cacheable paths with no new killed offers after producer
 flush; it is not a completion deadline for survivors or a protocol-drain bound.
 MMIO/NC, AMO, CBO and segment paths need their own contracts. The path rejects
 multiple unhandled violation samples rather than attributing only the latest
-record; adjacent redirect arbitration, full ROB walk completion and universal
-late-writeback silence remain outside its claim.
+record; adjacent redirect arbitration and universal late-writeback silence
+remain outside its claim.
+
+Generic ordinary suffix recovery returns the request at sampled+2. On public
+redirect R the previous registered pending-store level is retained; R+1 and
+R+2 suppress pendingst, pendingMMIOld and scommit without replacing the surviving
+head H with victim L. After terminal cancellation, the sequence declares an
+input-owned backend/trace busy interval of 1024 edges, followed by one low
+registered-output edge before restoring H and resuming explicit retirement.
+An already-completed normal scalar H retains low controls for its WB guard and
+restores pendingst together with its single scommit, then advances head on the
+next edge. It never inserts an H-high/zero-commit restoration edge. An incomplete
+H resumes ordinary completion/retirement scheduling. This exceeds the conservative single-ordinary-walk bound
+RobSize + 2*RabSize + 2*VTypeBufferSize + 16 = 816 for pinned 160/256/64
+capacities. ROB, RAB and VType traversal have no external ready gate in this
+flow; trace blockCommit can legally keep H and pending controls low afterward.
+No admission, retirement, nested redirect or exceptional recovery is modeled
+during the interval. Surviving memory obligations continue; this is neither a
+measured ROB latency nor a universal memory-drain deadline. After release the
+explicit scheduler owns the next retirement/head/scommit transition; exact
+full-core commit phase and arbitrary configurations remain unqualified.
+The request is snapshotted before any recovery tick; a competing sample during
+the producer wait, return or backend hold fails rather than changing the victim
+or being folded into the handled count. The memory-violation directed case checks a physically disjoint partial-PA RAW
+match across ROB wrap with a surviving store head, a killed unissued store,
+strict refetch, surviving-store readback and canceled-store no-write readback.
 
 ### Ordinary sliding-stream expectations
 
@@ -439,6 +463,23 @@ this lifecycle accounting does not independently monitor all address bits.
 Dependency depth/edges and pending-source
 selection are observed; they do not prove arbitrary rename or ALU timing.
 
+Ordinary selected disjoint-bypass loads retain exact admission-order byte
+expectations. Independent scalar and active-vector byte translation builds a
+physical cache-line footprint; it must be disjoint from every live older store.
+This deliberately excludes same-line byte-disjoint cases. A reachable cold
+scalar predictor clears hit/wait/strict/target metadata before dispatch. Issue
+may pass an older unaccepted STA, unacknowledged translation or unissued vector
+sibling; operand completion, full queue identities, head constraints and normal
+retirement remain unchanged. Accepted-edge and sampled-feedback relations count
+once per load/relation and exclude same-edge store issue from before-issue bins.
+The whole pending acceptance batch is frozen before classification. A sampled
+hit at boundary E is available before a new acceptance labeled E; cursor-based
+per-attempt matching excludes older reused SQ feedback. These counters do not
+independently reconstruct a passive address transcript or require completion
+before the older store. RAW partial-PA matches and unaligned SQ forwarding may
+legally replay; existing explicit cancellation/strict replacement expectations
+remain required, without weakening data or side-effect checking.
+
 Epoch length is independently configurable up to 4096 instructions, with a
 single reference-byte image and 2..8 live instructions. Admission checks current
 flow capacity and rejects duplicate live ROB value/wrap identities. Prefix
@@ -482,7 +523,8 @@ SQ cancellation is forbidden; explicit scalar cancellation is limited to the
 one selected cold initial execution. Conflicting STAs
 are eligible only at a non-store actual head or the nonmemory anchor, retaining
 `pendingst=false` across redirect return. This bounded restriction avoids claiming
-unmodeled registered pending-store suppression or arbitrary full-ROB walk timing.
+arbitrary full-ROB walk timing in that graph. Generic ordinary suffix recovery
+uses the separate registered suppression and declared busy contract above.
 The external initially-unassigned predictor/producer premise also requires a
 compatible prefix history; dynamic SSIT/LFST/rename history and an executable
 full-CPU wall-clock witness remain unqualified.

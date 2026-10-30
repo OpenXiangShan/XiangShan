@@ -2,6 +2,7 @@
 
 #include "memblock_env.hpp"
 #include "alias_refetch.hpp"
+#include "mixed/stream_recovery.hpp"
 #include "mixed/scalar_load.hpp"
 
 #include <algorithm>

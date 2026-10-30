@@ -259,6 +259,9 @@ int main() {
             } else if (action == "W") {
                 std::uint64_t cycle; input >> cycle;
                 std::cout << state.waiting_at(cycle, samples, transactions.at(id)) << '\n';
+            } else if (action == "H") {
+                std::uint64_t cycle; input >> cycle;
+                std::cout << state.translated_at(cycle, samples, transactions.at(id)) << '\n';
             } else if (action == "X") {
                 std::uint64_t cycle; unsigned timeout; input >> cycle >> timeout;
                 std::cout << state.timed_out(cycle, timeout) << '\n';
@@ -400,7 +403,7 @@ class StoreAddressReplayTest(unittest.TestCase):
         reports = []
         for original, line in zip(expected, lines):
             report = self.parser.parse_summary(line)
-            self.assertEqual(report["constraint_schema"], 83)
+            self.assertEqual(report["constraint_schema"], 84)
             # This independent event ledger describes synchronous producers.
             # Preserve its schema76 compatibility contract; persistent-session
             # offers and edge masks have their own independent ledger tests.
@@ -513,6 +516,17 @@ class StoreAddressReplayTest(unittest.TestCase):
             ("S 1 0 47 12 1", "1"), ("W 0 13", "1"),
             ("S 1 1 47 20 1", "2"), ("W 0 19", "1"), ("W 0 20", "0"),
             ("W 0 21", "0"), ("O 0", "hit"), ("W 0 19", "0"),
+        ])
+
+    def test_translated_at_tracks_sample_boundary_and_accepted_lifetime(self):
+        self.check_commands([
+            ("T 0 1 1 47", "ok"), ("S 1 1 47 4 1", "1"),
+            ("H 0 20", "0"), ("A 0 1 10", "1"), ("H 0 20", "0"),
+            ("S 0 1 47 11 1", "2"), ("H 0 20", "0"),
+            ("S 1 1 47 11 0", "3"), ("H 0 20", "0"), ("O 0", "miss"),
+            ("A 0 3 19", "1"), ("S 1 1 47 21 1", "4"),
+            ("H 0 20", "0"), ("H 0 21", "1"), ("O 0", "hit"),
+            ("H 0 20", "0"), ("H 0 21", "1"), ("H 0 22", "1"),
         ])
 
     def test_private_replay_mutations_are_detected(self):

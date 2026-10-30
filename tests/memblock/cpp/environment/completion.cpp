@@ -591,7 +591,7 @@ auto Environment::Impl::authorize_release_store_inputs() -> bool
     return true;
 }
 
-auto Environment::Impl::retire_store(const StoreTransaction &transaction) -> bool
+auto Environment::Impl::retire_store(const StoreTransaction &transaction, bool restore_after_walk) -> bool
 {
     const auto target = queues_.scalar_store_target(scalar_store_key(transaction));
     if (static_cast<unsigned>(transaction.op) > static_cast<unsigned>(StoreOp::sd) ||
@@ -604,10 +604,21 @@ auto Environment::Impl::retire_store(const StoreTransaction &transaction) -> boo
         store_scoreboard_.pending(transaction) ||
         dut_.queues.backend.pending_ptr_value.value() != transaction.rob ||
         dut_.queues.backend.pending_ptr_flag.value() != transaction.rob_flag ||
-        !dut_.queues.backend.pendingst.boolean() ||
+        (!restore_after_walk && !dut_.queues.backend.pendingst.boolean()) ||
         !target || !queues_.valid_store_retirement_target(*target)) {
         error_.record("scalar architectural retirement requires a completed normal cacheable store at the held head");
         return false;
+    }
+    if (restore_after_walk) {
+        if (dut_.queues.backend.pendingst.boolean() || dut_.queues.backend.scommit.boolean() ||
+            dut_.queues.backend.pending_mmi_old.boolean() || !ordinary_walk_resume_cycle_ ||
+            cycle() < *ordinary_walk_resume_cycle_) {
+            error_.record("store walk restoration requires recovered low pending controls");
+            return false;
+        }
+        // First unblocked registered store-head tuple also carries scommit
+        // when H is already complete. Do not expose an extra high/zero edge.
+        dut_.queues.backend.pendingst.set(std::uint64_t{1});
     }
     // ROB emits exactly one scalar scommit even if this ordinary SQ entry
     // already drained while it was the head. Dequeue is not the commit event.
@@ -615,6 +626,7 @@ auto Environment::Impl::retire_store(const StoreTransaction &transaction) -> boo
         !queues_.retire_scalar_store(scalar_store_key(transaction))) return false;
     record_committed_store(transaction);
     scalar_release_inputs_.erase(scalar_store_key(transaction));
+    ordinary_walk_resume_cycle_.reset();
     return check_components();
 }
 
@@ -1146,9 +1158,10 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
     bool rob_flag,
     bool flush_itself,
     bool is_vls_exception, std::uint64_t *captured_vaddr,
-    LoadExceptionStoreObservation *stores)  -> bool
+    LoadExceptionStoreObservation *stores, bool ordinary_walk)  -> bool
 {
     scalar_redirect_boundary_.reset();
+    ordinary_walk_resume_cycle_.reset();
     if (is_vls_exception && !flush_itself) {
         error_.record("VLS exception redirect must enter as a flush redirect");
         return false;
@@ -1166,6 +1179,15 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
         *stores = {cycle(), retirement.scalar + retirement.vector_uops,
             retirement.pending, !dut_.sample_sbuffer_empty()};
     });
+    // Rob.pendingst is registered from isCommit, which is false on the
+    // redirect edge and during walk. Preserve the previous level at R, then
+    // suppress at R+1 without moving the surviving architectural head.
+    // Ordinary caller owns walk completion and explicit head restoration.
+    if (ordinary_walk) {
+        dut_.queues.backend.pendingst.set(std::uint64_t{0});
+        dut_.queues.backend.pending_mmi_old.set(std::uint64_t{0});
+        dut_.queues.backend.scommit.set(std::uint64_t{0});
+    }
     dut_.queues.redirect.valid.set(std::uint64_t{0});
     dut_.queues.redirect.is_vls_exception.set(std::uint64_t{0});
     // MemBlock registers redirect once; the queues publish their retained
@@ -1192,6 +1214,7 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
             flush_itself && !is_vls_exception)) return false;
     scalar_redirect_boundary_ = ScalarRedirectBoundary{rob_value, rob_flag,
         flush_itself, cycle(), lq_canceled, queues_.sq_allocated()};
+    if (ordinary_walk) ordinary_walk_resume_cycle_ = cycle() + kStreamOrdinaryRecoveryBusy + 1U;
     return true;
 }
 

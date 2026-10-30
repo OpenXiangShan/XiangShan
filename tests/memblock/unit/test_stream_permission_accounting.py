@@ -104,7 +104,7 @@ def history(seed, epochs=8, rate=1000, mxr=500):
     p[19] = max(admitted_per_epoch.values(), default=0)
     p[20] = len(admitted_per_epoch)
     p[17] = (p[5] + p[7] + 3) if p[1] else 0
-    record = dict(constraint_schema=83, target_stream_permission_load=rate, target_stream_mxr=mxr, target_stream_arena=750)
+    record = dict(constraint_schema=84, target_stream_permission_load=rate, target_stream_mxr=mxr, target_stream_arena=750)
     record.update({field: csv(row) for field, row in rows.items()})
     return record
 
