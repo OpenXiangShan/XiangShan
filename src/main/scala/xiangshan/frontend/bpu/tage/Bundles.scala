@@ -116,11 +116,12 @@ class TageMetaEntry(implicit p: Parameters) extends TageBundle {
   val hasProvider:       Bool            = Bool()
   val hasAlt:            Bool            = Bool()
   val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)
-  val providerWayIdx:    UInt            = UInt(MaxNumWays.W)
+  val providerWayIdx:    UInt            = UInt(MaxWayIdxWidth.W)
   val providerTakenCtr:  SaturateCounter = TakenCounter()
   val providerUsefulCtr: SaturateCounter = UsefulCounter()
-  val altOrBasePred:     Bool            = Bool()
-  val altConf:           Bool            = Bool()
+  val altTableIdx:       UInt            = UInt(TableIdxWidth.W)
+  val altWayIdx:         UInt            = UInt(MaxWayIdxWidth.W)
+  val altTakenCtr:       SaturateCounter = TakenCounter()
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
@@ -128,8 +129,9 @@ class TageMeta(implicit p: Parameters) extends TageBundle {
 }
 
 class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val forIdx: UInt      = UInt(SetIdxWidth.W)
-  val forTag: Vec[UInt] = Vec(2, UInt(TagWidth.W))
+  val forBankIdx: UInt      = UInt(BankIdxWidth.W)
+  val forSetIdx:  UInt      = UInt(SetIdxWidth.W)
+  val forTag:     Vec[UInt] = Vec(2, UInt(TagWidth.W))
 }
 
 class PredictTagMatchResult(implicit p: Parameters) extends TageBundle {
