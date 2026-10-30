@@ -279,9 +279,9 @@ class MainBtbAlignBank(
     t1_mispredictInfo.valid && t1_canWriteEntry && (
       // 1. not hit, always write a new entry, use mbtb replacer's victim way.
       !t1_hit ||
-        // 2. hit, do write only if:
-        //   a. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table).
-        t1_mispredictInfo.bits.attribute.needIttage || t1_mispredictInfo.bits.attribute.hasPop ||
+        // 2. hit, do write only if
+        //   a. it is an indirect branch.
+        t1_mispredictInfo.bits.attribute.isIndirect ||
         //   b. attribute changed, probably indicating a software self-modification.
         t1_mispredictInfo.bits.attribute =/= Mux1H(t1_hitMask, t1_meta.map(_.attribute))
     )
