@@ -1286,3 +1286,49 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
                    io_backend_cfVec_3_bits_exceptionVec_20, io_backend_cfVec_2_bits_exceptionVec_20,
                    io_backend_cfVec_1_bits_exceptionVec_20, io_backend_cfVec_0_bits_exceptionVec_20})
 );
+
+`define VTYPE_FETCH_FAULT(I) { \
+  io_backend_cfVec_``I``_bits_exceptionVec_20, \
+  io_backend_cfVec_``I``_bits_exceptionVec_12, \
+  io_backend_cfVec_``I``_bits_exceptionVec_1 }
+
+bind Frontend frontend_vtype_funcov u_frontend_vtype_funcov (
+  .clock(clock), .reset(reset),
+  .decode_can_accept(io_backend_toIBuf_decodeCanAccept),
+  .redirect(io_backend_toFtq_redirect_valid),
+  .resuming_vtype(io_backend_toIBuf_resumingVType),
+  .walk_to_arch(io_backend_toIBuf_walkToArchVType),
+  .walk_valid(io_backend_toIBuf_walkVType_valid),
+  .walk_type({io_backend_toIBuf_walkVType_bits_illegal,
+    io_backend_toIBuf_walkVType_bits_vma, io_backend_toIBuf_walkVType_bits_vta,
+    io_backend_toIBuf_walkVType_bits_vsew, io_backend_toIBuf_walkVType_bits_vlmul}),
+  .commit_valid(io_backend_toIBuf_commitVType_vtype_valid),
+  .commit_vsetvl(io_backend_toIBuf_commitVType_hasVsetvl),
+  .commit_type({io_backend_toIBuf_commitVType_vtype_bits_illegal,
+    io_backend_toIBuf_commitVType_vtype_bits_vma,
+    io_backend_toIBuf_commitVType_vtype_bits_vta,
+    io_backend_toIBuf_commitVType_vtype_bits_vsew,
+    io_backend_toIBuf_commitVType_vtype_bits_vlmul}),
+  .vsetvl_type({io_backend_toIBuf_vsetvlVType_illegal,
+    io_backend_toIBuf_vsetvlVType_vma, io_backend_toIBuf_vsetvlVType_vta,
+    io_backend_toIBuf_vsetvlVType_vsew, io_backend_toIBuf_vsetvlVType_vlmul}),
+  .queued(inner_ibuffer.numValid),
+  .dequeued(inner_ibuffer.numOut),
+  .enq_fire(inner_ibuffer.io_in_valid && inner_ibuffer.io_in_ready),
+  .enq_has_vset(inner_ibuffer._enqHasVSet_T_466),
+  .enq_has_instruction(|(inner_ibuffer.io_in_bits_valid &
+    inner_ibuffer.io_in_bits_enqEnable)),
+  .cf_valid({io_backend_cfVec_7_valid, io_backend_cfVec_6_valid,
+    io_backend_cfVec_5_valid, io_backend_cfVec_4_valid,
+    io_backend_cfVec_3_valid, io_backend_cfVec_2_valid,
+    io_backend_cfVec_1_valid, io_backend_cfVec_0_valid}),
+  .cf_instr({io_backend_cfVec_7_bits_instr, io_backend_cfVec_6_bits_instr,
+    io_backend_cfVec_5_bits_instr, io_backend_cfVec_4_bits_instr,
+    io_backend_cfVec_3_bits_instr, io_backend_cfVec_2_bits_instr,
+    io_backend_cfVec_1_bits_instr, io_backend_cfVec_0_bits_instr}),
+  .cf_fetch_fault({`VTYPE_FETCH_FAULT(7), `VTYPE_FETCH_FAULT(6),
+    `VTYPE_FETCH_FAULT(5), `VTYPE_FETCH_FAULT(4),
+    `VTYPE_FETCH_FAULT(3), `VTYPE_FETCH_FAULT(2),
+    `VTYPE_FETCH_FAULT(1), `VTYPE_FETCH_FAULT(0)})
+);
+`undef VTYPE_FETCH_FAULT
