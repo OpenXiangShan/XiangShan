@@ -140,6 +140,9 @@ package seq_pkg;
     `include "memblock_dispatch_manual_control_vseq.sv"
     `include "memblock_dispatch_real_cancel_reconcile_vseq.sv"
     `include "memblock_l2tlb_pbmt_response_fault_vseq.sv"
+    `include "memblock_dtlb_hwpf_training_vseq.sv"
+    `include "memblock_dtlb_0101_source_vseq.sv"
+    `include "memblock_dtlb_0102_pipeline_vseq.sv"
 
 endpackage
 
