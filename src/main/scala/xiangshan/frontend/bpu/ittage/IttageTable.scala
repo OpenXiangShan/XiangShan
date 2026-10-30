@@ -243,11 +243,10 @@ class IttageTable(
   // Reads and ordinary updates take priority over background useful-counter clears.
   // Each bank sweeps independently, advancing only when the SRAM accepts a clear.
   tables.zip(writeBuffers).zipWithIndex.foreach { case ((bank, writeBuffer), bankIdx) =>
-    val readPort          = writeBuffer.io.read.head
-    val usefulResetActive = RegInit(false.B)
-    val usefulResetGrant = usefulResetActive && bank.io.resetDone &&
-      !bank.io.r.req.valid && !readPort.valid && !writeBuffer.io.write.head.valid
-    val usefulResetFire                     = usefulResetGrant && bank.io.w.req.fire
+    val readPort                            = writeBuffer.io.read.head
+    val usefulResetActive                   = RegInit(false.B)
+    val usefulResetCandidate                = usefulResetActive && !writeBuffer.io.write.head.valid
+    val usefulResetFire                     = bank.io.w.req.fire && !readPort.valid
     val (usefulResetSet, usefulResetFinish) = Counter(usefulResetFire, NumSetsPerBank)
     // Coalesce requests during a sweep; a request on its last write starts another sweep.
     when(io.update.resetUsefulCnt) {
@@ -256,14 +255,16 @@ class IttageTable(
       usefulResetActive := false.B
     }
 
-    val writeValid   = !bank.io.r.req.valid && (readPort.valid || usefulResetGrant)
-    val writeEntry   = Mux(usefulResetGrant, usefulResetWdata, readPort.bits.entry)
-    val writeSetIdx  = Mux(usefulResetGrant, usefulResetSet, readPort.bits.setIdx)
-    val writeBitMask = Mux(usefulResetGrant, updateUsefulBitmask, readPort.bits.bitmask)
+    val writeValid = !bank.io.r.req.valid && (readPort.valid || usefulResetCandidate)
+    // Select the payload independently of late read/update arbitration.
+    // An accepted write without a buffered entry is necessarily a background clear.
+    val writeEntry   = Mux(readPort.valid, readPort.bits.entry, usefulResetWdata)
+    val writeSetIdx  = Mux(readPort.valid, readPort.bits.setIdx, usefulResetSet)
+    val writeBitMask = Mux(readPort.valid, readPort.bits.bitmask, updateUsefulBitmask)
     bank.io.w.apply(writeValid, writeEntry, writeSetIdx, true.B, writeBitMask)
     readPort.ready := bank.io.w.req.ready && !bank.io.r.req.valid
 
-    // The buffer is drained and has no incoming update when a clear is granted.
+    // The buffer is drained and has no incoming update when a clear fires.
     // Forget the old write record only after SRAM has actually changed.
     writeBuffer.io.invalidate.get.valid := usefulResetFire
     writeBuffer.io.invalidate.get.bits  := usefulResetSet
