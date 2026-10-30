@@ -15,8 +15,10 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
+NOOP_HOME ?= $(abspath .)
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
+export NOOP_HOME
 
 # import docker support
 include scripts/Makefile.docker
@@ -193,6 +195,15 @@ endif
 # public args sumup
 RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 override DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
+
+include scripts/Makefile.mcsim.mk
+include scripts/Makefile.yuquan.mk
+
+# External memory backends are mutually exclusive.
+MEMORY_BACKEND_COUNT := $(words $(filter 1,$(WITH_DRAMSIM3) $(WITH_MCSIM) $(WITH_YUQUAN)))
+ifneq ($(filter-out 0 1,$(MEMORY_BACKEND_COUNT)),)
+$(error WITH_DRAMSIM3, WITH_MCSIM, and WITH_YUQUAN are mutually exclusive)
+endif
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -395,11 +406,14 @@ reformat:
 	mill xiangshan.reformat
 
 # verilator simulation
-emu-mk: sim-verilog
-	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
+EMU_BACKEND_DEPS := $(MCSIM_EMU_DEPS) $(YUQUAN_EMU_DEPS)
+EMU_BACKEND_ARGS := $(MCSIM_DIFTEST_ARGS) $(YUQUAN_DIFTEST_ARGS)
+
+emu-mk: sim-verilog $(EMU_BACKEND_DEPS)
+	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)" $(EMU_BACKEND_ARGS)
 
 emu: $(call docker-deps,emu-mk)
-	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
+	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE) $(EMU_BACKEND_ARGS)
 
 gsim: sim-chirrtl
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)

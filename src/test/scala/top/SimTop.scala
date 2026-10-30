@@ -92,6 +92,14 @@ class MemXbar(implicit p: Parameters) extends LazyModule
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
   val debugOpts = p(DebugOptionsKey)
+  require(
+    !(debugOpts.UseDRAMSim && debugOpts.UseYuQuan),
+    "DRAMSim3 and YuQuan DDR memory backends are mutually exclusive"
+  )
+  require(
+    !(debugOpts.UseMCSim && debugOpts.UseYuQuan),
+    "MCSim and YuQuan DDR memory backends are mutually exclusive"
+  )
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -121,7 +129,8 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
     l_memXbar.memNode,
     debugOpts.SimMemSize,
     useBlackBox = true,
-    dynamicLatency = debugOpts.UseDRAMSim
+    dynamicLatency = debugOpts.UseDRAMSim || debugOpts.UseMCSim,
+    useYuQuan = debugOpts.UseYuQuan
   )
   val simAXIMem = Module(l_simAXIMem.module)
 
