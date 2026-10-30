@@ -40,7 +40,8 @@ struct CancelFixture {
     std::uint64_t cycle()const{return ticks;}
     void tick(){++ticks;if(ticks==complete_tick)scoreboard_.observe(0,completion);}
     bool check_components(){error_.merge(scoreboard_.failures());return error_.empty();}
-    bool redirect_after(std::uint8_t,bool,bool,bool=false);
+    bool redirect_after(std::uint8_t,bool,bool,bool=false,std::uint64_t * = nullptr);
+    std::uint64_t exception_vaddr() const { return 0; }
     bool cancel_scalar_load_after_redirect(const LoadTransaction&);
 };
 // PRODUCTION_METHODS

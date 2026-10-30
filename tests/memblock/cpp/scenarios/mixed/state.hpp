@@ -147,6 +147,12 @@ struct AddressConstants {
     static constexpr std::uint64_t gstage_boundary_physical = 0x510000000ULL;
     static constexpr std::array<std::uint64_t, 2> gstage_boundary_roots{{
         0xe6000000ULL, 0xe7000000ULL}};
+    // Immutable execute-only pages, outside every ordinary/special data pool.
+    static constexpr std::uint64_t permission_virtual_base = 0x6a000000ULL;
+    static constexpr std::uint64_t permission_guest_base = 0x6b000000ULL;
+    static constexpr std::uint64_t permission_physical_base = 0x520000000ULL;
+    static constexpr unsigned permission_page_count = 16;
+    static constexpr std::uint64_t permission_context_stride = 0x100000ULL;
     static constexpr std::uint64_t guest_virtual = 0x60000000ULL;
     static constexpr std::uint64_t guest_fault_virtual = 0xa0000000ULL;
     static constexpr std::uint64_t guest_physical = 0xb0000000ULL;

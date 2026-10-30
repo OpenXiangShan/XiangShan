@@ -105,6 +105,8 @@ struct TrackingQueue : TrackingAgent {
     }
 };
 struct TrackingScoreboard {
+    unsigned cleared_completions = 0;
+    void clear_checked_completions() { ++cleared_completions; }
     bool incomplete = false;
     template<class T> bool pending(const T &) const { return incomplete; }
     bool mark_address_issued(const StoreTransaction &, std::uint64_t) { return true; }
@@ -367,6 +369,7 @@ static void reset_legacy_rejection() {
     require(e.reset(),"production reset rejected");
     require(e.scalar_release_inputs_.empty()&&e.vector_release_inputs_.empty()&&e.memory_agent_.groups.empty(),"reset retained transient input trackers");
     require(e.memory_agent_.resets==1,"manager reset missing");
+    require(e.scoreboard_.cleared_completions==1,"reset retained checked terminal authorization");
     ReleaseInputFixture legacy; t.reference_pages=std::make_shared<ReferencePageMap>(0x80002000,std::vector<std::uint64_t>{0x90005000});
     require(legacy.issue_store_address(t)&&legacy.issue_store_data(t),"legacy untracked issue rejected");
     legacy.record_committed_store(t);

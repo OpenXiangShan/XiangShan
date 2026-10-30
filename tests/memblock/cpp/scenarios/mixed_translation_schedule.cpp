@@ -230,6 +230,7 @@ memblock::scenarios::TranslationContext MixedScenario::choose_translation_contex
             constraints.translation_switches_per_mille) {
         auto context = current_translation;
         context.access = 0; // Non-stream actions retain their supervisor-data contract.
+        context.mxr = false;
         return context;
     }
     return random_translation_context();
@@ -299,18 +300,19 @@ bool MixedScenario::enter_translation_context(const TranslationContext &context)
 
 bool MixedScenario::leave_stream_access_context()
 {
-    if (!translation_context_valid || !current_translation.user_pages()) return true;
+    if (!translation_context_valid || (!current_translation.user_pages() && !current_translation.mxr)) return true;
     // Serial boundary helpers and final readback use the privileged legacy
     // configuration. Complete the normal drained transition before returning
     // to their scheduler, including the matching roots and covering fences.
     auto context = current_translation;
     context.access = 0;
+    context.mxr = false;
     return enter_translation_context(context);
 }
 
 bool MixedScenario::issue_constrained_fence(unsigned operation_kind)
 {
-    if (current_translation.access != 0 ||
+    if (current_translation.access != 0 || current_translation.mxr ||
         current_translation.regime ==
             RandomConstraints::translation_bare ||
         constraints.tlb_flushes_per_mille == 0 ||

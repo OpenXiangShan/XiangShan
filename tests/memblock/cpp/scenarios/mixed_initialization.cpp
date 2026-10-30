@@ -40,6 +40,9 @@ void MixedScenario::initialize_memory()
             gstage_boundary_physical, 0x4000,
             static_cast<unsigned char>(options.seed ^ 0xb7U));
     }
+    if (constraints.stream_permission_load_per_mille != 0)
+        environment.memory().define_seeded_random(permission_physical_base,
+            6 * permission_context_stride, options.seed ^ 0x741bc39eU);
     environment.memory().define_seeded_random(
         bare_base, 0x20000, options.seed ^ 0x19U);
     environment.memory().define_seeded_random(

@@ -146,6 +146,9 @@ private:
     bool prepare_random_translation_contexts();
     bool prepare_permuted_translation_pages();
     bool prepare_user_translation_pages();
+    bool prepare_stream_permission_pages();
+    std::uint64_t stream_permission_physical(const TranslationContext &, std::uint64_t) const;
+    bool validate_stream_permission_load(const memblock::LoadTransaction &, const TranslationContext &);
     unsigned choose_stream_access();
     std::shared_ptr<const memblock::ReferencePageMap> reference_pages_for(
         std::uint64_t address) const;

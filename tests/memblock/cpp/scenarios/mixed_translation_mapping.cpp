@@ -134,14 +134,14 @@ bool MixedScenario::validate_translation_byte(std::uint64_t virtual_address,
             reference.leaf_permissions && memblock::reference_memory_access_permitted(
                 access, *reference.leaf_permissions,
                 static_cast<memblock::ReferencePrivilegeMode>(context.expected_privilege().data_mode),
-                context.access == 2, false);
+                context.access == 2, context.mxr);
     } else if (context.regime == RandomConstraints::translation_nested) {
         const auto reference = memblock::reference_two_stage_access(
             environment.memory(), (context.user_pages() ? user_vs_roots : random_vs_roots).at(context.vs_mode),
             random_g_roots.at(context.g_mode), virtual_address, access,
             page_mode(context.vs_mode), page_mode(context.g_mode),
             static_cast<memblock::ReferencePrivilegeMode>(context.expected_privilege().data_mode),
-            context.access == 2);
+            context.access == 2, context.mxr);
         valid = reference.translated && reference.physical_address == physical_address;
     }
     if (!valid) {
@@ -280,6 +280,110 @@ bool MixedScenario::prepare_user_translation_pages()
         for (auto base : {stage1_napot_base, nested_g_napot_base, nested_vs_napot_base, nested_both_napot_base}) {
             for (auto offset : {0ULL, 0xffffULL}) for (bool store : {false, true}) {
                 if (!validate_translation_byte(base + offset, base + offset, store, translation)) return false;
+            }
+        }
+    }
+    return true;
+}
+
+std::uint64_t MixedScenario::stream_permission_physical(
+    const TranslationContext &context, std::uint64_t address) const
+{
+    if (address < permission_virtual_base ||
+        address - permission_virtual_base >= permission_page_count * 0x1000ULL ||
+        context.regime == RandomConstraints::translation_bare)
+        throw std::logic_error("permission address outside its translated pool");
+    const auto page = (address - permission_virtual_base) >> 12U;
+    const auto offset = address & 0xfffU;
+    if (context.regime == RandomConstraints::translation_stage1)
+        return permission_physical_base + context.stage1_mode * permission_context_stride +
+            ordinary_pages.host[context.stage1_mode][page] * 0x1000ULL + offset;
+    return permission_physical_base + (2U + 2U * context.vs_mode + context.g_mode) * permission_context_stride +
+        ordinary_pages.g[context.g_mode][ordinary_pages.vs[context.vs_mode][page]] * 0x1000ULL + offset;
+}
+
+bool MixedScenario::validate_stream_permission_load(const memblock::LoadTransaction &load,
+    const TranslationContext &context)
+{
+    const auto expected = stream_permission_physical(context, load.address);
+    const auto exception = context.mxr ? 0U : memblock::kExceptionLoadPageFault;
+    bool valid = load.expected_exception_mask == exception && load.oracle_address == expected &&
+        !load.reference_pages;
+    const auto privilege = static_cast<memblock::ReferencePrivilegeMode>(context.expected_privilege().data_mode);
+    if (context.regime == RandomConstraints::translation_stage1) {
+        const auto reference = memblock::reference_page_walk_permissions(environment.memory(),
+            (context.user_pages() ? user_stage1_roots : random_stage1_roots).at(context.stage1_mode),
+            load.address, page_mode(context.stage1_mode));
+        valid &= reference.walk.translated && reference.walk.physical_address == expected &&
+            reference.leaf_permissions && !reference.leaf_permissions->readable &&
+            !reference.leaf_permissions->writable && reference.leaf_permissions->executable &&
+            reference.leaf_permissions->user == context.user_pages() &&
+            memblock::reference_memory_access_permitted(memblock::ReferenceMemoryAccess::load,
+                *reference.leaf_permissions, privilege, context.access == 2, context.mxr) == context.mxr;
+    } else if (context.regime == RandomConstraints::translation_nested) {
+        const auto root = (context.user_pages() ? user_vs_roots : random_vs_roots).at(context.vs_mode);
+        const auto raw = memblock::reference_two_stage_walk(environment.memory(), root,
+            random_g_roots.at(context.g_mode), load.address, page_mode(context.vs_mode), page_mode(context.g_mode));
+        const auto reference = memblock::reference_two_stage_access(environment.memory(), root,
+            random_g_roots.at(context.g_mode), load.address, memblock::ReferenceMemoryAccess::load,
+            page_mode(context.vs_mode), page_mode(context.g_mode), privilege, context.access == 2, context.mxr);
+        valid &= raw.translated && raw.physical_address == expected &&
+            reference.translated == context.mxr && reference.stage1_page_fault == !context.mxr &&
+            !reference.guest_page_fault && !reference.access_fault &&
+            (!context.mxr || reference.physical_address == expected);
+    } else valid = false;
+    if (!valid) phase = "stream-permission-independent-mapping-or-cause";
+    return valid;
+}
+
+bool MixedScenario::prepare_stream_permission_pages()
+{
+    if (constraints.stream_permission_load_per_mille == 0) return true;
+    for (unsigned mode = 0; mode < 2; ++mode) {
+        for (unsigned page = 0; page < permission_page_count; ++page) {
+            const auto va = permission_virtual_base + page * 0x1000ULL;
+            TranslationContext context;
+            context.regime = RandomConstraints::translation_stage1;
+            context.stage1_mode = mode;
+            const auto pa = stream_permission_physical(context, va);
+            const auto gpa = permission_guest_base + mode * permission_context_stride +
+                ordinary_pages.vs[mode][page] * 0x1000ULL;
+            for (unsigned user = 0; user < 2; ++user) {
+                if (user && constraints.stream_access_weights[1] == 0 && constraints.stream_access_weights[2] == 0) continue;
+                const auto host_root = (user ? user_stage1_roots : random_stage1_roots)[mode];
+                const auto vs_root = (user ? user_vs_roots : random_vs_roots)[mode];
+                if (!(mode == 0
+                    ? environment.map_sv39_4k(va, pa, host_root, false, false, true, user) &&
+                      environment.map_sv39_4k(va, gpa, vs_root, false, false, true, user)
+                    : environment.map_sv48_4k(va, pa, host_root, false, false, true, user) &&
+                      environment.map_sv48_4k(va, gpa, vs_root, false, false, true, user))) return false;
+            }
+            context.regime = RandomConstraints::translation_nested;
+            context.vs_mode = mode;
+            for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
+                context.g_mode = g_mode;
+                if (!map_g_page(g_mode, random_g_roots[g_mode], gpa,
+                        stream_permission_physical(context, va), true)) return false;
+            }
+        }
+    }
+    // Declarations own expected PA and cause; permission walks validate setup.
+    for (unsigned access = 0; access < 3; ++access) {
+        if (access && constraints.stream_access_weights[access] == 0) continue;
+        for (unsigned pair = 0; pair < 6; ++pair) for (bool mxr : {false, true}) {
+            TranslationContext context;
+            context.access = access;
+            context.mxr = mxr;
+            context.regime = pair < 2 ? RandomConstraints::translation_stage1 : RandomConstraints::translation_nested;
+            context.stage1_mode = pair % 2;
+            context.vs_mode = pair < 2 ? 0 : (pair - 2) / 2;
+            context.g_mode = pair < 2 ? 0 : (pair - 2) % 2;
+            for (unsigned page = 0; page < permission_page_count; ++page) for (unsigned offset : {0U, 0xfffU}) {
+                memblock::LoadTransaction load;
+                load.address = permission_virtual_base + page * 0x1000ULL + offset;
+                load.oracle_address = stream_permission_physical(context, load.address);
+                load.expected_exception_mask = mxr ? 0U : memblock::kExceptionLoadPageFault;
+                if (!validate_stream_permission_load(load, context)) return false;
             }
         }
     }
@@ -714,7 +818,8 @@ bool MixedScenario::prepare_random_translation_contexts()
             }
         }
     }
-    if (!prepare_permuted_translation_pages() || !prepare_user_translation_pages()) return false;
+    if (!prepare_permuted_translation_pages() || !prepare_user_translation_pages() ||
+        !prepare_stream_permission_pages()) return false;
     std::vector<std::pair<std::uint64_t, std::uint64_t>>
         reference_addresses{{
             {cache0_base + 0x106a8, cache0_base + 0x106a8},
@@ -833,11 +938,11 @@ bool MixedScenario::activate_translation_context(const TranslationContext &conte
             !environment.issue_sfence(0, 0, true, true, false, true)) return false;
         ++coverage.context_fences[1]; ++coverage.context_fences[2];
     }
-    if (!context.user_pages()) return true;
+    if (!context.user_pages() && !context.mxr) return true;
     const auto privilege = context.expected_privilege();
     return environment.set_translation_permissions(
             static_cast<memblock::ReferencePrivilegeMode>(privilege.data_mode),
-            false, privilege.sum, false, privilege.vsum) &&
+            privilege.mxr, privilege.sum, privilege.vmxr, privilege.vsum) &&
         environment.set_instruction_privilege(
             static_cast<memblock::ReferencePrivilegeMode>(privilege.instruction_mode));
 }

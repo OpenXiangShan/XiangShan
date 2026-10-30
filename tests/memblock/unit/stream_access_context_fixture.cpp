@@ -42,10 +42,10 @@ struct HostEnvironment {
             r, w, x, u, nc, true, std::nullopt, io);
     }
     bool map_sv39_4k(std::uint64_t va, std::uint64_t pa, std::uint64_t root,
-        bool r, bool w, bool x, bool u, bool nc, bool io)
+        bool r, bool w, bool x, bool u, bool nc = false, bool io = false)
     { return map_stage(ReferencePageMode::sv39, va, pa, root, r, w, x, u, nc, io); }
     bool map_sv48_4k(std::uint64_t va, std::uint64_t pa, std::uint64_t root,
-        bool r, bool w, bool x, bool u, bool nc, bool io)
+        bool r, bool w, bool x, bool u, bool nc = false, bool io = false)
     { return map_stage(ReferencePageMode::sv48, va, pa, root, r, w, x, u, nc, io); }
     bool map_guest(ReferencePageMode mode, std::uint64_t va, std::uint64_t pa,
         unsigned level, std::uint64_t root, bool r, bool w, bool x, bool a,
@@ -169,6 +169,9 @@ struct Fixture : AddressConstants {
         std::optional<std::uint64_t> = std::nullopt, bool = false,
         bool = false, bool = false);
     bool prepare_user_translation_pages();
+    bool prepare_stream_permission_pages();
+    std::uint64_t stream_permission_physical(const TranslationContext &, std::uint64_t) const;
+    bool validate_stream_permission_load(const LoadTransaction &, const TranslationContext &);
     bool validate_translation_byte(std::uint64_t, std::uint64_t, bool,
         const TranslationContext &);
     bool activate_translation_context(const TranslationContext &);
@@ -714,6 +717,57 @@ void pool_isolation()
               << " boundary_controls=" << controls << " construction_orders=2\n";
 }
 
+void permission_maps()
+{
+    unsigned checks = 0, denied = 0, mxr_reads = 0;
+    std::set<std::uint64_t> signatures;
+    for (auto seed : {17ULL, 0x491acULL}) {
+        Fixture fixture(seed);
+        prepare(fixture);
+        // The ordinary initializer maps its own VS table storage through G.
+        for (unsigned g = 0; g < 2; ++g) for (auto root : fixture.random_vs_roots)
+            for (auto page = root; page < root + 0x200000; page += 4096)
+                require(fixture.map_g_page(g, fixture.random_g_roots[g], page, page), "implicit-ordinary-build");
+        require(fixture.prepare_stream_permission_pages(), "permission-setup:" + fixture.phase);
+        for (unsigned access = 0; access < 3; ++access) for (unsigned pair = 0; pair < 6; ++pair)
+            for (unsigned page = 0; page < fixture.permission_page_count; ++page) for (unsigned offset : {0U, 4095U}) {
+                auto c = context(pair, access);
+                const auto va = fixture.permission_virtual_base + 4096ULL * page + offset;
+                const auto root = pair < 2 ? (access ? fixture.user_stage1_roots : fixture.random_stage1_roots)[c.stage1_mode]
+                    : (access ? fixture.user_vs_roots : fixture.random_vs_roots)[c.vs_mode];
+                const auto leaf = literal_walk(fixture.environment.image, root, va, pair < 2 ? c.stage1_mode : c.vs_mode);
+                require((leaf.pte & 0xcf) == 0x49 && bool(leaf.pte & 16) == (access != 0),
+                    "permission-X-only-leaf");
+                const auto expected = fixture.permission_physical_base + pair * fixture.permission_context_stride +
+                    (pair < 2 ? fixture.ordinary_pages.host[pair][page] :
+                        fixture.ordinary_pages.g[c.g_mode][fixture.ordinary_pages.vs[c.vs_mode][page]]) * 4096ULL + offset;
+                auto actual = leaf.physical;
+                if (pair >= 2) {
+                    const auto g = literal_walk(fixture.environment.image, fixture.random_g_roots[c.g_mode], actual, c.g_mode, true);
+                    require((g.pte & 0xd7) == 0xd7, "permission-G-leaf");
+                    actual = g.physical;
+                    for (auto table : leaf.table_pages) {
+                        const auto implicit = literal_walk(fixture.environment.image, fixture.random_g_roots[c.g_mode], table, c.g_mode, true);
+                        require(implicit.physical == table && (implicit.pte & 0x53) == 0x53, "permission-implicit-G");
+                    }
+                }
+                require(actual == expected && fixture.stream_permission_physical(c, va) == expected,
+                    "permission-declared-physical");
+                for (bool mxr : {false, true}) {
+                    c.mxr = mxr;
+                    LoadTransaction load; load.address = va; load.oracle_address = expected;
+                    load.expected_exception_mask = mxr ? 0U : kExceptionLoadPageFault;
+                    require(fixture.validate_stream_permission_load(load, c), "permission-oracle:" + fixture.phase);
+                    ++checks; denied += !mxr; mxr_reads += mxr;
+                }
+                signatures.insert(expected);
+            }
+    }
+    require(signatures.size() > 192, "permission-seeds-fixed-map");
+    std::cout << "permission_map_checks=" << checks << " denied=" << denied
+        << " mxr_reads=" << mxr_reads << " distinct_addresses=" << signatures.size() << std::endl;
+}
+
 int main(int argc, char **argv)
 {
     try {
@@ -727,6 +781,7 @@ int main(int argc, char **argv)
         else if (test == "profiles") profiles();
         else if (test == "pool-isolation") pool_isolation();
         else if (test == "handoff") handoff();
+        else if (test == "permission-maps") permission_maps();
         else throw std::runtime_error("unknown-case");
         std::cout << test << " PASS\n";
     } catch (const std::exception &error) {

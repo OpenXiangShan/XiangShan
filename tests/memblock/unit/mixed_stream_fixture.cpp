@@ -30,7 +30,7 @@ struct SyntheticEnvironment {
     };
     struct Instruction {
         unsigned kind = 0, id = 0, flows = 0, group = 0, epoch = 0;
-        bool refetch_pending = false, initial_cold = false, cold_canceled = false;
+        bool refetch_pending = false, initial_cold = false, cold_canceled = false, canceled = false;
         LoadTransaction load;
         StoreTransaction store;
         std::uint8_t rob = 0;
@@ -46,6 +46,15 @@ struct SyntheticEnvironment {
     struct LqEntry { unsigned id, epoch, flows; bool done = false; };
     mutable std::deque<LqEntry> lq_entries;
     mutable std::uint64_t canceled_lq = 0;
+    std::uint64_t canceled_sq = 0;
+    bool permission_enabled = false;
+    TranslationContext permission_context;
+    unsigned canceled_generations = 0, trap_count = 0;
+    std::optional<std::uint64_t> trap_address, trap_edge;
+    std::map<unsigned, unsigned> exception_anchors;
+    bool at_exception_anchor = false;
+    std::optional<std::uint64_t> anchor_wb_edge;
+    mutable unsigned independent_permission_checks = 0;
     bool recovery_enabled = false, cold_enabled = false, narrow_history = false, successor_history = false, at_anchor = false;
     std::optional<std::uint64_t> held_line, released_at, redirect_boundary;
     std::optional<LoadTransaction> cold_snapshot;
@@ -60,6 +69,7 @@ struct SyntheticEnvironment {
         const auto &producer = find(source.rob, source.rob_flag);
         require(producer.kind == 0 && !producer.load.fp_wen && producer.id < consumer,
             "dependency source was not an older integer load");
+        require(producer.load.expected_exception_mask == 0, "faulting load became a value producer");
         require(value == load_expectations.at(identity(source.rob, source.rob_flag)),
             "dependency value was not frozen from the older load expectation");
         dependencies.push_back({consumer, producer.id, data});
@@ -209,8 +219,8 @@ struct SyntheticEnvironment {
     std::map<unsigned, std::array<std::optional<std::uint64_t>, 2>> pair_acceptance_edges;
     void select_pair(const StoreTransaction &store) { selected_pairs.insert(find(store.rob, store.rob_flag).id); }
     void note_selection(unsigned kind) {
-        if (kind == 0 || kind == 5 || kind == 7 || kind == 8 || kind == 9) return;
-        issues_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
+        if (kind == 0 || kind == 5 || kind == 7 || kind == 8 || kind == 9 || kind == 11) return;
+        issues_with_completed_head += !at_anchor && !at_exception_anchor && retired < instructions.size() && complete(instructions[retired]);
         if (kind != 6) ++observed_transport[9];
     }
     bool begin_issue_session() { require(!session, "nested issue session"); session = true; return true; }
@@ -284,6 +294,12 @@ struct SyntheticEnvironment {
             observed_ports[edge] |= 1U << unsigned(it->kind);
             transport_events.push_back({it->tag, edge, it->kind, it->lane,
                 OrdinaryIssueOutcome::accepted, false, cursor, pending});
+            if (permission_enabled) {
+                auto &event = transport_events.back();
+                event.privilege = permission_context.expected_privilege();
+                event.translation_roots[0] = (permission_context.access ? 0xea000000ULL : 0xe0000000ULL) >> 12;
+                event.translation_modes[0] = 8;
+            }
             it = offers.erase(it);
         }
         defer_producer_edge = saved;
@@ -324,16 +340,54 @@ struct SyntheticEnvironment {
     std::uint64_t cycle() const { return tick; }
     std::uint64_t ptw_requests() const { return 0; }
     std::uint64_t tilelink_requests() const { return issues; }
+    std::uint64_t uncache_requests() const { return 0; }
+    std::uint64_t dcache_requests_from_source_covering_since(unsigned source, std::uint64_t address, std::uint64_t) const {
+        require(permission_enabled && source == 2 && address >= 0x520000000ULL && address < 0x520010000ULL,
+            "permission suppression did not cover the declared reservation");
+        ++independent_permission_checks;
+        return 0;
+    }
+    void select_store_exception_address(bool store) { require(permission_enabled && !store, "wrong trap address owner"); }
+    std::uint64_t exception_vaddr() {
+        require(trap_address && trap_edge && tick == *trap_edge + 2U, "fault VA sampled outside consumption edge");
+        return *trap_address;
+    }
+    bool run_until_dcache_idle(unsigned) { return true; }
     std::uint64_t lq_allocated() const { return lq_used; }
     std::uint64_t sq_allocated() const { return sq_used; }
     std::uint64_t lq_canceled() const { return canceled_lq; }
-    std::uint64_t sq_canceled() const { return 0; }
+    std::uint64_t sq_canceled() const { return canceled_sq; }
     Environment::MemoryViolationStats violation;
     const Environment::MemoryViolationStats &memory_violation_stats() const { return violation; }
-    std::uint64_t sq_redirect_canceled_observed() const { return 0; }
+    std::uint64_t sq_redirect_canceled_observed() const { return canceled_sq; }
     std::uint64_t lq_redirect_canceled_observed() const { return canceled_lq; }
     std::uint64_t scalar_load_redirect_canceled() const { return cold_cancellations; }
-    bool cancel_pending_for_redirect(std::uint8_t, bool, bool) { return true; }
+    bool cancel_pending_for_redirect(std::uint8_t, bool, bool) {
+        if (!permission_enabled) return true;
+        require(trap_edge && tick == *trap_edge + 3U, "cancellation left exact return boundary");
+        for (auto &work : instructions) if (work.canceled) {
+            const auto rob = identity(work.rob, work.flag);
+            for (auto it = expected.begin(); it != expected.end();)
+                if (std::get<0>(*it) == rob) it = expected.erase(it); else ++it;
+            for (auto it = enqueued.begin(); it != enqueued.end();)
+                if (std::get<0>(*it) == rob) it = enqueued.erase(it); else ++it;
+        }
+        return true;
+    }
+    bool return_load_exception_after_nonmemory_wb(const LoadTransaction &fault,
+        std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr) {
+        auto &head = find(fault.rob, fault.rob_flag);
+        require(at_exception_anchor && head.id == retired && exception_anchors.at(head.id) == identity(anchor, anchor_flag) &&
+            (identity(anchor, anchor_flag) + 1U) % (2U * kRobEntries) == identity(fault.rob, fault.rob_flag),
+            "exception lost its predeclared predecessor anchor");
+        require(complete(head) && tick >= completion_edge(head) + 4U, "anchor WB preceded settled fault");
+        anchor_wb_edge = tick;
+        for (unsigned edge = 0; edge < 4; ++edge) capture_store_edge();
+        at_exception_anchor = false;
+        if (!redirect_after(fault.rob, fault.rob_flag, true)) return false;
+        captured_vaddr = *trap_address;
+        return true;
+    }
     bool redirect_after(std::uint8_t rob, bool flag, bool itself) {
         if (!itself) {
             auto &head = find(rob, flag);
@@ -346,6 +400,42 @@ struct SyntheticEnvironment {
             tick += 3U;
             head.restart_boundary = tick;
             trace.push_back("VSF" + std::to_string(head.id));
+            return true;
+        }
+        if (permission_enabled) {
+            auto &head = find(rob, flag);
+            require(itself && head.id == retired && head.kind == 0 && head.load.expected_exception_mask == kExceptionLoadPageFault &&
+                complete(head) && !pending_store_level && !at_exception_anchor &&
+                anchor_wb_edge && tick == *anchor_wb_edge + 4U,
+                "trap violated head, cause, completion or producer delay");
+            trap_address = head.load.address; trap_edge = tick; ++trap_count;
+            refresh_lq();
+            const auto first = head.id;
+            for (auto &offer : offers) std::visit([&](const auto &t) {
+                require(find(t.rob, t.rob_flag).id >= first, "trap killed an older offer");
+                transport_events.push_back({offer.tag, tick, offer.kind, offer.lane, OrdinaryIssueOutcome::canceled, true});
+                ++observed_transport[3];
+            }, offer.payload);
+            offers.clear();
+            for (unsigned index = first; index < instructions.size(); ++index) {
+                auto &work = instructions[index];
+                require(!work.committed, "trap canceled an architecturally committed store");
+                work.canceled = true; ++canceled_generations;
+                if (work.is_store()) canceled_sq += work.flows;
+                if (work.kind == 0 || work.kind == 1) {
+                    const auto domain = work.kind == 0 ? scalar_domains.at(work.id) : 2U;
+                    for (const auto &uop : work.uops)
+                        require(destinations[domain].erase(uop.destination) == 1, "canceled destination freed twice");
+                }
+                trace.push_back("K" + std::to_string(index));
+            }
+            for (auto it = lq_entries.begin(); it != lq_entries.end();)
+                if (it->id >= first) { canceled_lq += it->flows; it = lq_entries.erase(it); } else ++it;
+            retired = instructions.size(); head_retirement_marker = retired; installed_head.reset();
+            for (unsigned edge = 0; edge < 3; ++edge) {
+                if (edge == 2) require(exception_vaddr() == *trap_address, "wrong consumed trap VA");
+                capture_store_edge();
+            }
             return true;
         }
         require(recovery_enabled && itself && violation.last.rob_value == rob && violation.last.rob_flag == flag,
@@ -386,7 +476,7 @@ struct SyntheticEnvironment {
         return true;
     }
     void refresh_lq() const {
-        if (!recovery_enabled) return;
+        if (!recovery_enabled && !permission_enabled) return;
         for (auto &entry : lq_entries)
             if (entry.epoch == instructions[entry.id].epoch && complete(instructions[entry.id])) entry.done = true;
         while (!lq_entries.empty() && lq_entries.front().done) {
@@ -425,8 +515,9 @@ struct SyntheticEnvironment {
     }
     void synchronize_retirement() {
         require(actions != nullptr, "missing architectural action counter");
-        require(*actions >= retired && *actions <= instructions.size(), "retirement outside admitted prefix");
-        while (retired < *actions) {
+        const auto processed = *actions + canceled_generations;
+        require(processed >= retired && processed <= instructions.size(), "retirement outside admitted prefix");
+        while (retired < processed) {
             observed_transport[7] += retirement_had_stall.value_or(held_live());
             retirement_had_stall.reset();
             const auto &work = instructions.at(retired);
@@ -448,11 +539,12 @@ struct SyntheticEnvironment {
                 require(expected.erase(terminal) == 1 && enqueued.erase(terminal) == 1,
                     "terminal identity lacked exactly one expectation and dispatch");
             }
-            if (!work.is_store() && !recovery_enabled) lq_done += work.flows;
+            if (!work.is_store() && !recovery_enabled && !permission_enabled) lq_done += work.flows;
             const auto age = work.kind == 1 || work.kind == 3 ? 4U : 3U;
             require(tick >= completion_edge(work) + age,
                 "architectural retirement preceded backend writeback readiness");
             prefix_old_retirements += old_response_active() && work.group != active_group;
+            require(!work.load.expected_exception_mask, "exception received normal architectural retirement");
             prefix_retirements += retired + 1U < instructions.size();
             trace.push_back("R" + std::to_string(work.id));
             ++retired;
@@ -495,12 +587,19 @@ struct SyntheticEnvironment {
         require(enqueued.insert(key(t, kind, uop)).second, "duplicate dispatch");
         if (uop == 0) {
             observed_transport[6] += held_live();
-            admissions_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
+            admissions_with_completed_head += !at_anchor && !at_exception_anchor && retired < instructions.size() && complete(instructions[retired]);
             for (unsigned index = retired; index < instructions.size(); ++index)
                 require(!instructions[index].needs_restart_flush(), "younger admission escaped VSTART barrier");
             const unsigned next = instructions.size();
             // Builders start immediately before ROB/queue wrap boundaries.
             const auto received = identity(t.rob, t.rob_flag);
+            if constexpr (requires { t.expected_exception_mask; }) {
+                if (permission_enabled && kind == 0 && t.expected_exception_mask == kExceptionLoadPageFault) {
+                    require(received == (next_rob + 1U) % (2U * kRobEntries), "missing preallocated nonmemory predecessor");
+                    require(exception_anchors.emplace(next, next_rob % (2U * kRobEntries)).second, "duplicate anchor");
+                    ++next_rob;
+                }
+            }
             const bool graph_load = [&] { if constexpr (requires { t.pc; }) return t.pc.has_value(); else return false; }();
             if (recovery_enabled && active_group && std::any_of(instructions.begin(), instructions.end(),
                 [&](const auto &work) { return work.group == active_group && work.kind == 0; }) &&
@@ -534,7 +633,7 @@ struct SyntheticEnvironment {
         auto &work = instructions.back();
         require(work.rob == t.rob && work.flag == t.rob_flag && work.kind == kind,
             "vector siblings escaped their architectural admission");
-        const auto lq = initial_lq + lq_used - canceled_lq, sq = initial_sq + sq_used;
+        const auto lq = initial_lq + lq_used - canceled_lq, sq = initial_sq + sq_used - canceled_sq;
         require(t.lq == lq_pointer_value(lq) && t.lq_flag == lq_pointer_flag(lq) &&
             t.sq == sq_pointer_value(sq) && t.sq_flag == sq_pointer_flag(sq),
             "dispatch cursor snapshot disagreed with allocated prefix");
@@ -546,10 +645,10 @@ struct SyntheticEnvironment {
         work.flows += count;
         (work.kind == 2 || work.kind == 3 ? sq_used : lq_used) += count;
         if (work.is_store()) {
-            work.sq_target = sq_used;
-            if (!work.uops.empty()) work.uops.back().sq_target = sq_used;
+            work.sq_target = sq_used - canceled_sq;
+            if (!work.uops.empty()) work.uops.back().sq_target = sq_used - canceled_sq;
         }
-        if (recovery_enabled && !work.is_store()) lq_entries.push_back({work.id, work.epoch, count});
+        if ((recovery_enabled || permission_enabled) && !work.is_store()) lq_entries.push_back({work.id, work.epoch, count});
         refresh_lq();
         refresh_sq();
         capture_store_edge();
@@ -557,7 +656,7 @@ struct SyntheticEnvironment {
             retired_pending_admissions += retirement_stats.pending_before_last_edge != 0;
         require(lq_used - canceled_lq - lq_done <= kVirtualLoadQueueEntries - kLqEnqueueHeadroom,
             "LQ admission exceeded reserved capacity");
-        require(sq_used - sq_done <= kStoreQueueEntries - kSqEnqueueHeadroom,
+        require(sq_used - sq_done - canceled_sq <= kStoreQueueEntries - kSqEnqueueHeadroom,
             "SQ admission exceeded reserved capacity");
     }
     void destination(Instruction &work, unsigned domain, unsigned value) {
@@ -624,7 +723,9 @@ struct SyntheticEnvironment {
     bool leave_stream_access_context() {
         require(!session && !release_epoch_open && release_ended_at && tick >= *release_ended_at + 8,
             "ordinary context handoff preceded closed session/release epoch and quiet guard");
-        ++context_handoffs; return true;
+        ++context_handoffs;
+        if (permission_enabled) for (unsigned edge = 0; edge < 17; ++edge) capture_store_edge();
+        return true;
     }
     bool track_store_release_inputs(const StoreTransaction &t) {
         const auto &work = find(t.rob, t.rob_flag);
@@ -657,6 +758,7 @@ struct SyntheticEnvironment {
         allocate(work, t.flow_num); return true;
     }
     void check_load_age(const Instruction &work) {
+        if (permission_enabled && work.kind == 0 && work.load.expected_exception_mask) return;
         for (unsigned index = retired; index < work.id; ++index) {
             const auto &older = instructions[index];
             if (older.kind == 2) {
@@ -674,7 +776,7 @@ struct SyntheticEnvironment {
         const auto &head = instructions.at(retired);
         const bool flush_blocked = head.restart_blocked &&
             (!head.restart_boundary || tick < *head.restart_boundary + 6U);
-        require(pending_store_level == (!at_anchor && head.is_store() && !flush_blocked), "accepted producer with wrong pending-store level");
+        require(pending_store_level == (!at_anchor && !at_exception_anchor && head.is_store() && !flush_blocked), "accepted producer with wrong pending-store level");
     }
     void check_head(const Instruction &work, bool ordered = false) {
         if (work.needs_head || ordered) {
@@ -713,10 +815,11 @@ struct SyntheticEnvironment {
         const unsigned width = 1U << (unsigned(t.op) & 3U);
         std::uint64_t payload = 0;
         for (unsigned byte = 0; byte < width; ++byte) {
-            const auto address = t.address + byte;
+            const auto address = t.oracle_address.value_or(t.address) + byte;
             unsigned char value = bytes.read_byte(address);
             for (unsigned index = 0; index < load.id; ++index) {
                 const auto &older = instructions[index];
+                if (older.canceled) continue;
                 if (older.kind == 2) {
                     if (load.group == older.group && load.load.pc && !older.address) continue;
                     const auto first = older.store.address;
@@ -746,7 +849,7 @@ struct SyntheticEnvironment {
     }
     bool issue_load(const LoadTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag); check_load_age(work); check_head(work);
-        if (recovery_enabled) check_scalar_value(work, t);
+        if (recovery_enabled || permission_enabled) check_scalar_value(work, t);
         requested_lines.insert(t.address & ~std::uint64_t{63});
         ++request_counts[t.address & ~std::uint64_t{63}];
         issue(work, 0, "L"); return true;
@@ -926,6 +1029,11 @@ struct SyntheticEnvironment {
         if (recovery_enabled && active_group && retired == first_graph && anchor_identity == identity(rob, flag)) {
             require(!pending_store, "nonmemory recovery anchor asserted pendingst");
             at_anchor = true;
+        } else if (exception_anchors.count(retired)) {
+            require(identity(rob, flag) == exception_anchors.at(retired) && !pending_store,
+                "fault became public ROB head before mandatory redirect");
+            at_exception_anchor = true;
+            at_anchor = false;
         } else {
             if (head.is_store() && head.needs_restart_flush() && !pending_store && !head.restart_boundary) {
                 require(complete(head) && tick + 1U >= completion_edge(head) + 3U,
@@ -942,6 +1050,7 @@ struct SyntheticEnvironment {
                 active_group = 0; anchor_identity.reset();
             }
             at_anchor = false;
+            at_exception_anchor = false;
         }
         installed_head = retired; pending_store_level = pending_store;
         capture_store_edge(); retired_pending_heads += advanced && retirement_stats.pending_before_last_edge != 0;
@@ -956,11 +1065,30 @@ struct SyntheticEnvironment {
         synchronize_retirement();
         for (const auto &store : retired_stores) tick = std::max(tick, store.due) + 1U;
         refresh_sq();
-        return lq_used == lq_done + canceled_lq && sq_used == sq_done && retired_stores.empty();
+        return lq_used == lq_done + canceled_lq && sq_used == sq_done + canceled_sq && retired_stores.empty();
     }
     void finish(unsigned count, const MixedCoverage &coverage, const ConstraintCoverage &constraints) {
         synchronize_retirement();
         require(context_handoffs == (count ? 1U : 0U), "ordinary context handoff omitted or repeated");
+        if (permission_enabled) {
+            require(retired == instructions.size() && retired == count + canceled_generations &&
+                expected.empty() && enqueued.empty(), "permission architectural generation conservation");
+            require(lq_used == lq_done + canceled_lq && sq_used == sq_done + canceled_sq, "permission physical queue conservation");
+            for (const auto &domain : destinations) require(domain.empty(), "permission destination leak");
+            require(coverage.stream[1] == instructions.size() && coverage.stream[2] == count &&
+                coverage.stream_permission[7] == trap_count && coverage.stream_transport == observed_transport,
+                "permission independent generation/trap/transport ledger");
+            unsigned fault_count = 0, probes = 0, positives = 0;
+            for (const auto &work : instructions) if (work.kind == 0 && work.load.oracle_address) {
+                ++probes;
+                if (work.load.expected_exception_mask) { ++fault_count; require(work.canceled, "fault survived trap"); }
+                else positives += !work.canceled;
+            }
+            require(coverage.stream_permission[0] == probes && coverage.stream_permission[1] == fault_count &&
+                coverage.stream_permission[6] == positives && trap_count == fault_count, "permission input-owned outcomes");
+            require(!fault_count || independent_permission_checks >= 64U * fault_count, "missing complete denied-page checks");
+            return;
+        }
         require(retired == count && instructions.size() == count, "lost or excess architectural work");
         require(expected.empty() && enqueued.empty(), "expectation/dispatch conservation failed");
         require(lq_used == lq_done + canceled_lq && sq_used == sq_done, "queue conservation failed");
@@ -1073,10 +1201,13 @@ public:
     }
     bool run_concurrent_stream(unsigned);
     void report_progress(bool = false) { environment.synchronize_retirement(); }
-    unsigned choose_stream_access() { return 0; }
-    TranslationContext choose_translation_context() { return {}; }
+    unsigned choose_stream_access() { return environment.permission_enabled ? environment.permission_context.access : 0U; }
+    TranslationContext choose_translation_context() { return environment.permission_enabled ? environment.permission_context : TranslationContext{}; }
     TranslationLeafTopology choose_translation_leaf(const TranslationContext &) { return {}; }
-    bool enter_translation_context(const TranslationContext &) { return true; }
+    bool enter_translation_context(const TranslationContext &context) {
+        if (environment.permission_enabled) environment.permission_context = context;
+        return true;
+    }
     bool leave_stream_access_context() { return environment.leave_stream_access_context(); }
     bool validate_translation_byte(std::uint64_t va, std::uint64_t pa, bool, const TranslationContext &) {
         require(va == pa, "synthetic bare translation changed byte address"); return true;
@@ -1087,6 +1218,13 @@ public:
     unsigned long constrained_window_address(std::uint64_t, unsigned);
     std::shared_ptr<const ReferencePageMap> reference_pages_for(std::uint64_t) { return {}; }
     bool validate_vector_translation(const VectorMemoryTransaction &) { return true; }
+    std::uint64_t stream_permission_physical(const TranslationContext &, std::uint64_t address) const {
+        require(environment.permission_enabled, "unexpected permission mapping in Bare fixture");
+        return 0x520000000ULL + (address - permission_virtual_base);
+    }
+    bool validate_stream_permission_load(const LoadTransaction &, const TranslationContext &) {
+        require(environment.permission_enabled, "permission mapping unavailable"); return true;
+    }
     bool choose_binary_class(unsigned probability, const std::array<std::uint64_t, 2> &) { return random() % 1000U < probability; }
     LoadTransaction make_load(std::uint64_t, LoadOp, unsigned, bool = false);
     StoreTransaction make_store(std::uint64_t, std::uint64_t, StoreOp, unsigned);
@@ -1210,10 +1348,21 @@ int main(int argc, char **argv) {
                 "oracle checkpoint failed to remove canceled-store bytes");
             std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
                 << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
-        } else if (mode == "stream" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback") {
+        } else if (mode == "stream" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
             require(argc == 6 || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "permission") {
+                fixture.environment.permission_enabled = true;
+                fixture.environment.permission_context.regime = RandomConstraints::translation_stage1;
+                fixture.constraints.stream_permission_load_per_mille = 1000;
+                fixture.constraints.stream_mxr_per_mille = std::stoul(argv[4]) == 1 ? 1000 : 0;
+                fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = limit;
+                fixture.constraints.vector_nonzero_vstart_per_mille = 0;
+                fixture.constraints.scalar_fp_per_mille = 0;
+                fixture.constraints.stream_dependency_per_mille = 1000;
+                fixture.environment.bytes.define_seeded_random(0x520000000ULL, 0x10000, 719);
+            }
             if (mode == "pair-rate") fixture.constraints.apply(std::string("stream-store-pair=") + argv[6]);
             if (mode == "sustained") {
                 fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = std::max(1U, limit);
@@ -1274,6 +1423,9 @@ int main(int argc, char **argv) {
             std::cout << "],\"stream_issue_ports\":[";
             for (unsigned i=0; i<fixture.coverage.stream_issue_ports.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_issue_ports[i];
+            std::cout << "],\"stream_permission\":[";
+            for (unsigned i=0; i<fixture.coverage.stream_permission.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_permission[i];
             std::cout << "],\"stream_store_pair\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_store_pair.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_store_pair[i];

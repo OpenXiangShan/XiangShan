@@ -34,11 +34,16 @@ class RedirectTailTest(unittest.TestCase):
         source = source.replace('// PRODUCTION_TYPES', '\n'.join(types))
         methods = [method('cpp/environment/observations.cpp', 'auto Environment::Impl::cancel_pending_for_redirect(')]
         methods += [method('cpp/environment/completion.cpp', 'auto Environment::Impl::redirect_after('),
+                    method('cpp/environment/completion.cpp', 'auto Environment::Impl::return_load_exception_after_nonmemory_wb('),
                     method('cpp/environment/cycle.cpp', 'auto Environment::Impl::tick(')]
         cls.source = source.replace('// PRODUCTION_METHODS', '\n'.join(methods).replace('Environment::Impl::', 'Harness::'))
         stream = (ROOT / 'cpp/scenarios/mixed_stream.cpp').read_text()
-        begin = stream.index('            if (!return_ordinary_redirect(')
-        cls.ledger = stream[begin:stream.index('            canceled += killed;', begin)]
+        begin = stream.index('            StreamCanceledGeneration record;')
+        end = stream.index('        canceled += killed;', begin)
+        cls.ledger = ('if (!return_ordinary_redirect(environment, 100, false, true)) return false;\n'
+                      'if (!consume_issue_events()) return false;\n'
+                      '            ++coverage.stream_cancel[0];\n'
+                      'for (auto &item : live) { if (!kills(item)) continue;\n' + stream[begin:end])
         cls.source = cls.source.replace('// PRODUCTION_RETURN_AND_CANCELLATION_LEDGER', cls.ledger)
         cls.binary = cls.compile(cls.source, 'baseline')
 
@@ -63,6 +68,20 @@ class RedirectTailTest(unittest.TestCase):
 
     def test_exact_terminals_through_every_monitored_return_edge(self):
         self.run_mode('tails')
+
+    def test_declared_anchor_exact_head_redirect_and_preedge_fault_capture(self):
+        self.run_mode('exception-anchor')
+
+    def test_private_anchor_timing_and_fault_capture_faults_reject(self):
+        faults = {
+            'early_anchor_redirect': self.source.replace('if (!run_cycles(4))', 'if (!run_cycles(3))'),
+            'late_anchor_redirect': self.source.replace('if (!run_cycles(4))', 'if (!run_cycles(5))'),
+            'late_fault_va': self.source.replace('*captured_vaddr = exception_vaddr();', 'tick(); *captured_vaddr = exception_vaddr();'),
+            'wrong_public_head': self.source.replace('pending_ptr_value.set(fault.rob);', 'pending_ptr_value.set(anchor);'),
+        }
+        for name, source in faults.items():
+            with self.subTest(name=name):
+                self.run_mode('exception-anchor', self.compile(source, name), passing=False)
 
     def test_boundary_identity_freshness_and_exactly_once_consumption(self):
         self.run_mode('boundaries')

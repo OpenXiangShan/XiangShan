@@ -380,13 +380,12 @@ class MixedStreamTest(unittest.TestCase):
         self.assert_retirement_interleaving(results)
 
     def test_private_context_handoff_omission_and_early_entry_reject(self):
-        before = ('environment.end_store_release_epoch(constrained_completion_timeout) &&\n'
-                  '        environment.run_cycles(8) && leave_stream_access_context();')
+        before = 'environment.run_cycles(8) && leave_stream_access_context() && check_permission_suppression();'
         self.assertEqual(self.source.count(before), 1)
         for name, replacement, marker in (
-                ('handoff-omitted', 'environment.end_store_release_epoch(constrained_completion_timeout) && environment.run_cycles(8);',
+                ('handoff-omitted', 'environment.run_cycles(8);',
                  'ordinary context handoff omitted or repeated'),
-                ('handoff-early', 'leave_stream_access_context() && environment.end_store_release_epoch(constrained_completion_timeout) && environment.run_cycles(8);',
+                ('handoff-early', 'leave_stream_access_context() && environment.run_cycles(8);',
                  'ordinary context handoff preceded closed session/release epoch and quiet guard')):
             binary = self.compile(self.source.replace(before, replacement), name)
             for seed in (1, 7, 19):
@@ -394,6 +393,43 @@ class MixedStreamTest(unittest.TestCase):
                                      capture_output=True, text=True, timeout=20)
                 self.assertNotEqual(ran.returncode, 0, ran.stdout + ran.stderr)
                 self.assertIn(marker, ran.stderr)
+
+    def test_permission_faults_and_mxr_use_variable_mixed_schedules(self):
+        denied = [self.run_fixture('permission', seed, 1, 0, 48) for seed in range(1, 65)]
+        allowed = [self.run_fixture('permission', seed, 1, 1, 48) for seed in range(1, 17)]
+        self.assertGreater(len({run['schedule'] for run in denied}), 48)
+        self.assertTrue(all(run['actions'] == 48 for run in denied + allowed))
+        self.assertGreater(sum(run['stream_permission'][7] for run in denied), 64)
+        self.assertGreater(sum(run['stream_permission'][11] for run in denied), 0)
+        self.assertGreater(sum(run['stream_permission'][12] for run in denied), 0)
+        self.assertGreater(sum(run['stream_permission'][13] for run in denied), 0)
+        self.assertGreater(sum(run['stream_permission'][15] for run in denied), 0)
+        self.assertTrue(all(run['stream_permission'][1] == 0 and run['stream_permission'][6] > 0 for run in allowed))
+        for run in denied:
+            probes = run['stream_permission']
+            self.assertEqual(probes[1], probes[7] + probes[8])
+            self.assertEqual(probes[7], probes[16])
+            self.assertGreaterEqual(probes[17], probes[7])
+        self.assertEqual(self.run_fixture('permission', 7, 1, 0, 48), denied[6])
+
+    def test_private_permission_faults_and_posthandoff_demand_are_detected(self):
+        suppression = '++independent_permission_checks;\n        return 0;'
+        self.assertEqual(self.source.count(suppression), 1)
+        faults = {
+            'forbidden_demand_after_handoff': self.source.replace(suppression,
+                '++independent_permission_checks;\n        return context_handoffs ? 1 : 0;'),
+            'wrong_trap_va': self.source.replace('captured_vaddr = *trap_address;',
+                                                'captured_vaddr = *trap_address + 8U;'),
+            'missing_fault_anchor': self.source.replace('work.exception_anchor = rob_offset++;',
+                                                       'work.exception_anchor = rob_offset;'),
+        }
+        for name, source in faults.items():
+            with self.subTest(name=name):
+                binary = self.compile(source, name)
+                ran = subprocess.run([str(binary), 'permission', '7', '1', '0', '48'],
+                                     capture_output=True, text=True, timeout=20)
+                self.assertNotEqual(ran.returncode, 0, name + ' escaped permission oracle')
+                self.mutations[name] = {'rejected': True, 'diagnostic': ran.stderr.strip()}
 
     def test_recovery_preserves_mixed_prefix_and_strict_epochs(self):
         results = []
@@ -778,7 +814,7 @@ class MixedStreamTest(unittest.TestCase):
             self.mutations[name] = {'rejected': True, 'diagnostic': result.stderr.strip()}
 
     def test_private_missing_older_address_guard_is_rejected(self):
-        scalar = '(work.kind == 4 || older_addresses_known)'
+        scalar = '(work.fault() || work.kind == 4 || older_addresses_known)'
         vector = '(work.kind == 3 || older_addresses_known)'
         self.assertEqual(self.source.count(scalar), 1)
         self.assertEqual(self.source.count(vector), 1)

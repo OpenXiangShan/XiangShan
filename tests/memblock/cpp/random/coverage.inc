@@ -3284,6 +3284,7 @@ struct MixedCoverage {
     std::array<std::uint64_t, 16> stream_issue_ports{};
     // Epoch access profile x Bare/stage1/nested; actual accepted session issue
     // class by access profile; accepted-overlap admissions/prefix retirements.
+    std::array<std::uint64_t, 22> stream_permission{};
     std::array<std::uint64_t, 9> stream_access_epochs{};
     std::array<std::uint64_t, 18> stream_access_issue{};
     std::array<std::uint64_t, 6> stream_access_overlap{};
@@ -3683,6 +3684,7 @@ struct MixedCoverage {
                " stream_store_pair=" + csv(stream_store_pair) +
                " stream_transport=" + csv(stream_transport) +
                " stream_issue_ports=" + csv(stream_issue_ports) +
+               " stream_permission=" + csv(stream_permission) +
                " stream_access_epochs=" + csv(stream_access_epochs) +
                " stream_access_issue=" + csv(stream_access_issue) +
                " stream_access_overlap=" + csv(stream_access_overlap) +

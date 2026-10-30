@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=78`.
+`constraint_schema=79`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -79,6 +79,8 @@ they do not imply arbitrary numeric suffix support.
 | `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the current 4-KiB page; scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
 | `stream-store-pair` | Conditional rate offering an ordinary scalar store's initial STA and STD together when both operand events are ready. Independent retained lane handshakes permit same-edge, STA-first or STD-first acceptance. Default 500 in all presets; zero retains separate scheduling. Graph operands and STA retries remain separate. |
+| `stream-permission-load` | Conditional scalar/FP load admission rate for immutable execute-only pages in translated ordinary streams; default 50, zero for cmo-stress. A seeded 1..4-probe epoch budget bounds canceled/replacement work; one denied probe may be live. Bare epochs and unresolved graph roles are excluded. |
+| `stream-mxr` | Epoch-wide host MXR rate for translated ordinary streams, default 125, zero for cmo-stress. MXR=0 X-only loads require stage-one/VS load page fault; MXR=1 controls require exact normal data. vMXR remains clear and G leaves remain permissive. |
 | `stream-access-s`, `stream-access-u`, `stream-access-sum` | Relative epoch weights for legacy S data privilege, ordinary U/VU, and S/VS accessing U pages with SUM/vSUM. Choose once per ordinary stream at a drained context boundary; a single enabled class needs no random draw. U/SUM roots preserve the independently declared identity/NAPOT/permuted PA map. These weights select epochs, not instruction or handshake percentages. Serial/special helpers retain their prior context contract. |
 | `stream-unresolved` | Conditional rate (default 125 in all presets) replacing an eligible scalar-store admission with a variable unresolved-store/scalar-load graph inside the same sliding stream. Needs at least two remaining live/budget slots and actual LQ/SQ capacity. Zero disables it; `scalar-unresolved-conflict` controls conflict/control geometry. |
 | `special-concurrent` | Rate for adding one clean NC/MMIO load to an eligible heterogeneous window; NC/MMIO weights choose the class. |
@@ -234,6 +236,8 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | `stream-max-instructions` | 256 | 256 | 256 | 256 |
 | `stream-dependency` | 250 | 250 | 250 | 250 |
 | `stream-store-pair` | 500 | 500 | 500 | 500 |
+| `stream-permission-load` | 50 | 50 | 50 | 0 |
+| `stream-mxr` | 125 | 125 | 125 | 0 |
 | `stream-unresolved` | 125 | 125 | 125 | 125 |
 | `stream-unresolved-inflight` | 250 | 250 | 250 | 250 |
 | `special-concurrent` | 500 | 20 | 750 | 0 |
@@ -671,6 +675,7 @@ Array order and sampling code are authoritative in
 | `stream_waiting_head` | Admission and operand/uop event selections while the oldest architectural instruction has completed. From schema 74 this includes its required backend retirement-readiness guard; it does not imply immediate legal retirement. Scalar STA retries count as producer selections; vector replay service does not. Both verifier modes enforce sparse bounds without requiring positive bins: at least one initial producer per epoch cannot see a completed head, and singleton-only populations have zero waiting-head choices. |
 | `stream_sta` | Schema 73: ordinary first STA attempts, retries, matched hits, misses; accepted admission/scalar load/other STA/other STD/vector uop/prefetch during another ordinary store's feedback wait; maximum simultaneous ordinary feedback waits at accepted issue boundaries. Each overlap is counted once per accepted event if at least one other attempt is outstanding at its edge, excluding feedback already observed by that edge. Without mixed cancellation, first attempts and hits equal ordinary scalar-store retirements (excluding recovery roles), and retries and misses equal `stream_scalar_retries`. Schema 75 adds canceled first attempts and final translated states; total attempts equal hits plus misses plus canceled feedback-pending attempts. A canceled final miss can remain un-retried, so misses equal retries plus canceled retry-ready states. These are scheduling/feedback relations, not a per-request PTW or translation-hit oracle. |
 | `stream_store_pair` | Schema 76: ordinary stores with same-edge initial STA/STD acceptance, STA-first acceptance, STD-first acceptance, total split-edge skew and maximum skew. Each operand remains one accepted issue event; the pair contributes two. Feedback-wait overlap and committed-SQ coexistence use each operand's accepted edge. Pairs exclude graph roles and retries; pair selection is not proof of same-edge acceptance. |
+| `stream_permission` | 22 sparse counters: total/denied/MXR-permitted admissions; denied/permitted acceptances; denied checked/MXR retired; traps; denied/permitted external cancellations; checked-denied external cancellations; denied completion before F deque front/with older incomplete store; traps with committed SQ drain/younger suffix; younger canceled generations; consumed VA checks; suppression scans; MXR epochs; maximum probes per epoch; epochs with probes; permitted checked completions. These count actual outcomes; zero overlap is not closure. |
 | `stream_store_retirement` | Schema 74: scalar architectural retirements, vector instruction retirements, vector uop drain records; records still in SQ at retirement, records already dequeued; maximum pending committed records; accepted initial-admission completion edges, regular producer acceptance edges, and retirement-driven head-update edges with pending committed records; records drained by public SQ dequeue. Record totals conserve scalar retirements plus retired vector uops (admitted uops minus canceled uops), and physical records must drain at epoch end. Recovery-store STA/STD and vector replay helper edges are excluded from the producer-overlap count; strict refetch load acceptance is included. |
 | `stream_vstart_flush` | Schema 74: admitted nonzero-VSTART vector load/store instructions, completed same-instruction flush-after redirects, and those redirects with pending committed SQ records. Admitted load plus store counts equal completed flush-after redirects plus canceled unflushed VSTART obligations; physical cancellation must be zero at each completed flush-after boundary. The serialized suffix is a conservative stimulus constraint. |
 | `stream_history` | Schema 72: epochs longer than 32 instructions, maximum actual epoch length, admissions after the first 32 with older accepted work pending, and reuse of a full ROB value/wrap identity within one epoch. These observations distinguish sustained queue overlap from repeated short epochs; lifetime reuse is driver history, not an oracle excluding arbitrary stale responses. Sparse accounting checks length/overlap bounds without requiring positive bins. |
@@ -1232,7 +1237,7 @@ pulses only for an effective virtualization transition. A root/mode-only write
 with a reused identity supplies no artificial identity-change flush; the covering
 fences remain necessary. Activation then installs the complete U or S+SUM bundle; U epochs use matching
 instruction/data mode U, and SUM epochs use matching S modes. SUM/vSUM are both
-clear for U and both set for SUM; MXR/vMXR remain clear. Privilege stays stable
+clear for U and both set for SUM; host MXR follows the epoch draw and vMXR remains clear. Privilege stays stable
 through the epoch. Random in-epoch translation fences are skipped for these
 profiles; the setup fences still run at the legal boundary. After closing the
 issue/release epochs and the quiet guard, user/SUM epochs re-enter the drained
@@ -1258,11 +1263,49 @@ with the actual accepted-kind histogram: each kind has at least one and at most
 bounds do not reconstruct per-profile or per-identity ownership.
 
 Bare cells are privilege controls and do not exercise PTE U permissions.
-Current mixed U/SUM leaves are permissive R/W/X/A/D; permission-denied requests,
-X-only/MXR and varying R/W/A/D with live mixed work remain gaps. Context switches
+Ordinary data leaves are permissive R/W/X/A/D. Schema 79 adds separate X-only
+load probes and MXR controls amid this mixed work; store denial, G-stage denial
+and general varying R/W/A/D remain gaps. Context switches
 with live translations or committed stores, arbitrary ASID/VMID histories and
 fault-address arbitration remain separate work. Positive user-epoch coverage
 does not close those temporal and exception relations.
+
+### Mixed X-only load probes and exception recovery
+
+Schema 79 reserves 16 immutable X-only VA pages at 0x6a000000, nested GPA pages
+at 0x6b000000, and six disjoint PA regions starting at 0x520000000 with 1-MiB
+stride. Seed-owned host or composed VS/G permutations declare each PA before
+issue. Host/VS leaves have R=0/W=0/X=1, U follows S/U/SUM, and G leaves permit
+the load. Independent literal/table walks validate setup. Expected cause is
+load page fault when host MXR is clear; MXR controls compare independent bytes
+and ordinary integer extension or FP boxing. These probes use randomized
+aligned widths, offsets, pages, lanes, admission positions and mixed suffixes.
+They cannot produce dependency values on a fault and do not borrow an ordinary
+load dependency source. A denied reserved-page load may issue while older
+store addresses remain unresolved, because the pools cannot overlap.
+
+Before allocating every denied F, the generator declares a separate older
+one-uop nonmemory instruction A at the immediately preceding ROB identity.
+It has no LSQ entry and remains incomplete with pending-load/store clear.
+Other work can continue; the random event chooses A's actual external WB at C
+only after F's checked completion settles. The helper holds A through four
+monitored edges, then changes public head to F and asserts its redirect together
+at R=C+4. This follows Ctrl WB C+1, commit bank C+2 and internal F head C+3;
+it does not randomly defer an eligible F-head exception. The helper captures
+fault VA pre-edge R+2, where CSR consumes the delayed exception, and retains
+strict expectations through the completed R+3 cancellation boundary. Competing
+redirects are excluded. Older committed-store drain obligations survive;
+canceled mixed generations restore the independent byte checkpoint and own
+exact observed LQ/SQ cancellation credits before replacement admissions.
+
+For every denied page, accepted source-2 Acquire requests must remain absent
+on all 64 lines from the pre-enqueue history baseline through final stream
+quiet/context-handoff return. Unrelated demand/PTW/prefetch/coherence are allowed;
+the all-cacheable stream separately rejects any Uncache request. This is a
+bounded memory-side source/address rule, not proof against every internal lookup,
+merge, wrong-PA/class request or speculative prefetch. Store faults, G denial,
+multiple competing faults, trap-handler/xRET continuity, live CSR edits and
+full backend redirect arbitration remain outside this direction.
 
 ### Ordinary producer dependencies
 

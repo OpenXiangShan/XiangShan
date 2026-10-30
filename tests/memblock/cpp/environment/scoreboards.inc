@@ -42,6 +42,7 @@ public:
 
     void expect(const LoadTransaction &transaction, std::uint64_t data)
     {
+        checked_.erase(rob_identity(transaction.rob, transaction.rob_flag));
         if (!transaction.check_data &&
             transaction.expected_trigger != kTriggerDebugMode) {
             if (error_.empty()) {
@@ -86,6 +87,7 @@ public:
 
     void expect_prefetch(const PrefetchTransaction &transaction)
     {
+        checked_.erase(rob_identity(transaction.rob, transaction.rob_flag));
         const auto [_, inserted] = expected_.emplace(
             rob_identity(transaction.rob, transaction.rob_flag),
             Expected{
@@ -177,10 +179,33 @@ public:
             return;
         }
         if (canceled_data) ++canceled_observed_;
+        if (!canceled_data) checked_.insert_or_assign(
+            rob_identity(writeback.rob_value, writeback.rob_flag), Checked{it->second, sample_cycle_});
         expected_.erase(it);
     }
 
     bool done() const { return expected_.empty(); }
+    // A terminal record belongs to this expectation generation: installing
+    // either kind of new expectation erases it even when ROB wraps/reuses.
+    std::optional<std::uint64_t> checked_completion_cycle(const LoadTransaction &transaction) const
+    {
+        const auto identity = rob_identity(transaction.rob, transaction.rob_flag);
+        const auto it = checked_.find(identity);
+        if (!error_.empty() || expected_.count(identity) || it == checked_.end()) return {};
+        const auto &expected = it->second.expected;
+        if (expected.prefetch || expected.pdest != transaction.pdest || expected.address != transaction.address ||
+            expected.op != static_cast<std::uint16_t>(transaction.op) ||
+            expected.exception_mask != transaction.expected_exception_mask || expected.lq != transaction.lq ||
+            expected.lq_flag != transaction.lq_flag || expected.sq != transaction.sq || expected.sq_flag != transaction.sq_flag)
+            return {};
+        return it->second.cycle;
+    }
+    bool consume_checked_completion(const LoadTransaction &transaction)
+    {
+        if (!checked_completion_cycle(transaction)) return false;
+        return checked_.erase(rob_identity(transaction.rob, transaction.rob_flag)) == 1;
+    }
+    void clear_checked_completions() { checked_.clear(); }
     bool pending(const LoadTransaction &transaction) const
     {
         return expected_.find(
@@ -257,6 +282,10 @@ public:
                 return canceled;
             }
         }
+        for (auto it = checked_.begin(); it != checked_.end();) {
+            if (scoreboard_redirect_kills(it->first, rob, flag, flush_itself)) it = checked_.erase(it);
+            else ++it;
+        }
         for (auto it = expected_.begin(); it != expected_.end();) {
             if (!scoreboard_redirect_kills(it->first, rob, flag, flush_itself)) {
                 ++it;
@@ -286,7 +315,7 @@ public:
         return it == expected_.end() ? nullptr : &it->second;
     }
     const FailureState &failures() const { return error_; }
-    void set_failure_cycle(std::uint64_t cycle) { error_.set_cycle(cycle); }
+    void set_failure_cycle(std::uint64_t cycle) { sample_cycle_ = cycle; error_.set_cycle(cycle); }
 
     bool ok() const { return error_.empty(); }
     std::uint64_t observed() const { return observed_; }
@@ -377,7 +406,10 @@ private:
         error_.record(message.str());
     }
 
+    struct Checked { Expected expected; std::uint64_t cycle; };
     std::unordered_map<RobIdentity, Expected, RobIdentityHash> expected_;
+    std::unordered_map<RobIdentity, Checked, RobIdentityHash> checked_;
+    std::uint64_t sample_cycle_ = 0;
     std::uint64_t observed_ = 0;
     std::uint64_t canceled_observed_ = 0;
     std::uint64_t reset_canceled_ = 0;

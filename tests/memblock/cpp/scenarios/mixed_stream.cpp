@@ -30,7 +30,9 @@ struct StreamWork {
     StoreAddressReplay address_replay;
     std::uint64_t expected_scalar = 0;
     unsigned recovery_id = 0, recovery_index = 0;
-    bool refetch = false, checked = false;
+    bool refetch = false, checked = false, permission_probe = false;
+    std::optional<std::uint64_t> exception_anchor, anchor_wb_ready_cycle;
+    bool fault() const { return kind == 0 && load.expected_exception_mask != 0; }
     std::optional<std::uint64_t> retire_ready_cycle, restart_ready_cycle, restart_block_cycle;
     bool restart_blocked = false, restart_flushed = false;
     bool needs_restart_flush() const {
@@ -71,6 +73,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     phase = "mixed-stream-enter";
     auto translation = choose_translation_context();
     translation.access = choose_stream_access();
+    if (translation.regime != RandomConstraints::translation_bare && constraints.stream_mxr_per_mille != 0)
+        translation.mxr = random() % 1000U < constraints.stream_mxr_per_mille;
     const auto leaf = choose_translation_leaf(translation);
     if (!enter_translation_context(translation) ||
         !issue_constrained_fence(RandomConstraints::scalar_load) ||
@@ -102,6 +106,27 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     auto &recovery_counts = coverage.stream_recovery;
     auto &inflight = coverage.stream_recovery_inflight;
     const auto drained_before = environment.store_retirement_stats().drained;
+    auto &permission = coverage.stream_permission;
+    unsigned permission_probes = 0;
+    const unsigned permission_budget = constraints.stream_permission_load_per_mille != 0 &&
+        translation.regime != RandomConstraints::translation_bare ? 1U + random() % 4U : 0U;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> denied_pages;
+    const auto uncache_before = environment.uncache_requests();
+    bool returning_exception = false;
+    permission[18] += translation.mxr;
+    const auto check_permission_suppression = [&]() {
+        if (denied_pages.empty()) return true;
+        ++permission[17];
+        for (const auto &[page, first_request] : denied_pages)
+            for (unsigned offset = 0; offset < 4096; offset += 64)
+                if (environment.dcache_requests_from_source_covering_since(2, page + offset, first_request) != 0) {
+                    phase += ":denied-page-issued-CPU-demand"; return false;
+                }
+        if (environment.uncache_requests() != uncache_before) {
+            phase += ":cacheable-stream-issued-uncache"; return false;
+        }
+        return true;
+    };
     auto last_progress = environment.cycle();
     std::uint64_t deadline = environment.cycle() + std::uint64_t{target_admissions} * constrained_completion_timeout * 4U;
     const auto start_action = actions;
@@ -157,7 +182,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     work.vector_ready[attempt.uop] = event.edge + 9U;
                     ++coverage.stream_transport[2];
                 } else {
-                    if (!event.killed || environment.memory_violation_stats().count == expected_violations) return false;
+                    if (!event.killed || (!returning_exception &&
+                        environment.memory_violation_stats().count == expected_violations)) return false;
                     ++coverage.stream_transport[3];
                 }
                 continue;
@@ -197,6 +223,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             unsigned initial_events = 1;
             if (attempt.kind == 1) {
                 work.issued[0] = true;
+                if (work.permission_probe) ++permission[work.fault() ? 3U : 4U];
                 initial_events = !work.refetch;
                 coverage.stream_issue[work.kind == 0 ? 0U : 5U] += initial_events;
                 if (recovery && work.recovery_id == recovery->id) {
@@ -271,6 +298,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     const auto install_head = [&]() {
         if (barrier_at_front()) return environment.set_rob_head_state(
             memblock::rob_pointer_value(recovery->anchor), memblock::rob_pointer_flag(recovery->anchor), false);
+        if (!live.empty() && live.front().exception_anchor) return environment.set_rob_head_state(
+            memblock::rob_pointer_value(*live.front().exception_anchor),
+            memblock::rob_pointer_flag(*live.front().exception_anchor), false);
         return live.empty() || environment.set_rob_head_state(
             live.front().rob(), live.front().flag(), live.front().is_store() &&
                 (!live.front().restart_blocked || live.front().restart_flushed));
@@ -388,6 +418,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
 
     const auto retire_head = [&]() {
         auto &work = live.front();
+        if (work.fault()) { phase += ":fault-cannot-retire"; return false; }
+        if (work.permission_probe) ++permission[6];
         coverage.stream_transport[7] += held_offer();
         coverage.stream[5] += live.size() > 1;
         coverage.stream_access_overlap[translation.access * 2U + 1U] += live.size() > 1;
@@ -428,6 +460,123 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         coverage.stream_store_retirement[8] +=
             environment.store_retirement_stats().pending_before_last_edge != 0;
         last_progress = environment.cycle();
+        return true;
+    };
+
+    const auto cancel_suffix = [&](std::uint8_t rob, bool flag, bool flush_itself, bool trap) {
+        const auto kills = [&](const StreamWork &item) {
+            const bool equal = item.rob() == rob && item.flag() == flag;
+            const bool younger = item.flag() == flag ? item.rob() > rob : item.rob() < rob;
+            return younger || (flush_itself && equal);
+        };
+        const auto killed = static_cast<unsigned>(std::count_if(live.begin(), live.end(), kills));
+        const auto first_killed = std::find_if(live.begin(), live.end(), kills);
+        std::ostringstream detail;
+        detail << ":redirect=" << unsigned(rob) << '/' << flag << ":trap=" << trap;
+        if (killed == 0 || first_killed == live.end() || !first_killed->oracle_before || recovery ||
+            (trap && (&*first_killed != &live.front() || !first_killed->fault() || !first_killed->checked))) return false;
+        const auto lq_before = environment.lq_redirect_canceled_observed();
+        const auto sq_before = environment.sq_redirect_canceled_observed();
+        // Exact expected bytes and identities remain active on E/E+1/E+2.
+        // Killed work may complete during propagation or cancel at return;
+        // retaining the expectation never waives a wrong/duplicate result.
+        returning_exception = trap;
+        if (trap) environment.select_store_exception_address(false);
+        std::uint64_t captured_fault_va = 0;
+        const bool returned = trap
+            ? live.front().exception_anchor && environment.return_load_exception_after_nonmemory_wb(
+                live.front().load, memblock::rob_pointer_value(*live.front().exception_anchor),
+                memblock::rob_pointer_flag(*live.front().exception_anchor), captured_fault_va) &&
+                environment.cancel_pending_for_redirect(rob, flag, flush_itself)
+            : return_ordinary_redirect(environment, rob, flag, flush_itself);
+        if (!returned) {
+            phase += detail.str() + ":redirect-drive-or-terminal-cancellation-failed";
+            return false;
+        }
+        if (!consume_issue_events()) return false;
+        returning_exception = false;
+        if (trap) {
+            if (captured_fault_va != live.front().load.address) {
+                phase += ":oldest-fault-VA-at-trap-consumption"; return false;
+            }
+            ++permission[7]; ++permission[16];
+            permission[13] += environment.store_retirement_stats().pending != 0;
+            permission[14] += killed > 1U;
+            permission[15] += killed - 1U;
+        }
+        if (!check_permission_suppression()) return false;
+        ++coverage.stream_cancel[0];
+        for (auto &item : live) {
+            if (!kills(item)) continue;
+            if (item.permission_probe) {
+                if (item.fault()) {
+                    const bool owner = trap && item.rob() == rob && item.flag() == flag;
+                    permission[8] += !owner;
+                    permission[10] += !owner && item.checked;
+                } else ++permission[9];
+            }
+            StreamCanceledGeneration record;
+            record.kind = item.kind;
+            record.scalar_issued = (item.kind == 0 || item.kind == 4) && item.issued[0];
+            record.vector_uops = item.vectors.size();
+            record.accepted_vector_uops = std::count(item.issued.begin(), item.issued.end(), true);
+            if (item.vectors.empty()) record.accepted_vector_uops = 0;
+            record.unflushed_vstart = item.needs_restart_flush() && !item.restart_flushed;
+            for (unsigned uop = 1; uop < item.vectors.size(); ++uop) {
+                const auto &previous = item.vectors[uop - 1U];
+                const auto &current = item.vectors[uop];
+                if (!memblock::vector_is_special_indexed(current) ||
+                    memblock::vector_indexed_vd_index(previous) != memblock::vector_indexed_vd_index(current)) continue;
+                ++record.vector_dependencies;
+                record.unconsumed_vector_dependencies += !current.store && !item.issued[uop];
+            }
+            record.unconsumed_address_dependency = item.address_source && !item.address_consumed;
+            record.unconsumed_data_dependency = item.data_source && !item.data_consumed;
+            if (item.kind == 2) {
+                const auto observation = item.address_replay.observe(
+                    environment.iq_slow_feedback_stats().sta_samples, item.store);
+                if (observation == StoreAddressReplay::Observation::invalid) {
+                    phase += ":canceled-store-address-feedback"; return false;
+                }
+                coverage.stream_sta[2] += observation == StoreAddressReplay::Observation::hit;
+                coverage.stream_sta[3] += observation == StoreAddressReplay::Observation::miss;
+                record.address_issued = item.address_issued;
+                record.data_issued = item.data_issued;
+                record.address_retries = item.address_retries;
+                record.address_state = !item.address_issued ? StreamCanceledGeneration::AddressState::unissued :
+                    item.address_replay.translated() ? StreamCanceledGeneration::AddressState::translated :
+                    item.address_replay.waiting() ? StreamCanceledGeneration::AddressState::feedback_pending :
+                    StreamCanceledGeneration::AddressState::retry_ready;
+            }
+            record.sample(coverage.stream_cancel);
+        }
+        canceled += killed;
+        const auto lq_canceled = environment.lq_redirect_canceled_observed() - lq_before;
+        const auto sq_canceled = environment.sq_redirect_canceled_observed() - sq_before;
+        if (lq_canceled > lq_offset || sq_canceled > sq_offset ||
+            !environment.run_cycles(6)) {
+            phase += detail.str() + ":queue-recovery-failed";
+            return false;
+        }
+        lq_offset -= lq_canceled;
+        sq_offset -= sq_canceled;
+        oracle.restore(*first_killed->oracle_before);
+        for (const auto &item : live) {
+            if (!kills(item)) continue;
+            if (item.kind == 0) destinations[item.load.fp_wen ? 1U : 0U].erase(item.load.pdest);
+            if (item.kind == 1) for (const auto &uop : item.vectors) destinations[2].erase(uop.pdest);
+        }
+        for (const auto &[tag, attempt] : attempts)
+            for (const auto &item : live)
+                if (item.generation == attempt.generation && kills(item)) return false;
+        live.erase(std::remove_if(live.begin(), live.end(), kills), live.end());
+        target_admissions += killed;
+        deadline += std::uint64_t{killed} * constrained_completion_timeout * 4U;
+        if (!live.empty() && !install_head()) return false;
+        last_progress = environment.cycle();
+        phase += ":killed=" + std::to_string(killed) +
+            ":lq_cancel=" + std::to_string(lq_canceled) +
+            ":sq_cancel=" + std::to_string(sq_canceled);
         return true;
     };
 
@@ -497,83 +646,26 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 phase += detail.str() + ":unmatched-or-nested";
                 return false;
             }
-            const auto lq_before = environment.lq_redirect_canceled_observed();
-            const auto sq_before = environment.sq_redirect_canceled_observed();
-            // Exact expected bytes and identities remain active on E/E+1/E+2.
-            // Killed work may complete during propagation or cancel at return;
-            // retaining the expectation never waives a wrong/duplicate result.
-            if (!return_ordinary_redirect(environment, violation.last.rob_value,
-                    violation.last.rob_flag, violation.last.level)) {
-                phase += detail.str() + ":redirect-drive-or-terminal-cancellation-failed";
-                return false;
-            }
-            if (!consume_issue_events()) return false;
-            ++coverage.stream_cancel[0];
-            for (auto &item : live) {
-                if (!kills(item)) continue;
-                StreamCanceledGeneration record;
-                record.kind = item.kind;
-                record.scalar_issued = (item.kind == 0 || item.kind == 4) && item.issued[0];
-                record.vector_uops = item.vectors.size();
-                record.accepted_vector_uops = std::count(item.issued.begin(), item.issued.end(), true);
-                if (item.vectors.empty()) record.accepted_vector_uops = 0;
-                record.unflushed_vstart = item.needs_restart_flush() && !item.restart_flushed;
-                for (unsigned uop = 1; uop < item.vectors.size(); ++uop) {
-                    const auto &previous = item.vectors[uop - 1U];
-                    const auto &current = item.vectors[uop];
-                    if (!memblock::vector_is_special_indexed(current) ||
-                        memblock::vector_indexed_vd_index(previous) != memblock::vector_indexed_vd_index(current)) continue;
-                    ++record.vector_dependencies;
-                    record.unconsumed_vector_dependencies += !current.store && !item.issued[uop];
-                }
-                record.unconsumed_address_dependency = item.address_source && !item.address_consumed;
-                record.unconsumed_data_dependency = item.data_source && !item.data_consumed;
-                if (item.kind == 2) {
-                    const auto observation = item.address_replay.observe(
-                        environment.iq_slow_feedback_stats().sta_samples, item.store);
-                    if (observation == StoreAddressReplay::Observation::invalid) {
-                        phase += ":canceled-store-address-feedback"; return false;
-                    }
-                    coverage.stream_sta[2] += observation == StoreAddressReplay::Observation::hit;
-                    coverage.stream_sta[3] += observation == StoreAddressReplay::Observation::miss;
-                    record.address_issued = item.address_issued;
-                    record.data_issued = item.data_issued;
-                    record.address_retries = item.address_retries;
-                    record.address_state = !item.address_issued ? StreamCanceledGeneration::AddressState::unissued :
-                        item.address_replay.translated() ? StreamCanceledGeneration::AddressState::translated :
-                        item.address_replay.waiting() ? StreamCanceledGeneration::AddressState::feedback_pending :
-                        StreamCanceledGeneration::AddressState::retry_ready;
-                }
-                record.sample(coverage.stream_cancel);
-            }
-            canceled += killed;
-            const auto lq_canceled = environment.lq_redirect_canceled_observed() - lq_before;
-            const auto sq_canceled = environment.sq_redirect_canceled_observed() - sq_before;
-            if (lq_canceled > lq_offset || sq_canceled > sq_offset ||
-                !environment.run_cycles(6)) {
-                phase += detail.str() + ":queue-recovery-failed";
-                return false;
-            }
-            lq_offset -= lq_canceled;
-            sq_offset -= sq_canceled;
-            oracle.restore(*first_killed->oracle_before);
-            for (const auto &item : live) {
-                if (!kills(item)) continue;
-                if (item.kind == 0) destinations[item.load.fp_wen ? 1U : 0U].erase(item.load.pdest);
-                if (item.kind == 1) for (const auto &uop : item.vectors) destinations[2].erase(uop.pdest);
-            }
-            for (const auto &[tag, attempt] : attempts)
-                for (const auto &item : live)
-                    if (item.generation == attempt.generation && kills(item)) return false;
-            live.erase(std::remove_if(live.begin(), live.end(), kills), live.end());
-            target_admissions += killed;
-            deadline += std::uint64_t{killed} * constrained_completion_timeout * 4U;
+            if (!cancel_suffix(violation.last.rob_value, violation.last.rob_flag, violation.last.level, false)) return false;
             expected_violations = violation.count;
-            if (!live.empty() && !install_head()) return false;
-            phase += ":killed=" + std::to_string(killed) +
-                ":lq_cancel=" + std::to_string(lq_canceled) +
-                ":sq_cancel=" + std::to_string(sq_canceled);
             continue;
+        }
+        for (unsigned i = 0; i < live.size(); ++i) {
+            auto &work = live[i];
+            if (!work.permission_probe || work.checked || !work.issued[0] || pending(work)) continue;
+            work.checked = true;
+            ++permission[work.fault() ? 5U : 21U];
+            if (work.fault()) {
+                // A was allocated before F and remains an incomplete independent
+                // nonmemory instruction. The event selects A's actual WB; it
+                // cannot defer an already eligible F-head exception.
+                work.anchor_wb_ready_cycle = environment.cycle() + 4U;
+                permission[11] += i != 0;
+                permission[12] += std::any_of(live.begin(), live.begin() + i, [&](const auto &older) {
+                    return older.is_store() && (!all_issued(older) || pending(older));
+                });
+                if (!check_permission_suppression()) return false;
+            }
         }
         unsigned waiting_addresses = 0;
         for (auto &work : live) if (work.kind == 2 && !work.recovery_id) {
@@ -709,7 +801,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         // stores emit no scommit but use the same explicit retirement edge.
         // Prep/nonmemory vector uops are abstracted as already completed.
         for (auto &work : live) {
-            if (!all_issued(work) || pending(work)) continue;
+            if (work.fault() || !all_issued(work) || pending(work)) continue;
             if (!work.retire_ready_cycle) {
                 const auto latency = work.kind == 1 || work.kind == 3
                     ? memblock::kStreamVectorWritebackToHead : memblock::kStreamScalarWritebackToHead;
@@ -735,7 +827,13 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (head.restart_ready_cycle && environment.cycle() >= *head.restart_ready_cycle)
                 ready.push_back({8, 0, 0});
         }
-        const bool retire_ready = completed_head && !restart_pending && live.front().retire_ready_cycle &&
+        if (completed_head && live.front().fault()) {
+            auto &head = live.front();
+            if (!head.exception_anchor) { phase += ":missing-declared-exception-anchor"; return false; }
+            if (head.anchor_wb_ready_cycle && environment.cycle() >= *head.anchor_wb_ready_cycle)
+                ready.push_back({11, 0, 0});
+        }
+        const bool retire_ready = completed_head && !live.front().fault() && !restart_pending && live.front().retire_ready_cycle &&
             environment.cycle() >= *live.front().retire_ready_cycle;
         if (retire_ready) ready.push_back({5, 0, 0});
         // A nonzero-VSTART prep uop records a full-instruction flush-after.
@@ -751,7 +849,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         // Never feed observed DUT data back into generation. The scoreboard
         // validates a producer before this external backend releases consumers.
         for (auto &work : live)
-            if (work.kind == 0 && !work.recovery_id && work.issued[0] && !pending(work))
+            if (work.kind == 0 && !work.fault() && !work.recovery_id && work.issued[0] && !pending(work))
                 work.result->complete = true;
         bool older_addresses_known = true, prefix_addresses_known = true;
         if (recovery && recovery->phase == StreamRecovery::Phase::operands &&
@@ -789,7 +887,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     ready.push_back({1, i, 0});
             } else if ((work.kind == 0 || work.kind == 4) && !work.issued[0] && !work.offered[0] &&
                 environment.issue_session_available(IssueKind::load, work.kind == 0 ? work.load.lane : work.prefetch.lane) && head_eligible && address_ready &&
-                (work.kind == 4 || older_addresses_known)) ready.push_back({1, i, 0});
+                // The reserved fault page is disjoint from every older store.
+                // CPU load issue can speculate before older store addresses.
+                (work.fault() || work.kind == 4 || older_addresses_known)) ready.push_back({1, i, 0});
             if (work.kind == 2 && graph_role) {
                 const auto &episode = *recovery;
                 const bool early = (episode.phase == StreamRecovery::Phase::admission ||
@@ -846,13 +946,16 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             continue;
         }
         const auto event = ready[random() % ready.size()];
-        if (completed_head && event.kind != 5 && event.kind != 7 && event.kind != 8 && event.kind != 9)
+        if (completed_head && !live.front().exception_anchor &&
+            event.kind != 5 && event.kind != 7 && event.kind != 8 && event.kind != 9 && event.kind != 11)
             ++coverage.stream_waiting_head[event.kind == 0 ? 0U : 1U];
         if (event.kind == 9) {
             if (!environment.run_cycles(1)) return false;
             continue;
         }
-        if (event.kind == 5) {
+        if (event.kind == 11) {
+            if (!cancel_suffix(live.front().rob(), live.front().flag(), true, true)) return false;
+        } else if (event.kind == 5) {
             if (!retire_head()) return false;
         } else if (event.kind == 8) {
             auto &head = live.front();
@@ -967,7 +1070,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 constrained_cacheable_address(64, translation, leaf, false);
             const unsigned slots = std::min<unsigned>(depth - live.size(), target_admissions - admitted);
             if (!recovery && work.kind == 2 && slots >= 2 && lq_free != 0 && sq_free != 0 &&
-                weights[0] != 0 && random() % 1000U < constraints.stream_unresolved_per_mille)
+                weights[0] != 0 && std::none_of(live.begin(), live.end(), [](const auto &older) { return older.fault(); }) &&
+                random() % 1000U < constraints.stream_unresolved_per_mille)
                 begin_recovery(line, slots, lq_free, sq_free);
             const bool graph_admission = recovery.has_value();
             if (graph_admission) {
@@ -976,11 +1080,15 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 line = recovery->base;
             } else recovery_counts[13] += std::any_of(live.begin(), live.end(),
                 [](const auto &older) { return older.recovery_id != 0; });
+            work.permission_probe = !graph_admission && work.kind == 0 &&
+                permission_probes < permission_budget &&
+                std::none_of(live.begin(), live.end(), [](const auto &older) { return older.fault(); }) &&
+                random() % 1000U < constraints.stream_permission_load_per_mille;
             std::optional<std::uint64_t> address_value, data_value;
-            if (!graph_admission && constraints.stream_dependency_per_mille != 0) {
+            if (!graph_admission && !work.permission_probe && constraints.stream_dependency_per_mille != 0) {
                 std::vector<const StreamWork *> sources;
                 for (const auto &older : live)
-                    if (older.kind == 0 && !older.load.fp_wen && !older.recovery_id)
+                    if (older.kind == 0 && !older.fault() && !older.load.fp_wen && !older.recovery_id)
                         sources.push_back(&older);
                 const auto choose_source = [&](bool data) {
                     if (sources.empty() || random() % 1000U >= constraints.stream_dependency_per_mille) return;
@@ -1004,6 +1112,10 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 const auto offset = ((address & 0xfffU) + ((*address_value & 63U) << 6U)) & 0xfffU;
                 return (address & ~std::uint64_t{0xfff}) | offset;
             };
+            // Reserve a separate one-uop nonmemory ROB entry before F exists.
+            // Its operands may remain unavailable independently of F. It owns
+            // no LSQ entry and cannot compress with the noncompressible load.
+            if (work.permission_probe && !translation.mxr) work.exception_anchor = rob_offset++;
             if (work.kind == 0) {
                 const auto format = graph_admission ? ScalarLoadShape{recovery->group.loads[work.recovery_index].op,
                     recovery->group.loads[work.recovery_index].fp} : constraints.scalar_load_policy().choose(random);
@@ -1012,6 +1124,18 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     dependent_address(constrained_window_address(line, 1U << (format.op & 3U))),
                     static_cast<memblock::LoadOp>(format.op), random() % memblock::kScalarLoadLanes, format.fp);
                 work.load.pdest = allocate_destination(format.fp ? 1U : 0U);
+                if (work.permission_probe) {
+                    ++permission_probes; ++permission[0]; ++permission[translation.mxr ? 2U : 1U];
+                    const unsigned width = 1U << (format.op & 3U);
+                    work.load.address = permission_virtual_base + (random() % permission_page_count) * 0x1000ULL +
+                        (random() % (4096U / width)) * width;
+                    work.load.reference_pages.reset();
+                    work.load.oracle_address = stream_permission_physical(translation, work.load.address);
+                    work.load.expected_exception_mask = translation.mxr ? 0U : memblock::kExceptionLoadPageFault;
+                    if (!validate_stream_permission_load(work.load, translation)) return false;
+                    if (work.fault()) denied_pages.emplace_back(*work.load.oracle_address & ~std::uint64_t{4095},
+                        environment.tilelink_requests());
+                }
                 if (graph_admission) {
                     auto &episode = *recovery;
                     work.load.predecode_rvc = (format.op == 3U || (!format.fp && format.op == 2U)) && (random() & 1U);
@@ -1030,7 +1154,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.requires_head = (work.load.address & 15U) + (1U << (format.op & 3U)) > 16U;
                 work.issued.assign(1, false);
                 work.offered.assign(1, false);
-                for (unsigned byte = 0; byte < (1U << (static_cast<unsigned>(work.load.op) & 3U)); ++byte) {
+                for (unsigned byte = 0; !work.permission_probe && byte < (1U << (static_cast<unsigned>(work.load.op) & 3U)); ++byte) {
                     if (!validate_translation_byte(work.load.address + byte,
                             memblock::reference_byte_address(work.load, work.load.address + byte),
                             false, translation)) return false;
@@ -1181,7 +1305,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     constraint_coverage.sample_dcache(requests_before, environment.tilelink_requests());
     constraint_coverage.sample_translation(translation, leaf, ptw_before,
         environment.ptw_requests(), actions - start_action, actions - start_action);
+    permission[19] = std::max<std::uint64_t>(permission[19], permission_probes);
+    permission[20] += permission_probes != 0;
     return environment.end_store_release_epoch(constrained_completion_timeout) &&
-        environment.run_cycles(8) && leave_stream_access_context();
+        (denied_pages.empty() || (environment.run_cycles(32) &&
+            environment.run_until_dcache_idle(constrained_completion_timeout) && check_permission_suppression())) &&
+        environment.run_cycles(8) && leave_stream_access_context() && check_permission_suppression();
 }
 } // namespace memblock::scenarios::mixed

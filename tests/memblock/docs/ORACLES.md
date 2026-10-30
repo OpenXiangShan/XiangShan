@@ -70,6 +70,36 @@ case and its observed result, not every execution of a similar instruction.
 | Frontend/DFT transport | Frontend exercise compares declared request/response payloads, handshakes and extra transfers; selected reset cases suppress buffered stale traffic. DFT exhausts ten Boolean inputs against combinational frontend/backend outputs while reset is held. | DFT pin transport is not functional scan/clock/reset verification. See [frontend.cpp](../cpp/environment/frontend.cpp), [control.cpp](../cpp/environment/control.cpp). |
 | Top-down/prefetch | Bridge delay relations are exact; focused top-down cases also gate selected pressure/event counters. | Event presence is implementation characterization, not architectural performance attribution or a generic correctness oracle. See [load_feedback.inc](../cpp/scenarios/load_feedback.inc), [feedback_monitor.cpp](../cpp/environment/feedback_monitor.cpp). |
 
+### Ordinary mixed execute-only load contract
+
+The canonical schema79 stream declares X-only page PA/cause before issue from
+immutable independent mappings. Host MXR alone selects normal byte/boxing
+comparison versus exact stage-one/VS load page fault and suppressed RF/FP writes.
+A fault is never a normal retirement or value producer. A checked scalar terminal
+records its actual monitored pre-edge WB and matching expectation identity;
+installing another load/prefetch expectation clears the prior record, including
+ROB wrap/reuse. The exception helper rejects pending, stale, mismatched or
+unsettled terminal records. Helper authorization is consumed once before its
+external WB event; completed redirect cancellation invalidates killed records,
+and reset clears every checked terminal record.
+
+A separate immediate-predecessor nonmemory ROB instruction A is allocated before
+F. It may remain incomplete while F and mixed younger work execute. Its selected
+actual WB is C; four monitored ticks later public F head and exception redirect
+are driven together. The helper samples VA at pre-edge R+2 and completes strict
+propagation/cancellation at R+3. Random A issue scheduling cannot delay an already
+eligible F-head exception. Older committed stores retain their physical-drain
+and release obligations. Competing redirect arbitration is excluded. See
+CONSTRAINED_RANDOM.md for the exact bounded producer contract and limits.
+
+Each denied PA page is reserved from unrelated demand. All 64 accepted source-2
+Acquire line histories remain zero from pre-enqueue through quiet/context exit;
+Uncache request count is unchanged in this all-cacheable stream. This permits
+unrelated demand, PTW, prefetch and coherence and does not prove suppression of
+internal speculative work or requests using another PA/class. Denied stores,
+G-only permission faults, multiple simultaneous fault ownership and software
+trap/xRET continuity remain gaps.
+
 ## Reference Model Details
 
 ### Memory ownership and scalar values
@@ -667,8 +697,10 @@ permission walker; expected data remains the independent input-byte oracle.
 Every session handshake records pre-edge privilege and active roots/modes and
 must match the selected epoch. This prevents a wrong supervisor-only root from
 masquerading as S+SUM coverage merely because its data matches. These mixed
-leaves are positive R/W/X/A/D cases; their oracles do not establish a unified
-permission-fault/forbidden-demand rule amid unrelated background traffic.
+data leaves are positive R/W/X/A/D cases. Separate immutable X-only load
+probes now check host MXR, exact stage-one/VS fault/consumed VA and reserved-page
+source-2 accepted demand amid unrelated background traffic. This bounded rule
+does not cover denied stores or every fault class.
 
 Named ordinary, user and GPA-boundary table pools own disjoint root and child
 storage. The combined construction host test snapshots complete ordinary host/VS, user and

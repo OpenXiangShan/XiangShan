@@ -24,7 +24,8 @@ METHOD_FILES = {
     **{name: MAPPING for name in (
         "page_mode", "map_stage_page", "map_g_page", "map_stage_napot",
         "prepare_user_translation_pages", "validate_translation_byte",
-        "activate_translation_context",
+        "activate_translation_context", "prepare_stream_permission_pages",
+        "stream_permission_physical", "validate_stream_permission_load",
     )},
     "choose_stream_access": SCHEDULE,
     "leave_stream_access_context": SCHEDULE,
@@ -71,9 +72,9 @@ def private_fault(methods: dict[str, str], fault: str) -> dict[str, str]:
     elif fault == "fence-order":
         name = "activate_translation_context"
         source = result[name]
-        begin = source.index("    if (!context.user_pages()) return true;")
+        begin = source.index("    if (!context.user_pages() && !context.mxr) return true;")
         suffix = source[begin:source.rfind("\n}")]
-        install = suffix.replace("    if (!context.user_pages()) return true;\n", "")
+        install = suffix.replace("    if (!context.user_pages() && !context.mxr) return true;\n", "")
         install = install.replace("    return environment.set_translation_permissions(",
                                   "    const bool installed = environment.set_translation_permissions(")
         install += "\n    if (!installed) return false;\n"
@@ -84,7 +85,7 @@ def private_fault(methods: dict[str, str], fault: str) -> dict[str, str]:
         result[name] = source.replace(anchor,
             "    if (context.user_pages()) {\n" + install + "    }\n" + anchor)
     elif fault == "permission-install":
-        replace("activate_translation_context", "false, privilege.sum, false, privilege.vsum",
+        replace("activate_translation_context", "privilege.mxr, privilege.sum, privilege.vmxr, privilege.vsum",
                 "false, false, false, false")
     elif fault == "handoff-omitted":
         replace("leave_stream_access_context", "return enter_translation_context(context);", "return true;")
@@ -188,6 +189,10 @@ class StreamAccessContextTest(unittest.TestCase):
         self.assertIn("permuted_checks=0", self.check_case("construction-no-permutation"))
         self.assertIn("one_hot_profiles=3 weighted_counts=20,30,50 replay_choices=1024 bare_controls=8",
                       self.check_case("profiles"))
+
+    def test_execute_only_maps_and_mxr_controls(self) -> None:
+        self.assertIn("permission_map_checks=2304 denied=1152 mxr_reads=1152",
+                      self.check_case("permission-maps"))
 
     def test_access_aware_permission_counter_controls(self) -> None:
         self.assertIn("permission_controls=282", self.check_case("permissions"))

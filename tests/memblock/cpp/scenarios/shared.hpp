@@ -88,17 +88,18 @@ struct TranslationContext {
     unsigned g_mode = 0;
     // 0: legacy S data context, 1: U/VU, 2: S/VS with SUM/vSUM on U pages.
     unsigned access = 0;
+    bool mxr = false;
     bool user_pages() const { return access != 0; }
     memblock::OrdinaryPrivilegeContext expected_privilege() const {
         return {static_cast<std::uint8_t>(access == 1 ? 0 : 1),
             static_cast<std::uint8_t>(access == 0 ? 3 : access == 1 ? 0 : 1),
-            regime == RandomConstraints::translation_nested, access == 2, false, access == 2, false};
+            regime == RandomConstraints::translation_nested, access == 2, mxr, access == 2, false};
     }
 
     bool operator==(const TranslationContext &other) const
     {
         return regime == other.regime && stage1_mode == other.stage1_mode &&
-            vs_mode == other.vs_mode && g_mode == other.g_mode && access == other.access;
+            vs_mode == other.vs_mode && g_mode == other.g_mode && access == other.access && mxr == other.mxr;
     }
 
     bool operator!=(const TranslationContext &other) const

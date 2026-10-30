@@ -2161,6 +2161,12 @@ auto Environment::run_cycles(unsigned cycles)  -> bool
     return impl_->run_cycles(cycles);
 }
 
+auto Environment::return_load_exception_after_nonmemory_wb(const LoadTransaction &fault,
+    std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr) -> bool
+{
+    return impl_->return_load_exception_after_nonmemory_wb(fault, anchor, anchor_flag, captured_vaddr);
+}
+
 auto Environment::redirect_after(std::uint8_t rob_value,
     bool rob_flag,
     bool flush_itself,

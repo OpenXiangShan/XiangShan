@@ -1107,10 +1107,44 @@ auto Environment::Impl::run_cycles(unsigned cycles)  -> bool
     return true;
 }
 
+auto Environment::Impl::return_load_exception_after_nonmemory_wb(const LoadTransaction &fault,
+    std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr) -> bool
+{
+    const unsigned anchor_identity = unsigned(anchor) + unsigned(anchor_flag) * kRobEntries;
+    const unsigned fault_identity = unsigned(fault.rob) + unsigned(fault.rob_flag) * kRobEntries;
+    const auto checked_edge = scoreboard_.checked_completion_cycle(fault);
+    if (anchor >= kRobEntries || fault.rob >= kRobEntries ||
+        (anchor_identity + 1U) % (2U * kRobEntries) != fault_identity ||
+        fault.expected_exception_mask != kExceptionLoadPageFault || !checked_edge || cycle() < *checked_edge + 5U ||
+        dut_.queues.backend.pending_ptr_value.value() != anchor ||
+        dut_.queues.backend.pending_ptr_flag.boolean() != anchor_flag ||
+        dut_.queues.backend.pendingst.boolean() || dut_.queues.backend.pending_mmi_old.boolean() ||
+        dut_.queues.redirect.valid.boolean()) {
+        error_.record("load exception requires checked F and its declared incomplete nonmemory predecessor A");
+        return false;
+    }
+    if (!scoreboard_.consume_checked_completion(fault)) {
+        error_.record("load exception terminal authorization was already consumed");
+        return false;
+    }
+    const auto violation_count = feedback_.memory_violation_stats().count;
+    // Omitted EXU's actual A WB is C. Ctrl WB C+1, bank commit-ready C+2,
+    // internal F head C+3; public F head and ROB redirect both C+4. Existing
+    // retained offers remain monitored; no new dispatch occurs in this helper.
+    if (!run_cycles(4)) return false;
+    if (feedback_.memory_violation_stats().count != violation_count) {
+        error_.record("competing redirect during nonmemory exception handoff");
+        return false;
+    }
+    dut_.queues.backend.pending_ptr_value.set(fault.rob);
+    dut_.queues.backend.pending_ptr_flag.set(fault.rob_flag);
+    return redirect_after(fault.rob, fault.rob_flag, true, false, &captured_vaddr);
+}
+
 auto Environment::Impl::redirect_after(std::uint8_t rob_value,
     bool rob_flag,
     bool flush_itself,
-    bool is_vls_exception)  -> bool
+    bool is_vls_exception, std::uint64_t *captured_vaddr)  -> bool
 {
     scalar_redirect_boundary_.reset();
     if (is_vls_exception && !flush_itself) {
@@ -1129,6 +1163,12 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
     // redirectCancelCount values after two more clock edges. Sample once
     // per known redirect instead of treating the retained value as a pulse.
     tick();
+    // CSR consumes DelayN(rob.exception,2) pre-edge R+2. The payload after
+    // return R+3 need not retain the exception consumed on this edge.
+    if (captured_vaddr) {
+        dut_.refresh_comb();
+        *captured_vaddr = exception_vaddr();
+    }
     tick();
     dut_.refresh_comb();
     const std::uint64_t lq_canceled =

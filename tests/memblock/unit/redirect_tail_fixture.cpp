@@ -18,6 +18,7 @@ struct Adapter {
     struct {
         struct { Pin valid, rob_idx_value, rob_idx_flag, level, is_vls_exception; } redirect;
         struct { Pin lq_cancel_cnt, sq_cancel_cnt; } retirement;
+        struct { Pin pending_ptr_value, pending_ptr_flag, pendingst, pending_mmi_old; } backend;
     } queues;
     std::uint64_t edge = 0;
     void refresh_comb() {}
@@ -55,6 +56,8 @@ struct Bridge {
     void advance_after_edge() {}
 };
 struct Feedback {
+    Environment::MemoryViolationStats violations;
+    const auto &memory_violation_stats() const { return violations; }
     std::function<void(std::uint64_t)> sample;
     std::function<void(std::uint64_t)> after_sample;
     std::vector<std::uint64_t> edges;
@@ -97,7 +100,13 @@ struct Harness : Fixture {
         return error_.empty();
     }
     void tick(bool monitor = true);
-    bool redirect_after(std::uint8_t, bool, bool, bool = false);
+    bool redirect_after(std::uint8_t, bool, bool, bool = false, std::uint64_t * = nullptr);
+    bool return_load_exception_after_nonmemory_wb(const LoadTransaction &, std::uint8_t, bool, std::uint64_t &);
+    bool run_cycles(unsigned count) { for (unsigned i = 0; i < count; ++i) { tick(); if (!check_components()) return false; } return true; }
+    std::uint64_t exception_vaddr() const {
+        require(dut_.edge == 16U, "trap VA sampled outside pre-edge R+2");
+        return 0x6a003028ULL;
+    }
     bool cancel_pending_for_redirect(std::uint8_t, bool, bool);
     Harness() { dut_.queues.retirement.lq_cancel_cnt.set(2); dut_.queues.retirement.sq_cancel_cnt.set(1); }
 };
@@ -107,6 +116,69 @@ static void install(Harness &h, Obligation entry)
 {
     h.entries.push_back(entry);
     h.expect(entry);
+}
+
+static void exception_anchor()
+{
+    unsigned cases = 0;
+    for (unsigned anchor : {0U, 158U, 159U, 160U, 318U, 319U}) {
+        Harness h;
+        auto entry = obligation(Kind::scalar, (anchor + 1U) % 320U);
+        entry.load.address = 0x6a003028ULL;
+        entry.load.expected_exception_mask = kExceptionLoadPageFault;
+        h.loads.expect(entry.load, 0);
+        h.loads.set_failure_cycle(4);
+        auto wb = completion(entry);
+        wb.exception_mask = kExceptionLoadPageFault; wb.rf_wen = wb.fp_wen = false;
+        h.loads.observe(0, wb);
+        require(h.loads.done() && h.loads.error().empty(), "fault was not independently checked");
+        h.dut_.edge = 10;
+        h.dut_.queues.backend.pending_ptr_value.set(anchor % 160U);
+        h.dut_.queues.backend.pending_ptr_flag.set(anchor / 160U);
+        h.feedback_.sample = [&](auto edge) {
+            const bool redirect = edge == 14;
+            require(h.dut_.queues.redirect.valid.boolean() == redirect, "wrong A-WB-to-redirect edge");
+            require(h.dut_.queues.backend.pending_ptr_value.value() == (edge < 14 ? anchor % 160U : entry.load.rob) &&
+                h.dut_.queues.backend.pending_ptr_flag.boolean() == (edge < 14 ? bool(anchor / 160U) : entry.load.rob_flag),
+                "public F head and redirect did not change together");
+        };
+        std::uint64_t captured = 0;
+        require(h.return_load_exception_after_nonmemory_wb(entry.load, anchor % 160U, anchor / 160U, captured), h.error_.message());
+        require(captured == entry.load.address && h.cycle() == 17 &&
+            h.feedback_.edges == std::vector<std::uint64_t>({10,11,12,13,14,15,16}), "wrong atomic handoff/capture");
+        require(!h.loads.checked_completion_cycle(entry.load), "helper retained consumed authorization");
+        h.dut_.queues.backend.pending_ptr_value.set(anchor % 160U);
+        h.dut_.queues.backend.pending_ptr_flag.set(anchor / 160U);
+        require(!h.return_load_exception_after_nonmemory_wb(entry.load, anchor % 160U, anchor / 160U, captured) &&
+            h.cycle() == 17, "helper reused terminal authorization");
+        ++cases;
+    }
+    // Checked terminals cannot alias a canceled/reinstalled generation.
+    auto entry = obligation(Kind::scalar, 101);
+    entry.load.expected_exception_mask = kExceptionLoadPageFault;
+    LoadScoreboard scoreboard;
+    scoreboard.expect(entry.load, 0);
+    require(!scoreboard.checked_completion_cycle(entry.load), "pending fault had checked terminal");
+    auto wb = completion(entry);
+    wb.exception_mask = kExceptionLoadPageFault; wb.rf_wen = wb.fp_wen = false;
+    scoreboard.set_failure_cycle(7); scoreboard.observe(0, wb);
+    require(scoreboard.checked_completion_cycle(entry.load) == 7U, "checked terminal lost actual edge");
+    auto wrong = entry.load; ++wrong.lq;
+    require(!scoreboard.checked_completion_cycle(wrong), "checked terminal ignored generation identity");
+    require(scoreboard.consume_checked_completion(entry.load) && !scoreboard.consume_checked_completion(entry.load),
+        "checked terminal was not one-shot");
+    for (bool including : {false, true}) {
+        LoadScoreboard boundary;
+        boundary.expect(entry.load, 0); boundary.set_failure_cycle(7); boundary.observe(0, wb);
+        boundary.cancel_pending_for_redirect(entry.load.rob, entry.load.rob_flag, including);
+        require(bool(boundary.checked_completion_cycle(entry.load)) == !including,
+            "completed redirect lost survivor or retained killed terminal");
+        boundary.clear_checked_completions();
+        require(!boundary.checked_completion_cycle(entry.load), "reset retained checked terminal");
+    }
+    scoreboard.expect(entry.load, 0);
+    require(!scoreboard.checked_completion_cycle(entry.load), "reinstalled generation reused old completion");
+    std::cout << "exception_anchor_cases=" << cases << '\n';
 }
 
 static void tails()
@@ -358,6 +430,7 @@ int main(int argc, char **argv)
         else if (mode == "corrupt") corrupt();
         else if (mode == "inputs") inputs();
         else if (mode == "feedback") feedback_states();
+        else if (mode == "exception-anchor") exception_anchor();
         else require(false, "unknown mode");
     } catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
 }

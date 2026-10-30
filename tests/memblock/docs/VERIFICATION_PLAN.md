@@ -315,8 +315,14 @@ User/SUM stream exit completes the drained legacy-context transition before
 serial boundary helpers or final readback, restoring roots and privilege after
 closing issue/release sessions and their quiet guard. This bounded handoff does
 not supply live context or software trap-handler coverage.
-These positive R/W/X/A/D leaves do not cover permission-denied or X-only/MXR
-traffic amid live mixed work. Dynamic privilege/root/ASID/VMID transitions across
+Schema79 now adds X-only scalar/FP load probes and epoch MXR controls to the
+ordinary mixed scheduler. Expected PA/cause/bytes are input-owned; denied
+results cannot retire, and exact pre-edge trap VA plus source-2 accepted-demand
+suppression are checked through context exit. A predeclared older nonmemory
+entry permits independent younger issue and fixed legal WB-to-head/redirect
+handoff; canceled mixed suffixes retain strict propagation and physical credits.
+This bounded load direction does not cover denied stores, G-stage denial,
+multiple competing faults, or trap-handler/xRET continuity. Dynamic privilege/root/ASID/VMID transitions across
 outstanding translations or committed stores remain high priorities and still
 require actual CSR/fence/redirect producer ordering.
 

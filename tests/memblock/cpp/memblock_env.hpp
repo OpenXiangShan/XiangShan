@@ -679,6 +679,10 @@ public:
     bool service_vector_replay(const VectorMemoryTransaction &transaction,
         bool &replayed, unsigned timeout = 256);
     bool set_rob_head_state(std::uint8_t value, bool flag, bool pending_store);
+    // Complete a declared immediate-predecessor nonmemory head at C; publish
+    // F head+redirect C+4, and capture trap VA pre-edge R+2.
+    bool return_load_exception_after_nonmemory_wb(const LoadTransaction &fault,
+        std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr);
 
 
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);

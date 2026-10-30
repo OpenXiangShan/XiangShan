@@ -583,7 +583,7 @@ class StreamAccessSerializationTest(unittest.TestCase):
         actual = [runner.parse_summary(line) for line in ran.stdout.splitlines()]
         self.assertEqual(len(actual), len(expected))
         for original, emitted in zip(expected, actual):
-            self.assertEqual(emitted["constraint_schema"], 78)
+            self.assertEqual(emitted["constraint_schema"], 79)
             for field in ("target_stream_access", "target_translation", *FIELDS, "stream_scalar_retries"):
                 self.assertEqual(emitted[field], original[field], field)
             verifier._check_stream_transport(emitted)

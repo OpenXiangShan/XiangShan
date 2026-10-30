@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4297,6 +4297,7 @@ def _check_mixed_coverage(
     _check_constraint_coverage(result)
     _check_stream_transport(result)
     _check_stream_access(result)
+    _check_stream_permission(result)
     for name, fields in (
         ("load_ops", 7),
         ("store_ops", 4),
@@ -5151,6 +5152,45 @@ def _check_stream_transport(result: dict[str, Any]) -> None:
              "stream session acceptances disagree with architectural issue accounting")
 
 
+def _check_stream_permission(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 79:
+        return
+    rate, mxr = result.get("target_stream_permission_load"), result.get("target_stream_mxr")
+    _require(type(rate) is int and 0 <= rate <= 1000 and
+             type(mxr) is int and 0 <= mxr <= 1000, "invalid stream permission rates")
+    p = _csv_counts(result, "stream_permission", 22)
+    _require(all(value <= (1 << 64) - 1 for value in p), "stream permission counter domain")
+    epochs = _csv_counts(result, "stream_access_epochs", 9)
+    stream = _csv_counts(result, "stream", 12)
+    canceled = _csv_counts(result, "stream_cancel", 29)
+    ops = _csv_counts(result, "stream_ops", 5)
+    issues = _csv_counts(result, "stream_issue", 6)
+    translated = sum(epochs[i] for i in (1, 2, 4, 5, 7, 8))
+    _require(p[0] == p[1] + p[2] and p[1] == p[7] + p[8] and
+             p[2] == p[6] + p[9], "permission probes lack exactly one retirement or cancellation")
+    _require(p[3] <= p[1] and p[4] <= p[2] and p[5] == p[7] + p[10] and
+             p[5] <= p[3] and p[10] <= p[8] and p[6] <= p[21] <= p[4] and
+             p[21] - p[6] <= p[9], "permission acceptances/completions disagree")
+    _require(p[7] == p[16] and p[7] <= canceled[0] and p[7] + p[8] + p[9] <= canceled[1] and
+             p[6] <= ops[0] and p[3] + p[4] <= issues[0] and
+             p[11] <= p[5] and p[12] <= p[11] and p[13] <= p[7],
+             "permission trap/overlap populations exceed their owners")
+    _require(p[14] <= p[7] and p[14] <= p[15] <= 7 * p[14] and
+             p[7] + p[15] <= sum(canceled[1:6]), "permission trap suffix population")
+    _require(p[18] <= translated and p[20] <= translated and
+             ((p[0] == 0 and p[19] == p[20] == 0) or
+              (1 <= p[19] <= 4 and 1 <= p[20] <= p[0] <= p[19] * p[20] and
+               p[19] + p[20] - 1 <= p[0])), "permission epoch population")
+    _require((rate != 0 or p[0] == 0) and (mxr != 0 or p[2] == p[18] == 0) and
+             (mxr != 1000 or p[1] == 0) and
+             (p[2] == 0 or p[18] > 0) and (p[1] == 0 or translated > p[18]),
+             "disabled permission direction or MXR population")
+    _require((p[1] == 0 and p[17] == 0) or (p[1] > 0 and p[17] >= p[7]),
+             "permission forbidden-demand checks disagree")
+    if stream[0] == 0:
+        _require(not any(p), "empty stream has permission observations")
+
+
 def _check_stream_access(result: dict[str, Any]) -> None:
     """Conserve ordinary access-profile epochs and actual session acceptances.
 
@@ -5211,6 +5251,7 @@ def _check_mixed_accounting(result: dict[str, Any]) -> None:
     """
     _check_stream_transport(result)
     _check_stream_access(result)
+    _check_stream_permission(result)
     lq_allocated, lq_canceled = _balanced_queue(result, "lq")
     sq_allocated, sq_canceled = _balanced_queue(result, "sq")
     lsq_monitor_schema = result.get("lsq_monitor_schema", 0)
