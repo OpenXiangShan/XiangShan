@@ -10,7 +10,7 @@ import xiangshan.AddrTransType
 
 
 class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
-  val dcsr = ValidIO((new DcsrBundle).addInEvent(_.V, _.PRV))
+  val dcsr = ValidIO((new DcsrBundle).addInEvent(_.V, _.PRV, _.PELP))
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV, _.MDT, _.SDT))
   val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SDT))
   val debugMode = ValidIO(Bool())
@@ -61,6 +61,11 @@ class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
 
   out.privState.bits.PRVM     := in.dcsr.PRV.asUInt
   out.privState.bits.V        := Mux(in.dcsr.PRV === PrivMode.M, VirtMode.Off.asUInt, in.dcsr.V.asUInt)
+  out.dcsr.bits.V             := in.dcsr.V
+  out.dcsr.bits.PRV           := in.dcsr.PRV
+  // Debug Spec 1.0 §4.8：恢复 ELP 后消费 PELP。NewCSR 在本次返回事务中
+  // 先用旧 PELP 计算并保存 retELP，因此该字段清零不会丢失正常 DRET 的恢复值。
+  out.dcsr.bits.PELP          := 0.U
   out.mstatus.bits.MPRV       := Mux(!out.privState.bits.isModeM, 0.U, in.mstatus.MPRV.asUInt)
   out.mstatus.bits.MDT        := Mux(!out.privState.bits.isModeM, 0.U, in.mstatus.MDT.asBool)
   out.mstatus.bits.SDT        := Mux(out.privState.bits.isVirtual || out.privState.bits.isModeHU, 0.U, in.mstatus.SDT.asBool)

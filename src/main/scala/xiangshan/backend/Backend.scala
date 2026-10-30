@@ -211,6 +211,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.fromCSR.toDecode := intRegion.io.csrToDecode.get
   ctrlBlock.io.fromCSR.traceCSR := intRegion.io.csrio.get.traceCSR
   ctrlBlock.io.fromCSR.instrAddrTransType := RegNext(intRegion.io.csrio.get.instrAddrTransType)
+  ctrlBlock.io.fromCSR.zicfilpEntryClear.foreach { sink =>
+    sink := intRegion.io.csrio.get.zicfilpEntryClear.get
+  }
   val wbDataPathToCtrlBlock = intRegion.io.wbDataPathToCtrlBlock.writeback ++
     fpRegion.out.toRob.writeback.flatMap(_.map(_.map(x => x.toWriteBackRobBundle))) ++
     vecRegion.out.toRob.writeback.flatMap(_.map(_.map(x => x.toWriteBackRobBundle))) ++
@@ -524,6 +527,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.l2FlushDone := RegNext(io.fromTop.l2FlushDone)
   csrin.reset_mtvec.foreach(_ := io.fromTop.reset_mtvec.get)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
+  csrin.ZicfilpELP.foreach(_ := ctrlBlock.io.toCSR.ZicfilpELP.getOrElse(false.B))
   csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   csrin.criticalErrorState := backendCriticalError
 

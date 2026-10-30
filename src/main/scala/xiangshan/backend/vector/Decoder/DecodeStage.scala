@@ -109,6 +109,7 @@ class DecodeStageImp(
         ctrl.vtype            := inMopBits.vtype
         ctrl.oldVType         := inMopBits.specvtype
         ctrl.rawInst          := inMopBits.instr
+        ctrl.ZicfilpPCAligned.foreach(_ := inMopBits.ZicfilpPCAligned.get)
         ctrl.debug.foreach(_  := inMopBits.debug.get)
     }
   }
@@ -117,6 +118,8 @@ class DecodeStageImp(
     case (mop, i) =>
       mop.ready := decodeChannels.in.mops(i).ready
   }
+
+  decodeChannels.in.ZicfilpRedirect.foreach(_ := in.ZicfilpRedirect.get)
 
   out.uop.zipWithIndex.foreach { case (uop, i) =>
     val coUop = decodeChannels.out.uops(i)
@@ -188,6 +191,11 @@ class DecodeStageImp(
         bits.isJ := uopInfo.isJ
         bits.isJr := uopInfo.isJr
         bits.numWB := uopInfo.numWb +& 1.U
+        coUop.bits.zicfilp.foreach { info =>
+          bits.ZicfilpInfos.get := info.info
+          bits.ZicfilpLPAD.get := info.isLPAD
+          bits.exceptionVec(softwareCheck) := info.exception && uopInfo.isFirstUop
+        }
         bits.latency := LatDecoder(bits.fuType, bits.fuOpType)
         bits.debug.foreach{ x =>
           x.pc := mopInfo.debug.get.pc
@@ -227,6 +235,7 @@ class DecodeStageImp(
 object DecodeStage {
   class In(implicit p: Parameters) extends XSBundle {
     val redirect = Input(ValidIO(new Redirect))
+    val ZicfilpRedirect = Option.when(HasZicfilp)(Input(ValidIO(Bool())))
 
     // The ready of mop means this mop is accepted by DecodeStage
     // Ready signal depends on valid
