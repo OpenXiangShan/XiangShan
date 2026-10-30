@@ -207,7 +207,105 @@ def waiting_history():
         stream_transport="4,2,2,0,0,1,0,0,0,4", stream_issue_ports=csv(ports))
 
 
+def vector_wait_history(replays, overlap_count, timeouts=0, store_vector=False, canceled_unissued=False):
+    """One slow STA, a vector obligation and independently timed feedback.
+
+    Physical edges distinguish accepted replay from preaccept timeout. An
+    optional younger two-uop vector generation is canceled before acceptance;
+    it owns admitted uops but cannot contribute accepted overlap.
+    """
+    assert 0 <= overlap_count <= replays + 1
+    history = SourceHistory()
+    edge = 0
+    def clock(*tokens):
+        nonlocal edge
+        edge += 1
+        history.edge(*tokens)
+        return edge
+    scalar = history.admit()
+    start = clock(*history.offer(scalar, 1))
+    vector = history.admit()
+    admissions = [clock()]
+    if canceled_unissued:
+        killed = history.admit()
+        history.offer(killed, 3)
+        admissions.append(clock())
+        history.redirect(vector)
+    for _ in range(timeouts):
+        token = history.offer(vector, 3)[0]
+        clock()
+        history.timeout(token)
+    vector_edges = [clock(*history.offer(vector, 3))]
+    for _ in range(replays):
+        vector_edges.append(clock(*history.offer(vector, 3, replay=True)))
+    feedback = vector_edges[overlap_count] if overlap_count < len(vector_edges) else edge + 1
+    while edge <= feedback:
+        clock()
+    clock(*history.offer(scalar, 2))
+    history.retire(scalar)
+    history.retire(vector)
+    result = waiting_history()
+    result.update(history.result())
+    stream = list(map(int, result["stream"].split(",")))
+    stream[3] = history.admitted - 1
+    stream[5] = 1
+    stream[6] = history.admitted
+    stream[7] = 2
+    stream[11] = 2
+    issues = [0, 1, 1, int(not store_vector), int(store_vector), 0]
+    uops = [0, 0]
+    uops[int(store_vector)] = 1 + 2 * int(canceled_unissued)
+    operations = [0, int(not store_vector), 1, int(store_vector), 0]
+    sta = [1, 0, 1, 0, sum(start < cycle < feedback for cycle in admissions), 0, 0, 0,
+           sum(start < cycle < feedback for cycle in vector_edges), 0, 1]
+    canceled = list(map(int, result["stream_cancel"].split(",")))
+    canceled[24] = history.admitted
+    if canceled_unissued:
+        canceled[4 if store_vector else 2] = 1
+        canceled[13 if store_vector else 12] = 2
+        canceled[22] = canceled[23] = 1
+    retirement = [1, int(store_vector), int(store_vector), 0, 1 + int(store_vector),
+                  0, 0, 0, 0, 1 + int(store_vector)]
+    result.update(stream=csv(stream), stream_ops=csv(operations), stream_issue=csv(issues),
+                  stream_vector_uops=csv(uops), stream_sta=csv(sta), stream_cancel=csv(canceled),
+                  stream_store_retirement=csv(retirement), stream_waiting_head="0,0")
+    assert sta[8] == overlap_count
+    return result
+
+
 class StreamTransportAccountingTest(unittest.TestCase):
+    def test_vector_wait_overlap_counts_accepted_replays_and_preserves_legacy_scope(self):
+        checked = 0
+        for store in (False, True):
+            for replays in range(9):
+                for overlaps in range(replays + 2):
+                    for timeouts in (0, 1, 3):
+                        for canceled in (False, True):
+                            result = vector_wait_history(replays, overlaps, timeouts, store, canceled)
+                            verifier._check_stream_transport(result)
+                            verifier._check_stream_accounting(result)
+                            # The same source work's old helper-level observation
+                            # contains at most its one initial vector-uop event.
+                            legacy = change(result, "stream_sta", 8, min(overlaps, 1))
+                            verifier._check_stream_accounting(dict(legacy, constraint_schema=76))
+                            checked += 1
+        print(f"stream_STA_vector_replay_histories={checked}")
+
+    def test_vector_wait_overlap_cannot_use_timeouts_or_canceled_unissued_uops(self):
+        for store in (False, True):
+            for replays in (0, 1, 4, 9):
+                for timeouts in (0, 1, 3):
+                    for canceled in (False, True):
+                        result = vector_wait_history(replays, replays + 1, timeouts, store, canceled)
+                        corrupt = change(result, "stream_sta", 8, replays + 2)
+                        with self.subTest(store=store, replays=replays, timeouts=timeouts, canceled=canceled):
+                            verifier._check_stream_transport(corrupt)
+                            with self.assertRaisesRegex(verifier.VerificationError, "overlaps exceed accepted work"):
+                                verifier._check_stream_accounting(corrupt)
+        legacy = dict(vector_wait_history(3, 4), constraint_schema=76)
+        with self.assertRaisesRegex(verifier.VerificationError, "overlaps exceed accepted work"):
+            verifier._check_stream_accounting(legacy)
+
     def test_physical_edge_masks_and_lane_capacity_boundaries(self):
         rng = random.Random(7701)
         checked = 0

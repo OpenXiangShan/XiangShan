@@ -379,6 +379,22 @@ class MixedStreamTest(unittest.TestCase):
                                for schedule in events}), 1)
         self.assert_retirement_interleaving(results)
 
+    def test_private_context_handoff_omission_and_early_entry_reject(self):
+        before = ('environment.end_store_release_epoch(constrained_completion_timeout) &&\n'
+                  '        environment.run_cycles(8) && leave_stream_access_context();')
+        self.assertEqual(self.source.count(before), 1)
+        for name, replacement, marker in (
+                ('handoff-omitted', 'environment.end_store_release_epoch(constrained_completion_timeout) && environment.run_cycles(8);',
+                 'ordinary context handoff omitted or repeated'),
+                ('handoff-early', 'leave_stream_access_context() && environment.end_store_release_epoch(constrained_completion_timeout) && environment.run_cycles(8);',
+                 'ordinary context handoff preceded closed session/release epoch and quiet guard')):
+            binary = self.compile(self.source.replace(before, replacement), name)
+            for seed in (1, 7, 19):
+                ran = subprocess.run([str(binary), 'stream', str(seed), '1', '0', '32'],
+                                     capture_output=True, text=True, timeout=20)
+                self.assertNotEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+                self.assertIn(marker, ran.stderr)
+
     def test_recovery_preserves_mixed_prefix_and_strict_epochs(self):
         results = []
         for conflict in (0, 500, 1000):

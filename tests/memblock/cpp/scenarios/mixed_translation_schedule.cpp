@@ -297,6 +297,17 @@ bool MixedScenario::enter_translation_context(const TranslationContext &context)
     return true;
 }
 
+bool MixedScenario::leave_stream_access_context()
+{
+    if (!translation_context_valid || !current_translation.user_pages()) return true;
+    // Serial boundary helpers and final readback use the privileged legacy
+    // configuration. Complete the normal drained transition before returning
+    // to their scheduler, including the matching roots and covering fences.
+    auto context = current_translation;
+    context.access = 0;
+    return enter_translation_context(context);
+}
+
 bool MixedScenario::issue_constrained_fence(unsigned operation_kind)
 {
     if (current_translation.access != 0 ||

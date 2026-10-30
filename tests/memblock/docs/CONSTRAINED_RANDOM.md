@@ -1213,6 +1213,17 @@ identity, 64-KiB NAPOT and declared page permutations. Software permission walks
 validate installed relations, while expected bytes continue to come from the
 declared map and independent admission-order byte image.
 
+Ordinary host/VS/G, user host/VS and GPA-boundary tables own separate storage
+pools. User host roots occupy `0xea000000` and `0xeb000000`; the GPA-boundary
+roots retain `0xe6000000` and `0xe7000000`. Their allocated child pages must also
+remain disjoint. The combined host construction check compares complete
+ordinary host/VS and user/boundary table images across both construction orders and recursively compares
+reachable page ownership, including the four-page x4 roots and G permutation
+subtrees. Its representative ordinary host/VS/G seed maps complement the
+production user builders; native combined directions qualify the complete
+initializer. This checks UT table-resource
+isolation; it does not exercise dynamic PTE edits or live context switching.
+
 The existing context boundary drains terminal, LSQ and committed SBuffer/cache
 obligations before changing privilege. An M instruction-privilege boundary
 (MPRV/MPP and MPV where applicable) owns root writes and covering SFENCE/HFENCE.
@@ -1223,8 +1234,11 @@ fences remain necessary. Activation then installs the complete U or S+SUM bundle
 instruction/data mode U, and SUM epochs use matching S modes. SUM/vSUM are both
 clear for U and both set for SUM; MXR/vMXR remain clear. Privilege stays stable
 through the epoch. Random in-epoch translation fences are skipped for these
-profiles; the setup fences still run at the legal boundary. Subsequent ordinary
-serial actions explicitly select the legacy context again.
+profiles; the setup fences still run at the legal boundary. After closing the
+issue/release epochs and the quiet guard, user/SUM epochs re-enter the drained
+legacy context, restoring its roots, complete permission bundle and M instruction
+privilege before serial boundary helpers or final readback can run. This is a
+settled boundary abstraction, not a live privilege transition or modeled trap handler.
 
 Every actual session acceptance captures data/instruction privilege,
 virtualization, SUM/MXR/vSUM/vMXR, and SATP/VSATP/HGATP roots/modes at the pre-edge
@@ -1300,6 +1314,12 @@ arrive while other session offers, admission or retirement advance time. The
 pre-edge acceptance callback captures the actual feedback cursor and edge;
 overlap reporting scans those observed sample cycles. No fixed feedback latency
 is an expected CPU result.
+
+From schema 77, vector feedback-wait overlaps count actual accepted initial and
+LSU-replay attempts. Their aggregate upper bound is accepted initial vector
+issues plus accepted vector replays. Unaccepted preaccept timeouts and canceled
+unissued uops cannot supply overlap events. Earlier synchronous schemas retain
+their initial-uop helper bound.
 
 Ordinary issue handshakes now remain in independent retained slots. Capacity
 and recovery guards below still constrain admission. The bounded unresolved

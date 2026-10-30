@@ -306,6 +306,15 @@ arrays have conservation checks. Root fences run in a legal privileged boundary
 before the complete requested bundle is installed. ASID/VMID/dvirt changed flags
 now reflect actual identity/effective-virtualization transitions; root-only reuse
 gets no artificial flush. Normal roots remain intact.
+The combined host construction recursively checks disjoint storage across its
+twelve ordinary/user/GPA-boundary roots and preserves ordinary host/VS and user/boundary PTE images
+across both construction orders, including every page of the x4 roots. It uses
+representative ordinary seed mappings; native combined directions qualify the
+complete mixed initializer.
+User/SUM stream exit completes the drained legacy-context transition before
+serial boundary helpers or final readback, restoring roots and privilege after
+closing issue/release sessions and their quiet guard. This bounded handoff does
+not supply live context or software trap-handler coverage.
 These positive R/W/X/A/D leaves do not cover permission-denied or X-only/MXR
 traffic amid live mixed work. Dynamic privilege/root/ASID/VMID transitions across
 outstanding translations or committed stores remain high priorities and still

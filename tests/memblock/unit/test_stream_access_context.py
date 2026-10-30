@@ -2,7 +2,7 @@
 """Compile actual ordinary user-root/profile methods against a recording driver.
 
 PTE writes use the real PageTableBuilder; a separate literal walk checks declared
-physical relations and U/R/W/A/D bits. Five private compiled faults must fail at
+physical relations and U/R/W/A/D bits. Private compiled faults must fail at
 their designated semantic check. Optional MEMBLOCK_STREAM_ACCESS_ARTIFACT_DIR
 retains generated sources, dependency/method hashes, compiler commands and runs.
 """
@@ -27,6 +27,7 @@ METHOD_FILES = {
         "activate_translation_context",
     )},
     "choose_stream_access": SCHEDULE,
+    "leave_stream_access_context": SCHEDULE,
 }
 
 
@@ -85,6 +86,15 @@ def private_fault(methods: dict[str, str], fault: str) -> dict[str, str]:
     elif fault == "permission-install":
         replace("activate_translation_context", "false, privilege.sum, false, privilege.vsum",
                 "false, false, false, false")
+    elif fault == "handoff-omitted":
+        replace("leave_stream_access_context", "return enter_translation_context(context);", "return true;")
+    elif fault == "handoff-user-context":
+        replace("leave_stream_access_context", "context.access = 0;", "context.access = 1;")
+    elif fault == "handoff-mode":
+        replace("leave_stream_access_context", "context.access = 0;", "context.access = 0; context.g_mode ^= 1;")
+    elif fault == "handoff-failure":
+        replace("leave_stream_access_context", "return enter_translation_context(context);",
+                "enter_translation_context(context); return true;")
     else:
         raise AssertionError(f"unknown private fault: {fault}")
     return result
@@ -184,6 +194,42 @@ class StreamAccessContextTest(unittest.TestCase):
 
     def test_privileged_activation_roots_fence_order_and_final_bundles(self) -> None:
         self.assertIn("activation_contexts=21", self.check_case("activation"))
+
+    def test_user_and_boundary_table_pools_preserve_independent_images(self) -> None:
+        self.assertIn("pool_cases=8 disjoint_owner_pairs=528 boundary_controls=48 construction_orders=2",
+                      self.check_case("pool-isolation"))
+
+    def test_user_epoch_returns_to_privileged_legacy_context(self) -> None:
+        self.assertIn("handoff_contexts=14 noop_contexts=8 rejected_entries=14", self.check_case("handoff"))
+
+    def test_private_handoff_omission_context_mode_and_failure_faults_reject(self) -> None:
+        for fault, marker in (("handoff-omitted", "handoff-entry-count"),
+                              ("handoff-user-context", "handoff-legacy-context"),
+                              ("handoff-mode", "handoff-legacy-context"),
+                              ("handoff-failure", "handoff-entry-failure-suppressed")):
+            with self.subTest(fault=fault):
+                ran = self.run_case(self.build(fault, private_fault(self.methods, fault)), "handoff")
+                self.assertEqual(ran.returncode, 1, ran.stdout + ran.stderr)
+                self.assertIn(marker, ran.stderr)
+                self.report["faults"][fault] = {"case": "handoff", "designated_rejection": marker}
+
+    def test_private_root_and_child_storage_aliases_reject(self) -> None:
+        anchor = "struct Fixture : AddressConstants {"
+        self.assertEqual(FIXTURE.read_text().count(anchor), 1)
+        for name, offset in (("root-alias", 0), ("child-alias", 0x4000)):
+            with self.subTest(fault=name):
+                source = self.folder / f"{name}.cpp"
+                text = FIXTURE.read_text().replace(anchor, anchor +
+                    "\n    static constexpr std::array<std::uint64_t, 2> user_stage1_roots{{" +
+                    f"gstage_boundary_roots[0] + {offset}, gstage_boundary_roots[1] + {offset}" + "}};")
+                source.write_text(text.replace("// PRODUCTION_METHODS", "\n".join(self.methods.values())))
+                binary = self.folder / name
+                self.compile([str(source), str(self.builder_object), "-o", str(binary)])
+                ran = self.run_case(binary, "pool-isolation")
+                self.assertEqual(ran.returncode, 1, ran.stdout + ran.stderr)
+                self.assertIn("pool-isolation:", ran.stderr)
+                self.report["faults"][name] = {"case": "pool-isolation",
+                    "designated_rejection": ran.stderr.strip()}
 
     def test_private_faults_reach_designated_semantic_rejections(self) -> None:
         cases = {

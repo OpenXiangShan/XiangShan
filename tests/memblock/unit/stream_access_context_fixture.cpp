@@ -4,6 +4,8 @@
 #include "scenarios/mixed/translation_permutation.hpp"
 #include "environment/page_table_builder.hpp"
 #include <map>
+#include <functional>
+#include <set>
 
 using namespace memblock;
 using namespace memblock::scenarios;
@@ -151,6 +153,9 @@ struct Fixture : AddressConstants {
     OrdinaryPageMappings ordinary_pages;
     CountingRandom random;
     std::string phase;
+    TranslationContext current_translation;
+    bool translation_context_valid = false, entry_allowed = true;
+    unsigned entries = 0;
     struct { std::array<unsigned, 3> context_fences{}; } coverage;
     explicit Fixture(std::uint64_t seed = 17)
         : ordinary_pages(seed, permuted_physical_base), random(seed)
@@ -168,6 +173,12 @@ struct Fixture : AddressConstants {
         const TranslationContext &);
     bool activate_translation_context(const TranslationContext &);
     unsigned choose_stream_access();
+    bool leave_stream_access_context();
+    bool enter_translation_context(const TranslationContext &context) {
+        ++entries;
+        if (!entry_allowed || !activate_translation_context(context)) return false;
+        current_translation = context; translation_context_valid = true; return true;
+    }
 };
 
 // PRODUCTION_METHODS
@@ -305,7 +316,7 @@ void construction(bool permuted, std::uint64_t seed)
 {
     Fixture fixture(seed);
     prepare(fixture, permuted);
-    require(fixture.user_stage1_roots == std::array<std::uint64_t, 2>{0xe6000000, 0xe7000000} &&
+    require(fixture.user_stage1_roots == std::array<std::uint64_t, 2>{0xea000000, 0xeb000000} &&
         fixture.user_vs_roots == std::array<std::uint64_t, 2>{0xe8000000, 0xe9000000},
         "user-root-identity");
     unsigned identity = 0, permutations = 0, napot = 0, implicit = 0;
@@ -435,7 +446,7 @@ void activation()
         const auto &events = fixture.environment.events;
         const bool nested = number >= 2 && number < 6;
         const bool host = number < 2;
-        const auto root = host ? (access ? 0xe6000000ULL : 0xe0000000ULL) + number * 0x1000000ULL
+        const auto root = host ? (access ? 0xea000000ULL : 0xe0000000ULL) + number * 0x1000000ULL
             : (access ? 0xe8000000ULL : 0xe2000000ULL) + translation.vs_mode * 0x1000000ULL;
         for (const auto &event : events) {
             if (event.kind == 'H' || event.kind == 'N') {
@@ -464,6 +475,54 @@ void activation()
         ++checked;
     }
     std::cout << "activation_contexts=" << checked << '\n';
+}
+
+void handoff()
+{
+    unsigned contexts = 0, noops = 0, rejected = 0;
+    for (unsigned number = 0; number < 7; ++number) {
+        const auto base = number < 6 ? context(number, 0) : TranslationContext{};
+        for (unsigned access : {1U, 2U}) {
+            Fixture fixture;
+            auto active = base; active.access = access;
+            fixture.current_translation = active; fixture.translation_context_valid = true;
+            fixture.environment.privilege = expected(active.regime, access);
+            require(fixture.leave_stream_access_context(), "handoff-rejected");
+            require(fixture.entries == 1, "handoff-entry-count");
+            require(fixture.current_translation == base && fixture.translation_context_valid,
+                "handoff-legacy-context");
+            require(fixture.environment.privilege == expected(base.regime, 0), "handoff-legacy-privilege");
+            for (const auto &event : fixture.environment.events) {
+                if (event.kind == 'F' || event.kind == 'V' || event.kind == 'G')
+                    require(event.privilege.instruction_mode == 3, "handoff-unprivileged-fence");
+                if (event.kind == 'H') require(event.first == fixture.random_stage1_roots[base.stage1_mode],
+                    "handoff-user-root-retained");
+                if (event.kind == 'N') require(event.first == fixture.random_vs_roots[base.vs_mode] &&
+                    event.second == fixture.random_g_roots[base.g_mode], "handoff-nested-user-root-retained");
+            }
+            require(fixture.random.calls == 0, "handoff-consumed-random");
+            ++contexts;
+            Fixture failure;
+            failure.current_translation = active; failure.translation_context_valid = true;
+            failure.environment.privilege = expected(active.regime, access); failure.entry_allowed = false;
+            require(!failure.leave_stream_access_context() && failure.current_translation == active &&
+                failure.environment.privilege == expected(active.regime, access) && failure.environment.events.empty(),
+                "handoff-entry-failure-suppressed");
+            ++rejected;
+        }
+        Fixture legacy;
+        legacy.current_translation = base; legacy.translation_context_valid = true;
+        require(legacy.leave_stream_access_context() && legacy.entries == 0 && legacy.environment.events.empty(),
+            "handoff-changed-legacy-context");
+        ++noops;
+    }
+    Fixture invalid;
+    invalid.current_translation.access = 1;
+    require(invalid.leave_stream_access_context() && invalid.entries == 0 && invalid.environment.events.empty(),
+        "handoff-activated-invalid-context");
+    ++noops;
+    std::cout << "handoff_contexts=" << contexts << " noop_contexts=" << noops
+              << " rejected_entries=" << rejected << '\n';
 }
 
 void profiles()
@@ -516,6 +575,145 @@ void profiles()
               << " weighted_counts=20,30,50 replay_choices=1024 bare_controls=8\n";
 }
 
+// Pools are independently owned UT resources. Check their actual reachable
+// table pages and complete PTE images, including all four x4 root pages;
+// distinct root pointers alone do not prevent child/root allocation overlap.
+void pool_isolation()
+{
+    using Pages = std::set<std::uint64_t>;
+    unsigned cases = 0, pairs = 0, controls = 0;
+    for (auto seed : {17ULL, 0x491acULL}) for (bool permuted : {false, true})
+        for (bool boundary_first : {false, true}) {
+        Fixture fixture(seed);
+        auto &memory = fixture.environment.memory();
+        const auto observe = [&](Pages &pages, std::uint64_t root,
+                                 std::uint64_t address, unsigned mode, bool guest) {
+            const auto leaf = literal_walk(memory, root, address, mode, guest);
+            pages.insert(leaf.table_pages.begin(), leaf.table_pages.end());
+            for (unsigned page = 0; page < (guest ? 4U : 1U); ++page)
+                pages.insert(root + page * 0x1000);
+            return leaf.physical;
+        };
+        const auto reachable = [&](std::uint64_t root, unsigned mode, bool guest) {
+            Pages pages;
+            std::map<std::uint64_t, int> visited;
+            std::function<void(std::uint64_t, int, bool)> visit =
+                [&](std::uint64_t table, int level, bool top) {
+                const auto [entry, inserted] = visited.emplace(table, level);
+                if (!inserted) {
+                    require(entry->second == level, "pool-isolation:cyclic-table-path");
+                    return;
+                }
+                const unsigned entries = top && guest ? 2048U : 512U;
+                for (unsigned page = 0; page < entries / 512; ++page)
+                    pages.insert(table + page * 4096);
+                for (unsigned index = 0; index < entries; ++index) {
+                    const auto pte = memory.read_u64(table + index * 8);
+                    if (!(pte & 1) || (pte & 0xa)) continue;
+                    require(level > 0 && !(pte & 0xd0), "pool-isolation:malformed-nonleaf");
+                    visit(((pte >> 10) & ((1ULL << 44) - 1)) << 12, level - 1, false);
+                }
+            };
+            visit(root, mode ? 3 : 2, true);
+            return pages;
+        };
+        const auto image = [&](const Pages &pages) {
+            std::vector<std::pair<std::uint64_t, std::uint64_t>> result;
+            for (auto page : pages) for (unsigned offset = 0; offset < 4096; offset += 8)
+                result.emplace_back(page + offset, memory.read_u64(page + offset));
+            return result;
+        };
+        const auto build_boundary = [&]() {
+            bool result = true;
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                const auto limit = 1ULL << (mode ? 50U : 41U);
+                for (unsigned side = 0; side < 2; ++side)
+                    result &= fixture.map_g_page(mode, fixture.gstage_boundary_roots[mode],
+                        side ? 0 : limit - 4096,
+                        fixture.gstage_boundary_physical + (mode * 2U + side) * 4096, true);
+            }
+            return result;
+        };
+        const auto boundary_pages = [&]() {
+            Pages pages;
+            for (unsigned mode = 0; mode < 2; ++mode) for (unsigned side = 0; side < 2; ++side) {
+                const auto limit = 1ULL << (mode ? 50U : 41U);
+                const auto physical = observe(pages, fixture.gstage_boundary_roots[mode],
+                    side ? 0 : limit - 4096, mode, true);
+                require(physical == fixture.gstage_boundary_physical + (mode * 2U + side) * 4096,
+                    "pool-boundary-declared-physical");
+                ++controls;
+            }
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                const auto owned = reachable(fixture.gstage_boundary_roots[mode], mode, true);
+                pages.insert(owned.begin(), owned.end());
+            }
+            return pages;
+        };
+        const auto user_pages = [&]() {
+            Pages pages;
+            for (unsigned mode = 0; mode < 2; ++mode)
+                for (auto root : {fixture.user_stage1_roots[mode], fixture.user_vs_roots[mode]}) {
+                    const auto owned = reachable(root, mode, false);
+                    pages.insert(owned.begin(), owned.end());
+                }
+            return pages;
+        };
+        if (boundary_first) require(build_boundary(), "pool-boundary-build");
+        seed_baseline(fixture, permuted);
+        Pages normal_pages;
+        for (unsigned mode = 0; mode < 2; ++mode)
+            for (auto root : {fixture.random_stage1_roots[mode], fixture.random_vs_roots[mode]}) {
+                const auto pages = reachable(root, mode, false);
+                normal_pages.insert(pages.begin(), pages.end());
+            }
+        const auto normal_before = image(normal_pages);
+        Pages protected_pages;
+        if (boundary_first) protected_pages = boundary_pages();
+        const auto before = image(protected_pages);
+        const bool prepared = fixture.prepare_user_translation_pages();
+        require(image(protected_pages) == before, "pool-isolation:boundary-image-mutated-by-user-setup");
+        require(prepared, "pool-user-setup:" + fixture.phase);
+        const auto user_before_pages = user_pages();
+        const auto user_before = image(user_before_pages);
+        const bool boundary_built = build_boundary();
+        require(image(user_before_pages) == user_before, "pool-isolation:user-image-mutated-by-boundary-setup");
+        require(boundary_built, "pool-boundary-rebuild");
+        require(image(normal_pages) == normal_before, "pool-isolation:ordinary-image-mutated");
+        boundary_pages();
+
+        std::array<Pages, 12> owners;
+        for (unsigned mode = 0; mode < 2; ++mode) {
+            for (unsigned role = 0; role < 6; ++role) {
+                const auto root = role == 0 ? fixture.user_stage1_roots[mode] :
+                    role == 1 ? fixture.user_vs_roots[mode] :
+                    role == 2 ? fixture.random_stage1_roots[mode] :
+                    role == 3 ? fixture.random_vs_roots[mode] :
+                    role == 4 ? fixture.random_g_roots[mode] : fixture.gstage_boundary_roots[mode];
+                owners[role * 2 + mode] = reachable(root, mode, role >= 4);
+            }
+        }
+        for (unsigned first = 0; first < owners.size(); ++first)
+            for (unsigned second = first + 1; second < owners.size(); ++second) {
+                for (auto page : owners[first]) require(!owners[second].count(page),
+                    "pool-isolation:shared-table-page:" + std::to_string(first) + "/" + std::to_string(second));
+                ++pairs;
+            }
+        for (unsigned access : {1U, 2U}) for (unsigned number = 0; number < 6; ++number)
+            for (unsigned page : {0U, 131U}) for (bool store : {false, true}) {
+                const auto translation = context(number, access);
+                const auto address = fixture.cache0_base + 0xf000 + page * 4096ULL;
+                check_declared_byte(fixture, translation, address, address, store);
+                if (permuted) check_declared_byte(fixture, translation,
+                    OrdinaryPageMappings::virtual_base + page * 4096ULL,
+                    declared_physical(fixture, number, page), store);
+            }
+        ++cases;
+    }
+    std::cout << "pool_cases=" << cases << " disjoint_owner_pairs=" << pairs
+              << " boundary_controls=" << controls << " construction_orders=2\n";
+}
+
 int main(int argc, char **argv)
 {
     try {
@@ -527,6 +725,8 @@ int main(int argc, char **argv)
         else if (test == "permissions") permissions();
         else if (test == "activation") activation();
         else if (test == "profiles") profiles();
+        else if (test == "pool-isolation") pool_isolation();
+        else if (test == "handoff") handoff();
         else throw std::runtime_error("unknown-case");
         std::cout << test << " PASS\n";
     } catch (const std::exception &error) {

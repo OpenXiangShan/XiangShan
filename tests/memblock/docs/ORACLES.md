@@ -351,6 +351,9 @@ and data results still require their existing scoreboards, and younger loads
 still wait for checked older store addresses. Unresolved graph operands retain
 their synchronous helper. `stream_sta` counts another accepted event only before
 that attempt's matching feedback cycle, even when its helper advances time.
+For persistent sessions, the vector overlap bound includes accepted initial
+issues and accepted LSU replays. Offered attempts that time out before acceptance
+and canceled unissued uops provide no such events.
 
 Schema 75 retains admitted generations and accepted issue observations after
 mixed-suffix cancellation. `StreamCanceledGeneration` records the killed class,
@@ -666,6 +669,28 @@ must match the selected epoch. This prevents a wrong supervisor-only root from
 masquerading as S+SUM coverage merely because its data matches. These mixed
 leaves are positive R/W/X/A/D cases; their oracles do not establish a unified
 permission-fault/forbidden-demand rule amid unrelated background traffic.
+
+Named ordinary, user and GPA-boundary table pools own disjoint root and child
+storage. The combined construction host test snapshots complete ordinary host/VS, user and
+GPA-boundary table images before the other pool is built, rechecks declared
+mappings afterward and recursively enumerates physical table-page ownership
+across all twelve roots in its seeded construction. The fixture installs the
+production user mapping methods with representative ordinary host/VS/G mappings
+and the two GPA-boundary leaves; it does not run the complete mixed initializer.
+User setup intentionally adds implicit VS-table mappings to the ordinary G
+tables, so those G images are not required to remain byte-for-byte identical.
+The x4 roots
+occupy four pages. Distinct root addresses alone do not establish this property;
+a child allocation can still overlap another root or table. These are UT
+resource-isolation checks, not a restriction on architectural page-table sharing.
+
+Ordinary user/SUM epochs return to the legacy privileged context only after
+their issue session and release epoch close and the quiet guard completes. The
+normal context transition drains and restores the corresponding roots and full
+permission bundle before returning to serial helpers. This prevents a later
+decoded SFENCE/HFENCE or legacy readback from inheriting U/VS instruction
+privilege; it does not model software trap/xRET timing or establish live context
+continuity.
 
 The address-only walker and access-aware permission walker are separate
 functions. A scenario using `reference_two_stage_walk` has not automatically

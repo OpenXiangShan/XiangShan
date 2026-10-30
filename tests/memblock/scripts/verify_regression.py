@@ -4847,10 +4847,15 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
                  sta[0] + sta[1] == sta[2] + sta[3] + canceled[20] and
                  (ordinary != 0 or retries == canceled[21]),
                  "stream STA attempts/feedback/cancellations are not conserved")
+        # Persistent sessions sample every accepted vector attempt, including
+        # LSU replay. Unaccepted timeouts and canceled unissued uops contribute
+        # no accepted event. Older synchronous helpers sampled initial uops.
+        vector_acceptances = (issues[3] + issues[4] + replays
+                              if result.get("constraint_schema", 0) >= 77 else sum(vector_uops))
         _require(sta[4] <= admitted - epochs and sta[5] <= issues[0] +
                  _csv_counts(result, "stream_recovery", 20)[8] and
                  sta[6] <= sta[0] + sta[1] and sta[7] <= issues[2] and
-                 sta[8] <= sum(vector_uops) and sta[9] <= issues[5],
+                 sta[8] <= vector_acceptances and sta[9] <= issues[5],
                  "stream STA wait overlaps exceed accepted work")
         eligible_stores = ordinary + canceled[7]
         _require((eligible_stores == 0 and not any(sta)) or

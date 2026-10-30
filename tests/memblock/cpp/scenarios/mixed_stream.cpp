@@ -1181,6 +1181,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     constraint_coverage.sample_dcache(requests_before, environment.tilelink_requests());
     constraint_coverage.sample_translation(translation, leaf, ptw_before,
         environment.ptw_requests(), actions - start_action, actions - start_action);
-    return environment.end_store_release_epoch(constrained_completion_timeout) && environment.run_cycles(8);
+    return environment.end_store_release_epoch(constrained_completion_timeout) &&
+        environment.run_cycles(8) && leave_stream_access_context();
 }
 } // namespace memblock::scenarios::mixed

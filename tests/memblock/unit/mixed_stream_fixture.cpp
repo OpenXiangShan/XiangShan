@@ -606,13 +606,25 @@ struct SyntheticEnvironment {
     }
     bool begin_store_release_epoch(unsigned) {
         require(retired == instructions.size(), "release epoch began with unfinished architectural work");
+        require(!release_epoch_open, "release epoch already open");
+        release_epoch_open = true;
         return true;
     }
     bool end_store_release_epoch(unsigned) {
         synchronize_retirement();
         require(retired == instructions.size() && retired_stores.empty(),
             "release epoch ended with unfinished physical or architectural work");
+        require(release_epoch_open, "release epoch already closed");
+        release_epoch_open = false; release_ended_at = tick;
         return true;
+    }
+    bool release_epoch_open = false;
+    unsigned context_handoffs = 0;
+    std::optional<std::uint64_t> release_ended_at;
+    bool leave_stream_access_context() {
+        require(!session && !release_epoch_open && release_ended_at && tick >= *release_ended_at + 8,
+            "ordinary context handoff preceded closed session/release epoch and quiet guard");
+        ++context_handoffs; return true;
     }
     bool track_store_release_inputs(const StoreTransaction &t) {
         const auto &work = find(t.rob, t.rob_flag);
@@ -948,6 +960,7 @@ struct SyntheticEnvironment {
     }
     void finish(unsigned count, const MixedCoverage &coverage, const ConstraintCoverage &constraints) {
         synchronize_retirement();
+        require(context_handoffs == (count ? 1U : 0U), "ordinary context handoff omitted or repeated");
         require(retired == count && instructions.size() == count, "lost or excess architectural work");
         require(expected.empty() && enqueued.empty(), "expectation/dispatch conservation failed");
         require(lq_used == lq_done + canceled_lq && sq_used == sq_done, "queue conservation failed");
@@ -1064,6 +1077,7 @@ public:
     TranslationContext choose_translation_context() { return {}; }
     TranslationLeafTopology choose_translation_leaf(const TranslationContext &) { return {}; }
     bool enter_translation_context(const TranslationContext &) { return true; }
+    bool leave_stream_access_context() { return environment.leave_stream_access_context(); }
     bool validate_translation_byte(std::uint64_t va, std::uint64_t pa, bool, const TranslationContext &) {
         require(va == pa, "synthetic bare translation changed byte address"); return true;
     }

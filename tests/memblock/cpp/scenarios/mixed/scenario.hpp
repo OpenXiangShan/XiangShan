@@ -168,6 +168,7 @@ private:
     memblock::scenarios::TranslationContext choose_translation_context();
     bool flush_pending_translation_fences();
     bool enter_translation_context(const TranslationContext &context);
+    bool leave_stream_access_context();
     bool issue_constrained_fence(unsigned operation_kind);
     std::uint64_t mmio_access_address();
     bool run_concurrent_windows();
