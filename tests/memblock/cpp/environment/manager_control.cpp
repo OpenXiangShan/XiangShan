@@ -125,6 +125,12 @@ auto Environment::Impl::configure_backpressure(std::uint64_t seed,
         seed ^ 0x3c6ef372fe94f82aULL, enabled, latency_profiles.uncache);
 }
 
+auto Environment::Impl::configure_ptw_response_order(std::uint64_t seed, unsigned per_mille) -> void
+{ ptw_agent_.configure_response_order(seed, per_mille); }
+
+auto Environment::Impl::ptw_response_order_stats() const -> const std::array<std::uint64_t, 8> &
+{ return ptw_agent_.response_order_stats(); }
+
 auto Environment::Impl::inject_next_dcache_response_error(bool denied,
     bool corrupt,
     DcacheCorruptBeat corrupt_beat)  -> void

@@ -322,12 +322,20 @@ int MixedScenario::run()
         return stream.str();
     };
     report_progress();
+    const auto ptw_order_summary = [&] {
+        std::ostringstream out;
+        out << " ptw_response_order=";
+        const auto &counts = environment.ptw_response_order_stats();
+        for (unsigned i = 0; i < counts.size(); ++i) out << (i ? "," : "") << counts[i];
+        return out.str();
+    };
     initialize_memory();
     const bool completed = execute();
     report_progress(true);
     if (!completed) {
         std::cerr << "MEMBLOCK_CONSTRAINED_RANDOM_FAIL seed=" << options.seed
-                  << " transactions=" << actions
+                  << ptw_order_summary()
+              << " transactions=" << actions
                   << " requested=" << options.transactions
                   << " cycle=" << environment.cycle()
                   << " phase=" << phase
@@ -401,6 +409,7 @@ int MixedScenario::run()
 
     std::cout << "MEMBLOCK_CONSTRAINED_RANDOM_PASS"
               << " seed=" << options.seed
+              << ptw_order_summary()
               << " transactions=" << actions
               << " cycle=" << environment.cycle()
               << " scalar_writebacks=" << environment.writebacks()

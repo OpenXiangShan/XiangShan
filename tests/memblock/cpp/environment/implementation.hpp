@@ -71,6 +71,9 @@ public:
         std::uint64_t seed, bool enabled,
         const ResponseLatencyProfiles &latency_profiles);
 
+    void configure_ptw_response_order(std::uint64_t seed, unsigned per_mille);
+    const std::array<std::uint64_t, 8> &ptw_response_order_stats() const;
+
     void inject_next_dcache_response_error(
         bool denied, bool corrupt,
         DcacheCorruptBeat corrupt_beat = DcacheCorruptBeat::all);

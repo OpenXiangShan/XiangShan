@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=80`.
+`constraint_schema=81`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -97,6 +97,7 @@ they do not imply arbitrary numeric suffix support.
 | `scalar-unresolved-inflight` | Conditional conflicting-window rate selecting one youngest unfinished cold scalar/FP load, with a held late response and observed redirect cancellation; default 250 in all presets. Selection needs a same-page line with no accepted external A history; unavailable attempts are reported. Zero retains all-completed windows. |
 | `scalar-dependency` | Rate replacing a remaining eligible ordinary scalar-store action with a randomized dependency window: 1..4 older stores, 1..3 younger loads, and an optional store younger than those loads. Widths, byte overlap, payloads, lanes, operand arrival, issue order and 0..7-cycle gaps vary. Defaults coverage/spec/corner/cmo-stress: 350/200/500/0. |
 | `latency` | `compact` or `spec`, applied to all three managers. |
+| `ptw-response-reorder` | Whole-message PTW D arbitration rate, default 250 per mille in all presets. At a message boundary with two or more pending messages, zero keeps FIFO, 1000 uniformly selects among all pending messages, and intermediate rates choose between FIFO and uniform selection. A dedicated seeded RNG avoids changing legacy latency/backpressure draws when disabled. Message beats and D payload under stall stay locked; the oldest active message, including its response delay, is not preempted. This is manager scheduling, not a demand/translation percentage. |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | `compact` or `spec`, applied to one manager. |
 
 ### Scalar errors, atomics, and hypervisor accesses
@@ -1046,6 +1047,31 @@ complete matching C transactions. Both use the ordinary B-source allocator and
 are included in total Probe lifecycle conservation. The artifact verifier checks field conservation and bounds without requiring
 positive bins in a sparse run. Unit substitution tests exercise wrong-page and
 contiguous-PA results against production scoreboards.
+
+## PTW Response Message Ordering
+
+Schema81 permits complete PTW response messages to finish in a different order
+than accepted requests on distinct active sources. The manager snapshots each
+request's bytes and error injection at A acceptance. It selects only before a
+new message, holds that message through first/interbeat gaps and D backpressure,
+and retains the producer-specific final-D source lifetime rule. No beat-level
+interleaving, same-source overlap, live reconfiguration or malformed response
+stimulus is introduced. L2TLB uses one shared refill beat buffer and selects
+request metadata by D source; independent architectural load and translation
+checks therefore remain essential under reordering.
+
+The eight `ptw_response_order` fields are message starts, starts with multiple
+pending messages, random-arbitration selections, nonfront selections, final-D
+message completions, maximum selectable pending messages, completions overtaking
+at least one accepted older request, and maximum accepted older requests still
+pending at such completion. At final drain,
+starts and completions equal accepted PTW requests. The aggregate checker bounds
+selection populations, disabled/forced endpoints and maximum source population;
+it does not reconstruct each source's ordering or prove correct DUT translation.
+The normal load/IFU/PTW scenarios continue to check independent input-owned bytes,
+page walks, permissions and response identities. Positive nonfront activity is
+observational, not a hidden coverage PASS requirement. DCache/Uncache response
+permutations and generalized reset/malformed-D campaigns remain separate gaps.
 
 ## Explicit Stimulus And Oracle Gaps
 

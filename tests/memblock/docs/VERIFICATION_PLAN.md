@@ -372,8 +372,11 @@ Priority work, each requiring executable stimulus and an independent check:
    allowing only its readable prefix line and independent prefetch; a cold
    both-readable control observes the second page and checks its returned data.
 3. Preserve accepted-B provenance, same-PA serialization, C multibeat identity,
-   DCache E first-D/sink and PTW/Uncache source-lifetime checks. Broaden legal
-   ordering/reset qualification and independent owner-version handling beyond
+   DCache E first-D/sink and PTW/Uncache source-lifetime checks. Schema81 adds
+   seeded complete-message PTW D permutations across outstanding sources, with
+   exactly-once source/payload histories and stable contiguous message beats;
+   ordinary independent translation/load oracles remain active. Broaden DCache
+   and Uncache ordering/reset qualification and independent owner-version handling beyond
    the checkpointed pool.
 4. Repair verifier schema/backpressure/statistic validation. Regression and
    benchmark sidecars now use distinct campaign run-ID namespaces, including

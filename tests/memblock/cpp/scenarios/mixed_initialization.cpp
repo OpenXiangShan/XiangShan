@@ -93,6 +93,8 @@ void MixedScenario::initialize_memory()
         bank_conflict_base, bank_conflict_span, options.seed ^ 0x71U);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
+    environment.configure_ptw_response_order(options.seed ^ 0xbb67ae8584caa73bULL,
+        constraints.ptw_response_reorder_per_mille);
 }
 
 bool MixedScenario::prepare_tail()

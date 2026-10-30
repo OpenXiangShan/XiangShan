@@ -5152,6 +5152,29 @@ def _check_stream_transport(result: dict[str, Any]) -> None:
              "stream session acceptances disagree with architectural issue accounting")
 
 
+def _check_ptw_response_order(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 81:
+        return
+    rate = result.get("target_ptw_response_reorder")
+    _require(type(rate) is int and 0 <= rate <= 1000, "invalid PTW response reorder rate")
+    counts = _csv_counts(result, "ptw_response_order", 8)
+    _require(all(value <= (1 << 64) - 1 for value in counts), "PTW order counter domain")
+    starts, multi, selected, nonfront, completed, maximum, overtaking, older = counts
+    requests = result.get("ptw_requests")
+    _require(type(requests) is int and requests >= 0 and starts == completed == requests,
+             "PTW messages not completed exactly once")
+    _require(nonfront <= selected <= multi <= max(0, starts - 1) and
+             maximum <= min(16, starts) and
+             ((starts == 0 and maximum == multi == 0) or (starts > 0 and maximum > 0)) and
+             ((multi == 0 and maximum <= 1) or (multi > 0 and maximum >= 2)),
+             "PTW order populations impossible")
+    _require(overtaking == nonfront and older <= max(0, maximum - 1) and
+             ((overtaking == 0 and older == 0) or (overtaking > 0 and older > 0)),
+             "PTW completion inversions exceed scheduling population")
+    _require(rate != 0 or selected == nonfront == 0, "disabled PTW reorder produced choices")
+    _require(rate != 1000 or selected == multi, "forced PTW reorder skipped eligible choice")
+
+
 def _check_stream_permission(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 79:
         return
@@ -5265,6 +5288,7 @@ def _check_mixed_accounting(result: dict[str, Any]) -> None:
     Coverage counters remain in the result and per-run report, but a sparse
     random run is valid: the verifier must not reject it for unobserved bins.
     """
+    _check_ptw_response_order(result)
     _check_stream_transport(result)
     _check_stream_access(result)
     _check_stream_permission(result)
@@ -5450,6 +5474,7 @@ def _check_result(
         _check_permuted_translation_accounting(result)
         _check_alias_recall_accounting(result)
         _check_scalar_fp_accounting(result)
+        _check_ptw_response_order(result)
         _check_vector_operand_accounting(result)
         if require_coverage:
             try:

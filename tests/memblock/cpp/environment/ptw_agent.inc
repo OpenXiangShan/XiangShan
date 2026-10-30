@@ -69,6 +69,20 @@ public:
         force_a_stall_ = enabled;
     }
 
+    // Reorder complete messages only. Dedicated RNG state leaves legacy
+    // backpressure/latency draws unchanged when this direction is disabled.
+    void configure_response_order(std::uint64_t seed, unsigned per_mille)
+    {
+        if (per_mille > 1000 || !idle())
+            throw std::invalid_argument("PTW response-order configuration requires idle link and rate <=1000");
+        response_order_per_mille_ = per_mille;
+        order_random_state_ = seed == 0 ? 1 : seed;
+        response_order_stats_ = {};
+    }
+
+    const std::array<std::uint64_t, 8> &response_order_stats() const
+    { return response_order_stats_; }
+
     void force_next_response_delay(unsigned cycles)
     {
         forced_next_response_delay_ = cycles;
@@ -82,7 +96,9 @@ public:
         d_fire_ = false;
         d_gap_ = 0;
         d_presenting_ = false;
+        response_message_active_ = false;
         active_sources_.fill(false);
+        active_orders_.fill(std::nullopt);
         outstanding_requests_ = 0;
         forced_next_response_delay_.reset();
         force_a_stall_ = random_backpressure_;
@@ -98,6 +114,10 @@ public:
             dut.ptw_memory.d.valid.set(std::uint64_t{0});
             d_presenting_ = false;
             return;
+        }
+        if (!response_message_active_) {
+            select_response_message();
+            response_message_active_ = true;
         }
         if (!d_presenting_) {
             if (d_gap_ != 0) {
@@ -187,6 +207,13 @@ public:
             const bool completed_request = responses_.front().last_beat;
             const std::uint8_t source = responses_.front().source;
             if (completed_request) {
+                if (source < active_orders_.size() && active_orders_[source]) {
+                    const auto older = std::count_if(active_orders_.begin(), active_orders_.end(),
+                        [&](const auto &order) { return order && *order < *active_orders_[source]; });
+                    response_order_stats_[6] += older != 0;
+                    response_order_stats_[7] = std::max<std::uint64_t>(response_order_stats_[7], older);
+                    active_orders_[source].reset();
+                }
                 if (source >= active_sources_.size() ||
                     !active_sources_[source]) {
                     error_.record(
@@ -198,6 +225,8 @@ public:
             responses_.pop_front();
             if (completed_request) {
                 --outstanding_requests_;
+                ++response_order_stats_[4];
+                response_message_active_ = false;
             }
             d_presenting_ = false;
             d_gap_ = responses_.empty() ? 0 : responses_.front().delay_before;
@@ -208,6 +237,7 @@ public:
                 error_.record("PTW TileLink A source is out of range");
             } else {
                 active_sources_[request_->source] = true;
+                active_orders_[request_->source] = request_count_;
             }
             request_history_.push_back(*request_);
             ++request_count_;
@@ -333,6 +363,7 @@ private:
         bool corrupt = false;
         bool last_beat = true;
         unsigned delay_before = 0;
+        bool first_beat = false;
     };
 
     struct PendingResponseError {
@@ -416,6 +447,41 @@ private:
         return random_state_;
     }
 
+    void select_response_message()
+    {
+        // The active multibeat message is never interleaved, including D
+        // backpressure and interbeat gaps. Select only before its first beat.
+        std::vector<std::size_t> starts;
+        for (std::size_t i = 0; i < responses_.size(); ++i)
+            if (responses_[i].first_beat) starts.push_back(i);
+        if (starts.empty() || starts.front() != 0) {
+            error_.record("PTW response queue lost a whole-message boundary");
+            return;
+        }
+        ++response_order_stats_[0];
+        response_order_stats_[5] = std::max<std::uint64_t>(response_order_stats_[5], starts.size());
+        if (starts.size() < 2) return;
+        ++response_order_stats_[1];
+        if (response_order_per_mille_ == 0) return;
+        const auto draw = [&] {
+            order_random_state_ ^= order_random_state_ << 13;
+            order_random_state_ ^= order_random_state_ >> 7;
+            order_random_state_ ^= order_random_state_ << 17;
+            return order_random_state_;
+        };
+        if (response_order_per_mille_ != 1000 && draw() % 1000U >= response_order_per_mille_) return;
+        ++response_order_stats_[2];
+        // Selecting from every pending message includes FIFO controls and
+        // permutations; no random choice may split or reorder message beats.
+        const auto selected = draw() % starts.size();
+        if (selected == 0) return;
+        ++response_order_stats_[3];
+        const auto begin = responses_.begin() + starts[selected];
+        const auto end = selected + 1U < starts.size() ? responses_.begin() + starts[selected + 1U] : responses_.end();
+        std::rotate(responses_.begin(), begin, end);
+        d_gap_ = responses_.front().delay_before;
+    }
+
     unsigned response_delay(bool first_beat)
     {
         if (first_beat && forced_next_response_delay_) {
@@ -439,6 +505,7 @@ private:
     unsigned push_response(Response response, bool first_beat)
     {
         const bool was_empty = responses_.empty();
+        response.first_beat = first_beat;
         response.delay_before = response_delay(first_beat);
         const unsigned delay = response.delay_before;
         responses_.push_back(std::move(response));
@@ -457,6 +524,14 @@ private:
     bool d_fire_ = false;
     std::uint64_t request_count_ = 0;
     std::uint64_t random_state_ = 1;
+    std::uint64_t order_random_state_ = 1;
+    unsigned response_order_per_mille_ = 0;
+    bool response_message_active_ = false;
+    // Message starts/multi-choice starts/random selections/nonfront selections/
+    // final-D completions/maximum selectable messages/completions overtaking
+    // at least one accepted older request/maximum pending-older overtaken. Counts are manager IO
+    // scheduling observations, not DUT translation-correctness evidence.
+    std::array<std::uint64_t, 8> response_order_stats_{};
     unsigned d_gap_ = 0;
     bool random_backpressure_ = false;
     ResponseLatencyProfile latency_profile_ = ResponseLatencyProfile::compact;
@@ -466,6 +541,7 @@ private:
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
     std::array<bool, 16> active_sources_{};
+    std::array<std::optional<std::uint64_t>, 16> active_orders_{};
     std::uint64_t outstanding_requests_ = 0;
     std::uint64_t max_outstanding_requests_ = 0;
     std::uint64_t request_stall_cycles_ = 0;
