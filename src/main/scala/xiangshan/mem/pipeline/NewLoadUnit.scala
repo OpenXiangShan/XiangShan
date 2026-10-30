@@ -1160,6 +1160,11 @@ class LoadUnitS2(param: ExeUnitParams)(
   connectSamePort(stageInfo, in)
   stageInfo.uop.flushPipe := false.B
   stageInfo.uop.exceptionVec extendFrom exceptionVec
+  when(isSwPrefetch) {
+    stageInfo.uop.exceptionVec(loadAccessFault) := false.B
+    stageInfo.uop.exceptionVec(loadPageFault) := false.B
+    stageInfo.uop.exceptionVec(loadGuestPageFault) := false.B
+  }
   // Todo[Vector]: support vector exception
   stageInfo.pmp.get := pmp
   stageInfo.nc.get := isNC
