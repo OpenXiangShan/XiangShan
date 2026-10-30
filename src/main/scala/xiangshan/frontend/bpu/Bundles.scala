@@ -256,12 +256,12 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
   }
 
   // s3 prediction train s1 predictor
-  def fromPrediction(prediction: Prediction, hasOverride: Bool): Unit = {
+  def fromPrediction(prediction: Prediction, isMisPred: Bool): Unit = {
     this.taken       := prediction.taken
     this.target      := prediction.target.unGuard // s1 training does not need guard bit
     this.cfiPosition := prediction.cfiPosition
     this.attribute   := prediction.attribute
-    this.mispredict  := hasOverride
+    this.mispredict  := isMisPred
     // not available
     this.debug_realCfiPc.foreach(_ := DontCare)
   }
