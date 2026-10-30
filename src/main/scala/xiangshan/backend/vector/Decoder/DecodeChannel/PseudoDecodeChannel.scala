@@ -13,9 +13,10 @@ import xiangshan.CommitType
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
-import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, JmpOpcodes, LduOpcodes, Opcode, VSetOpcodes}
+import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, CsrOpcodes, JmpOpcodes, LduOpcodes, Opcode, VSetOpcodes}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
+import xiangshan.backend.fu.NewCSR.CSROoORead
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.SrcRenType
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, DecodeSrcType}
@@ -79,6 +80,7 @@ class PseudoDecodeChannel(
       DecodeSelImm.UJ        -> ImmUnion.J.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.J.len),
       DecodeSelImm.CSRRVLENB -> (VLEN / 8).U,
       DecodeSelImm.S         -> ImmUnion.S.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.S.len),
+      DecodeSelImm.Z         -> ImmUnion.Z.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.Z.len),
     )
   )
 
@@ -90,7 +92,7 @@ class PseudoDecodeChannel(
   out.bits.lsrc1 := instBitFields.RS1
   out.bits.lsrc2 := instBitFields.RS2
   out.bits.ldest := instBitFields.RD
-  out.bits.gpWen := bundle(gpWenField)
+  out.bits.gpWen := bundle(gpWenField) && instBitFields.RD =/= 0.U
   out.bits.fpWen := bundle(fpWenField)
   out.bits.noSpec := bundle(noSpecField)
   out.bits.blockBack := bundle(blockBackField)
@@ -151,9 +153,25 @@ object PseudoDecodeChannel {
   }
 
   object InstPatterns {
-    val CSRRVL       = PseudoInstPattern(makeCSRRBitPat(CSRs.vl))
+    val CSRRVL       = PseudoInstPattern(makeCSRRallBitPat(CSRs.vl))
 
-    val CSRRVLENB    = PseudoInstPattern(makeCSRRBitPat(CSRs.vlenb))
+    val CSRRVLENB    = PseudoInstPattern(makeCSRRallBitPat(CSRs.vlenb))
+
+    def onlyBlockBackwardList = CSROoORead.blockBackwardCsrReadList.diff(CSROoORead.waitForwardCsrReadList)
+    def onlyWaitForwardList   = CSROoORead.waitForwardCsrReadList.diff(CSROoORead.blockBackwardCsrReadList)
+    def noBlockAndWaitList    = CSROoORead.fullCSRList.diff(CSROoORead.blockBackwardCsrReadList).diff(CSROoORead.waitForwardCsrReadList).diff(List(CSRs.vl, CSRs.vlenb))
+    val CSRR_CR_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRCBitPat(csr)))
+    val CSRR_CI_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRCIBitPat(csr)))
+    val CSRR_SR_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRSBitPat(csr)))
+    val CSRR_SI_BLOCK_BACKWARD = onlyBlockBackwardList.map(csr => PseudoInstPattern(makeCSRRSIBitPat(csr)))
+    val CSRR_CR_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRCBitPat(csr)))
+    val CSRR_CI_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRCIBitPat(csr)))
+    val CSRR_SR_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRSBitPat(csr)))
+    val CSRR_SI_WAIT_FORWARD   = onlyWaitForwardList.map(csr => PseudoInstPattern(makeCSRRSIBitPat(csr)))
+    val CSRR_CR_NO_BLOCK_WAIT  = noBlockAndWaitList.map(csr => PseudoInstPattern(makeCSRRCBitPat(csr)))
+    val CSRR_CI_NO_BLOCK_WAIT  = noBlockAndWaitList.map(csr => PseudoInstPattern(makeCSRRCIBitPat(csr)))
+    val CSRR_SR_NO_BLOCK_WAIT  = noBlockAndWaitList.map(csr => PseudoInstPattern(makeCSRRSBitPat(csr)))
+    val CSRR_SI_NO_BLOCK_WAIT  = noBlockAndWaitList.map(csr => PseudoInstPattern(makeCSRRSIBitPat(csr)))
 
     val PREFETCH_I   = PseudoInstPattern(PseudoInstructions.PREFETCH_I)
     val PREFETCH_R   = PseudoInstPattern(PseudoInstructions.PREFETCH_R)
@@ -185,7 +203,7 @@ object PseudoDecodeChannel {
     }
   }
 
-  val uopTable: SeqMap[InstPattern, Opcode] = SeqMap(
+  val uopTable: SeqMap[InstPattern, Opcode] = SeqMap[InstPattern, Opcode](
     CSRRVL        -> (VSetOpcodes.readvl + NeedVecEnable),
     CSRRVLENB     -> (AluOpcodes.add.copy() - Src1Gp - Src2En - Src2Gp + Src2Imm(DecodeSelImm.CSRRVLENB) + NeedVecEnable),
     PREFETCH_I    -> (LduOpcodes.prefetch_i + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
@@ -193,7 +211,19 @@ object PseudoDecodeChannel {
     PREFETCH_W    -> (LduOpcodes.prefetch_w + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
     J             -> (JmpOpcodes.j),
     JALR_RD_ZERO  -> (JmpOpcodes.jr),
-  )
+  ) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CR_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.clr.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CI_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.clri.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SR_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.set.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SI_BLOCK_BACKWARD.map(inst => inst -> (CsrOpcodes.seti.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z)             - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CR_WAIT_FORWARD  .map(inst => inst -> (CsrOpcodes.clr.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack          + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CI_WAIT_FORWARD  .map(inst => inst -> (CsrOpcodes.clri.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack          + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SR_WAIT_FORWARD  .map(inst => inst -> (CsrOpcodes.set.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack          + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SI_WAIT_FORWARD  .map(inst => inst -> (CsrOpcodes.seti.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack          + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CR_NO_BLOCK_WAIT .map(inst => inst -> (CsrOpcodes.clr.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_CI_NO_BLOCK_WAIT .map(inst => inst -> (CsrOpcodes.clri.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SR_NO_BLOCK_WAIT .map(inst => inst -> (CsrOpcodes.set.copy()  - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack - NoSpec + CannotRobCompress))) ++
+    SeqMap.from[InstPattern, Opcode](CSRR_SI_NO_BLOCK_WAIT .map(inst => inst -> (CsrOpcodes.seti.copy() - Src1Gp + Src2Imm(DecodeSelImm.Z) - BlockBack - NoSpec + CannotRobCompress)))
 
   val legalField = new DecodeFieldGen(
     Bool(),
@@ -215,7 +245,7 @@ object PseudoDecodeChannel {
         case _: Opcode.StuOpcodes.type => ???
         case _: Opcode.AmoOpcodes.type => ???
         case _: Opcode.BkuOpcodes.type => ???
-        case _: Opcode.CsrOpcodes.type => ???
+        case _: Opcode.CsrOpcodes.type => FuType.csr.U
         case _: Opcode.FenceOpcodes.type => ???
         case _: Opcode.FMacOpcodes.type => ???
         case _: Opcode.FDivOpcodes.type => ???
@@ -330,9 +360,18 @@ object PseudoDecodeChannel {
     (op: InstPattern) => (op == JALR_RD_ZERO).toBitPat
   )
 
-  def makeCSRRBitPat(csrno: Int): BitPat = {
-    new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_010_?????_1110011")
+  def makeCSRRallBitPat(csrno: Int): BitPat = {
+    new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_?1?_?????_1110011")
   }
+
+  /**
+   * Although "CSRR rd, csr" is encoded as "CSRRS rd, csr, x0", other instructions (CSRRSI/CSRRC/CSRRCI) performs the
+   * same when their RS1 is x0. They only read CSR value and write it into GPR[vd].
+   */
+  def makeCSRRCBitPat(csrno: Int): BitPat  = new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_011_?????_1110011")
+  def makeCSRRCIBitPat(csrno: Int): BitPat = new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_111_?????_1110011")
+  def makeCSRRSBitPat(csrno: Int): BitPat  = new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_010_?????_1110011")
+  def makeCSRRSIBitPat(csrno: Int): BitPat = new BitPat(csrno, 0xFFF, 12) ## BitPat("b00000_110_?????_1110011")
 
   implicit def StringToBitPat(str: String): BitPat = BitPat(str)
 }
