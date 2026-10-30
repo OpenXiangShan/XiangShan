@@ -2473,6 +2473,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // dontTouch for debug
   if (backendParams.debugEn) {
+    // Unpack the compressed ROB writeback state only for debug builds.
+    val debugFormerUopNum = Wire(Vec(RobSize, UInt(NormalUopNumWidth.W)))
+    val debugLatterUopNum = Wire(Vec(RobSize, UInt(NormalUopNumWidth.W)))
+    for (i <- 0 until RobSize) {
+      debugFormerUopNum(i) := RobBundles.decodeFormerUopNum(
+        robEntries(i).entryPairType,
+        robEntries(i).uopState
+      )
+      debugLatterUopNum(i) := RobBundles.decodeLatterUopNum(
+        robEntries(i).entryPairType,
+        robEntries(i).uopState
+      )
+    }
+    dontTouch(debugFormerUopNum)
+    dontTouch(debugLatterUopNum)
     dontTouch(enqPtrVec)
     dontTouch(deqPtrVec)
     dontTouch(robEntries)
