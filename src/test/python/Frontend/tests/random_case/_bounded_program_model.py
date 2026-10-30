@@ -31,7 +31,8 @@ def execute(program_map, *, max_steps=200000):
         trace.append({'index':step,'pc':hex(pc),'instr':hex(int(i['encoding'],16)),'size':i['size'],'taken':False})
         if int(i['encoding'],16)==0x0005006b:
             if registers[10]!=0:raise ValueError('nonzero trap code')
-            return {'trace':trace,'registers':registers,'memory':memory,'terminated':True,'minimum_sp':minimum_sp}
+            return {'trace':trace,'registers':registers,'memory':memory,'terminated':True,
+                    'minimum_sp':registers[2] if minimum_sp is None else min(minimum_sp,registers[2])}
         if mn in ('addi','addiw'):
             value=read(op[1])+number(op[2])
             if mn=='addiw':value=((value&0xffffffff)^0x80000000)-0x80000000
@@ -51,6 +52,10 @@ def execute(program_map, *, max_steps=200000):
         elif mn=='c.xor':write(op[0],read(op[0])^read(op[1]))
         elif mn=='c.add':write(op[0],read(op[0])+read(op[1]))
         elif mn in ('sd','ld'):
+            # Observe actual frames, not transient values while li sp expands.
+            # Generated frames use x2-relative stores after allocating their space.
+            if re.fullmatch(r'-?\d+\(x2\)',op[1]):
+                minimum_sp=registers[2] if minimum_sp is None else min(minimum_sp,registers[2])
             address=addr(op[1])
             if address%8:raise ValueError('unaligned stack access')
             if mn=='sd':memory[address]=read(op[0])
@@ -72,6 +77,5 @@ def execute(program_map, *, max_steps=200000):
         elif mn=='c.addi4spn':write(op[0],read('x2')+number(op[-1]))
         elif mn=='c.nop':pass
         else:raise ValueError('unsupported instruction '+mn+' '+i['operands'])
-        if registers[2]:minimum_sp=registers[2] if minimum_sp is None else min(minimum_sp,registers[2])
         trace[-1]['taken']=taken;pc=next_pc
     raise ValueError('bounded program failed to terminate within step budget')

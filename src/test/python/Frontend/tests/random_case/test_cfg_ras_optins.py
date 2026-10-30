@@ -122,6 +122,22 @@ def test_bounded_model_rejects_nonterminating_and_uninitialized_stack():
     with pytest.raises(ValueError,match='uninitialized'):execute(pm,max_steps=5)
 
 
+@pytest.mark.parametrize('frame_bytes',[0,16])
+def test_stack_occupancy_ignores_multistep_sp_initialization(frame_bytes):
+    # Real li sp expansion: the intermediate LUI value is not an allocated frame.
+    rows=[('04001137','lui','x2,0x4001'),('00511113','slli','x2,x2,0x5')]
+    if frame_bytes:
+        rows += [('ff010113','addi','x2,x2,-16'),('00113423','sd','x1,8(x2)'),
+                 ('00813083','ld','x1,8(x2)'),('01010113','addi','x2,x2,16')]
+    rows.append(('0005006b','.4byte','0x5006b'))
+    pm={'labels':{'_start':0x1000},'instructions':[
+        {'pc':0x1000+4*n,'size':4,'encoding':encoding,'mnemonic':mnemonic,'operands':operands}
+        for n,(encoding,mnemonic,operands) in enumerate(rows)]}
+    model=execute(pm)
+    assert model['terminated'] and model['registers'][2]==0x80020000
+    assert model['minimum_sp']==0x80020000-frame_bytes
+
+
 @pytest.mark.parametrize('family,flag,value',[
     ('cfg_layout_mix','--branch-history-mode','site8'),
     ('ras_indirect_history','--ras-return-mode','shared_leaf'),
@@ -223,6 +239,10 @@ def test_same_seed_control_and_optin_program_space_comparison(tmp_path,family,kw
         metadata,pm,model,analysis=_linked(out,spec)
         assert model['terminated'] and model['registers'][2]==0x80020000
         assert model['registers'][8]==0 and model['registers'][10]==0
+        stack_bytes=0x80020000-model['minimum_sp']
+        expected_stack_bytes=16*metadata.get('max_generated_call_depth',0)
+        assert 0<=stack_bytes<=16*spec.max_call_depth
+        assert stack_bytes==expected_stack_bytes
         branches={}
         targets={}
         by_pc={i['pc']:i for i in pm['instructions']}
@@ -233,7 +253,7 @@ def test_same_seed_control_and_optin_program_space_comparison(tmp_path,family,kw
         summary={'dynamic_instructions':len(model['trace']),'binary_bytes':(out/'case.bin').stat().st_size,
                  'conditional_sites':len(branches),'distinct_branch_sequences':len({tuple(s) for s in branches.values()}),
                  'max_return_successors':max(map(len,targets.values()),default=0),
-                 'max_stack_bytes':0x80020000-model['minimum_sp'],
+                 'max_stack_bytes':stack_bytes,
                  'source_sha256':hashlib.sha256((out/'case.S').read_bytes()).hexdigest(),
                  'binary_sha256':pm['binary_sha256'],'model_terminated':True}
         results.append(summary)
