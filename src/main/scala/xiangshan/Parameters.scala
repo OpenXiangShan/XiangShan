@@ -623,6 +623,8 @@ case class DebugOptions
   EnableXMR: Boolean = true,
   SimMemSize: Long = 8190L * 1024 * 1024 * 1024, // same as PMA, (0x80000000L, 0x80000000000L)
   UseDRAMSim: Boolean = false,
+  UseMCSim: Boolean = false,
+  UseYuQuan: Boolean = false,
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,

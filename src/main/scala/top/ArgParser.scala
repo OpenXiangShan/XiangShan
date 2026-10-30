@@ -41,6 +41,8 @@ object ArgParser {
       |--num-cores <Int>
       |--hartidbits <Int>
       |--with-dramsim3
+      |--with-mcsim
+      |--with-yuquan
       |--with-iommu
       |--fpga-platform
       |--reset-gen
@@ -105,6 +107,14 @@ object ArgParser {
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
+          }), tail)
+        case "--with-mcsim" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(UseMCSim = true)
+          }), tail)
+        case "--with-yuquan" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(UseYuQuan = true)
           }), tail)
         case "--with-iommu" :: tail =>
           nextOption(config.alter((site, here, up) => {
