@@ -49,6 +49,10 @@ auto Environment::Impl::enqueue_prefetch_batch(const std::vector<PrefetchTransac
 auto Environment::Impl::issue_prefetch(const PrefetchTransaction &transaction,
     unsigned timeout)  -> bool
 {
+    if (retained_issue_driver_) {
+        error_.record("legacy issue_prefetch conflicts with retained producer pin ownership");
+        return false;
+    }
     if (!scalar_immediate_is_valid(transaction.immediate)) {
         error_.record("software-prefetch immediate exceeds signed 12-bit range");
         return false;
@@ -89,6 +93,10 @@ auto Environment::Impl::issue_prefetch(const PrefetchTransaction &transaction,
 auto Environment::Impl::issue_prefetch_batch_same_cycle(const std::vector<PrefetchTransaction> &transactions,
     unsigned timeout)  -> bool
 {
+    if (retained_issue_driver_) {
+        error_.record("legacy issue_prefetch_batch_same_cycle conflicts with retained producer pin ownership");
+        return false;
+    }
     if (transactions.empty() || transactions.size() > kScalarLoadLanes) {
         error_.record("software-prefetch batch must contain one to three requests");
         return false;
@@ -314,6 +322,10 @@ void trace_vector_issue(const VectorMemoryTransaction &transaction)
 auto Environment::Impl::issue_vector(const VectorMemoryTransaction &transaction,
     unsigned timeout)  -> bool
 {
+    if (retained_issue_driver_) {
+        error_.record("legacy issue_vector conflicts with retained producer pin ownership");
+        return false;
+    }
     trace_vector_issue(transaction);
     const generated::VectorMemoryIssue issue =
         make_vector_memory_issue(transaction);
@@ -360,6 +372,10 @@ auto Environment::Impl::issue_vector(const VectorMemoryTransaction &transaction,
 auto Environment::Impl::issue_vector_batch_same_cycle(const std::vector<VectorMemoryTransaction> &transactions,
     unsigned timeout)  -> bool
 {
+    if (retained_issue_driver_) {
+        error_.record("legacy issue_vector_batch_same_cycle conflicts with retained producer pin ownership");
+        return false;
+    }
     if (transactions.empty() || transactions.size() > kVectorMemoryLanes) {
         error_.record("vector issue batch must contain one or two transactions");
         return false;
@@ -626,6 +642,10 @@ auto Environment::Impl::issue_store_operands(const StoreTransaction &transaction
 auto Environment::Impl::issue_store_address_batch(const std::vector<StoreTransaction> &transactions,
     unsigned timeout)  -> bool
 {
+    if (retained_issue_driver_) {
+        error_.record("legacy issue_store_address_batch conflicts with retained producer pin ownership");
+        return false;
+    }
     if (transactions.empty() || transactions.size() > kScalarStoreLanes) {
         error_.record("scalar store-address batch must contain one or two transactions");
         return false;
@@ -691,6 +711,10 @@ auto Environment::Impl::issue_store_address_batch(const std::vector<StoreTransac
 auto Environment::Impl::issue_atomic(const AtomicTransaction &transaction,
     unsigned timeout)  -> bool
 {
+    if (retained_issue_driver_) {
+        error_.record("legacy issue_atomic conflicts with retained producer pin ownership");
+        return false;
+    }
     generated::ScalarStoreIssue address;
     address.fu_type = kFuTypeAtomic;
     address.fu_op_type = static_cast<std::uint16_t>(transaction.op);
@@ -1093,6 +1117,9 @@ auto Environment::Impl::issue_store_data(const StoreTransaction &transaction,
     generated::ScalarStoreIssue issue;
     issue.fu_type = kFuTypeStore;
     issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
+    // The public STD flag is pruned; retained producer cancellation still
+    // requires the complete software ROB identity across wrap.
+    issue.rob_flag = transaction.rob_flag;
     issue.rob_value = transaction.rob;
     issue.sq_flag = transaction.sq_flag;
     issue.sq_value = transaction.sq;

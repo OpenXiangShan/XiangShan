@@ -1133,6 +1133,11 @@ FP helper and exceptional-misalignment combinations remain open.
 Broader temporal locality/dependent-address streams and scalar/vector SQ
 forwarding follow these. Rare error/protection/CMO crosses remain secondary.
 
+Retained bindings own every ordinary issue pin; legacy manual issue/replay
+helpers reject overlapping use before pin or replay-state mutation. STD retains
+its software ROB wrap for delayed cancellation even though no public STD wrap
+pin exists. These prerequisites do not yet make sliding issue nonblocking.
+
 The ready-event scheduler still executes one blocking producer helper per turn.
 An eligible ordinary scalar store can offer its initial STA and STD together;
 actual same/split-edge outcomes and skew are observed per operand. Heterogeneous

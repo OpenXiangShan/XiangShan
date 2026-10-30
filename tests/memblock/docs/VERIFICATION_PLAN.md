@@ -225,6 +225,13 @@ release input groups before same-edge writeback/manager capture. Pair coverage
 records actual same/split accepted edges and skew; both remain distinct issue
 events. General sliding load/vector scheduling and admission during a stalled
 pair remain to be migrated. Independent byte and identity scoreboards stay active.
+Legacy manual issue helpers now reject a bound retained owner before pin writes
+or clock edges; vector replay service also rejects before consuming its request.
+This includes an empty bound owner. The STD software offer retains full ROB wrap
+identity even with the public flag pin pruned. These are correctness
+prerequisites for persistent sessions, not completion of the producer-density
+gap; independent admission/retirement and heterogeneous issue during stalls
+remain required.
 The stream holds a single architectural head and independent byte-prefix oracle,
 with distinct live class destinations. Ordinary admissions can independently
 sample address and scalar-store data edges from older live integer loads.

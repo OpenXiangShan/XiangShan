@@ -1,4 +1,5 @@
 #include "memblock_env.hpp"
+#include "environment/retained_issue.hpp"
 #include <functional>
 #include <random>
 
@@ -69,6 +70,7 @@ public:
     StoreScoreboard store_scoreboard_;
     VectorMemoryScoreboard vector_scoreboard_;
     FeedbackMonitor feedback_;
+    RetainedIssueDriver *retained_issue_driver_ = nullptr;
     FixtureDut dut_;
     SparseMemory memory_;
     struct Agent {

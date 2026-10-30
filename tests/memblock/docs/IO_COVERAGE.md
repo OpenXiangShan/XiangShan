@@ -66,6 +66,12 @@ Environment::Impl::tick in [cycle.cpp](../cpp/environment/cycle.cpp) defines the
 sampling phases. Response fields driven by a manager and then read back by that
 same manager validate harness transport only. Independent result/side-effect
 checks are still required to establish DUT behavior.
+An explicitly bound retained driver owns all ordinary issue pins, including
+when its slots are empty. Legacy manual issue helpers reject overlapping use;
+vector replay service rejects before taking its request. The software STD offer
+retains full ROB value/wrap for producer cancellation; the generated STD wrap
+pin remains pruned. These rules do not establish nonblocking sliding issue or
+classify unmatched STD writeback pulses.
 
 The generated [protocol SVA](../sv/memblock_protocol_sva.sv) checks valid/payload
 stability for retained DUT producers including DCache A/C/E, PTW A, Uncache A,

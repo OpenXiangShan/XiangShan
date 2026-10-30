@@ -132,6 +132,10 @@ auto Environment::Impl::service_vector_replay(const VectorMemoryTransaction &tra
     bool &replayed, unsigned timeout) -> bool
 {
     replayed = false;
+    if (retained_issue_driver_) {
+        error_.record("legacy service_vector_replay conflicts with retained producer pin ownership");
+        return false;
+    }
     const auto request = feedback_.take_replay_for(transaction);
     if (!request) return check_components();
     if (!vector_scoreboard_.pending(transaction)) {

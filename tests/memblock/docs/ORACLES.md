@@ -716,6 +716,13 @@ outcomes at the common pre-edge boundary. Only the completed edge produces
 tagged acceptance/retry/cancellation events. Other helper ticks use that same
 binding, including `tick(false)`; this does not enable the terminal monitors
 which that mode skips. Unbound legacy helpers retain their separate sampling.
+Manual scalar-load/prefetch/vector issue, their batch helpers, scalar STA batch
+and atomic issue reject an already bound retained driver before changing pins
+or advancing an edge. `service_vector_replay` rejects before consuming its
+identified replay request. This prevents pre-tick ready samples from reporting
+acceptance for pins overwritten by the bound owner. A bound empty driver still
+owns the pins. These guards enforce ownership; they do not provide a persistent
+ordinary scheduling session or remove blocking helpers.
 
 The final CPU producer registers in `Backend.scala` and
 `datapath/NewPipelineConnect.scala` retain stalled scalar offers. Vector offers
@@ -744,6 +751,11 @@ head owner before manager capture. Same-store STA/STD may accept together or
 on different edges. The slow-feedback cursor begins at the actual STA edge;
 miss retries remain separate. Ordinary sliding load/vector issue and independent
 admission during a stalled operand pair have not yet migrated.
+The single STD helper retains the transaction's full ROB value/wrap in its
+software offer, even though the generated public STD flag pin is pruned. The
+delayed producer cancellation rule uses this software identity. Wrapped
+survivors and killed acceptances remain distinct; no public STD flag or new
+unmatched-pulse oracle is inferred.
 
 [BridgeMonitor](../cpp/environment/bridge_monitor.cpp) compares independently
 captured inputs against explicit combinational, one-cycle, two-cycle or

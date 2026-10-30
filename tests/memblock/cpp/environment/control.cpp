@@ -572,6 +572,10 @@ auto Environment::Impl::enqueue_load_batch(const std::vector<LoadTransaction> &t
 auto Environment::Impl::issue_load(const LoadTransaction &transaction,
     unsigned timeout)  -> bool
 {
+    if (retained_issue_driver_) {
+        error_.record("legacy issue_load conflicts with retained producer pin ownership");
+        return false;
+    }
     if (!scalar_immediate_is_valid(transaction.immediate)) {
         error_.record("scalar load immediate exceeds signed 12-bit range");
         return false;
@@ -622,6 +626,10 @@ auto Environment::Impl::issue_load_batch(const std::vector<LoadTransaction> &tra
     unsigned timeout,
     bool require_same_cycle)  -> bool
 {
+    if (retained_issue_driver_) {
+        error_.record("legacy issue_load_batch conflicts with retained producer pin ownership");
+        return false;
+    }
     if (transactions.empty() || transactions.size() > kScalarLoadLanes) {
         error_.record("scalar load batch must contain one to three transactions");
         return false;
