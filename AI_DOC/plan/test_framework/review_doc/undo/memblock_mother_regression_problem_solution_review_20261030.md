@@ -89,7 +89,13 @@ fault3跨轮当前1/100，原1FAIL/19ABORTED/80NOT_RUN历史保留；
 最终独立结果review和修复后稳定版本边界确认。
 恢复批次现已收敛为0PASS/1FAIL/19ABORTED/79NOT_RUN，unknown0，新首错seed1705742557在724655.8ns报ROLLBACK_XMR来源冲突；
 不是首段异常修复复发。新矩阵前5组50/50严格通过，第6组由主agent首错管理联停为9PASS/1ABORTED、0功能FAIL。
-当前只运行原参数波形复现，责任尚待确认；Turing已对精确同拍候选方案完成只读静态review，不能替代正式责任门禁。
+原参数带波形已同时间/身份复现；NPI证明sample144892 winner4与144894 winner5各自本拍输出正确，旧resolver错误地比较跨拍payload。
+Turing正式责任分类和正式方案review均PASS：测试框架问题，不是RM或RTL仲裁缺陷。
+修复已在mother顺序完成，仅修改resolver精确sample条件及一个相关软件定向task，未修改RTL/RM/cfg或请求生成。
+fresh compile、软件专项及20/20真实DUT专项通过（18邻接加原1705742557与1992896882各10000笔），Turing独立静态实现review PASS；所有专项controller已退出、unknown0。
+Turing最终独立`FINAL_IMPLEMENTATION_REVIEW_PASS`，本Bug方案移do，随本记录单Bug提交；当前修复版350项最终批量仍待执行，不把旧源码的51项或250项历史PASS迁移到新版本验收。
+后续计划为当前两根完整PASS后，保留最新19颗ABORTED原seed并构造79颗新seed恢复98项；同时在另一独立mode重验25组250项。
+当前专项review：`AI_DOC/plan/test_framework/review_doc/undo/memblock_rollback_same_sample_provenance_implementation_review_20261030.md`。
 分析入口：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
 当前25组250个通过记录的SV基线覆盖率已过滤合并，目录`mem_ut/ver/ut/memblock/sim/mother_matrix_pass_coverage_20261030`，
 有效`urgReport_r2`/`merged_r2.vdb`确认250 tests/records及精确白名单一致，工具日志无ERROR/WARNING；

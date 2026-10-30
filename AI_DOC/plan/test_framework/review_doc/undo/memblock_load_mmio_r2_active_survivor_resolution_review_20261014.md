@@ -4,6 +4,10 @@
 
 对象：`memblock_load_mmio_r2_active_survivor_resolution_plan_20261014.md`
 
+2026-10-30合同更正：本文保留历史MMIO分析与验证记录，其中旧rollback跨拍来源容错不再作为当前V2合同。
+原seed1705742557波形证明winner4→5的跨拍合法变化会被旧4拍一致性判断误报；当前精确同拍修复及验证门禁见
+`AI_DOC/plan/test_framework/plan/do/memblock_rollback_same_sample_provenance_fix_plan_20261030.md`，20/20真实DUT及软件专项通过，Turing最终独立review PASS。
+
 ## Review 1
 
 - 结论：有条件通过。

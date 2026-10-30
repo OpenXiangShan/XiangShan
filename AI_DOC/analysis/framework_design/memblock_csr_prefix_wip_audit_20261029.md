@@ -284,3 +284,13 @@ Kuhn独立复核snapshot：23个已跟踪源码/测试文件，其中20个净改
 B1另外4源码文件为`seq/base_seq/{memblock_csr_control_base_sequence,memblock_dynamic_csr_change_sequence}.sv`及
 `seq/virtual_sequence/{memblock_csr_mapping_transport_negative_vseq,memblock_csr_random_config_vseq}.sv`，
 连同flow/plan/review/Buglist见独立提交`5a4dc2df4d`；不能据此声称原WIP已整体迁移。
+
+## 门禁后新Rollback问题与旧WIP的边界（2026-10-30）
+
+门禁关闭后母任务fault3 seed1705742557发现的ROLLBACK_XMR已独立确认为测试框架跨拍来源误关联。
+重新只读核对source `common/memblock_common/src/memblock_sync_pkg.sv:1008`的resolver，仍为
+`entry.sample_seq > output_sample_seq`过滤，即保留age0–4全部同key记录；source的HEAD到WIP差异不含rollback相关修改。
+因此没有该resolver已完成精确同拍修复却漏合入mother的证据，不能把新Bug误记成A2–A7遗漏的必要修复。
+本Bug已在mother按独立责任/方案review顺序实现，一个生产逻辑文件加一个必要软件定向文件；20/20真实DUT及软件专项通过，Turing最终独立review PASS，随本记录单Bug提交后恢复批量。
+完整证据与后续验收：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
+旧source继续仅保全证据，无写入、不重开其修改流程、不新建worktree；原A0–A7/B1处置结论不变。

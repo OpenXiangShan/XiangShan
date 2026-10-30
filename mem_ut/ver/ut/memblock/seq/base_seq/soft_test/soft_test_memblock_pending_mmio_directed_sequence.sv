@@ -313,70 +313,118 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_rollback_cross_sampl
     input_snapshot.memory_violation_valid = 1'b1;
     input_snapshot.memory_violation_rob_valid = 1'b1;
     input_snapshot.memory_violation_rob_flag = 1'b1;
-    input_snapshot.memory_violation_rob_value = 8'h76;
+    input_snapshot.memory_violation_rob_value = 8'h7e;
     input_snapshot.memory_violation_level = 1'b1;
     input_snapshot.rollback_diag_valid = 1'b1;
     input_snapshot.rollback_diag_complete = 1'b1;
-    input_snapshot.rollback_candidate_known[0] = 1'b1;
-    input_snapshot.rollback_candidate_valid[0] = 1'b1;
-    input_snapshot.rollback_candidate_rob_flag[0] = 1'b1;
-    input_snapshot.rollback_candidate_rob_value[0] = 8'h76;
-    input_snapshot.rollback_candidate_level[0] = 1'b1;
-    input_snapshot.rollback_winner_known[0] = 1'b1;
-    input_snapshot.rollback_winner[0] = 1'b1;
-    input_snapshot.rollback_lu_reason_known[0] = 1'b1;
-    input_snapshot.rollback_lu_vp_match_fail[0] = 1'b1;
+    // 中文注释：复刻原seed同ROB1/126的RAW-nuke0到RAW-nuke1跨拍来源变化。
+    input_snapshot.rollback_candidate_known = '1;
+    input_snapshot.rollback_candidate_valid[4] = 1'b1;
+    input_snapshot.rollback_candidate_rob_flag[4] = 1'b1;
+    input_snapshot.rollback_candidate_rob_value[4] = 8'h7e;
+    input_snapshot.rollback_candidate_level[4] = 1'b1;
+    input_snapshot.rollback_winner_known = 6'h37;
+    input_snapshot.rollback_winner[4] = 1'b1;
+    input_snapshot.rollback_raw_store_known = '1;
     memblock_sync_pkg::cache_rollback_input_provenance(input_snapshot, 100);
 
     if (!memblock_sync_pkg::resolve_rollback_output_provenance(
-            1'b1, 8'h76, 1'b1, 102,
+            1'b1, 8'h7e, 1'b1, 100,
             resolved_snapshot, input_sample_seq, conflicting) ||
         conflicting || input_sample_seq != 100 ||
-        resolved_snapshot.rollback_winner != 6'b00_0001 ||
-        !resolved_snapshot.rollback_lu_vp_match_fail[0]) begin
+        !memblock_sync_pkg::rollback_provenance_payload_equal(resolved_snapshot, input_snapshot)) begin
         `uvm_fatal(get_type_name(),
-                   "cross-sample rollback provenance did not resolve by full ROB/level")
+                   "same-sample rollback provenance did not copy the complete snapshot")
     end
     if (memblock_sync_pkg::resolve_rollback_output_provenance(
-            1'b1, 8'h76, 1'b0, 102,
-            resolved_snapshot, input_sample_seq, conflicting)) begin
+            1'b1, 8'h7e, 1'b1, 102,
+            resolved_snapshot, input_sample_seq, conflicting) ||
+        conflicting || input_sample_seq != 0 || resolved_snapshot.memory_violation_valid ||
+        resolved_snapshot.rollback_diag_valid || resolved_snapshot.rollback_winner != '0 ||
+        resolved_snapshot.rollback_candidate_valid != '0) begin
         `uvm_fatal(get_type_name(),
-                   "rollback provenance resolver ignored output level")
+                   "missing current sample borrowed historical rollback provenance")
     end
 
     repeated_snapshot = input_snapshot;
-    memblock_sync_pkg::cache_rollback_input_provenance(repeated_snapshot, 103);
+    repeated_snapshot.rollback_candidate_valid = 6'b10_0000;
+    repeated_snapshot.rollback_candidate_rob_flag = 6'b10_0000;
+    repeated_snapshot.rollback_candidate_rob_value = '0;
+    repeated_snapshot.rollback_candidate_rob_value[5] = 8'h7e;
+    repeated_snapshot.rollback_candidate_level = 6'b10_0000;
+    repeated_snapshot.rollback_winner = 6'b10_0000;
+    memblock_sync_pkg::cache_rollback_input_provenance(repeated_snapshot, 102);
     if (!memblock_sync_pkg::resolve_rollback_output_provenance(
-            1'b1, 8'h76, 1'b1, 104,
+            1'b1, 8'h7e, 1'b1, 102,
             resolved_snapshot, input_sample_seq, conflicting) ||
-        conflicting || input_sample_seq != 103) begin
+        conflicting || input_sample_seq != 102 ||
+        !memblock_sync_pkg::rollback_provenance_payload_equal(resolved_snapshot, repeated_snapshot)) begin
         `uvm_fatal(get_type_name(),
-                   "identical repeated rollback provenance did not select latest sample")
+                   "cross-sample winner4 to winner5 change falsely conflicted")
     end
-
+    // 中文注释：完整ROB flag/value和level仍参与本拍身份，错误身份必须失败且无旧值泄漏。
+    for (int idx = 0; idx < 3; idx++) begin
+        if (memblock_sync_pkg::resolve_rollback_output_provenance(
+                idx == 0 ? 1'b0 : 1'b1,
+                idx == 1 ? 8'h7f : 8'h7e,
+                idx == 2 ? 1'b0 : 1'b1, 102,
+                resolved_snapshot, input_sample_seq, conflicting) ||
+            conflicting || input_sample_seq != 0 || resolved_snapshot.memory_violation_valid ||
+            resolved_snapshot.rollback_diag_valid || resolved_snapshot.rollback_winner != '0) begin
+            `uvm_fatal(get_type_name(), "rollback provenance ignored current ROB/level identity")
+        end
+    end
+    // 中文注释：另一拍增加未获选候选合法；同一拍的重复证明才要求完整一致。
     repeated_snapshot.rollback_candidate_known[1] = 1'b1;
     repeated_snapshot.rollback_candidate_valid[1] = 1'b1;
     repeated_snapshot.rollback_candidate_rob_flag[1] = 1'b1;
-    repeated_snapshot.rollback_candidate_rob_value[1] = 8'h77;
+    repeated_snapshot.rollback_candidate_rob_value[1] = 8'h7f;
     repeated_snapshot.rollback_candidate_level[1] = 1'b1;
     memblock_sync_pkg::cache_rollback_input_provenance(repeated_snapshot, 104);
+    memblock_sync_pkg::cache_rollback_input_provenance(repeated_snapshot, 104);
+    if (!memblock_sync_pkg::resolve_rollback_output_provenance(
+            1'b1, 8'h7e, 1'b1, 104,
+            resolved_snapshot, input_sample_seq, conflicting) || conflicting || input_sample_seq != 104 ||
+        !memblock_sync_pkg::rollback_provenance_payload_equal(resolved_snapshot, repeated_snapshot)) begin
+        `uvm_fatal(get_type_name(), "same-sample identical proof or cross-sample nonwinner change failed")
+    end
+    repeated_snapshot.rollback_candidate_rob_value[1] = 8'h80;
+    memblock_sync_pkg::cache_rollback_input_provenance(repeated_snapshot, 104);
     if (memblock_sync_pkg::resolve_rollback_output_provenance(
-            1'b1, 8'h76, 1'b1, 104,
+            1'b1, 8'h7e, 1'b1, 104,
             resolved_snapshot, input_sample_seq, conflicting) ||
-        !conflicting) begin
+        !conflicting || input_sample_seq != 0 || resolved_snapshot.memory_violation_valid ||
+        resolved_snapshot.rollback_diag_valid || resolved_snapshot.rollback_winner != '0) begin
         `uvm_fatal(get_type_name(),
-                   "same-key rollback provenance conflict was not rejected")
+                   "same-sample rollback proof conflict was not rejected atomically")
     end
 
     memblock_sync_pkg::clear_rollback_provenance_cache();
+    memblock_sync_pkg::cache_rollback_input_provenance(input_snapshot, 108);
+    if (memblock_sync_pkg::resolve_rollback_output_provenance(
+            1'b1, 8'h7e, 1'b1, 107,
+            resolved_snapshot, input_sample_seq, conflicting) || conflicting || input_sample_seq != 0 ||
+        resolved_snapshot.memory_violation_valid || resolved_snapshot.rollback_diag_valid) begin
+        `uvm_fatal(get_type_name(), "future rollback proof was used for an earlier output")
+    end
+    memblock_sync_pkg::clear_rollback_provenance_cache();
+    if (memblock_sync_pkg::resolve_rollback_output_provenance(
+            1'b1, 8'h7e, 1'b1, 108,
+            resolved_snapshot, input_sample_seq, conflicting) || conflicting || input_sample_seq != 0 ||
+        resolved_snapshot.memory_violation_valid || resolved_snapshot.rollback_diag_valid) begin
+        `uvm_fatal(get_type_name(), "reset-cleared rollback provenance remained visible")
+    end
     memblock_sync_pkg::cache_rollback_input_provenance(input_snapshot, 100);
     if (memblock_sync_pkg::resolve_rollback_output_provenance(
-            1'b1, 8'h76, 1'b1, 105,
-            resolved_snapshot, input_sample_seq, conflicting)) begin
+            1'b1, 8'h7e, 1'b1, 105,
+            resolved_snapshot, input_sample_seq, conflicting) || conflicting || input_sample_seq != 0 ||
+        memblock_sync_pkg::rollback_provenance_cache.size() != 0) begin
         `uvm_fatal(get_type_name(),
                    "expired rollback provenance remained visible")
     end
     memblock_sync_pkg::clear_rollback_provenance_cache();
+    `uvm_info("ROLLBACK_SAME_SAMPLE_DIRECTED",
+              "winner4 to winner5 isolation, current identity, strict same-sample conflicts and reset checks PASS", UVM_LOW)
 endtask:run_rollback_cross_sample_cache_scenario
 
 // 中文注释：每个 directed 场景只通过 LSQ/data owner 的公开 reset/bind API

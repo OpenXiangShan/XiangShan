@@ -1,6 +1,6 @@
-# Rollback输出来源冲突待确认分析
+# Rollback跨拍来源误关联根因分析
 
-日期：2026-10-30。状态：`PAUSED_ANALYSIS`，原参数波形复现运行中，尚未确认责任，不提前登记正式Buglist或修改生产源码。
+日期：2026-10-30。状态：责任、正式方案及最终实现review PASS；已顺序coding、fresh compile、软件专项及20/20真实DUT专项PASS，方案移do，随本记录单Bug提交；提交后再恢复批量。
 
 ## 1. 原始合同与首错
 
@@ -64,3 +64,47 @@ RAW当前storeIn只作附加诊断，不据此断言流水之前的致因store�
 后续：等待原时间/现象复现，提取NPI输入/输出窗口；独立责任review通过后更新对应W44 Buglist，
 编写并review最小方案，再在母工作区顺序coding、fresh compile、原seed与必要邻接/负向专项，单Bug提交后恢复批次。
 strict-NC已确认RTL组仍跳过，不修改RTL，不新建worktree，不修无关soft_test。
+
+## 5. 最终波形事实与责任结论
+
+第1–4节保留发现/候选过程，不是当前仍待复现的状态。原参数带波形在724655.8ns同ROB1/126、sample144894、conflict1精确复现，
+结果1FAIL、unknown0，controller退出。VCS仍用原版本，NPI读取使用具备内置Python3.6的Verdi V-2023.12-SP1；
+R-2020.12-SP1没有该Python路径，最初抽取没有产生有效数据，改用已验证NPI版本后成功，未改仿真或工具安装。
+
+| 采样编号 | 边沿前1ps取值点 | winner | candidate valid | 输出 |
+|---|---:|---|---|---|
+| 144892 | 724645799ps | 4，RAW-nuke0 | 0x10 | ROB1/126，level1，本拍匹配 |
+| 144893 | 724650799ps | 无有效获选 | 0 | valid0 |
+| 144894 | 724655799ps | 5，RAW-nuke1 | 0x20 | ROB1/126，level1，本拍匹配 |
+
+两次有效事件的winner_known均0x37；非活动uncache未知payload没有被当成有效来源，活动获选payload和完整诊断均已知。
+这不是非winner小变化，而是两个独立输入来源针对同一ROB先后发出的合法事件。
+旧resolver允许age2旧记录参加本拍判断，再由`rollback_candidate_valid`的0x10≠0x20即可使完整payload比较失败。
+本拍完整证据确实存在，无需伪造输入、删除比较字段、最新样本兜底或跨拍fallback。
+
+权威结果：debug目录的`rollback_native_npi_trace.json`和`rollback_wave_acceptance.json`；断言脚本`check_wave.py`已由主agent与Turing独立执行PASS。
+trace SHA256=`957f52e2626ecb3ddd1cd6e6b1d37ccd6f4bf5853d6923ab9d199c59a9e5c305`，同时记录原生packed二进制与十六进制，避免窄位宽/X态失真。
+Turing正式责任`REVIEW_PASS`：测试框架rollback provenance跨拍误关联，非RM、非RTL仲裁；不扩展结论为RAW致因store全链均已证明。
+已登记W44 RM目录中的测试框架章节，方案为`AI_DOC/plan/test_framework/plan/do/memblock_rollback_same_sample_provenance_fix_plan_20261030.md`。
+正式方案review已PASS，实施与专项最新状态见第6节；不能仅凭责任通过记修复PASS或恢复批量。
+
+## 6. 修复执行与验证进展
+
+生产逻辑仅收紧resolver的sample比较为精确相等并补中文注释；相关软件task同步测试winner4→5、本拍缺失、
+错ROB/level、跨拍非winner变化、同拍一致重复/不一致冲突、未来、reset及过期清除。没有修改其他softcase、RTL、RM或cfg。
+原2540输入相对1343只有sync package和该测试task两个SV变化，逐路径hash已保存；原失败源码也已归档并核对hash，旧NPI断言可在修后重跑。
+
+`mother_rollback_same_sample_protocol_20261030_results` fresh compile/软件专项PASS，basicTest只启动外加vseq调用目标task，
+没有启动整个软件sequence的body；唯一marker/VSEQ_BODY/TEST_PASS/finish及六项零错误已验收，不计DUT PASS。
+原1705742557 10000笔fresh compile及原参数完整STRICT_PASS，目录`mother_rollback_same_sample_original1705742557_20261030_results`；
+首段原1992896882 10000笔在另一coverage mode重新编译并完整STRICT_PASS，18项真实DUT邻接用独立protocol mode全部严格通过。
+所有均为当前Bug必要专项，不代表已恢复99/250批量；专项/最终review通过后才单Bug提交。
+18项邻接现已全部STRICT_PASS，controller退出/unknown0；软件专项另计PASS。
+原1705742557于724655.8ns已成功同拍关联，另有`failure_point_acceptance.json`保存前缀hash；
+两颗完整10000笔根seed现已独立严格验收：正常结束、RM比较10000次、六项错误计数0、rc0/unknown0；Turing最终独立实现review PASS。
+原170与199完整日志SHA256分别为24b07012037609494916f60d7c29d58944ad92e0114aa1f64cd14a8080d39db4、
+c9a3e9c0b34c94e4dc83fdf9190ebea2a0e9efaacee6b04eb55fddd649a147c5；各目录strict_acceptance.json保留入口及hash。
+
+补充旧工作区审计：只读核对`.codex_csr_prefix_fix_20261025`同名resolver（1008行），仍使用相同的age0–4过滤；
+该文件HEAD到WIP差异无rollback相关修改，没有“旧source已修但未合入”的证据。本Bug是门禁关闭后新回归发现的问题，
+不是必须恢复旧residency/deferred机制才能修复。source未改，母工作区继续顺序闭环。

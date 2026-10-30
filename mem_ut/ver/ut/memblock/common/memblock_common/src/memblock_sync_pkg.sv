@@ -1309,8 +1309,10 @@ package memblock_sync_pkg;
             rollback_provenance_cache.pop_front();
         end
         foreach (rollback_provenance_cache[idx]) begin
+            // 中文注释：V2顶层仲裁为同拍组合输出；历史保存上界不是输出延迟容差。
+            // 只比较本拍同身份的重复证明，不能把不同拍的合法winner变化归为冲突。
             if (!rollback_provenance_cache[idx].valid ||
-                rollback_provenance_cache[idx].sample_seq > output_sample_seq ||
+                rollback_provenance_cache[idx].sample_seq != output_sample_seq ||
                 rollback_provenance_cache[idx].snapshot.memory_violation_rob_flag != rob_flag ||
                 rollback_provenance_cache[idx].snapshot.memory_violation_rob_value != rob_value ||
                 rollback_provenance_cache[idx].snapshot.memory_violation_level != level) begin

@@ -5,12 +5,12 @@
 - Worktree: `.codex_mother_integration_20261028`
 - Branch: `codex/memblock-csr-prefix-fix-20261025`
 - 最近已提交实现：`1343dbce3`（跨页Load首段数据错误RM修复，单Bug commit）；旧PBMT profile为`3bd0e9934`、旧已通过SV基线为`60dcca7c6`。
-  本次2540项编译输入中仅计划内10个SV输入变化，RTL未变；四项无关知识库脏文档未纳入提交。
+  该1343修复的2540项编译输入中仅计划内10个SV变化；当前未提交rollback修复相对1343另变2个SV。RTL未变，四项无关知识库脏文档未纳入提交。
 - 当前执行状态：旧WIP门禁已关闭；原矩阵非strict-NC共25组250/250通过，strict-NC10项延期；25组通过SV基线覆盖率已过滤合并。
   新fault3问题已独立确认为RM并通过方案review。r5 fresh compile及相同临时参数最小真实DUT用例严格PASS，
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
   本BugTuring最终独立review PASS并已提交；fault3恢复99出现新ROLLBACK_XMR，当前跨轮1/100、`PAUSED_ANALYSIS`；
-  修复后矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。原参数波形复现与独立责任分析进行中。
+  1343基线矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。新rollback责任/方案/最终实现review均PASS，已顺序修改2个SV并fresh compile；软件1/1及真实DUT20/20专项通过（18邻接加两个原根各10000笔）。方案移do，随本记录单Bug提交后才恢复批量，当前新版最终350项尚未验收。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -426,7 +426,8 @@ Turing独立责任分类为`REVIEW_PASS`，已登记W44 RM周文件“跨页Load
 恢复99结果：`mem_ut/ver/ut/memblock/sim/mother_fault3_recovery99_r5_20261030_results`，mode=`mother_first_split_pass_only_cov_20261030`。
 修复后25组矩阵：`mem_ut/ver/ut/memblock/sim/mother_stable_matrix_r5_20261030_results`，mode=`mother_stable_matrix_r5_20261030`；
 首组`basicTest / memblock_dispatch_manual_control_vseq / csr_sfence_check_store_manual_control` fresh compile PASS并10/10严格通过，后续组各10并发。
-两处`campaign_state.tsv`逐轮/逐组保留状态，原失败和旧250通过记录不覆盖；当前修复后矩阵50/250、fault3 1/100，合计51/350，专项邻接不替代计划矩阵名额。
+两处`campaign_state.tsv`逐轮/逐组保留状态，原失败和旧250通过记录不覆盖；1343基线当时矩阵50/250、fault3 1/100，共51项验收，专项邻接不替代计划矩阵名额。
+随后rollback修复改变2个SV输入；这些旧基线结果不计新SV最终350项，新版最终批量尚未恢复。
 
 ### 1343dbce3修复后矩阵逐组状态
 
@@ -466,7 +467,40 @@ Turing独立责任分类为`REVIEW_PASS`，已登记W44 RM周文件“跨页Load
 seed1705742557于724655.800ns，`ROLLBACK_XMR cannot correlate rollback output rob=1/126 level=1 sample=144894 conflict=1`。
 99项恢复批次最终0PASS/1FAIL/19ABORTED/79NOT_RUN，unknown0；controller已退出，原失败/联停/未启动记录均保留。
 并行矩阵controller已收敛，第6组9PASS/1ABORTED（212889620）无功能FAIL；第7–25组未启动，不继续批量或修改生产源码。
-当前只运行原参数带波形专项：`mother_rollback_1705742557_debug_20261030_results`；Turing独立只读分析同步进行。
+原参数带波形专项：`mother_rollback_1705742557_debug_20261030_results`，同724655.8ns/ROB/sample复现，1FAIL/unknown0、controller退出。
 分析入口：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
-责任尚未确认，暂不登记正式Buglist，也不把已修首段错误Bug重新标记失败；状态为`PAUSED_ANALYSIS`。
+Turing正式责任review PASS：测试框架跨拍来源误关联，已登记W44测试框架章节；144892 winner4与144894 winner5输出各自正确，旧缓存错误要求跨拍payload一致。
+正式方案：`AI_DOC/plan/test_framework/plan/do/memblock_rollback_same_sample_provenance_fix_plan_20261030.md`，Turing独立方案review PASS后已完成coding，不把已修首段错误Bug重新标记失败。
+必要专项已全部完成：原1705742557完整10000笔fresh compile与严格验收PASS；原1992896882完整10000笔独立coverage mode fresh compile与严格验收PASS；
+Sv393、CSR2、PBMT2、SFENCE2、cancel2、safe2、新随机fault3 MAIN1000五项共18项真实DUT邻接严格通过；软件精确同拍专项另计PASS。
+当前Bug相对1343仅一个生产逻辑文件sync package及一个相关软件task两个编译SV变化；未修改RTL/RM/cfg。软件mode含未执行fixture类，核心2540输入一致，不贡献最终coverage。
+Turing最终独立`FINAL_IMPLEMENTATION_REVIEW_PASS`，无源码阻塞；20真实DUT、1软件、核心输入及三个simv均独立核验。
+专项/独立最终review/单Bug提交完成前不恢复批量；当前新版最终350项尚未验收，不能沿用1343的51项或旧250覆盖率。
+
+### Rollback同拍修复专项台账
+
+本表是当前Bug门禁，不替代最终350项。源码冻结：一个生产逻辑文件及一个相关软件定向文件，Turing静态实现review PASS。
+软件协议1/1已通过，六项错误计数全0，不计DUT PASS。真实DUT共20个专项名额（两个原10k根seed加18个邻接）；20/20已严格验收。
+原1705742557已越过724655.8ns旧失败点，两次来源均以精确同拍age0成功关联，证据`failure_point_acceptance.json`；不把过点等同完整10000笔PASS。
+两个10k目录分别为`mother_rollback_same_sample_original1705742557_20261030_results`和
+`mother_rollback_same_sample_first_split_neighbor1992896882_20261030_results`；其他组位于`mother_rollback_same_sample_neighbors_20261030_results/<cfg>`，
+其中新随机组子目录为`fault3_fresh5_main1000`。根`campaign_state.tsv`逐组更新，完整入口与seed来源在`manifest.json`。
+
+| tc | ts | cfg | seed范围 | 专项状态 | 已验收/计划 |
+|---|---|---|---|---|---:|
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 原1705742557，MAIN10000 | STRICT_PASS，rc0/unknown0，六项错误计数0 | 1/1 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 原1992896882，MAIN10000 | STRICT_PASS，rc0/unknown0，六项错误计数0 | 1/1 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_mmu_sv39_smoke` | 212889620及原邻接2颗 | STRICT_PASS | 3/3 |
+| `basicTest` | `memblock_csr_random_config_vseq` | `tc_memblock_csr_random_config` | 原邻接2颗 | STRICT_PASS | 2/2 |
+| `basicTest` | `memblock_l2tlb_pbmt_response_fault_vseq` | `tc_l2tlb_pbmt_response_fault` | 原邻接2颗，保留cfg两UID | STRICT_PASS | 2/2 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_sfence_stress_1k` | 原邻接2颗 | STRICT_PASS | 2/2 |
+| `basicTest` | `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | 原矩阵2颗 | STRICT_PASS | 2/2 |
+| `basicTest` | `memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq` | `tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16` | 原矩阵2颗 | STRICT_PASS | 2/2 |
+| `basicTest` | `memblock_dispatch_real_smoke_vseq` | `tc_l2tlb_fault_2pct_no_trigger` | 新随机5颗，MAIN1000 | STRICT_PASS | 5/5 |
 最终交付还需完成独立 fault3 100-seed、统一稳定源码的覆盖率数据库与合并报告、问题/方案总 review。
+
+原1705742557完整日志SHA256=`24b07012037609494916f60d7c29d58944ad92e0114aa1f64cd14a8080d39db4`，
+`strict_acceptance.json`已落盘；只完成首错过点的旧证据不再代替全seed验收。
+最终批量启动/覆盖率artifact独立review发现二进制绑定、精确350项和验收异常状态记录三处缺口；
+已补ignored脚本，Turing独立`READINESS_REVIEW_PASS`，三项全部关闭；汇总门禁也已`FINAL_ROLLBACK_IMPLEMENTATION_GATE_PASS`。
+未修改生产SV或提前启动批量，不把这些证据工具问题另算DUT/RM Bug；旧source四项快照hash再次全部OK。
