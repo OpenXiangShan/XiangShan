@@ -16,6 +16,7 @@ struct VectorReplayRequest {
     bool is_part_replay;
     std::uint16_t replay_mask;
     std::uint8_t replay_mb_index;
+    std::uint64_t cycle = 0;
 };
 
 

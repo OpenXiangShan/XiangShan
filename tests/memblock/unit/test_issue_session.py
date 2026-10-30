@@ -39,6 +39,10 @@ class IssueSessionTest(unittest.TestCase):
         methods.extend(method('cycle.cpp', name) for name in ('tick', 'scalar_store_key', 'vector_store_key'))
         methods.append(method('manager_control.cpp', 'make_vector_memory_issue'))
         methods.append(method('feedback_monitor.cpp', 'take_replay_for', 'FeedbackMonitor').replace('FeedbackMonitor::', 'Feedback::'))
+        feedback = (ROOT / 'cpp/environment/feedback_monitor.cpp').read_text()
+        start = feedback.index('void FeedbackMonitor::sample_after_edge(')
+        sample = feedback[start:feedback.index('\n}\n', start) + 3]
+        methods.append(sample.replace('FeedbackMonitor::', 'Feedback::').replace('DutAdapter &', 'Adapter &'))
         cls.source = '#include "environment/issue_payloads.hpp"\n' + source.replace(
             '// PRODUCTION_METHODS', '\n'.join(methods).replace('Environment::Impl::', 'Harness::'))
         cls.binary = cls.compile(cls.source, 'baseline')
@@ -118,6 +122,29 @@ class IssueSessionTest(unittest.TestCase):
         wrong = retained.replace(old, 'if (event.outcome != Outcome::accepted || event.killed) continue;')
         self.run_mode('redirect', self.compile(self.source, 'missing_killed_callback', wrong), passing=False)
         print('issue_session_fault=missing_killed_callback')
+
+    def test_reused_SQ_feedback_requires_current_accepted_attempt(self):
+        self.run_mode('replay-lifetimes')
+        original = 'request.cycle <= *transaction.replay_not_before'
+        self.assertIn(original, self.source)
+        for name, replacement in [('stale_replay', 'false'),
+                                  ('retain_boundary_stale', 'request.cycle < *transaction.replay_not_before'),
+                                  ('discard_current', 'request.cycle <= *transaction.replay_not_before + 1U')]:
+            self.run_mode('replay-lifetimes', self.compile(self.source.replace(original, replacement), name), passing=False)
+
+    def test_actual_tick_replay_causality_uses_poststep_sample_boundary(self):
+        self.run_mode('replay-acceptance-boundary')
+        original = 'request.cycle <= *transaction.replay_not_before'
+        mutant = self.compile(self.source.replace(original, 'request.cycle < *transaction.replay_not_before'),
+                              'prestep_boundary_stale')
+        self.run_mode('replay-acceptance-boundary', mutant, passing=False)
+        capture = '.cycle = sample.cycle,'
+        self.assertEqual(self.source.count(capture), 2)
+        for lane in range(2):
+            start = self.source.index(capture) if lane == 0 else self.source.rindex(capture)
+            wrong = self.source[:start] + self.source[start:].replace(capture, '.cycle = 0,', 1)
+            mutant = self.compile(wrong, 'missing_feedback_sample_cycle_lane' + str(lane))
+            self.run_mode('replay-acceptance-boundary', mutant, passing=False)
 
     def test_private_privilege_omissions_field_substitutions_and_late_read_reject(self):
         late_read = '''converted.privilege = {

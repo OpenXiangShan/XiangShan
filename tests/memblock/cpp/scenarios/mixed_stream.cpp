@@ -4,6 +4,7 @@
 #include "mixed/stream_recovery.hpp"
 #include "mixed/store_address_replay.hpp"
 #include "mixed/stream_cancellation.hpp"
+#include "mixed/stream_dependency.hpp"
 
 namespace memblock::scenarios::mixed {
 namespace {
@@ -26,6 +27,7 @@ struct StreamWork {
     bool requires_head = false;
     bool data_first = false;
     bool address_consumed = false, data_consumed = false;
+    bool cross_page_address = false;
     unsigned address_retries = 0;
     StoreAddressReplay address_replay;
     std::uint64_t expected_scalar = 0;
@@ -217,6 +219,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 if (!source || (data ? work.data_consumed : work.address_consumed)) return true;
                 if (!source->complete) { phase += ":dependency-before-producer-completion"; return false; }
                 ++coverage.stream_dependencies[data ? 3U : 2U];
+                if (!data && work.cross_page_address) ++coverage.stream_dependency_pages[5U + work.kind];
                 ++coverage.stream_dependencies[source->retired ? 7U : 6U];
                 (data ? work.data_consumed : work.address_consumed) = true;
                 return true;
@@ -260,6 +263,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     work.issued[attempt.uop] = true;
                     ++coverage.stream_issue[work.kind == 1 ? 3U : 4U];
                 }
+                work.vectors[attempt.uop].replay_not_before = event.edge;
                 work.replay[attempt.uop].reset();
             }
             if (work.paired_initial && work.pair_edges[0] && work.pair_edges[1]) {
@@ -583,6 +587,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     StreamCanceledGeneration::AddressState::retry_ready;
             }
             record.sample(coverage.stream_cancel);
+            if (item.cross_page_address && !item.address_consumed)
+                ++coverage.stream_dependency_pages[10U + item.kind];
         }
         canceled += killed;
         const auto lq_canceled = environment.lq_redirect_canceled_observed() - lq_before;
@@ -1152,13 +1158,31 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 choose_source(false);
                 if (work.kind == 2) choose_source(true);
             }
-            // Model a bounded integer ALU address calculation in this page.
-            // Preserve the independently chosen byte/alignment class. The seed
-            // supplies the addend, the producer supplies the line displacement.
+            // The checked producer supplies line and page displacement inside
+            // the declared mapping. Rate zero preserves legacy RNG and ALU.
             const auto dependent_address = [&](std::uint64_t address) {
                 if (!address_value) return address;
                 const auto offset = ((address & 0xfffU) + ((*address_value & 63U) << 6U)) & 0xfffU;
-                return (address & ~std::uint64_t{0xfff}) | offset;
+                if (constraints.stream_dependency_pages_per_mille == 0 ||
+                    (constraints.stream_dependency_pages_per_mille != 1000 &&
+                     random() % 1000U >= constraints.stream_dependency_pages_per_mille))
+                    return (address & ~std::uint64_t{0xfff}) | offset;
+                auto base = cache0_base + 0xf000;
+                unsigned pages = OrdinaryPageMappings::page_count;
+                if (address >= OrdinaryPageMappings::virtual_base &&
+                    address - OrdinaryPageMappings::virtual_base < OrdinaryPageMappings::span) {
+                    base = OrdinaryPageMappings::virtual_base;
+                } else if (translation.regime == RandomConstraints::translation_stage1 && leaf.stage1_napot) {
+                    base = stage1_napot_base; pages = 16;
+                } else if (translation.regime == RandomConstraints::translation_nested && leaf.nested_index() != 0) {
+                    constexpr std::array<std::uint64_t, 4> bases{{0, nested_g_napot_base,
+                        nested_vs_napot_base, nested_both_napot_base}};
+                    base = bases.at(leaf.nested_index()); pages = 16;
+                }
+                const auto target = stream_dependency_address(address, *address_value, base, pages);
+                work.cross_page_address = (target >> 12U) != (address >> 12U);
+                if (work.cross_page_address) ++coverage.stream_dependency_pages[work.kind];
+                return target;
             };
             // Reserve a separate one-uop nonmemory ROB entry before F exists.
             // Its operands may remain unavailable independently of F. It owns

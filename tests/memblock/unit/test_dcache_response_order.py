@@ -81,7 +81,7 @@ class DcacheResponseOrderTest(unittest.TestCase):
             self.assertEqual(r.returncode == 0, valid, r.stdout + r.stderr)
             if valid:
                 self.assertIn('target_dcache_response_reorder=' + value + ' ', r.stdout)
-                self.assertIn('constraint_schema=82', r.stdout)
+                self.assertIn('constraint_schema=83', r.stdout)
 
     def test_independent_deferred_and_release_histories_allow_distinct_inversion_populations(self):
         # Pending A may be delayed by same-line ownership or explicit holds;
@@ -133,21 +133,21 @@ class DcacheResponseOrderTest(unittest.TestCase):
                     self.fail('independent history did not drain')
                 if rate == 0:
                     total_fifo_overtakes += row[6]
-                verifier._check_dcache_response_order(dict(constraint_schema=82,
+                verifier._check_dcache_response_order(dict(constraint_schema=83,
                     target_dcache_response_reorder=rate, tilelink_requests=accepted,
                     dcache_releases=c_releases, dcache_response_order=','.join(map(str, row))))
         self.assertGreater(total_fifo_overtakes, 0)
         print('dcache_independent_histories=384 fifo_accepted_age_overtakes=' + str(total_fifo_overtakes))
 
     def test_sparse_endpoints_and_corrupted_ledgers(self):
-        base = dict(constraint_schema=82, target_dcache_response_reorder=1000,
+        base = dict(constraint_schema=83, target_dcache_response_reorder=1000,
                     tilelink_requests=6, dcache_releases=2, dcache_response_order='8,6,6,4,8,7,4,3,2,6')
         check = verifier._check_dcache_response_order
         check(base)
-        check(dict(constraint_schema=82, target_dcache_response_reorder=0,
+        check(dict(constraint_schema=83, target_dcache_response_reorder=0,
                    tilelink_requests=0, dcache_releases=0, dcache_response_order='0,0,0,0,0,0,0,0,0,0'))
         # Deferred accepted older A can be overtaken with one selectable queued message.
-        check(dict(constraint_schema=82, target_dcache_response_reorder=0,
+        check(dict(constraint_schema=83, target_dcache_response_reorder=0,
                    tilelink_requests=2, dcache_releases=0, dcache_response_order='2,0,0,0,2,1,1,1,0,2'))
         for index in range(10):
             row = [8,6,6,4,8,7,4,3,2,6]

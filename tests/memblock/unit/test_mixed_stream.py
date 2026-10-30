@@ -18,6 +18,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 INPUTS = (
+    'cpp/scenarios/mixed/stream_dependency.hpp', 'cpp/scenarios/mixed/translation_permutation.hpp',
     'cpp/scenarios/mixed_stream.cpp', 'cpp/scenarios/mixed_scheduler.cpp',
     'cpp/scenarios/mixed_initialization.cpp',
     'cpp/scenarios/mixed_transactions.cpp', 'cpp/scenarios/mixed_vectors.cpp',
@@ -87,6 +88,9 @@ class MixedStreamTest(unittest.TestCase):
         stream = stream.replace('return (address & ~std::uint64_t{0xfff}) | offset;',
             'return environment.check_dependent_address(address, '
             '(address & ~std::uint64_t{0xfff}) | offset, *address_value);')
+        stream = stream.replace('const auto target = stream_dependency_address(address, *address_value, base, pages);',
+            'const auto target = environment.check_cross_page_address(address, *address_value, base, pages, '
+            'stream_dependency_address(address, *address_value, base, pages));')
         # Observe chosen actions and paired intent; the shell independently
         # computes readiness/completion and all actual acceptance edges.
         stream = stream.replace('const auto event = ready[random() % ready.size()];',
@@ -179,7 +183,7 @@ class MixedStreamTest(unittest.TestCase):
                 'recovery_observations': {field: sum(run['result'][field] for run in cls.recoveries)
                     for field in ('recovery_windows', 'recovery_rounds', 'recovery_prefix',
                                   'refetch_issues', 'surviving_prefix_redirects', 'checked_scalar_values', 'lq_canceled')},
-                'explicit_gaps': ['synthetic ports and completions', 'replay service reports no replay',
+                'explicit_gaps': ['synthetic ports and completions', 'synthetic one-retry store feedback in vector-replay mode',
                                   'bare translation only', 'representative decoder-legal vector shapes'],
                 'runs': cls.runs,
             }
@@ -232,6 +236,29 @@ class MixedStreamTest(unittest.TestCase):
         self.assertGreater(sum(run['head_checks'] for run in results), 0)
         self.assertGreater(sum(run['dependency_checks'] for run in results), 0)
 
+    def test_vector_replay_bound_tracks_initial_and_retry_acceptance(self):
+        results = [self.run_fixture('vector-replay', seed, 1, 0, 64) for seed in range(1, 17)]
+        self.assertGreater(sum(run['replay_bound_checks'] for run in results), 0)
+        self.assertGreater(sum(run['vector_retries'] for run in results), 0)
+        self.assertGreater(sum(run['replay_retry_bound_checks'] for run in results), 0)
+        original = 'work.vectors[attempt.uop].replay_not_before = event.edge;'
+        self.assertEqual(self.source.count(original), 1)
+        for name, replacement in [
+            ('missing_vector_replay_bound', ''),
+            ('stale_vector_retry_bound', 'if (!attempt.replay) ' + original),
+            ('wrong_vector_replay_bound', 'work.vectors[attempt.uop].replay_not_before = event.edge + 1U;'),
+        ]:
+            binary = self.compile(self.source.replace(original, replacement), name)
+            failures = []
+            for seed in range(1, 9):
+                result = subprocess.run([str(binary), 'vector-replay', str(seed), '1', '0', '64'],
+                                        capture_output=True, text=True, timeout=10)
+                if result.returncode:
+                    self.assertIn('scheduler replay bound differs from actual accepted vector edge', result.stderr)
+                    failures.append(seed)
+            self.assertTrue(failures, name + ' escaped')
+            self.mutations[name] = failures
+
     def test_dependent_streams_gate_operands_and_vary_graph_structure(self):
         results = [self.run_fixture('dependency', seed, timing, 0, 32)
                    for timing in (0, 1) for seed in range(1, 65)]
@@ -259,6 +286,32 @@ class MixedStreamTest(unittest.TestCase):
         for bin in range(11):
             self.assertGreater(sum(run['stream_sta'][bin] for run in results), 0, bin)
         self.assertGreaterEqual(max(run['stream_sta'][10] for run in results), 2)
+
+    def test_cross_page_dependencies_vary_targets_and_accept_each_edge_once(self):
+        results = [self.run_fixture('dependency-pages', seed, timing, 0, 64)
+                   for timing in (0, 1) for seed in range(1, 33)]
+        self.dependencies.extend(results)
+        self.assertGreaterEqual(len({run['schedule'] for run in results}), 48)
+        for run in results:
+            selected, accepted, canceled = (run['stream_dependency_pages'][i:i+5] for i in (0, 5, 10))
+            self.assertEqual(selected, accepted)
+            self.assertEqual(canceled, [0] * 5)
+            self.assertEqual(sum(selected), run['cross_page_changes'])
+            self.assertLessEqual(run['cross_page_changes'], run['cross_page_checks'])
+            self.assertEqual(run['dependency_counts'][:2], run['dependency_counts'][2:4])
+        self.assertTrue(all(sum(run['stream_dependency_pages'][kind] for run in results) > 0 for kind in range(5)))
+        self.assertEqual(results[0], self.run_fixture('dependency-pages', 1, 0, 0, 64))
+
+    def test_private_cross_page_target_corruption_is_rejected(self):
+        original = 'stream_dependency_address(address, *address_value, base, pages));'
+        self.assertIn(original, self.source)
+        source = self.source.replace(original, 'stream_dependency_address(address, *address_value, base, pages) ^ 4096U);')
+        binary = self.compile(source, 'wrong-cross-page-target')
+        for seed in range(1, 9):
+            run = subprocess.run([str(binary), 'dependency-pages', str(seed), '1', '0', '32'],
+                                 capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn('cross-page dependent ALU disagrees', run.stderr)
 
     def test_architectural_store_retirement_preserves_independent_sq_drain(self):
         results = []

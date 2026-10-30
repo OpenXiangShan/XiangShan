@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=82`.
+`constraint_schema=83`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -77,7 +77,8 @@ they do not imply arbitrary numeric suffix support.
 | `concurrent-stream` | Rate selecting a variable ordinary mixed stream instead of a fixed heterogeneous window at an eligible concurrency site. Default 750 in all presets; 0 preserves the legacy prefix schedule, 1000 selects streams only. A residual budget below seven actions always uses a stream when enabled. |
 | `stream-unresolved-inflight` | Conditional conflicting stream-graph rate, default 250 in all presets, selecting one youngest held cold scalar/FP role when at least two load slots fit. Requires a same-page physical line without accepted A coverage, explicit reference bytes or older admitted store bytes. Unavailable attempts retain the completed-load path; zero disables selection. |
 | `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
-| `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the current 4-KiB page; scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
+| `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the page offset; `stream-dependency-pages` may also select a page within the declared mapping. Scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
+| `stream-dependency-pages` | Conditional page-displacement ALU rate for an already selected address edge, default 250 in all presets. Result bits above bit5 select a cyclic page displacement inside the ordinary identity/permuted window or selected 64-KiB NAPOT region, reserving one guard page at each end. A selected ALU may retain the page; only actual page changes count as cross-page edges. Zero preserves the preceding RNG draws and same-page addresses. |
 | `stream-store-pair` | Conditional rate offering an ordinary scalar store's initial STA and STD together when both operand events are ready. Independent retained lane handshakes permit same-edge, STA-first or STD-first acceptance. Default 500 in all presets; zero retains separate scheduling. Graph operands and STA retries remain separate. |
 | `stream-arena` | Ordinary eight-line stream-arena selection rate; default 750 preserves the previous seeded draw. Zero uses the configured locality/working set for every ordinary selection; 1000 always selects the eight-line arena. Dependencies, permission reservations and unresolved-graph addresses retain their own constraints. This is an address-choice rate, not an observed cache-miss percentage. |
 | `stream-permission-load` | Conditional scalar/FP load admission rate for immutable execute-only pages in translated ordinary streams; default 50, zero for cmo-stress. A seeded 1..4-probe epoch budget bounds canceled/replacement work; one denied probe may be live. Bare epochs and unresolved graph roles are excluded. |
@@ -238,6 +239,7 @@ or the corresponding field table. Rates are per mille; arrays are weights.
 | `stream-min-instructions` | 8 | 8 | 8 | 8 |
 | `stream-max-instructions` | 256 | 256 | 256 | 256 |
 | `stream-dependency` | 250 | 250 | 250 | 250 |
+| `stream-dependency-pages` | 250 | 250 | 250 | 250 |
 | `stream-store-pair` | 500 | 500 | 500 | 500 |
 | `stream-permission-load` | 50 | 50 | 50 | 0 |
 | `stream-mxr` | 125 | 125 | 125 | 0 |
@@ -1417,7 +1419,16 @@ graph roles do not serve as producers. Recovery preserves older ordinary edges
 but does not admit unrelated consumers into its invalidated suffix. Address
 arithmetic retains the input byte offset/alignment before scalar stores crossing
 the page end are clamped to `page+4096-width`, potentially changing alignment;
-expectations use the final injected address. The base stays within one page; it is an external ALU model, not a claim to execute pointer-chasing code.
+expectations use the final injected address. Schema83 also permits a result-derived
+page displacement within the declared mapping. `stream_dependency_pages` has
+15 counters: selected, first accepted, and canceled-before-acceptance address
+edges, each in scalar-load/vector-load/scalar-store/vector-store/prefetch order.
+Each actual page-changing edge must be accepted once or canceled unaccepted;
+the existing checked producer lifetime gates acceptance. Retries and later
+vector uops do not recount it. These are generator/accepted-event lifecycle
+observations, not an independent passive address transcript. The ALU is a bounded
+external computation, not execution of pointer-chasing code or a claim of a
+single scalar memory uop spanning two pages.
 Expected bytes remain frozen in admission order, independently of DUT responses.
 Live depth and boundary drains retain their existing rules; schema 72 extends
 configurable epoch lengths as described below. General vector-result/index
@@ -1435,8 +1446,15 @@ value/wrap identity. `stream_history` records full-identity reuse after terminal
 retirement, and dependency depths may exceed 31 within the configured length.
 Context/epoch boundaries still drain. Repeated identity generations have no
 general accepted-operation ledger: late completions can alias a matching reused
-expectation, vector-store replay feedback carries SQ range rather than an
-absolute generation, and scalar STD pulses omit ROB wrap. Exact current
+expectation, and scalar STD pulses omit ROB wrap. Ordinary vector-store replay
+selection additionally freezes the actual accepted initial/retry edge and
+removes queued matching-SQ requests sampled at or before it (accepted edge E is
+pre-step; the earliest new feedback sample is E+1); current feedback retains
+its observed lane, partial mask and merge index. This excludes stale queued
+requests across cancellation/SQ reuse, but feedback still carries SQ ranges
+rather than an absolute generation: arbitrary old feedback arriving after
+replacement acceptance remains outside the attribution claim. Legacy helpers
+retain their existing matching. Exact current
 scoreboard comparison, queue conservation, replay servicing and final byte
 readback remain active; these explicit attribution limits prohibit claiming
 universal stale-response detection or full CPU timing equivalence.

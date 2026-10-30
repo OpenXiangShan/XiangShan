@@ -254,7 +254,8 @@ transport histograms do not establish every producer/operation timing cross.
 The stream holds a single architectural head and independent byte-prefix oracle,
 with distinct live class destinations. Ordinary admissions can independently
 sample address and scalar-store data edges from older live integer loads.
-Reference-predicted results select page-bounded ALU addresses/data; checked
+Reference-predicted results select bounded mapped-window ALU addresses/data,
+including optional page displacement with guard pages for vector expansion; checked
 producer completion gates each operand, with lifetime retained across producer
 retirement. Seeds vary edge source, direction and chain depth. General vector
 result/index chains remain absent. Its configured 1..4096-instruction epochs (default draw 8..256), 2..8 live

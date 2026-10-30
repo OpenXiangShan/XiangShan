@@ -13,6 +13,20 @@ struct Adapter : PinAdapter {
     std::function<void()> on_edge, after_edge;
     struct {
         struct {
+            Port lane_0_feedback_slow_valid, lane_0_feedback_slow_hit, lane_0_feedback_slow_sq_idx_flag, lane_0_feedback_slow_sq_idx_value;
+            Port lane_1_feedback_slow_valid, lane_1_feedback_slow_hit, lane_1_feedback_slow_sq_idx_flag, lane_1_feedback_slow_sq_idx_value;
+        } scalar_store;
+        struct {
+            Port lane_0_feedback_slow_valid, lane_0_feedback_slow_hit, lane_0_feedback_slow_lq_idx_flag, lane_0_feedback_slow_lq_idx_value;
+            Port lane_0_feedback_slow_sq_idx_flag, lane_0_feedback_slow_sq_idx_value, lane_0_feedback_slow_is_vec_part_replay;
+            Port lane_0_feedback_slow_vec_replay_mask, lane_0_feedback_slow_vec_replay_mb_idx;
+            Port lane_1_feedback_slow_valid, lane_1_feedback_slow_hit, lane_1_feedback_slow_lq_idx_flag, lane_1_feedback_slow_lq_idx_value;
+            Port lane_1_feedback_slow_sq_idx_flag, lane_1_feedback_slow_sq_idx_value, lane_1_feedback_slow_is_vec_part_replay;
+            Port lane_1_feedback_slow_vec_replay_mask, lane_1_feedback_slow_vec_replay_mb_idx;
+        } vector_store;
+    } feedback;
+    struct {
+        struct {
             Port priv_dmode, priv_imode, priv_virt, priv_sum, priv_mxr, priv_vsum, priv_vmxr;
             Port satp_ppn, vsatp_ppn, hgatp_ppn, satp_mode, vsatp_mode, hgatp_mode;
         } csr;
@@ -50,6 +64,8 @@ struct VectorScores {
 // REPLAY_REQUEST
 struct Feedback {
     Environment::IqSlowFeedbackStats stats;
+    Environment::IqSlowFeedbackStats &iq_slow_feedback_stats_ = stats;
+    std::uint64_t store_tlb_feedbacks_ = 0, store_tlb_misses_ = 0, vector_replay_feedbacks_ = 0;
     std::deque<VectorReplayRequest> vector_replay_requests_;
     unsigned std_pulses = 0, samples_per_tick = 1;
     bool observe_std = true;
@@ -71,7 +87,7 @@ struct Feedback {
             ++std_pulses;
         }
     }
-    void sample_after_edge(Adapter &, std::uint64_t) {}
+    void sample_after_edge(Adapter &, std::uint64_t);
 };
 struct Harness {
     Adapter dut_;
@@ -586,6 +602,63 @@ void misuse() {
     }
     std::cout << "misuse_rejections=" << rejected << " empty_owner_clears_all_pins=1 reusable_clean_session=1\n";
 }
+void replay_lifetimes() {
+    for (unsigned wrap = 0; wrap < 2; ++wrap) {
+        Harness h; auto v = vector(); v.store = true; v.sq = 54; v.sq_flag = wrap;
+        v.flow_num = 4; v.replay_not_before = 100;
+        h.feedback_.vector_replay_requests_.push_back({.lane=1,.sq_flag=bool(wrap),.sq_value=54,
+            .is_part_replay=true,.replay_mask=1,.replay_mb_index=9,.cycle=99});
+        h.feedback_.vector_replay_requests_.push_back({.sq_flag=bool(wrap),.sq_value=3,
+            .replay_mask=0x1234,.cycle=1});
+        h.feedback_.vector_replay_requests_.push_back({.sq_flag=!bool(wrap),.sq_value=0,
+            .is_part_replay=true,.replay_mask=14,.replay_mb_index=7,.cycle=101});
+        VectorMemoryTransaction out; bool found = false;
+        assert(h.poll_vector_replay(v,out,found) && found);
+        assert(out.replay_mask==14 && out.replay_mb_index==7 && out.lane==0);
+        assert(h.feedback_.vector_replay_requests_.size()==1 &&
+            h.feedback_.vector_replay_requests_.front().sq_value==3);
+        // Every accepted retry starts a fresh attempt. Old responses cannot
+        // reuse the earlier merge mask after replacement issue.
+        v.replay_not_before = 200;
+        h.feedback_.vector_replay_requests_.push_back({.sq_flag=bool(wrap),.sq_value=54,.cycle=200});
+        assert(h.poll_vector_replay(v,out,found) && !found);
+        h.feedback_.vector_replay_requests_.push_back({.sq_flag=bool(wrap),.sq_value=54,
+            .replay_mask=5,.cycle=201});
+        assert(h.poll_vector_replay(v,out,found) && found && out.replay_mask==5);
+    }
+    std::cout << "replay_lifetime_histories=2 older_requests_discarded=4 current_requests=4 unrelated_preserved=2\n";
+}
+void replay_acceptance_boundary() {
+    for (unsigned lane = 0; lane < 2; ++lane) for (unsigned wrap = 0; wrap < 2; ++wrap) {
+        Harness h; auto v = vector(); v.store = true; v.lane = lane; v.sq_flag = wrap;
+        h.dut_.edge = 12;
+        const auto drive = [&](unsigned mask, unsigned merge) {
+            auto &pins = h.dut_.feedback.vector_store;
+            (lane ? pins.lane_1_feedback_slow_valid : pins.lane_0_feedback_slow_valid).data = 1;
+            (lane ? pins.lane_1_feedback_slow_sq_idx_flag : pins.lane_0_feedback_slow_sq_idx_flag).data = wrap;
+            (lane ? pins.lane_1_feedback_slow_sq_idx_value : pins.lane_0_feedback_slow_sq_idx_value).data = v.sq;
+            (lane ? pins.lane_1_feedback_slow_is_vec_part_replay : pins.lane_0_feedback_slow_is_vec_part_replay).data = 1;
+            (lane ? pins.lane_1_feedback_slow_vec_replay_mask : pins.lane_0_feedback_slow_vec_replay_mask).data = mask;
+            (lane ? pins.lane_1_feedback_slow_vec_replay_mb_idx : pins.lane_0_feedback_slow_vec_replay_mb_idx).data = merge;
+        };
+        // Production sampling at boundary E precedes the offer accepted at E.
+        drive(1, 9); h.feedback_.sample_after_edge(h.dut_, h.cycle());
+        h.expect_vector_store(v); assert(h.begin_issue_session());
+        assert(h.offer_vector(90, v)); h.dut_.ready[7 + lane] = true;
+        h.dut_.after_edge = [&] { h.dut_.feedback.vector_store.lane_0_feedback_slow_valid.data = 0;
+            h.dut_.feedback.vector_store.lane_1_feedback_slow_valid.data = 0; };
+        h.tick();
+        const auto event = only_event(h);
+        assert(event.edge == 12 && h.cycle() == 13 && event.outcome == PublicOutcome::accepted);
+        v.replay_not_before = event.edge;
+        VectorMemoryTransaction out; bool found = false;
+        assert(h.poll_vector_replay(v, out, found) && !found);
+        drive(14, 7); h.feedback_.sample_after_edge(h.dut_, h.cycle());
+        assert(h.poll_vector_replay(v, out, found) && found && out.replay_mask == 14 && out.replay_mb_index == 7 && out.lane == lane);
+        assert(h.feedback_.vector_replay_feedbacks_ == 2 && h.end_issue_session());
+    }
+    std::cout << "preoffer_boundary_feedback_discarded=4 earliest_poststep_feedback_retained=4\n";
+}
 int main(int argc, char **argv) {
     assert(argc == 2); const std::string mode = argv[1];
     if (mode == "progress") progress_and_value_capture();
@@ -594,5 +667,7 @@ int main(int argc, char **argv) {
     else if (mode == "redirect") wrapped_redirects();
     else if (mode == "replay") retries_and_replay();
     else if (mode == "misuse") misuse();
+    else if (mode == "replay-lifetimes") replay_lifetimes();
+    else if (mode == "replay-acceptance-boundary") replay_acceptance_boundary();
     else assert(false);
 }

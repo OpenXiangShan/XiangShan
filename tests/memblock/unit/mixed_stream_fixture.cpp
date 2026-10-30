@@ -7,6 +7,8 @@
 #include "scenarios/mixed/stream_recovery.hpp"
 #include "scenarios/mixed/store_address_replay.hpp"
 #include "scenarios/mixed/stream_cancellation.hpp"
+#include "scenarios/mixed/stream_dependency.hpp"
+#include "scenarios/mixed/translation_permutation.hpp"
 #include <functional>
 #include <map>
 #include <tuple>
@@ -24,6 +26,8 @@ struct SyntheticEnvironment {
     struct Uop {
         bool issued = false, committed = false;
         mutable bool completed = false;
+        bool replay_requested = false, replay_accepted = false;
+        std::optional<std::uint64_t> accepted_edge;
         std::uint64_t due = 0, sq_target = 0;
         unsigned destination = 0;
         VectorMemoryTransaction vector;
@@ -95,6 +99,29 @@ struct SyntheticEnvironment {
         const auto displacement = (wanted_value % 64U) * 64U;
         const auto wanted = (before & ~std::uint64_t{4095}) + ((before % 4096U + displacement) % 4096U);
         require(after == wanted, "dependent ALU address disagrees with input model");
+        return after;
+    }
+    unsigned cross_page_checks = 0, cross_page_changes = 0;
+    std::uint64_t check_cross_page_address(std::uint64_t before, std::uint64_t value,
+        std::uint64_t base, unsigned pages, std::uint64_t after) {
+        const auto edge = std::find_if(dependencies.begin(), dependencies.end(), [&](const auto &item) {
+            return item.consumer == instructions.size() && !item.data;
+        });
+        require(edge != dependencies.end(), "cross-page address lacked recorded producer");
+        const auto &producer = instructions.at(edge->producer);
+        require(value == load_expectations.at(identity(producer.rob, producer.flag)), "wrong cross-page producer value");
+        std::vector<std::uint64_t> legal_pages;
+        for (unsigned page = 1; page + 1 < pages; ++page) legal_pages.push_back(base + page * 4096ULL);
+        const auto page_address = before - before % 4096U;
+        const auto page = std::find(legal_pages.begin(), legal_pages.end(), page_address);
+        std::uint64_t index = page == legal_pages.end() ?
+            (page_address == base ? legal_pages.size() - 1U : 0U) : page - legal_pages.begin();
+        index = (index + (value / 64U) % legal_pages.size()) % legal_pages.size();
+        auto byte = before % 4096U;
+        for (unsigned step = 0; step < value % 64U; ++step) byte = (byte + 64U) % 4096U;
+        require(after == legal_pages.at(index) + byte, "cross-page dependent ALU disagrees with independent page enumeration");
+        ++cross_page_checks; cross_page_changes += before / 4096U != after / 4096U;
+        trace.push_back("P" + std::to_string(instructions.size()) + ":" + std::to_string(after));
         return after;
     }
     unsigned cold_cancellations = 0, cold_releases = 0, cold_refetches = 0;
@@ -177,6 +204,8 @@ struct SyntheticEnvironment {
     unsigned overlap_admissions = 0, continued_admissions = 0;
     unsigned loads_before_older_std = 0, head_checks = 0, dependency_checks = 0;
     unsigned issues = 0, commits = 0;
+    bool inject_vector_replay = false;
+    unsigned replay_bound_checks = 0, replay_retry_bound_checks = 0, vector_retries = 0;
     bool delayed_store_feedback = false;
     mutable Environment::IqSlowFeedbackStats store_feedback;
     mutable std::vector<Environment::StoreSlowFeedbackSample> future_store_feedback;
@@ -264,7 +293,23 @@ struct SyntheticEnvironment {
     bool offer_store_data(std::uint64_t tag, const StoreTransaction &t) { return offer(tag, OrdinaryIssueKind::store_data, t.data_lane, t); }
     bool offer_vector(std::uint64_t tag, const VectorMemoryTransaction &t) { return offer(tag, OrdinaryIssueKind::vector, t.lane, t); }
     auto take_issue_events() { auto events = std::move(transport_events); transport_events.clear(); return events; }
-    bool poll_vector_replay(const VectorMemoryTransaction &, VectorMemoryTransaction &, bool &found) { found = false; return true; }
+    bool poll_vector_replay(const VectorMemoryTransaction &t, VectorMemoryTransaction &out, bool &found) {
+        // Observe actual accepted producers, without instrumenting the
+        // scheduler's bound assignment or deriving it from a replay request.
+        const auto &work = static_cast<const SyntheticEnvironment &>(*this).find(t.rob, t.rob_flag);
+        auto &uop = instructions.at(work.id).uops.at(t.vuop_idx);
+        require(uop.accepted_edge && t.replay_not_before == uop.accepted_edge,
+            "scheduler replay bound differs from actual accepted vector edge");
+        ++replay_bound_checks;
+        replay_retry_bound_checks += uop.replay_accepted;
+        found = inject_vector_replay && t.store && !uop.replay_requested;
+        if (found) {
+            uop.replay_requested = true;
+            out = t; out.is_part_replay = true; out.replay_mask = 1; out.replay_mb_index = 3;
+            out.lane ^= 1U;
+        }
+        return true;
+    }
     void process_offers() {
         if (!session || processing_offers) return;
         processing_offers = true;
@@ -837,7 +882,9 @@ struct SyntheticEnvironment {
         check_dependency(work.id, false);
         auto &uop = work.uops.at(index);
         require(!uop.issued, "duplicate uop acceptance");
-        uop.issued = true; uop.due = due(work, index); ++producer_counts[work.id]; ++issues;
+        uop.issued = true; uop.accepted_edge = tick;
+        uop.due = inject_vector_replay && work.kind == 3 ? std::numeric_limits<std::uint64_t>::max() : due(work, index);
+        ++producer_counts[work.id]; ++issues;
         if (work.kind == 0 && work.epoch) ++refetch_issues;
         trace.push_back(std::string(tag) + std::to_string(work.id) + ":" + std::to_string(index));
         sample_accepted(); capture_store_edge();
@@ -988,6 +1035,19 @@ struct SyntheticEnvironment {
     bool issue_vector(const VectorMemoryTransaction &t, unsigned) {
         auto &work = find(t.rob, t.rob_flag);
         const unsigned index = t.vuop_idx;
+        if (t.is_part_replay) {
+            auto &uop = work.uops.at(index);
+            require(inject_vector_replay && t.store && uop.issued && uop.replay_requested && !uop.replay_accepted,
+                "vector replay lacked one outstanding accepted attempt");
+            require(t.replay_not_before == uop.accepted_edge && t.replay_mask == 1 && t.replay_mb_index == 3 &&
+                t.lane == (uop.vector.lane ^ 1U), "vector replay lost accepted provenance or feedback payload");
+            uop.replay_accepted = true; uop.accepted_edge = tick; uop.due = due(work, index);
+            ++vector_retries; ++producer_counts[work.id]; ++issues;
+            trace.push_back("VR" + std::to_string(work.id) + ":" + std::to_string(index));
+            capture_store_edge();
+            retired_pending_issues += retirement_stats.pending_before_last_edge != 0;
+            return true;
+        }
         if (!t.store) check_load_age(work);
         check_head(work, !t.store && t.addressing == VectorAddressingMode::indexed_ordered);
         if (t.addressing != VectorAddressingMode::indexed_unordered)
@@ -1144,7 +1204,8 @@ struct SyntheticEnvironment {
         require(coverage.stream_waiting_head == std::array<std::uint64_t, 2>{
             admissions_with_completed_head, issues_with_completed_head},
             "production completed-head choices disagreed with independent observations");
-        require(coverage.stream[8] + refetch_issues + coverage.stream_scalar_retries == issues, "production issue count disagreed with accepted producers");
+        require(coverage.stream[8] + refetch_issues + coverage.stream_scalar_retries + vector_retries == issues &&
+            coverage.stream[9] == vector_retries, "production issue count disagreed with accepted producers");
         std::array<std::uint64_t, 5> expected_pairs{};
         for (const auto &edges : accepted_operand_pairs) {
             if (edges[0] == edges[1]) ++expected_pairs[0];
@@ -1177,7 +1238,8 @@ struct SyntheticEnvironment {
         std::array<std::uint64_t, 5> operations{};
         for (const auto &work : instructions) {
             ++operations[work.kind];
-            const auto count = work.kind == 2 ? 2U + work.address_retries : work.kind == 0 ? 1U + work.epoch : work.uops.size();
+            const auto count = work.kind == 2 ? 2U + work.address_retries : work.kind == 0 ? 1U + work.epoch :
+                work.uops.size() + std::count_if(work.uops.begin(), work.uops.end(), [](const auto &uop) { return uop.replay_accepted; });
             require(producer_counts[work.id] == count, "producer conservation failed");
         }
         require(coverage.stream_ops == operations, "retired operation-kind accounting disagreed");
@@ -1230,6 +1292,7 @@ public:
             constraints.operation_weights[operations[index]] = validated_profile ? ((family >> index) & 1U) :
                 family == 0 ? (index == 0 ? 7 : 3) : (family == index + 1 ? 1 : 0);
         constraints.stream_max_instructions = 32;
+        constraints.stream_dependency_pages_per_mille = 0;
         constraints.stream_unresolved_per_mille = 0;
         constraints.stream_unresolved_inflight_per_mille = 0;
         constraints.misaligned_per_mille = 450;
@@ -1258,7 +1321,10 @@ public:
     }
     bool issue_constrained_fence(unsigned) { return true; }
     std::uint64_t constrained_cacheable_address(unsigned, const TranslationContext &, const TranslationLeafTopology &,
-        std::optional<bool> = {}, bool = true) { return 0x80010000 + (random() % 128U) * 64U; }
+        std::optional<bool> = {}, bool = true) {
+        return (constraints.stream_dependency_pages_per_mille ? cache0_base + 0x10000 : 0x80010000) +
+            (random() % 128U) * 64U;
+    }
     unsigned long constrained_window_address(std::uint64_t, unsigned);
     std::shared_ptr<const ReferencePageMap> reference_pages_for(std::uint64_t) { return {}; }
     bool validate_vector_translation(const VectorMemoryTransaction &) { return true; }
@@ -1392,10 +1458,11 @@ int main(int argc, char **argv) {
                 "oracle checkpoint failed to remove canceled-store bytes");
             std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
                 << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
-        } else if (mode == "stream" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
+        } else if (mode == "stream" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
             require(argc == 6 || (mode == "permission" && argc == 7) || (mode == "independent" && argc == 7) || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "vector-replay") fixture.environment.inject_vector_replay = true;
             if (mode == "permission") {
                 fixture.environment.permission_enabled = true;
                 fixture.environment.permission_context.regime = RandomConstraints::translation_stage1;
@@ -1413,6 +1480,13 @@ int main(int argc, char **argv) {
                 fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = std::max(1U, limit);
                 fixture.constraints.stream_dependency_per_mille = 1000;
                 fixture.constraints.scalar_fp_per_mille = 0;
+            }
+            if (mode == "dependency-pages") {
+                fixture.constraints.stream_dependency_pages_per_mille = 1000;
+                fixture.constraints.stream_dependency_per_mille = 1000;
+                fixture.constraints.scalar_fp_per_mille = 0;
+                fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = limit;
+                fixture.environment.bytes.define_seeded_random(MixedScenario::cache0_base + 0xf000, 132U * 4096U, std::stoull(argv[2]) ^ 71U);
             }
             if (mode == "dependency") {
                 fixture.constraints.stream_dependency_per_mille = 1000;
@@ -1448,6 +1522,9 @@ int main(int argc, char **argv) {
                 << ",\"overlap_admissions\":" << env.overlap_admissions << ",\"continued_admissions\":" << env.continued_admissions
                 << ",\"loads_before_older_std\":" << env.loads_before_older_std << ",\"head_checks\":" << env.head_checks
                 << ",\"dependency_checks\":" << env.dependency_checks << ",\"issues\":" << env.issues
+                << ",\"replay_bound_checks\":" << env.replay_bound_checks
+                << ",\"replay_retry_bound_checks\":" << env.replay_retry_bound_checks
+                << ",\"vector_retries\":" << env.vector_retries
                 << ",\"admissions_with_completed_head\":" << env.admissions_with_completed_head
                 << ",\"issues_with_completed_head\":" << env.issues_with_completed_head
                 << ",\"recovery_windows\":" << fixture.coverage.stream_recovery[0]
@@ -1493,11 +1570,16 @@ int main(int argc, char **argv) {
                 std::cout << (i ? "," : "") << fixture.coverage.stream_store_retirement[i];
             std::cout << "]"
                 << ",\"address_misses\":" << env.address_misses
+                << ",\"cross_page_checks\":" << env.cross_page_checks
+                << ",\"cross_page_changes\":" << env.cross_page_changes
                 << ",\"dependency_edges\":" << env.dependencies.size()
                 << ",\"dependency_operand_checks\":" << env.dependency_operand_checks
                 << ",\"dependency_counts\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_dependencies.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_dependencies[i];
+            std::cout << "],\"stream_dependency_pages\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_dependency_pages.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_dependency_pages[i];
             std::cout << "]"
                 << ",\"cold_attempts\":" << fixture.coverage.stream_recovery_inflight[0]
                 << ",\"cold_unavailable\":" << fixture.coverage.stream_recovery_inflight[1]

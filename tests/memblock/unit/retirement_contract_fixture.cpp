@@ -47,6 +47,7 @@ struct VectorReplayRequest {
     bool is_part_replay = false;
     std::uint16_t replay_mask = 0;
     std::uint8_t replay_mb_index = 0;
+    std::uint64_t cycle = 0;
 };
 class FeedbackMonitor {
 public:

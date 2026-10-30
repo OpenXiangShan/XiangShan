@@ -379,6 +379,7 @@ struct StoreWork {
     unsigned kind = 2, address_retries = 0;
     bool address_issued = true, data_issued = false, restart_flushed = false;
     bool address_source = false, data_source = false, address_consumed = false, data_consumed = false;
+    bool cross_page_address = false;
     std::vector<bool> issued;
     std::vector<VectorMemoryTransaction> vectors;
     StoreTransaction store;
@@ -387,6 +388,7 @@ struct StoreWork {
 };
 struct CancellationCoverage {
     std::array<std::uint64_t, 29> stream_cancel{};
+    std::array<std::uint64_t, 15> stream_dependency_pages{};
     std::array<std::uint64_t, 11> stream_sta{};
 };
 static bool return_and_classify(Harness &environment, std::vector<StoreWork> &live,

@@ -3303,6 +3303,9 @@ struct MixedCoverage {
     // Address/data edges, consumed address/data, pending sources at selection,
     // consumed before/after source retirement, maximum dependent chain depth.
     std::array<std::uint64_t, 9> stream_dependencies{};
+    // Cross-page address edges by scalar load/vector load/scalar store/
+    // vector store/prefetch: selected, first accepted, canceled unaccepted.
+    std::array<std::uint64_t, 15> stream_dependency_pages{};
     // Epochs exceeding32, maximum epoch retirements, admissions after ordinal32
     // with older accepted pending work, ROB value/wrap identity reuse admissions.
     std::array<std::uint64_t, 4> stream_history{};
@@ -3697,6 +3700,7 @@ struct MixedCoverage {
                " stream_vstart_flush=" + csv(stream_vstart_flush) +
                " stream_history=" + csv(stream_history) +
                " stream_dependencies=" + csv(stream_dependencies) +
+               " stream_dependency_pages=" + csv(stream_dependency_pages) +
                " stream_recovery=" + csv(stream_recovery) +
                " stream_recovery_shapes=" + csv(stream_recovery_shapes) +
                " stream_recovery_victims=" + csv(stream_recovery_victims) +

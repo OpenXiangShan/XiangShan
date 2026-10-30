@@ -189,6 +189,7 @@ void FeedbackMonitor::sample_after_edge(DutAdapter &dut_, std::uint64_t sample_c
                 .is_part_replay = sample.is_part_replay,
                 .replay_mask = sample.replay_mask,
                 .replay_mb_index = sample.replay_mb_index,
+                .cycle = sample.cycle,
             });
             ++vector_replay_feedbacks_;
         }
@@ -224,6 +225,7 @@ void FeedbackMonitor::sample_after_edge(DutAdapter &dut_, std::uint64_t sample_c
                 .is_part_replay = sample.is_part_replay,
                 .replay_mask = sample.replay_mask,
                 .replay_mb_index = sample.replay_mb_index,
+                .cycle = sample.cycle,
             });
             ++vector_replay_feedbacks_;
         }
@@ -247,9 +249,7 @@ std::optional<VectorReplayRequest> FeedbackMonitor::take_replay_for(
     // Only vector-store slow feedback creates these requests. LQ is a
     // snapshot, not the identity of an independently replaying vector load.
     if (!transaction.store) return std::nullopt;
-    const auto replay_it = std::find_if(
-        vector_replay_requests_.begin(), vector_replay_requests_.end(),
-        [&](const VectorReplayRequest &request) {
+    const auto matches = [&](const VectorReplayRequest &request) {
             const unsigned entries = transaction.store
                 ? kStoreQueueEntries : kVirtualLoadQueueEntries;
             const unsigned value = transaction.store
@@ -265,7 +265,20 @@ std::optional<VectorReplayRequest> FeedbackMonitor::take_replay_for(
             const unsigned distance =
                 (packed + 2 * entries - packed_base) % (2 * entries);
             return distance < transaction.flow_num;
-    });
+    };
+    // A circular SQ range is reusable. The actual accepted edge identifies
+    // the current ordinary-stream lifetime; canceled older feedback must not
+    // attach its partial mask/merge index to replacement work. The accepted
+    // event labels the pre-step edge E; feedback sampled at E is already
+    // queued before that acceptance. Its first possible new sample is E+1.
+    if (transaction.replay_not_before) {
+        vector_replay_requests_.erase(std::remove_if(vector_replay_requests_.begin(),
+            vector_replay_requests_.end(), [&](const auto &request) {
+                return matches(request) && request.cycle <= *transaction.replay_not_before;
+            }), vector_replay_requests_.end());
+    }
+    const auto replay_it = std::find_if(vector_replay_requests_.begin(),
+        vector_replay_requests_.end(), matches);
     if (replay_it == vector_replay_requests_.end()) return std::nullopt;
     const auto request = *replay_it;
     vector_replay_requests_.erase(replay_it);

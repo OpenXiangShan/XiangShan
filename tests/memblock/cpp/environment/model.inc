@@ -560,6 +560,9 @@ struct VectorMemoryTransaction {
     unsigned lane = 0;
     std::uint8_t flow_num = kVectorUnitStrideMaxFlows;
     bool is_part_replay = false;
+    // Host provenance only: current accepted attempt edge, never a DUT field.
+    // Feedback from a killed/reused older SQ lifetime cannot replay this uop.
+    std::optional<std::uint64_t> replay_not_before;
     std::uint16_t replay_mask = 0;
     std::uint8_t replay_mb_index = 0;
     std::uint32_t expected_exception_mask = 0;

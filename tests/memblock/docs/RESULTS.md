@@ -18,6 +18,22 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema83 adds result-derived page displacement for ordinary integer-load
+  address consumers, within the declared identity/permuted or selected NAPOT
+  mapping. Guard pages retain legal vector expansion; scalar-store page-end
+  clamping and independent per-byte translation checks remain active. Default
+  rate is 250 per mille conditional on a selected address edge. Actual page
+  changes conserve first acceptance or unaccepted cancellation by class. Zero
+  retains preceding seeded behavior. This broadens ordinary address/dependency
+  state space; it does not execute SPEC or establish arbitrary pointer chains.
+
+- Ordinary vector-store replay selection records actual accepted initial/retry
+  edges and sampled feedback cycles. The pre-step acceptance E admits only
+  feedback sampled after E; old queued same-SQ masks cannot attach to a reused
+  lifetime. Current and unrelated feedback and all independent expectations
+  remain intact. Arbitrarily late old feedback arriving after acceptance still
+  needs a general generation ledger. This is a testbench correction.
+
 - Schema82 adds seeded complete-message DCache D arbitration after the existing
   line/sink/coherence preparation gates. Held responses stay excluded until
   released; first/interbeat delays, stalled payloads and immutable keyword/error
@@ -26,7 +42,7 @@ None.
   inversions are distinct from nonfront queue choices. Independent byte/value
   checks remain active. Default rate is 250 per mille; zero preserves the
   preceding runtime's semantic result. Strict coverage now recognizes schemas
-  80..82 rather than rejecting current traffic at an obsolete allowlist. Both
+  80..83 rather than rejecting current traffic at an obsolete allowlist. Both
   queue schedulers reject an impossible peak greater than multi-choice starts
   plus one. Uncache ordering, broad reset/malformed responses and source-receipt
   edge qualification remain gaps.
@@ -472,6 +488,10 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| Ordinary mapped-page dependencies | Frozen runtime-v3 passes 20 finite cases / 22528 actions: four forced SPEC-profile dependency cases, four U-mode translated cases, four each unmodified spec/corner profiles, and four stronger U-mode permission/cancellation cases. All five complete artifact verifiers pass. The 3138 actual page-changing edges conserve 3087 first acceptances plus 51 unaccepted cancellations, with both outcomes in all five stream classes. All 13214 final words compare. Exact seed8302 replay passes; disabling page displacement matches 418 prior schema82 parsed semantic fields. | `build/memblock/dependency-pages-20261031/{qualification-v3.json,artifact-verifiers-v3.json,replay-compat-v3.json,provenance-v3.json}`. All 100 prepared source pairs match; model and RTL metadata match the preceding runtime. Counters are lifecycle observations rather than a passive accepted-address transcript. These finite UT runs do not execute SPEC, establish arbitrary pointer chains, or meet closure thresholds. |
+| Dependency diversity and independent checks | All 46 production-scheduler host methods pass. The fixed eight-load population has 64/64 distinct event-only schedules after excluding dependency selections, plus 41 admission/retirement interleavings and 43 load issue orders. The enabled mode checks 2415 dependent address calculations with 2242 actual page changes across 64 seed/timing cases, plus exact replay. The wrong-page target mutant rejects. Literal iterative enumeration checks 1132096 page/offset cases; parser endpoints and all 15 single-counter corruptions reject appropriately. | `build/memblock/dependency-pages-20261031/{host-report-v3.json,host-v3-final.log,address-accounting-v3.log}`. Scheduler observations use synthetic completion/ports and a Bare identity map; native runs provide translated evidence. Unique enabled-mode traces include address choices and are not represented as event-only structural diversity. General vector-result/index dependencies, arbitrary continuous mappings and generation-aware stale-response attribution remain gaps. |
+| Ordinary vector-store replay provenance | Replay requests retain the sampled feedback cycle; ordinary initial/retry acceptances update the bound. Selection drops matching-SQ feedback sampled at or before the accepted pre-step edge, preserving unrelated requests and current feedback lane/mask/merge index. Eleven issue-session methods pass; the production tick/sample witness checks both lanes and wrap values. Sixteen mixed scheduler histories check 16292 bounds, including 7694 after retries and 95 accepted retries. Missing/incorrect bounds, retry-update omission, stale equality cutoff and either lane timestamp omission reject. | `build/memblock/dependency-pages-20261031/{issue-session-v3-final.log,replay-review-v2/reviewer/review-v2.json,triage-disposition.json}`. Original failing seed8343 passes its full 2048-action budget in the runtime-v3 cancellation campaign. This repairs testbench attribution, not CPU RTL. Three adjacent directed contracts pass (`directed-v3.json`); six vector-operand compatibility methods also pass. Arbitrarily late old feedback sampled after replacement acceptance still lacks universal generation attribution; legacy helpers retain their prior matching. |
+| Current schema83 integration checks | The complete host suite passes 699 tests; both methods affected by the final assertion-placement-only delta also pass. `check-rtl` passes generated interface, semantic mapping, documentation, scenario catalog and prepared-RTL checks. | `build/memblock/dependency-pages-20261031/{full-unit-v3.log,mixed-assertion-placement-final.log,check-rtl-v3-final.log}`. The complete run validates the reviewed logic plus the initialized vector-operand compatibility member; the focused delta restores two pre-existing checks to their original method. No broader regression acceptance or RTL mutation claim. |
 | DCache complete-message response ordering and recovery | Frozen runtime-v4 passes 12 primary finite cases / 16640 actions plus exact seed8203 replay. All 13 complete artifact verifiers pass. The primary runs observe 39536 message starts/final-D completions, 9961 multiple-choice boundaries, 3237 random arbitrations, 2095 nonfront choices and 1909 A completions overtaking older accepted A; maximum selectable messages is 15 and maximum older outstanding at overtaking is 12. The 25806 A responses and 13730 ReleaseAck messages conserve separately. All 7231 final words compare. | `build/memblock/dcache-order-20261031/{qualification-v4.json,artifact-verifiers-v4.json,provenance-v4.json,replay-compat-v4.json,triage-disposition-v4.json}`. Both default spec/corner runs observe nonfront choices; three 2048-action cold U/nested/SUM profiles use the default 250 rate. Original corner seeds8222/8224 and an8222 FIFO control each pass their original 2048-action budget after the target-cleanup/CMO-oracle repairs. Ordering disabled matches all 419 preceding schema81 semantic fields. All 100 prepared sources and four frozen artifact hashes are retained; model/RTL metadata match the preceding runtime. Six adjacent directed scenarios pass at retained FIFO settings and supply compatibility only (`directed-v4.json`). These are finite scheduling/outcome observations, not an independent native per-beat transcript, fairness or coverage closure. |
 | DCache ordering host and accounting contracts | Seven methods check independent accepted A/C, D message and E histories, equal numeric A/C sources, early/final E, whole-message initial/interbeat delay and stall locking, snapshot bytes/keyword/error choices, held responses, same-line final-D-plus-E deferral and configuration/reset boundaries. Both no-stall and A/C/E-backpressure samples produce 128 source schedules over 128 seeds; FIFO produces one. Four private FIFO/payload/interleave/stalled-switch faults reject. Another 384 independently reduced deferred-A/C histories distinguish accepted-age inversions from queue choices, including 1356 FIFO accepted-age overtakes. | `build/memblock/dcache-order-20261031/{host-v3.log,ptw-host-v3.log}`. Aggregate relational corruption checks include peak versus multi-choice population, exact A/C message conservation, sparse endpoints and current-schema strict-mode recognition. Synthetic histories qualify manager/checker contracts, not native full-CPU reachability or arbitrary reset epochs. The existing final-D/same-edge A reuse corner differs from reference receipt-edge handling and remains unqualified; this patch adds no reuse stimulus. |
 | Redirect allocation targets and CMO overlap lifecycle | Nine retirement and ten redirect methods pass; 640 author literal-age histories and 204160 independent reviewer age cases preserve surviving scalar/vector targets, committed drain obligations, exact credit snapshots and strict vector membership across ROB reuse. Private missing-cleanup, caller-omission, early-cleanup and wrong-VLS-anchor faults reject. Three CMO methods pass 576 early/during-return/pending-cancel histories with the actual scenario and production LoadScoreboard. Four private registration/cancellation/rewind/FIFO-assumption faults reject; wrong, duplicate and unknown late results reject. | `build/memblock/dcache-order-20261031/{retirement-cleanup-host-v2.log,redirect-cleanup-host-v2.log,cmo-host-final.log,review-v1/reviewer/}`. Reviewer private challenges add 18 nonzero literal-byte/wrap histories, 18 completed-plus-physical-cancel cases, wrong results before/during return and late WB after pending cancellation. Author CMO fixtures alone use zero default bytes and do not establish native timing. VLS fault-anchor lifetime beyond strict-younger cleanup remains outside this repair. No result or complete-group check is relaxed. |
@@ -606,6 +626,33 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Schema83 mapped-page and replay-provenance changes have non-author actual-diff
+review approval within their bounded scope. Page review checks producer lifetime
+gating, all mapped-window choices, vector guard bounds, strict byte/translation
+expectations and acceptance/cancellation conservation. Independent arithmetic
+challenges add 720 high-bit, signed-load-like and guard cases. A private actual
+scheduler challenge combines dependencies and permission traps across 32 seeds:
+1453 selected edges equal 1329 accepted plus 124 canceled, with both outcomes in
+every class. Native runtime-v3 qualification independently observes both
+acceptance and cancellation in all five classes. These checks do not establish
+full-CPU timing equivalence or RTL mutation sensitivity.
+
+Replay review confirms accepted-edge causality through production tick/sampling
+and sensitivity to omitted initial/retry bounds and either lane timestamp. The
+clock-boundary and host integration findings are resolved and re-reviewed; no
+blocking findings remain. Evidence and primary disposition are under
+`build/memblock/dependency-pages-20261031/{reviewer-v1/review.md,review-disposition.json,replay-review-v2/reviewer/review-v2.json,replay-review-disposition-v3.json}`.
+The page-review pins predate the bounded replay repair; the replay review covers
+the updated shared sources, tests and attribution contracts. Exact reviewer
+snapshots are retained rather than treating the earlier hashes as current.
+The final evidence audit independently recomputes all native totals, reruns five
+complete artifact verifiers and checks prepared/frozen hashes at
+`build/memblock/dependency-pages-20261031/replay-review-v2/final-evidence-audit/review.json`.
+A final test-only delta restores two existing assertions to their original
+structural-diversity method; both affected methods pass, with the delta recorded
+in `replay-review-disposition-v3.json` and `final-pins-v3.json`.
+The passive accepted-address transcript and general stale-generation gaps remain.
 
 Schema82 actual-diff independent review accepts bounded DCache ordering and
 redirect-target cleanup. The peak/multiple-choice finding is corrected in both

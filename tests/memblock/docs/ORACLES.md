@@ -421,7 +421,11 @@ equivalence is claimed.
 `stream-dependency` samples older live ordinary integer loads as producers.
 Expected producer results come from this byte image, never observed DUT values.
 For address edges the external ALU adds `(result & 63) * 64` to the independently
-sampled page offset modulo 4096, preserving byte alignment before the existing
+sampled page offset modulo 4096. With `stream-dependency-pages`, bits above bit5
+also select a cyclic displacement among interior pages of the independently
+declared identity/permuted window or selected 64-KiB NAPOT region. Guard pages
+remain for vector expansion; every active byte still passes independent
+translation/permission validation. Address arithmetic preserves byte alignment before the existing
 scalar-store clamp: a store crossing the page end moves to `page+4096-width`
 and can become aligned. Expectations use that final injected address. Scalar store-data
 edges use the full predicted integer result. Values are frozen before enqueue;
@@ -429,7 +433,10 @@ address and data issue separately require producer checked completion. The
 producer lifetime token survives deque retirement, so a consumer cannot lose a
 dependency or bind a reused ROB/destination identity. A load completion releases
 consumers only when its exact scoreboard obligation is no longer pending and
-normal monitor comparison has succeeded. Dependency depth/edges and pending-source
+normal monitor comparison has succeeded. Actual page-changing edges additionally
+conserve first acceptance or explicit unaccepted cancellation by operation class;
+this lifecycle accounting does not independently monitor all address bits.
+Dependency depth/edges and pending-source
 selection are observed; they do not prove arbitrary rename or ALU timing.
 
 Epoch length is independently configurable up to 4096 instructions, with a
@@ -439,8 +446,16 @@ retirement frees destinations; absolute queue cursors carry through repeated
 wraps. Full identity reuse is counted after retirement, but the existing
 expectation-before-issue model is not a generation-aware accepted-operation
 ledger. Arbitrarily late old completions could alias a reused expected identity;
-vector-store replay records carry SQ value/wrap ranges without absolute issue
-generation, and bare scalar STD pulses lack ROB wrap. The same strict byte,
+ordinary vector-store replay selection now records each accepted attempt edge
+and rejects queued matching-SQ feedback sampled at or before that edge. The
+accepted event is labeled before the clock step; the earliest new feedback
+sample is labeled after the step, E+1 for acceptance E. Retried
+attempts advance this lower bound without changing independent data expectations.
+This prevents queued canceled lifetimes from attaching old partial masks or
+lane-local merge indices to replacement work. Feedback still carries SQ
+value/wrap ranges without a general absolute generation, so an arbitrarily late
+old feedback sampled after replacement acceptance is not universally attributed;
+legacy helpers retain their existing matching. Bare scalar STD pulses lack ROB wrap. The same strict byte,
 exactly-once and final-observation rules apply within those attribution limits.
 Longer epochs do not close these gaps or remove context-boundary drains.
 

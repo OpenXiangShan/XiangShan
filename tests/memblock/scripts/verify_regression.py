@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4976,6 +4976,29 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
 
 
 
+def _check_stream_dependency_pages(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 83:
+        return
+    rate = result.get("target_stream_dependency_pages")
+    _require(type(rate) is int and 0 <= rate <= 1000,
+             "invalid target_stream_dependency_pages")
+    counts = _csv_counts(result, "stream_dependency_pages", 15)
+    selected, accepted, canceled = (counts[i:i+5] for i in (0, 5, 10))
+    dependencies = _csv_counts(result, "stream_dependencies", 9)
+    operations = _csv_counts(result, "stream_ops", 5)
+    cancellations = _csv_counts(result, "stream_cancel", 29)
+    _require(all(a == b + c for a, b, c in zip(selected, accepted, canceled)),
+             "cross-page address edges were not accepted or canceled exactly once")
+    _require(all(a <= b + c for a, b, c in zip(selected, operations, cancellations[1:6])) and
+             all(a <= b for a, b in zip(canceled, cancellations[1:6])),
+             "cross-page address edges exceed eligible instruction classes")
+    _require(sum(selected) <= dependencies[0] and sum(accepted) <= dependencies[2] and
+             sum(canceled) <= cancellations[16],
+             "cross-page address edges exceed dependency lifetimes")
+    if rate == 0 or result.get("target_stream_dependency") == 0:
+        _require(not any(counts), "disabled cross-page dependencies generated edges")
+
+
 def _check_stream_recovery_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 68:
         return
@@ -5496,6 +5519,7 @@ def _check_result(
         )
     if scenario == run_regression.CONSTRAINED_RANDOM_SCENARIO:
         _check_stream_accounting(result)
+        _check_stream_dependency_pages(result)
         _check_stream_recovery_accounting(result)
         _check_scalar_dependency_accounting(result)
         _check_vector_index_accounting(result)

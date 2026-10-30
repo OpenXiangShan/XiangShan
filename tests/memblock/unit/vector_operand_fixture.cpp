@@ -179,6 +179,7 @@ static generated::VectorMemoryWriteback completion(const VectorMemoryTransaction
 // The actual scoreboard still checks the completion before pending changes.
 namespace memblock {
 struct VectorReplayRequest {
+    std::uint64_t cycle = 0;
     unsigned lane=0;bool lq_flag=false;std::uint8_t lq_value=0;
     bool sq_flag=false;std::uint8_t sq_value=0;bool is_part_replay=false;
     std::uint16_t replay_mask=0;std::uint8_t replay_mb_index=0;
