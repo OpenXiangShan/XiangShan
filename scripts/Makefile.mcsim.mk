@@ -1,12 +1,15 @@
 # MCSim timing backend.
 
-MCSIM_HOME ?= $(NOOP_HOME)/MCSim
+MCSIM_HOME ?=
 MCSIM_CPU_FREQ_MHZ ?= 3000
 MCSIM_CXX ?= clang++
 MCSIM_EMU_DEPS :=
 MCSIM_DIFTEST_ARGS :=
 
 ifeq ($(WITH_MCSIM),1)
+ifeq ($(strip $(MCSIM_HOME)),)
+$(error MCSIM_HOME is not set; source xs-env/env.sh or pass MCSIM_HOME=/path/to/MCSim)
+endif
 ifeq ($(wildcard $(MCSIM_HOME)/Makefile),)
 $(error MCSIM_HOME is invalid: $(MCSIM_HOME))
 endif
