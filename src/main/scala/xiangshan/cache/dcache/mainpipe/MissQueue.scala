@@ -275,7 +275,7 @@ class MissReqPipeRegBundle()(implicit p: Parameters) extends DCacheBundle
   }
 
   def get_acquire(l2_pf_store_only: Bool): FlitREQ = {
-    val acquire = Wire(new FlitREQ)
+    val acquire = Wire(DCacheREQ())
     val grow_param = req.req_coh.onAccess(req.cmd)._2
     DCacheCCHI.Tx.missReq(
       acquire,
@@ -286,6 +286,21 @@ class MissReqPipeRegBundle()(implicit p: Parameters) extends DCacheBundle
       req.full_overwrite,
       cchiDcacheSrcId(selectCCHIChannel(req.addr, mshr_id))
     )
+    // Restored verbatim RHS/priority from c8d7b3a5c1abf3f42c954e61abba20dd27e02a21
+    // src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:306,315,317-325.
+    DCacheREQ.train(acquire).foreach { train =>
+      train.vaddrBlock := req.vaddr(VAddrBits - 1, blockOffBits)
+      train.trainEnable := Mux(l2_pf_store_only, req.isFromStore, true.B)
+      when(req.isFromLoad) {
+        train.reqSource := MemReqSource.CPULoadData.id.U
+      }.elsewhen(req.isFromStore) {
+        train.reqSource := MemReqSource.CPUStoreData.id.U
+      }.elsewhen(req.isFromAMO) {
+        train.reqSource := MemReqSource.CPUAtomicData.id.U
+      }.otherwise {
+        train.reqSource := MemReqSource.L1DataPrefetch.id.U
+      }
+    }
     acquire
   }
 
@@ -301,7 +316,7 @@ class MissReqPipeRegBundle()(implicit p: Parameters) extends DCacheBundle
 class CMOUnit(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new CMOReq))
-    val txreq = DecoupledIO(new FlitREQ)
+    val txreq = DecoupledIO(DCacheREQ())
     val rxrsp = Flipped(DecoupledIO(new FlitDnRSP))
     val resp_to_lsq = DecoupledIO(new CMOResp)
     val wfi = Flipped(new WfiReqBundle)
@@ -402,7 +417,7 @@ class MissEntry(reqNum: Int)(implicit p: Parameters) extends DCacheModule
     val secondary_reject = Output(Vec(reqNum, Bool()))
     // way selected for replacing, used to support plru update
     // bus
-    val txreq = DecoupledIO(new FlitREQ)
+    val txreq = DecoupledIO(DCacheREQ())
     val rxdat = Flipped(DecoupledIO(new FlitDnDAT))
     val rxrsp = Flipped(DecoupledIO(new FlitDnRSP))
     val txrsp = DecoupledIO(new FlitUpRSP)
@@ -946,6 +961,33 @@ for(i <- 0 until reqNum) {
     full_overwrite,
     cchiDcacheSrcId(channel_sel)
   )
+  // Restored verbatim RHS/priority from c8d7b3a5c1abf3f42c954e61abba20dd27e02a21
+  // src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:987,994,996-1007.
+  DCacheREQ.train(io.txreq.bits).foreach { train =>
+    train.vaddrBlock := req.vaddr(VAddrBits-1, blockOffBits)
+    train.trainEnable := Mux(io.l2_pf_store_only, req.isFromStore, true.B)
+    when(prefetch && !secondary_fired) {
+      train.reqSource := MemReqSource.L1DataPrefetch.id.U
+    }.otherwise {
+      when(req.isFromStore) {
+        train.reqSource := MemReqSource.CPUStoreData.id.U
+      }.elsewhen(req.isFromLoad) {
+        train.reqSource := MemReqSource.CPULoadData.id.U
+      }.elsewhen(req.isFromAMO) {
+        train.reqSource := MemReqSource.CPUAtomicData.id.U
+      }.otherwise {
+        train.reqSource := MemReqSource.L1DataPrefetch.id.U
+      }
+    }
+    if (coreParams.oceanusTrainChecks) {
+      when(io.txreq.fire && train.trainEnable) {
+        assert(train.vaddrBlock === req.vaddr(49, 6), "pf-b entry VA encoding")
+        val expected = Mux(prefetch && !secondary_fired, 6.U,
+          Mux(req.isFromStore, 3.U, Mux(req.isFromLoad, 2.U, Mux(req.isFromAMO, 4.U, 6.U))))
+        assert(train.reqSource === expected, "pf-b entry reqSource/type mismatch")
+      }
+    }
+  }
   require(nSets <= 256)
 
   io.rxdat.ready := true.B
@@ -1115,7 +1157,7 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
 
     val queryMQ = Vec(reqNum, Flipped(new DCacheMQQueryIOBundle))
 
-    val txreq = Vec(nCCHIChannels, DecoupledIO(new FlitREQ))
+    val txreq = Vec(nCCHIChannels, DecoupledIO(DCacheREQ()))
     val txrsp = Vec(nCCHIChannels, DecoupledIO(new FlitUpRSP))
     val rxdat = Vec(nCCHIChannels, Flipped(DecoupledIO(new FlitDnDAT)))
     val rxrsp = Vec(nCCHIChannels, Flipped(DecoupledIO(new FlitDnRSP)))
@@ -1770,6 +1812,16 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
   for(i <- 0 until reqNum) {
     acquire_from_pipereg_vec(i).valid := parallel_pipe_regs(i).alloc && !can_merge_store_from_pipe(i) && !io.wfi.wfiReq
     acquire_from_pipereg_vec(i).bits := parallel_pipe_regs(i).get_acquire(io.l2_pf_store_only)
+    if (coreParams.oceanusTrainChecks) {
+      DCacheREQ.train(acquire_from_pipereg_vec(i).bits).foreach { train =>
+        val req = parallel_pipe_regs(i).req
+        when(acquire_from_pipereg_vec(i).fire && train.trainEnable) {
+          assert(train.vaddrBlock === req.vaddr(49, 6), "pf-b early VA encoding")
+          val expected = Mux(req.isFromLoad, 2.U, Mux(req.isFromStore, 3.U, Mux(req.isFromAMO, 4.U, 6.U)))
+          assert(train.reqSource === expected, "pf-b early reqSource/type mismatch")
+        }
+      }
+    }
 
     XSPerfAccumulate(s"acquire_fire_from_pipereg_$i", acquire_from_pipereg_vec(i).fire)
     XSPerfAccumulate(s"parallel_pipe_regs_valid_$i", parallel_pipe_regs(i).reg_valid())

@@ -19,7 +19,8 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
-import chisel3.util.{Valid, ValidIO}
+import chisel3.util.{Valid, ValidIO, PopCount}
+import chisel3.util.experimental.BoringUtils.tapAndRead
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -31,12 +32,12 @@ import xscache.chi.{ChannelIO, DecoupledPortIO, PortIO}
 import oceanus.chi.EnumCHIChannel
 import oceanus.chi.bundle.{CHIBundleDAT, CHIBundleREQ, CHIBundleRSP, CHIBundleSNP}
 import oceanus.chi.link.OceanusChannelAdapter
-import oceanus.l2.{L2Configuration, L2Top}
+import oceanus.l2.{L2Configuration, L2Top, L2BOPPerf, L2PfSource}
 import system.HasSoCParameter
 import utility._
 import utility.sram.{SramBroadcastBundle, SramHelper}
 import utility.mbist.{MbistInterface, MbistPipeline}
-import xiangshan.cache.{CCHIConnect, CCHIType1Port, CCHIType4Port}
+import xiangshan.cache.{CCHIConnect, CCHIType1Port, CCHIType4Port, DCacheREQ}
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
@@ -92,8 +93,7 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
   val beu_local_int_source = IntSourceNode(IntSourcePortSimple())
   val beu_local_int_source_buffer = IntBuffer()
 
-  // Reserved L2 prefetch Diplomacy sinks. Oceanus L2 has no prefetcher yet;
-  // keep the L1 sender endpoints so they can be wired later.
+  // Keep the existing L1 prefetch sender endpoints; selected producers consume L2 hints.
   val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] =
     Option.when(coreParams.prefetcher.nonEmpty)(BundleBridgeSink(Some(() => new PrefetchRecv)))
   val l3_pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] =
@@ -307,45 +307,13 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
     beu.module.io.errors.l2 := 0.U.asTypeOf(beu.module.io.errors.l2)
     io.decoupledCHI.foreach(_ := DontCare)
 
-    // Reserved L2 prefetch / L1-hint ports (CoupledL2 mapping).
-    // Oceanus L2 has no prefetcher yet; keep the L1-facing mapping and do not
-    // connect these wires to oceanusL2.
-    val l2Pf = Wire(new Bundle {
-      val pfCtrlFromCore = new PrefetchCtrlFromCore
-      val l2_hint = chiselTypeOf(io.l2_hint)
-      val l2_fdbk_pf_ctrl = new L2ToL1PfCtrl
-      val l2_tlb_req = chiselTypeOf(io.l2_tlb_req)
-      val l2_pmp_resp = chiselTypeOf(io.l2_pmp_resp)
-    })
-    l2Pf.pfCtrlFromCore := io.pfCtrlFromCore
-    io.l2_hint := l2Pf.l2_hint
-    io.l2_fdbk_pf_ctrl := l2Pf.l2_fdbk_pf_ctrl
-
-    /* l2 tlb */
-    io.l2_tlb_req.req.bits := DontCare
-    io.l2_tlb_req.req.valid := l2Pf.l2_tlb_req.req.valid
-    io.l2_tlb_req.resp.ready := l2Pf.l2_tlb_req.resp.ready
-    io.l2_tlb_req.req.bits.vaddr := l2Pf.l2_tlb_req.req.bits.vaddr
-    io.l2_tlb_req.req.bits.cmd := l2Pf.l2_tlb_req.req.bits.cmd
-    io.l2_tlb_req.req.bits.size := l2Pf.l2_tlb_req.req.bits.size
-    io.l2_tlb_req.req.bits.kill := l2Pf.l2_tlb_req.req.bits.kill
-    io.l2_tlb_req.req.bits.isPrefetch := l2Pf.l2_tlb_req.req.bits.isPrefetch
-    io.l2_tlb_req.req.bits.no_translate := l2Pf.l2_tlb_req.req.bits.no_translate
-    io.l2_tlb_req.req_kill := l2Pf.l2_tlb_req.req_kill
-    l2Pf.l2_tlb_req.resp.valid := io.l2_tlb_req.resp.valid
-    l2Pf.l2_tlb_req.req.ready := io.l2_tlb_req.req.ready
-    l2Pf.l2_tlb_req.resp.bits := io.l2_tlb_req.resp.bits
-    l2Pf.l2_pmp_resp := io.l2_pmp_resp
-
-    // Idle L2-side drivers until oceanus prefetch is implemented.
-    l2Pf.l2_hint := 0.U.asTypeOf(l2Pf.l2_hint)
-    l2Pf.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
-    l2Pf.l2_tlb_req.req.valid := false.B
-    l2Pf.l2_tlb_req.req.bits := DontCare
-    l2Pf.l2_tlb_req.req_kill := false.B
-    l2Pf.l2_tlb_req.resp.ready := true.B
-    dontTouch(l2Pf)
-
+    // L1 hint/degree feedback has no Oceanus counterpart in this migration.
+    io.l2_hint := 0.U.asTypeOf(io.l2_hint)
+    io.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
+    io.l2_tlb_req.req.valid := false.B
+    io.l2_tlb_req.req.bits := 0.U.asTypeOf(io.l2_tlb_req.req.bits)
+    io.l2_tlb_req.req_kill := false.B
+    io.l2_tlb_req.resp.ready := true.B
     pf_recv_node.foreach { n => dontTouch(n.in.head._1) }
     l3_pf_recv_node.foreach { n => dontTouch(n.in.head._1) }
 
@@ -358,7 +326,14 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
         eSAM = true,
         slices = 0 until coreParams.L2NBanks,
         upstream = cchiUpstream,
-        pfSrcID = 2
+        pfSrcID = 2,
+        bopEnable = coreParams.oceanusPrefetch.bop,
+        pfRecvEnable = coreParams.oceanusPrefetch.recv,
+        pfCtrlEnable = coreParams.oceanusPrefetch.enabled,
+        pfTlbEnable = coreParams.oceanusPrefetch.tlb,
+        pfTrainEnable = coreParams.oceanusPrefetch.tlb,
+        vbopStubEnable = coreParams.oceanusPrefetch.vbop,
+        cdpStubEnable = coreParams.oceanusPrefetch.cdp
       )
       // XiangShan freezes its parameter lookup before module construction.
       // Give L2 a regular lookup view so its local observation keys can be
@@ -368,8 +343,81 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
       })
       val oceanusL2 = Module(new L2Top(l2cfg)(l2Parameters))
 
+      if (coreParams.oceanusPrefetch.cdp) {
+        // Observation only, outside the pinned XSCache submodule. Existing
+        // bop_* XSPerf totals combine every source; export the already-defined
+        // L2TSHR.bopPerfSource provenance so the all-on run can separate them.
+        // No prefetch policy, queue or request control signal is driven here.
+        val sources = Seq("pbop" -> L2PfSource.PBOP, "vbop" -> L2PfSource.BOP,
+          "cdp" -> L2PfSource.CDP, "sms" -> L2PfSource.SMS,
+          "stream" -> L2PfSource.Stream, "stride" -> L2PfSource.Stride,
+          "berti" -> L2PfSource.Berti, "tp" -> L2PfSource.TP, "nl" -> L2PfSource.NL)
+        val metrics = Seq("sent_downstream" -> L2BOPPerf.IssuedDownstream,
+          "demand_hit" -> L2BOPPerf.Useful, "redundant" -> L2BOPPerf.Redundant)
+        metrics.foreach { case (metric, event) =>
+          val observed = oceanusL2.slices.flatMap(_.tshrs).map { t =>
+            (tapAndRead(t.io.bopPerf(event)), tapAndRead(t.io.bopPerfSource(event)))
+          }
+          sources.foreach { case (name, source) =>
+            XSPerfAccumulate(s"pfB_${name}_$metric",
+              PopCount(observed.map { case (valid, origin) => valid && origin === source.U }))
+          }
+        }
+        sources.foreach { case (name, source) =>
+          val slot = oceanusL2.pfSourceSlots.indexOf(source)
+          val overwritten = l2cfg.slices.indices.map { slice =>
+            tapAndRead(oceanusL2.pfQueueOverwriteBySource(slice)(slot))
+          }
+          XSPerfAccumulate(s"pfB_${name}_queue_overwrite", PopCount(overwritten))
+        }
+      }
+
+
+      oceanusL2.io.pfCtrl.foreach(_ := io.pfCtrlFromCore)
+      oceanusL2.io.pfRecv.foreach { recv =>
+        require(pf_recv_node.nonEmpty, "Oceanus Recv requires an existing L1 prefetch sender")
+        recv := pf_recv_node.get.in.head._1
+      }
+      // Translate only bundle shape: the L2 uses one of the core's duplicate
+      // translation results. Keep the response and next-cycle PMP timing intact.
+      oceanusL2.io.pfTlb.foreach { tlb =>
+        io.l2_tlb_req.req.valid := tlb.req.valid
+        io.l2_tlb_req.req.bits.vaddr := tlb.req.bits.vaddr
+        io.l2_tlb_req.req.bits.cmd := tlb.req.bits.cmd
+        io.l2_tlb_req.req.bits.size := tlb.req.bits.size
+        io.l2_tlb_req.req.bits.kill := tlb.req.bits.kill
+        io.l2_tlb_req.req.bits.isPrefetch := tlb.req.bits.isPrefetch
+        io.l2_tlb_req.req.bits.no_translate := tlb.req.bits.no_translate
+        io.l2_tlb_req.req_kill := tlb.req_kill
+        tlb.req.ready := io.l2_tlb_req.req.ready
+        io.l2_tlb_req.resp.ready := tlb.resp.ready
+        tlb.resp.valid := io.l2_tlb_req.resp.valid
+        tlb.resp.bits.paddr(0) := io.l2_tlb_req.resp.bits.paddr(0)
+        tlb.resp.bits.pbmt := io.l2_tlb_req.resp.bits.pbmt(0)
+        tlb.resp.bits.miss := io.l2_tlb_req.resp.bits.miss
+        tlb.resp.bits.excp(0).gpf := io.l2_tlb_req.resp.bits.excp(0).gpf
+        tlb.resp.bits.excp(0).pf := io.l2_tlb_req.resp.bits.excp(0).pf
+        tlb.resp.bits.excp(0).af := io.l2_tlb_req.resp.bits.excp(0).af
+        tlb.pmp_resp.ld := io.l2_pmp_resp.ld
+        tlb.pmp_resp.st := io.l2_pmp_resp.st
+        tlb.pmp_resp.instr := io.l2_pmp_resp.instr
+        tlb.pmp_resp.mmio := io.l2_pmp_resp.mmio
+        tlb.pmp_resp.atomic := io.l2_pmp_resp.atomic
+      }
+
       require(oceanusL2.io.t1p.size == io.dcache_cchi.size)
       oceanusL2.io.t1p.zip(io.dcache_cchi).foreach { case (t1, l1) => CCHIConnect.type1(t1, l1) }
+      oceanusL2.io.pfTrain.foreach { trains =>
+        require(coreParams.oceanusTrainSideband, "VA prefetch requires original core training context")
+        trains.zip(io.dcache_cchi).foreach { case (train, l1) =>
+          // L2 captures only on this same Type-1 REQ.fire (L2Top.scala:623-635).
+          // No independent handshake/register; each of the two lanes owns its context.
+          val coreTrain = DCacheREQ.train(l1.upREQ.bits).get
+          train.vaddrBlock := coreTrain.vaddrBlock
+          train.reqSource := coreTrain.reqSource
+          train.trainEnable := coreTrain.trainEnable
+        }
+      }
       CCHIConnect.type4(oceanusL2.io.t4p(0), io.icache_cchi)
       CCHIConnect.type4(oceanusL2.io.t4p(1), io.ptw_cchi)
 

@@ -299,6 +299,10 @@ case class XSCoreParameters
     prefetch = Seq(xscache.coupledL2.prefetch.PrefetchReceiverParams(), xscache.coupledL2.prefetch.BOPParameters(),
       xscache.coupledL2.prefetch.TPParameters()),
   )),
+  oceanusPrefetch: OceanusPrefetchParameters = OceanusPrefetchParameters(),
+  // pf-b local REQ metadata; false elaborates the original FlitREQ and queues.
+  oceanusTrainSideband: Boolean = false,
+  oceanusTrainChecks: Boolean = false,
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
   softTLB: Boolean = false, // dpi-c l1tlb debug only

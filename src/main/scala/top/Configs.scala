@@ -702,3 +702,24 @@ trait DeprecatedConfigWarning {
   )
   Thread.sleep(10000)
 }
+
+// Oceanus producer combinations retain DefaultConfig cache/core geometry.
+class WithOceanusPrefetch(pf: OceanusPrefetchParameters) extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(_.copy(oceanusPrefetch = pf, oceanusTrainSideband = pf.tlb, oceanusTrainChecks = pf.tlb))
+})
+
+class PfBBopConfig(n: Int = 1) extends Config(
+  new WithOceanusPrefetch(OceanusPrefetchParameters(bop = true)) ++ new DefaultConfig(n)
+)
+class PfBBopRecvConfig(n: Int = 1) extends Config(
+  new WithOceanusPrefetch(OceanusPrefetchParameters(bop = true, recv = true)) ++ new DefaultConfig(n)
+)
+class PfBBopVbopConfig(n: Int = 1) extends Config(
+  new WithOceanusPrefetch(OceanusPrefetchParameters(bop = true, vbop = true)) ++ new DefaultConfig(n)
+)
+class PfBBopCdpConfig(n: Int = 1) extends Config(
+  new WithOceanusPrefetch(OceanusPrefetchParameters(bop = true, cdp = true)) ++ new DefaultConfig(n)
+)
+class PfBAllConfig(n: Int = 1) extends Config(
+  new WithOceanusPrefetch(OceanusPrefetchParameters(bop = true, recv = true, vbop = true, cdp = true)) ++ new DefaultConfig(n)
+)

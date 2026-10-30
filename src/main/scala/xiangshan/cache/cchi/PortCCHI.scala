@@ -8,6 +8,26 @@ import oceanus.compactchi._
 import xscache.oceanus.compactchi.CCHIParametersKey
 import org.chipsalliance.cde.config.Parameters
 
+// Local core payload only: no change to compactchi.FlitREQ or protocol fields.
+// Source encoding: c8d7b3a5c1abf3f42c954e61abba20dd27e02a21,
+// MissQueue.scala:306,315,317-325 and 987,994,996-1007 (before CCHI).
+class DCacheTrainSideband extends Bundle {
+  val vaddrBlock = UInt(44.W) // VA[49:6]
+  val reqSource = UInt(5.W)   // MemReqSource: load=2, store=3, atomic=4, L1PF=6
+  val trainEnable = Bool()
+}
+class DCacheTrainREQ(implicit p: Parameters) extends FlitREQ {
+  val train = new DCacheTrainSideband
+}
+object DCacheREQ {
+  def apply()(implicit p: Parameters): FlitREQ =
+    if (p(xiangshan.XSCoreParamsKey).oceanusTrainSideband) new DCacheTrainREQ else new FlitREQ
+  def train(req: FlitREQ): Option[DCacheTrainSideband] = req match {
+    case r: DCacheTrainREQ => Some(r.train)
+    case _ => None
+  }
+}
+
 /*
  * Compact CHI Type 1 (fully coherent) upstream port, DCache view.
  *
@@ -16,7 +36,7 @@ import org.chipsalliance.cde.config.Parameters
 class CCHIType1Port(implicit p: Parameters) extends Bundle {
   // up (DCache -> L2)
   val upEVT = DecoupledIO(new FlitEVT)
-  val upREQ = DecoupledIO(new FlitREQ)
+  val upREQ = DecoupledIO(DCacheREQ())
   val upRSP = DecoupledIO(new FlitUpRSP)
   val upDAT = DecoupledIO(new FlitUpDAT)
   // dn (L2 -> DCache)
@@ -71,6 +91,11 @@ object DCacheCCHI {
 
   object Tx {
     private def fillReq(req: FlitREQ, expCompData: Bool, srcId: UInt): Unit = {
+      // Deterministic non-training default, overridden for miss requests only.
+      // CMO deviation authorized by user: c8d7b3a MissQueue.scala:405-410 ->
+      // rocket-chip a2df1a42399cfe2b343eeb5293796268dc2bc211 Edges.scala:389
+      // used a.user := DontCare. Zero avoids X; it does not change REQ control.
+      DCacheREQ.train(req).foreach(_ := 0.U.asTypeOf(new DCacheTrainSideband))
       req.SrcID := srcId
       req.TgtID := Params.tgtId
       req.Size := Params.size64
@@ -286,7 +311,16 @@ object PtwCCHI {
 object CCHIConnect {
   def type1(l2: CCHIInterfaceType1, l1: CCHIType1Port): Unit = {
     l2.UpEVT <> l1.upEVT
-    l2.UpREQ <> l1.upREQ
+    if (l1.upREQ.bits.isInstanceOf[DCacheTrainREQ]) {
+      // Split only at the L2 boundary, after all original REQ queues/arbitration.
+      l2.UpREQ.valid := l1.upREQ.valid
+      l1.upREQ.ready := l2.UpREQ.ready
+      l2.UpREQ.bits.elements.foreach { case (name, field) =>
+        field := l1.upREQ.bits.elements(name)
+      }
+    } else {
+      l2.UpREQ <> l1.upREQ
+    }
     l1.dnSNP <> l2.DnSNP
     l2.UpRSP <> l1.upRSP
     l2.UpDAT <> l1.upDAT

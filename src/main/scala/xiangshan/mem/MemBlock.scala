@@ -638,6 +638,75 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
+  if (coreParams.oceanusTrainChecks) {
+    // Observational checker only: real successful DTLB translations witness
+    // VPN->PPN. No requests, ready/valid changes or page walks are introduced.
+    // Request/response timing follows TLB.scala:775-791 (DiffL1TLBEvent).
+    // Flush witnesses on sfence or any CSR context change; do not guess across
+    // address spaces, killed translations, no_translate PA hints or hyperinst.
+    val contextChanged = RegNext(tlbcsr.asUInt, 0.U) =/= tlbcsr.asUInt
+    val invalidate = sfence.valid || contextChanged
+    val slots = 32
+    val witnesses = dtlb_reqs.map { tlb =>
+      val valid = RegInit(VecInit(Seq.fill(slots)(false.B)))
+      val vpn = Reg(Vec(slots, UInt((VAddrBits - 12).W)))
+      val ppn = Reg(Vec(slots, UInt((PAddrBits - 12).W)))
+      val reqVpn = RegEnable(tlb.req.bits.vaddr(VAddrBits - 1, 12), tlb.req.fire)
+      val pending = RegNext(tlb.req.fire && !tlb.req.bits.kill &&
+        !tlb.req.bits.no_translate && !tlb.req.bits.hyperinst, false.B)
+      val excp = tlb.resp.bits.excp(0)
+      val success = pending && !tlb.req_kill && tlb.resp.fire &&
+        !tlb.resp.bits.miss && !excp.pf.asUInt.orR &&
+        !excp.gpf.asUInt.orR && !excp.af.asUInt.orR
+      val index = reqVpn(4, 0)
+      when(invalidate) {
+        valid.foreach(_ := false.B)
+      }.elsewhen(success) {
+        valid(index) := true.B
+        vpn(index) := reqVpn
+        ppn(index) := tlb.resp.bits.paddr(0)(PAddrBits - 1, 12)
+      }
+      (valid, vpn, ppn)
+    }
+    XSPerfAccumulate("pfB_train_context_invalidate", invalidate)
+    io.outer_dcache_cchi.zipWithIndex.foreach { case (port, lane) =>
+      val train = DCacheREQ.train(port.upREQ.bits).get
+      val vpn = train.vaddrBlock(43, 6)
+      val index = vpn(4, 0)
+      val hits = witnesses.map { case (v, tag, _) => v(index) && tag(index) === vpn }
+      val candidates = witnesses.map(_._3(index))
+      val anyHit = hits.reduce(_ || _)
+      val selected = PriorityMux(hits.zip(candidates))
+      val agree = hits.zip(candidates).map { case (h, ppn) => !h || ppn === selected }.reduce(_ && _)
+      val fire = port.upREQ.fire && train.trainEnable
+      val checked = fire && !invalidate && anyHit && agree
+      XSPerfAccumulate(s"pfB_train_lane${lane}_fire", fire)
+      XSPerfAccumulate(s"pfB_train_lane${lane}_page_checked", checked)
+      XSPerfAccumulate(s"pfB_train_lane${lane}_page_uncovered", fire && !invalidate && !anyHit)
+      XSPerfAccumulate(s"pfB_train_lane${lane}_page_ambiguous", fire && !invalidate && anyHit && !agree)
+      XSPerfAccumulate(s"pfB_train_lane${lane}_context_discard", fire && invalidate)
+      when(checked) {
+        assert(selected === port.upREQ.bits.Addr(PAddrBits - 1, 12),
+          "pf-b VA/PA page mismatch against successful core DTLB translation")
+      }
+      when(port.upREQ.fire) {
+        val opcode = port.upREQ.bits.Opcode
+        val miss = opcode === oceanus.compactchi.CCHIOpcode.ReadShared.U ||
+          opcode === oceanus.compactchi.CCHIOpcode.ReadUnique.U ||
+          opcode === oceanus.compactchi.CCHIOpcode.MakeUnique.U
+        when(train.trainEnable) {
+          assert(miss, "pf-b non-training REQ has trainEnable")
+          assert(train.reqSource === 2.U || train.reqSource === 3.U ||
+            train.reqSource === 4.U || train.reqSource === 6.U, "pf-b invalid reqSource")
+        }
+        when(!miss) {
+          assert(!train.trainEnable && train.vaddrBlock === 0.U && train.reqSource === 0.U,
+            "pf-b CMO metadata must be zero")
+        }
+      }
+    }
+  }
+
   dtlb.map(_.hartId := io.hartId)
   dtlb.map(_.sfence := sfence)
   dtlb.map(_.csr := tlbcsr)
