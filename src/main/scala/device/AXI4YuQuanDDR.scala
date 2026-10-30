@@ -30,7 +30,54 @@ import freechips.rocketchip.amba.axi4.{
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, TransferSizes}
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils.VerilogAXI4Record
+
+import scala.collection.immutable.SeqMap
+
+private class YuQuanAXI4Record(val params: AXI4BundleParameters) extends Record {
+  private val axi4Bundle = new AXI4Bundle(params)
+
+  private def flatten(data: (String, Data)): SeqMap[String, Data] = data match {
+    case (name, node: Record) => SeqMap.from(node.elements.toSeq.flatMap(flatten).map {
+      case (nodeName, child) => s"${name.replace("bits", "")}$nodeName" -> child
+    })
+    case (name, node) => SeqMap(name -> node)
+  }
+
+  private val outputPattern = "^(aw|w|ar).*".r
+  private val elems = flatten("", axi4Bundle).map { case (name, node) =>
+    val directed = name match {
+      case outputPattern(_) => Output(node)
+      case _                => Input(node)
+    }
+    name match {
+      case s"${_}ready" => name -> Flipped(directed)
+      case _             => name -> directed
+    }
+  }
+
+  def elements: SeqMap[String, Data] = elems.map { case (name, data) => s"${name}_0" -> data }
+}
+
+private object YuQuanAXI4Record {
+  private val names = new YuQuanAXI4Record(AXI4BundleParameters(1, 8, 1)).elements.keys
+    .map(_.stripSuffix("_0"))
+  private val pattern = "^(aw|w|b|ar|r)(.*)".r
+  private val elementsMap = names.map { name =>
+    (verilog: YuQuanAXI4Record, chisel: AXI4Bundle) => {
+      val (channel, signal) = name match {
+        case pattern(prefix, field) => chisel.elements(prefix).asInstanceOf[Record] -> field
+        case _ => throw new IllegalArgumentException(s"Unexpected AXI field: $name")
+      }
+      verilog.elements(s"${name}_0") -> channel.elements.applyOrElse(
+        signal,
+        channel.elements("bits").asInstanceOf[Record].elements
+      )
+    }
+  }.toSeq
+
+  implicit val axi4View: DataView[YuQuanAXI4Record, AXI4Bundle] =
+    DataView[YuQuanAXI4Record, AXI4Bundle](record => new AXI4Bundle(record.params), elementsMap: _*)
+}
 
 class YuQuanPreloadDoneHelper extends ExtModule with HasExtModuleInline {
   val clock = IO(Input(Clock()))
@@ -65,11 +112,11 @@ class YuQuanDDRBlackBox extends ExtModule {
   val aresetn_0 = IO(Input(Bool()))
   val aclk_0    = IO(Input(Clock()))
 
-  val axi = FlatIO(Flipped(new VerilogAXI4Record(AXI4BundleParameters(
+  private val axi = FlatIO(Flipped(new YuQuanAXI4Record(AXI4BundleParameters(
     addrBits = 36,
     dataBits = 256,
     idBits = 18
-  ), portSuffix = "_0")))
+  ))))
 
   val awuser_0        = IO(Input(UInt(8.W)))
   val awregion_0      = IO(Input(UInt(4.W)))
