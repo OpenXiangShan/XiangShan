@@ -49,6 +49,10 @@ class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
 
   override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
     List(
+      // Index 0 is reserved: BusErrorUnit uses `cause === 0` as the "no event yet" value
+      // (cause resets to 0 and is only latched when cause === 0), so a source at index 0
+      // can never be distinguished from "no event".  Rocket's L1BusErrors leaves 0 empty too.
+      None,
       Some(icache.ecc_error, "I_ECC", "Icache ecc error"),
       Some(dcache.ecc_error, "D_ECC", "Dcache ecc error"),
       Some(uncache.ecc_error, "U_ECC", "Uncache ecc error"),
