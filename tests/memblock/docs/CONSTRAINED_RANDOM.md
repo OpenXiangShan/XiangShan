@@ -1060,6 +1060,13 @@ contiguous-PA results against production scoreboards.
   own mappings, and context transitions drain SBuffer. Arbitrary root/ASID/VMID
   churn, dynamic PTE mutation/invalidation races and general in-flight
   cross-alias recovery remain outside this direction.
+
+  The separate `translation-alias` directed contract shares exact-identity
+  redirect return and strict refetch for warmed and cold-first alias accesses.
+  Typed store snapshots, held/guarded architectural retirement and next-edge
+  head advancement before drain preserve that isolated producer path. This
+  focused contract does not add arbitrary synonyms to the canonical random
+  stream or remove its producer-density limits.
 - Ordinary VLEFF uses VL=2 and faults at element0 or element1. Segment FOF
   supports legal unit-stride shape tuples but also uses those two fault
   positions. Later arbitrary fault positions, all FOF policy combinations,

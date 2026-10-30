@@ -248,8 +248,10 @@ rejected. Individual-byte collisions and unchanged special-case pools remain.
 `ld2Cancel` cancels speculative wakeup dependencies; it does not by itself
 cancel an instruction or an LQ allocation. The alias forwarding-tag mismatch
 instead requests a same-instruction flush-itself through `memoryViolation`.
-`translation-alias` checks its full retained identity, returns the redirect after
-the isolated backend's two registered stages, and dispatches a fresh refetch
+`translation-alias` uses [alias_refetch.hpp](../cpp/scenarios/alias_refetch.hpp)
+for both its warmed-alias and cold-first-access loads. It checks full retained
+identity, returns the redirect after the isolated backend's two registered
+stages, and dispatches a fresh refetch
 expectation. With no intervening allocation, rename restores the original pdest
 as well as the ROB identity. LQ dispatch
 position rewinds only by observed redirect cancellations, since the first entry
@@ -257,6 +259,15 @@ may already have dequeued. The refetch must return exact committed store bytes,
 with no second data opt-out and no unobserved queue cancellation. This directed
 round trip does not model arbitrary backend redirect arbitration or every IQ/LQ
 replay producer.
+Both direct and refetched paths conserve allocations, checked/discarded scalar
+completions and redirects, preserve older SQ work, and reject extra terminals.
+Stores use typed dispatch snapshots, hold pendingst with their store head, wait
+the scalar writeback-to-retirement guard, retire once, and expose the next
+non-store head on the following edge before any SQ/cache drain. The second
+store retains LQ snapshot 3 after three earlier loads;
+dequeue does not rewind dispatch. A pre-issue SBuffer-busy sample is diagnostic,
+not a specific-store forwarding-stage witness. Native alias cases and synthetic
+correct-first-data/nonzero-cancellation scripts are distinct evidence.
 
 The ordinary mixed executor has a separate bounded cacheable memory-violation
 recovery path. `return_ordinary_redirect` retains exact scalar,

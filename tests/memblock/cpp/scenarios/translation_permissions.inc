@@ -2540,14 +2540,7 @@ int run_translation_alias(int argc, char **argv)
         .expected_debug_is_mmio = false,
         .expected_debug_is_ncio = false,
     };
-    environment.expect_store(store);
-    if (!environment.set_rob_head(store.rob, store.rob_flag) ||
-        !environment.enqueue_store(store, 0) ||
-        !environment.warm_store_translation(store, 4096) ||
-        !environment.issue_store_data(store, 2048) ||
-        !environment.pulse_pending_store(store.rob, store.rob_flag) ||
-        !environment.run_until_store_complete(16384) ||
-        !environment.commit_store(store, 16384)) {
+    if (!retire_alias_store(environment, store)) {
         std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
                   << environment.cycle() << " phase=store reason="
                   << environment.error() << '\n';
@@ -2578,11 +2571,12 @@ int run_translation_alias(int argc, char **argv)
         .expected_debug_is_perf_cnt = false,
     };
     environment.expect_load_data(original_load, store_data);
-    if (!environment.set_rob_head(original_load.rob, original_load.rob_flag) ||
+    if (!environment.set_rob_head_state(original_load.rob, original_load.rob_flag, false) ||
         !environment.enqueue_load(original_load) ||
         !environment.issue_load(original_load, 4096) ||
         !environment.run_until_complete(16384) ||
-        !environment.run_until_lq_retired(4096)) {
+        !environment.run_until_lq_retired(4096) ||
+        !environment.run_cycles(memblock::kStreamScalarWritebackToHead - 1U)) {
         std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
                   << environment.cycle() << " phase=original-load reason="
                   << environment.error() << '\n';
@@ -2603,11 +2597,12 @@ int run_translation_alias(int argc, char **argv)
         .expected_debug_is_perf_cnt = false,
     };
     environment.expect_load_data(alias_load, store_data);
-    if (!environment.set_rob_head(alias_load.rob, alias_load.rob_flag) ||
+    if (!environment.set_rob_head_state(alias_load.rob, alias_load.rob_flag, false) ||
         !environment.enqueue_load(alias_load) ||
         !environment.issue_load(alias_load, 4096) ||
         !environment.run_until_complete(16384) ||
-        !environment.run_until_lq_retired(4096)) {
+        !environment.run_until_lq_retired(4096) ||
+        !environment.run_cycles(memblock::kStreamScalarWritebackToHead - 1U)) {
         std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
                   << environment.cycle() << " phase=alias-load reason="
                   << environment.error() << '\n';
@@ -2632,21 +2627,21 @@ int run_translation_alias(int argc, char **argv)
     };
     environment.expect_load_data(
         alias_neighbour, environment.memory().read_u64(physical + offset + 8));
-    if (!environment.set_rob_head(
-            alias_neighbour.rob, alias_neighbour.rob_flag) ||
+    if (!environment.set_rob_head_state(alias_neighbour.rob, alias_neighbour.rob_flag, false) ||
         !environment.enqueue_load(alias_neighbour) ||
         !environment.issue_load(alias_neighbour, 4096) ||
         !environment.run_until_complete(16384) ||
-        !environment.run_until_lq_retired(4096)) {
+        !environment.run_until_lq_retired(4096) ||
+        !environment.run_cycles(memblock::kStreamScalarWritebackToHead - 1U)) {
         std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
                   << environment.cycle() << " phase=alias-neighbour reason="
                   << environment.error() << '\n';
         return 1;
     }
 
-    // The same alias pair must also work while the committed store is still
-    // in the SBuffer pipeline.  This is the cross-alias forwarding window; a
-    // drained-cache-only check would not exercise it.
+    // Issue through the other alias without first draining the older store.
+    // Busy at this sample is diagnostic, not proof of forwarding-stage residence.
+    // A legal alias-tag refetch still owes exact final committed bytes.
     constexpr std::uint64_t second_offset = 0x200ULL;
     constexpr std::uint64_t second_data = 0x8877665544332211ULL;
     const memblock::StoreTransaction second_store{
@@ -2655,22 +2650,14 @@ int run_translation_alias(int argc, char **argv)
         .data = second_data,
         .op = memblock::StoreOp::sd,
         .rob = 4,
+        .lq = 3,
         .sq = 1,
         .address_lane = 1,
         .data_lane = 1,
         .expected_debug_is_mmio = false,
         .expected_debug_is_ncio = false,
     };
-    environment.expect_store(second_store);
-    if (!environment.set_rob_head(
-            second_store.rob, second_store.rob_flag) ||
-        !environment.enqueue_store(second_store, 0) ||
-        !environment.issue_store_address_until_tlb_hit(second_store, 4096) ||
-        !environment.issue_store_data(second_store, 2048) ||
-        !environment.pulse_pending_store(
-            second_store.rob, second_store.rob_flag) ||
-        !environment.run_until_store_complete(16384) ||
-        !environment.commit_store(second_store, 16384)) {
+    if (!retire_alias_store(environment, second_store)) {
         std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
                   << environment.cycle() << " phase=second-store reason="
                   << environment.error() << '\n';
@@ -2697,19 +2684,13 @@ int run_translation_alias(int argc, char **argv)
         .expected_debug_is_ncio = false,
         .expected_debug_is_perf_cnt = false,
     };
-    environment.expect_load_data(in_flight_load, second_data);
-    if (!environment.set_rob_head(
-            in_flight_load.rob, in_flight_load.rob_flag) ||
-        !environment.enqueue_load(in_flight_load) ||
-        !environment.issue_load(in_flight_load, 4096) ||
-        !environment.run_until_complete(16384) ||
-        !environment.run_until_lq_retired(4096)) {
+    AliasRefetchResult in_flight_result;
+    if (!complete_alias_load(environment, in_flight_load, second_data, in_flight_result)) {
         std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
-                  << environment.cycle() << " phase=in-flight-alias-load reason="
-                  << environment.error() << '\n';
+                  << environment.cycle() << " phase=in-flight-" << in_flight_result.phase
+                  << " reason=" << environment.error() << '\n';
         return 1;
     }
-
 
     // First access to the second alias while the older store is still in the
     // SBuffer pipeline. A virtual/physical forwarding-tag mismatch requests
@@ -2752,16 +2733,7 @@ int run_translation_alias(int argc, char **argv)
             .expected_debug_is_mmio = false,
             .expected_debug_is_ncio = false,
         };
-        canceled_alias.expect_store(cancel_store);
-        if (!canceled_alias.set_rob_head(
-                cancel_store.rob, cancel_store.rob_flag) ||
-            !canceled_alias.enqueue_store(cancel_store, 0) ||
-            !canceled_alias.warm_store_translation(cancel_store, 4096) ||
-            !canceled_alias.issue_store_data(cancel_store, 2048) ||
-            !canceled_alias.pulse_pending_store(
-                cancel_store.rob, cancel_store.rob_flag) ||
-            !canceled_alias.run_until_store_complete(16384) ||
-            !canceled_alias.commit_store(cancel_store, 16384)) {
+        if (!retire_alias_store(canceled_alias, cancel_store)) {
             std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
                       << canceled_alias.cycle()
                       << " phase=first-access-store reason="
@@ -2783,115 +2755,18 @@ int run_translation_alias(int argc, char **argv)
             .expected_debug_is_mmio = false,
             .expected_debug_is_ncio = false,
             .expected_debug_is_perf_cnt = false,
-            .tolerate_canceled_result = true,
         };
-        const auto violations_before =
-            canceled_alias.memory_violation_stats().count;
-        canceled_alias.expect_load_data(first_access_load, cancel_data);
-        if (!canceled_alias.set_rob_head(
-                first_access_load.rob, first_access_load.rob_flag) ||
-            !canceled_alias.enqueue_load(first_access_load) ||
-            !canceled_alias.issue_load(first_access_load, 4096) ||
-            !canceled_alias.run_until_complete(16384)) {
+        AliasRefetchResult first_access_result;
+        if (!complete_alias_load(canceled_alias, first_access_load, cancel_data, first_access_result)) {
             std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
-                      << canceled_alias.cycle()
-                      << " phase=first-access-load reason="
-                      << canceled_alias.error() << '\n';
-            return 1;
-        }
-        const std::uint64_t canceled_count =
-            canceled_alias.scalar_load_canceled_observed();
-        if (canceled_count > 1) {
-            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
-                      << canceled_alias.cycle()
-                      << " phase=first-access-cancellation reason="
-                      << canceled_alias.error()
-                      << " canceled=" << canceled_count << '\n';
-            return 1;
-        }
-        for (unsigned cycle = 0;
-             cycle < 16 && canceled_alias.memory_violation_stats().count ==
-                 violations_before; ++cycle) {
-            if (!canceled_alias.run_cycles(1)) return 1;
-        }
-        const auto violation = canceled_alias.memory_violation_stats();
-        const bool refetch = violation.count == violations_before + 1;
-        if (violation.count > violations_before + 1 ||
-            (canceled_count != 0 && !refetch) ||
-            (refetch && (!violation.last.valid || !violation.last.level ||
-                violation.last.rob_value != first_access_load.rob ||
-                violation.last.rob_flag != first_access_load.rob_flag ||
-                violation.last.ftq_flag ||
-                violation.last.ftq_value != first_access_load.ftq_ptr ||
-                violation.last.ftq_offset != first_access_load.ftq_offset ||
-                violation.last.is_rvc != first_access_load.predecode_rvc))) {
-            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
-                      << canceled_alias.cycle()
-                      << " phase=first-access-redirect-evidence canceled="
-                      << canceled_count << " violations=" << violation.count
-                      << " level=" << violation.last.level << " rob="
-                      << unsigned(violation.last.rob_value) << ':'
-                      << violation.last.rob_flag << '\n';
-            return 1;
-        }
-        if (refetch) {
-            // CtrlBlock registers memoryViolation and RedirectGenerator adds
-            // another register before Backend returns the redirect to MemBlock.
-            const auto return_cycle = violation.last_cycle + 2;
-            if (canceled_alias.cycle() > return_cycle ||
-                !canceled_alias.run_cycles(static_cast<unsigned>(
-                    return_cycle - canceled_alias.cycle())) ||
-                !canceled_alias.redirect_after(
-                    violation.last.rob_value, violation.last.rob_flag, true) ||
-                !canceled_alias.run_until_queues_retired(4096) ||
-                !canceled_alias.run_until_sbuffer_empty(4096) ||
-                !canceled_alias.run_cycles(8)) {
-                std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
-                          << canceled_alias.cycle()
-                          << " phase=first-access-redirect-recovery reason="
-                          << canceled_alias.error() << '\n';
-                return 1;
-            }
-            auto replay = first_access_load;
-            // Flush-itself restores this ROB identity. The LQ entry may have
-            // dequeued already; rewind the dispatch cursor only by observed
-            // redirect cancellation, never by the wakeup-cancel pulse.
-            const auto next_lq = canceled_alias.lq_allocated() -
-                canceled_alias.lq_redirect_canceled_observed();
-            replay.lq = memblock::lq_pointer_value(next_lq);
-            replay.lq_flag = memblock::lq_pointer_flag(next_lq);
-            // No intervening integer allocation: rename restores the original
-            // free-list candidate as well as this load's ROB identity.
-            replay.pdest = first_access_load.pdest;
-            replay.tolerate_canceled_result = false;
-            canceled_alias.expect_load_data(replay, cancel_data);
-            if (!canceled_alias.set_rob_head(replay.rob, replay.rob_flag) ||
-                !canceled_alias.enqueue_load(replay) ||
-                !canceled_alias.issue_load(replay, 4096) ||
-                !canceled_alias.run_until_complete(16384)) {
-                std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
-                          << canceled_alias.cycle()
-                          << " phase=first-access-refetch reason="
-                          << canceled_alias.error() << '\n';
-                return 1;
-            }
-        }
-        if (!canceled_alias.run_until_queues_retired(4096) ||
-            canceled_alias.lq_dequeued() + canceled_alias.lq_canceled() !=
-                canceled_alias.lq_allocated() ||
-            canceled_alias.lq_canceled_unobserved() != 0 ||
-            canceled_alias.scalar_load_canceled_observed() != canceled_count ||
-            canceled_alias.memory_violation_stats().count != violation.count) {
-            std::cerr << "MEMBLOCK_TRANSLATION_ALIAS_FAIL cycle="
-                      << canceled_alias.cycle()
-                      << " phase=first-access-terminal-accounting reason="
-                      << canceled_alias.error() << '\n';
+                      << canceled_alias.cycle() << " phase=first-access-" << first_access_result.phase
+                      << " reason=" << canceled_alias.error() << '\n';
             return 1;
         }
         std::cout << "MEMBLOCK_TRANSLATION_ALIAS_FIRST_ACCESS"
                   << " cycle=" << canceled_alias.cycle()
-                  << " canceled=" << canceled_count
-                  << " refetched=" << refetch << " completed=1"
+                  << " canceled=" << first_access_result.discarded
+                  << " refetched=" << first_access_result.refetched << " completed=1"
                   << " lq=" << canceled_alias.lq_dequeued() << '+'
                   << canceled_alias.lq_canceled() << '/'
                   << canceled_alias.lq_allocated()
@@ -2906,6 +2781,10 @@ int run_translation_alias(int argc, char **argv)
               << " data=0x" << std::hex << store_data << std::dec
               << " dcache_requests=" << environment.tilelink_requests()
               << " second_sbuffer_busy=" << second_sbuffer_busy
+              << " in_flight_discarded=" << in_flight_result.discarded
+              << " in_flight_refetched=" << in_flight_result.refetched
+              << " in_flight_lq=" << environment.lq_dequeued() << '+'
+              << environment.lq_canceled() << '/' << environment.lq_allocated()
               << '\n';
     return 0;
 }

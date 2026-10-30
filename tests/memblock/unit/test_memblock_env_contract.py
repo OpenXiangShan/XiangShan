@@ -2088,6 +2088,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         environment = read_cpp_source("memblock_env.hpp")
         feedback = read_cpp_source("environment/feedback_monitor.cpp")
         scenario = read_cpp_source("scenarios/translation_permissions.inc")
+        recovery = read_cpp_source("scenarios/alias_refetch.hpp")
         for contract in (
             "bool tolerate_canceled_result = false",
         ):
@@ -2102,13 +2103,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("scalar_load_canceled_observed()", environment)
         self.assertIn("scoreboard_.observe(lane, writeback, memory_violation)", feedback)
         for contract in (
-            ".tolerate_canceled_result = true",
+            "load.tolerate_canceled_result = true",
+            "load.tolerate_canceled_result = false",
             "scalar_load_canceled_observed()",
             "lq_redirect_canceled_observed()",
-            "phase=first-access-refetch",
-            "MEMBLOCK_TRANSLATION_ALIAS_FIRST_ACCESS",
         ):
-            self.assertIn(contract, scenario)
+            self.assertIn(contract, recovery)
+        self.assertIn("MEMBLOCK_TRANSLATION_ALIAS_FIRST_ACCESS", scenario)
+        self.assertIn("complete_alias_load(environment, in_flight_load", scenario)
+        self.assertIn("complete_alias_load(canceled_alias, first_access_load", scenario)
 
     def test_non_cacheable_final_effect_tracking_is_registered(self) -> None:
         completion = read_cpp_source("environment/completion.cpp")

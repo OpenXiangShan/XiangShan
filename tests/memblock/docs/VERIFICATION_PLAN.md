@@ -313,11 +313,15 @@ Priority work, each requiring executable stimulus and an independent check:
    and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable
    identity-mapped and declared permuted-page commits to remaining legal aliases, non-cacheable/device effects and
    fault-path side-effect checks; one cross-alias path is now directed, but
-   the first-access alias mismatch now requires its exact flush-itself request,
-   observed queue recovery and correct-data frontend refetch. Its retained DUT
-   case dequeues both LQ epochs with zero cancellations; nonzero-cancellation
-   alias refetch still needs qualification, as does a correct-first-data alias
-   redirect. General IQ/LQ replay and arbitrary
+   warmed-alias and first-access mismatches require an exact flush-itself request,
+   observed queue recovery and strict correct-data frontend refetch. The shared
+   directed helper uses typed store dispatch, held store-head state and separate
+   guarded retirement, immediate next-head update and later SQ cleanup.
+   Native cases dequeue both load epochs with
+   zero cancellations; synthetic event scripts additionally exercise nonzero
+   cancellation and correct-first-data redirects. Those two classes still need
+   native qualification. SBuffer busy before issue does not prove a specific
+   store's residence at forwarding. General IQ/LQ replay and arbitrary
    refetch overlaps remain open. Keep the CMO exclusion
    explicit. Single-uop later-element and masked page faults now
    require `vstart=1`, and an all-masked unmapped load must complete without a
