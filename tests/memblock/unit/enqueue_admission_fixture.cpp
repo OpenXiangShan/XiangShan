@@ -1,4 +1,4 @@
-#include "memblock_env.hpp"
+#include "environment/retained_issue.hpp"
 #include <functional>
 #include <iostream>
 
@@ -20,12 +20,24 @@ struct FixturePort {
 struct FixtureDut {
     struct {
         struct { FixturePort lq_deq, sq_deq; } retirement;
-        struct { FixturePort valid; } redirect;
+        struct { FixturePort valid, rob_idx_value, rob_idx_flag, level; } redirect;
     } queues;
     std::array<generated::LsqEnqueueObservation, generated::kLsqEnqueueLanes> enqueues{};
     std::uint64_t edges = 0;
     std::function<void(FixtureDut &)> on_step;
     auto sample_lsq_enqueue(unsigned lane) const { return enqueues.at(lane); }
+    // This admission fixture runs unbound; accidental issue ownership fails.
+    void clear_scalar_load_issue_valids() { throw std::logic_error("unexpected producer binding"); }
+    void clear_scalar_store_issue_valids() { throw std::logic_error("unexpected producer binding"); }
+    void clear_vector_memory_issue_valids() { throw std::logic_error("unexpected producer binding"); }
+    void drive_scalar_load_issue(unsigned, const generated::ScalarLoadIssue &) { throw std::logic_error("unexpected producer binding"); }
+    void drive_scalar_store_address(unsigned, const generated::ScalarStoreIssue &) { throw std::logic_error("unexpected producer binding"); }
+    void drive_scalar_store_data(unsigned, const generated::ScalarStoreIssue &) { throw std::logic_error("unexpected producer binding"); }
+    void drive_vector_memory_issue(unsigned, const generated::VectorMemoryIssue &) { throw std::logic_error("unexpected producer binding"); }
+    bool scalar_load_issue_ready(unsigned) const { throw std::logic_error("unexpected producer binding"); }
+    bool scalar_store_address_ready(unsigned) const { throw std::logic_error("unexpected producer binding"); }
+    bool scalar_store_data_ready(unsigned) const { throw std::logic_error("unexpected producer binding"); }
+    bool vector_memory_issue_ready(unsigned) const { throw std::logic_error("unexpected producer binding"); }
     void refresh_comb() {}
     void step() { ++edges; if (on_step) on_step(*this); }
 };
@@ -50,6 +62,7 @@ public:
     FailureState error_{"enqueue-admission-fixture", "contract"};
     QueueAccounting queues_{error_};
     FixtureDut dut_;
+    RetainedIssueDriver *retained_issue_driver_ = nullptr;
     NoopAgent memory_agent_, ptw_agent_, uncache_agent_;
     NoopBridge bridge_;
     NoopFeedback feedback_;

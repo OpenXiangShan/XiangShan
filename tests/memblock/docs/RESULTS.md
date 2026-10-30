@@ -18,6 +18,14 @@ None.
 
 ## Current Changes Qualified Below
 
+- The shared retained producer driver owns independent ordinary lane slots,
+  captures acceptance after manager drive at the common pre-edge boundary and
+  emits events only after that edge. The legacy scalar/vector load pair now
+  uses it, retaining scalar stalls and preserving vector timeout/retry
+  obligations. Host witnesses check payload stability, exact events, circular
+  redirect age and delayed cancellation tails. Ordinary sliding issue and
+  pre-edge store acceptance authorization still require migration.
+
 - Schema 75 separates admitted generations, accepted initial issue events and
   architectural retirement after a mixed-suffix redirect. Canceled class/uop,
   dependency, VSTART and final STA-feedback records preserve exact lifecycle
@@ -353,12 +361,12 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 | Current alias diagnostic | `translation-alias` fails identically in pre-change and current frozen runtimes at cycle 365 with a load-byte mismatch | `build/memblock/store-retirement-20261030/alias-comparison/replay-k2l5u1ac/comparison.json`; same model and byte-for-byte identical output. Origin remains unclassified; no CPU RTL bug or current pass claim |
 | Ordinary-input cancellation manager | Nine manager host methods pass, including 19 focused cancellation cases; nine new private cancellation faults and nine retained input-version faults reject | `WORKSPACE_ROOT/build/memblock/store-retirement-20261030/release-cancel-checkpoint/{evidence.json,host-ao5gtuoq/summary.json}`; cancellation removes only unauthorized groups after a caller-certified boundary, preserves first-C snapshots/history/floors and permits fresh reuse of never-applied orders. Synthetic manager ports; no mixed-suffix/native recovery qualification |
 | Vector frontend input identity | Three host methods pass: 2496 whole ordinary-builder cases and 640 segment-metadata-block cases; both former independent per-uop assignments reject | `build/memblock/store-retirement-20261030/vector-frontend-identity-v1/`; sibling ROB/FTQ identity remains shared while instruction identities vary. Comparison with the former builder preserves non-frontend fields, queue cursors and PRNG state. Segment coverage is the actual FTQ assignment block, not its complete action/ports. Fresh non-author review accepts this bounded scope; its metadata probe passes 40960 instruction cases/315392 uops (`vector-frontend-review-v1/`). The isolated archived-HEAD-header suite also passes all three methods (`vector-frontend-isolated-v1/`). No native replay or CPU bug claim |
-| Legacy scalar/vector pair issue | Eight finite native cases pass 2048 actions: default `spec`/`corner` and forced legacy `spec`/`corner`, two seeds each. The forced `spec` cases each observe three same-edge pairs; forced corner observes zero/three. All four finite artifact verifiers pass. The rebuilt harness, `check-rtl`/`check-docs`, and all 572 host tests pass, including compiled same/split-edge, repeated-call, metadata and timeout checks. | `build/memblock/store-retirement-20261030/coissue-qualification-v2.json`, `coissue-unit-v3.log`, `runtime-coissue-v2/runtime.json`; development qualification, without strict coverage or closure. Ordinary simultaneous issue, admission plus issue and general independent producer scheduling remain gaps. |
+| Retained producer and scalar/vector pair issue | Eight finite native cases pass 2048 actions: default `spec`/`corner` and forced legacy `spec`/`corner`, two seeds each; all four full finite artifact verifiers pass. Forced `spec` cases observe three same-edge pairs each; forced corner observes zero/three. One additional 256-action `spec` replay has an identical terminal summary and passes its full verifier. Seven new retained-driver host methods check 9244 offers, 49921 age/redirect cases, timeout/retention boundaries, actual tick sampling and three private driver faults. | `build/memblock/ordinary-issue-20261030/retained-driver-v1/qualification.json`, `runtime/runtime.json`, `native-verification.json`, `retained-final.log`; fresh non-author review adds repeated retry, failure/exception cleanup and all-slot redirect challenges. Synthetic transport cases do not qualify store authorization, full vector legality or native redirect stages. Ordinary sliding simultaneous issue and admission plus issue remain gaps. Development qualification only. |
 | Constrained-random structural uniqueness | The current pinned ordinary scheduler produces 64 distinct schedules from 64 fixed-eight-load seeds after removing addresses, payloads, delays and dependency-selection events; reductions retain 52 admission/retirement interleavings and 45 load issue orders. The refreshed three-method sample passes 152 executor runs, including 12 exact seed replays. The full current unit suite also checks oracle rollback and private scheduling-fault sensitivity. | `build/memblock/ordinary-issue-20261030/cancellation-structure-v3-summary.json` records reductions and equality of all 22 current production hashes; `cancellation-structure-v3.log` retains the focused methods. This proves variation inside the implemented grammar, not broad full-CPU joint coverage. Blocking issue helpers, ordinary-stream same-cycle heterogeneous issue, adjacent-return/EXU arbitration and ordinary U-mode/context continuity remain explicit gaps. |
 | Ordinary mixed redirect replay and generation accounting | Frozen runtime-cancellation-v2 passes five finite native cases / 3584 actions and all three full finite artifact verifiers. Corner seed 6271 completes 2048 actions at cycle 821593, with one generic redirect canceling six generations (four vector loads, one scalar store, one prefetch), 14 allocated vector-load uops, nine accepted vector-load uops, one unflushed VSTART obligation and two unconsumed vector source-chain edges. Both 256-action `spec` controls and both 512-action scalar/FP-only controls pass; those controls observe zero generic cancellation. | `build/memblock/ordinary-issue-20261030/cancellation-qualification-v3.json` retains exact commands, runtime, source comparisons and exclusions. All terminal tokens except the extended cancellation record match the intermediate native replay; intermediate failures are excluded. Development qualification only. Adjacent returns, EXU/ROB arbitration, scalar late-output histories and full CPU reachability remain gaps; no RTL bug claim. |
 | Redirect cancellation and replay host oracles | Eight replay-controller methods and six bulk-cancellation methods pass; randomized public-edge histories, ROB age/wrap and both redirect levels are checked, with ten controller and six scoreboard private faults detected. | `build/memblock/store-retirement-20261030/memory-replay-controller-v1/verification.json` and `build/memblock/store-retirement-20261030/mixed-scoreboard-cancel-v1/verification.json`; these are independent host contracts and do not certify native DUT timing or full-CPU recovery. |
 | Ordinary store retirement separation | Nine store-retirement methods and two release-input methods pass. Architectural scalar/vector retirement is accounted separately from physical SQ drain, including pending committed records, vector-uop drain targets, nonzero-VSTART flush accounting and independent ReleaseData histories. | `build/memblock/store-retirement-20261030/store-retirement-*` and `release-cancel-checkpoint/`; the rebuilt harness passed 32 scheduler methods, while the corner replay above remains outside this bounded retirement qualification. |
-| Infrastructure unit | 577 tests pass; generated-interface, RTL and documentation checks pass | `build/memblock/ordinary-issue-20261030/cancellation-unit-v3.log`; unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 584 tests pass; generated-interface, RTL and documentation checks pass | `build/memblock/ordinary-issue-20261030/retained-driver-v1/unit-v2.log`; final seven-method fixture rerun is `retained-final.log` (dynamic evidence count only). Unit checks do not establish DUT functional coverage |
 | Admission/ledger host contracts | 20 independent methods pass: 13 production C++ schedules, 20 compiled private faults detected, 50 ledger records; non-author review independently enumerates 4803 arithmetic cases | `build/memblock/enqueue-admission-20261030/independent-tests/{summary.txt,evidence.json,ledger-evidence.json}`, `review-v1/review.md`; exact credit/redirect boundaries, repeated highs, both watermarks, unmonitored ticks, immediate conservation, holey batches, cadence and schema 2 compatibility. Synthetic public ports/edges; no DUT mutation claim |
 | Ordinary enqueue/feedback DUT qualification | Frozen runtime-v1: 12/12 finite cases pass 22528 actions; six current-runtime artifact verifiers and one prior-monitor2 control pass; 9/9 adjacent directed scenarios pass | `build/memblock/enqueue-admission-20261030/qualification-v1.json`, `artifact-verifiers-v1.json`, `directed-v1/results.json`; spec/coverage/corner defaults, ordinary dependency streams, integrated recovery and store-only 641-instruction epochs. Whole-run cadence: 51092 enqueue edges, 8969 adjacent edges with older work, maximum run 19; this includes legacy/final readback and has no per-stream attribution. Stream-specific feedback overlap includes 315 admissions, 14 loads, 227 STA, 182 STD, 35 vector uops and 7 prefetches. 5478 ordinary hits, 715 misses/retries, maximum pending 2; 12303 stream retirements, 2748 full ROB identity reuses and 9929/9929 final words. Exact corner replays pass at 333.5/336.6s with 900s budget; initial 180s timeouts and malformed-constraint attempts are excluded. Functional/accounting development evidence, not closure |
 | Store feedback structural and sensitivity checks | 29 scheduler methods and 16 independent replay/accounting methods pass; fresh focused 64/64 seeds produce distinct structural schedules and seed 1 replays exactly; 44 serialization round trips and 15 private replay/accounting faults remain detected | `build/memblock/enqueue-admission-20261030/scheduler-focused-v1.json`, `unit-v2.log`; focused schedules exclude addresses/payload/cycles/delays. Replay-state checks and retained serializer/fault evidence are at `build/memblock/store-feedback-20261030/independent-tests/summary-v2.json`. Synthetic host timing does not prove full CPU reachability; these are UT checks, not RTL mutation coverage |
@@ -465,6 +473,18 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
+Fresh-context non-author review accepts the retained producer transport and
+migrated scalar/vector load pair with no blocking findings. It reviews the
+actual diff and CPU final-register/redirect contract, reruns four host suites
+and independently challenges repeated timeout/reoffer, edge-fourteen readiness,
+delayed killed acceptance, failure/exception cleanup and all nine slot kinds.
+Evidence is `build/memblock/ordinary-issue-20261030/retained-driver-v1/review/reviewer/review-v1.md`;
+primary disposition and qualification are in that artifact's `retained-driver-v1`
+parent. Ordinary sliding integration, store authorization, vector replacement,
+redirect-during-off-pin-retry, binding startup after an earlier redirect and
+reset during a live binding remain outside this verdict. Terminal checks skipped
+by `tick(false)` remain skipped; driver events do not substitute for them.
+
 Fresh-context non-author review accepts schema 75 generation-cancellation
 accounting with no remaining findings. Primary disposition resolves canceled
 vector-source attribution, phase-ineligible unconsumed operands, retry attribution,
@@ -478,18 +498,6 @@ classes and cancellation phases retain host-only accounting evidence. Aggregate
 inequalities are necessary conditions, not reconstruction of every joint history.
 This acceptance does not establish full-CPU input reachability, late-output
 coverage or closure.
-
-Fresh-context non-author review accepts the legacy scalar/vector pair change
-for bounded development use with no blocking findings. It checks all 21 scalar
-issue fields, 1,364 scripted readiness schedules, the corrected release-input
-fixture and all four finite native artifact verifiers. The generated-RTL ready
-trace resolves sampling across manager re-drive for this configuration; future
-configurations require that assumption to be rechecked or replaced with passive
-sampling after manager drive. Evidence and primary disposition are
-`build/memblock/store-retirement-20261030/coissue-review-v2/reviewer/review.txt`
-and `coissue-review-v2/disposition.json`. Ordinary-stream simultaneous issue,
-general port-set coverage and full-CPU synthetic-metadata reachability remain
-outside this acceptance.
 
 Fresh-context non-author review accepts the cancellation extension as a
 manager-only source/host capability. Independent probes check cross-line

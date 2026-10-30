@@ -42,7 +42,7 @@ METHODS = {
 DEPENDENCIES = (
     'cpp/memblock_env.hpp', 'cpp/environment/model.inc',
     'cpp/environment/dcache_a_contract.inc', 'cpp/generated_interface_types.hpp',
-    'cpp/failure.hpp', 'cpp/environment/implementation.hpp',
+    'cpp/failure.hpp', 'cpp/environment/implementation.hpp', 'cpp/environment/retained_issue.hpp',
 )
 CASES = (
     'sta_first', 'std_first', 'pressure_replay', 'head_flags_wrap',

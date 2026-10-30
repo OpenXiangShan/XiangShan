@@ -10,6 +10,7 @@
 #include "scoreboards.hpp"
 #include "queue_accounting.hpp"
 #include "debug_trace.hpp"
+#include "retained_issue.hpp"
 
 namespace memblock {
 #include "dcache_agent.inc"
@@ -1516,6 +1517,9 @@ private:
     bool write_distributed_csr(std::uint16_t address, std::uint64_t data);
 
     void tick(bool monitor = true);
+
+    // Bound only while one driver exclusively owns all ordinary issue pins.
+    RetainedIssueDriver *retained_issue_driver_ = nullptr;
 
     bool check_components();
 

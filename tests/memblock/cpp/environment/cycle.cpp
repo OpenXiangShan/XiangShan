@@ -47,10 +47,16 @@ auto Environment::Impl::tick(bool monitor)  -> void
 {
     set_failure_cycle();
     if (!authorize_release_store_inputs()) return;
+    if (retained_issue_driver_) retained_issue_driver_->drive(dut_);
     memory_agent_.drive(dut_);
     ptw_agent_.drive(dut_);
     uncache_agent_.drive(dut_);
     dut_.refresh_comb();
+    if (retained_issue_driver_) retained_issue_driver_->capture_before_edge(dut_, cycle(), {
+        dut_.queues.redirect.valid.boolean(),
+        static_cast<std::uint8_t>(dut_.queues.redirect.rob_idx_value.value()),
+        dut_.queues.redirect.rob_idx_flag.boolean(),
+        dut_.queues.redirect.level.boolean()});
     memory_agent_.capture_before_tick(dut_);
     ptw_agent_.capture_before_tick(dut_);
     uncache_agent_.capture_before_tick(dut_);
@@ -79,6 +85,7 @@ auto Environment::Impl::tick(bool monitor)  -> void
 
     const bool redirect = dut_.queues.redirect.valid.boolean();
     dut_.step();
+    if (retained_issue_driver_) retained_issue_driver_->advance_after_edge(dut_);
     set_failure_cycle();
     bridge_.advance_after_edge();
     memory_agent_.update_after_tick();

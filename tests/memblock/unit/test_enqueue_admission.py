@@ -22,6 +22,7 @@ PRODUCTION_PATHS = (
     'cpp/environment/queue_accounting.hpp',
     'cpp/environment/queue_accounting.cpp',
     'cpp/environment/cycle.cpp',
+    'cpp/environment/retained_issue.hpp',
     'cpp/environment/model.inc',
     'cpp/memblock_env.hpp',
     'cpp/generated_interface_types.hpp',

@@ -680,12 +680,36 @@ observations. Redirect valid is captured before the edge even in that mode.
 Claims of continuous
 monitoring apply only while the corresponding monitor is enabled.
 
-The legacy mixed scalar/vector pair driver samples each pending request's ready
-with its valid held before `tick()`. `last_load_vector_pair_same_cycle()` is
-true only if both handshakes occurred on that edge, and resets on each call and
-reset. `coissue` uses this observation, never helper completion alone. This is
-coverage evidence; independent scalar/vector data and identity scoreboards own
-terminal correctness. Split-edge acceptance remains legal.
+`RetainedIssueDriver` owns ordinary producer pins during an explicitly bound
+interval. Independent load, STA, STD and vector slots retain copied payloads;
+offers cannot overwrite an occupied lane. `tick()` drives these offers, drives
+the managers, refreshes combinational outputs, then captures individual ready
+outcomes at the common pre-edge boundary. Only the completed edge produces
+tagged acceptance/retry/cancellation events. Other helper ticks use that same
+binding, including `tick(false)`; this does not enable the terminal monitors
+which that mode skips. Unbound legacy helpers retain their separate sampling.
+
+The final CPU producer registers in `Backend.scala` and
+`datapath/NewPipelineConnect.scala` retain stalled scalar offers. Vector offers
+can time out after fourteen rejected edges; ready on that edge wins. A timeout
+returns a retry obligation, never an architectural cancellation. A public
+redirect reaches the producer one edge later: a stalled killed offer remains
+visible on the public redirect edge and the following edge. Acceptance on the
+latter edge is recorded with its killed status, allowing a legal terminal tail
+without conflating acceptance and cancellation. The caller still owns legal
+suffix authorization, terminal obligations and retries. Older-vector replacement,
+incoming replacement on a redirect edge and load-dependency cancellation are
+outside this driver's exercised subset.
+
+The legacy scalar/vector load pair uses this binding. Its vector timeout keeps
+the obligation and waits eight further edges before reoffer, a conservative
+producer round trip rather than an exact IQ timing claim; the scalar can
+complete meanwhile. `last_load_vector_pair_same_cycle()` is true only when both
+accepted events share an edge, and resets on each call and reset. `coissue`
+uses this observation, never helper completion alone. Independent scalar/vector
+data and identity scoreboards own terminal correctness. Split-edge acceptance
+remains legal. Ordinary sliding-stream issue and pre-edge store acceptance
+authorization have not yet migrated to this binding.
 
 [BridgeMonitor](../cpp/environment/bridge_monitor.cpp) compares independently
 captured inputs against explicit combinational, one-cycle, two-cycle or

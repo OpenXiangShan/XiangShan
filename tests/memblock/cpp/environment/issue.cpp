@@ -411,6 +411,11 @@ auto Environment::Impl::issue_load_vector_pair(const LoadTransaction &load,
         error_.record("scalar load immediate exceeds signed 12-bit range");
         return false;
     }
+    if (retained_issue_driver_ || vector.store || load.lane >= kScalarLoadLanes ||
+        vector.lane >= kVectorMemoryLanes || load.rob >= kRobEntries || vector.rob >= kRobEntries) {
+        error_.record("invalid or nested scalar/vector load producer binding");
+        return false;
+    }
     generated::ScalarLoadIssue scalar_issue;
     scalar_issue.pc = load.pc.value_or(0x1000 + load.rob * 4);
     scalar_issue.predecode_rvc = load.predecode_rvc;
@@ -438,41 +443,44 @@ auto Environment::Impl::issue_load_vector_pair(const LoadTransaction &load,
     const generated::VectorMemoryIssue vector_issue =
         make_vector_memory_issue(vector);
 
-    bool scalar_pending = true;
-    bool vector_pending = true;
+    RetainedIssueDriver driver;
+    driver.offer_load(0, load.lane, scalar_issue);
+    driver.offer_vector(1, vector.lane, vector_issue);
+    retained_issue_driver_ = &driver;
+    struct Binding {
+        RetainedIssueDriver *&bound;
+        decltype(dut_) &adapter;
+        ~Binding() { bound = nullptr; RetainedIssueDriver::clear_pins(adapter); }
+    } binding{retained_issue_driver_, dut_};
+    std::optional<std::uint64_t> scalar_edge, vector_edge;
+    std::optional<std::uint64_t> vector_retry_cycle;
     for (unsigned cycle = 0; cycle < timeout; ++cycle) {
-        if (scalar_pending) {
-            dut_.drive_scalar_load_issue(load.lane, scalar_issue);
-        }
-        if (vector_pending) {
-            dut_.drive_vector_memory_issue(vector.lane, vector_issue);
-        }
-        dut_.refresh_comb();
-        const bool scalar_accepted = scalar_pending &&
-            dut_.scalar_load_issue_ready(load.lane);
-        const bool vector_accepted = vector_pending &&
-            dut_.vector_memory_issue_ready(vector.lane);
-        if (scalar_accepted && vector_accepted) {
-            last_load_vector_pair_same_cycle_ = true;
+        if (vector_retry_cycle && this->cycle() >= *vector_retry_cycle) {
+            driver.offer_vector(1, vector.lane, vector_issue);
+            vector_retry_cycle.reset();
         }
         tick();
-        if (scalar_accepted) {
-            scalar_pending = false;
-            dut_.clear_scalar_load_issue_valid(load.lane);
-        }
-        if (vector_accepted) {
-            vector_pending = false;
-            dut_.clear_vector_memory_issue_valids();
+        for (const auto &event : driver.take_events()) {
+            if (event.outcome == RetainedIssueDriver::Outcome::retry) {
+                // A final-pipeline timeout blocks the IQ obligation; represent
+                // a conservative producer round trip before offering it again.
+                vector_retry_cycle = this->cycle() + 8U;
+                continue;
+            }
+            if (event.outcome != RetainedIssueDriver::Outcome::accepted || event.killed) {
+                error_.record("scalar/vector load producer canceled");
+                return false;
+            }
+            (event.tag == 0 ? scalar_edge : vector_edge) = event.edge;
         }
         if (!check_components()) {
             return false;
         }
-        if (!scalar_pending && !vector_pending) {
+        if (scalar_edge && vector_edge) {
+            last_load_vector_pair_same_cycle_ = scalar_edge && vector_edge && *scalar_edge == *vector_edge;
             return true;
         }
     }
-    dut_.clear_scalar_load_issue_valids();
-    dut_.clear_vector_memory_issue_valids();
     error_.record("mixed scalar/vector load issue timed out waiting for ready");
     return false;
 }

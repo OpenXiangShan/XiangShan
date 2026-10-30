@@ -1,4 +1,4 @@
-#include "memblock_env.hpp"
+#include "environment/retained_issue.hpp"
 #include <functional>
 #include <map>
 #include <tuple>
@@ -17,7 +17,7 @@ struct TrackingPort {
 };
 struct TrackingDut {
     struct { struct { TrackingPort pending_ptr_value, pending_ptr_flag, pendingst, scommit; } backend;
-        struct { TrackingPort valid; } redirect; } queues;
+        struct { TrackingPort valid, rob_idx_value, rob_idx_flag, level; } redirect; } queues;
     struct { struct { TrackingPort valid; } ifetch_request;
         struct { TrackingPort ready; } ifetch_response; } translation;
     struct { TrackingPort external, backend; } reset;
@@ -26,6 +26,9 @@ struct TrackingDut {
     std::function<void()> at_edge;
     static bool ready(const std::deque<bool> &values) { return values.empty() || values.front(); }
     void refresh_comb() {}
+    void drive_scalar_load_issue(unsigned, const generated::ScalarLoadIssue &) { throw std::logic_error("unexpected load binding"); }
+    bool scalar_load_issue_ready(unsigned) const { throw std::logic_error("unexpected load binding"); }
+    void clear_scalar_load_issue_valids() { throw std::logic_error("unexpected load binding"); }
     void drive_scalar_store_address(unsigned, const generated::ScalarStoreIssue &) { sta_valid = true; }
     void drive_scalar_store_data(unsigned, const generated::ScalarStoreIssue &) { std_valid = true; }
     void drive_vector_memory_issue(unsigned, const generated::VectorMemoryIssue &) { vec_valid = true; }
@@ -115,6 +118,7 @@ class ReleaseInputFixture {
 public:
     FailureState error_{"host-release-inputs", "contract"};
     TrackingDut dut_;
+    RetainedIssueDriver *retained_issue_driver_ = nullptr;
     TrackingManager memory_agent_;
     TrackingAgent ptw_agent_, uncache_agent_, bridge_, feedback_;
     TrackingQueue queues_;

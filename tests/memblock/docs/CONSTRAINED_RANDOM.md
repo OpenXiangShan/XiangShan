@@ -386,11 +386,16 @@ shapes are restricted to the concurrent flow budget. A window without a special
 NC/MMIO load may offer its scalar/FP load and first vector-load uop together,
 with a conditional rate of `min(250, concurrent)` per mille. Ordered-indexed
 loads and first vector elements crossing a 16-byte beat are excluded. The pair
-preserves each request until its own handshake and issues remaining vector uops
+uses the retained producer binding and samples each handshake after manager
+drive at the common pre-edge boundary. Scalar offers retain valid and payload;
+fourteen rejected vector edges return a retry obligation followed by an
+eight-edge producer gap before reoffer. The pair issues remaining vector uops
 once under their existing predecessor dependencies. `coissue` counts the pair
 only when both requests handshake on the same sampled edge; split-edge
 acceptance does not increment it. The pair retains the scalar frontend and
-dependency metadata used by ordinary load issue. This bounded legacy direction
+dependency metadata used by ordinary load issue. Its binding can independently
+retain distinct producer slots; store acceptance authorization and the ordinary
+sliding scheduler have not yet migrated. This bounded legacy direction
 does not add simultaneous issue to the sliding-stream executor. Store dispatch retains the
 architectural-prefix LQ snapshot and wrap bit. The pending ROB head cannot pass
 an older incomplete special load, and simultaneous integer destinations are

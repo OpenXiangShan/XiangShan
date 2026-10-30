@@ -217,6 +217,12 @@ queue value/wrap snapshots; selected store/vector-list waits retain unrelated
 obligations. Heterogeneous head movement waits for older special-load completion,
 and ordinary vector architectural retirement uses complete allocation groups
 without scalar commit pulses while their physical SQ targets may remain live.
+The scalar/vector load pair now uses independent retained lane slots and
+post-manager pre-edge acceptance events. Host contracts check scalar retention,
+fourteen-edge vector timeout/retry and delayed age-specific redirect tails.
+This shared driver is a prerequisite for ordinary independent producer issue;
+the sliding scheduler and pre-edge store acceptance authorization remain to be
+migrated. Existing independent data and identity scoreboards remain separate.
 The stream holds a single architectural head and independent byte-prefix oracle,
 with distinct live class destinations. Ordinary admissions can independently
 sample address and scalar-store data edges from older live integer loads.

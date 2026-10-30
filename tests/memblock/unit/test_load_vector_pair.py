@@ -19,13 +19,14 @@ class LoadVectorPairTest(unittest.TestCase):
         method = production[start:production.index("\n}\n", start) + 3]
         method = method.replace("Environment::Impl::", "Harness::")
         source = r'''
-#include "memblock_env.hpp"
+#include "environment/retained_issue.hpp"
 #include <cassert>
 #include <tuple>
 using namespace memblock;
 struct Adapter {
     std::vector<std::pair<bool, bool>> ready;
     unsigned cycle = 0, scalar_count = 0, vector_count = 0;
+    std::pair<bool, bool> driven_ready{};
     std::vector<unsigned> scalar_edges, vector_edges;
     bool scalar_valid = false, vector_valid = false;
     generated::ScalarLoadIssue scalar;
@@ -39,17 +40,22 @@ struct Adapter {
         vector_valid = true;
     }
     void refresh_comb() {}
-    bool scalar_load_issue_ready(unsigned) const { return ready.at(cycle).first; }
-    bool vector_memory_issue_ready(unsigned) const { return ready.at(cycle).second; }
+    bool scalar_load_issue_ready(unsigned) const { return driven_ready.first; }
+    bool vector_memory_issue_ready(unsigned) const { return driven_ready.second; }
+    bool scalar_store_address_ready(unsigned) const { return false; }
+    bool scalar_store_data_ready(unsigned) const { return false; }
+    void drive_scalar_store_address(unsigned, const generated::ScalarStoreIssue &) { assert(false); }
+    void drive_scalar_store_data(unsigned, const generated::ScalarStoreIssue &) { assert(false); }
+    void clear_scalar_store_issue_valids() {}
     void clear_scalar_load_issue_valid(unsigned) { scalar_valid = false; }
     void clear_scalar_load_issue_valids() { scalar_valid = false; }
     void clear_vector_memory_issue_valids() { vector_valid = false; }
     void tick() {
-        if (scalar_valid && ready.at(cycle).first) {
+        if (scalar_valid && driven_ready.first) {
             ++scalar_count;
             scalar_edges.push_back(cycle);
         }
-        if (vector_valid && ready.at(cycle).second) {
+        if (vector_valid && driven_ready.second) {
             ++vector_count;
             vector_edges.push_back(cycle);
         }
@@ -63,10 +69,20 @@ struct Errors {
 struct Harness {
     Adapter dut_;
     Errors error_;
+    RetainedIssueDriver *retained_issue_driver_ = nullptr;
     bool last_load_vector_pair_same_cycle_ = false;
     bool issue_load_vector_pair(const LoadTransaction &, const VectorMemoryTransaction &, unsigned);
     generated::VectorMemoryIssue make_vector_memory_issue(const VectorMemoryTransaction &) { return {}; }
-    void tick() { dut_.tick(); }
+    void tick() {
+        assert(retained_issue_driver_);
+        retained_issue_driver_->drive(dut_);
+        // Manager drive changes combinational readiness at the common edge.
+        dut_.driven_ready = dut_.ready.at(dut_.cycle);
+        retained_issue_driver_->capture_before_edge(dut_, dut_.cycle, {});
+        dut_.tick();
+        retained_issue_driver_->advance_after_edge(dut_);
+    }
+    std::uint64_t cycle() const { return dut_.cycle; }
     bool check_components() { return !error_.failed; }
 };
 // PRODUCTION_METHOD
@@ -120,6 +136,24 @@ int main() {
     assert(!reused.issue_load_vector_pair(load, vector, 1));
     assert(reused.error_.failed && !reused.last_load_vector_pair_same_cycle_);
     assert(!reused.dut_.scalar_valid && !reused.dut_.vector_valid);
+    assert(!reused.retained_issue_driver_);
+    Harness timeout;
+    timeout.dut_.ready.assign(16, {false, false});
+    assert(!timeout.issue_load_vector_pair(load, vector, 16));
+    assert(timeout.dut_.cycle == 16 && timeout.error_.failed);
+    assert(!timeout.dut_.scalar_valid && !timeout.dut_.vector_valid && !timeout.retained_issue_driver_);
+    Harness retry;
+    retry.dut_.ready.assign(23, {false, false});
+    retry.dut_.ready[15].first = true;
+    retry.dut_.ready[22].second = true;
+    assert(retry.issue_load_vector_pair(load, vector, 23));
+    assert(retry.dut_.scalar_edges == std::vector<unsigned>{15});
+    assert(retry.dut_.vector_edges == std::vector<unsigned>{22});
+    assert(!retry.last_load_vector_pair_same_cycle_ && !retry.retained_issue_driver_);
+    Harness invalid;
+    vector.store = true;
+    assert(!invalid.issue_load_vector_pair(load, vector, 1));
+    assert(invalid.dut_.cycle == 0 && invalid.error_.failed);
 }
 '''.replace("// PRODUCTION_METHOD", method)
         with tempfile.TemporaryDirectory(prefix="memblock-load-vector-pair-") as directory:
