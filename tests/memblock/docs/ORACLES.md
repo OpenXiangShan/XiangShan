@@ -258,7 +258,35 @@ with no second data opt-out and no unobserved queue cancellation. This directed
 round trip does not model arbitrary backend redirect arbitration or every IQ/LQ
 replay producer.
 
-The ordinary mixed executor has a separate bounded memory-violation recovery path. Before driving the public redirect, `Environment::cancel_pending_for_redirect` removes only still-pending killed scoreboard obligations and cancels only unauthorized registered ReleaseData groups; committed/authorized store inputs survive. The stream matches the returned ROB/FTQ pointer, FTQ offset, wrap and RVC identity against an independently registered live load or vector instruction, samples physical LQ/SQ cancellation counts, and waits the selected local queue-recovery guard. Its `StreamByteOracle` checkpoint is taken before each ordinary admission and restored at the first killed instruction, so a canceled store cannot remain in the expected byte image. Replacement instructions receive fresh ROB/queue generations and destinations. This is a bounded memory-only recovery contract; it rejects multiple unhandled violation samples rather than attributing only the latest record, and it does not establish adjacent redirect arbitration, full ROB walk completion, or universal late-writeback silence.
+The ordinary mixed executor has a separate bounded cacheable memory-violation
+recovery path. `return_ordinary_redirect` retains exact scalar,
+prefetch, STA/STD and vector terminal expectations throughout all three monitored
+`redirect_after` ticks: public redirect edge E, then E+1 and E+2. The CPU's delayed
+producer flush and final output registers permit killed terminals during this
+propagation; no wrong-data grace interval is introduced. Only immediately after
+the successful return does `cancel_pending_for_redirect` remove killed
+unauthorized input groups and remaining killed terminal obligations.
+Unauthorized groups are excluded from release candidates throughout propagation;
+committed/authorized store inputs survive cancellation. The method requires the
+same anchor, wrap, level and current cycle, and consumes the boundary once.
+Surviving obligations remain
+required; unknown later scalar/prefetch/STA/vector terminals fail. Unmatched STD
+pulses retain the separate attribution limitation below.
+
+The stream matches the returned ROB/FTQ pointer, FTQ offset, wrap and RVC identity
+against an independently registered live load or vector instruction, samples
+physical LQ/SQ cancellation counts, and waits the local queue-recovery guard.
+Canceled-generation accounting samples STA feedback after the monitored return.
+Its `StreamByteOracle` checkpoint is taken before each ordinary admission and
+restored at the first killed instruction, so a canceled store cannot remain in
+the expected byte image. Replacement instructions receive fresh ROB/queue
+generations and destinations. The three-edge terminal allowance is bounded to
+the inspected ordinary cacheable paths with no new killed offers after producer
+flush; it is not a completion deadline for survivors or a protocol-drain bound.
+MMIO/NC, AMO, CBO and segment paths need their own contracts. The path rejects
+multiple unhandled violation samples rather than attributing only the latest
+record; adjacent redirect arbitration, full ROB walk completion and universal
+late-writeback silence remain outside its claim.
 
 ### Ordinary sliding-stream expectations
 
@@ -788,7 +816,8 @@ possible. This retains ABA alternatives while rejecting observable rollback.
 Exact scenario overrides stay exact. Registration/authorization do not mutate
 architectural memory; retirement does so exactly once, without duplicate legacy
 notifications. This is a byte-value oracle, not an exact early-effect timing
-oracle. Ordinary stream store cancellation is outside this bounded direction.
+oracle. Ordinary mixed-suffix recovery cancels only killed unauthorized groups
+at its completed redirect boundary; authorized groups retain their obligations.
 Epoch exit clears covered records only after the explicit drain; existing exact
 alias checkpoints are refreshed for covered owners. Uncheckpointed legacy owners
 retain their separate oracle contract.
@@ -822,8 +851,9 @@ preflights the complete unique order list before changing any journal; unknown,
 authorized or applied/retired orders fail. Cancellation preserves other groups,
 line baselines, progress floors, legacy history and frozen first-C candidates.
 A canceled order may represent a fresh allocation later; applied/retired orders
-remain unavailable. This is a manager capability: ordinary mixed-suffix recovery
-has not integrated it, and the method does not establish CPU redirect legality.
+remain unavailable. Ordinary mixed-suffix recovery uses this capability after
+all three monitored return edges; the method itself does not establish CPU
+redirect legality.
 
 C-source attribution follows TileLink 1.9.3 section 6.4's explicit independent
 client C namespace rule, consistent with the connected DCache WBQ and the existing

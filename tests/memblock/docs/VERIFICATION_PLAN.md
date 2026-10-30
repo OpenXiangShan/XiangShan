@@ -271,6 +271,15 @@ mixed instructions. Public LQ/SQ cancellations count remaining physical entries,
 not every invalidated architectural uop. The selected backend return path samples
 MemBlock's redirect two edges after its public memoryViolation edge; a blocking
 helper must not postpone that return until the outer scheduler polls. Exact
+terminal expectations stay live during all three monitored public-return edges
+E/E+1/E+2; killed unauthorized store inputs and remaining killed terminal
+obligations cancel immediately after them. Unauthorized inputs cannot enter
+release candidates during propagation. Bulk cancellation
+consumes an exact current anchor/wrap/level boundary once. Host contracts check
+every sampled edge, survivor preservation, wrong/duplicate tails and phase
+ordering faults against production helpers and scoreboards. This cacheable
+bound does not cover MMIO/NC/AMO/CBO/segment tails or protocol drain, and unmatched
+STD pulse attribution remains open. Exact
 producer/commit ordering, old responses and independent strict refetch checks
 remain required. This mechanism alone is not evidence of an RTL defect.
 

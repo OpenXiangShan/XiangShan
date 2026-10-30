@@ -1107,6 +1107,10 @@ operand event permutations, vector uop/flow shapes, index vectors, masks and
 page mappings. Dedicated seed samples exclude payload and timing when measuring
 structural uniqueness. Such samples establish those builders' variation, not
 unique full-run schedules or an assurance that a design bug exists.
+The fixed-eight-load scheduler check also removes dependency-selection records
+before testing event diversity and separately checks admission/retirement
+interleavings and load issue orders. Random source choices alone therefore
+cannot disguise a repeated producer-event template in that check.
 
 Ordinary stream epochs now vary the number, age and class of instructions,
 interleave STA/STD/vector/load events, and admit new work after prefix retirement
@@ -1134,17 +1138,19 @@ An eligible ordinary scalar store can offer its initial STA and STD together;
 actual same/split-edge outcomes and skew are observed per operand. Heterogeneous
 ordinary load/vector issue and issue alongside admission remain absent. Ordinary loads conservatively wait for older scalar
 addresses and complete older vector stores; unresolved scalar graphs provide a
-bounded exception. Ordinary U-mode permissions with live mixed work, general
-scalar/vector/store suffix cancellation and cross-page pointer chains remain
-absent. These are generation limits; more seeds or larger weights cannot reach
+bounded exception. Ordinary U-mode permissions with live mixed work and
+cross-page pointer chains remain absent; mixed-suffix cancellation has only the
+bounded memory-violation path below. These are generation limits; more seeds or larger weights cannot reach
 those combinations. Distinct synthetic schedules establish variation within the
 implemented grammar, not DUT joint coverage or full-CPU input legality.
 
 An older allocated unaligned SQ entry can mark forwarding data unavailable even
 when its data is valid. A misaligned load can turn that condition into a public
 flush-self replay. The native ordinary stream now handles this bounded memory-
-violation path: it validates the independent ROB/FTQ/RVC victim identity, cancels
-pending scalar/vector/prefetch obligations and unauthorized ReleaseData groups,
+violation path: it validates the independent ROB/FTQ/RVC victim identity and
+retains exact scalar/prefetch/STA/STD/vector expectations during all three
+monitored return edges, then cancels killed unauthorized ReleaseData groups and
+remaining terminal obligations at the matching just-returned boundary. It
 reconciles physical LQ/SQ credits, restores the independent byte overlay before
 the first killed instruction, frees killed destinations, and admits replacement
 generations after the local queue-recovery guard. Queue drain before every such
@@ -1319,6 +1325,12 @@ without a later feedback obligation.
 Cancellation records do not relax the terminal/data oracles. The redirect still
 needs a matching external victim identity, legal suffix cancellation and physical
 queue recovery; surviving work and replacement generations remain checked.
+Unauthorized input groups cannot enter release candidates; they and pending
+terminal expectations cancel only after the monitored E/E+1/E+2 return. Final STA feedback
+state is sampled after those edges. The propagation allowance covers ordinary
+cacheable paths with no new killed offers after the delayed producer flush;
+MMIO/NC/AMO/CBO/segment and memory-protocol drain require separate contracts.
+Unmatched bare STD pulses remain an explicit attribution gap.
 `stream_history` lengths count retirement, while the cancellation ledger's
 admitted-generation maxima bound retry-expanded histories and late admissions.
 Pre-schema-75 artifacts without this ledger cannot establish these conservation

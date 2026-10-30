@@ -4,6 +4,17 @@
 
 namespace memblock::scenarios::mixed {
 
+// Retain exact ordinary cacheable expectations through every monitored return
+// edge. Unauthorized store groups cannot enter release candidates; remove them
+// and pending victims only at the completed legal redirect boundary.
+template<class Environment>
+bool return_ordinary_redirect(Environment &environment, std::uint8_t rob,
+                              bool flag, bool flush_itself)
+{
+    return environment.redirect_after(rob, flag, flush_itself) &&
+        environment.cancel_pending_for_redirect(rob, flag, flush_itself);
+}
+
 // One bounded speculative episode inside the ordinary architectural deque.
 // Transaction ownership and final architectural observation remain in the
 // stream; this object owns only the unresolved input image and load epochs.

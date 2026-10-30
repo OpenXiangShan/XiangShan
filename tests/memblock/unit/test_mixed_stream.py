@@ -138,6 +138,12 @@ class MixedStreamTest(unittest.TestCase):
                 'excluded_from_schedule': ['address', 'payload', 'cycle', 'delay'],
                 'fixed_eight_load_structural_schedules': len({run['result']['schedule'] for run in fixed}),
                 'fixed_eight_load_samples': len(fixed),
+                'fixed_eight_without_dependency_choices': len({tuple(event for event in run['result']['schedule'].split(',')
+                    if not event.startswith('D')) for run in fixed}),
+                'fixed_eight_admission_retirement_interleavings': len({tuple(event for event in run['result']['schedule'].split(',')
+                    if event.startswith(('A', 'R'))) for run in fixed}),
+                'fixed_eight_load_issue_orders': len({tuple(event for event in run['result']['schedule'].split(',')
+                    if event.startswith('L')) for run in fixed}),
                 'unique_structural_schedules': len({run['result']['schedule'] for run in mixed}),
                 'unique_instruction_kind_sequences': len({tuple(run['result']['kinds']) for run in mixed}),
                 'unique_producer_count_sequences': len({tuple(run['result']['producer_counts']) for run in mixed}),
@@ -325,7 +331,14 @@ class MixedStreamTest(unittest.TestCase):
             self.assertEqual(run['actions'], 8)
             self.assertEqual(run['kinds'], [0] * 8)
             self.assertEqual(run['producer_counts'], [1] * 8)
-        self.assertGreaterEqual(len({run['schedule'] for run in results}), 32)
+        # Random dependency choices must not disguise a fixed event template.
+        events = [run['schedule'].split(',') for run in results]
+        self.assertGreaterEqual(len({tuple(event for event in schedule if not event.startswith('D'))
+                                    for schedule in events}), 32)
+        self.assertGreater(len({tuple(event for event in schedule if event.startswith(('A', 'R')))
+                               for schedule in events}), 1)
+        self.assertGreater(len({tuple(event for event in schedule if event.startswith('L'))
+                               for schedule in events}), 1)
         self.assert_retirement_interleaving(results)
 
     def test_recovery_preserves_mixed_prefix_and_strict_epochs(self):

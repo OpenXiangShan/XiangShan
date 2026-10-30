@@ -596,14 +596,13 @@ auto Environment::Impl::cancel_scalar_load_after_redirect(const LoadTransaction 
 auto Environment::Impl::cancel_pending_for_redirect(
     std::uint8_t rob_value, bool rob_flag, bool flush_itself) -> bool
 {
-    if (rob_value >= kRobEntries) {
-        error_.record("bulk redirect cancellation has an invalid ROB anchor");
+    if (rob_value >= kRobEntries || !scalar_redirect_boundary_ ||
+        scalar_redirect_boundary_->cycle != cycle() ||
+        scalar_redirect_boundary_->rob != rob_value || scalar_redirect_boundary_->flag != rob_flag ||
+        scalar_redirect_boundary_->flush_itself != flush_itself) {
+        error_.record("bulk terminal cancellation requires the matching just-returned redirect boundary");
         return false;
     }
-    scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
-    store_scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
-    vector_scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
-
     const auto kills = [&](unsigned value, bool flag) {
         const bool equal = value == rob_value && flag == rob_flag;
         const bool younger = flag == rob_flag ? value > rob_value : value < rob_value;
@@ -624,6 +623,10 @@ auto Environment::Impl::cancel_pending_for_redirect(
         }
         for (const auto key : keys) tracked->erase(key);
     }
+    scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
+    store_scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
+    vector_scoreboard_.cancel_pending_for_redirect(rob_value, rob_flag, flush_itself);
+    scalar_redirect_boundary_.reset();
     return check_components();
 }
 

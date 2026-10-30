@@ -350,10 +350,18 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             const auto killed = static_cast<unsigned>(std::count_if(live.begin(), live.end(), kills));
             const auto first_killed = std::find_if(live.begin(), live.end(), kills);
             if (!victim_identity_ok() || killed == 0 || first_killed == live.end() ||
-                !first_killed->oracle_before || recovery ||
-                !environment.cancel_pending_for_redirect(violation.last.rob_value,
-                    violation.last.rob_flag, violation.last.level)) {
+                !first_killed->oracle_before || recovery) {
                 phase += detail.str() + ":unmatched-or-nested";
+                return false;
+            }
+            const auto lq_before = environment.lq_redirect_canceled_observed();
+            const auto sq_before = environment.sq_redirect_canceled_observed();
+            // Exact expected bytes and identities remain active on E/E+1/E+2.
+            // Killed work may complete during propagation or cancel at return;
+            // retaining the expectation never waives a wrong/duplicate result.
+            if (!return_ordinary_redirect(environment, violation.last.rob_value,
+                    violation.last.rob_flag, violation.last.level)) {
+                phase += detail.str() + ":redirect-drive-or-terminal-cancellation-failed";
                 return false;
             }
             ++coverage.stream_cancel[0];
@@ -395,13 +403,6 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 record.sample(coverage.stream_cancel);
             }
             canceled += killed;
-            const auto lq_before = environment.lq_redirect_canceled_observed();
-            const auto sq_before = environment.sq_redirect_canceled_observed();
-            if (!environment.redirect_after(violation.last.rob_value,
-                    violation.last.rob_flag, violation.last.level)) {
-                phase += detail.str() + ":redirect-drive-failed";
-                return false;
-            }
             const auto lq_canceled = environment.lq_redirect_canceled_observed() - lq_before;
             const auto sq_canceled = environment.sq_redirect_canceled_observed() - sq_before;
             if (lq_canceled > lq_offset || sq_canceled > sq_offset ||
