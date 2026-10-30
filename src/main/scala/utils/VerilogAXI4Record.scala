@@ -26,7 +26,7 @@ class VerilogAXI4Record(val params: AXI4BundleParameters, val portSuffix: String
   private val axi4Bundle = new AXI4Bundle(params)
   private def traverseAndMap(data: (String, Data)): SeqMap[String, Data] = {
     data match {
-      case (name: String, node: Bundle) => SeqMap.from(
+      case (name: String, node: Record) => SeqMap.from(
         node.elements.map(x => traverseAndMap(x)).flatten.map {
           case (nodeName, node) => (s"${name.replace("bits", "")}${nodeName}", node)
         }
