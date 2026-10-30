@@ -2119,7 +2119,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   if (backendParams.teaEn) {
     case class TeaPsvSetSource(valid: Bool, robIdx: RobPtr, mask: UInt)
     val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
-    val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 1)
+    val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 256)
+    val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
+    val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
     val teaRedirectPtr = io.redirect.bits.robIdx
     val teaFlushPtr = deqExceptionRobIdx
     val teaRedirectCtrlMispred = io.redirect.valid &&
@@ -2235,8 +2237,31 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
 
+    val sample = WireInit(teaSelector.io.sample)
+    sample.context.retired := PopCount(tracker.io.committed.map(_.valid))
+    // Bit order is part of the trace schema; preserve overlapping raw conditions.
+    sample.context.commitBlockMask := VecInit(Seq(misPredBlock, lastCycleFlush, hasWFI,
+      io.redirect.valid, deqNeedFlush && !deqHasFlushed, deqFlushBlock,
+      criticalErrorState, traceBlock, state === s_walk)).asUInt
+    sample.context.headValid := !isEmpty
+    sample.context.headReady := !isEmpty && robEntries(deqPtr.value).isWritebacked
+    sample.context.head := deqPtr
+    sample.context.headReasonValid := !isEmpty && !hasTeaCommit && io.debugRobHeadStall.get.valid
+    sample.context.headReason := Mux(sample.context.headReasonValid, io.debugRobHeadStall.get.bits, 0.U)
+
+    val stats = Module(new TeaCycleStats)
+    stats.io.enable := enableTeaStats.asBool || enableTea.asBool
+    stats.io.cycle := teaSelector.io.cycle
+    stats.io.state := teaSelector.io.sample.state
+    stats.io.retired := sample.context.retired
+    stats.io.gapThreshold := teaGapThreshold
+    val summaryTable = ChiselDB.createTable(s"TeaCycleSummary_$hartId", new TeaCycleSummary, basicDB = true)
+    summaryTable.log(stats.io.summary, "summary", clock, reset)
+    val intervalTable = ChiselDB.createTable(s"TeaNoCommit_$hartId", new TeaNoCommit, basicDB = true)
+    intervalTable.log(stats.io.interval, "interval", clock, reset)
+
     val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
-    teaTable.log(teaSelector.io.sample, teaSelector.io.sampleValid, "", clock, reset)
+    teaTable.log(sample, teaSelector.io.sampleValid, "", clock, reset)
     val finalTable = ChiselDB.createTable(s"TeaDelayedFinal_$hartId", new TeaDelayedFinal, basicDB = true)
     tracker.io.finals.zipWithIndex.foreach { case (res, rank) =>
       finalTable.log(res, s"member$rank", clock, reset)
@@ -2244,7 +2269,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     finalTable.log(teaSelector.io.drainFinal, "drain", clock, reset)
   } else {
     val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
-    assert(!enableTea.asBool, "TEA was not elaborated; rebuild with WITH_TEA=1")
+    val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
+    assert(!enableTea.asBool && !enableTeaStats.asBool, "TEA was not elaborated; rebuild with WITH_TEA=1")
   }
   val ldReason = Mux(l3Miss, LoadMemStall.id.U,
     Mux(l2Miss, LoadL3Stall.id.U,
