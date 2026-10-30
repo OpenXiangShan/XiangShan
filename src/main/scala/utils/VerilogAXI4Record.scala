@@ -22,7 +22,7 @@ import chisel3.experimental.dataview._
 import scala.collection.immutable._
 import freechips.rocketchip.amba.axi4._
 
-class VerilogAXI4Record(val params: AXI4BundleParameters) extends Record {
+class VerilogAXI4Record(val params: AXI4BundleParameters, val portSuffix: String = "") extends Record {
   private val axi4Bundle = new AXI4Bundle(params)
   private def traverseAndMap(data: (String, Data)): SeqMap[String, Data] = {
     data match {
@@ -42,12 +42,12 @@ class VerilogAXI4Record(val params: AXI4BundleParameters) extends Record {
     case s"${_}ready" => (name, Flipped(node))
     case _: String    => (name, node)
   }}
-  def elements: SeqMap[String, Data] = elems
+  def elements: SeqMap[String, Data] = elems.map { case (name, data) => s"$name$portSuffix" -> data }
 }
 
 object VerilogAXI4Record {
   private val elementsMap: Seq[(VerilogAXI4Record, AXI4Bundle) => (Data, Data)] = {
-    val names = (new VerilogAXI4Record(AXI4BundleParameters(1, 8, 1))).elements.map(_._1)
+    val names = (new VerilogAXI4Record(AXI4BundleParameters(1, 8, 1))).elements.keys
     val pattern = "^(aw|w|b|ar|r)(.*)".r
     names.map { name => { (verilog: VerilogAXI4Record, chisel: AXI4Bundle) => {
       val (channel: Record, signal: String) = name match {
@@ -55,7 +55,7 @@ object VerilogAXI4Record {
           (chisel.elements(prefix).asInstanceOf[Record], signal)
         case _: String => require(false, "unexpected prefix"); null
       }
-      verilog.elements(name) -> channel.elements.applyOrElse(signal,
+      verilog.elements(s"$name${verilog.portSuffix}") -> channel.elements.applyOrElse(signal,
         channel.elements("bits").asInstanceOf[Record].elements)
     }}}.toSeq
   }

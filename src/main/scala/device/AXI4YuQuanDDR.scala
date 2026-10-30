@@ -16,9 +16,12 @@
 package device
 
 import chisel3._
+import chisel3.experimental.dataview._
 import chisel3.experimental.ExtModule
 import chisel3.util._
 import freechips.rocketchip.amba.axi4.{
+  AXI4Bundle,
+  AXI4BundleParameters,
   AXI4Parameters,
   AXI4SlaveNode,
   AXI4SlaveParameters,
@@ -27,6 +30,7 @@ import freechips.rocketchip.amba.axi4.{
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, TransferSizes}
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils.VerilogAXI4Record
 
 class YuQuanPreloadDoneHelper extends ExtModule with HasExtModuleInline {
   val clock = IO(Input(Clock()))
@@ -61,64 +65,35 @@ class YuQuanDDRBlackBox extends ExtModule {
   val aresetn_0 = IO(Input(Bool()))
   val aclk_0    = IO(Input(Clock()))
 
-  val awid_0          = IO(Input(UInt(18.W)))
-  val awaddr_0        = IO(Input(UInt(36.W)))
-  val awlen_0         = IO(Input(UInt(8.W)))
-  val awsize_0        = IO(Input(UInt(3.W)))
-  val awburst_0       = IO(Input(UInt(2.W)))
-  val awlock_0        = IO(Input(UInt(1.W)))
-  val awcache_0       = IO(Input(UInt(4.W)))
-  val awprot_0        = IO(Input(UInt(3.W)))
+  val axi = FlatIO(Flipped(new VerilogAXI4Record(AXI4BundleParameters(
+    addrBits = 36,
+    dataBits = 256,
+    idBits = 18
+  ), portSuffix = "_0")))
+
   val awuser_0        = IO(Input(UInt(8.W)))
-  val awvalid_0       = IO(Input(Bool()))
-  val awready_0       = IO(Output(Bool()))
-  val awqos_0         = IO(Input(UInt(4.W)))
   val awregion_0      = IO(Input(UInt(4.W)))
   val awurgent_0      = IO(Input(Bool()))
   val awpoison_0      = IO(Input(Bool()))
   val awpoison_intr_0 = IO(Output(Bool()))
   val awautopre_0     = IO(Input(Bool()))
 
-  val wdata_0  = IO(Input(UInt(256.W)))
-  val wstrb_0  = IO(Input(UInt(32.W)))
-  val wlast_0  = IO(Input(Bool()))
-  val wvalid_0 = IO(Input(Bool()))
-  val wready_0 = IO(Output(Bool()))
   val wuser_0  = IO(Input(UInt(8.W)))
 
-  val bid_0    = IO(Output(UInt(18.W)))
-  val bresp_0  = IO(Output(UInt(2.W)))
   val buser_0  = IO(Output(UInt(8.W)))
-  val bvalid_0 = IO(Output(Bool()))
-  val bready_0 = IO(Input(Bool()))
 
-  val arid_0          = IO(Input(UInt(18.W)))
-  val araddr_0        = IO(Input(UInt(36.W)))
-  val arlen_0         = IO(Input(UInt(8.W)))
-  val arsize_0        = IO(Input(UInt(3.W)))
-  val arburst_0       = IO(Input(UInt(2.W)))
-  val arlock_0        = IO(Input(UInt(1.W)))
-  val arcache_0       = IO(Input(UInt(4.W)))
-  val arprot_0        = IO(Input(UInt(3.W)))
   val aruser_0        = IO(Input(UInt(8.W)))
-  val arvalid_0       = IO(Input(Bool()))
-  val arready_0       = IO(Output(Bool()))
-  val arqos_0         = IO(Input(UInt(4.W)))
   val arregion_0      = IO(Input(UInt(4.W)))
   val arpoison_0      = IO(Input(Bool()))
   val arpoison_intr_0 = IO(Output(Bool()))
   val arurgent_0      = IO(Input(Bool()))
   val arautopre_0     = IO(Input(Bool()))
 
-  val rid_0    = IO(Output(UInt(18.W)))
-  val rdata_0  = IO(Output(UInt(256.W)))
-  val rresp_0  = IO(Output(UInt(2.W)))
   val ruser_0  = IO(Output(UInt(8.W)))
-  val rlast_0  = IO(Output(Bool()))
-  val rvalid_0 = IO(Output(Bool()))
-  val rready_0 = IO(Input(Bool()))
 
   val training_over = IO(Output(Bool()))
+
+  def axi4: AXI4Bundle = axi.viewAs[AXI4Bundle]
 }
 
 class AXI4MCDDR(
@@ -163,6 +138,7 @@ class AXI4MCDDRImp(outer: AXI4MCDDR) extends LazyModuleImp(outer) {
   }
 
   val ddr = Module(new YuQuanDDRBlackBox)
+  val ddrAxi = ddr.axi4
   val preload = Module(new YuQuanPreloadDoneHelper)
 
   preload.clock := clock
@@ -173,62 +149,62 @@ class AXI4MCDDRImp(outer: AXI4MCDDR) extends LazyModuleImp(outer) {
 
   val mcReady = ddr.training_over && preload.done
 
-  ddr.awid_0     := fitTo(in.aw.bits.id, 18)
-  ddr.awaddr_0   := fitTo(in.aw.bits.addr, 36)
-  ddr.awlen_0    := fitTo(in.aw.bits.len, 8)
-  ddr.awsize_0   := fitTo(in.aw.bits.size, 3)
-  ddr.awburst_0  := fitTo(in.aw.bits.burst, 2)
-  ddr.awlock_0   := fitTo(in.aw.bits.lock, 1)
-  ddr.awcache_0  := fitTo(in.aw.bits.cache, 4)
-  ddr.awprot_0   := fitTo(in.aw.bits.prot, 3)
+  ddrAxi.aw.bits.id     := fitTo(in.aw.bits.id, 18)
+  ddrAxi.aw.bits.addr   := fitTo(in.aw.bits.addr, 36)
+  ddrAxi.aw.bits.len    := fitTo(in.aw.bits.len, 8)
+  ddrAxi.aw.bits.size   := fitTo(in.aw.bits.size, 3)
+  ddrAxi.aw.bits.burst  := fitTo(in.aw.bits.burst, 2)
+  ddrAxi.aw.bits.lock   := fitTo(in.aw.bits.lock, 1)
+  ddrAxi.aw.bits.cache  := fitTo(in.aw.bits.cache, 4)
+  ddrAxi.aw.bits.prot   := fitTo(in.aw.bits.prot, 3)
   ddr.awuser_0   := 0.U
-  ddr.awvalid_0  := in.aw.valid && mcReady
-  ddr.awqos_0    := fitTo(in.aw.bits.qos, 4)
+  ddrAxi.aw.valid := in.aw.valid && mcReady
+  ddrAxi.aw.bits.qos := fitTo(in.aw.bits.qos, 4)
   ddr.awregion_0 := 0.U
   ddr.awurgent_0 := false.B
   ddr.awpoison_0 := false.B
   ddr.awautopre_0 := false.B
-  in.aw.ready := ddr.awready_0 && mcReady
+  in.aw.ready := ddrAxi.aw.ready && mcReady
 
-  ddr.wdata_0  := fitTo(in.w.bits.data, 256)
-  ddr.wstrb_0  := fitTo(in.w.bits.strb, 32)
-  ddr.wlast_0  := in.w.bits.last
-  ddr.wvalid_0 := in.w.valid && mcReady
+  ddrAxi.w.bits.data := fitTo(in.w.bits.data, 256)
+  ddrAxi.w.bits.strb := fitTo(in.w.bits.strb, 32)
+  ddrAxi.w.bits.last := in.w.bits.last
+  ddrAxi.w.valid := in.w.valid && mcReady
   ddr.wuser_0  := 0.U
-  in.w.ready := ddr.wready_0 && mcReady
+  in.w.ready := ddrAxi.w.ready && mcReady
 
-  in.b.valid := ddr.bvalid_0 && mcReady
-  in.b.bits.id := fitTo(ddr.bid_0, in.b.bits.id.getWidth)
-  in.b.bits.resp := fitTo(ddr.bresp_0, in.b.bits.resp.getWidth)
+  in.b.valid := ddrAxi.b.valid && mcReady
+  in.b.bits.id := fitTo(ddrAxi.b.bits.id, in.b.bits.id.getWidth)
+  in.b.bits.resp := fitTo(ddrAxi.b.bits.resp, in.b.bits.resp.getWidth)
   in.b.bits.user := DontCare
   in.b.bits.echo := DontCare
-  ddr.bready_0 := in.b.ready && mcReady
+  ddrAxi.b.ready := in.b.ready && mcReady
 
-  ddr.arid_0     := fitTo(in.ar.bits.id, 18)
-  ddr.araddr_0   := fitTo(in.ar.bits.addr, 36)
-  ddr.arlen_0    := fitTo(in.ar.bits.len, 8)
-  ddr.arsize_0   := fitTo(in.ar.bits.size, 3)
-  ddr.arburst_0  := fitTo(in.ar.bits.burst, 2)
-  ddr.arlock_0   := fitTo(in.ar.bits.lock, 1)
-  ddr.arcache_0  := fitTo(in.ar.bits.cache, 4)
-  ddr.arprot_0   := fitTo(in.ar.bits.prot, 3)
+  ddrAxi.ar.bits.id     := fitTo(in.ar.bits.id, 18)
+  ddrAxi.ar.bits.addr   := fitTo(in.ar.bits.addr, 36)
+  ddrAxi.ar.bits.len    := fitTo(in.ar.bits.len, 8)
+  ddrAxi.ar.bits.size   := fitTo(in.ar.bits.size, 3)
+  ddrAxi.ar.bits.burst  := fitTo(in.ar.bits.burst, 2)
+  ddrAxi.ar.bits.lock   := fitTo(in.ar.bits.lock, 1)
+  ddrAxi.ar.bits.cache  := fitTo(in.ar.bits.cache, 4)
+  ddrAxi.ar.bits.prot   := fitTo(in.ar.bits.prot, 3)
   ddr.aruser_0   := 0.U
-  ddr.arvalid_0  := in.ar.valid && mcReady
-  ddr.arqos_0    := fitTo(in.ar.bits.qos, 4)
+  ddrAxi.ar.valid := in.ar.valid && mcReady
+  ddrAxi.ar.bits.qos := fitTo(in.ar.bits.qos, 4)
   ddr.arregion_0 := 0.U
   ddr.arpoison_0 := false.B
   ddr.arurgent_0 := false.B
   ddr.arautopre_0 := false.B
-  in.ar.ready := ddr.arready_0 && mcReady
+  in.ar.ready := ddrAxi.ar.ready && mcReady
 
-  in.r.valid := ddr.rvalid_0 && mcReady
-  in.r.bits.id := fitTo(ddr.rid_0, in.r.bits.id.getWidth)
-  in.r.bits.data := fitTo(ddr.rdata_0, in.r.bits.data.getWidth)
-  in.r.bits.resp := fitTo(ddr.rresp_0, in.r.bits.resp.getWidth)
+  in.r.valid := ddrAxi.r.valid && mcReady
+  in.r.bits.id := fitTo(ddrAxi.r.bits.id, in.r.bits.id.getWidth)
+  in.r.bits.data := fitTo(ddrAxi.r.bits.data, in.r.bits.data.getWidth)
+  in.r.bits.resp := fitTo(ddrAxi.r.bits.resp, in.r.bits.resp.getWidth)
   in.r.bits.user := DontCare
   in.r.bits.echo := DontCare
-  in.r.bits.last := ddr.rlast_0
-  ddr.rready_0 := in.r.ready && mcReady
+  in.r.bits.last := ddrAxi.r.bits.last
+  ddrAxi.r.ready := in.r.ready && mcReady
 
   when(in.aw.fire) {
     assert(in.aw.bits.burst === AXI4Parameters.BURST_INCR, "YuQuan ddr_wrapper only supports AXI INCR bursts")

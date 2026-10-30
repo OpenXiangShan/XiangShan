@@ -5,7 +5,7 @@ def update_sv_modules_and_filelist(directory):
     module_name_map = {}
     file_path_map = {}
 
-    # Step 1: 找出模块定义和路径映射
+    # Step 1: Find module definitions and build the path mapping.
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith('.sv'):
@@ -22,7 +22,7 @@ def update_sv_modules_and_filelist(directory):
                         new_path = os.path.join(root, new_file_name)
                         file_path_map[old_path] = new_path
 
-    # Step 2: 修改模块名和实例引用
+    # Step 2: Rename module definitions and instance references.
     for old_path, new_path in file_path_map.items():
         with open(old_path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -34,12 +34,12 @@ def update_sv_modules_and_filelist(directory):
         with open(old_path, 'w', encoding='utf-8') as f:
             f.write(content)
 
-    # Step 3: 文件重命名
+    # Step 3: Rename the source files.
     for old_path, new_path in file_path_map.items():
         os.rename(old_path, new_path)
-        print(f'Renamed: {os.path.basename(old_path)} → {os.path.basename(new_path)}')
+        print(f'Renamed: {os.path.basename(old_path)} -> {os.path.basename(new_path)}')
 
-    # Step 4: 简单处理 filelist.f 中每一行，加 hello_ 前缀
+    # Step 4: Add the hello_ prefix to each entry in filelist.f.
     filelist_path = os.path.join(directory, 'filelist.f')
     if os.path.exists(filelist_path):
         with open(filelist_path, 'r', encoding='utf-8') as f:
@@ -58,7 +58,7 @@ def update_sv_modules_and_filelist(directory):
             f.write('\n'.join(updated_lines) + '\n')
         print('Updated filelist.f')
 
-# 使用方法
+# Example usage
 if __name__ == "__main__":
-    target_dir = "./build"  # 修改为实际路径
+    target_dir = "./build"  # Replace with the actual path.
     update_sv_modules_and_filelist(target_dir)
