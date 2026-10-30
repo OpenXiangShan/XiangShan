@@ -1186,6 +1186,10 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
         dut_.queues.retirement.sq_cancel_cnt.value();
     if (!queues_.observe_redirect_cancellation(lq_canceled, sq_canceled)) return false;
     if (!check_components()) return false;
+    // VLS exception recovery retains the faulting vector instruction's SQ
+    // members; StoreQueue cancels strict-younger ROB identities in this mode.
+    if (!queues_.cancel_store_targets_for_redirect(rob_value, rob_flag,
+            flush_itself && !is_vls_exception)) return false;
     scalar_redirect_boundary_ = ScalarRedirectBoundary{rob_value, rob_flag,
         flush_itself, cycle(), lq_canceled, queues_.sq_allocated()};
     return true;

@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -5152,6 +5152,34 @@ def _check_stream_transport(result: dict[str, Any]) -> None:
              "stream session acceptances disagree with architectural issue accounting")
 
 
+def _check_dcache_response_order(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 82:
+        return
+    rate = result.get("target_dcache_response_reorder")
+    _require(type(rate) is int and 0 <= rate <= 1000, "invalid DCache reorder rate")
+    counts = _csv_counts(result, "dcache_response_order", 10)
+    _require(all(value <= (1 << 64) - 1 for value in counts), "DCache order counter domain")
+    starts, multi, selected, nonfront, completed, maximum, overtaking, older, releases, a_completed = counts
+    requests, c_releases = result.get("tilelink_requests"), result.get("dcache_releases")
+    _require(type(requests) is int and requests >= 0 and type(c_releases) is int and c_releases >= 0,
+             "missing DCache accepted request/release populations")
+    _require(a_completed == requests and releases == c_releases and
+             starts == completed == a_completed + releases,
+             "DCache messages not completed exactly once")
+    _require(nonfront <= selected <= multi <= max(0, starts - 1) and maximum <= min(starts, multi + 1) and
+             ((starts == 0 and maximum == multi == 0) or (starts > 0 and maximum > 0)) and
+             ((multi == 0 and maximum <= 1) or (multi > 0 and maximum >= 2)),
+             "DCache order populations impossible")
+    # Deferred/held older A can be overtaken even in FIFO mode; ReleaseAck has
+    # an independent C source namespace. Accepted-age inversions and queued
+    # nonfront selections are separate populations, unlike the PTW scheduler.
+    _require(overtaking <= max(0, a_completed - 1) and older <= min(63, max(0, requests - 1)) and
+             ((overtaking == 0 and older == 0) or (overtaking > 0 and older > 0)),
+             "DCache accepted-age completion populations impossible")
+    _require(rate != 0 or selected == nonfront == 0, "disabled DCache reorder produced choices")
+    _require(rate != 1000 or selected == multi, "forced DCache reorder skipped eligible choice")
+
+
 def _check_ptw_response_order(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 81:
         return
@@ -5164,7 +5192,7 @@ def _check_ptw_response_order(result: dict[str, Any]) -> None:
     _require(type(requests) is int and requests >= 0 and starts == completed == requests,
              "PTW messages not completed exactly once")
     _require(nonfront <= selected <= multi <= max(0, starts - 1) and
-             maximum <= min(16, starts) and
+             maximum <= min(16, starts, multi + 1) and
              ((starts == 0 and maximum == multi == 0) or (starts > 0 and maximum > 0)) and
              ((multi == 0 and maximum <= 1) or (multi > 0 and maximum >= 2)),
              "PTW order populations impossible")
@@ -5288,6 +5316,7 @@ def _check_mixed_accounting(result: dict[str, Any]) -> None:
     Coverage counters remain in the result and per-run report, but a sparse
     random run is valid: the verifier must not reject it for unobserved bins.
     """
+    _check_dcache_response_order(result)
     _check_ptw_response_order(result)
     _check_stream_transport(result)
     _check_stream_access(result)
@@ -5474,6 +5503,7 @@ def _check_result(
         _check_permuted_translation_accounting(result)
         _check_alias_recall_accounting(result)
         _check_scalar_fp_accounting(result)
+        _check_dcache_response_order(result)
         _check_ptw_response_order(result)
         _check_vector_operand_accounting(result)
         if require_coverage:

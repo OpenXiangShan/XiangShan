@@ -33,6 +33,7 @@ struct CancelFixture {
         struct { Pin lq_cancel_cnt,sq_cancel_cnt; } retirement; } queues; void refresh_comb(){};
         bool sample_sbuffer_empty() const {return true;} } dut_;
     struct { Environment::StoreRetirementStats stats; const auto &store_retirement_stats()const{return stats;}
+        bool cancel_store_targets_for_redirect(std::uint8_t,bool,bool){return true;}
         std::uint64_t sq_allocated()const{return 0;} bool observe_redirect_cancellation(std::uint64_t,std::uint64_t){return true;} } queues_;
     FailureState error_{"fixture","contract"};
     LoadScoreboard scoreboard_;

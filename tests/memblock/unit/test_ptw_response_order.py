@@ -57,7 +57,7 @@ class PtwResponseOrderTest(unittest.TestCase):
             self.assertEqual(r.returncode==0,valid,r.stdout+r.stderr)
             if valid:
                 self.assertIn('target_ptw_response_reorder='+value+' ',r.stdout)
-                self.assertIn('constraint_schema=81',r.stdout)
+                self.assertIn('constraint_schema=82',r.stdout)
 
     def test_independent_accepted_and_completion_histories_reduce_to_valid_ledgers(self):
         for seed in range(128):
@@ -75,10 +75,10 @@ class PtwResponseOrderTest(unittest.TestCase):
                     row[6]+=older!=0;row[7]=max(row[7],older);row[4]+=1
                 verify_regression._check_ptw_response_order(dict(constraint_schema=81,
                     target_ptw_response_reorder=rate,ptw_requests=count,ptw_response_order=','.join(map(str,row))))
-        for impossible in ['2,0,0,0,2,2,0,0','2,2,2,0,2,2,0,0']:
+        for impossible in ['2,0,0,0,2,2,0,0','2,2,2,0,2,2,0,0','8,1,1,0,8,7,0,0']:
             with self.assertRaises(verify_regression.VerificationError):
                 verify_regression._check_ptw_response_order(dict(constraint_schema=81,
-                    target_ptw_response_reorder=1000,ptw_requests=2,ptw_response_order=impossible))
+                    target_ptw_response_reorder=1000,ptw_requests=int(impossible.split(',')[0]),ptw_response_order=impossible))
 
     def test_sparse_and_corrupted_order_ledgers(self):
         for rate in [0,1,250,1000]:

@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=81`.
+`constraint_schema=82`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -97,6 +97,7 @@ they do not imply arbitrary numeric suffix support.
 | `scalar-unresolved-inflight` | Conditional conflicting-window rate selecting one youngest unfinished cold scalar/FP load, with a held late response and observed redirect cancellation; default 250 in all presets. Selection needs a same-page line with no accepted external A history; unavailable attempts are reported. Zero retains all-completed windows. |
 | `scalar-dependency` | Rate replacing a remaining eligible ordinary scalar-store action with a randomized dependency window: 1..4 older stores, 1..3 younger loads, and an optional store younger than those loads. Widths, byte overlap, payloads, lanes, operand arrival, issue order and 0..7-cycle gaps vary. Defaults coverage/spec/corner/cmo-stress: 350/200/500/0. |
 | `latency` | `compact` or `spec`, applied to all three managers. |
+| `dcache-response-reorder` | Complete eligible DCache D message arbitration rate, default 250 per mille in all presets. Zero retains FIFO queue selection, 1000 uniformly chooses among all queued messages, and intermediate rates choose between FIFO and uniform selection. First/interbeat delay and stalled payload remain locked to one complete message. Acquires still wait for same-line final D plus E, probes, ReleaseData and alias recovery; held messages remain excluded until released. ReleaseAck uses the independent C-source namespace. A dedicated seeded RNG preserves latency/backpressure draws when disabled. This changes response ordering rather than instruction selection. |
 | `ptw-response-reorder` | Whole-message PTW D arbitration rate, default 250 per mille in all presets. At a message boundary with two or more pending messages, zero keeps FIFO, 1000 uniformly selects among all pending messages, and intermediate rates choose between FIFO and uniform selection. A dedicated seeded RNG avoids changing legacy latency/backpressure draws when disabled. Message beats and D payload under stall stay locked; the oldest active message, including its response delay, is not preempted. This is manager scheduling, not a demand/translation percentage. |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | `compact` or `spec`, applied to one manager. |
 
@@ -119,7 +120,7 @@ they do not imply arbitrary numeric suffix support.
 | Keys | Type and meaning |
 | --- | --- |
 | `cmo-clean`, `cmo-flush`, `cmo-inval` | Relative CMO operation weights. |
-| `cmo-dirty`, `cmo-younger-overlap` | Rates for dirtying the target by a committed store and for a younger cold-load cancellation check. |
+| `cmo-dirty`, `cmo-younger-overlap` | Rates for dirtying the target by a committed store and for younger cold-load overlap with a checked early result or exact-return cancellation. |
 | `cmo-error`, `cmo-error-denied` | Rates for an opcode-qualified CBOAck error and conditional denied share; otherwise corrupt. |
 | `cmo-probe-depth1` .. `cmo-probe-depth8` | Relative successful-CMO total Probe depth: target plus zero through seven auxiliary lines. Error CMOs omit these Probes. |
 | `ptw-error-stage1`, `ptw-error-gstage`, `ptw-error-nested-g-implicit`, `ptw-error-nested-vs`, `ptw-error-nested-g-final` | Relative manager-error site weights, in this order. |
@@ -1070,8 +1071,52 @@ selection populations, disabled/forced endpoints and maximum source population;
 it does not reconstruct each source's ordering or prove correct DUT translation.
 The normal load/IFU/PTW scenarios continue to check independent input-owned bytes,
 page walks, permissions and response identities. Positive nonfront activity is
-observational, not a hidden coverage PASS requirement. DCache/Uncache response
-permutations and generalized reset/malformed-D campaigns remain separate gaps.
+observational, not a hidden coverage PASS requirement. DCache complete-message
+selection is defined below; Uncache ordering and generalized reset/malformed-D
+campaigns remain separate gaps.
+
+The CMO younger-load overlap direction permits either an independently checked
+early result or explicit cancellation at its exact redirect return. First-delay
+choices do not impose a cross-message completion order. Physical LQ cancellation
+and result/cancellation ownership are separate obligations; completed physical
+allocations are not rewound.
+
+## DCache Response Message Ordering
+
+Schema82 permits complete eligible DCache D messages to leave their normal
+response queue in a seeded order. Response construction still follows the
+existing line/sink/coherence gates: pending same-line Acquires, active probes,
+ReleaseData, alias recall and explicit held-response state are not bypassed.
+Only complete normal queued messages are selectable. Selection locks before
+its first delay, through interbeat gaps and presented D stalls until final D.
+Immutable GrantData bytes, keyword beat order and selected denied/corrupt beats
+stay attached to the message. Grant/GrantData require exactly one matching E;
+ReleaseAck belongs to the independent C-source namespace and consumes no A
+source or E obligation. No new source-reuse timing is introduced.
+
+Ordinary mixed recovery also removes killed noncommitted scalar/vector SQ
+allocation targets at every certified redirect return. VLS exception recovery
+retains the faulting instruction and removes strict-younger targets. This cleanup
+retains survivor targets and committed drain obligations, changes no physical
+credit, and prevents a canceled generation from polluting strict vector-group
+membership when its full ROB identity is later reused.
+
+The ten `dcache_response_order` fields are message starts, starts with multiple
+selectable queued messages, random arbitrations, nonfront choices, final-D
+message completions, maximum selectable messages, A-response completions that
+overtake at least one older accepted A, maximum older A still outstanding at
+such completion, ReleaseAck completions and A-response completions. At final
+drain, starts equal completed A requests plus completed C releases; the latter
+is serialized as `dcache_releases`. Accepted-A inversions are a separate
+population from nonfront queue choices: same-line deferral or held responses
+can cause inversions even with FIFO selection, and C releases have a separate
+source namespace. The aggregate checker does not equate these populations or
+reconstruct a native per-beat transcript. Independent input-owned load/vector,
+translation, release-byte and final-readback oracles remain responsible for DUT
+outcomes. Sparse observations do not cause functional FAIL; uniform random
+choice has no deterministic fairness bound. Uncache ordering, arbitrary
+reset/malformed-D campaigns and the existing source receipt/reuse timing corner
+remain outside this direction.
 
 ## Explicit Stimulus And Oracle Gaps
 

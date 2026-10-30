@@ -54,6 +54,9 @@ struct Queues {
         return !reject;
     }
     std::uint64_t sq_allocated() const { return 7; }
+    unsigned target_cancellations = 0;
+    bool target_self = false;
+    bool cancel_store_targets_for_redirect(std::uint8_t, bool, bool self) { ++target_cancellations; target_self = self; return true; }
 };
 struct Bridge {
     void capture_inputs() {}
@@ -242,7 +245,7 @@ static void tails()
         require(h.cycle() == 3 && h.queues_.observations == 1 &&
             h.feedback_.edges == std::vector<std::uint64_t>{0, 1, 2}, "redirect tail was not fully monitored");
         require(h.entries[1].completed, "tail terminal was not checked");
-        require(!h.scalar_release_inputs_.count(1) && h.scalar_release_inputs_.count(2) &&
+        require(h.queues_.target_cancellations == 1 && !h.scalar_release_inputs_.count(1) && h.scalar_release_inputs_.count(2) &&
             h.memory_agent_.canceled == std::vector<std::uint64_t>{42}, "wrong input journal cancellation");
         for (unsigned i = 0; i < h.entries.size(); ++i)
             if (i == 2 || i == 4 || (i == 3 && self)) h.entries[i].canceled = true;
@@ -334,6 +337,11 @@ static void corrupt()
 
 static void inputs()
 {
+    for (bool vls : {false, true}) {
+        Harness boundary;
+        require(boundary.redirect_after(100, false, true, vls) && boundary.queues_.target_cancellations == 1 &&
+            boundary.queues_.target_self == !vls, "VLS/ordinary target cancellation boundary mismatch");
+    }
     for (bool vector : {false, true}) for (bool self : {false, true}) {
         Harness h;
         auto &tracked = vector ? h.vector_release_inputs_ : h.scalar_release_inputs_;

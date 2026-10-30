@@ -339,6 +339,16 @@ late-writeback silence remain outside its claim.
 
 ### Ordinary sliding-stream expectations
 
+At every successful redirect-return boundary, SQ allocation-target metadata
+for killed scalar/vector stores is removed by full ROB value/wrap age. This is
+separate from observed physical SQ cancellation credit: targets for surviving
+stores remain, and retired stores retain their independent committed/drain
+records. Complete vector-instruction membership remains strict across later
+ROB identity reuse; canceled old targets cannot become members of a new group.
+VLS exception recovery retains the faulting vector instruction and removes only
+strictly younger target identities, matching its SQ-specific cancellation rule.
+No late terminal, result mismatch or committed side effect is waived by cleanup.
+
 [StreamByteOracle](../cpp/scenarios/mixed/stream_oracle.hpp) owns a mirror-free
 physical-byte image. Admission follows architectural order; each input store
 overlays its active bytes before younger load values are frozen. Lazy initial
@@ -907,6 +917,20 @@ can still drain. The load path attributes CPU demand loads and their target
 line. Background prefetch and unrelated prior stores are not proof of a
 forbidden operation.
 
+### CMO overlap completion
+
+The canonical CMO overlap path registers the younger scalar load's input-owned
+value before enqueue/issue. Independent response delays or complete-message
+arbitration may allow its exact result before the CMO completes, during the
+three monitored redirect-return edges, or leave it pending at the return.
+At that actual return, pending terminal obligations are explicitly canceled.
+The isolated episode requires exactly one checked load completion or legal
+scoreboard cancellation and rejects duplicate/late/unknown results. Physical
+LQ cancellation remains separately observed; a completed load may already have
+dequeued, so only actual canceled allocations rewind the software LQ cursor.
+CMO operation/error and final-byte policies remain unchanged. Delays alone are
+not an ordering oracle.
+
 ### DCache manager
 
 | Rule | Active check/model | Incomplete or missing portion |
@@ -914,7 +938,7 @@ forbidden operation.
 | Accepted A legality | [dcache_a_contract.inc](../cpp/environment/dcache_a_contract.inc) validates supported opcode, size and corruption. Acquires require full-line alignment/size/mask, miss-source range, legal grow and request-source classes, and VA alias/page-offset consistency. Get checks param, alignment, mask and source range. CMO checks line size/alignment and the dedicated source. | Get user fields and CMO unspecified fields are intentionally unconstrained. Opcode legality does not by itself match an instruction to an A request. |
 | A source credit | [update_after_tick](../cpp/environment/dcache_agent.inc) rejects reuse while the source is active, activates on A acceptance, frees on final corresponding D; same-edge D completion is processed before new A. | Credit is not retained through GrantAck. It is separate from E-sink lifetime. |
 | Cross-colour alias ownership | PA-line directory stores granted VA alias/maximum permission. Acquires queue per line until prior final D and E, same-line Probes and active ReleaseData complete; unrelated lines can progress. An alias change sends forced-data toN to the stored old alias and constructs GrantData only after complete recovery. | Automatic recall requires an independent drained reference checkpoint; unsupported uncheckpointed simultaneous synonyms fail as a manager-contract limitation. Error-grant and synonym CMO ownership are unqualified. |
-| D response | The manager constructs response beats from captured A and backing memory, then compares its driven handshake fields/data to queued beats. GrantData supports keyword beat order; denied is fixed and implies corrupt on data beats; independent corrupt injection can select first/last/all beats. | This is a manager/adapter consistency check of manager-owned output, not an independent DUT response scoreboard or malformed-response campaign. |
+| D response | The manager constructs response beats from captured A and backing memory, then compares its driven handshake fields/data to queued beats. Seeded arbitration selects only complete eligible normal messages and locks first/interbeat delays and stalled payload through final D; same-line/sink/coherence and explicit hold gates remain active. GrantData supports keyword beat order; denied is fixed and implies corrupt on data beats; independent corrupt injection can select first/last/all beats. Accepted-A completion-age and queued-selection populations are separately observed; ReleaseAck consumes only C-source ownership. | This is a manager/adapter consistency check of manager-owned output, not an independent DUT response scoreboard or malformed-response campaign. |
 | E GrantAck | Sink must match a queued expectation; matching consumes exactly one entry. An E is accepted only after the first corresponding Grant/GrantData D beat, or in that same cycle, and every sink stays busy from first D acceptance until E. Drains check expected E entries separately from D response queues. | The expectation entry is still created when `respond` constructs Grant/GrantData; the first-D/sink-busy check supplies the causal eligibility gate. A same-cycle D/E is accepted. A sink's A source may still be reused only after its final D, which is separately checked. |
 | Probe lifecycle | Rotating 6-bit B sources, accepted-B provenance and source reuse/wrap/depth accounting. Same-PA B presentation is serialized through final matching C and waits for prior final D plus E. Standalone and automatic Probes use the recorded old VA alias. | This is a single-client manager schedule; broad manager reordering remains outside the current direction. |
 | ProbeAck/Data | Match one accepted same-PA B; C source is client-owned and fixed across beats. Exact scenario-owned expectations remain exact. Forced-data automatic toN accepts present TtoN/BtoN with full data or absent NtoN without data, rejects a B-to-T report, and checks all data bytes against the frozen independent owner image. Size/address/report/opcode/corrupt and multibeat identity are checked. | C user/echo fields do not carry reliable alias identity. NtoN does not remove an unobserved voluntary Release obligation. Arbitrary in-flight versioned data images are not modeled. |
@@ -926,6 +950,13 @@ All DCache lifecycle details above come from
 `capture_before_tick`, `update_after_tick`, `respond`, `request_probe`,
 `accept_probe_response`, `accept_release`, and the idle predicates. A manager
 response drain does not imply cache-byte observation or coherence closure.
+The existing UT A-source credit rule retains credit through final D and permits
+same-edge final-D/new-A reuse. This retains credit longer than TileLink receipt
+at first D but differs at the receipt edge from the reference monitor's pre-edge
+reuse check. The actual DCache MSHR remains live through GrantAck, main-pipe and
+refill completion; the new message scheduler does not expand reuse stimulus.
+That source receipt/reuse corner remains unqualified and is not used as a new
+full-CPU legality claim.
 
 Ordinary mixed epochs isolate their input journal from untracked legacy actions.
 Entry drains LSQ, SBuffer and the public memory link before enabling the journal;

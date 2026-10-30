@@ -334,6 +334,8 @@ public:
         std::uint64_t seed, bool enabled,
         const ResponseLatencyProfiles &latency_profiles);
 
+    void configure_dcache_response_order(std::uint64_t seed, unsigned per_mille);
+    const std::array<std::uint64_t, 10> &dcache_response_order_stats() const;
     void configure_ptw_response_order(std::uint64_t seed, unsigned per_mille);
     const std::array<std::uint64_t, 8> &ptw_response_order_stats() const;
 

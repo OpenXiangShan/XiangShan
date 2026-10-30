@@ -18,14 +18,36 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema82 adds seeded complete-message DCache D arbitration after the existing
+  line/sink/coherence preparation gates. Held responses stay excluded until
+  released; first/interbeat delays, stalled payloads and immutable keyword/error
+  bytes remain attached to one message. GrantData/Grant and ReleaseAck retain
+  separate A/C-source and E-sink obligations. Manager-observed accepted-A
+  inversions are distinct from nonfront queue choices. Independent byte/value
+  checks remain active. Default rate is 250 per mille; zero preserves the
+  preceding runtime's semantic result. Strict coverage now recognizes schemas
+  80..82 rather than rejecting current traffic at an obsolete allowlist. Both
+  queue schedulers reject an impossible peak greater than multi-choice starts
+  plus one. Uncache ordering, broad reset/malformed responses and source-receipt
+  edge qualification remain gaps.
+
+- Redirect-return cleanup removes only killed unretired scalar/vector allocation
+  targets, retaining survivor membership and separate committed-drain records.
+  VLS exception return preserves its fault anchor. Strict vector-group checking
+  remains unchanged across ROB identity reuse. CMO younger-load overlap now
+  registers its input-owned expected result before issue and permits checked
+  early completion or pending cancellation at exact return; delays do not impose
+  message order and completed physical allocations are not rewound.
+
 - Schema81 adds seeded whole-message PTW D arbitration across outstanding
   sources. Accepted request bytes/error choices remain frozen; one message owns
   first/interbeat delays and stalled D until final handshake. Accepted-request-age
   completion-order counters record overtaking accepted older work. Ordinary
   translation/page-walk and load-value oracles remain active. Default arbitration
   rate is 250 per mille; zero retains previous latency/backpressure/RNG behavior.
-  The bounded native sample observes response inversions; DCache/Uncache order,
-  arbitrary reset histories and malformed manager responses remain gaps.
+  The bounded native sample observes response inversions; DCache whole-message
+  ordering is qualified below. Uncache ordering, arbitrary reset histories and
+  malformed manager responses remain gaps.
 
 - Schema80 adds exact monitored pre-edge R store observations and a normal
   posttrap LBU checking a randomly selected older scalar-store byte from the
@@ -450,6 +472,9 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| DCache complete-message response ordering and recovery | Frozen runtime-v4 passes 12 primary finite cases / 16640 actions plus exact seed8203 replay. All 13 complete artifact verifiers pass. The primary runs observe 39536 message starts/final-D completions, 9961 multiple-choice boundaries, 3237 random arbitrations, 2095 nonfront choices and 1909 A completions overtaking older accepted A; maximum selectable messages is 15 and maximum older outstanding at overtaking is 12. The 25806 A responses and 13730 ReleaseAck messages conserve separately. All 7231 final words compare. | `build/memblock/dcache-order-20261031/{qualification-v4.json,artifact-verifiers-v4.json,provenance-v4.json,replay-compat-v4.json,triage-disposition-v4.json}`. Both default spec/corner runs observe nonfront choices; three 2048-action cold U/nested/SUM profiles use the default 250 rate. Original corner seeds8222/8224 and an8222 FIFO control each pass their original 2048-action budget after the target-cleanup/CMO-oracle repairs. Ordering disabled matches all 419 preceding schema81 semantic fields. All 100 prepared sources and four frozen artifact hashes are retained; model/RTL metadata match the preceding runtime. Six adjacent directed scenarios pass at retained FIFO settings and supply compatibility only (`directed-v4.json`). These are finite scheduling/outcome observations, not an independent native per-beat transcript, fairness or coverage closure. |
+| DCache ordering host and accounting contracts | Seven methods check independent accepted A/C, D message and E histories, equal numeric A/C sources, early/final E, whole-message initial/interbeat delay and stall locking, snapshot bytes/keyword/error choices, held responses, same-line final-D-plus-E deferral and configuration/reset boundaries. Both no-stall and A/C/E-backpressure samples produce 128 source schedules over 128 seeds; FIFO produces one. Four private FIFO/payload/interleave/stalled-switch faults reject. Another 384 independently reduced deferred-A/C histories distinguish accepted-age inversions from queue choices, including 1356 FIFO accepted-age overtakes. | `build/memblock/dcache-order-20261031/{host-v3.log,ptw-host-v3.log}`. Aggregate relational corruption checks include peak versus multi-choice population, exact A/C message conservation, sparse endpoints and current-schema strict-mode recognition. Synthetic histories qualify manager/checker contracts, not native full-CPU reachability or arbitrary reset epochs. The existing final-D/same-edge A reuse corner differs from reference receipt-edge handling and remains unqualified; this patch adds no reuse stimulus. |
+| Redirect allocation targets and CMO overlap lifecycle | Nine retirement and ten redirect methods pass; 640 author literal-age histories and 204160 independent reviewer age cases preserve surviving scalar/vector targets, committed drain obligations, exact credit snapshots and strict vector membership across ROB reuse. Private missing-cleanup, caller-omission, early-cleanup and wrong-VLS-anchor faults reject. Three CMO methods pass 576 early/during-return/pending-cancel histories with the actual scenario and production LoadScoreboard. Four private registration/cancellation/rewind/FIFO-assumption faults reject; wrong, duplicate and unknown late results reject. | `build/memblock/dcache-order-20261031/{retirement-cleanup-host-v2.log,redirect-cleanup-host-v2.log,cmo-host-final.log,review-v1/reviewer/}`. Reviewer private challenges add 18 nonzero literal-byte/wrap histories, 18 completed-plus-physical-cancel cases, wrong results before/during return and late WB after pending cancellation. Author CMO fixtures alone use zero default bytes and do not establish native timing. VLS fault-anchor lifetime beyond strict-younger cleanup remains outside this repair. No result or complete-group check is relaxed. |
 | PTW complete-message response ordering | Frozen runtime-v2 passes 18 finite cases / 23296 actions and 20 complete artifact verifiers including exact replay and schema80 disabled compatibility. There are 20296 message starts/final-D completions, 216 multiple-message boundaries, 141 random arbitrations and 63 nonfront choices with 63 actual final-D completions overtaking older accepted requests; maximum selectable pending messages is 4 and maximum older overtaken is 3. All 9679 final words compare. Four adjacent directed contracts pass, including IFU/DTLB overlap and 16 PTW denied/corrupt/error recovery cases. | `build/memblock/ptw-order-20261031/{qualification-final.json,artifact-verifiers-final.json,provenance-final.json,replay-compat.json,directed-v2.json,ptw-errors-v2.json}`. Seed 8101 exactly replays; 413 prior schema80 semantic fields match with ordering disabled. All 100 prepared sources and four frozen artifact hashes are retained; model/RTL metadata match prior runtime. Whole-message source/control/beat lock follows inspected L2TLB/refill and TileLink contracts. Initial default-spec/corner and forced U VS48/G48 samples select at most one pending message and supply compatibility only; no inversion coverage follows from those runs. Finite qualification, not coverage closure or CPU RTL bug evidence. |
 | PTW ordering host and accounting contracts | Seven host methods check accepted-input byte snapshots, contiguous mixed-size D messages, stalled payload, final-D source reuse, selected corrupt beats, reset/live-configuration rejection, disabled FIFO/replay, 384 independent event histories and malformed/overpopulation ledgers. 128 seeds produce 127 response-source schedules; four private FIFO/payload/interleave/stall faults reject. | `build/memblock/ptw-order-20261031/{host-final.log,review-v2/reviewer/}`. Reviewer additionally checks random A backpressure/interbeat gaps and 1055 identical current-disabled versus prior-agent edges across 32 seeds. Host stimulus uses synthetic requests and cannot prove DUT translation correctness. Aggregate counters do not reconstruct every transaction or imply a fairness bound. |
 | Trap observation, survivor and arena host contracts | The 675-method suite includes 43 scheduler methods, 256 independently reduced/serialized permission histories, malformed/overflow/ownership checks for all 12 store counters, exact after-manager pre-edge observation, actual address-space endpoint controls and default 750 replay. Private wrong-byte and auxiliary-format faults reject; a fresh reviewer also rejects live-younger checkpoint pollution and original-store-byte substitution when a later older write owns the byte. | `build/memblock/committed-trap-20261031/{full-unit-v4.log,full-scheduler-v4.json,witness-v4.log,review-v4/reviewer/}`. Fixed eight-load samples retain 64/64 event-only schedules, 41 admission/retirement interleavings and 43 load issue orders, excluding addresses/data/timing/dependency choices. The older-overwrite mutant needs a host-only compressed address pool; the default 256-seed sample does not establish that relation. Auxiliary-source-removal produces forbidden dependencies in all three reviewer endpoint samples. Synthetic host histories establish checker contracts, not native RTL mutation sensitivity. |
@@ -471,7 +496,7 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 | Redirect cancellation and replay host oracles | Eight replay-controller methods and six bulk-cancellation methods pass; randomized public-edge histories, ROB age/wrap and both redirect levels are checked, with ten controller and six scoreboard private faults detected. | `build/memblock/store-retirement-20261030/memory-replay-controller-v1/verification.json` and `build/memblock/store-retirement-20261030/mixed-scoreboard-cancel-v1/verification.json`; these are independent host contracts and do not certify native DUT timing or full-CPU recovery. |
 | Ordinary store retirement separation | Nine store-retirement methods and two release-input methods pass. Architectural scalar/vector retirement is accounted separately from physical SQ drain, including pending committed records, vector-uop drain targets, nonzero-VSTART flush accounting and independent ReleaseData histories. | `build/memblock/store-retirement-20261030/store-retirement-*` and `release-cancel-checkpoint/`; the rebuilt harness passed 32 scheduler methods, while the corner replay above remains outside this bounded retirement qualification. |
 | Retained issue ownership and STD wrap | Six ownership methods pass: 20 bound-owner rejections, 10 unbound controls/11 accepted edges, all 320 ROB value/wrap identities and four wrapped redirect cases. Ten author private faults and two additional reviewer faults reject. Four finite native cases pass 1024 actions and both full artifact verifiers; entire terminal summaries match the preceding runtime | `build/memblock/ordinary-async-20261030/ownership-v1/qualification.json`, `reviewer/review-v2.md`; guards precede pin/edge/replay mutation and same-edge STD completion remains checked. The retirement fixture integration failure was corrected and all 17 methods independently rerun. Native compatibility does not qualify new scheduler overlap, unmatched STD pulses or closure |
-| Infrastructure unit | 682 tests pass; generated-interface, RTL and documentation checks pass | `build/memblock/ptw-order-20261031/{full-unit-final.log,check-rtl-final.log}`; current source includes schema81 whole-message PTW ordering, independent host histories, impossible-population rejection and current-schema migrations alongside the retained trap/survivor/arena checks. Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 692 tests pass; generated-interface, RTL and documentation checks pass | `build/memblock/dcache-order-20261031/{full-unit-production-final.log,check-rtl-production-final.log}`; exact production source includes schema82 whole-message DCache ordering, redirect allocation-target cleanup, CMO early-result/cancellation ownership, relational accounting and current-schema fixture compatibility. Unit checks do not establish DUT functional coverage |
 | Admission/ledger host contracts | 20 independent methods pass: 13 production C++ schedules, 20 compiled private faults detected, 50 ledger records; non-author review independently enumerates 4803 arithmetic cases | `build/memblock/enqueue-admission-20261030/independent-tests/{summary.txt,evidence.json,ledger-evidence.json}`, `review-v1/review.md`; exact credit/redirect boundaries, repeated highs, both watermarks, unmonitored ticks, immediate conservation, holey batches, cadence and schema 2 compatibility. Synthetic public ports/edges; no DUT mutation claim |
 | Ordinary enqueue/feedback DUT qualification | Frozen runtime-v1: 12/12 finite cases pass 22528 actions; six current-runtime artifact verifiers and one prior-monitor2 control pass; 9/9 adjacent directed scenarios pass | `build/memblock/enqueue-admission-20261030/qualification-v1.json`, `artifact-verifiers-v1.json`, `directed-v1/results.json`; spec/coverage/corner defaults, ordinary dependency streams, integrated recovery and store-only 641-instruction epochs. Whole-run cadence: 51092 enqueue edges, 8969 adjacent edges with older work, maximum run 19; this includes legacy/final readback and has no per-stream attribution. Stream-specific feedback overlap includes 315 admissions, 14 loads, 227 STA, 182 STD, 35 vector uops and 7 prefetches. 5478 ordinary hits, 715 misses/retries, maximum pending 2; 12303 stream retirements, 2748 full ROB identity reuses and 9929/9929 final words. Exact corner replays pass at 333.5/336.6s with 900s budget; initial 180s timeouts and malformed-constraint attempts are excluded. Functional/accounting development evidence, not closure |
 | Store feedback structural and sensitivity checks | 29 scheduler methods and 16 independent replay/accounting methods pass; fresh focused 64/64 seeds produce distinct structural schedules and seed 1 replays exactly; 44 serialization round trips and 15 private replay/accounting faults remain detected | `build/memblock/enqueue-admission-20261030/scheduler-focused-v1.json`, `unit-v2.log`; focused schedules exclude addresses/payload/cycles/delays. Replay-state checks and retained serializer/fault evidence are at `build/memblock/store-feedback-20261030/independent-tests/summary-v2.json`. Synthetic host timing does not prove full CPU reachability; these are UT checks, not RTL mutation coverage |
@@ -581,6 +606,27 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Schema82 actual-diff independent review accepts bounded DCache ordering and
+redirect-target cleanup. The peak/multiple-choice finding is corrected in both
+DCache and PTW accounting; stale gap descriptions and the strict-mode schema
+allowlist are repaired. Review covers whole-message/source/byte ownership,
+first-delay/stall locking, separate accepted-A/C populations and retained
+line/sink/coherence gates. Root redirect cleanup preserves the VLS exception
+anchor and never changes committed drain records or physical cancellation.
+
+Current evidence is under `build/memblock/dcache-order-20261031/`. Ordering
+and cleanup reports are `review-v1/reviewer/REVIEW.md` and
+`review-v1/reviewer/CLEANUP_REVIEW_V5.md`. Later CMO review independently
+challenges nonzero input-owned values, wrap, early/during-return result checks,
+pending cancellation and completed physical entries; its verdict is
+`review-v1/reviewer/CMO_REVIEW_FINAL.md`. The primary dispositions are
+`review-disposition-final.json`. The final 12-case runtime-v4
+packet and 13 verifier commands include the original failing seeds at their
+unchanged 2048-action budget. Earlier failing runtime-v1/v3 and transient
+cleanup-v2 artifacts are excluded from accepting qualification. The exact-source general suite
+passes 692 tests and check-rtl; all 32 reviewed source pins remain matched. This
+is finite UT qualification, not coverage closure or CPU RTL bug evidence.
 
 Schema81 fresh-context actual-diff independent review accepts whole-message legality,
 source/byte ownership, stalled payloads, dedicated RNG and completion-order

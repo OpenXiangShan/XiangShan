@@ -38,6 +38,20 @@ public:
         force_e_stall_ = enabled;
     }
 
+    // Independent RNG preserves legacy latency and backpressure when disabled.
+    void configure_response_order(std::uint64_t seed, unsigned per_mille)
+    {
+        if (per_mille > 1000 || !responses_idle() || !grant_acks_idle() ||
+            !b_beats_.empty() || !probe_responses_.empty())
+            throw std::invalid_argument("DCache response-order configuration requires idle link and rate <=1000");
+        response_order_per_mille_ = per_mille;
+        order_random_state_ = seed == 0 ? 1 : seed;
+        response_order_stats_ = {};
+    }
+
+    const std::array<std::uint64_t, 10> &response_order_stats() const
+    { return response_order_stats_; }
+
     void inject_next_response_error(
         bool denied, bool corrupt,
         DcacheCorruptBeat corrupt_beat = DcacheCorruptBeat::all)
@@ -290,6 +304,8 @@ public:
         force_e_stall_ = random_backpressure_;
         outstanding_requests_ = 0;
         active_request_sources_.fill(false);
+        active_request_orders_.fill(std::nullopt);
+        response_message_active_ = false;
         probe_canceled_count_ += probe_request_count_ -
             probe_response_count_ - probe_canceled_count_;
         next_probe_source_ = 0;
@@ -335,6 +351,10 @@ public:
             return;
         }
 
+        if (!response_message_active_) {
+            select_response_message();
+            response_message_active_ = true;
+        }
         if (!d_presenting_) {
             if (d_gap_ != 0) {
                 --d_gap_;
@@ -601,6 +621,17 @@ public:
                     outstanding_requests_ == 0) {
                     error_.record("DCache TileLink D completed an inactive A source");
                 } else {
+                    const auto order = active_request_orders_[response.source];
+                    if (!order) {
+                        error_.record("DCache completed A source lost accepted age");
+                    } else {
+                        const auto older = std::count_if(active_request_orders_.begin(), active_request_orders_.end(),
+                            [&](const auto &candidate) { return candidate && *candidate < *order; });
+                        response_order_stats_[6] += older != 0;
+                        response_order_stats_[7] = std::max<std::uint64_t>(response_order_stats_[7], older);
+                        active_request_orders_[response.source].reset();
+                    }
+                    ++response_order_stats_[9];
                     active_request_sources_[response.source] = false;
                     --outstanding_requests_;
                 }
@@ -610,6 +641,11 @@ public:
                 for (auto &grant : grants_) {
                     if (grant.sink == response.sink) grant.final_d = true;
                 }
+            }
+            if (response.last_beat) {
+                ++response_order_stats_[4];
+                response_order_stats_[8] += response.opcode == 6;
+                response_message_active_ = false;
             }
             d_beats_.pop_front();
             d_presenting_ = false;
@@ -621,6 +657,7 @@ public:
                 error_.record("DCache TileLink A source reused before D completion");
             } else {
                 active_request_sources_[captured_a_->source] = true;
+                active_request_orders_[captured_a_->source] = request_count_;
                 ++outstanding_requests_;
                 max_outstanding_requests_ = std::max(
                     max_outstanding_requests_, outstanding_requests_);
@@ -2167,6 +2204,39 @@ private:
         return e_random_state_;
     }
 
+    void select_response_message()
+    {
+        // service_acquires enforced line, sink and coherence eligibility.
+        // Held/building messages are absent here. Lock before the first delay.
+        std::vector<std::size_t> starts;
+        for (std::size_t i = 0; i < d_beats_.size(); ++i)
+            if (d_beats_[i].first_beat) starts.push_back(i);
+        if (starts.empty() || starts.front() != 0) {
+            error_.record("DCache response queue lost a whole-message boundary");
+            return;
+        }
+        ++response_order_stats_[0];
+        response_order_stats_[5] = std::max<std::uint64_t>(response_order_stats_[5], starts.size());
+        if (starts.size() < 2) return;
+        ++response_order_stats_[1];
+        if (response_order_per_mille_ == 0) return;
+        const auto draw = [&] {
+            order_random_state_ ^= order_random_state_ << 13;
+            order_random_state_ ^= order_random_state_ >> 7;
+            order_random_state_ ^= order_random_state_ << 17;
+            return order_random_state_;
+        };
+        if (response_order_per_mille_ != 1000 && draw() % 1000U >= response_order_per_mille_) return;
+        ++response_order_stats_[2];
+        const auto selected = draw() % starts.size();
+        if (selected == 0) return;
+        ++response_order_stats_[3];
+        const auto begin = d_beats_.begin() + starts[selected];
+        const auto end = selected + 1U < starts.size() ? d_beats_.begin() + starts[selected + 1U] : d_beats_.end();
+        std::rotate(d_beats_.begin(), begin, end);
+        d_gap_ = d_beats_.front().delay_before;
+    }
+
     unsigned response_delay(bool first_beat)
     {
         if (first_beat && forced_next_response_delay_) {
@@ -2322,6 +2392,14 @@ private:
     bool force_e_stall_ = false;
     bool d_presenting_ = false;
     std::array<bool, 64> active_request_sources_{};
+    std::array<std::optional<std::uint64_t>, 64> active_request_orders_{};
+    std::uint64_t order_random_state_ = 1;
+    unsigned response_order_per_mille_ = 0;
+    bool response_message_active_ = false;
+    // Starts/multi-choice starts/random choices/nonfront choices/final D/max
+    // selectable messages/A completions overtaking older A/max older A/
+    // ReleaseAck completions/A completions. Manager IO observations only.
+    std::array<std::uint64_t, 10> response_order_stats_{};
     std::optional<PendingResponseError> pending_response_error_;
     std::optional<unsigned> forced_next_response_delay_;
     std::optional<unsigned> forced_next_cmo_response_delay_;

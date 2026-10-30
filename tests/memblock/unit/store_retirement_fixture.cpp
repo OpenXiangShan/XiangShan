@@ -414,6 +414,64 @@ static void invalid_target_order() {
             "stale vector target rejection consumed input allocation");
     }
 }
+static void redirect_targets() {
+    unsigned cases = 0;
+    for (unsigned anchor = 0; anchor < kRobEntries; ++anchor) for (bool flag : {false, true})
+        for (bool self : {false, true}) {
+            StoreRetirementFixture e;
+            // Independent circular-age reference. Populate one ROB revolution
+            // around each anchor; no half-ring ambiguous age is generated.
+            struct Item { unsigned value; bool flag; std::uint64_t scalar, vector; bool killed; };
+            std::vector<Item> items;
+            for (int delta = -4; delta <= 4; ++delta) {
+                const int raw = int(anchor) + delta;
+                const unsigned value = (raw + kRobEntries) % kRobEntries;
+                const bool wrap = flag ^ (raw < 0 || raw >= int(kRobEntries));
+                const auto base = std::uint64_t{value} | (std::uint64_t{wrap} << 8U);
+                const auto skey = base | (std::uint64_t{unsigned(delta+4)} << 9U);
+                const auto vkey = base | (std::uint64_t{unsigned(delta+14)} << 9U);
+                e.allocate(skey, 1, false);e.allocate(vkey, 2, true);
+                items.push_back({value,wrap,skey,vkey,delta > 0 || (delta == 0 && self)});
+            }
+            const auto before = snapshot(e);
+            require(e.queues_.cancel_store_targets_for_redirect(anchor,flag,self),"legal target cancellation failed");
+            for (const auto &item : items) {
+                require(e.queues_.scalar_store_target(item.scalar).has_value() == !item.killed &&
+                    e.queues_.vector_store_target(item.vector).has_value() == !item.killed,
+                    "redirect removed survivor or retained killed allocation target");
+            }
+            require(snapshot(e)==before,"target cleanup changed physical credits, bytes or committed obligations");
+            ++cases;
+        }
+    StoreRetirementFixture e;
+    auto committed=scalar(100,0);scalar_allocate(e,committed);scalar_expect(e,committed);e.head(100,false);
+    require(e.retire_store(committed),"committed target setup failed");
+    // Canceled old generation and a later full-identity ROB reuse have different
+    // SQ targets. The canceled member must not pollute complete-group checking.
+    const std::uint64_t old_key=101|(std::uint64_t{1}<<9U), new_key=101|(std::uint64_t{2}<<9U);
+    e.allocate(old_key,1,true);
+    require(e.queues_.observe_redirect_cancellation(0,1) &&
+        e.queues_.cancel_store_targets_for_redirect(100,false,false),"redirect cleanup failed");
+    require(!e.queues_.vector_store_target(old_key),"canceled vector target survived ROB reuse");
+    require(e.queues_.store_retirement_stats().pending==1,"committed SQ obligation canceled");
+    e.allocate(new_key,1,true);
+    require(e.queues_.complete_vector_store_group({new_key}),"old canceled target polluted reused ROB group");
+    // Repeated cleanup is idempotent. A previously canceled legacy allocation
+    // ordinal may be below a later committed prefix and still is not committed.
+    require(e.queues_.cancel_store_targets_for_redirect(100,false,false),"idempotent redirect cleanup failed");
+    StoreRetirementFixture stale;
+    stale.allocate(old_key,1,true);
+    stale.allocate(50,1,false);
+    require(stale.queues_.retire_scalar_store(50),"later committed-prefix setup failed");
+    require(stale.queues_.cancel_store_targets_for_redirect(100,false,false) &&
+        !stale.queues_.vector_store_target(old_key) && stale.queues_.store_retirement_stats().pending==1,
+        "stale target ordinal confused with committed ownership");
+    const auto before=snapshot(e);
+    require(!e.queues_.cancel_store_targets_for_redirect(kRobEntries,false,true),"invalid target boundary accepted");
+    require(snapshot(e)==before,"invalid target cancellation changed state");
+    std::cout << "redirect_target_histories=" << cases << " reused_group=1 committed_survivor=1\n";
+}
+
 static void ledger_rejection() {
     StoreRetirementFixture e;
     e.allocate(0x101,1,false);e.allocate(0x102,1,false);
@@ -440,7 +498,7 @@ int main(int argc,char **argv) {
             {"vector_retained",vector_retained},{"vector_already_dequeued",vector_already_dequeued},
             {"vector_invalid",vector_invalid},{"mixed_prefix",mixed_prefix},
             {"cancellation_retains",cancellation_retains},{"cumulative_wrap_reuse",cumulative_wrap_reuse},
-            {"ledger_rejection",ledger_rejection},{"invalid_target_order",invalid_target_order}};
+            {"redirect_targets",redirect_targets},{"ledger_rejection",ledger_rejection},{"invalid_target_order",invalid_target_order}};
         require(argc==2,"one case name required");cases.at(argv[1])();return 0;
     } catch(const std::exception &error) {std::cerr<<error.what()<<'\n';return 1;}
 }

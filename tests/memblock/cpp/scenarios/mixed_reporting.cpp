@@ -322,6 +322,14 @@ int MixedScenario::run()
         return stream.str();
     };
     report_progress();
+    const auto dcache_order_summary = [&] {
+        std::ostringstream out;
+        out << " dcache_response_order=";
+        const auto &counts = environment.dcache_response_order_stats();
+        for (unsigned i = 0; i < counts.size(); ++i) out << (i ? "," : "") << counts[i];
+        out << " dcache_releases=" << environment.tilelink_releases();
+        return out.str();
+    };
     const auto ptw_order_summary = [&] {
         std::ostringstream out;
         out << " ptw_response_order=";
@@ -334,7 +342,7 @@ int MixedScenario::run()
     report_progress(true);
     if (!completed) {
         std::cerr << "MEMBLOCK_CONSTRAINED_RANDOM_FAIL seed=" << options.seed
-                  << ptw_order_summary()
+                  << ptw_order_summary() << dcache_order_summary()
               << " transactions=" << actions
                   << " requested=" << options.transactions
                   << " cycle=" << environment.cycle()
@@ -409,7 +417,7 @@ int MixedScenario::run()
 
     std::cout << "MEMBLOCK_CONSTRAINED_RANDOM_PASS"
               << " seed=" << options.seed
-              << ptw_order_summary()
+              << ptw_order_summary() << dcache_order_summary()
               << " transactions=" << actions
               << " cycle=" << environment.cycle()
               << " scalar_writebacks=" << environment.writebacks()

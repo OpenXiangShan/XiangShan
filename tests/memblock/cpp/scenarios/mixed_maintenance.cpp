@@ -213,6 +213,7 @@ bool MixedScenario::issue_random_cmo(
     std::optional<memblock::LoadTransaction> younger;
     std::uint64_t younger_writebacks_before = environment.writebacks();
     std::uint64_t younger_cancels_before = 0;
+    std::uint64_t younger_scoreboard_cancels_before = 0;
     unsigned younger_response_delay = 0;
     if (younger_overlap) {
         phase = "random-cmo-younger-overlap";
@@ -228,6 +229,10 @@ bool MixedScenario::issue_random_cmo(
         younger_writebacks_before = environment.writebacks();
         younger_cancels_before =
             environment.lq_redirect_canceled_observed();
+        younger_scoreboard_cancels_before = environment.scalar_load_redirect_canceled();
+        // Response delays do not order independent messages. Freeze the
+        // input-owned value before issue and check every early completion.
+        environment.expect_load(*younger);
         younger_response_delay = cmo_response_delay + 512U +
             static_cast<unsigned>(random() % 1025U);
         environment.force_next_dcache_response_delay(
@@ -237,7 +242,6 @@ bool MixedScenario::issue_random_cmo(
             !environment.run_until_dcache_requests(
                 requests_before + 1, 8192) ||
             environment.store_writebacks() != store_writebacks_before ||
-            environment.writebacks() != younger_writebacks_before ||
             environment.pending_scalar_stores() != 1) {
             return false;
         }
@@ -271,9 +275,12 @@ bool MixedScenario::issue_random_cmo(
                 error_denied.has_value())) {
             return fail_cmo_completion("redirect");
         }
-        if (environment.writebacks() != younger_writebacks_before) {
-            return fail_cmo_completion("younger-writeback-at-redirect");
-        }
+        // Exactly one architectural role: either its input-owned result has
+        // already completed, or this actual return cancels the pending result.
+        // Keep expectations active through all three redirect-return edges.
+        if (!environment.cancel_pending_for_redirect(cmo_transaction.rob,
+                cmo_transaction.rob_flag, error_denied.has_value()))
+            return fail_cmo_completion("terminal-cancel");
     }
     if (!environment.run_cycles(
             younger_overlap ? younger_response_delay + 256U
@@ -283,14 +290,13 @@ bool MixedScenario::issue_random_cmo(
     if (!environment.run_until_dcache_idle(cmo_completion_timeout)) {
         return fail_cmo_completion("manager-drain");
     }
-    if (younger_overlap &&
-        environment.writebacks() != younger_writebacks_before) {
-        return fail_cmo_completion("younger-writeback-after-redirect");
-    }
-    if (younger_overlap &&
-        environment.lq_redirect_canceled_observed() !=
-            younger_cancels_before + 1) {
-        return fail_cmo_completion("younger-cancel");
+    if (younger_overlap) {
+        const auto completed = environment.writebacks() - younger_writebacks_before;
+        const auto canceled = environment.scalar_load_redirect_canceled() - younger_scoreboard_cancels_before;
+        const auto physical_canceled = environment.lq_redirect_canceled_observed() - younger_cancels_before;
+        if (completed > 1 || canceled > 1 || completed + canceled != 1 || physical_canceled > 1 ||
+            (canceled != 0 && physical_canceled != 1) || environment.scalar_load_pending(*younger))
+            return fail_cmo_completion("younger-terminal-conservation");
     }
     if (!environment.run_until_queues_retired(8192)) {
         return fail_cmo_completion("queue-retire");
@@ -327,7 +333,9 @@ bool MixedScenario::issue_random_cmo(
     }
     if (younger_overlap) {
         --rob_offset;
-        --lq_offset;
+        // A completed load may have physically dequeued; rewind only the
+        // actual canceled queue allocation, never completed work.
+        lq_offset -= environment.lq_redirect_canceled_observed() - younger_cancels_before;
     }
     // CBO.INVAL may legally discard dirty data and an errored CMO has no
     // stable final-byte contract.  Successful CLEAN/FLUSH must retain

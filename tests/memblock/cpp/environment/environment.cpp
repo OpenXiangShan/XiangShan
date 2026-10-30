@@ -118,6 +118,12 @@ auto Environment::configure_backpressure(std::uint64_t seed,
     return impl_->configure_backpressure(seed, enabled, latency_profiles);
 }
 
+auto Environment::configure_dcache_response_order(std::uint64_t seed, unsigned per_mille) -> void
+{ impl_->configure_dcache_response_order(seed, per_mille); }
+
+auto Environment::dcache_response_order_stats() const -> const std::array<std::uint64_t, 10> &
+{ return impl_->dcache_response_order_stats(); }
+
 auto Environment::configure_ptw_response_order(std::uint64_t seed, unsigned per_mille) -> void
 { impl_->configure_ptw_response_order(seed, per_mille); }
 

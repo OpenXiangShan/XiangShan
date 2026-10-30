@@ -224,6 +224,26 @@ bool QueueAccounting::retire_scalar_store(std::uint64_t key)
     return true;
 }
 
+bool QueueAccounting::cancel_store_targets_for_redirect(std::uint8_t rob, bool flag, bool flush_itself)
+{
+    if (rob >= kRobEntries) {
+        error_.record("store target cancellation has an invalid ROB boundary");
+        return false;
+    }
+    const auto kills = [&](const auto &entry) {
+        const unsigned value = entry.first & 0xffU;
+        const bool wrap = (entry.first >> 8U) & 1U;
+        return (value == rob && wrap == flag && flush_itself) ||
+            (wrap == flag ? value > rob : value < rob);
+    };
+    // These maps own unretired allocations only. Retired stores already left
+    // them and retain separate committed_stores_ drain obligations, untouched
+    // here. A target ordinal is not an architectural commitment witness.
+    std::erase_if(scalar_store_sq_targets_, kills);
+    std::erase_if(vector_store_sq_targets_, kills);
+    return true;
+}
+
 bool QueueAccounting::complete_vector_store_group(const std::set<std::uint64_t> &keys) const
 {
     if (keys.empty()) return false;

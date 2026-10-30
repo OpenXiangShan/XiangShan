@@ -24,6 +24,7 @@ public:
     bool retire_scalar_store(std::uint64_t key);
     bool retire_vector_store(std::uint64_t key);
     bool complete_vector_store_group(const std::set<std::uint64_t> &keys) const;
+    bool cancel_store_targets_for_redirect(std::uint8_t rob, bool flag, bool flush_itself);
     const Environment::StoreRetirementStats &store_retirement_stats() const { return store_retirement_stats_; }
     void forget_scalar_store(std::uint64_t key) { scalar_store_sq_targets_.erase(key); }
     void forget_vector_store(std::uint64_t key) { vector_store_sq_targets_.erase(key); }

@@ -211,6 +211,10 @@ The schema77 aggregate checker ties accepted session attempts to initial issue,
 STA retry, vector replay and scalar refetch counts, excluding synchronous graph
 operand calls. Transport conservation alone does not establish exactly-once
 architectural work.
+Every certified redirect return now removes only killed noncommitted store
+allocation target metadata, preserving the VLS-exception anchor where required. Surviving targets and already-retired physical drain records
+remain; strict complete-vector membership therefore survives later full ROB
+identity reuse without stale canceled members.
 Special-store lifecycle separation and broader recovery remain high priorities. Nonzero-VSTART
 vectors retain their required whole-instruction flush-after through a serialized
 suffix barrier with low `pendingst`, zero cancellation and conservative local
@@ -375,8 +379,16 @@ Priority work, each requiring executable stimulus and an independent check:
    DCache E first-D/sink and PTW/Uncache source-lifetime checks. Schema81 adds
    seeded complete-message PTW D permutations across outstanding sources, with
    exactly-once source/payload histories and stable contiguous message beats;
-   ordinary independent translation/load oracles remain active. Broaden DCache
-   and Uncache ordering/reset qualification and independent owner-version handling beyond
+   ordinary independent translation/load oracles remain active. Schema82 extends
+   seeded complete-message selection to eligible DCache Grant/GrantData/ReleaseAck
+   responses without bypassing line/sink/coherence or held-message gates.
+   Queue nonfront choices and accepted-A completion-age inversions are separate
+   observations, supported by independent A/C/D/E host histories and unchanged
+   architectural/byte oracles. CMO overlap loads register input-owned values
+   before issue and allow checked early completion or exact-return cancellation;
+   physical queue rewind follows observed cancellation rather than delay intent.
+   Broaden Uncache ordering/reset qualification and
+   independent owner-version handling beyond
    the checkpointed pool.
 4. Repair verifier schema/backpressure/statistic validation. Regression and
    benchmark sidecars now use distinct campaign run-ID namespaces, including
