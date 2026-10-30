@@ -177,11 +177,14 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s0_pc_match_vec = VecInit(array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_pc_hash) }).asUInt
   val s0_hit = s0_pc_match_vec.orR
   val s0_index = Mux(s0_hit, OHToUInt(s0_pc_match_vec), replacement.way)
+  private val missTrainAllocate = Constantin.createRecord(s"pf_strideAllocateOnMiss${p(XSCoreParamsKey).HartId}", initValue = true)
+  val s0_original_training = io.train_req.bits.miss || isFromStride(io.train_req.bits.metaSource)
+  val s0_alloc_allowed = !missTrainAllocate || s0_original_training
   io.train_req.ready := s0_can_accept
   io.stream_lookup_req.valid := s0_valid
   io.stream_lookup_req.bits := io.train_req.bits.vaddr
 
-  when(s0_valid) {
+  when(s0_valid && (s0_hit || s0_alloc_allowed)) {
     replacement.access(s0_index)
   }
 
@@ -196,7 +199,10 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s1_pc_hash = RegEnable(s0_pc_hash, s0_valid)
   val s1_vaddr = RegEnable(s0_vaddr, s0_valid)
   val s1_hit = RegEnable(s0_hit, s0_valid)
-  val s1_alloc = s1_valid && !s1_hit
+  val s1_alloc_allowed = RegEnable(s0_alloc_allowed, s0_valid)
+  val s1_original_training = RegEnable(s0_original_training, s0_valid)
+  private val issueOnHit = Constantin.createRecord(s"pf_strideIssueOnHit${p(XSCoreParamsKey).HartId}", initValue = false)
+  val s1_alloc = s1_valid && !s1_hit && s1_alloc_allowed
   val s1_update = s1_valid && s1_hit
   val s1_stride = array(s1_index).stride
   val s1_decr_mode = array(s1_index).decr_mode
@@ -218,7 +224,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     )
   }.elsewhen(s1_update) {
     val res = array(s1_index).update(s1_vaddr, always_update)
-    s1_can_send_pf := res._1
+    s1_can_send_pf := res._1 && (s1_original_training || issueOnHit)
     s1_new_stride := res._2
     s1_mode_changed := res._3
     s1_stride_valid := res._4
