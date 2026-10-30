@@ -1,6 +1,6 @@
 # Redirect取消窗口延迟出队依赖实现Review（2026-10-30）
 
-状态：Boole于2026-10-30完成最终`FINAL_IMPLEMENTATION_REVIEW_PASS`，主agent复核通过，plan已归档do；随本记录单Bug提交。最终350及母任务尚未完成。
+状态（更新2026-10-31）：Boole最终实现review PASS，plan已归档do，单Bug提交`50e80d275`。提交后非strict-NC350项回归及最终覆盖率已独立验收PASS；母任务因另一个strict-NC RTL组10个名额仍为`STOPPED_RTL_CONFIRMED`，不声称全部完成。
 关联方案：`AI_DOC/plan/test_framework/plan/do/memblock_cancel_window_deferred_dependency_formal_plan_20261030.md`。
 
 ## 1. 术语与抽象功能说明
@@ -189,7 +189,7 @@ Boole独立复核r3日志与2541输入，正式`SOFTWARE_CONTRACT_REVIEW_PASS`�
 
 ### 实现与Plan不一致项
 
-主生产行为未发现不一致。初版专项负向缺口已经r3补齐且获独立review PASS，三个真实长seed均已严格通过；母350验证仍未执行。
+主生产行为未发现不一致。初版专项负向缺口已经r3补齐且获独立review PASS，三个真实长seed均已严格通过；提交后母350项及覆盖率亦已验收，见第9节。
 
 ### Plan未说明但Coding落实的细节
 
@@ -200,3 +200,13 @@ Boole独立复核r3日志与2541输入，正式`SOFTWARE_CONTRACT_REVIEW_PASS`�
 
 四项已有V2知识库脏文件保持不动，不纳入本Bug提交：`AI_DOC/analysis/interface/v2/agents/int_writeback_agent.md`、`AI_DOC/analysis/rtl/v2/flows/rob_compress_and_backend_instruction_flow.md`、`AI_DOC/analysis/rtl/v2/index.md`、未跟踪`AI_DOC/analysis/rtl/v2/flows/backend_memory_writeback_flow.md`。
 忽略目录下fixture、编译和仿真证据不作生产代码；本轮文档更新仅对应Bug、方案、实现review、flow及母状态。提交前重新逐项核对git status和diff。
+续接观察到未跟踪`mem_ut/ver/ut/memblock/signal.rc`，未修改或提交，未改变已验2540项编译输入。
+
+## 9. 提交后全量子任务结果（2026-10-31）
+
+本节仅补结果，不改变第2–7节已审源码方案或验收标准。单Bug提交为`50e80d275eb17750df5fb69f021d2ddfd7fd6e26`，恰4SV＋7文档。
+同源码矩阵250＋fault3压力100＝350/350，通过记录为310真实DUT＋40原计划软件别名；不包含本Bug四组合fixture、基础入口、邻接/debug等额外记录。fault3每seed仍MAIN10000、原timeout和plusargs、10000次RM比较，六项错误零及正常finish；原失败和联停证据保留。
+Boole最终`FINAL_350_REGRESSION_INDEPENDENT_REVIEW_PASS`，报告`sim/mother_post_cancel_fault3_final99_20261030_results/final_350_independent_review.json`。
+最终coverage产物为`sim/mother_final_cancel_nonrtl_pass_coverage_20261030`，实际`merged.vdb`的唯一聚合测试`accepted350`及350条testrecords精确对应通过清单；Boole最终`FINAL_350_COVERAGE_INDEPENDENT_REVIEW_PASS`。DUT line80.88%、condition60.54%、toggle38.56%、FSM9.24%，fcov/branch关闭。
+所有controller及collector已rc0退出、unknown0。strict-NC10仍未通过且STOPPED_RTL_CONFIRMED，未授权修改RTL；不冒称整体母任务完成。
+七份原绑定文档均与50e80d275逐份核验并快照留存coverage目录`frozen_documents_50e80d275/`；collector及独立review结束后，仅其中六份补充结果，`redirect_flow.md`保持不变。旧门禁hash不回填，后续若重跑须重新建立内容绑定。review按规则仍保留undo。

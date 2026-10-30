@@ -1,6 +1,6 @@
 # 母任务回归问题与方案汇总 Review
 
-日期：2026-10-30。状态：**阶段记录，非最终全量关闭**。本文汇总已落盘的专项review与本轮集成/仿真证据，
+创建日期：2026-10-30；最终结果更新：2026-10-31。状态：**非strict-NC350项回归与覆盖率验收完成，母任务整体仍为STOPPED_RTL_CONFIRMED**。本文汇总已落盘的专项review与本轮集成/仿真证据，
 不替代每个Bug的源码级implementation review，不声称对全部历史函数重新做了一轮源码review。
 
 ## 1. 术语与抽象功能说明
@@ -47,6 +47,7 @@ source只保留证据，不承接后续编码；2026-10-30重新核对快照四�
 | PBMT矩阵请求数路由错误 | 统一MAIN1000覆盖当前两UID定向cfg，发送前合同检查fatal | 新增fixed_cfg路由，仅此组保留cfg2；不改SV/cfg/RM/checker | `3bd0e9934` | 原MAIN1000波形仍复现拒绝；单测/dry-run、原seed cfg2、恢复10/10严格通过 |
 | 跨页Load首段数据错误提前终止漏建模 | RM先要求全部页翻译，DUT首页corrupt合法取消高页时先query miss | 固定首段身份/实际S2与连续消费证明，跨页前按独立错误形成严格异常；不造高页、不改RTL | `1343dbce3` | 原seed10000笔及21/21真实DUT、四类软件专项PASS，Turing最终实现review PASS |
 | Rollback来源缓存跨拍误报冲突 | 不同拍同ROB/level的合法winner4→5变化被当作同事件payload冲突 | 精确同sample绑定，保留完整ROB/level及同拍重复证明冲突检查；无本拍证明仍拒绝 | `bba3008ba` | 两个原10000笔根seed及18邻接，20/20真实DUT严格PASS；软件1/1，Turing最终实现及恢复readiness均PASS |
+| 取消窗口被无关延迟出队阻塞 | 旧store等STD真实WB使全局FIFO不空，阻止无关record冻结，目标快照积到15超过14 | 唯一LSQ handler只读顺推deferred FIFO覆盖区间，相关或不明身份仍阻塞，无关live owner不阻塞；保留STD屏障、完整raw原子性及严格对账 | `50e80d275` | 四软件组合+18只读负例、12真实DUT+1空virtual专项通过；提交后同源码350/350及最终覆盖率独立review PASS |
 
 主要专项review入口：
 
@@ -61,6 +62,8 @@ source只保留证据，不承接后续编码；2026-10-30重新核对快照四�
 - `AI_DOC/plan/test_framework/review_doc/undo/memblock_csr_hs_mapping_fence_gate_review_20261029.md`
 - `AI_DOC/plan/test_framework/review_doc/undo/memblock_pbmt_matrix_fixed_cfg_profile_review_20261030.md`
 - `AI_DOC/plan/test_framework/review_doc/undo/memblock_rollback_same_sample_provenance_implementation_review_20261030.md`
+- `AI_DOC/plan/rm_review_doc/undo/memblock_first_split_data_error_termination_implementation_review_20261030.md`
+- `AI_DOC/plan/test_framework/review_doc/undo/memblock_cancel_window_deferred_dependency_implementation_review_20261030.md`
 
 ## 4. 仍未修复的RTL问题
 
@@ -72,6 +75,42 @@ NC返回已进入输出暂存寄存器，redirect后旧返回未被取消，之�
 原1 FAIL、5 ABORTED、4 NOT_RUN全部保留，10个名额均不记PASS。
 
 ## 5. 回归证据与当前缺口
+
+### 5.1 最终350项及覆盖率结论（2026-10-31，当前权威状态）
+
+生产实现提交`50e80d275eb17750df5fb69f021d2ddfd7fd6e26`后，2540项核心输入冻结不变，两个coverage mode并行仿真、每mode唯一controller；没有新建worktree或并行源码修改。最终清单350条全部重验通过，不复用旧源码PASS：
+
+| 范围 | 数量/类型 | 证据目录（相对mother的`mem_ut/ver/ut/memblock/sim`） |
+|---|---|---|
+| 原矩阵非strict-NC25组 | 250/250；210真实DUT＋40原计划软件别名 | `mother_post_cancel_matrix_20261030_results`，独立MATRIX_250_INDEPENDENT_REVIEW_PASS |
+| 原551576067根 | 1/1；真实DUT、MAIN10000 | `mother_cancel_dependency_original551576067_20261030_results` |
+| fault3最终99 | 99/99；真实DUT、MAIN10000 | `mother_post_cancel_fault3_final99_20261030_results`，strict_acceptance99及source_commit50e80d275 |
+| 总有效白名单 | 350/350；310真实DUT＋40软件 | fault99目录`final_350_independent_review.json`；FINAL_350_REGRESSION_INDEPENDENT_REVIEW_PASS |
+| 未通过且排除 | strict-NC10名额：1FAIL/5ABORTED/4NOT_RUN | 第4节已确认RTL，STOPPED_RTL_CONFIRMED，不计PASS |
+
+fault100逐项保留原`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fault_2pct_no_trigger`入口、MAIN10000、timeout100000000ns及无临时覆盖参数；每项10000次RM比较、正常完成、六项最终/捕获/降级ERROR/FATAL均0、rc0/unknown0。最终99由旧原根重验2＋旧源码20PASS重验＋19ABORTED原seed＋58新seed组成；原551单列1，不重复计数。
+
+Boole最终独立回归review JSON SHA256：`87add3d0867515c409d49e37c34ac5e3ee79c9dc36b47833f4f12c5d2cbc7acd`。
+最终覆盖率目录：`mem_ut/ver/ut/memblock/sim/mother_final_cancel_nonrtl_pass_coverage_20261030`，包含`merged.vdb`、`urgReport`的HTML/TXT、精确350条`selected_tests.txt`与`selection_manifest.json`、2540编译输入快照、指纹和独立验收。
+数据库唯一聚合测试`accepted350`，350 tests/350 testrecords精确匹配真实日志SHA和白名单；不混入旧源码、FAIL/debug、额外专项或本Bug软件fixture。
+
+| DUT层次`top_tb.U_MEMBLOCK`指标 | 值 |
+|---|---:|
+| line | 80.88% |
+| condition | 60.54% |
+| toggle | 38.56% |
+| FSM | 9.24% |
+| score | 47.30% |
+
+仅`line+cond+fsm+tgl`，fcov/branch关闭，不能称为功能覆盖率收敛或全部测试空间穷尽；全设计dashboard数值不是本表DUT层次数值。URG自身ERROR/WARNING均0，三个远端console另有12条shell初始化提示已保留并分类，不宣称完整console零warning。
+Boole于2026-10-31给出`FINAL_350_COVERAGE_INDEPENDENT_REVIEW_PASS`，产物内`independent_coverage_review.json` SHA256=`cefce3f094c7404e52e6931465515edb4df58c4422862423a6004abc175a2ca0`。
+
+所有controller和collector均已rc0退出；本子任务COMPLETE，母任务整体仍为STOPPED_RTL_CONFIRMED。原矩阵250/260＋额外fault压力100＝350/360名额已PASS，未解决项仅strict-NC10，不以软件40冒充DUT40。所有旧Bug原失败、波形、联停记录保留，后续不得改写。
+结果文档在collector及独立review结束后才更新；七份原冻结文档已逐份与50e80d275验证并留存于覆盖率目录`frozen_documents_50e80d275/`。旧gate为历史时点证明，当前结果续记不重新使用旧启动脚本，也不回填旧哈希。review保持undo，未擅自归档。
+
+### 5.2 历史执行过程（非当前待执行任务）
+
+以下“当前/待执行/尚未”等字样仅表示当时阶段；本轮最新验收和剩余问题以5.1及第4节为准。
 
 原矩阵26组×10：BasicTest110/120，其余14组140/140，合计250/260；后者包含真实DUT100和软件40。
 本轮门禁后19组190日志已按增强验收全部重新核对通过，实际2540项编译输入hash未变。
@@ -124,12 +163,12 @@ PBMT路由方案为`AI_DOC/plan/test_framework/plan/do/memblock_pbmt_matrix_fixe
 ### 实现与Plan不一致项
 
 未在本轮集成/结果核对中发现新增实现不一致项；各Bug的逐函数结论见对应review。
-总体母目标仍有第5节列出的验证/覆盖率缺口，不能因方案已编码而标记母任务完成。
+第5.1节非strict-NC350项验证与覆盖率均已完成；总体母目标只剩第4节RTL阻塞，不把方案编码完成或部分范围通过标为全母任务完成。
 
 ### Plan未说明但Coding落实的细节
 
 最初汇总阶段没有生产coding；本次cancel依赖修复的生产改动、专项及执行中补充另见
-`AI_DOC/plan/test_framework/review_doc/undo/memblock_cancel_window_deferred_dependency_implementation_review_20261030.md`，尚非最终验收。
+`AI_DOC/plan/test_framework/review_doc/undo/memblock_cancel_window_deferred_dependency_implementation_review_20261030.md`；该实现现已完成专项及350项/覆盖率验收，详见第5.1节。
 结果目录验收工具增加legacy完成标志/数量、原入口及六种计数唯一性检查，
 仅用于证据核验，不改变TB或DUT行为；不作为新的生产Bug修复。
 阶段独立文档review首轮发现四处事实/索引问题：遗漏17e2f2d67、Basic/legacy marker混写、B1修前混入A1、
@@ -142,3 +181,4 @@ PBMT路由方案为`AI_DOC/plan/test_framework/plan/do/memblock_pbmt_matrix_fixe
 `AI_DOC/analysis/rtl/v2/flows/rob_compress_and_backend_instruction_flow.md`、
 `AI_DOC/analysis/rtl/v2/index.md`、`AI_DOC/analysis/rtl/v2/flows/backend_memory_writeback_flow.md`。
 仿真/覆盖率产物位于ignored sim目录；source旧混合WIP继续保全，不整包暂存或覆盖。
+未跟踪`mem_ut/ver/ut/memblock/signal.rc`是本次续接观察到的独立本地文件，不修改、不暂存、不提交；未作为本次2540项编译输入变更。结果文档更新不包含任何生产源码修改。

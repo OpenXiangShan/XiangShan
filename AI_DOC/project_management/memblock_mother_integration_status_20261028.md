@@ -1,4 +1,76 @@
-# Memblock mother integration status - 2026-10-30
+# Memblock母任务集成与回归状态（更新至2026-10-31）
+
+## 最新验收结论（2026-10-31，优先于后文历史台账）
+
+- 唯一后续修改工作区：`.codex_mother_integration_20261028`；任务分支`codex/memblock-csr-prefix-fix-20261025`，不是主线；本轮未创建新worktree。
+- 最新单Bug实现提交：`50e80d275eb17750df5fb69f021d2ddfd7fd6e26`，修复取消窗口被无关延迟出队阻塞；仅4个SV和7份对应文档，无RTL修改。
+- **绕开已确认RTL组的回归子任务：COMPLETE，350/350已严格/clean验收。** 矩阵25组250＋fault3完整10000笔压力100；310条真实DUT，40条原计划软件别名单列。专项与邻接额外记录不增加350分子。
+- 原矩阵整体仍为250/260：BasicTest110/120、其他14组140/140。再加fault3压力100，母任务计划360个名额中350个PASS；strict-NC10个名额未通过，不能写成母任务全部PASS或COMPLETE。
+- **母任务整体：STOPPED_RTL_CONFIRMED。** 剩余入口为`basicTest / memblock_dispatch_real_smoke_vseq / tc_dispatch_real_mmu_sv39_strict_nc_100k`；原1FAIL、5ABORTED、4NOT_RUN，不计PASS。RTL取消链问题已两轮独立确认，未获RTL coding授权。
+- 所有本轮controller及coverage collector均已退出，rc0、remote_unknown_jobs0；没有运行中的仿真，也不需要再重启已完成350项。
+- 最终稳定源码覆盖率已生成且独立review PASS：DUT层次`top_tb.U_MEMBLOCK`的line80.88%、condition60.54%、toggle38.56%、FSM9.24%、score47.30%；fcov与branch关闭，不是功能覆盖率闭环结论。
+- 2026-10-30完成仿真，23:48 CST完成fault3整批验收；2026-10-31完成覆盖率及独立review。结果目录日期20261030是任务标识，不表示10月31日之前已生成最终报告。
+
+### 最终证据与交付入口
+
+以下均相对mother仓库根目录，完整交付目录为`mem_ut/ver/ut/memblock/sim/mother_final_cancel_nonrtl_pass_coverage_20261030`：
+
+| 产物 | 路径与验收 |
+|---|---|
+| 本轮问题与方案总review | `AI_DOC/plan/test_framework/review_doc/undo/memblock_mother_regression_problem_solution_review_20261030.md`，保持undo，不因实现完成擅自归档 |
+| 新源码矩阵250 | `mem_ut/ver/ut/memblock/sim/mother_post_cancel_matrix_20261030_results`；25组250/250，Boole独立MATRIX_250_INDEPENDENT_REVIEW_PASS |
+| fault3原551根1 | `mem_ut/ver/ut/memblock/sim/mother_cancel_dependency_original551576067_20261030_results`；MAIN10000严格PASS |
+| fault3最终99 | `mem_ut/ver/ut/memblock/sim/mother_post_cancel_fault3_final99_20261030_results`；summary99PASS，strict_acceptance99PASS，source_commit50e80d275 |
+| fault3跨轮总100 | `mem_ut/ver/ut/memblock/sim/mother_post_wip_cov_20261029_results/fault3_final100_20261030/campaign_state.tsv`；最终100/100 COMPLETE，历史错误及联停行保留 |
+| 最终350独立回归review | `mem_ut/ver/ut/memblock/sim/mother_post_cancel_fault3_final99_20261030_results/final_350_independent_review.json`；FINAL_350_REGRESSION_INDEPENDENT_REVIEW_PASS，SHA256=`87add3d0867515c409d49e37c34ac5e3ee79c9dc36b47833f4f12c5d2cbc7acd` |
+| 最终合并数据库与报告 | 交付目录内`merged.vdb`、聚合测试`accepted350`、`urgReport/dashboard.html`及TXT报告；350 tests/350 testrecords与白名单精确一致 |
+| 覆盖率验收及独立review | 交付目录内`coverage_acceptance.json`和`independent_coverage_review.json/.md`；FINAL_350_COVERAGE_INDEPENDENT_REVIEW_PASS，review JSON SHA256=`cefce3f094c7404e52e6931465515edb4df58c4422862423a6004abc175a2ca0` |
+
+URG自身ERROR/WARNING均0；三个远端调用另有12条shell初始化提示，独立review已分类保留，不把完整console描述为零warning。
+最终回归、collector与独立review完成前7份文档一直冻结；完成后才进行本次结果更新。已审原文另保存在交付目录`frozen_documents_50e80d275/`并与Git提交逐份核对。冻结gate只证明50e80d275时点，不修改旧receipt/hash来适配新文档；后续重跑必须重新建立绑定，不能直接沿用只认原文档的旧启动门禁。
+生产2540项编译输入与两份simv仍按50e80d275验收，无新源码修改；四项已有知识库脏文件及未跟踪`mem_ut/ver/ut/memblock/signal.rc`不修改、不暂存、不提交。只本地提交，未指定私有目标，不向公共origin推送。
+
+### 当前源码矩阵逐项状态
+
+前25个非strict-NC组各10个seed全部PASS；末行strict-NC单独列为未通过，不包含在这250项中。具体seed、原参数和逐日志hash在上述矩阵目录的`manifest.json`及各cfg子目录验收文件中；本表不使用省略的ts或cfg。
+
+| tc | ts | cfg | 结果/类型 |
+|---|---|---|---|
+| basicTest | memblock_dispatch_manual_control_vseq | csr_sfence_check_store_manual_control | 10/10，真实DUT |
+| basicTest | memblock_dispatch_real_smoke_vseq | csr_sfence_check_store_rob_control | 10/10，真实DUT |
+| basicTest | memblock_dispatch_real_cancel_reconcile_vseq | tc_dispatch_real_cancel_reconcile_smoke | 10/10，真实DUT |
+| basicTest | memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq | tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k | 10/10，真实DUT |
+| basicTest | memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq | tc_dispatch_real_mmu_sv39_pbmt0_non_nc_100k_safe_nocross16 | 10/10，真实DUT |
+| basicTest | memblock_dispatch_real_smoke_vseq | tc_dispatch_real_mmu_sv39_smoke | 10/10，真实DUT |
+| basicTest | memblock_dispatch_real_smoke_vseq | tc_l2tlb_fault_2pct_no_trigger | 矩阵10/10，真实DUT；另有MAIN10000压力100/100 |
+| basicTest | memblock_l2tlb_pbmt_response_fault_vseq | tc_l2tlb_pbmt_response_fault | 10/10，真实DUT，保留cfg两UID |
+| basicTest | memblock_csr_random_config_vseq | tc_memblock_csr_random_config | 10/10，真实DUT |
+| basicTest | memblock_dispatch_real_smoke_vseq | tc_sfence_stress_10k | 10/10，真实DUT |
+| basicTest | memblock_dispatch_real_smoke_vseq | tc_sfence_stress_1k | 10/10，真实DUT |
+| tc_dispatch_real_smoke | virtual_base_sequence | default | 10/10，真实DUT |
+| tc_boundary_addr_reuse_gate | virtual_base_sequence | tc_boundary_addr_reuse_store_cross8_gate | 10/10，软件 |
+| tc_dispatch_real_smoke | virtual_base_sequence | tc_dispatch_real_l2cache_model | 10/10，真实DUT |
+| tc_dispatch_real_mixed_sta_wb_smoke | virtual_base_sequence | tc_dispatch_real_mixed_sta_wb_smoke | 10/10，真实DUT |
+| tc_dispatch_real_mixed_wb_smoke | virtual_base_sequence | tc_dispatch_real_mixed_wb_smoke | 10/10，真实DUT |
+| tc_dispatch_real_multi_store_wb_smoke | virtual_base_sequence | tc_dispatch_real_multi_store_wb_smoke | 10/10，真实DUT |
+| tc_dispatch_real_smoke | virtual_base_sequence | tc_dispatch_real_smoke | 10/10，真实DUT |
+| tc_dispatch_real_smoke | virtual_base_sequence | tc_dispatch_real_smoke_flushsb | 10/10，真实DUT |
+| tc_dispatch_real_store_smoke | virtual_base_sequence | tc_dispatch_real_store_smoke | 10/10，真实DUT |
+| tc_dispatch_real_store_sta_wb_smoke | virtual_base_sequence | tc_dispatch_real_store_sta_wb_smoke | 10/10，真实DUT |
+| tc_dispatch_real_store_wb_smoke | virtual_base_sequence | tc_dispatch_real_store_wb_smoke | 10/10，真实DUT |
+| tc_l2tlb_pbmt_csr_gate | virtual_base_sequence | tc_l2tlb_pbmt_csr_gate_io | 10/10，软件 |
+| tc_l2tlb_pbmt_csr_gate | virtual_base_sequence | tc_l2tlb_pbmt_csr_gate_nc | 10/10，软件 |
+| tc_l2tlb_ppn_reuse_smoke | virtual_base_sequence | tc_l2tlb_ppn_reuse_smoke | 10/10，软件 |
+| basicTest | memblock_dispatch_real_smoke_vseq | tc_dispatch_real_mmu_sv39_strict_nc_100k | 未通过，STOPPED_RTL_CONFIRMED；原1FAIL/5ABORTED/4NOT_RUN |
+
+### 后续任务门禁
+
+1. 非strict-NC350项回归、最终覆盖率和问题总review已完成，不再作为待跑任务。所有修复均在已有mother顺序完成、逐Bug专项通过后单独提交，仿真允许并行。
+2. 只剩strict-NC RTL问题：取得RTL coding授权后，按原Buglist方案及独立review修复，fresh compile，原seed846339364专项通过后恢复原5个ABORTED及为4个NOT_RUN新构造seed；不得将它们算作本次350已通过。
+3. 该组全部通过且在新源码上重验必要范围后，重新形成包含它们的准确覆盖率白名单及最终review；当前报告明确不含该组，不能称为全部母任务覆盖率闭环。
+4. 旧CSR工作区仅证据存档，无新必合修复；历史适配工作区不在本轮新建/自动删除范围。不新开工作区、不并行修改源码。
+
+以下章节保留历史阶段事实；其中“当前/尚未/待执行”均指各节当时状态，不覆盖本节最新验收结论。
 
 ## Mother
 
@@ -23,10 +95,10 @@
 | 正式方案 | Boole独立PLAN_REVIEW_PASS、主agent复核通过，coding/文档/动态验收完成后归档do | `AI_DOC/plan/test_framework/plan/do/memblock_cancel_window_deferred_dependency_formal_plan_20261030.md`；补齐三项资源闭环断言后通过，不跳过门禁 |
 | 顺序coding及契约测试 | 三生产文件及本Bug测试task已修改；四组合+18只读负例PASS，Boole独立SOFTWARE_CONTRACT_REVIEW_PASS | r3 fresh compile、controller rc0/unknown0、391ns finish、六项错误0；r2 fixture表数量变化失败保留，仅修fixture不改生产/RM |
 | 原seed及邻接验证 | 原551576067、1705742557、1992896882各完整10000笔及8邻接全部严格PASS；基础两入口通过 | 原mode=`mother_cancel_dependency_original551576067_20261030`；邻接结果`mother_cancel_dependency_focused_20261030_results`；统一动态门禁12真实DUT＋1空virtual、六项错误0，所有controller退出、unknown0 |
-| 单Bug提交与批量恢复 | Boole最终FINAL_IMPLEMENTATION_REVIEW_PASS，随本记录单Bug提交后恢复 | 新源码最终350必须重新绑定验证，不沿用旧250冒充新版本；运行进度权威表为新结果目录campaign_state.tsv |
+| 单Bug提交与批量恢复 | 已提交50e80d275；新源码矩阵250及fault3压力100全部完成并独立验收 | 350/350及最终覆盖率已独立review PASS，strict-NC10另计未通过；详见文首最新结论 |
 
-没有新增worktree，记录时没有活动仿真。专项动态验证及最终独立review已完成，随本记录单Bug提交；母任务仍未完成。
-最终源码重验清单仅已准备、未启动：原551当前coverage1＋两个前原根重验2＋旧版本20PASS重验＋19原ABORTED＋58新seed＝fault3总100；另外固定矩阵25组250均须新源码重验。只读readiness review及单Bug提交门禁通过后才能启动，不能拿旧252/350当新版本通过。
+没有新增worktree；50e80d275提交前完成专项门禁，提交后恢复批量，10月31日最终350及覆盖率全部验收，无活动仿真。
+最终源码重验清单已经完成：原551当前coverage1＋两个前原根重验2＋旧版本20PASS重验＋19原ABORTED＋58新seed＝fault3总100；另外固定矩阵25组250全部重验通过。没有把旧252/350搬作新版本通过。
 
 ## 续接入口（2026-10-29）
 
@@ -148,6 +220,9 @@ strict-NC本组获得修复后的历史执行顺序（当前其他组恢复顺�
 
 | Commit | Bug | Mother verification | Source worktree |
 |---|---|---|---|
+| `50e80d275` | 取消窗口被无关延迟出队阻塞 | 软件四组合+18负例、12真实DUT+1空virtual专项、提交后350/350及最终覆盖率独立review PASS | 只在mother顺序修改，4SV+7文档单Bug提交 |
+| `bba3008ba` | Rollback同ROB跨拍来源误报冲突 | 两原根各10000笔及18邻接、软件专项通过；后续同源码最终重验见文首 | 只在mother顺序完成 |
+| `1343dbce3` | 跨页首段数据错误终止未建模 | 原seed10000笔及21真实DUT专项、四类软件专项通过；后续同源码最终重验见文首 | 只在mother顺序完成 |
 | `3bd0e9934` | PBMT矩阵统一MAIN1000覆盖两UID定向合同 | 原错参带波形仍fatal；shell单测/dry-run及原seed cfg2严格PASS；修正矩阵10/10严格PASS，独立review PASS | 只在mother顺序完成，旧FAIL保留 |
 | `60dcca7c6`；源`5a4dc2df4d` | CSR非虚拟映射切换真实HS全SFENCE及C4门禁 | fresh compile；原8+Sv39/PBMT/SFENCE各2共14/14严格PASS；协议/15运输负例单列；最终独立review PASS | 原source WIP保留存档，后续不在其编码 |
 | `91d403eb1` | PMA/PMP CSR raw FIFO continuous prefix service | integrated before this continuation; later PBMT integration preserved ticket/revision/prefix semantics | preserved WIP source worktree remains untouched |

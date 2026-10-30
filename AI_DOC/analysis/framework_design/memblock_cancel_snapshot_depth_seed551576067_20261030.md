@@ -1,6 +1,6 @@
 # fault3新seed的cancel快照深度失败分析
 
-日期：2026-10-30。状态：`PAUSED_ANALYSIS`，等待正式修复方案及独立review；原参数波形/只读运行态复现均完成，正式责任review确认测试框架，生产源码未修改，无活动仿真。
+创建日期：2026-10-30；更新：2026-10-31。当前状态：本Bug验证通过，修复提交`50e80d275`，方案/实现/最终350项回归及覆盖率独立review均PASS，无活动仿真。母任务因独立strict-NC RTL组保持`STOPPED_RTL_CONFIRMED`。第2–6节保留原取证阶段，其待确认/待修改措辞不代表当前状态。
 
 ## 1. 术语与证据边界
 
@@ -100,3 +100,10 @@ Bug专项软件契约在`mother_cancel_dependency_protocol_20261030_results` fre
 原551576067完整10000笔coverage fresh compile及原参严格验收已PASS，结果`mother_cancel_dependency_original551576067_20261030_results/strict_acceptance.json`，2524588.5ns finish、六项错误0、controller rc0/unknown0；Boole最终独立实现review PASS，随本记录单Bug提交。
 补充负例在独立fixture进行，r2因表数量变化触发既有RM合同拒绝，修fixture保持6条后r3通过四组合及18只读探针，391ns结束、六项错误0、unknown0；Boole独立`SOFTWARE_CONTRACT_REVIEW_PASS`。
 8个真实Sv39/CSR/PBMT/SFENCE/cancel邻接及前两原10000笔根1705742557/1992896882全部严格PASS；基础virtual与MAIN1 real smoke亦通过。统一动态门禁12真实DUT＋1空virtual＋四软件组合＋18只读负例PASS，全部controller退出、unknown0；Boole最终独立FINAL_IMPLEMENTATION_REVIEW_PASS，随本记录单Bug提交后恢复非RTL批量。
+
+## 8. 提交后最终验收（2026-10-31）
+
+单Bug提交`50e80d275eb17750df5fb69f021d2ddfd7fd6e26`后重新验证同一2540项核心输入：矩阵25组250/250及fault3压力100/100全部通过，350条包含310真实DUT＋40既有软件别名，不混入本Bug软件fixture或额外专项。fault3每项MAIN10000、10000次RM比较、六项错误零、正常结束；所有controller/collector已退出、unknown0。
+Boole最终独立回归和覆盖率review均PASS；证据为母sim下`mother_post_cancel_fault3_final99_20261030_results/final_350_independent_review.json`及`mother_final_cancel_nonrtl_pass_coverage_20261030/independent_coverage_review.json`。
+最终覆盖率数据库位于后者目录`merged.vdb`，聚合测试`accepted350`，DUT line80.88%、condition60.54%、toggle38.56%、FSM9.24%；fcov/branch关闭。这里只关闭本Bug及非strict-NC子任务，不把独立strict-NC10个未通过名额算为PASS。
+文档结果更新在回归、collector及独立review结束后进行；原七份门禁绑定文档已与50e80d275核对，保存在覆盖率目录`frozen_documents_50e80d275/`。原失败日志、波形和Bug责任事实不改写。
