@@ -89,7 +89,15 @@ actual WB is C; four monitored ticks later public F head and exception redirect
 are driven together. The helper samples VA at pre-edge R+2 and completes strict
 propagation/cancellation at R+3. Random A issue scheduling cannot delay an already
 eligible F-head exception. Older committed stores retain their physical-drain
-and release obligations. Competing redirect arbitration is excluded. See
+and release obligations. Schema80 samples their cumulative committed count,
+committed SQ pending and public composite store-path busy at actual pre-edge R;
+checks unchanged committed count through R+3; and independently checks a selected
+older scalar-store byte using a normal replacement LBU without first forcing a
+store-path drain. Expected bytes come from the fault's input-order checkpoint, including older overwrites
+and excluding canceled suffix stores. A witness consumes a replacement stream
+slot and is independently scored; exactly one retirement/cancellation owner is
+required. Public store-path busy cannot identify committed SBuffer occupancy.
+Competing redirect arbitration is excluded. See
 CONSTRAINED_RANDOM.md for the exact bounded producer contract and limits.
 
 Each denied PA page is reserved from unrelated demand. All 64 accepted source-2

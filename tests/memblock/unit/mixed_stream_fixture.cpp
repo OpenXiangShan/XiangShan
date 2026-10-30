@@ -153,6 +153,18 @@ struct SyntheticEnvironment {
     std::optional<unsigned> anchor_identity;
     unsigned refetch_issues = 0, invalidated_executions = 0, surviving_prefix_redirects = 0;
     unsigned checked_scalar_values = 0, expected_next_ftq = 0;
+    std::array<std::uint64_t, 12> permission_store_observations{};
+    std::optional<std::pair<std::uint64_t, std::uint64_t>> survival_witness;
+    std::set<unsigned> survival_generations;
+    void note_store_survival(std::uint64_t address, std::uint64_t expected) {
+        require(!survival_witness, "new witness overwrote unadmitted witness");
+        require(std::any_of(instructions.begin(), instructions.end(), [&](const auto &work) {
+            return work.kind == 2 && work.committed && !work.canceled &&
+                address >= work.store.address && address - work.store.address < (1U << unsigned(work.store.op));
+        }), "survival byte did not belong to a retired scalar store");
+        survival_witness = std::make_pair(address, expected);
+        ++permission_store_observations[8];
+    }
     std::map<unsigned, std::uint64_t> load_expectations;
     SparseMemory bytes;
     std::vector<Instruction> instructions;
@@ -316,6 +328,7 @@ struct SyntheticEnvironment {
     const Environment::StoreRetirementStats &store_retirement_stats() const {
         refresh_sq(); return retirement_stats;
     }
+    bool sbuffer_empty() const { refresh_sq(); return retired_stores.empty(); }
     void register_retired_store(std::uint64_t target, unsigned id, bool vector) {
         require(target > sq_done && target <= sq_used, "retired store lost its physical SQ target");
         ++(vector ? retirement_stats.vector_uops : retirement_stats.scalar);
@@ -375,7 +388,8 @@ struct SyntheticEnvironment {
         return true;
     }
     bool return_load_exception_after_nonmemory_wb(const LoadTransaction &fault,
-        std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr) {
+        std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr,
+        Environment::LoadExceptionStoreObservation *stores = nullptr) {
         auto &head = find(fault.rob, fault.rob_flag);
         require(at_exception_anchor && head.id == retired && exception_anchors.at(head.id) == identity(anchor, anchor_flag) &&
             (identity(anchor, anchor_flag) + 1U) % (2U * kRobEntries) == identity(fault.rob, fault.rob_flag),
@@ -384,7 +398,18 @@ struct SyntheticEnvironment {
         anchor_wb_edge = tick;
         for (unsigned edge = 0; edge < 4; ++edge) capture_store_edge();
         at_exception_anchor = false;
+        const auto stats = store_retirement_stats();
+        const bool busy = !sbuffer_empty();
+        ++permission_store_observations[0];
+        permission_store_observations[1] += stats.scalar + stats.vector_uops != 0;
+        permission_store_observations[2] += stats.pending != 0;
+        permission_store_observations[3] += busy;
+        permission_store_observations[4] += stats.pending != 0 && busy;
+        if (stores) *stores = {tick, stats.scalar + stats.vector_uops, stats.pending, busy};
         if (!redirect_after(fault.rob, fault.rob_flag, true)) return false;
+        permission_store_observations[5] += store_retirement_stats().pending != 0;
+        permission_store_observations[6] += !sbuffer_empty();
+        ++permission_store_observations[7];
         captured_vaddr = *trap_address;
         return true;
     }
@@ -691,6 +716,13 @@ struct SyntheticEnvironment {
             }
         }
         auto &work = admit(t, 0); work.load = t; work.last_uop_seen = true; work.uops.emplace_back();
+        if (survival_witness) {
+            require(t.address == survival_witness->first && t.op == LoadOp::lbu && !t.fp_wen &&
+                load_expectations.at(identity(t.rob, t.rob_flag)) == survival_witness->second,
+                "posttrap admission lost committed-byte witness");
+            survival_generations.insert(work.id); survival_witness.reset();
+            ++permission_store_observations[9];
+        }
         work.initial_cold = work.group && held_line == (t.address & ~std::uint64_t{63});
         const unsigned width = 1U << (static_cast<unsigned>(t.op) & 3U);
         work.needs_head = (t.address & 15U) + width > 16;
@@ -1078,6 +1110,18 @@ struct SyntheticEnvironment {
             require(coverage.stream[1] == instructions.size() && coverage.stream[2] == count &&
                 coverage.stream_permission[7] == trap_count && coverage.stream_transport == observed_transport,
                 "permission independent generation/trap/transport ledger");
+            require(!survival_witness, "unadmitted committed-byte witness at finish");
+            for (auto id : survival_generations)
+                ++permission_store_observations[instructions.at(id).canceled ? 11U : 10U];
+            require(coverage.stream_permission_stores == permission_store_observations,
+                "committed-byte witnesses disagreed with independent input and edge history");
+            std::array<std::uint64_t, 2> ordinary_formats{};
+            for (const auto &work : instructions)
+                if (work.kind == 0 && !work.canceled && !survival_generations.count(work.id))
+                    ++ordinary_formats[unsigned(work.load.fp_wen)];
+            require(coverage.scalar_format_choices[2] == ordinary_formats[0] &&
+                coverage.scalar_format_choices[3] == ordinary_formats[1],
+                "auxiliary byte witness polluted ordinary random format choices");
             unsigned fault_count = 0, probes = 0, positives = 0;
             for (const auto &work : instructions) if (work.kind == 0 && work.load.oracle_address) {
                 ++probes;
@@ -1349,7 +1393,7 @@ int main(int argc, char **argv) {
             std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
                 << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
         } else if (mode == "stream" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
-            require(argc == 6 || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
+            require(argc == 6 || (mode == "permission" && argc == 7) || (mode == "independent" && argc == 7) || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
             if (mode == "permission") {
@@ -1359,10 +1403,11 @@ int main(int argc, char **argv) {
                 fixture.constraints.stream_mxr_per_mille = std::stoul(argv[4]) == 1 ? 1000 : 0;
                 fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = limit;
                 fixture.constraints.vector_nonzero_vstart_per_mille = 0;
-                fixture.constraints.scalar_fp_per_mille = 0;
+                fixture.constraints.scalar_fp_per_mille = argc == 7 ? std::stoul(argv[6]) : 0;
                 fixture.constraints.stream_dependency_per_mille = 1000;
                 fixture.environment.bytes.define_seeded_random(0x520000000ULL, 0x10000, 719);
             }
+            if (mode == "independent" && argc >= 7) fixture.constraints.apply(std::string("stream-arena=") + argv[6]);
             if (mode == "pair-rate") fixture.constraints.apply(std::string("stream-store-pair=") + argv[6]);
             if (mode == "sustained") {
                 fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = std::max(1U, limit);
@@ -1426,6 +1471,15 @@ int main(int argc, char **argv) {
             std::cout << "],\"stream_permission\":[";
             for (unsigned i=0; i<fixture.coverage.stream_permission.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_permission[i];
+            std::cout << "],\"stream_permission_stores\":[";
+            for (unsigned i=0; i<fixture.coverage.stream_permission_stores.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_permission_stores[i];
+            std::set<std::uint64_t> scalar_lines;
+            for (const auto &work : env.instructions) if (work.kind == 0 || work.kind == 2)
+                scalar_lines.insert((work.kind == 0 ? work.load.address : work.store.address) & ~std::uint64_t{63});
+            std::cout << "],\"scalar_lines\":[";
+            bool comma = false;
+            for (auto line : scalar_lines) { std::cout << (comma ? "," : "") << line; comma = true; }
             std::cout << "],\"stream_store_pair\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_store_pair.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_store_pair[i];

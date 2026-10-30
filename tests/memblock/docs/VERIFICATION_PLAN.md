@@ -153,6 +153,13 @@ scalar/FP dependency traffic and full-capacity vector loads without mandatory
 legacy producers; report the actual accepted class mix and queue activity. Rare PMP/H/error/CMO combinations follow these unless they block a
 correct oracle or reproducible failure. Neither a template count nor a larger
 constraint set guarantees a design bug.
+Schema80 exposes the eight-line arena bias as `stream-arena`; zero allows the
+configured larger locality working set. Mixed X-only traps observe committed SQ
+obligations at actual pre-edge R, retain all older drain/release obligations and
+check one randomly selected committed scalar byte with a normal posttrap LBU.
+The public composite store-path signal is activity evidence only. This bounded
+direction does not model trap-handler/xRET continuity or identify SBuffer entries.
+
 
 The common scalar dependency direction now varies store/load counts, overlap,
 operand arrival and issue order with independent byte-overlay expectations and

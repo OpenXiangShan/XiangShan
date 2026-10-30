@@ -190,6 +190,7 @@ struct RandomConstraints {
     unsigned stream_max_instructions = 256;
     unsigned stream_dependency_per_mille = 250;
     unsigned stream_store_pair_per_mille = 500;
+    unsigned stream_arena_per_mille = 750;
     unsigned stream_permission_load_per_mille = 50;
     unsigned stream_mxr_per_mille = 125;
     // Relative epoch weights: legacy S-data, ordinary U, S accessing U pages.
@@ -1130,6 +1131,8 @@ struct RandomConstraints {
             stream_dependency_per_mille = parsed;
         } else if (key == "stream-store-pair") {
             stream_store_pair_per_mille = parsed;
+        } else if (key == "stream-arena") {
+            stream_arena_per_mille = parsed;
         } else if (key == "stream-permission-load") {
             stream_permission_load_per_mille = parsed;
         } else if (key == "stream-mxr") {
@@ -1843,6 +1846,7 @@ struct RandomConstraints {
             concurrent_stream_per_mille > 1000 ||
             stream_dependency_per_mille > 1000 ||
             stream_store_pair_per_mille > 1000 ||
+            stream_arena_per_mille > 1000 ||
             stream_permission_load_per_mille > 1000 || stream_mxr_per_mille > 1000 ||
             stream_unresolved_per_mille > 1000 ||
             stream_unresolved_inflight_per_mille > 1000 ||
@@ -3094,7 +3098,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=79 constraints=" << name
+        stream << "constraint_schema=80 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3207,6 +3211,7 @@ struct RandomConstraints {
                << " target_stream_max_instructions=" << stream_max_instructions
                << " target_stream_dependency=" << stream_dependency_per_mille
                << " target_stream_store_pair=" << stream_store_pair_per_mille
+               << " target_stream_arena=" << stream_arena_per_mille
                << " target_stream_permission_load=" << stream_permission_load_per_mille
                << " target_stream_mxr=" << stream_mxr_per_mille
                << " target_stream_access=" << stream_access_weights[0] << ','

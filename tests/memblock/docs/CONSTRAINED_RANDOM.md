@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=79`.
+`constraint_schema=80`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -79,6 +79,7 @@ they do not imply arbitrary numeric suffix support.
 | `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the current 4-KiB page; scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
 | `stream-store-pair` | Conditional rate offering an ordinary scalar store's initial STA and STD together when both operand events are ready. Independent retained lane handshakes permit same-edge, STA-first or STD-first acceptance. Default 500 in all presets; zero retains separate scheduling. Graph operands and STA retries remain separate. |
+| `stream-arena` | Ordinary eight-line stream-arena selection rate; default 750 preserves the previous seeded draw. Zero uses the configured locality/working set for every ordinary selection; 1000 always selects the eight-line arena. Dependencies, permission reservations and unresolved-graph addresses retain their own constraints. This is an address-choice rate, not an observed cache-miss percentage. |
 | `stream-permission-load` | Conditional scalar/FP load admission rate for immutable execute-only pages in translated ordinary streams; default 50, zero for cmo-stress. A seeded 1..4-probe epoch budget bounds canceled/replacement work; one denied probe may be live. Bare epochs and unresolved graph roles are excluded. |
 | `stream-mxr` | Epoch-wide host MXR rate for translated ordinary streams, default 125, zero for cmo-stress. MXR=0 X-only loads require stage-one/VS load page fault; MXR=1 controls require exact normal data. vMXR remains clear and G leaves remain permissive. |
 | `stream-access-s`, `stream-access-u`, `stream-access-sum` | Relative epoch weights for legacy S data privilege, ordinary U/VU, and S/VS accessing U pages with SUM/vSUM. Choose once per ordinary stream at a drained context boundary; a single enabled class needs no random draw. U/SUM roots preserve the independently declared identity/NAPOT/permuted PA map. These weights select epochs, not instruction or handshake percentages. Serial/special helpers retain their prior context contract. |
@@ -1306,6 +1307,32 @@ bounded memory-side source/address rule, not proof against every internal lookup
 merge, wrong-PA/class request or speculative prefetch. Store faults, G denial,
 multiple competing faults, trap-handler/xRET continuity, live CSR edits and
 full backend redirect arbitration remain outside this direction.
+
+Schema 80 samples committed-store obligations at the actual monitored pre-edge R,
+after retained producers/managers drive and before DUT advance or dequeue
+accounting. The 12 `stream_permission_stores` counters are: exact-R snapshots;
+snapshots with any cumulative older scalar/vector commit; committed SQ pending
+at R; public store path busy at R; both; committed SQ pending at R+3; public
+store path busy at R+3; committed-prefix count conservation checks; committed-byte
+witnesses selected, admitted, normally retired, and canceled by a later redirect.
+`sbIsEmpty` is a delayed composite of SQ, SBuffer and Uncache state. Its inverse
+only establishes public store-path activity, never attribution of one committed
+store to SBuffer. R+3 observations cannot substitute for R observations.
+
+When a trap has an already retired scalar store, select a random byte of a random
+such store. Freeze its expected value from F's pre-admission independent byte
+checkpoint, including all older overwrites and excluding the canceled suffix.
+The first replacement admission is a normal unsigned-byte scalar load of that
+VA, with the usual LQ capacity, mapping, scoreboard, issue and retirement rules;
+it does not drain the store path first. It consumes an ordinary replacement
+instruction slot, bypasses ordinary operation weights and random dependency or
+permission selection, and has exactly one retirement/cancellation owner. As an
+auxiliary load it is excluded from random format-choice counts and cannot source
+ordinary dependency edges, including scalar-fp=1000 profiles. Broader
+vector-only committed-prefix witnesses, software trap/xRET execution, SBuffer
+entry attribution and universal posttrap readback remain outside this direction.
+The current oldest-fault recovery naturally places each witness before later
+faults; a positive native witness-cancellation population is not claimed.
 
 ### Ordinary producer dependencies
 

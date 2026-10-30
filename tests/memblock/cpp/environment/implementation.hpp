@@ -311,7 +311,8 @@ public:
         bool &replayed, unsigned timeout = 256);
     bool set_rob_head_state(std::uint8_t value, bool flag, bool pending_store);
     bool return_load_exception_after_nonmemory_wb(const LoadTransaction &fault,
-        std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr);
+        std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr,
+        LoadExceptionStoreObservation *stores = nullptr);
 
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);
     bool cancel_scalar_load_after_redirect(const LoadTransaction &transaction);
@@ -1058,7 +1059,8 @@ public:
     bool run_cycles(unsigned cycles);
 
     bool redirect_after(std::uint8_t rob_value, bool rob_flag, bool flush_itself,
-                        bool is_vls_exception = false, std::uint64_t *captured_vaddr = nullptr);
+                        bool is_vls_exception = false, std::uint64_t *captured_vaddr = nullptr,
+                        LoadExceptionStoreObservation *stores = nullptr);
 
     const std::vector<Failure> &failures() const { return error_.records(); }
     std::string failure_report() const { return error_.json(); }
@@ -1538,7 +1540,7 @@ private:
 
     bool write_distributed_csr(std::uint16_t address, std::uint64_t data);
 
-    void tick(bool monitor = true);
+    void tick(bool monitor = true, const std::function<void()> &before_edge = {});
 
     // Bound only while one driver exclusively owns all ordinary issue pins.
     RetainedIssueDriver *retained_issue_driver_ = nullptr;

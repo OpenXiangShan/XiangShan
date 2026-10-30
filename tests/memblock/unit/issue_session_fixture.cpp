@@ -126,7 +126,7 @@ struct Harness {
     static std::uint64_t scalar_store_key(const StoreTransaction &);
     static std::uint64_t vector_store_key(const VectorMemoryTransaction &);
     static generated::VectorMemoryIssue make_vector_memory_issue(const VectorMemoryTransaction &);
-    void tick(bool monitor = true);
+    void tick(bool monitor = true, const std::function<void()> &before_edge = {});
     bool require_issue_session();
     bool capture_issue_acceptance(std::uint64_t, std::uint64_t);
     bool begin_issue_session();

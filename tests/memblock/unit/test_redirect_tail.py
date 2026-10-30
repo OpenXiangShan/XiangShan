@@ -74,10 +74,15 @@ class RedirectTailTest(unittest.TestCase):
 
     def test_private_anchor_timing_and_fault_capture_faults_reject(self):
         faults = {
+            'observation_before_managers': self.source.replace('    if (before_edge) before_edge();', '').replace('    memory_agent_.drive(dut_);', '    if (before_edge) before_edge();\n    memory_agent_.drive(dut_);'),
             'early_anchor_redirect': self.source.replace('if (!run_cycles(4))', 'if (!run_cycles(3))'),
             'late_anchor_redirect': self.source.replace('if (!run_cycles(4))', 'if (!run_cycles(5))'),
             'late_fault_va': self.source.replace('*captured_vaddr = exception_vaddr();', 'tick(); *captured_vaddr = exception_vaddr();'),
             'wrong_public_head': self.source.replace('pending_ptr_value.set(fault.rob);', 'pending_ptr_value.set(anchor);'),
+            'wrong_store_observation_edge': self.source.replace('*stores = {cycle(),', '*stores = {cycle() + 1U,'),
+            'wrong_store_path_level': self.source.replace('!dut_.sample_sbuffer_empty()', 'dut_.sample_sbuffer_empty()'),
+            'lost_committed_SQ': self.source.replace('retirement.pending, !dut_.sample_sbuffer_empty()',
+                                                   '0, !dut_.sample_sbuffer_empty()'),
         }
         for name, source in faults.items():
             with self.subTest(name=name):

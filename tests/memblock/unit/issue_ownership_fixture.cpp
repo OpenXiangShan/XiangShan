@@ -79,7 +79,7 @@ struct Harness {
     void set_failure_cycle() {}
     bool check_components() const { return error_.empty() && store_scoreboard_.ok(); }
     std::uint64_t cycle() const { return dut_.edge; }
-    void tick(bool monitor = true);
+    void tick(bool monitor = true, const std::function<void()> &before_edge = {});
     static generated::VectorMemoryIssue make_vector_memory_issue(const VectorMemoryTransaction &);
     bool issue_load(const LoadTransaction &, unsigned);
     bool issue_load_batch(const std::vector<LoadTransaction> &, unsigned, bool);

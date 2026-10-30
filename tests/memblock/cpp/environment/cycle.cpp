@@ -43,7 +43,7 @@ auto Environment::Impl::write_distributed_csr(std::uint16_t address,
     return check_components();
 }
 
-auto Environment::Impl::tick(bool monitor)  -> void
+auto Environment::Impl::tick(bool monitor, const std::function<void()> &before_edge)  -> void
 {
     set_failure_cycle();
     if (!authorize_release_store_inputs()) return;
@@ -58,6 +58,7 @@ auto Environment::Impl::tick(bool monitor)  -> void
         dut_.queues.redirect.rob_idx_flag.boolean(),
         dut_.queues.redirect.level.boolean()});
     if (retained_issue_driver_ && !retained_issue_driver_->authorize_before_edge()) return;
+    if (before_edge) before_edge();
     memory_agent_.capture_before_tick(dut_);
     ptw_agent_.capture_before_tick(dut_);
     uncache_agent_.capture_before_tick(dut_);

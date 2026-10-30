@@ -53,7 +53,7 @@ def fixture_source():
     cycle = (ROOT / 'cpp/environment/cycle.cpp').read_text()
     helpers = [method(cycle, signature).replace('Environment::Impl::', 'AdmissionFixture::')
                for signature in ('auto Environment::Impl::wait_for_enqueue_capacity(',
-                                 'auto Environment::Impl::tick(bool monitor)')]
+                                 'auto Environment::Impl::tick(bool monitor,')]
     return source.replace('// PRODUCTION_METHODS', '\n'.join(helpers))
 
 

@@ -21,14 +21,17 @@ struct Adapter {
         struct { Pin pending_ptr_value, pending_ptr_flag, pendingst, pending_mmi_old; } backend;
     } queues;
     std::uint64_t edge = 0;
+    std::optional<std::uint64_t> store_path_busy_edge;
+    bool sample_sbuffer_empty() const { return !store_path_busy_edge || edge != *store_path_busy_edge; }
     void refresh_comb() {}
     void step() { ++edge; }
 };
 struct Agent {
     FailureState error{"tail-manager", "contract"};
     bool reject = false;
+    std::function<void(Adapter &)> on_drive;
     std::vector<std::uint64_t> canceled;
-    void drive(Adapter &) {}
+    void drive(Adapter &dut) { if (on_drive) on_drive(dut); }
     void capture_before_tick(Adapter &) {}
     void update_after_tick() {}
     const auto &failures() const { return error; }
@@ -39,6 +42,8 @@ struct Agent {
     }
 };
 struct Queues {
+    Environment::StoreRetirementStats store_stats;
+    const auto &store_retirement_stats() const { return store_stats; }
     bool reject = false;
     unsigned observations = 0;
     void sample_before_edge(Adapter &) {}
@@ -78,6 +83,7 @@ struct IdleProducer {
     void advance_after_edge(Adapter &) {}
 };
 struct Harness : Fixture {
+    using LoadExceptionStoreObservation = Environment::LoadExceptionStoreObservation;
     Adapter dut_;
     Agent memory_agent_, ptw_agent_, uncache_agent_;
     Queues queues_; Bridge bridge_; Feedback feedback_;
@@ -99,9 +105,11 @@ struct Harness : Fixture {
         error_.merge(loads.failures()); error_.merge(stores.failures()); error_.merge(vectors.failures());
         return error_.empty();
     }
-    void tick(bool monitor = true);
-    bool redirect_after(std::uint8_t, bool, bool, bool = false, std::uint64_t * = nullptr);
-    bool return_load_exception_after_nonmemory_wb(const LoadTransaction &, std::uint8_t, bool, std::uint64_t &);
+    void tick(bool monitor = true, const std::function<void()> &before_edge = {});
+    bool redirect_after(std::uint8_t, bool, bool, bool = false, std::uint64_t * = nullptr,
+        LoadExceptionStoreObservation * = nullptr);
+    bool return_load_exception_after_nonmemory_wb(const LoadTransaction &, std::uint8_t, bool, std::uint64_t &,
+        LoadExceptionStoreObservation * = nullptr);
     bool run_cycles(unsigned count) { for (unsigned i = 0; i < count; ++i) { tick(); if (!check_components()) return false; } return true; }
     std::uint64_t exception_vaddr() const {
         require(dut_.edge == 16U, "trap VA sampled outside pre-edge R+2");
@@ -133,6 +141,11 @@ static void exception_anchor()
         h.loads.observe(0, wb);
         require(h.loads.done() && h.loads.error().empty(), "fault was not independently checked");
         h.dut_.edge = 10;
+        h.memory_agent_.on_drive = [](auto &dut) {
+            if (dut.edge == 14) dut.store_path_busy_edge = 14;
+        };
+        h.queues_.store_stats.scalar = 3;
+        h.queues_.store_stats.pending = 1;
         h.dut_.queues.backend.pending_ptr_value.set(anchor % 160U);
         h.dut_.queues.backend.pending_ptr_flag.set(anchor / 160U);
         h.feedback_.sample = [&](auto edge) {
@@ -143,7 +156,14 @@ static void exception_anchor()
                 "public F head and redirect did not change together");
         };
         std::uint64_t captured = 0;
-        require(h.return_load_exception_after_nonmemory_wb(entry.load, anchor % 160U, anchor / 160U, captured), h.error_.message());
+        h.feedback_.after_sample = [&](auto edge) {
+            if (edge == 15) h.queues_.store_stats.pending = 0;
+        };
+        Environment::LoadExceptionStoreObservation stores;
+        require(h.return_load_exception_after_nonmemory_wb(entry.load, anchor % 160U, anchor / 160U, captured, &stores), h.error_.message());
+        require(stores.redirect_cycle == 14 && stores.retired == 3 && stores.sq_pending == 1 &&
+            stores.store_path_nonempty && h.queues_.store_stats.pending == 0 && h.dut_.sample_sbuffer_empty(),
+            "trap store observation missed pre-edge R or used postreturn state");
         require(captured == entry.load.address && h.cycle() == 17 &&
             h.feedback_.edges == std::vector<std::uint64_t>({10,11,12,13,14,15,16}), "wrong atomic handoff/capture");
         require(!h.loads.checked_completion_cycle(entry.load), "helper retained consumed authorization");

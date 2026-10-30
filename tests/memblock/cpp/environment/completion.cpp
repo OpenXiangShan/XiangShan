@@ -1108,7 +1108,8 @@ auto Environment::Impl::run_cycles(unsigned cycles)  -> bool
 }
 
 auto Environment::Impl::return_load_exception_after_nonmemory_wb(const LoadTransaction &fault,
-    std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr) -> bool
+    std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr,
+    LoadExceptionStoreObservation *stores) -> bool
 {
     const unsigned anchor_identity = unsigned(anchor) + unsigned(anchor_flag) * kRobEntries;
     const unsigned fault_identity = unsigned(fault.rob) + unsigned(fault.rob_flag) * kRobEntries;
@@ -1138,13 +1139,14 @@ auto Environment::Impl::return_load_exception_after_nonmemory_wb(const LoadTrans
     }
     dut_.queues.backend.pending_ptr_value.set(fault.rob);
     dut_.queues.backend.pending_ptr_flag.set(fault.rob_flag);
-    return redirect_after(fault.rob, fault.rob_flag, true, false, &captured_vaddr);
+    return redirect_after(fault.rob, fault.rob_flag, true, false, &captured_vaddr, stores);
 }
 
 auto Environment::Impl::redirect_after(std::uint8_t rob_value,
     bool rob_flag,
     bool flush_itself,
-    bool is_vls_exception, std::uint64_t *captured_vaddr)  -> bool
+    bool is_vls_exception, std::uint64_t *captured_vaddr,
+    LoadExceptionStoreObservation *stores)  -> bool
 {
     scalar_redirect_boundary_.reset();
     if (is_vls_exception && !flush_itself) {
@@ -1156,7 +1158,14 @@ auto Environment::Impl::redirect_after(std::uint8_t rob_value,
     dut_.queues.redirect.level.set(flush_itself);
     dut_.queues.redirect.is_vls_exception.set(is_vls_exception);
     dut_.queues.redirect.valid.set(std::uint64_t{1});
-    tick();
+    // Observe the actual monitored pre-edge R after retained producers and
+    // managers drive, before the DUT advances or dequeue accounting changes.
+    tick(true, [&] {
+        if (!stores) return;
+        const auto &retirement = queues_.store_retirement_stats();
+        *stores = {cycle(), retirement.scalar + retirement.vector_uops,
+            retirement.pending, !dut_.sample_sbuffer_empty()};
+    });
     dut_.queues.redirect.valid.set(std::uint64_t{0});
     dut_.queues.redirect.is_vls_exception.set(std::uint64_t{0});
     // MemBlock registers redirect once; the queues publish their retained

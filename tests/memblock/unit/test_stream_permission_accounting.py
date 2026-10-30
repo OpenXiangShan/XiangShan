@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import run_regression
 import verify_regression
 
-FIELDS = dict(stream_permission=22, stream_access_epochs=9, stream=12,
+FIELDS = dict(stream_permission=22, stream_permission_stores=12, stream_access_epochs=9, stream=12,
               stream_cancel=29, stream_ops=5, stream_issue=6)
 
 
@@ -75,6 +75,24 @@ def history(seed, epochs=8, rate=1000, mxr=500):
             p[13] += draining
             p[14] += bool(suffix)
             p[15] += len(suffix)
+            # Independent before/after edge facts: an already-retired SQ
+            # obligation can drain during return; public path busy may reflect
+            # an unrelated younger SQ store and need not imply a retired store.
+            retired = bool(rng.randrange(2)) or draining
+            sq_at_redirect = retired and (draining or bool(rng.randrange(2)))
+            path_at_redirect = bool(rng.randrange(2))
+            path_at_return = bool(rng.randrange(2))
+            stores = rows['stream_permission_stores']
+            stores[0] += 1; stores[1] += retired; stores[2] += sq_at_redirect
+            stores[3] += path_at_redirect; stores[4] += sq_at_redirect and path_at_redirect
+            stores[5] += draining; stores[6] += path_at_return; stores[7] += 1
+            # Select independent witness/terminal events before reduction.
+            witness = retired and bool(rng.randrange(2))
+            witness_canceled = witness and bool(rng.randrange(2))
+            stores[8] += witness; stores[9] += witness
+            stores[10] += witness and not witness_canceled; stores[11] += witness_canceled
+            rows['stream_ops'][0] += witness and not witness_canceled
+            rows['stream_cancel'][1] += witness_canceled
         else:
             p[9 if permitted else 8] += 1
             p[10] += checked and not permitted
@@ -86,7 +104,7 @@ def history(seed, epochs=8, rate=1000, mxr=500):
     p[19] = max(admitted_per_epoch.values(), default=0)
     p[20] = len(admitted_per_epoch)
     p[17] = (p[5] + p[7] + 3) if p[1] else 0
-    record = dict(constraint_schema=79, target_stream_permission_load=rate, target_stream_mxr=mxr)
+    record = dict(constraint_schema=80, target_stream_permission_load=rate, target_stream_mxr=mxr, target_stream_arena=750)
     record.update({field: csv(row) for field, row in rows.items()})
     return record
 
@@ -134,7 +152,7 @@ int main(int argc, char **argv) {
         reports = [run_regression.parse_summary(line) for line in ran.stdout.splitlines()]
         self.assertEqual(len(reports), len(records))
         for expected, report in zip(records, reports):
-            for field in (*FIELDS, 'constraint_schema', 'target_stream_permission_load', 'target_stream_mxr'):
+            for field in (*FIELDS, 'constraint_schema', 'target_stream_permission_load', 'target_stream_mxr', 'target_stream_arena'):
                 self.assertEqual(report[field], expected[field], field)
             verify_regression._check_stream_permission(report)
         print('permission_accounting_serialized_histories=' + str(len(records)))
@@ -143,7 +161,7 @@ int main(int argc, char **argv) {
         base = history(42, epochs=8)
         verify_regression._check_stream_permission(base)
         corruptions = []
-        for field in ('stream_permission', 'target_stream_permission_load', 'target_stream_mxr'):
+        for field in ('stream_permission', 'target_stream_permission_load', 'target_stream_mxr', 'target_stream_arena'):
             missing = dict(base); del missing[field]; corruptions.append(missing)
         for value in ('', '1,2', 'x,' * 21 + '1', '-1,' + ','.join(['0'] * 21)):
             corruptions.append(dict(base, stream_permission=value))
@@ -160,12 +178,30 @@ int main(int argc, char **argv) {
 
     def test_legacy_and_disabled_endpoint_domains(self):
         verify_regression._check_stream_permission(dict(constraint_schema=78))
-        for key in ('stream-permission-load', 'stream-mxr'):
+        old = history(3); old['constraint_schema'] = 79
+        del old['stream_permission_stores']
+        verify_regression._check_stream_permission(old)
+        for key in ('stream-permission-load', 'stream-mxr', 'stream-arena'):
             for value in ('0', '1', '999', '1000', '1001', '-1', '1.5', '1000x', ''):
                 ran = subprocess.run([str(self.binary), key + '=' + value], capture_output=True, text=True)
                 self.assertEqual(ran.returncode, 0 if value in ('0', '1', '999', '1000') else 2, ran.stderr)
         for rate, mxr in ((0, 0), (0, 1000), (1000, 0), (1000, 1000)):
             verify_regression._check_stream_permission(history(3, rate=rate, mxr=mxr))
+
+    def test_store_boundary_populations_require_owned_samples_and_intersections(self):
+        base = history(42)
+        verify_regression._check_stream_permission(base)
+        for index in range(12):
+            row = list(map(int, base['stream_permission_stores'].split(',')))
+            row[index] += 10000
+            with self.subTest(index=index), self.assertRaises(verify_regression.VerificationError):
+                verify_regression._check_stream_permission(dict(base, stream_permission_stores=csv(row)))
+        for value in ('', '1,2', '-1,' + ','.join(['0'] * 11), csv([1 << 64] * 12)):
+            with self.subTest(value=value), self.assertRaises(verify_regression.VerificationError):
+                verify_regression._check_stream_permission(dict(base, stream_permission_stores=value))
+        missing = dict(base); del missing['stream_permission_stores']
+        with self.assertRaises(verify_regression.VerificationError):
+            verify_regression._check_stream_permission(missing)
 
 
 if __name__ == '__main__':

@@ -273,6 +273,10 @@ public:
         std::uint64_t drained = 0, max_pending = 0;
         std::uint64_t pending = 0, pending_before_last_edge = 0;
     };
+    struct LoadExceptionStoreObservation {
+        std::uint64_t redirect_cycle = 0, retired = 0, sq_pending = 0;
+        bool store_path_nonempty = false;
+    };
 
     struct TopDownStats {
         std::uint64_t replay_allocate_cycles = 0;
@@ -682,7 +686,8 @@ public:
     // Complete a declared immediate-predecessor nonmemory head at C; publish
     // F head+redirect C+4, and capture trap VA pre-edge R+2.
     bool return_load_exception_after_nonmemory_wb(const LoadTransaction &fault,
-        std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr);
+        std::uint8_t anchor, bool anchor_flag, std::uint64_t &captured_vaddr,
+        LoadExceptionStoreObservation *stores = nullptr);
 
 
     bool cancel_scalar_load_for_reset(const LoadTransaction &transaction);

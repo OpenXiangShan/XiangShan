@@ -453,7 +453,7 @@ class StreamStoreRetirementAccountingTest(unittest.TestCase):
                              text=True, capture_output=True, timeout=20)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         report = self.modules['run_regression'].parse_summary(ran.stdout)
-        self.assertEqual(report['constraint_schema'], 79)
+        self.assertEqual(report['constraint_schema'], 80)
         # These synchronous producer histories predate persistent sessions.
         # Keep their schema76 contract without inventing transport events.
         summary = re.sub(r'\bconstraint_schema=\d+\b', 'constraint_schema=76', ran.stdout)

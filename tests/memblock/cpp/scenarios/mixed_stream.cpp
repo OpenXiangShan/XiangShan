@@ -30,7 +30,7 @@ struct StreamWork {
     StoreAddressReplay address_replay;
     std::uint64_t expected_scalar = 0;
     unsigned recovery_id = 0, recovery_index = 0;
-    bool refetch = false, checked = false, permission_probe = false;
+    bool refetch = false, checked = false, permission_probe = false, store_survival_probe = false;
     std::optional<std::uint64_t> exception_anchor, anchor_wb_ready_cycle;
     bool fault() const { return kind == 0 && load.expected_exception_mask != 0; }
     std::optional<std::uint64_t> retire_ready_cycle, restart_ready_cycle, restart_block_cycle;
@@ -111,6 +111,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     const unsigned permission_budget = constraints.stream_permission_load_per_mille != 0 &&
         translation.regime != RandomConstraints::translation_bare ? 1U + random() % 4U : 0U;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> denied_pages;
+    std::vector<memblock::StoreTransaction> retired_scalar_stores;
+    struct StoreSurvivalProbe { std::uint64_t address, expected; };
+    std::optional<StoreSurvivalProbe> store_survival_probe;
     const auto uncache_before = environment.uncache_requests();
     bool returning_exception = false;
     permission[18] += translation.mxr;
@@ -420,6 +423,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         auto &work = live.front();
         if (work.fault()) { phase += ":fault-cannot-retire"; return false; }
         if (work.permission_probe) ++permission[6];
+        if (work.store_survival_probe) ++coverage.stream_permission_stores[10];
         coverage.stream_transport[7] += held_offer();
         coverage.stream[5] += live.size() > 1;
         coverage.stream_access_overlap[translation.access * 2U + 1U] += live.size() > 1;
@@ -429,6 +433,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             inflight[10] += recovery->old_response_active();
         }
         if (work.kind == 2 && !environment.retire_store(work.store)) return false;
+        if (work.kind == 2) retired_scalar_stores.push_back(work.store);
         if (work.kind == 3 && !environment.retire_vector_stores(work.vectors)) return false;
         coverage.stream_store_retirement[0] += work.kind == 2;
         coverage.stream_store_retirement[1] += work.kind == 3;
@@ -443,7 +448,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (work.kind == 0) {
             coverage.sample(work.load);
             coverage.sample_fp_load(work.load, work.expected_scalar, 1);
-            coverage.sample_scalar_format_choice(1, work.load.fp_wen);
+            if (!work.store_survival_probe) coverage.sample_scalar_format_choice(1, work.load.fp_wen);
             constraint_coverage.sample_dcache_load(std::nullopt);
         } else if (work.kind == 2) coverage.sample(work.store, work.data_first);
         else if (work.kind == 4) coverage.sample(work.prefetch);
@@ -477,16 +482,31 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             (trap && (&*first_killed != &live.front() || !first_killed->fault() || !first_killed->checked))) return false;
         const auto lq_before = environment.lq_redirect_canceled_observed();
         const auto sq_before = environment.sq_redirect_canceled_observed();
+        // Freeze a committed-byte witness before R. The fault's admission
+        // checkpoint contains all older stores, including any later overwrite
+        // of the selected retired byte, and no younger suffix store.
+        std::optional<StoreSurvivalProbe> survivor;
+        if (trap && !retired_scalar_stores.empty()) {
+            const auto &store = retired_scalar_stores[random() % retired_scalar_stores.size()];
+            auto load = memblock::LoadTransaction{};
+            load.address = store.address + random() % (1U << unsigned(store.op));
+            load.op = memblock::LoadOp::lbu;
+            load.reference_pages = store.reference_pages;
+            memblock::scenarios::mixed::StreamByteOracle checkpoint(environment.memory());
+            checkpoint.restore(*first_killed->oracle_before);
+            survivor = StoreSurvivalProbe{load.address, checkpoint.scalar_load(load)};
+        }
         // Exact expected bytes and identities remain active on E/E+1/E+2.
         // Killed work may complete during propagation or cancel at return;
         // retaining the expectation never waives a wrong/duplicate result.
         returning_exception = trap;
         if (trap) environment.select_store_exception_address(false);
         std::uint64_t captured_fault_va = 0;
+        memblock::Environment::LoadExceptionStoreObservation trap_stores;
         const bool returned = trap
             ? live.front().exception_anchor && environment.return_load_exception_after_nonmemory_wb(
                 live.front().load, memblock::rob_pointer_value(*live.front().exception_anchor),
-                memblock::rob_pointer_flag(*live.front().exception_anchor), captured_fault_va) &&
+                memblock::rob_pointer_flag(*live.front().exception_anchor), captured_fault_va, &trap_stores) &&
                 environment.cancel_pending_for_redirect(rob, flag, flush_itself)
             : return_ordinary_redirect(environment, rob, flag, flush_itself);
         if (!returned) {
@@ -500,6 +520,19 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 phase += ":oldest-fault-VA-at-trap-consumption"; return false;
             }
             ++permission[7]; ++permission[16];
+            const auto &retirement = environment.store_retirement_stats();
+            if (trap_stores.redirect_cycle + 3U != environment.cycle() ||
+                trap_stores.retired != retirement.scalar + retirement.vector_uops) {
+                phase += ":trap-changed-committed-store-prefix"; return false;
+            }
+            auto &stores = coverage.stream_permission_stores;
+            ++stores[0]; stores[1] += trap_stores.retired != 0;
+            stores[2] += trap_stores.sq_pending != 0;
+            stores[3] += trap_stores.store_path_nonempty;
+            stores[4] += trap_stores.sq_pending != 0 && trap_stores.store_path_nonempty;
+            stores[5] += retirement.pending != 0;
+            stores[6] += !environment.sbuffer_empty();
+            ++stores[7];
             permission[13] += environment.store_retirement_stats().pending != 0;
             permission[14] += killed > 1U;
             permission[15] += killed - 1U;
@@ -508,6 +541,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         ++coverage.stream_cancel[0];
         for (auto &item : live) {
             if (!kills(item)) continue;
+            if (item.store_survival_probe) ++coverage.stream_permission_stores[11];
             if (item.permission_probe) {
                 if (item.fault()) {
                     const bool owner = trap && item.rob() == rob && item.flag() == flag;
@@ -561,6 +595,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         lq_offset -= lq_canceled;
         sq_offset -= sq_canceled;
         oracle.restore(*first_killed->oracle_before);
+        if (survivor) {
+            if (store_survival_probe) { phase += ":unconsumed-store-survival-witness"; return false; }
+            store_survival_probe = survivor;
+            ++coverage.stream_permission_stores[8];
+        }
         for (const auto &item : live) {
             if (!kills(item)) continue;
             if (item.kind == 0) destinations[item.load.fp_wen ? 1U : 0U].erase(item.load.pdest);
@@ -842,7 +881,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             [](const auto &work) { return work.needs_restart_flush(); });
         if (!restart_barrier && admitted < target_admissions && live.size() < depth &&
             (!recovery || recovery->phase == StreamRecovery::Phase::admission) &&
-            std::accumulate(weights.begin(), weights.end(), std::uint64_t{0}) != 0)
+            (store_survival_probe ? lq_free != 0 :
+                std::accumulate(weights.begin(), weights.end(), std::uint64_t{0}) != 0))
             ready.push_back({0, 0, 0});
         if (recovery && recovery->phase == StreamRecovery::Phase::release_old && environment.cycle() >= recovery->ready_cycle)
             ready.push_back({7, 0, 0});
@@ -1060,13 +1100,21 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             coverage.stream[4] += retired != 0 && !live.empty();
             StreamWork work;
             work.generation = admitted;
+            work.store_survival_probe = store_survival_probe.has_value();
             if (!recovery) {
                 work.oracle_before = std::make_shared<StreamByteOracle::Checkpoint>(oracle.checkpoint());
-                auto selection = random() % std::accumulate(weights.begin(), weights.end(), std::uint64_t{0});
-                for (work.kind = 0; work.kind < 4 && selection >= weights[work.kind]; ++work.kind)
-                    selection -= weights[work.kind];
+                if (!work.store_survival_probe) {
+                    auto selection = random() % std::accumulate(weights.begin(), weights.end(), std::uint64_t{0});
+                    for (work.kind = 0; work.kind < 4 && selection >= weights[work.kind]; ++work.kind)
+                        selection -= weights[work.kind];
+                }
             } else work.kind = recovery->stores.size() < recovery->plan.stores.size() ? 2U : 0U;
-            auto line = recovery ? recovery->base : random() % 4U != 0 ? arena + (random() % 8U) * 64U :
+            // Default preserves the original seeded draw; profiles can remove
+            // the eight-line bias and exercise the configured working set.
+            const bool arena_choice = !recovery && (constraints.stream_arena_per_mille == 750
+                ? random() % 4U != 0 : constraints.stream_arena_per_mille != 0 &&
+                    (constraints.stream_arena_per_mille == 1000 || random() % 1000U < constraints.stream_arena_per_mille));
+            auto line = recovery ? recovery->base : arena_choice ? arena + (random() % 8U) * 64U :
                 constrained_cacheable_address(64, translation, leaf, false);
             const unsigned slots = std::min<unsigned>(depth - live.size(), target_admissions - admitted);
             if (!recovery && work.kind == 2 && slots >= 2 && lq_free != 0 && sq_free != 0 &&
@@ -1080,15 +1128,15 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 line = recovery->base;
             } else recovery_counts[13] += std::any_of(live.begin(), live.end(),
                 [](const auto &older) { return older.recovery_id != 0; });
-            work.permission_probe = !graph_admission && work.kind == 0 &&
+            work.permission_probe = !graph_admission && !work.store_survival_probe && work.kind == 0 &&
                 permission_probes < permission_budget &&
                 std::none_of(live.begin(), live.end(), [](const auto &older) { return older.fault(); }) &&
                 random() % 1000U < constraints.stream_permission_load_per_mille;
             std::optional<std::uint64_t> address_value, data_value;
-            if (!graph_admission && !work.permission_probe && constraints.stream_dependency_per_mille != 0) {
+            if (!graph_admission && !work.permission_probe && !work.store_survival_probe && constraints.stream_dependency_per_mille != 0) {
                 std::vector<const StreamWork *> sources;
                 for (const auto &older : live)
-                    if (older.kind == 0 && !older.fault() && !older.load.fp_wen && !older.recovery_id)
+                    if (older.kind == 0 && !older.fault() && !older.load.fp_wen && !older.recovery_id && !older.store_survival_probe)
                         sources.push_back(&older);
                 const auto choose_source = [&](bool data) {
                     if (sources.empty() || random() % 1000U >= constraints.stream_dependency_per_mille) return;
@@ -1117,10 +1165,12 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             // no LSQ entry and cannot compress with the noncompressible load.
             if (work.permission_probe && !translation.mxr) work.exception_anchor = rob_offset++;
             if (work.kind == 0) {
-                const auto format = graph_admission ? ScalarLoadShape{recovery->group.loads[work.recovery_index].op,
+                const auto format = work.store_survival_probe ? ScalarLoadShape{unsigned(memblock::LoadOp::lbu), false} :
+                    graph_admission ? ScalarLoadShape{recovery->group.loads[work.recovery_index].op,
                     recovery->group.loads[work.recovery_index].fp} : constraints.scalar_load_policy().choose(random);
                 const bool cold_role = graph_admission && recovery->group.unfinished && work.recovery_index == *recovery->group.unfinished;
-                work.load = make_load(cold_role ? *recovery->cold_address : graph_admission ? line + recovery->group.loads[work.recovery_index].offset :
+                work.load = make_load(work.store_survival_probe ? store_survival_probe->address :
+                    cold_role ? *recovery->cold_address : graph_admission ? line + recovery->group.loads[work.recovery_index].offset :
                     dependent_address(constrained_window_address(line, 1U << (format.op & 3U))),
                     static_cast<memblock::LoadOp>(format.op), random() % memblock::kScalarLoadLanes, format.fp);
                 work.load.pdest = allocate_destination(format.fp ? 1U : 0U);
@@ -1151,6 +1201,14 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     episode.loads.push_back(work.load);
                     ++recovery_counts[4];
                 } else work.expected_scalar = oracle.scalar_load(work.load);
+                if (work.store_survival_probe) {
+                    if (work.expected_scalar != store_survival_probe->expected) {
+                        phase += ":committed-byte-lost-from-oracle-checkpoint"; return false;
+                    }
+                    work.expected_scalar = store_survival_probe->expected;
+                    store_survival_probe.reset();
+                    ++coverage.stream_permission_stores[9];
+                }
                 work.requires_head = (work.load.address & 15U) + (1U << (format.op & 3U)) > 16U;
                 work.issued.assign(1, false);
                 work.offered.assign(1, false);
@@ -1285,7 +1343,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (!environment.run_cycles(random() % 4U)) return false;
     }
     phase = "mixed-stream-drain";
-    if (!consume_issue_events() || !attempts.empty() || !environment.end_issue_session()) return false;
+    if (store_survival_probe || !consume_issue_events() || !attempts.empty() || !environment.end_issue_session()) return false;
     for (const auto &[edge, ports] : accepted_ports) ++coverage.stream_issue_ports[ports];
     if (recovery || environment.memory_violation_stats().count != expected_violations ||
         !environment.run_until_queues_retired(constrained_completion_timeout)) return false;

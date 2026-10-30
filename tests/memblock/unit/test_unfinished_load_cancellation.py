@@ -28,9 +28,12 @@ namespace memblock {
 #include "environment/scoreboards.inc"
 struct Pin { std::uint64_t v=0; void set(std::uint64_t value){v=value;} std::uint64_t value()const{return v;} };
 struct CancelFixture {
+    using LoadExceptionStoreObservation = Environment::LoadExceptionStoreObservation;
     struct { struct { struct { Pin rob_idx_flag,rob_idx_value,level,is_vls_exception,valid; } redirect;
-        struct { Pin lq_cancel_cnt,sq_cancel_cnt; } retirement; } queues; void refresh_comb(){}; } dut_;
-    struct { std::uint64_t sq_allocated()const{return 0;} bool observe_redirect_cancellation(std::uint64_t,std::uint64_t){return true;} } queues_;
+        struct { Pin lq_cancel_cnt,sq_cancel_cnt; } retirement; } queues; void refresh_comb(){};
+        bool sample_sbuffer_empty() const {return true;} } dut_;
+    struct { Environment::StoreRetirementStats stats; const auto &store_retirement_stats()const{return stats;}
+        std::uint64_t sq_allocated()const{return 0;} bool observe_redirect_cancellation(std::uint64_t,std::uint64_t){return true;} } queues_;
     FailureState error_{"fixture","contract"};
     LoadScoreboard scoreboard_;
     struct ScalarRedirectBoundary { unsigned rob;bool flag,flush_itself;std::uint64_t cycle,remaining,sq_allocation_limit; };
@@ -38,9 +41,9 @@ struct CancelFixture {
     unsigned ticks=0,complete_tick=0;
     generated::ScalarLoadWriteback completion;
     std::uint64_t cycle()const{return ticks;}
-    void tick(){++ticks;if(ticks==complete_tick)scoreboard_.observe(0,completion);}
+    void tick(bool=true,const std::function<void()> &before_edge={}){if(before_edge)before_edge();++ticks;if(ticks==complete_tick)scoreboard_.observe(0,completion);}
     bool check_components(){error_.merge(scoreboard_.failures());return error_.empty();}
-    bool redirect_after(std::uint8_t,bool,bool,bool=false,std::uint64_t * = nullptr);
+    bool redirect_after(std::uint8_t,bool,bool,bool=false,std::uint64_t * = nullptr,LoadExceptionStoreObservation * = nullptr);
     std::uint64_t exception_vaddr() const { return 0; }
     bool cancel_scalar_load_after_redirect(const LoadTransaction&);
 };

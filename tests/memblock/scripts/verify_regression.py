@@ -5189,6 +5189,22 @@ def _check_stream_permission(result: dict[str, Any]) -> None:
              "permission forbidden-demand checks disagree")
     if stream[0] == 0:
         _require(not any(p), "empty stream has permission observations")
+    if result.get("constraint_schema", 0) >= 80:
+        arena = result.get("target_stream_arena")
+        _require(type(arena) is int and 0 <= arena <= 1000, "invalid stream arena rate")
+        stores = _csv_counts(result, "stream_permission_stores", 12)
+        _require(all(value <= (1 << 64) - 1 for value in stores),
+                 "permission store observation counter domain")
+        _require(stores[0] == stores[7] == p[7] and stores[5] == p[13],
+                 "permission store observations lack exact trap ownership")
+        _require(stores[1] <= stores[0] and stores[2] <= stores[1] and
+                 stores[3] <= stores[0] and stores[4] <= min(stores[2], stores[3]) and
+                 stores[2] + stores[3] - stores[4] <= stores[0] and
+                 stores[5] <= stores[2] and stores[6] <= stores[0],
+                 "permission store observations have impossible edge populations")
+        _require(stores[8] == stores[9] == stores[10] + stores[11] and
+                 stores[8] <= stores[1] and stores[10] <= ops[0] and stores[11] <= canceled[1],
+                 "permission committed-byte witnesses lack retirement or cancellation")
 
 
 def _check_stream_access(result: dict[str, Any]) -> None:

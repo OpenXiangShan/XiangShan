@@ -88,7 +88,7 @@ struct Harness {
     bool authorize_release_store_inputs() { return true; }
     void set_failure_cycle() {}
     std::uint64_t cycle() const { return dut_.edge; }
-    void tick(bool monitor = true);
+    void tick(bool monitor = true, const std::function<void()> &before_edge = {});
 };
 // TICK_METHOD
 void production_tick_edges() {

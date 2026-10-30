@@ -93,6 +93,9 @@ class MixedStreamTest(unittest.TestCase):
             'const auto event = ready[random() % ready.size()];\n        environment.note_selection(event.kind);')
         stream = stream.replace('if (pair_operands) {\n                work.paired_initial = true;',
             'if (pair_operands) {\n                environment.select_pair(work.store);\n                work.paired_initial = true;')
+        stream = stream.replace('survivor = StoreSurvivalProbe{load.address, checkpoint.scalar_load(load)};',
+            'survivor = StoreSurvivalProbe{load.address, checkpoint.scalar_load(load)};\n'
+            '            environment.note_store_survival(survivor->address, survivor->expected);')
         source = source.replace('// PRODUCTION_STREAM', stream)
         execute = method('cpp/scenarios/mixed_scheduler.cpp', 'bool MixedScenario::execute()')
         source = source.replace('// PRODUCTION_EXECUTE', execute.replace('MixedScenario::', 'BudgetFixture::'))
@@ -411,6 +414,63 @@ class MixedStreamTest(unittest.TestCase):
             self.assertEqual(probes[7], probes[16])
             self.assertGreaterEqual(probes[17], probes[7])
         self.assertEqual(self.run_fixture('permission', 7, 1, 0, 48), denied[6])
+
+    def test_committed_byte_witnesses_have_independent_terminal_owners(self):
+        runs = [self.run_fixture('permission', seed, 1, 0, 96) for seed in range(1, 33)]
+        self.assertGreater(sum(run['stream_permission_stores'][8] for run in runs), 0)
+        self.assertGreater(sum(run['stream_permission_stores'][10] for run in runs), 0)
+        for run in runs:
+            row = run['stream_permission_stores']
+            self.assertEqual(row[8], row[9])
+            self.assertEqual(row[9], row[10] + row[11])
+        # Corrupt only production admission's strict expected value; the shell
+        # rebuilds bytes from independently recorded older input stores.
+        before = 'work.expected_scalar = store_survival_probe->expected;'
+        self.assertEqual(self.source.count(before), 1)
+        binary = self.compile(self.source.replace(before, 'work.expected_scalar = store_survival_probe->expected ^ 1U;'),
+                              'wrong-surviving-byte')
+        rejected = 0
+        for seed in range(1, 9):
+            ran = subprocess.run([str(binary), 'permission', str(seed), '1', '0', '96'],
+                                 capture_output=True, text=True, timeout=20)
+            if ran.returncode:
+                self.assertTrue('posttrap admission lost committed-byte witness' in ran.stderr or
+                                'stream scalar expected value disagreed' in ran.stderr, ran.stderr)
+                rejected += 1
+        self.assertGreater(rejected, 0)
+        self.mutations['wrong-surviving-byte'] = {'rejected_cases': rejected}
+
+    def test_auxiliary_committed_byte_load_preserves_forced_fp_and_dependency_policy(self):
+        rows = [self.run_fixture('permission', seed, 1, 0, 96, 1000) for seed in range(1, 17)]
+        self.assertGreater(sum(row['stream_permission_stores'][10] for row in rows), 0)
+        self.assertTrue(all(row['dependency_edges'] == 0 for row in rows))
+        before = 'if (!work.store_survival_probe) coverage.sample_scalar_format_choice(1, work.load.fp_wen);'
+        self.assertEqual(self.source.count(before), 1)
+        binary = self.compile(self.source.replace(before, 'coverage.sample_scalar_format_choice(1, work.load.fp_wen);'),
+                              'auxiliary-format-pollution')
+        rejected = 0
+        for seed in range(1, 9):
+            ran = subprocess.run([str(binary), 'permission', str(seed), '1', '0', '96', '1000'],
+                                 capture_output=True, text=True, timeout=20)
+            if ran.returncode:
+                self.assertIn('auxiliary byte witness polluted ordinary random format choices', ran.stderr)
+                rejected += 1
+        self.assertGreater(rejected, 0)
+        self.mutations['auxiliary-format-pollution'] = {'rejected_cases': rejected}
+
+    def test_stream_arena_endpoints_control_actual_address_space_and_default_replay(self):
+        working_sets = []
+        for seed in range(1, 17):
+            default = self.run_fixture('independent', seed, 0, 1, 64)
+            explicit = self.run_fixture('independent', seed, 0, 1, 64, 750)
+            self.assertEqual(default, explicit)
+            arena = self.run_fixture('independent', seed, 0, 1, 64, 1000)
+            working = self.run_fixture('independent', seed, 0, 1, 64, 0)
+            self.assertLessEqual(len(arena['scalar_lines']), 8)
+            working_sets.append(set(working['scalar_lines']))
+            self.assertTrue(all(0x80010000 <= line < 0x80012000 for line in working['scalar_lines']))
+        self.assertGreater(max(map(len, working_sets)), 8)
+        self.assertGreater(len(set.union(*working_sets)), 8)
 
     def test_private_permission_faults_and_posthandoff_demand_are_detected(self):
         suppression = '++independent_permission_checks;\n        return 0;'

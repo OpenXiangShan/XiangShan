@@ -164,7 +164,7 @@ public:
     bool issue_store_data(const StoreTransaction &,unsigned=10);
     bool issue_store_operands(const StoreTransaction &,StoreOperandAcceptances &,unsigned=10);
     bool issue_vector(const VectorMemoryTransaction &,unsigned=10);
-    void tick(bool=true);
+    void tick(bool=true, const std::function<void()> &before_edge = {});
     bool reset();
     bool retire_store(const StoreTransaction &);
     bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &);

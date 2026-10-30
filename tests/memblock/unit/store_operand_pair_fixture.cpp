@@ -107,7 +107,7 @@ struct Harness {
     bool issue_store_address(const StoreTransaction &, unsigned);
     bool issue_store_data(const StoreTransaction &, unsigned);
     bool issue_store_operands(const StoreTransaction &, StoreOperandAcceptances &, unsigned);
-    void tick(bool monitor = true);
+    void tick(bool monitor = true, const std::function<void()> &before_edge = {});
 };
 void trace_store_issue(const char *, const StoreTransaction &) {}
 // PRODUCTION_METHODS
