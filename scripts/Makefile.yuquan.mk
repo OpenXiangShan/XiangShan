@@ -12,6 +12,9 @@ ifeq ($(WITH_YUQUAN),1)
 ifeq ($(wildcard $(YUQUAN_HOME)/Makefile),)
 $(error YUQUAN_HOME is invalid: $(YUQUAN_HOME))
 endif
+ifeq ($(wildcard $(YUQUAN_ADAPTER_HOME)/Makefile.difftest.mk),)
+$(error YUQUAN_ADAPTER_HOME is invalid: $(YUQUAN_ADAPTER_HOME))
+endif
 override SIM_ARGS += --with-yuquan
 YUQUAN_EMU_DEPS += yuquan-verilog
 YUQUAN_DIFTEST_ARGS += WITH_EXTERNAL_MEMORY_BACKEND=1

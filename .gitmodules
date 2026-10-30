@@ -25,6 +25,3 @@
 [submodule "OpenIOMMU"]
 	path = OpenIOMMU
 	url = https://github.com/OpenXiangShan/OpenIOMMU.git
-[submodule "env-scripts"]
-	path = env-scripts
-	url = https://gitlink.org.cn/mc-cosim/env-scripts.git
