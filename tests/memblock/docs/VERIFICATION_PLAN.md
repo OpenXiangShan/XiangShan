@@ -234,7 +234,10 @@ A conditional youngest cold role can also remain pending in this integrated
 graph. Freshness excludes accepted A coverage of every line byte, explicit
 reference writes and older admitted store bytes, so no SBuffer drain is needed.
 Its exact observed cancellation boundary and strict later refetch share the
-independent epoch ledger. Target-line old Grant completion through both final D
+independent epoch ledger. Generic mixed-suffix cancellation additionally records killed
+generations, accepted issue phases, unconsumed dependencies and final STA
+feedback state, with retired-or-canceled conservation in schema 75.
+Target-line old Grant completion through both final D
 and E plus 32 quiet cycles precedes same-identity refetch; prefix producers and
 retirement remain eligible. That quiet interval is a bounded witness, not a full
 CPU pipeline-empty proof. Next ordinary-workload work should interleave broader

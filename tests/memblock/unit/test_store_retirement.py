@@ -392,6 +392,8 @@ int main() {
     read(coverage.stream_vector_uops); read(coverage.stream_store_retirement);
     read(coverage.stream_recovery); read(coverage.stream_sta); read(coverage.stream_history);
     read(coverage.stream_waiting_head); read(coverage.stream_dependencies);
+    coverage.stream_cancel[24] = coverage.stream_history[1];
+    coverage.stream_cancel[25] = coverage.stream_history[0];
     std::uint64_t transactions;
     std::cin >> coverage.stream_scalar_retries >> transactions;
     std::string extra;
@@ -450,7 +452,7 @@ class StreamStoreRetirementAccountingTest(unittest.TestCase):
                              text=True, capture_output=True, timeout=20)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         report = self.modules['run_regression'].parse_summary(ran.stdout)
-        self.assertEqual(report['constraint_schema'], 74)
+        self.assertEqual(report['constraint_schema'], 75)
         for field in RETIREMENT_FIELDS:
             self.assertEqual(report[field], ','.join(map(lambda n: str(int(n)), rows[field])), field)
         self.records.append({'kind': 'serialized-history', 'store_retirement': report['stream_store_retirement'],

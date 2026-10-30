@@ -286,6 +286,8 @@ int main() {
         read(coverage.stream_vector_uops); read(coverage.stream_waiting_head);
         read(coverage.stream_recovery); read(coverage.stream_dependencies);
         read(coverage.stream_history); read(coverage.stream_sta);
+        coverage.stream_cancel[24] = coverage.stream_history[1];
+        coverage.stream_cancel[25] = coverage.stream_history[0];
         std::uint64_t transactions;
         input >> transactions >> coverage.stream_scalar_retries;
         std::string extra;
@@ -397,7 +399,7 @@ class StoreAddressReplayTest(unittest.TestCase):
         reports = []
         for original, line in zip(expected, lines):
             report = self.parser.parse_summary(line)
-            self.assertEqual(report["constraint_schema"], 74)
+            self.assertEqual(report["constraint_schema"], 75)
             for field, value in original.items():
                 self.assertEqual(report[field], value, field)
             reports.append(report)
@@ -587,7 +589,7 @@ class StoreAddressReplayTest(unittest.TestCase):
 
     def test_schema72_compatibility_omits_new_field(self):
         current = self.baseline()
-        line = current["summary"].replace("constraint_schema=74", "constraint_schema=72")
+        line = current["summary"].replace("constraint_schema=75", "constraint_schema=72")
         line = " ".join(word for word in line.split() if not word.startswith("stream_sta="))
         legacy = self.parser.parse_summary(line)
         self.assertNotIn("stream_sta", legacy)
@@ -649,11 +651,11 @@ class StoreAddressReplayTest(unittest.TestCase):
         report = self.baseline()
         original = (SOURCE_ROOT / "scripts/verify_regression.py").read_text()
         cases = [
-            ("lost_feedback", "sta[0] == sta[2] == ordinary and sta[1] == sta[3] == retries", "True",
+            ("lost_feedback", "sta[0] == ordinary + canceled[7] and sta[2] == ordinary + canceled[18] and\n                 sta[1] == retries and sta[3] == retries + canceled[19] and\n                 sta[0] + sta[1] == sta[2] + sta[3] + canceled[20] and\n                 (ordinary != 0 or retries == canceled[21])", "True",
              self.replace(report, "stream_sta", 2, 1)),
             ("invented_admission_overlap", "sta[4] <= admitted - epochs", "True",
              self.replace(report, "stream_sta", 4, len(mixed_history().instructions))),
-            ("invented_waiter", "1 <= sta[10] <= min(ordinary, live)", "True",
+            ("invented_waiter", "1 <= sta[10] <= min(eligible_stores, live)", "True",
              self.replace(report, "stream_sta", 10, 3)),
             ("lost_overlapping_waiter", "sta[6] == 0 or sta[10] >= 2", "True",
              self.replace(report, "stream_sta", 10, 1)),

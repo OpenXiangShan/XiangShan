@@ -296,7 +296,7 @@ completion observation before driving that low edge. Zero LQ/SQ cancellation is
 required; six extra local
 recovery edges precede restoring the store level and retirement. These are
 conservative generator constraints, not exact ROB/RAB recovery timing. General
-mixed-suffix cancellation remains outside this direction. Scalar STA/STD acknowledgements and vector uop completions match their
+mixed-suffix cancellation is handled separately by the bounded ordinary replay path. Scalar STA/STD acknowledgements and vector uop completions match their
 scoreboards; prefetch queries require the prefetch class as well as ROB value
 and wrap. Exact vector replay service consumes only its matching feedback,
 rejects an already-completed target and preserves unrelated replay obligations.
@@ -312,6 +312,16 @@ and data results still require their existing scoreboards, and younger loads
 still wait for checked older store addresses. Unresolved graph operands retain
 their synchronous helper. `stream_sta` counts another accepted event only before
 that attempt's matching feedback cycle, even when its helper advances time.
+
+Schema 75 retains admitted generations and accepted issue observations after
+mixed-suffix cancellation. `StreamCanceledGeneration` records the killed class,
+accepted operands/uops, unflushed VSTART obligation, unconsumed dependencies,
+vector source chains/reuses and final STA feedback state. The artifact verifier requires retirement-or-cancellation
+conservation, rather than equating every admitted generation with retirement.
+This lifecycle record does not authorize cancellation: matching victim identity,
+scoreboard suffix cancellation and observed physical LQ/SQ recovery remain
+separate requirements. Committed store drain records exclude canceled vector
+uops, and all surviving/replacement values remain strict.
 
 Subset profiles retain the same data, identity, exactly-once and final-byte
 oracles. These are bounded external

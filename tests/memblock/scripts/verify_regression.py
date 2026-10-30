@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4428,8 +4428,11 @@ def _check_vector_operand_accounting(result: dict[str, Any]) -> None:
         return
     loads, stores, waits = _csv_counts(result, "vector_operand_chains", 3)
     vector_loads, vector_stores = _csv_counts(result, "vector", 2)
-    _require(loads == waits and loads <= vector_loads and stores <= vector_stores,
-             "vector operand source chains and checked predecessor waits disagree")
+    canceled = _csv_counts(result, "stream_cancel", 29) if result.get("constraint_schema", 0) >= 75 else [0] * 29
+    _require(loads == waits + canceled[28] and
+             canceled[26] <= loads <= vector_loads + canceled[26] and
+             canceled[27] <= stores <= vector_stores + canceled[27],
+             "vector operand source chains and checked predecessor waits/cancellations disagree")
 
 
 def _check_scalar_fp_accounting(result: dict[str, Any]) -> None:
@@ -4732,6 +4735,65 @@ def _check_scalar_dependency_accounting(result: dict[str, Any]) -> None:
                  "scalar dependency interleaved windows disagree with early loads")
 
 
+def _check_stream_cancellation(result: dict[str, Any]) -> list[int]:
+    if result.get("constraint_schema", 0) < 75:
+        return [0] * 29
+    counts = _csv_counts(result, "stream_cancel", 29)
+    retries = result.get("stream_scalar_retries")
+    _require(type(retries) is int and retries >= 0, "invalid stream_scalar_retries")
+    classes, issued = counts[1:6], counts[6:12]
+    canceled = sum(classes)
+    epochs, admitted, retired, *_ = _csv_counts(result, "stream", 12)
+    redirects, maximum_canceled, affected_epochs = counts[0], counts[22], counts[23]
+    longest_admitted, extended_admitted = counts[24:26]
+    _require(admitted == retired + canceled,
+             "stream admitted generations are not retired or canceled exactly once")
+    _require((canceled == 0 and not any(counts[:24])) or
+             (1 <= affected_epochs <= min(epochs, redirects) and
+              redirects <= canceled <= 8 * redirects and 1 <= maximum_canceled <= canceled and
+              maximum_canceled + affected_epochs - 1 <= canceled <= maximum_canceled * affected_epochs),
+             "stream cancellation windows/epochs/generations disagree")
+    _require(issued[0] <= classes[0] and issued[1] <= classes[2] and
+             issued[2] <= classes[2] and issued[5] <= classes[4],
+             "canceled scalar acceptances exceed admitted generations")
+    _require(all(n <= uops <= 8 * n for n, uops in zip((classes[1], classes[3]), counts[12:14])) and
+             issued[3] <= counts[12] and issued[4] <= counts[13],
+             "canceled vector acceptances/uops exceed admitted generations")
+    accepted_vector_generations = [max((accepted + 7) // 8, generations - (uops - accepted))
+        for generations, uops, accepted in zip((classes[1], classes[3]), counts[12:14], issued[3:5])]
+    address_accepted = issued[0] + issued[1] + issued[5] + sum(accepted_vector_generations)
+    _require(counts[14] <= classes[1] and counts[15] <= classes[3] and
+             counts[16] <= canceled - address_accepted and counts[17] <= classes[2] - issued[2],
+             "canceled VSTART/dependency obligations exceed their generations")
+    _require(sum(counts[18:21]) == issued[1] and counts[21] <= retries and
+             (issued[1] != 0 or counts[21] == 0),
+             "canceled store-address states/retries are not conserved")
+    _require(counts[26] <= counts[12] - classes[1] and counts[27] <= counts[13] - classes[3] and
+             counts[28] <= min(counts[26], counts[12] - issued[3]) and
+             counts[26] - counts[28] <= issued[3] - accepted_vector_generations[0],
+             "canceled vector source dependencies exceed generated or accepted uops")
+    if epochs == 0:
+        _require(not any(counts), "empty stream has cancellation/generation history")
+    else:
+        retired_history = _csv_counts(result, "stream_history", 4)
+        longest_retired = retired_history[1]
+        _require(retired_history[0] <= extended_admitted <= retired_history[0] + affected_epochs,
+                 "stream admitted/retired extended-epoch populations disagree")
+        _require(longest_retired <= longest_admitted <= longest_retired + maximum_canceled and
+                 maximum_canceled + 1 <= longest_admitted and
+                 longest_admitted <= admitted <= epochs * longest_admitted and
+                 extended_admitted <= epochs and
+                 ((extended_admitted == 0 and longest_admitted <= 32) or
+                  (extended_admitted > 0 and longest_admitted > 32)),
+                 "stream admitted-generation maxima disagree with epoch populations")
+        _require(admitted >= longest_admitted + max(0, extended_admitted - 1) * 33 +
+                 (epochs - max(1, extended_admitted)) and
+                 admitted <= extended_admitted * longest_admitted +
+                 (epochs - extended_admitted) * min(32, longest_admitted),
+                 "stream extended admitted-generation lengths disagree with total")
+    return counts
+
+
 def _check_stream_store_retirement(result: dict[str, Any]) -> None:
     scalar, vector, uops, queued, predequeued, peak, admissions, issues, heads, drained = _csv_counts(
         result, "stream_store_retirement", 10
@@ -4740,12 +4802,13 @@ def _check_stream_store_retirement(result: dict[str, Any]) -> None:
     vector_uops = _csv_counts(result, "stream_vector_uops", 2)
     stream = _csv_counts(result, "stream", 12)
     restart_loads, restart_stores, flushes, pending_flushes = _csv_counts(result, "stream_vstart_flush", 4)
-    _require(restart_loads <= operations[1] and restart_stores <= operations[3] and
-             flushes == restart_loads + restart_stores and pending_flushes <= flushes,
+    canceled = _check_stream_cancellation(result)
+    _require(restart_loads <= operations[1] + canceled[2] and restart_stores <= operations[3] + canceled[4] and
+             flushes + canceled[14] + canceled[15] == restart_loads + restart_stores and pending_flushes <= flushes,
              "stream nonzero-VSTART flush-after accounting is inconsistent")
     retries = result.get("stream_scalar_retries")
     _require(type(retries) is int and retries >= 0, "invalid stream_scalar_retries")
-    _require(scalar == operations[2] and vector == operations[3] and uops == vector_uops[1],
+    _require(scalar == operations[2] and vector == operations[3] and uops == vector_uops[1] - canceled[13],
              "stream architectural store retirements disagree with completed instructions/uops")
     _require(queued + predequeued == drained == scalar + uops,
              "stream committed store drain records are not conserved")
@@ -4762,6 +4825,8 @@ def _check_stream_store_retirement(result: dict[str, Any]) -> None:
 def _check_stream_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 62:
         return
+    canceled = _check_stream_cancellation(result)
+    canceled_classes, canceled_issues = canceled[1:6], canceled[6:12]
     if result.get("constraint_schema", 0) >= 74:
         _check_stream_store_retirement(result)
     rate = result.get("target_concurrent_stream")
@@ -4775,15 +4840,19 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) >= 73:
         sta = _csv_counts(result, "stream_sta", 11)
         ordinary = operations[2] - _csv_counts(result, "stream_recovery", 20)[9]
-        _require(sta[0] == sta[2] == ordinary and sta[1] == sta[3] == retries,
-                 "stream STA attempts/feedback are not conserved")
+        _require(sta[0] == ordinary + canceled[7] and sta[2] == ordinary + canceled[18] and
+                 sta[1] == retries and sta[3] == retries + canceled[19] and
+                 sta[0] + sta[1] == sta[2] + sta[3] + canceled[20] and
+                 (ordinary != 0 or retries == canceled[21]),
+                 "stream STA attempts/feedback/cancellations are not conserved")
         _require(sta[4] <= admitted - epochs and sta[5] <= issues[0] +
                  _csv_counts(result, "stream_recovery", 20)[8] and
                  sta[6] <= sta[0] + sta[1] and sta[7] <= issues[2] and
                  sta[8] <= sum(vector_uops) and sta[9] <= issues[5],
                  "stream STA wait overlaps exceed accepted work")
-        _require((ordinary == 0 and not any(sta)) or
-                 (ordinary > 0 and 1 <= sta[10] <= min(ordinary, live) and
+        eligible_stores = ordinary + canceled[7]
+        _require((eligible_stores == 0 and not any(sta)) or
+                 (eligible_stores > 0 and 1 <= sta[10] <= min(eligible_stores, live) and
                   (sta[6] == 0 or sta[10] >= 2)),
                  "stream STA waits exceed eligible stores or miss accepted overlap")
     maximum = 32
@@ -4804,31 +4873,36 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
             _require(retired >= longest + max(0, extended - 1) * 33 + (epochs - max(1, extended)) and
                      retired <= extended * longest + (epochs - extended) * min(32, longest),
                      "stream extended epoch lengths disagree with total")
-            _require(late_overlap <= retired - 32 * extended - (epochs - extended) and
-                     late_overlap <= extended * max(0, longest - 32),
+            tail_total, tail_epochs, tail_longest = (admitted, canceled[25], canceled[24]) if result.get("constraint_schema", 0) >= 75 else (retired, extended, longest)
+            _require(late_overlap <= tail_total - 32 * tail_epochs - (epochs - tail_epochs) and
+                     late_overlap <= tail_epochs * max(0, tail_longest - 32),
                      "stream late overlap exceeds extended tails")
-    _require(admitted == retired == sum(operations) and epochs <= retired <= maximum * epochs,
+    _require(admitted == retired + sum(canceled_classes) and retired == sum(operations) and epochs <= retired <= maximum * epochs,
              "stream admission/retirement/epoch counts disagree")
     _require(0 <= pending <= live <= 8 and overlap <= admitted - epochs and sliding <= admitted - epochs,
              "stream live overlap or sliding admissions exceed their bounds")
     _require(prefix <= retired - epochs and after_serial <= epochs and (not sliding or prefix > 0),
              "stream retirement/placement observations disagree")
-    _require(live <= retired and retired <= result.get("transactions", 0),
+    _require(live <= admitted and retired <= result.get("transactions", 0),
              "stream live/retired counts exceed completed actions")
-    _require((operations[2] != 0 or retries == 0) and
+    _require((operations[2] + canceled_classes[2] != 0 or retries == 0) and
              (sum(vector_uops) != 0 or replays == 0),
              "stream retry/replay has no matching producer")
-    _require(events == sum(issues) and issues[0] == operations[0] and
-             issues[1] == issues[2] == operations[2] and issues[5] == operations[4] and
-             issues[3:5] == vector_uops,
-             "stream accepted issue events are not conserved")
-    _require(operations[1] <= vector_uops[0] <= 8 * operations[1] and
-             operations[3] <= vector_uops[1] <= 8 * operations[3],
+    _require(events == sum(issues) and issues[0] == operations[0] + canceled_issues[0] and
+             issues[1] == operations[2] + canceled_issues[1] and
+             issues[2] == operations[2] + canceled_issues[2] and
+             issues[5] == operations[4] + canceled_issues[5] and
+             issues[3] == vector_uops[0] - canceled[12] + canceled_issues[3] and
+             issues[4] == vector_uops[1] - canceled[13] + canceled_issues[4],
+             "stream accepted issue events are not retired or canceled exactly once")
+    retired_vector_uops = [vector_uops[0] - canceled[12], vector_uops[1] - canceled[13]]
+    _require(operations[1] <= retired_vector_uops[0] <= 8 * operations[1] and
+             operations[3] <= retired_vector_uops[1] <= 8 * operations[3],
              "stream vector uop counts disagree with instructions")
     if result.get("constraint_schema", 0) >= 70:
         weights = _csv_counts(result, "target_ops", 15)
         _require(all(weight != 0 or count == 0 for count, weight in
-                     zip(operations, (weights[0], weights[2], weights[1], weights[3], weights[5]))),
+                     zip([a + b for a, b in zip(operations, canceled_classes)], (weights[0], weights[2], weights[1], weights[3], weights[5]))),
                  "stream generated a disabled operation class")
         if rate == 1000:
             _require(not any(_csv_counts(result, "concurrent", 5) + _csv_counts(result, "concurrent_ops", 5)),
@@ -4851,20 +4925,21 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
         _require(type(dependency_rate) is int and 0 <= dependency_rate <= 1000,
                  "invalid target_stream_dependency")
         address, data, used_address, used_data, pending_address, pending_data, live_source, retired_source, depth = _csv_counts(result, "stream_dependencies", 9)
-        _require(address == used_address and data == used_data,
-                 "stream dependency edges were not consumed exactly once")
-        _require(address <= admitted - epochs and data <= operations[2] and
+        _require(address == used_address + canceled[16] and data == used_data + canceled[17],
+                 "stream dependency edges were not consumed or canceled exactly once")
+        _require(address <= admitted - epochs and data <= operations[2] + canceled_classes[2] and
                  pending_address <= address and pending_data <= data,
                  "stream dependency counts exceed eligible instructions")
         if result.get("constraint_schema", 0) >= 72:
-            _require(depth <= max(0, longest - 1), "stream dependency depth exceeds observed epoch length")
-        _require(depth <= operations[0], "stream dependency depth exceeds scalar load producers")
-        if operations[0] == 0 or result.get("target_scalar_fp") == 1000:
+            generation_length = canceled[24] if result.get("constraint_schema", 0) >= 75 else longest
+            _require(depth <= max(0, generation_length - 1), "stream dependency depth exceeds observed epoch length")
+        _require(depth <= operations[0] + canceled_classes[0], "stream dependency depth exceeds scalar load producers")
+        if operations[0] + canceled_classes[0] == 0 or result.get("target_scalar_fp") == 1000:
             _require(address == data == 0, "stream dependencies have no eligible integer load producer")
-        _require(live_source + retired_source == address + data,
+        _require(live_source + retired_source == used_address + used_data,
                  "stream dependency source lifetimes disagree")
         _require((address + data == 0 and depth == 0) or
-                 (address + data > 0 and 1 <= depth < maximum and depth <= address + data),
+                 (address + data > 0 and 1 <= depth < maximum + canceled[22] and depth <= address + data),
                  "stream dependency chain depth disagrees")
         if dependency_rate == 0:
             _require(address == data == 0, "disabled stream dependencies generated edges")
@@ -4910,6 +4985,8 @@ def _check_stream_recovery_accounting(result: dict[str, Any]) -> None:
     else:
         inflight = []
     serialized = counts + shapes + victims + stream + operations + inflight
+    if result.get("constraint_schema", 0) >= 75:
+        serialized += _csv_counts(result, "stream_cancel", 29)
     for field, length in (("stream_issue", 6), ("stream_vector_uops", 2), ("stream_waiting_head", 2)):
         serialized += _csv_counts(result, field, length)
     _require(all(count <= (1 << 64) - 1 for count in serialized),

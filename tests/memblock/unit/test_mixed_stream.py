@@ -24,7 +24,7 @@ INPUTS = (
     'cpp/scenarios/mixed/state.hpp', 'cpp/scenarios/shared.hpp',
     'cpp/scenarios/mixed/scalar_load.hpp', 'cpp/scenarios/mixed/vector_indices.hpp',
     'cpp/scenarios/mixed/vector_operands.hpp', 'cpp/scenarios/mixed/stream_oracle.hpp',
-    'cpp/scenarios/mixed/stream_recovery.hpp', 'cpp/scenarios/mixed/store_address_replay.hpp', 'cpp/scenarios/mixed/unresolved_load_group.hpp',
+    'cpp/scenarios/mixed/stream_recovery.hpp', 'cpp/scenarios/mixed/stream_cancellation.hpp', 'cpp/scenarios/mixed/store_address_replay.hpp', 'cpp/scenarios/mixed/unresolved_load_group.hpp',
     'cpp/scenarios/mixed/unresolved_epochs.hpp', 'unit/mixed_stream_fixture.cpp',
     'cpp/random/constraints.inc', 'cpp/random/coverage.inc',
     'cpp/environment/model.inc', 'cpp/memblock_env.hpp',

@@ -3258,6 +3258,15 @@ struct MixedCoverage {
     std::array<std::uint64_t, 12> stream{};
     std::array<std::uint64_t, 5> stream_ops{};
     std::array<std::uint64_t, 6> stream_issue{};
+    // Mixed redirects; canceled generations by five classes; canceled accepted
+    // initial events by six issue classes; canceled admitted vector uops;
+    // canceled unflushed VSTART load/store; unconsumed address/data edges;
+    // canceled STA final hit/miss-awaiting-retry/feedback-pending states;
+    // canceled accepted STA retries; max canceled/epoch, epochs with cancel,
+    // max admitted generations/epoch, epochs with >32 admitted generations.
+    // Canceled generated vector-load chains, vector-store source reuses and
+    // unconsumed vector-load chains follow the generation history fields.
+    std::array<std::uint64_t, 29> stream_cancel{};
     std::array<std::uint64_t, 2> stream_vector_uops{};
     std::uint64_t stream_scalar_retries = 0;
     // Ordinary STA initial/retry attempts, matching hits/misses; accepted
@@ -3652,7 +3661,7 @@ struct MixedCoverage {
                std::to_string(scalar_dependency_interleaving[2]) + ',' +
                std::to_string(scalar_dependency_interleaving[3]) +
                " stream=" + csv(stream) + " stream_ops=" + csv(stream_ops) +
-               " stream_issue=" + csv(stream_issue) + " stream_vector_uops=" + csv(stream_vector_uops) +
+               " stream_issue=" + csv(stream_issue) + " stream_cancel=" + csv(stream_cancel) + " stream_vector_uops=" + csv(stream_vector_uops) +
                " stream_scalar_retries=" + std::to_string(stream_scalar_retries) +
                " stream_waiting_head=" + csv(stream_waiting_head) +
                " stream_sta=" + csv(stream_sta) +

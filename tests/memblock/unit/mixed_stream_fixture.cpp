@@ -6,6 +6,7 @@
 #include "scenarios/mixed/stream_oracle.hpp"
 #include "scenarios/mixed/stream_recovery.hpp"
 #include "scenarios/mixed/store_address_replay.hpp"
+#include "scenarios/mixed/stream_cancellation.hpp"
 #include <functional>
 #include <map>
 #include <tuple>

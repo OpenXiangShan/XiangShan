@@ -2,6 +2,7 @@
 #include "mixed/stream_oracle.hpp"
 #include "mixed/stream_recovery.hpp"
 #include "mixed/store_address_replay.hpp"
+#include "mixed/stream_cancellation.hpp"
 
 namespace memblock::scenarios::mixed {
 namespace {
@@ -18,6 +19,8 @@ struct StreamWork {
     bool data_issued = false;
     bool requires_head = false;
     bool data_first = false;
+    bool address_consumed = false, data_consumed = false;
+    unsigned address_retries = 0;
     StoreAddressReplay address_replay;
     std::uint64_t expected_scalar = 0;
     unsigned recovery_id = 0, recovery_index = 0;
@@ -78,7 +81,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         unsigned(random() % (constraints.stream_max_instructions - constraints.stream_min_instructions + 1U)));
     unsigned target_admissions = length;
     std::set<unsigned> admitted_rob_identities;
-    unsigned admitted = 0, retired = 0, recovery_serial = 0;
+    unsigned admitted = 0, retired = 0, recovery_serial = 0, canceled = 0;
     std::optional<StreamRecovery> recovery;
     auto expected_violations = environment.memory_violation_stats().count;
     auto &recovery_counts = coverage.stream_recovery;
@@ -353,6 +356,45 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 phase += detail.str() + ":unmatched-or-nested";
                 return false;
             }
+            ++coverage.stream_cancel[0];
+            for (auto &item : live) {
+                if (!kills(item)) continue;
+                StreamCanceledGeneration record;
+                record.kind = item.kind;
+                record.scalar_issued = (item.kind == 0 || item.kind == 4) && item.issued[0];
+                record.vector_uops = item.vectors.size();
+                record.accepted_vector_uops = std::count(item.issued.begin(), item.issued.end(), true);
+                if (item.vectors.empty()) record.accepted_vector_uops = 0;
+                record.unflushed_vstart = item.needs_restart_flush() && !item.restart_flushed;
+                for (unsigned uop = 1; uop < item.vectors.size(); ++uop) {
+                    const auto &previous = item.vectors[uop - 1U];
+                    const auto &current = item.vectors[uop];
+                    if (!memblock::vector_is_special_indexed(current) ||
+                        memblock::vector_indexed_vd_index(previous) != memblock::vector_indexed_vd_index(current)) continue;
+                    ++record.vector_dependencies;
+                    record.unconsumed_vector_dependencies += !current.store && !item.issued[uop];
+                }
+                record.unconsumed_address_dependency = item.address_source && !item.address_consumed;
+                record.unconsumed_data_dependency = item.data_source && !item.data_consumed;
+                if (item.kind == 2) {
+                    const auto observation = item.address_replay.observe(
+                        environment.iq_slow_feedback_stats().sta_samples, item.store);
+                    if (observation == StoreAddressReplay::Observation::invalid) {
+                        phase += ":canceled-store-address-feedback"; return false;
+                    }
+                    coverage.stream_sta[2] += observation == StoreAddressReplay::Observation::hit;
+                    coverage.stream_sta[3] += observation == StoreAddressReplay::Observation::miss;
+                    record.address_issued = item.address_issued;
+                    record.data_issued = item.data_issued;
+                    record.address_retries = item.address_retries;
+                    record.address_state = !item.address_issued ? StreamCanceledGeneration::AddressState::unissued :
+                        item.address_replay.translated() ? StreamCanceledGeneration::AddressState::translated :
+                        item.address_replay.waiting() ? StreamCanceledGeneration::AddressState::feedback_pending :
+                        StreamCanceledGeneration::AddressState::retry_ready;
+                }
+                record.sample(coverage.stream_cancel);
+            }
+            canceled += killed;
             const auto lq_before = environment.lq_redirect_canceled_observed();
             const auto sq_before = environment.sq_redirect_canceled_observed();
             if (!environment.redirect_after(violation.last.rob_value,
@@ -903,6 +945,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 if (!source->complete) { phase += ":dependency-before-producer-completion"; return false; }
                 ++coverage.stream_dependencies[data ? 3U : 2U];
                 ++coverage.stream_dependencies[source->retired ? 7U : 6U];
+                (data ? work.data_consumed : work.address_consumed) = true;
                 return true;
             };
             const bool first_address = event.kind == 1 || (event.kind == 2 && !work.address_issued) ||
@@ -924,6 +967,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 const bool first = !work.address_issued;
                 initial_event = first;
                 coverage.stream_scalar_retries += !first;
+                work.address_retries += !first;
                 const auto first_sample = environment.iq_slow_feedback_stats().sta_samples.size();
                 if (!environment.issue_store_address(work.store, constrained_completion_timeout) ||
                     !work.address_replay.accept(first_sample, environment.cycle() - 1U)) return false;
@@ -971,6 +1015,10 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     coverage.stream_store_retirement[4] = store_retirement.already_dequeued;
     coverage.stream_store_retirement[5] = store_retirement.max_pending;
     coverage.stream_store_retirement[9] += store_retirement.drained - drained_before;
+    coverage.stream_cancel[22] = std::max<std::uint64_t>(coverage.stream_cancel[22], canceled);
+    coverage.stream_cancel[23] += canceled != 0;
+    coverage.stream_cancel[24] = std::max<std::uint64_t>(coverage.stream_cancel[24], admitted);
+    coverage.stream_cancel[25] += admitted > 32U;
     coverage.stream_history[0] += retired > 32U;
     coverage.stream_history[1] = std::max<std::uint64_t>(coverage.stream_history[1], retired);
     coverage.stream[11] = actions;
