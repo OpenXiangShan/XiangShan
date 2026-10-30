@@ -46,6 +46,7 @@ source只保留证据，不承接后续编码；2026-10-30重新核对快照四�
 | CSR映射切换缺真实SFENCE完成 | target/PMP后直接进入candidate；CSR changed/inflight处理不等于DUT storage失效，未发送并等待真实全SFENCE；不混同未采用的A1删模型候选 | 限非虚拟special映射切换，目标CSR稳定后真实HS全SFENCE，等同owner/reset的C0/C4再放行 | `60dcca7c6` | 源12/12、母14/14严格通过及两类负向专项；独立最终review通过 |
 | PBMT矩阵请求数路由错误 | 统一MAIN1000覆盖当前两UID定向cfg，发送前合同检查fatal | 新增fixed_cfg路由，仅此组保留cfg2；不改SV/cfg/RM/checker | `3bd0e9934` | 原MAIN1000波形仍复现拒绝；单测/dry-run、原seed cfg2、恢复10/10严格通过 |
 | 跨页Load首段数据错误提前终止漏建模 | RM先要求全部页翻译，DUT首页corrupt合法取消高页时先query miss | 固定首段身份/实际S2与连续消费证明，跨页前按独立错误形成严格异常；不造高页、不改RTL | `1343dbce3` | 原seed10000笔及21/21真实DUT、四类软件专项PASS，Turing最终实现review PASS |
+| Rollback来源缓存跨拍误报冲突 | 不同拍同ROB/level的合法winner4→5变化被当作同事件payload冲突 | 精确同sample绑定，保留完整ROB/level及同拍重复证明冲突检查；无本拍证明仍拒绝 | `bba3008ba` | 两个原10000笔根seed及18邻接，20/20真实DUT严格PASS；软件1/1，Turing最终实现及恢复readiness均PASS |
 
 主要专项review入口：
 
@@ -59,6 +60,7 @@ source只保留证据，不承接后续编码；2026-10-30重新核对快照四�
 - `AI_DOC/plan/test_framework/review_doc/undo/memblock_redirect_later_split_cancel_implementation_review_20261029.md`
 - `AI_DOC/plan/test_framework/review_doc/undo/memblock_csr_hs_mapping_fence_gate_review_20261029.md`
 - `AI_DOC/plan/test_framework/review_doc/undo/memblock_pbmt_matrix_fixed_cfg_profile_review_20261030.md`
+- `AI_DOC/plan/test_framework/review_doc/undo/memblock_rollback_same_sample_provenance_implementation_review_20261030.md`
 
 ## 4. 仍未修复的RTL问题
 
@@ -96,6 +98,8 @@ fresh compile、软件专项及20/20真实DUT专项通过（18邻接加原170574
 Turing最终独立`FINAL_IMPLEMENTATION_REVIEW_PASS`，本Bug方案移do，随本记录单Bug提交；当前修复版350项最终批量仍待执行，不把旧源码的51项或250项历史PASS迁移到新版本验收。
 后续计划为当前两根完整PASS后，保留最新19颗ABORTED原seed并构造79颗新seed恢复98项；同时在另一独立mode重验25组250项。
 当前专项review：`AI_DOC/plan/test_framework/review_doc/undo/memblock_rollback_same_sample_provenance_implementation_review_20261030.md`。
+实际单Bug提交`bba3008ba`已在mother；随后恢复98和250两个独立mode，当前矩阵前15组150/150严格/clean通过（含原计划软件10），fault3恢复98仍运行。
+当前新源码最终清单只验收152/350（上述150＋两个原根），BasicTest非RTL11组110/110全通过；不复用旧1343的通过名额，没有新建worktree或修改RTL。
 分析入口：`AI_DOC/analysis/framework_design/memblock_rollback_provenance_conflict_seed1705742557_20261030.md`。
 当前25组250个通过记录的SV基线覆盖率已过滤合并，目录`mem_ut/ver/ut/memblock/sim/mother_matrix_pass_coverage_20261030`，
 有效`urgReport_r2`/`merged_r2.vdb`确认250 tests/records及精确白名单一致，工具日志无ERROR/WARNING；
