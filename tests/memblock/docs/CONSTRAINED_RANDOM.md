@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=76`.
+`constraint_schema=77`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -395,10 +395,9 @@ eight-edge producer gap before reoffer. The pair issues remaining vector uops
 once under their existing predecessor dependencies. `coissue` counts the pair
 only when both requests handshake on the same sampled edge; split-edge
 acceptance does not increment it. The pair retains the scalar frontend and
-dependency metadata used by ordinary load issue. Its binding can independently
-retain distinct producer slots; store acceptance authorization and the ordinary
-sliding scheduler have not yet migrated. This bounded legacy direction
-does not add simultaneous issue to the sliding-stream executor. Store dispatch retains the
+dependency metadata used by ordinary load issue. Its pair binding is separate from the persistent ordinary-stream session
+below. Store callbacks and the ordinary sliding scheduler use the same retained
+pin driver with their own ownership and accounting. Store dispatch retains the
 architectural-prefix LQ snapshot and wrap bit. The pending ROB head cannot pass
 an older incomplete special load, and simultaneous integer destinations are
 distinct. Scalar-store and vector-list waits select only their declared
@@ -1143,12 +1142,16 @@ forwarding follow these. Rare error/protection/CMO crosses remain secondary.
 Retained bindings own every ordinary issue pin; legacy manual issue/replay
 helpers reject overlapping use before pin or replay-state mutation. STD retains
 its software ROB wrap for delayed cancellation even though no public STD wrap
-pin exists. These prerequisites do not yet make sliding issue nonblocking.
-
-The ready-event scheduler still executes one blocking producer helper per turn.
-An eligible ordinary scalar store can offer its initial STA and STD together;
-actual same/split-edge outcomes and skew are observed per operand. Heterogeneous
-ordinary load/vector issue and issue alongside admission remain absent. Ordinary loads conservatively wait for older scalar
+pin exists. Schema 77 binds a persistent session across ordinary admission,
+issue and retirement. Ready events create copied tagged offers without advancing
+an edge; a separate random clock choice, enqueue or head/retirement edge drives
+all outstanding lanes. Actual accepted events update issue, dependency, STA
+feedback and paired-operand ledgers. A stalled operand therefore does not block
+independent offers, younger admission or an older completed head. Initial scalar
+STA/STD pairing remains conditional; actual same/split-edge outcomes and skew
+are observed per operand. Vector preaccept timeouts retain their obligation and
+wait eight further edges before reoffer; accepted LSU replay retains its
+identified lane/mask/merge entry and is counted separately. Ordinary loads conservatively wait for older scalar
 addresses and complete older vector stores; unresolved scalar graphs provide a
 bounded exception. Ordinary U-mode permissions with live mixed work and
 cross-page pointer chains remain absent; mixed-suffix cancellation has only the
@@ -1169,6 +1172,34 @@ generations after the local queue-recovery guard. Queue drain before every such
 load would remove the overlap this direction needs to verify. Adjacent returns,
 competing EXU/ROB redirects, scalar late-output histories and store-headed walk
 levels remain outside this bounded path.
+
+### Persistent ordinary producer evidence
+
+`stream_transport` reports, in order: offered attempts, actual acceptances,
+preaccept vector retries, canceled unaccepted offers, accepted killed tails,
+maximum live offers, instruction admissions and architectural retirements with
+an offer already stalled across a prior edge, synchronous graph operand-helper
+calls, and ordinary producer selections. An offer has exactly one transport
+outcome; a paired selection can create two offers. These counts describe
+transport attempts, not instruction mix or terminal correctness. A graph helper
+can contain multiple internal attempts and is outside the session counters.
+
+`stream_issue_ports[mask]` counts completed edges with actual accepted load,
+STA, STD and vector kinds at bits 0, 1, 2 and 3. Bin zero is unused. Same-edge
+pairs and mixed kinds come from tagged driver acceptances sampled after manager
+drive, not simultaneous offer selection. The aggregate checker conserves
+outcomes and bounds each mask using physical lane capacities 3/2/2/2. Host
+boundary ledgers compare the complete arrays; aggregate counters cannot
+reconstruct transaction ownership or prove every temporal cross. Independently
+checked byte values, terminal identities, store release inputs, recovery and
+final word readback remain required.
+
+At successful exit, session acceptances also equal initial architectural issue
+events plus accepted STA retries, accepted vector replays and scalar refetches,
+minus synchronous graph operand-helper calls:
+`stream_transport[1] = stream[8] + stream_scalar_retries + stream[9] + stream_recovery[8] - stream_transport[8]`.
+This ties transport to the separate issue/recovery ledgers; a self-consistent
+transport histogram alone cannot satisfy the contract.
 
 ### Ordinary producer dependencies
 
@@ -1216,16 +1247,19 @@ cursor. Wrong lane/SQ value/wrap and pre-attempt samples cannot release it;
 duplicate matching feedback is rejected. A successful hit never causes a retry
 while data or terminal writeback remains pending. Misses retain the same input
 transaction and may retry after the existing eight-cycle cooldown. Feedback can
-arrive while a different blocking helper advances time; overlap reporting scans
-those actual sample cycles rather than counting every selected helper as
-concurrent. No fixed feedback latency is an expected CPU result.
+arrive while other session offers, admission or retirement advance time. The
+pre-edge acceptance callback captures the actual feedback cursor and edge;
+overlap reporting scans those observed sample cycles. No fixed feedback latency
+is an expected CPU result.
 
-This removes one global scheduling barrier. Ordinary admission uses the
-capacity and recovery guards below. Issue handshakes and unresolved graph
-operand resolution still use blocking helpers. Normal store retirement uses the
-nonblocking physical-drain contract below. Broad same-cycle heterogeneous issue,
-special-store lifecycle separation, general recovery populations and a general
-accepted-generation ledger remain gaps. More seeds cannot remove those control-flow restrictions.
+Ordinary issue handshakes now remain in independent retained slots. Capacity
+and recovery guards below still constrain admission. The bounded unresolved
+address graph retains synchronous operand resolution: it selects that helper
+only with no held offers, ends the empty session and rebinds after the helper,
+without a queue/SBuffer/link drain. Ordinary prefix terminal work remains live,
+but no new producers are scheduled inside that synchronous helper. Special-store
+lifecycle separation, general recovery populations and a general accepted-
+generation ledger remain gaps.
 
 
 ### Ordinary enqueue cadence

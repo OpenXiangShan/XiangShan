@@ -1,4 +1,5 @@
 #include "mixed/scenario.hpp"
+#include <map>
 #include "mixed/stream_oracle.hpp"
 #include "mixed/stream_recovery.hpp"
 #include "mixed/store_address_replay.hpp"
@@ -8,13 +9,18 @@ namespace memblock::scenarios::mixed {
 namespace {
 // Architectural age belongs to this deque, independent of LSQ dequeue order.
 struct StreamWork {
-    unsigned kind = 0;
+    unsigned kind = 0, generation = 0;
     memblock::LoadTransaction load;
     memblock::StoreTransaction store;
     memblock::PrefetchTransaction prefetch;
     std::vector<memblock::VectorMemoryTransaction> vectors;
     RandomVectorShape shape{};
-    std::vector<bool> issued;
+    std::vector<bool> issued, offered;
+    std::vector<std::uint64_t> vector_ready;
+    std::vector<std::optional<memblock::VectorMemoryTransaction>> replay;
+    bool address_offered = false, data_offered = false, paired_initial = false;
+    std::array<std::optional<std::uint64_t>, 2> pair_edges;
+
     bool address_issued = false;
     bool data_issued = false;
     bool requires_head = false;
@@ -75,6 +81,14 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
     const auto arena = constrained_cacheable_address(64, translation, leaf, false);
     StreamByteOracle oracle(environment.memory());
     std::deque<StreamWork> live;
+    using IssueKind = memblock::OrdinaryIssueKind;
+    using IssueOutcome = memblock::OrdinaryIssueOutcome;
+    struct Attempt { unsigned generation, kind, uop; bool replay; std::uint64_t offered_at; };
+    std::unordered_map<std::uint64_t, Attempt> attempts;
+    std::map<std::uint64_t, unsigned> accepted_ports;
+    std::uint64_t next_attempt = 1;
+    if (!environment.begin_issue_session()) return false;
+
     std::array<std::set<unsigned>, 3> destinations;
     const unsigned depth = 2U + random() % 7U;
     const unsigned length = std::min(instruction_limit, constraints.stream_min_instructions +
@@ -114,6 +128,111 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (work.kind == 2) return work.address_issued && work.data_issued &&
             (work.recovery_id || work.address_replay.translated());
         return std::find(work.issued.begin(), work.issued.end(), false) == work.issued.end();
+    };
+    const auto consume_issue_events = [&]() {
+        for (const auto &event : environment.take_issue_events()) {
+            const auto found = attempts.find(event.tag);
+            if (found == attempts.end()) { phase += ":unknown-producer-event"; return false; }
+            const auto attempt = found->second;
+            const auto owner = std::find_if(live.begin(), live.end(), [&](const auto &work) {
+                return work.generation == attempt.generation;
+            });
+            if (owner == live.end()) { phase += ":producer-event-after-owner-removal"; return false; }
+            auto &work = *owner;
+            const auto expected_kind = attempt.kind == 1 ? IssueKind::load : attempt.kind == 2 ?
+                IssueKind::store_address : attempt.kind == 3 ? IssueKind::store_data : IssueKind::vector;
+            const auto lane = attempt.kind == 1 ? (work.kind == 0 ? work.load.lane : work.prefetch.lane) :
+                attempt.kind == 2 ? work.store.address_lane : attempt.kind == 3 ? work.store.data_lane :
+                work.replay[attempt.uop] ? work.replay[attempt.uop]->lane : work.vectors[attempt.uop].lane;
+            if (event.kind != expected_kind || event.lane != lane || event.edge < attempt.offered_at) return false;
+            attempts.erase(found);
+            if (attempt.kind == 2) work.address_offered = false;
+            else if (attempt.kind == 3) work.data_offered = false;
+            else work.offered[attempt.uop] = false;
+            if (event.outcome != IssueOutcome::accepted) {
+                if (event.outcome == IssueOutcome::retry) {
+                    if (attempt.kind != 4 || event.killed) return false;
+                    work.vector_ready[attempt.uop] = event.edge + 9U;
+                    ++coverage.stream_transport[2];
+                } else {
+                    if (!event.killed || environment.memory_violation_stats().count == expected_violations) return false;
+                    ++coverage.stream_transport[3];
+                }
+                continue;
+            }
+            if (recovery && recovery->old_response_active()) ++inflight[9];
+            ++coverage.stream_transport[1];
+            coverage.stream_transport[4] += event.killed;
+            accepted_ports[event.edge] |= 1U << unsigned(event.kind);
+            const auto consume = [&](const auto &source, bool data) {
+                if (!source || (data ? work.data_consumed : work.address_consumed)) return true;
+                if (!source->complete) { phase += ":dependency-before-producer-completion"; return false; }
+                ++coverage.stream_dependencies[data ? 3U : 2U];
+                ++coverage.stream_dependencies[source->retired ? 7U : 6U];
+                (data ? work.data_consumed : work.address_consumed) = true;
+                return true;
+            };
+            if (attempt.kind != 3 && !consume(work.address_source, false)) return false;
+            if (attempt.kind == 3 && !consume(work.data_source, true)) return false;
+            unsigned initial_events = 1;
+            if (attempt.kind == 1) {
+                work.issued[0] = true;
+                initial_events = !work.refetch;
+                coverage.stream_issue[work.kind == 0 ? 0U : 5U] += initial_events;
+                if (recovery && work.recovery_id == recovery->id) {
+                    ++recovery->issue;
+                    if (recovery->issue < recovery->issue_order().size())
+                        recovery->ready_cycle = environment.cycle() + recovery->issue_delays()[recovery->issue];
+                }
+            } else if (attempt.kind == 2) {
+                const bool first = !work.address_issued;
+                initial_events = first;
+                coverage.stream_scalar_retries += !first;
+                work.address_retries += !first;
+                if (!work.address_replay.accept(event.feedback_cursor, event.edge)) return false;
+                work.address_issued = true;
+                ++coverage.stream_sta[first ? 0U : 1U];
+                coverage.stream_issue[1] += first;
+                coverage.stream_sta[10] = std::max<std::uint64_t>(coverage.stream_sta[10],
+                    1U + feedback_waits_at(event.edge, &work));
+                if (work.paired_initial && first) work.pair_edges[0] = event.edge;
+            } else if (attempt.kind == 3) {
+                work.data_first = !work.address_issued;
+                work.data_issued = true; ++coverage.stream_issue[2];
+                if (work.paired_initial) work.pair_edges[1] = event.edge;
+                if (recovery && work.recovery_id == recovery->id && recovery->phase == StreamRecovery::Phase::refetch)
+                    recovery->promoted[work.recovery_index] = true;
+            } else {
+                if (attempt.replay) { ++coverage.stream[9]; initial_events = 0; }
+                else {
+                    if (attempt.uop && vector_load_depends_on_previous(work.vectors[attempt.uop-1], work.vectors[attempt.uop]))
+                        ++coverage.vector_operand_chains[2];
+                    work.issued[attempt.uop] = true;
+                    ++coverage.stream_issue[work.kind == 1 ? 3U : 4U];
+                }
+                work.replay[attempt.uop].reset();
+            }
+            if (work.paired_initial && work.pair_edges[0] && work.pair_edges[1]) {
+                const auto a = *work.pair_edges[0], d = *work.pair_edges[1];
+                auto &pairs = coverage.stream_store_pair;
+                ++pairs[a == d ? 0U : a < d ? 1U : 2U];
+                const auto skew = std::max(a, d) - std::min(a, d);
+                pairs[3] += skew; pairs[4] = std::max(pairs[4], skew);
+                work.paired_initial = false;
+            }
+            coverage.stream[8] += initial_events;
+            coverage.stream_store_retirement[7] += (work.kind != 2 || !work.recovery_id) && event.committed_pending;
+            const unsigned bin = attempt.kind == 1 ? (work.kind == 0 ? 5U : 9U) :
+                attempt.kind == 2 ? 6U : attempt.kind == 3 ? 7U : 8U;
+            if (feedback_waits_at(event.edge, &work)) ++coverage.stream_sta[bin];
+            last_progress = environment.cycle();
+        }
+        return environment.ok();
+    };
+    const auto held_offer = [&]() {
+        return std::any_of(attempts.begin(), attempts.end(), [&](const auto &entry) {
+            return entry.second.offered_at < environment.cycle();
+        });
     };
     const auto allocate_destination = [&](unsigned domain) {
         const unsigned count = domain == 0 ? memblock::kIntegerPhysicalRegisters :
@@ -249,10 +368,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
 
     const auto retire_head = [&]() {
         auto &work = live.front();
-        for (const auto &uop : work.vectors) {
-            bool replayed = false;
-            if (!environment.service_vector_replay(uop, replayed, 256)) return false;
-        }
+        coverage.stream_transport[7] += held_offer();
         coverage.stream[5] += live.size() > 1;
         if (work.recovery_id) ++recovery_counts[work.kind == 2 ? 9U : 10U];
         if (recovery) {
@@ -298,6 +414,12 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         phase = "mixed-stream:admitted=" + std::to_string(admitted) +
             ":retired=" + std::to_string(retired) + ":live=" + std::to_string(live.size());
         report_progress();
+        if (!consume_issue_events()) return false;
+        coverage.stream[7] = std::max<std::uint64_t>(coverage.stream[7], std::count_if(live.begin(), live.end(),
+            [&](const auto &work) { return work.accepted() && pending(work); }));
+        if (environment.cycle() - last_progress > 2U * constrained_completion_timeout) {
+            phase += ":no-accepted-or-retired-progress"; return false;
+        }
         if (environment.cycle() > deadline) { phase += ":epoch-deadline"; return false; }
 
         if (environment.memory_violation_stats().count != expected_violations) {
@@ -364,6 +486,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 phase += detail.str() + ":redirect-drive-or-terminal-cancellation-failed";
                 return false;
             }
+            if (!consume_issue_events()) return false;
             ++coverage.stream_cancel[0];
             for (auto &item : live) {
                 if (!kills(item)) continue;
@@ -418,6 +541,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 if (item.kind == 0) destinations[item.load.fp_wen ? 1U : 0U].erase(item.load.pdest);
                 if (item.kind == 1) for (const auto &uop : item.vectors) destinations[2].erase(uop.pdest);
             }
+            for (const auto &[tag, attempt] : attempts)
+                for (const auto &item : live)
+                    if (item.generation == attempt.generation && kills(item)) return false;
             live.erase(std::remove_if(live.begin(), live.end(), kills), live.end());
             target_admissions += killed;
             deadline += std::uint64_t{killed} * constrained_completion_timeout * 4U;
@@ -530,17 +656,13 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             }
         }
 
-        bool replayed = false;
-        for (auto &work : live) {
-            for (unsigned i = 0; i < work.vectors.size(); ++i) {
-                if (!work.issued[i]) continue;
-                bool serviced = false;
-                if (!environment.service_vector_replay(work.vectors[i], serviced, 256)) return false;
-                if (serviced) { ++coverage.stream[9]; replayed = true; break; }
-            }
-            if (replayed) break;
+        for (auto &work : live) for (unsigned u = 0; u < work.vectors.size(); ++u) {
+            if (!work.issued[u] || work.replay[u] || work.offered[u]) continue;
+            memblock::VectorMemoryTransaction replay;
+            bool found = false;
+            if (!environment.poll_vector_replay(work.vectors[u], replay, found)) return false;
+            if (found) work.replay[u] = replay;
         }
-        if (replayed) { last_progress = environment.cycle(); continue; }
 
         const auto lq_live = environment.lq_allocated() - environment.lq_canceled() - environment.lq_dequeued();
         const auto sq_live = environment.sq_allocated() - environment.sq_canceled() - environment.sq_dequeued();
@@ -620,7 +742,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 });
             // The actual ROB drops pendingst during redirect/walk. This bounded
             // direction admits a conflict only with a non-store head or A.
-            if (!conflict || barrier_at_front() || !live.front().is_store())
+            if (environment.issue_session_empty() && (!conflict || barrier_at_front() || !live.front().is_store()))
                 ready.push_back({6, operand.store, 0});
         }
         for (unsigned i = 0; i < live.size(); ++i) {
@@ -639,30 +761,42 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     if (episode.phase == StreamRecovery::Phase::initial ? episode.plan.stores[index].data_before_load : store.address_issued)
                         data_ready &= store.data_issued;
                 }
-                if (executing && !work.issued[0] && prefix_addresses_known && data_ready &&
+                if (executing && !work.issued[0] && !work.offered[0] &&
+                    environment.issue_session_available(IssueKind::load, work.load.lane) && prefix_addresses_known && data_ready &&
                     episode.issue < episode.issue_order().size() &&
                     episode.issue_order()[episode.issue] == work.recovery_index && environment.cycle() >= episode.ready_cycle)
                     ready.push_back({1, i, 0});
-            } else if ((work.kind == 0 || work.kind == 4) && !work.issued[0] && head_eligible && address_ready &&
+            } else if ((work.kind == 0 || work.kind == 4) && !work.issued[0] && !work.offered[0] &&
+                environment.issue_session_available(IssueKind::load, work.kind == 0 ? work.load.lane : work.prefetch.lane) && head_eligible && address_ready &&
                 (work.kind == 4 || older_addresses_known)) ready.push_back({1, i, 0});
             if (work.kind == 2 && graph_role) {
                 const auto &episode = *recovery;
                 const bool early = (episode.phase == StreamRecovery::Phase::admission ||
                     episode.phase == StreamRecovery::Phase::initial) && episode.plan.stores[work.recovery_index].data_before_load;
                 const bool promote = episode.phase == StreamRecovery::Phase::refetch && work.address_issued;
-                if (!work.data_issued && (early || promote)) ready.push_back({3, i, 0});
+                if (!work.data_issued && !work.data_offered &&
+                    environment.issue_session_available(IssueKind::store_data, work.store.data_lane) && (early || promote)) ready.push_back({3, i, 0});
             } else if (work.kind == 2) {
                 // Beat-crossing STA must not block older retirement.
-                if (!work.recovery_id && head_eligible && address_ready && work.address_replay.ready(environment.cycle()))
+                if (!work.recovery_id && !work.address_offered &&
+                    environment.issue_session_available(IssueKind::store_address, work.store.address_lane) &&
+                    head_eligible && address_ready && work.address_replay.ready(environment.cycle()))
                     ready.push_back({2, i, 0});
-                if (!work.data_issued && data_ready) ready.push_back({3, i, 0});
+                if (!work.data_issued && !work.data_offered &&
+                    environment.issue_session_available(IssueKind::store_data, work.store.data_lane) && data_ready) ready.push_back({3, i, 0});
             }
             if (work.kind == 1 || work.kind == 3) {
                 const bool ordered_load = work.kind == 1 && work.vectors.front().addressing ==
                     memblock::VectorAddressingMode::indexed_ordered;
                 if (head_eligible && address_ready && (!ordered_load || i == 0) && (work.kind == 3 || older_addresses_known)) {
                     for (unsigned u = 0; u < work.vectors.size(); ++u) {
-                        if (work.issued[u]) continue;
+                        if (work.offered[u] || environment.cycle() < work.vector_ready[u]) continue;
+                        const auto &offer = work.replay[u] ? *work.replay[u] : work.vectors[u];
+                        if (!environment.issue_session_available(IssueKind::vector, offer.lane)) continue;
+                        if (work.issued[u]) {
+                            if (work.replay[u]) ready.push_back({10, i, u});
+                            continue;
+                        }
                         if (work.vectors[u].addressing != memblock::VectorAddressingMode::indexed_unordered &&
                             u != unsigned(std::count(work.issued.begin(), work.issued.end(), true))) continue;
                         if (u && vector_load_depends_on_previous(work.vectors[u-1], work.vectors[u]) &&
@@ -681,6 +815,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 prefix_addresses_known &= all_issued(work) && !pending(work);
             }
         }
+        if (!environment.issue_session_empty()) ready.push_back({9, 0, 0});
         if (ready.empty()) {
             if (!environment.run_cycles(1)) return false;
             if (environment.cycle() - last_progress > 2U * constrained_completion_timeout) {
@@ -690,10 +825,12 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             continue;
         }
         const auto event = ready[random() % ready.size()];
-        if (recovery && recovery->old_response_active() && event.kind >= 1 && event.kind <= 4)
-            ++inflight[9];
-        if (completed_head && event.kind != 5 && event.kind != 7 && event.kind != 8)
+        if (completed_head && event.kind != 5 && event.kind != 7 && event.kind != 8 && event.kind != 9)
             ++coverage.stream_waiting_head[event.kind == 0 ? 0U : 1U];
+        if (event.kind == 9) {
+            if (!environment.run_cycles(1)) return false;
+            continue;
+        }
         if (event.kind == 5) {
             if (!retire_head()) return false;
         } else if (event.kind == 8) {
@@ -716,6 +853,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             recovery->phase = StreamRecovery::Phase::drain_old;
             recovery->old_quiet_since.reset();
         } else if (event.kind == 6) {
+            if (!environment.end_issue_session()) return false;
+            ++coverage.stream_transport[8];
+            if (recovery->old_response_active()) ++inflight[9];
             auto &episode = *recovery;
             const auto operand = episode.plan.after_provisional.at(episode.operand++);
             auto &work = graph_work(operand.store, true);
@@ -785,13 +925,16 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             ++coverage.stream[8];
             if (episode.phase == StreamRecovery::Phase::operands && episode.operand < episode.plan.after_provisional.size())
                 episode.ready_cycle = environment.cycle() + episode.plan.after_provisional[episode.operand].delay;
+            if (!environment.begin_issue_session()) return false;
         } else if (event.kind == 0) {
+            coverage.stream_transport[6] += held_offer();
             const bool had_accepted_pending = std::any_of(live.begin(), live.end(),
                 [&](const auto &work) { return work.accepted() && pending(work); });
             coverage.stream[3] += had_accepted_pending;
             coverage.stream_history[2] += admitted >= 32U && had_accepted_pending;
             coverage.stream[4] += retired != 0 && !live.empty();
             StreamWork work;
+            work.generation = admitted;
             if (!recovery) {
                 work.oracle_before = std::make_shared<StreamByteOracle::Checkpoint>(oracle.checkpoint());
                 auto selection = random() % std::accumulate(weights.begin(), weights.end(), std::uint64_t{0});
@@ -864,6 +1007,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 } else work.expected_scalar = oracle.scalar_load(work.load);
                 work.requires_head = (work.load.address & 15U) + (1U << (format.op & 3U)) > 16U;
                 work.issued.assign(1, false);
+                work.offered.assign(1, false);
                 environment.expect_load_data(work.load, work.expected_scalar);
                 if (!environment.enqueue_load(work.load)) return false;
             } else if (work.kind == 2) {
@@ -890,6 +1034,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.prefetch = make_prefetch(dependent_address(line), static_cast<memblock::PrefetchOp>(8U + random() % 3U),
                     random() % memblock::kScalarLoadLanes);
                 work.issued.assign(1, false);
+                work.offered.assign(1, false);
                 environment.expect_prefetch(work.prefetch);
                 if (!environment.enqueue_prefetch(work.prefetch)) return false;
             } else {
@@ -899,6 +1044,9 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.vectors = make_random_vector_uops(store, dependent_address(constrained_window_address(line, 1U << eew)),
                     work.shape, random() % 1000U < constraints.vector_corner_per_mille);
                 work.issued.assign(work.vectors.size(), false);
+                work.offered.assign(work.vectors.size(), false);
+                work.vector_ready.resize(work.vectors.size());
+                work.replay.resize(work.vectors.size());
                 if (work.needs_restart_flush()) ++coverage.stream_vstart_flush[store ? 1U : 0U];
                 if (!store) {
                     for (auto &uop : work.vectors) uop.pdest = allocate_destination(2);
@@ -940,92 +1088,36 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             }
         } else {
             auto &work = live[event.instruction];
-            unsigned initial_events = 1;
+            ++coverage.stream_transport[9];
             const bool pair_operands = work.kind == 2 && !work.recovery_id && !work.address_issued &&
-                !work.data_issued && (event.kind == 2 || event.kind == 3) &&
+                !work.data_issued && !work.address_offered && !work.data_offered && (event.kind == 2 || event.kind == 3) &&
                 std::any_of(ready.begin(), ready.end(), [&](const auto &other) {
                     return other.instruction == event.instruction && other.kind == (event.kind == 2 ? 3U : 2U);
                 }) && constraints.stream_store_pair_per_mille != 0 &&
                 random() % 1000U < constraints.stream_store_pair_per_mille;
-            const auto consume = [&](const std::shared_ptr<StreamWork::Producer> &source, bool data) {
-                if (!source) return true;
-                if (!source->complete) { phase += ":dependency-before-producer-completion"; return false; }
-                ++coverage.stream_dependencies[data ? 3U : 2U];
-                ++coverage.stream_dependencies[source->retired ? 7U : 6U];
-                (data ? work.data_consumed : work.address_consumed) = true;
+            const auto offer = [&](unsigned kind, unsigned uop, bool replay) {
+                const auto tag = next_attempt++;
+                const bool accepted = kind == 1 ? (work.kind == 0 ? environment.offer_load(tag, work.load) :
+                    environment.offer_prefetch(tag, work.prefetch)) : kind == 2 ? environment.offer_store_address(tag, work.store) :
+                    kind == 3 ? environment.offer_store_data(tag, work.store) :
+                    environment.offer_vector(tag, replay ? *work.replay[uop] : work.vectors[uop]);
+                if (!accepted) return false;
+                if (kind == 2) work.address_offered = true;
+                else if (kind == 3) work.data_offered = true;
+                else work.offered[uop] = true;
+                attempts.emplace(tag, Attempt{work.generation, kind, uop, replay, environment.cycle()});
+                ++coverage.stream_transport[0];
+                coverage.stream_transport[5] = std::max<std::uint64_t>(coverage.stream_transport[5], attempts.size());
                 return true;
             };
-            const bool first_address = pair_operands || event.kind == 1 || (event.kind == 2 && !work.address_issued) ||
-                (event.kind == 4 && std::find(work.issued.begin(), work.issued.end(), true) == work.issued.end());
-            if (first_address && !consume(work.address_source, false)) return false;
-            if ((pair_operands || event.kind == 3) && !consume(work.data_source, true)) return false;
             if (pair_operands) {
-                const auto first_sample = environment.iq_slow_feedback_stats().sta_samples.size();
-                memblock::Environment::StoreOperandAcceptances acceptances;
-                const auto &edges = acceptances.edges;
-                if (!environment.issue_store_operands(work.store, acceptances, constrained_completion_timeout) ||
-                    !work.address_replay.accept(first_sample, edges[0])) return false;
-                work.address_issued = work.data_issued = true;
-                work.data_first = edges[1] < edges[0];
-                ++coverage.stream_sta[0];
-                ++coverage.stream_issue[1]; ++coverage.stream_issue[2];
-                initial_events = 2;
-                coverage.stream_sta[10] = std::max<std::uint64_t>(coverage.stream_sta[10],
-                    1U + feedback_waits_at(edges[0], &work));
-                for (unsigned operand = 0; operand < 2; ++operand)
-                    coverage.stream_sta[6U + operand] += feedback_waits_at(edges[operand], &work) != 0;
-                auto &pairs = coverage.stream_store_pair;
-                ++pairs[edges[0] == edges[1] ? 0U : edges[0] < edges[1] ? 1U : 2U];
-                const auto skew = std::max(edges[0], edges[1]) - std::min(edges[0], edges[1]);
-                pairs[3] += skew;
-                pairs[4] = std::max(pairs[4], skew);
-                coverage.stream_store_retirement[7] += acceptances.committed_pending;
-            } else if (event.kind == 1) {
-                if (work.kind == 0 ? !environment.issue_load(work.load, constrained_completion_timeout) :
-                    !environment.issue_prefetch(work.prefetch, constrained_completion_timeout)) return false;
-                work.issued[0] = true;
-                initial_events = !work.refetch;
-                coverage.stream_issue[work.kind == 0 ? 0U : 5U] += initial_events;
-                if (recovery && work.recovery_id == recovery->id) {
-                    ++recovery->issue;
-                    if (recovery->issue < recovery->issue_order().size())
-                        recovery->ready_cycle = environment.cycle() + recovery->issue_delays()[recovery->issue];
-                }
-            } else if (event.kind == 2) {
-                const bool first = !work.address_issued;
-                initial_events = first;
-                coverage.stream_scalar_retries += !first;
-                work.address_retries += !first;
-                const auto first_sample = environment.iq_slow_feedback_stats().sta_samples.size();
-                if (!environment.issue_store_address(work.store, constrained_completion_timeout) ||
-                    !work.address_replay.accept(first_sample, environment.cycle() - 1U)) return false;
-                work.address_issued = true;
-                ++coverage.stream_sta[first ? 0U : 1U];
-                // Feedback waits increase only at accepted STA edges. Sampling
-                // just after the next poll can miss a wait resolved in between.
-                coverage.stream_sta[10] = std::max<std::uint64_t>(coverage.stream_sta[10],
-                    1U + feedback_waits_at(environment.cycle() - 1U, &work));
-                coverage.stream_issue[1] += first;
-            } else if (event.kind == 3) {
-                work.data_first = !work.address_issued;
-                if (!environment.issue_store_data(work.store, constrained_completion_timeout)) return false;
-                work.data_issued = true; ++coverage.stream_issue[2];
-                if (recovery && work.recovery_id == recovery->id && recovery->phase == StreamRecovery::Phase::refetch)
-                    recovery->promoted[work.recovery_index] = true;
-            } else {
-                const auto &uop = work.vectors[event.uop];
-                if (!environment.issue_vector(uop, constrained_completion_timeout)) return false;
-                if (event.uop && vector_load_depends_on_previous(work.vectors[event.uop-1], uop))
-                    ++coverage.vector_operand_chains[2];
-                work.issued[event.uop] = true;
-                ++coverage.stream_issue[work.kind == 1 ? 3U : 4U];
-            }
-            coverage.stream[8] += initial_events;
-            if (!pair_operands) coverage.stream_store_retirement[7] +=
-                (work.kind != 2 || !work.recovery_id) &&
-                environment.store_retirement_stats().pending_before_last_edge != 0;
-            if (!pair_operands) note_wait_overlap(event.kind == 1 ? (work.kind == 0 ? 5U : 9U) :
-                event.kind == 2 ? 6U : event.kind == 3 ? 7U : 8U, &work);
+                work.paired_initial = true;
+                if (!offer(2, 0, false) || !offer(3, 0, false)) return false;
+            } else if (!offer(event.kind == 10 ? 4U : event.kind, event.uop, event.kind == 10)) return false;
+            // Selecting another producer at this same boundary permits genuine
+            // heterogeneous handshakes. A later clock/admission/head edge
+            // advances every lane; no offer waits inside a blocking helper.
+            continue;
         }
         coverage.stream[6] = std::max<std::uint64_t>(coverage.stream[6], live.size());
         const auto accepted_pending = std::count_if(live.begin(), live.end(),
@@ -1035,6 +1127,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         if (!environment.run_cycles(random() % 4U)) return false;
     }
     phase = "mixed-stream-drain";
+    if (!consume_issue_events() || !attempts.empty() || !environment.end_issue_session()) return false;
+    for (const auto &[edge, ports] : accepted_ports) ++coverage.stream_issue_ports[ports];
     if (recovery || environment.memory_violation_stats().count != expected_violations ||
         !environment.run_until_queues_retired(constrained_completion_timeout)) return false;
     const auto &store_retirement = environment.store_retirement_stats();

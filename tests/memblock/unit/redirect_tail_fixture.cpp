@@ -296,6 +296,13 @@ static bool return_and_classify(Harness &environment, std::vector<StoreWork> &li
     violation.last.rob_value = 100; violation.last.level = true;
     std::ostringstream detail; std::string phase;
     const auto kills = [](const auto &) { return true; };
+    // This fixture isolates terminal/feedback propagation with no live offers.
+    // Persistent acceptance/cancellation is exercised by the session fixtures.
+    const auto consume_issue_events = [&]() {
+        require(environment.retained_issue_driver_ == nullptr,
+                "terminal-only fixture cannot consume retained offers");
+        return true;
+    };
     // PRODUCTION_RETURN_AND_CANCELLATION_LEDGER
     return true;
 }

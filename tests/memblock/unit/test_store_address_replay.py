@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 import random
+import re
 import shlex
 import subprocess
 import sys
@@ -399,7 +400,12 @@ class StoreAddressReplayTest(unittest.TestCase):
         reports = []
         for original, line in zip(expected, lines):
             report = self.parser.parse_summary(line)
-            self.assertEqual(report["constraint_schema"], 76)
+            self.assertEqual(report["constraint_schema"], 77)
+            # This independent event ledger describes synchronous producers.
+            # Preserve its schema76 compatibility contract; persistent-session
+            # offers and edge masks have their own independent ledger tests.
+            line = re.sub(r"\bconstraint_schema=\d+\b", "constraint_schema=76", line)
+            report = self.parser.parse_summary(line)
             for field, value in original.items():
                 self.assertEqual(report[field], value, field)
             reports.append(report)

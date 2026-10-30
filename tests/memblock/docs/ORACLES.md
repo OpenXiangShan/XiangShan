@@ -732,8 +732,13 @@ and atomic issue reject an already bound retained driver before changing pins
 or advancing an edge. `service_vector_replay` rejects before consuming its
 identified replay request. This prevents pre-tick ready samples from reporting
 acceptance for pins overwritten by the bound owner. A bound empty driver still
-owns the pins. These guards enforce ownership; they do not provide a persistent
-ordinary scheduling session or remove blocking helpers.
+owns the pins. The persistent ordinary session uses that same exclusive owner
+across enqueue, clock and head/retirement helper edges. `offer_*` copies a typed
+payload without ticking. Tagged outcomes are consumed only after completed
+edges, and ending a session rejects live offers or unconsumed events.
+Acceptance callbacks capture the exact pre-edge feedback cursor and committed-
+pending state; STA/STD declarations and release authorization precede same-edge
+terminal/manager sampling. Caller transaction lifetimes cannot change an offer.
 
 The final CPU producer registers in `Backend.scala` and
 `datapath/NewPipelineConnect.scala` retain stalled scalar offers. Vector offers
@@ -760,8 +765,24 @@ scoreboard obligation before same-edge writeback sampling, registers release
 input groups when both operands have accepted and authorizes only the public
 head owner before manager capture. Same-store STA/STD may accept together or
 on different edges. The slow-feedback cursor begins at the actual STA edge;
-miss retries remain separate. Ordinary sliding load/vector issue and independent
-admission during a stalled operand pair have not yet migrated.
+miss retries remain separate. Ordinary sliding load/vector/STA/STD/prefetch
+issue now uses persistent slots and a generation/attempt ledger. Admission and
+older retirement may advance while younger offers stall. The scheduler updates
+initial/retry/replay/dependency/pair counts from actual accepted events, including
+legal killed acceptances before owner removal. Exact terminal expectations stay
+active through redirect propagation. The synchronous unresolved-operand graph
+uses only an empty session boundary; its helper still limits new scheduling.
+`poll_vector_replay` consumes only the identified feedback request and prepares
+its exact lane/partial-mask/merge payload without driving pins or ticking.
+Preaccept timeout/reoffer retains the original obligation; accepted LSU replay
+adds no expectation or LSQ allocation. The independent scoreboards still own
+terminal correctness. Aggregate acceptance conservation also crosses the initial
+issue, STA retry, vector replay and scalar refetch ledgers, subtracting the
+synchronous graph operand calls outside the session. The exact schema77 equality
+is specified in `CONSTRAINED_RANDOM.md`; neither its transport counters nor its
+kind histogram replace independent result/identity checks.
+Session startup is exercised at quiescent epoch entry or
+after the bounded graph helper, not arbitrary reset/redirect rebinding.
 The single STD helper retains the transaction's full ROB value/wrap in its
 software offer, even though the generated public STD flag pin is pruned. The
 delayed producer cancellation rule uses this software identity. Wrapped

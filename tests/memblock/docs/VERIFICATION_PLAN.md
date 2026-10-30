@@ -194,10 +194,17 @@ versus vector completion rules and retained absolute targets preserve legality.
 `stream_store_retirement` measures accepted work and head updates while committed
 records remain queued. Legacy heterogeneous windows can now offer a legal
 scalar/FP load and first vector-load uop together, with `coissue` requiring both
-handshakes on one sampled edge. The ordinary sliding stream still selects one
-blocking producer helper at a time. Blocking issue handshakes, synchronous
-unresolved operands, heterogeneous ordinary producer issue and special-store
-lifecycle separation remain high priorities. Nonzero-VSTART
+handshakes on one sampled edge. The ordinary sliding stream uses a persistent
+retained session: independent offers survive stalls while other producers,
+admission and old-head retirement continue. Actual acceptance-edge kind sets
+and stalled-offer admission/retirement have separate counters and independent
+host ledgers. Synchronous unresolved graph operands still require an empty
+session before their helper and rebind afterward without a protocol drain.
+The schema77 aggregate checker ties accepted session attempts to initial issue,
+STA retry, vector replay and scalar refetch counts, excluding synchronous graph
+operand calls. Transport conservation alone does not establish exactly-once
+architectural work.
+Special-store lifecycle separation and broader recovery remain high priorities. Nonzero-VSTART
 vectors retain their required whole-instruction flush-after through a serialized
 suffix barrier with low `pendingst`, zero cancellation and conservative local
 recovery; `stream_vstart_flush` records that lifecycle. This direction does not
@@ -223,15 +230,16 @@ fourteen-edge vector timeout/retry and delayed age-specific redirect tails.
 Scalar-store accepted operands now mark their scoreboard and register/authorize
 release input groups before same-edge writeback/manager capture. Pair coverage
 records actual same/split accepted edges and skew; both remain distinct issue
-events. General sliding load/vector scheduling and admission during a stalled
-pair remain to be migrated. Independent byte and identity scoreboards stay active.
+events. Sliding load/vector/STA/STD/prefetch issue now uses persistent slots;
+ready selections and actual handshakes remain distinct. Independent byte and
+identity scoreboards stay active.
 Legacy manual issue helpers now reject a bound retained owner before pin writes
 or clock edges; vector replay service also rejects before consuming its request.
 This includes an empty bound owner. The STD software offer retains full ROB wrap
 identity even with the public flag pin pruned. These are correctness
-prerequisites for persistent sessions, not completion of the producer-density
-gap; independent admission/retirement and heterogeneous issue during stalls
-remain required.
+prerequisites for persistent sessions. The current session migration adds
+independent admission/retirement and heterogeneous issue during stalls; its
+transport histograms do not establish every producer/operation timing cross.
 The stream holds a single architectural head and independent byte-prefix oracle,
 with distinct live class destinations. Ordinary admissions can independently
 sample address and scalar-store data edges from older live integer loads.
@@ -306,8 +314,10 @@ Priority work, each requiring executable stimulus and an independent check:
    after architectural progress and reports committed-pending overlap. Measure
    actual accepted issue-port sets and extend lifecycle separation to other
    legal store classes. Per-store STA feedback removes another global wait;
-   blocking issue handshakes, legacy/special retirement and unresolved-operand
-   paths remain explicit work.
+   legacy/special retirement and synchronous unresolved-operand paths remain
+   explicit work. Ordinary persistent slots remove the prior handshake barrier;
+   extend accepted boundary crosses and keep aggregate and per-identity checks
+   distinct.
 2. Extend unfinished cancellation beyond the bounded youngest cold role in
    isolated and integrated sliding graphs; add broader temporal/address dependencies,
    and extend the canonical FP checks beyond their four implemented builders. Extend final observation beyond cacheable

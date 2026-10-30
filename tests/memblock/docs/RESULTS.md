@@ -18,11 +18,21 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema 77 gives the ordinary sliding stream independent retained load,
+  prefetch, STA, STD and vector offers. Clock, admission and retirement edges
+  service every live lane; accounting and dependency consumption follow actual
+  acceptance. Vector preaccept retries preserve their obligation separately
+  from identified LSU replay. Transport outcomes and accepted kind sets are
+  independently checked and tied to initial/retry/replay/refetch issue totals.
+  Native development cases observe heterogeneous handshakes and admission and
+  retirement during held offers. Synchronous graph operands, epoch/context
+  drains, ordinary U-mode live permissions and broader cancellation remain gaps.
+
 - Legacy issue helpers reject a bound retained driver before changing pins or
   advancing an edge, including an empty owner. Vector replay service rejects
   before consuming its request. Single STD offers preserve software ROB wrap
   for delayed cancellation despite the pruned public flag pin. These close
-  driver correctness prerequisites; persistent ordinary issue remains open.
+  driver correctness prerequisites used by the persistent ordinary session.
 
 - Ordinary cacheable mixed recovery retains exact terminal expectations through
   all three monitored redirect-return edges. Only at the matching completed
@@ -43,17 +53,18 @@ None.
   manager drive, marks store-scoreboard obligations before same-edge STD
   completion, and registers/authorizes release input groups before the edge.
   `stream-store-pair` controls selection; accepted same-edge/STA-first/STD-first
-  counts and edge skew distinguish selection from actual overlap. Graph
-  operands, retries and independent admission during a stalled pair remain
-  separate work. Byte-prefix and final-state oracles remain strict.
+  counts and edge skew distinguish selection from actual overlap. Unresolved
+  graph operands retain synchronous helpers. The persistent session also
+  services retries and independent admission during a stalled pair. Byte-prefix
+  and final-state oracles remain strict.
 
 - The shared retained producer driver owns independent ordinary lane slots,
   captures acceptance after manager drive at the common pre-edge boundary and
   emits events only after that edge. The legacy scalar/vector load pair now
   uses it, retaining scalar stalls and preserving vector timeout/retry
   obligations. Host witnesses check payload stability, exact events, circular
-  redirect age and delayed cancellation tails. General sliding load/vector issue
-  and independent admission during retained stalls still require migration.
+  redirect age and delayed cancellation tails. The ordinary sliding stream now
+  uses the same driver through a persistent session.
 
 - Schema 75 separates admitted generations, accepted initial issue events and
   architectural retirement after a mixed-suffix redirect. Canceled class/uop,
@@ -61,15 +72,15 @@ None.
   accounting. Repeated-Vd vector chains can cancel before consumer issue;
   generated chains and source reuses remain distinct from retired-uop counts.
   Data, identity, legal suffix cancellation and physical queue recovery checks
-  remain separate requirements. This is a verification-accounting correction;
-  the ordinary stream still uses blocking issue helpers.
+  remain separate requirements. Synchronous unresolved graph operands remain
+  outside the ordinary persistent session.
 
 - Legacy heterogeneous windows may offer a scalar/FP load and first vector-load
   uop together while preserving each request until its own handshake. The pair
   driver now retains the scalar frontend/dependency metadata used by ordinary
   issue. `coissue` requires both handshakes on one sampled edge; it is coverage
   evidence alongside independent scalar/vector terminal checks. The canonical
-  sliding stream still selects one blocking producer helper per turn.
+  sliding stream independently retains ordinary offers across scheduler turns.
 
 - The DCache manager provides independently grouped ordinary-input ReleaseData
   versions, with first-C snapshots, least-witness promotion, retained omitted
@@ -78,14 +89,15 @@ None.
   capability checkpoint; mixed-driver integration and its native qualification
   remain separate work.
 
-- LSQ monitor schema 3 adds passive enqueue cadence while constraint schema
-  remains 73. Ordinary admission uses both post-admission watermarks without a
+- LSQ monitor schema 3 adds passive enqueue cadence. Ordinary admission uses
+  both post-admission watermarks without a
   fixed quiet interval, ages public dequeue/reconciled cancellation credits by
   three further edges and blocks six further edges after each redirect-high
   sample. The guard restarts on repeated highs. Immediate correctness totals,
   lane/flow identity, terminal checks and pressure-helper behavior remain intact.
-  This admits consecutive normal-workload inputs using existing capacity; it
-  does not decouple blocking issue or architectural retirement from SQ dequeue.
+  This admits consecutive normal-workload inputs using existing capacity.
+  Persistent issue and architectural retirement/SQ drain separation are
+  qualified independently above and below.
 
 - Schema 73 keeps ordinary scalar-store address feedback and retry state per
   instruction. An accepted STA returns to the ready-event scheduler; only its
@@ -142,8 +154,8 @@ None.
   destinations, exact replay service and scalar/vector commit separation.
   An independent admission-order byte image freezes younger load values from
   initial bytes plus older input stores. Beat-crossing scalar STA waits for
-  actual head eligibility so its blocking acceptance helper cannot stall older
-  retirement. Schema 62 conserves initial issue, admission, retirement, replay
+  actual head eligibility, preserving the older-retirement and misalignment
+  contract. Schema 62 conserves initial issue, admission, retirement, replay
   and placement observations. Schema 67 records admission/producer choices
   made while a complete head could retire. The serial reservation is capped at
   half the available action budget, keeping short default spec/coverage/corner
@@ -392,14 +404,16 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 | Cross-alias producer/recovery qualification | Seven direct invocations pass across six scenarios, including exact replay of `translation-alias`. Warmed-alias recovery finishes at cycle 401 with one discarded pulse, strict refetch and total LQ 5+0/5; cold-first recovery finishes at cycle 312 with one discarded pulse, strict refetch and LQ 2+0/2. Four mixed seeds / 1024 actions pass both finite artifact verifiers and exactly match preceding summaries | `build/memblock/ordinary-async-20261030/alias-refetch-v1/{directed-v3-results.json,native-v3-comparison.json,provenance-v3.json}`. Secondary public trace confirms three store commits with pendingst high, immediate next-edge head advance and both simultaneous identified WB/redirects. Five host methods cover 26 load scripts, all 320 store ROB identities and seven private helper faults. Correct-first-data redirects and nonzero LQ cancellation remain synthetic-only; pre-issue SBuffer busy does not prove forwarding-stage residence. Corrected stimulus/recovery qualifies the UT; no CPU RTL bug or closure claim |
 | Ordinary-input cancellation manager | Nine manager host methods pass, including 19 focused cancellation cases; nine new private cancellation faults and nine retained input-version faults reject | `WORKSPACE_ROOT/build/memblock/store-retirement-20261030/release-cancel-checkpoint/{evidence.json,host-ao5gtuoq/summary.json}`; cancellation removes only unauthorized groups after a caller-certified boundary, preserves first-C snapshots/history/floors and permits fresh reuse of never-applied orders. Synthetic manager ports; no mixed-suffix/native recovery qualification |
 | Vector frontend input identity | Three host methods pass: 2496 whole ordinary-builder cases and 640 segment-metadata-block cases; both former independent per-uop assignments reject | `build/memblock/store-retirement-20261030/vector-frontend-identity-v1/`; sibling ROB/FTQ identity remains shared while instruction identities vary. Comparison with the former builder preserves non-frontend fields, queue cursors and PRNG state. Segment coverage is the actual FTQ assignment block, not its complete action/ports. Fresh non-author review accepts this bounded scope; its metadata probe passes 40960 instruction cases/315392 uops (`vector-frontend-review-v1/`). The isolated archived-HEAD-header suite also passes all three methods (`vector-frontend-isolated-v1/`). No native replay or CPU bug claim |
-| Retained producer and scalar/vector pair issue | Eight finite native cases pass 2048 actions: default `spec`/`corner` and forced legacy `spec`/`corner`, two seeds each; all four full finite artifact verifiers pass. Forced `spec` cases observe three same-edge pairs each; forced corner observes zero/three. One additional 256-action `spec` replay has an identical terminal summary and passes its full verifier. Seven new retained-driver host methods check 9244 offers, 49921 age/redirect cases, timeout/retention boundaries, actual tick sampling and three private driver faults. | `build/memblock/ordinary-issue-20261030/retained-driver-v1/qualification.json`, `runtime/runtime.json`, `native-verification.json`, `retained-final.log`; fresh non-author review adds repeated retry, failure/exception cleanup and all-slot redirect challenges. Synthetic transport cases do not qualify store authorization, full vector legality or native redirect stages. Ordinary sliding simultaneous issue and admission plus issue remain gaps. Development qualification only. |
-| Ordinary retained STA/STD pairing | Ten finite native cases pass 4096 actions and all six full finite artifact verifiers: two each default `spec`/`corner`, forced scalar pairing and separate-operand controls, plus exact split-pair replay and prior-runtime compatibility. Eight primary cases observe 393 same-edge pairs and one STD-first pair at one-edge skew; disabled controls observe zero. Seed 6621 replays its exact terminal summary. With pairing disabled, seed 6501 matches 399 semantic fields against the schema75 runtime, excluding schema/new pair fields. | `build/memblock/ordinary-issue-20261030/store-pair-v1/qualification.json`, `native-verification.json`, `replay-comparison.json`, `compat-comparison.json`. Three compiled helper methods include 256 schedules with real StoreScoreboard, same-edge STD and four failure controls; two accounting methods check 768 current/disabled/old-schema histories. The independent scheduler pair ledger compares all five outcome/skew bins; rate endpoints and three private direction/skew faults are checked. Canceled-store marginals provide necessary population bounds without joint-owner reconstruction. General heterogeneous issue, admission during stalls and native STA-first pairs remain gaps. Development qualification only. |
-| Constrained-random structural uniqueness | The current pinned ordinary scheduler produces 64 distinct schedules from 64 fixed-eight-load seeds after removing addresses, payloads, delays and dependency-selection events; reductions retain 52 admission/retirement interleavings and 45 load issue orders. The executable test independently requires event-only diversity and both reductions. All 35 scheduler methods pass, including exact same-seed replay, oracle rollback, independent pair counters and private scheduling-fault sensitivity. | `build/memblock/ordinary-issue-20261030/redirect-tail-v1/structure-final-summary.json` records reductions and equality of all 22 current production hashes; `structure-final.json` and `full-unit-final.log` retain the full scheduler sample. Fresh independent review reproduces 64/52/45. This proves variation inside the implemented grammar, not broad full-CPU joint coverage. Blocking issue helpers, ordinary-stream same-cycle heterogeneous issue, adjacent-return/EXU arbitration and ordinary U-mode/context continuity remain explicit gaps. |
+| Retained producer and scalar/vector pair issue | Eight finite native cases pass 2048 actions: default `spec`/`corner` and forced legacy `spec`/`corner`, two seeds each; all four full finite artifact verifiers pass. Forced `spec` cases observe three same-edge pairs each; forced corner observes zero/three. One additional 256-action `spec` replay has an identical terminal summary and passes its full verifier. Seven new retained-driver host methods check 9244 offers, 49921 age/redirect cases, timeout/retention boundaries, actual tick sampling and three private driver faults. | `build/memblock/ordinary-issue-20261030/retained-driver-v1/qualification.json`, `runtime/runtime.json`, `native-verification.json`, `retained-final.log`; fresh non-author review adds repeated retry, failure/exception cleanup and all-slot redirect challenges. Synthetic transport cases do not qualify store authorization, full vector legality or native redirect stages. These artifacts qualify the legacy pair; persistent ordinary overlap is qualified separately. Development qualification only. |
+| Ordinary retained STA/STD pairing | Ten finite native cases pass 4096 actions and all six full finite artifact verifiers: two each default `spec`/`corner`, forced scalar pairing and separate-operand controls, plus exact split-pair replay and prior-runtime compatibility. Eight primary cases observe 393 same-edge pairs and one STD-first pair at one-edge skew; disabled controls observe zero. Seed 6621 replays its exact terminal summary. With pairing disabled, seed 6501 matches 399 semantic fields against the schema75 runtime, excluding schema/new pair fields. | `build/memblock/ordinary-issue-20261030/store-pair-v1/qualification.json`, `native-verification.json`, `replay-comparison.json`, `compat-comparison.json`. Three compiled helper methods include 256 schedules with real StoreScoreboard, same-edge STD and four failure controls; two accounting methods check 768 current/disabled/old-schema histories. The independent scheduler pair ledger compares all five outcome/skew bins; rate endpoints and three private direction/skew faults are checked. Canceled-store marginals provide necessary population bounds without joint-owner reconstruction. Persistent heterogeneous issue and admission during stalls are qualified separately; these pair-specific samples do not establish native STA-first outcomes. Development qualification only. |
+| Persistent ordinary issue DUT qualification | Frozen runtime-v2 passes six finite cases / 3072 actions: two default `spec`, two default `corner`, and two dense ordinary corner profiles. All three finite artifact verifiers pass. There are 4560 accepted attempts, 301 preaccept retries and 1260 accepted vector replays; five admissions and one retirement occur with an already stalled offer. All-four-kind handshakes occur in both a default spec and a dense corner case. All 1566 tracked words are read back. Seven adjacent directed invocations pass; seed 6832 also replays its exact terminal summary. | `build/memblock/ordinary-async-20261030/persistent-v1/{qualification-v2.json,artifact-verifiers-v2.json,direct-invocations.json,exact-replay-6832.json,provenance-v2.json}`; 98 prepared source comparisons match and the RTL model is unchanged. These native samples contain no session canceled offers or accepted killed tails. Synchronous unresolved operands and ordinary U-mode/context continuity remain gaps. Finite development qualification only; no closure or CPU bug claim. |
+| Persistent session host and acceptance accounting | Six API methods exercise actual session/tick/scoreboard/replay code and detect six private faults. Nine accounting methods use independent edge histories, serialization and private faults; architecture-only corruptions preserve transport counts and fail the cross-ledger equality. A fresh reviewer separately drives 64 production-scheduler cases through 818 preaccept timeouts and eventual retries with exact independent ledgers. | `build/memblock/ordinary-async-20261030/persistent-v1/{api-tests,accounting-followup,reviewer/independent-timeout}`. Synthetic pins/completion timing qualify host contracts, not native reachability of every redirect or timeout cross. Legacy synchronous histories remain explicitly schema76 rather than inventing session evidence. |
+| Constrained-random structural uniqueness | The current pinned ordinary scheduler produces 64 distinct schedules from 64 fixed-eight-load seeds after removing addresses, payloads, delays and dependency-selection events; reductions retain 41 admission/retirement interleavings and 43 load issue orders. All 36 scheduler methods pass, including same-seed replay, oracle rollback, independent transport/port/pair ledgers and private scheduling faults. | `build/memblock/ordinary-async-20261030/persistent-v1/{structure-v4-summary.json,scheduler-dev-v4.json,scheduler-dev-v4.log}` records reductions and equality of all 22 production hashes. These results establish variation inside the implemented grammar. Synchronous graph operands, adjacent-return/EXU arbitration and ordinary U-mode/context continuity remain explicit gaps. |
 | Ordinary mixed redirect propagation and generation accounting | Frozen runtime-v2 passes six finite native cases / 5120 actions and all four full finite artifact verifiers: two each default `spec`/`corner`, seed 6271 with pairing disabled, and its exact replay. Both 2048-action cancellation cases finish at cycle 821593 with one redirect canceling six generations (four vector loads, one scalar store, one prefetch), 14 admitted/nine accepted vector-load uops, one unflushed VSTART and two unconsumed vector source-chain edges. Their entire terminal summaries also match the prior schema76 runtime. All 2437 final-word checks pass. Eight host methods exercise 168 exact terminal scripts, 30 corrupt/duplicate tails, five unknown late terminals, eight invalid boundaries, seven input lifecycles and nine propagation-feedback states; five author and four independent UT faults reject. | `build/memblock/ordinary-issue-20261030/redirect-tail-v1/qualification.json`, `runtime-v2/runtime.json`, `replay-comparison.json` and `review-disposition.json` retain commands, source comparisons, reviews and excluded preliminary attempts. Manager cancellation and pending-terminal erasure require the exact completed return; authorized stores and survivors remain live. Scripted edge/class tests qualify the checker, not native occurrence of every stage cross. Unmatched STD pulses, adjacent redirects, EXU/ROB arbitration, special-operation tails and full CPU reachability remain gaps. Development qualification only; no RTL bug or closure claim. |
 | Redirect cancellation and replay host oracles | Eight replay-controller methods and six bulk-cancellation methods pass; randomized public-edge histories, ROB age/wrap and both redirect levels are checked, with ten controller and six scoreboard private faults detected. | `build/memblock/store-retirement-20261030/memory-replay-controller-v1/verification.json` and `build/memblock/store-retirement-20261030/mixed-scoreboard-cancel-v1/verification.json`; these are independent host contracts and do not certify native DUT timing or full-CPU recovery. |
 | Ordinary store retirement separation | Nine store-retirement methods and two release-input methods pass. Architectural scalar/vector retirement is accounted separately from physical SQ drain, including pending committed records, vector-uop drain targets, nonzero-VSTART flush accounting and independent ReleaseData histories. | `build/memblock/store-retirement-20261030/store-retirement-*` and `release-cancel-checkpoint/`; the rebuilt harness passed 32 scheduler methods, while the corner replay above remains outside this bounded retirement qualification. |
 | Retained issue ownership and STD wrap | Six ownership methods pass: 20 bound-owner rejections, 10 unbound controls/11 accepted edges, all 320 ROB value/wrap identities and four wrapped redirect cases. Ten author private faults and two additional reviewer faults reject. Four finite native cases pass 1024 actions and both full artifact verifiers; entire terminal summaries match the preceding runtime | `build/memblock/ordinary-async-20261030/ownership-v1/qualification.json`, `reviewer/review-v2.md`; guards precede pin/edge/replay mutation and same-edge STD completion remains checked. The retirement fixture integration failure was corrected and all 17 methods independently rerun. Native compatibility does not qualify new scheduler overlap, unmatched STD pulses or closure |
-| Infrastructure unit | 610 tests pass; generated-interface, RTL and documentation checks pass | `build/memblock/ordinary-async-20261030/alias-refetch-v1/full-unit-v2.log`; final reviewed source includes corrected next-head timing, strict alias recovery and seven private helper faults. Its earlier `full-unit.log` predates the next-head fix and is excluded as final qualification. Unit checks do not establish DUT functional coverage |
+| Infrastructure unit | 626 tests pass; generated-interface, RTL and documentation checks pass | `build/memblock/ordinary-async-20261030/persistent-v1/full-unit-v2.log`; the final suite includes persistent API/scheduler/transport tests and the corrected legacy fixture boundaries. The initial failing compatibility suite is excluded. Unit checks do not establish DUT functional coverage |
 | Admission/ledger host contracts | 20 independent methods pass: 13 production C++ schedules, 20 compiled private faults detected, 50 ledger records; non-author review independently enumerates 4803 arithmetic cases | `build/memblock/enqueue-admission-20261030/independent-tests/{summary.txt,evidence.json,ledger-evidence.json}`, `review-v1/review.md`; exact credit/redirect boundaries, repeated highs, both watermarks, unmonitored ticks, immediate conservation, holey batches, cadence and schema 2 compatibility. Synthetic public ports/edges; no DUT mutation claim |
 | Ordinary enqueue/feedback DUT qualification | Frozen runtime-v1: 12/12 finite cases pass 22528 actions; six current-runtime artifact verifiers and one prior-monitor2 control pass; 9/9 adjacent directed scenarios pass | `build/memblock/enqueue-admission-20261030/qualification-v1.json`, `artifact-verifiers-v1.json`, `directed-v1/results.json`; spec/coverage/corner defaults, ordinary dependency streams, integrated recovery and store-only 641-instruction epochs. Whole-run cadence: 51092 enqueue edges, 8969 adjacent edges with older work, maximum run 19; this includes legacy/final readback and has no per-stream attribution. Stream-specific feedback overlap includes 315 admissions, 14 loads, 227 STA, 182 STD, 35 vector uops and 7 prefetches. 5478 ordinary hits, 715 misses/retries, maximum pending 2; 12303 stream retirements, 2748 full ROB identity reuses and 9929/9929 final words. Exact corner replays pass at 333.5/336.6s with 900s budget; initial 180s timeouts and malformed-constraint attempts are excluded. Functional/accounting development evidence, not closure |
 | Store feedback structural and sensitivity checks | 29 scheduler methods and 16 independent replay/accounting methods pass; fresh focused 64/64 seeds produce distinct structural schedules and seed 1 replays exactly; 44 serialization round trips and 15 private replay/accounting faults remain detected | `build/memblock/enqueue-admission-20261030/scheduler-focused-v1.json`, `unit-v2.log`; focused schedules exclude addresses/payload/cycles/delays. Replay-state checks and retained serializer/fault evidence are at `build/memblock/store-feedback-20261030/independent-tests/summary-v2.json`. Synthetic host timing does not prove full CPU reachability; these are UT checks, not RTL mutation coverage |
@@ -505,6 +519,24 @@ capability run or a controller/verifier return code alone.
 
 ## Current Review
 
+Fresh-context non-author review approves the bounded persistent ordinary issue
+checkpoint with no open blocking finding. The cross-ledger finding is resolved:
+session acceptances must equal initial issue plus accepted STA retries, vector
+replays and scalar refetches, less synchronous graph calls. Architecture-only
+corruptions leave transport/histogram fields intact and reject; deleting that
+rule makes them escape. The reviewer checks all 27 refreshed source/contract/test
+hashes, nine transport methods, three native verifiers, 98 prepared-source
+comparisons and four frozen-artifact hashes. Its separate 64-seed scheduler
+challenge exercises 818 preaccept timeouts and eventual retries with exact
+independent ledgers. The final complete suite passes 626 tests; seven directed
+invocations and an exact native spec replay also pass. Evidence is
+`build/memblock/ordinary-async-20261030/persistent-v1/reviewer/review-v1.md`;
+primary disposition is `review-disposition-v2.json` in its parent. Native session killed
+tails remain unobserved in the six qualified cases; synthetic API tests do not
+close that temporal gap. Synchronous graph scheduling, ordinary U-mode live
+permissions, general accepted-generation attribution and wider recovery remain
+open. No CPU RTL bug or closure is claimed.
+
 Fresh-context non-author review accepts the bounded alias producer/recovery
 change with no open findings. The retired-head finding is resolved: all three
 native store commits expose the next non-store head on the following edge,
@@ -528,8 +560,9 @@ and pass frozen-runtime/accounting checks; the final full suite passes 605
 tests. Evidence and disposition are under
 `build/memblock/ordinary-async-20261030/ownership-v1/`.
 The initial failed fixture suite and unrelated alias diagnostic are excluded
-from passing qualification. Persistent scheduling, admission during stalls,
-broader recovery and unmatched STD attribution remain open.
+from passing qualification. Persistent scheduling and admission during stalls
+are qualified separately above; broader recovery and unmatched STD attribution
+remain open.
 
 Fresh-context non-author review accepts the bounded ordinary cacheable redirect
 return and stronger event-only randomness check, with no open blocking findings.
@@ -556,8 +589,9 @@ checked. Evidence is `build/memblock/ordinary-issue-20261030/store-pair-v1/revie
 `review-v3/reviewer/review-v3.md` separately accepts the final emitter-domain
 check, and `review-disposition.json` records primary resolution in the same
 `store-pair-v1` parent. Canceled-operand marginals cannot reconstruct joint
-owner attribution; broad native split timing, heterogeneous issue, admission
-during stalls and retained recovery tails remain open. No RTL bug or closure
+owner attribution; broad native split timing and retained recovery tails remain
+open. Persistent heterogeneous issue and admission during stalls are qualified
+separately. No RTL bug or closure
 claim follows.
 
 Fresh-context non-author review accepts the retained producer transport and

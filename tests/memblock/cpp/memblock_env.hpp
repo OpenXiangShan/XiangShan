@@ -1252,6 +1252,23 @@ public:
 
     bool last_load_vector_pair_same_cycle() const;
 
+    // Persistent producer ownership: offers never tick; all environment edges
+    // retain independent lanes and publish sampled handshake events.
+    bool begin_issue_session();
+    bool end_issue_session();
+    bool issue_session_empty() const;
+    bool issue_session_available(OrdinaryIssueKind kind, unsigned lane) const;
+    bool offer_load(std::uint64_t tag, const LoadTransaction &transaction);
+    bool offer_prefetch(std::uint64_t tag, const PrefetchTransaction &transaction);
+    bool offer_store_address(std::uint64_t tag, const StoreTransaction &transaction);
+    bool offer_store_data(std::uint64_t tag, const StoreTransaction &transaction);
+    bool offer_vector(std::uint64_t tag, const VectorMemoryTransaction &transaction);
+    std::vector<OrdinaryIssueEvent> take_issue_events();
+    bool poll_vector_replay(const VectorMemoryTransaction &transaction,
+        VectorMemoryTransaction &replay, bool &found);
+
+
+
     bool issue_store_address(const StoreTransaction &transaction, unsigned timeout = 32);
 
     struct StoreOperandAcceptances {

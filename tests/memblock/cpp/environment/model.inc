@@ -345,6 +345,19 @@ inline std::uint64_t reference_byte_address(
         : virtual_address;
 }
 
+// Producer transport events, distinct from architectural terminal results.
+enum class OrdinaryIssueKind { load, store_address, store_data, vector };
+enum class OrdinaryIssueOutcome { accepted, retry, canceled };
+struct OrdinaryIssueEvent {
+    std::uint64_t tag = 0, edge = 0;
+    OrdinaryIssueKind kind = OrdinaryIssueKind::load;
+    unsigned lane = 0;
+    OrdinaryIssueOutcome outcome = OrdinaryIssueOutcome::accepted;
+    bool killed = false;
+    std::size_t feedback_cursor = 0;
+    bool committed_pending = false;
+};
+
 struct LoadTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;

@@ -1178,3 +1178,5 @@ auto Environment::Impl::enqueue_load(const LoadTransaction &transaction)  -> boo
 }
 
 } // namespace memblock
+
+#include "issue_session.inc"

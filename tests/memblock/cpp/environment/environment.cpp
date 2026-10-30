@@ -2205,4 +2205,34 @@ auto Environment::dcache_alias_recall_responses() const -> std::uint64_t
 {
     return impl_->dcache_alias_recall_responses();
 }
+
+auto Environment::begin_issue_session() -> bool { return impl_->begin_issue_session(); }
+auto Environment::end_issue_session() -> bool { return impl_->end_issue_session(); }
+auto Environment::issue_session_empty() const -> bool { return impl_->issue_session_empty(); }
+auto Environment::issue_session_available(OrdinaryIssueKind kind, unsigned lane) const -> bool {
+    return impl_->issue_session_available(kind, lane);
+}
+auto Environment::offer_load(std::uint64_t tag, const LoadTransaction &transaction) -> bool {
+    return impl_->offer_load(tag, transaction);
+}
+auto Environment::offer_prefetch(std::uint64_t tag, const PrefetchTransaction &transaction) -> bool {
+    return impl_->offer_prefetch(tag, transaction);
+}
+auto Environment::offer_store_address(std::uint64_t tag, const StoreTransaction &transaction) -> bool {
+    return impl_->offer_store_address(tag, transaction);
+}
+auto Environment::offer_store_data(std::uint64_t tag, const StoreTransaction &transaction) -> bool {
+    return impl_->offer_store_data(tag, transaction);
+}
+auto Environment::offer_vector(std::uint64_t tag, const VectorMemoryTransaction &transaction) -> bool {
+    return impl_->offer_vector(tag, transaction);
+}
+auto Environment::take_issue_events() -> std::vector<OrdinaryIssueEvent> {
+    return impl_->take_issue_events();
+}
+auto Environment::poll_vector_replay(const VectorMemoryTransaction &transaction,
+    VectorMemoryTransaction &replay, bool &found) -> bool {
+    return impl_->poll_vector_replay(transaction, replay, found);
+}
+
 } // namespace memblock

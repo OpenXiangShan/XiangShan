@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4295,6 +4295,7 @@ def _check_mixed_coverage(
     result: dict[str, Any], require_backpressure: bool = False
 ) -> None:
     _check_constraint_coverage(result)
+    _check_stream_transport(result)
     for name, fields in (
         ("load_ops", 7),
         ("store_ops", 4),
@@ -4931,7 +4932,11 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) >= 67:
         waiting_admissions, waiting_issues = _csv_counts(result, "stream_waiting_head", 2)
         refetch_issues = _csv_counts(result, "stream_recovery", 20)[8] if result.get("constraint_schema", 0) >= 68 else 0
-        _require(waiting_admissions <= admitted - epochs and waiting_issues <= events + retries + refetch_issues - epochs,
+        producer_selections = events + retries + refetch_issues
+        if result.get("constraint_schema", 0) >= 77:
+            transport = _csv_counts(result, "stream_transport", 10)
+            producer_selections = transport[0] + transport[8]
+        _require(waiting_admissions <= admitted - epochs and waiting_issues <= producer_selections - epochs,
                  "stream completed-head selections exceed admitted/issued work")
         if admitted == epochs:
             _require(waiting_admissions == waiting_issues == 0,
@@ -5096,12 +5101,57 @@ def _check_lsq_enqueue_cadence(result: dict[str, Any]) -> None:
              "LSQ longest enqueue run is inconsistent")
 
 
+def _check_stream_transport(result: dict[str, Any]) -> None:
+    """Conserve persistent attempts and bound actual accepted-edge kind sets."""
+    if result.get("constraint_schema", 0) < 77:
+        return
+    transport = _csv_counts(result, "stream_transport", 10)
+    ports = _csv_counts(result, "stream_issue_ports", 16)
+    _require(all(value <= (1 << 64) - 1 for value in transport + ports),
+             "stream transport counters exceed the emitter uint64 domain")
+    offers, accepted, retried, canceled, killed, peak, admissions, retirements, legacy, selections = transport
+    stream = _csv_counts(result, "stream", 12)
+    epochs, admitted, retired = stream[:3]
+    redirects = _csv_counts(result, "stream_cancel", 29)[0]
+    _require(offers == accepted + retried + canceled and killed <= accepted,
+             "stream persistent offers are not accepted, retried or canceled exactly once")
+    _require(selections <= offers <= 2 * selections and
+             ((offers == 0 and peak == 0) or
+              (offers > 0 and 1 <= peak <= min(offers, 9))),
+             "stream persistent producer selections/peak disagree with offers")
+    _require(admissions <= admitted - epochs and retirements <= retired,
+             "stream stalled-offer overlaps exceed admitted/retired work")
+    _require((canceled == killed == 0) or redirects > 0,
+             "stream canceled offers or killed acceptances have no mixed redirect")
+    _require(ports[0] == 0,
+             "stream accepted-edge histogram includes an empty port set")
+    minimum_accepts = sum(mask.bit_count() * count for mask, count in enumerate(ports))
+    lane_limits = (3, 2, 2, 2)
+    maximum_accepts = sum(sum(limit for kind, limit in enumerate(lane_limits)
+                              if mask & (1 << kind)) * count
+                          for mask, count in enumerate(ports))
+    _require(minimum_accepts <= accepted <= maximum_accepts,
+             "stream accepted-edge kind sets disagree with accepted lane counts")
+    if epochs == 0:
+        _require(not any(transport + ports), "empty stream has persistent transport observations")
+    else:
+        _require(offers > 0 and accepted > 0 and selections > 0,
+                 "nonempty stream has no persistent producer activity")
+    scalar_retries = result.get("stream_scalar_retries")
+    _require(type(scalar_retries) is int and scalar_retries >= 0,
+             "invalid stream_scalar_retries")
+    refetches = _csv_counts(result, "stream_recovery", 20)[8]
+    _require(accepted == stream[8] + scalar_retries + stream[9] + refetches - legacy,
+             "stream session acceptances disagree with architectural issue accounting")
+
+
 def _check_mixed_accounting(result: dict[str, Any]) -> None:
     """Validate queue/LSQ accounting, not coverage completeness.
 
     Coverage counters remain in the result and per-run report, but a sparse
     random run is valid: the verifier must not reject it for unobserved bins.
     """
+    _check_stream_transport(result)
     lq_allocated, lq_canceled = _balanced_queue(result, "lq")
     sq_allocated, sq_canceled = _balanced_queue(result, "sq")
     lsq_monitor_schema = result.get("lsq_monitor_schema", 0)

@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <tuple>
+#include <variant>
 
 using namespace memblock;
 using namespace memblock::scenarios;
@@ -187,8 +188,100 @@ struct SyntheticEnvironment {
         }
         retirement_stats.pending = retired_stores.size();
     }
+    struct Offer {
+        std::uint64_t tag, created, ready_at;
+        OrdinaryIssueKind kind;
+        unsigned lane;
+        std::variant<LoadTransaction, PrefetchTransaction, StoreTransaction, VectorMemoryTransaction> payload;
+    };
+    bool session = false, processing_offers = false;
+    std::vector<Offer> offers;
+    std::vector<OrdinaryIssueEvent> transport_events;
+    std::set<unsigned> selected_pairs;
+    std::array<std::uint64_t, 10> observed_transport{};
+    std::map<std::uint64_t, unsigned> observed_ports;
+    std::optional<bool> retirement_had_stall;
+    bool held_live() const {
+        return std::any_of(offers.begin(), offers.end(), [&](const auto &offer) { return offer.created < tick; });
+    }
+    std::map<unsigned, std::array<std::optional<std::uint64_t>, 2>> pair_acceptance_edges;
+    void select_pair(const StoreTransaction &store) { selected_pairs.insert(find(store.rob, store.rob_flag).id); }
+    void note_selection(unsigned kind) {
+        if (kind == 0 || kind == 5 || kind == 7 || kind == 8 || kind == 9) return;
+        issues_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
+        if (kind != 6) ++observed_transport[9];
+    }
+    bool begin_issue_session() { require(!session, "nested issue session"); session = true; return true; }
+    bool end_issue_session() {
+        require(session && offers.empty() && transport_events.empty(), "session ended with live offers/events");
+        session = false; return true;
+    }
+    bool ok() const { return true; }
+    bool issue_session_empty() const { return offers.empty(); }
+    bool issue_session_available(OrdinaryIssueKind kind, unsigned lane) const {
+        return session && std::none_of(offers.begin(), offers.end(), [&](const auto &offer) {
+            return offer.kind == kind && offer.lane == lane;
+        });
+    }
+    template<class Transaction>
+    bool offer(std::uint64_t tag, OrdinaryIssueKind kind, unsigned lane, const Transaction &transaction) {
+        require(issue_session_available(kind, lane), "offer overwrote an occupied producer lane");
+        const auto &work = find(transaction.rob, transaction.rob_flag);
+        // Independent bounded per-port backpressure; never consult ready list.
+        const auto delay = 1U + (work.id * 7U + unsigned(kind) * (13U + (work.id % 3U) * 2U)) % 5U;
+        offers.push_back({tag, tick, tick + delay, kind, lane, transaction});
+        ++observed_transport[0];
+        observed_transport[5] = std::max<std::uint64_t>(observed_transport[5], offers.size());
+        return true;
+    }
+    bool offer_load(std::uint64_t tag, const LoadTransaction &t) { return offer(tag, OrdinaryIssueKind::load, t.lane, t); }
+    bool offer_prefetch(std::uint64_t tag, const PrefetchTransaction &t) { return offer(tag, OrdinaryIssueKind::load, t.lane, t); }
+    bool offer_store_address(std::uint64_t tag, const StoreTransaction &t) { return offer(tag, OrdinaryIssueKind::store_address, t.address_lane, t); }
+    bool offer_store_data(std::uint64_t tag, const StoreTransaction &t) { return offer(tag, OrdinaryIssueKind::store_data, t.data_lane, t); }
+    bool offer_vector(std::uint64_t tag, const VectorMemoryTransaction &t) { return offer(tag, OrdinaryIssueKind::vector, t.lane, t); }
+    auto take_issue_events() { auto events = std::move(transport_events); transport_events.clear(); return events; }
+    bool poll_vector_replay(const VectorMemoryTransaction &, VectorMemoryTransaction &, bool &found) { found = false; return true; }
+    void process_offers() {
+        if (!session || processing_offers) return;
+        processing_offers = true;
+        const bool saved = defer_producer_edge;
+        defer_producer_edge = true;
+        for (auto it = offers.begin(); it != offers.end();) {
+            if (tick < it->ready_at) { ++it; continue; }
+            const auto cursor = iq_slow_feedback_stats().sta_samples.size();
+            const auto edge = tick;
+            const bool pending = store_retirement_stats().pending != 0;
+            std::visit([&](const auto &transaction) {
+                using T = std::decay_t<decltype(transaction)>;
+                if constexpr (std::is_same_v<T, LoadTransaction>) require(issue_load(transaction, 1), "load acceptance failed");
+                else if constexpr (std::is_same_v<T, PrefetchTransaction>) require(issue_prefetch(transaction, 1), "prefetch acceptance failed");
+                else if constexpr (std::is_same_v<T, VectorMemoryTransaction>) require(issue_vector(transaction, 1), "vector acceptance failed");
+                else {
+                    require(it->kind == OrdinaryIssueKind::store_address ? issue_store_address(transaction, 1) :
+                        issue_store_data(transaction, 1), "store acceptance failed");
+                    const auto id = find(transaction.rob, transaction.rob_flag).id;
+                    if (selected_pairs.count(id)) {
+                        auto &edges = pair_acceptance_edges[id];
+                        edges[it->kind == OrdinaryIssueKind::store_address ? 0 : 1] = edge;
+                        if (edges[0] && edges[1]) {
+                            accepted_operand_pairs.push_back({*edges[0], *edges[1]}); selected_pairs.erase(id);
+                        }
+                    }
+                }
+            }, it->payload);
+            require(tick == edge, "synthetic acceptance advanced a hidden edge");
+            ++observed_transport[1];
+            observed_ports[edge] |= 1U << unsigned(it->kind);
+            transport_events.push_back({it->tag, edge, it->kind, it->lane,
+                OrdinaryIssueOutcome::accepted, false, cursor, pending});
+            it = offers.erase(it);
+        }
+        defer_producer_edge = saved;
+        processing_offers = false;
+    }
     bool defer_producer_edge = false, suppress_producer_note = false;
     void capture_store_edge() {
+        if (!processing_offers) process_offers();
         refresh_sq();
         retirement_stats.pending_before_last_edge = retired_stores.size();
         if (!defer_producer_edge) ++tick;
@@ -324,6 +417,8 @@ struct SyntheticEnvironment {
         require(actions != nullptr, "missing architectural action counter");
         require(*actions >= retired && *actions <= instructions.size(), "retirement outside admitted prefix");
         while (retired < *actions) {
+            observed_transport[7] += retirement_had_stall.value_or(held_live());
+            retirement_had_stall.reset();
             const auto &work = instructions.at(retired);
             require(complete(work), "retired incomplete architectural head");
             if (work.needs_restart_flush())
@@ -388,6 +483,7 @@ struct SyntheticEnvironment {
         require(expected.count(key(t, kind, uop)) != 0, "dispatch lacked prior expectation");
         require(enqueued.insert(key(t, kind, uop)).second, "duplicate dispatch");
         if (uop == 0) {
+            observed_transport[6] += held_live();
             admissions_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
             for (unsigned index = retired; index < instructions.size(); ++index)
                 require(!instructions[index].needs_restart_flush(), "younger admission escaped VSTART barrier");
@@ -571,12 +667,12 @@ struct SyntheticEnvironment {
     }
     std::uint64_t due(const Instruction &work, unsigned uop = 0) const {
         // Completion timing does not inspect the scheduler's candidate list.
-        return tick + (cold_enabled && !work.group && (work.kind == 1 || work.kind == 3) ? 143U : latency ? 37U + ((work.id * 7U + uop * 11U) % 31U) : 3U + (work.id + uop) % 5U);
+        return tick + (cold_enabled && !work.group && work.kind == 1 ? 63U + (work.id * 11U + uop * 17U) % 81U :
+            cold_enabled && !work.group && work.kind == 3 ? 143U : latency ? 37U + ((work.id * 7U + uop * 11U) % 31U) : 3U + (work.id + uop) % 5U);
     }
     void note_producer() {
         if (suppress_producer_note) return;
         prefix_old_producers += old_response_active();
-        issues_with_completed_head += !at_anchor && retired < instructions.size() && complete(instructions[retired]);
     }
     void issue(Instruction &work, unsigned index, const char *tag) {
         check_installed_head();
@@ -658,6 +754,7 @@ struct SyntheticEnvironment {
         return true;
     }
     bool issue_store_address_until_tlb_hit(const StoreTransaction &t, unsigned) {
+        observed_transport[8] += !session;
         auto &work = find(t.rob, t.rob_flag);
         check_installed_head(); check_head(work); note_producer();
         if (recovery_enabled && work.group == active_group && active_group) {
@@ -692,6 +789,7 @@ struct SyntheticEnvironment {
         return true;
     }
     bool issue_store_data(const StoreTransaction &t, unsigned) {
+        observed_transport[8] += !session;
         auto &work = find(t.rob, t.rob_flag); check_installed_head(); require(!work.data, "duplicate scalar store data");
         note_producer();
         check_dependency(work.id, true);
@@ -763,6 +861,7 @@ struct SyntheticEnvironment {
         require(work.id == retired && complete(work), "scalar retirement outside completed head");
         require(tick >= completion_edge(work) + 2U, "scalar scommit preceded backend readiness");
         require(!work.committed, "duplicate scalar retirement");
+        retirement_had_stall = held_live();
         capture_store_edge();
         work.committed = true; ++commits;
         register_retired_store(work.sq_target, work.id, false);
@@ -774,6 +873,7 @@ struct SyntheticEnvironment {
         require(work.id == retired && complete(work) && transactions.size() == work.uops.size(),
             "vector retirement outside complete instruction");
         require(tick >= completion_edge(work) + 3U, "vector retirement preceded backend readiness");
+        retirement_had_stall = held_live();
         capture_store_edge();
         for (const auto &t : transactions) {
             auto &uop = work.uops.at(t.vuop_idx);
@@ -824,7 +924,7 @@ struct SyntheticEnvironment {
         capture_store_edge(); retired_pending_heads += advanced && retirement_stats.pending_before_last_edge != 0;
         return true;
     }
-    bool run_cycles(unsigned count) { synchronize_retirement(); tick += count; return true; }
+    bool run_cycles(unsigned count) { synchronize_retirement(); for (unsigned i=0; i<count; ++i) capture_store_edge(); return true; }
     bool run_until_all_complete(unsigned) {
         synchronize_retirement();
         return std::all_of(instructions.begin() + retired, instructions.end(), [&](const auto &work) { return complete(work); });
@@ -860,6 +960,12 @@ struct SyntheticEnvironment {
         }
         require(coverage.stream_store_pair == expected_pairs,
             "production operand-pair direction/skew disagreed with independent accepted edges");
+        require(coverage.stream_transport == observed_transport,
+            "production transport coverage disagreed with independent offered/accepted boundaries");
+        std::array<std::uint64_t, 16> port_sets{};
+        for (const auto &[edge, mask] : observed_ports) ++port_sets[mask];
+        require(coverage.stream_issue_ports == port_sets,
+            "production accepted port sets disagreed with actual handshake edges");
         require(coverage.stream_recovery_inflight[2] == cold_cancellations && cold_cancellations == cold_releases &&
             cold_releases == cold_refetches, "unfinished stream lifecycle accounting disagreed");
         require(coverage.stream_recovery_inflight[9] == prefix_old_producers &&
@@ -1126,6 +1232,12 @@ int main(int argc, char **argv) {
                 << ",\"stream_sta\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_sta.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_sta[i];
+            std::cout << "],\"stream_transport\":[";
+            for (unsigned i=0; i<fixture.coverage.stream_transport.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_transport[i];
+            std::cout << "],\"stream_issue_ports\":[";
+            for (unsigned i=0; i<fixture.coverage.stream_issue_ports.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_issue_ports[i];
             std::cout << "],\"stream_store_pair\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_store_pair.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_store_pair[i];

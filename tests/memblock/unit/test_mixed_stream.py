@@ -87,6 +87,12 @@ class MixedStreamTest(unittest.TestCase):
         stream = stream.replace('return (address & ~std::uint64_t{0xfff}) | offset;',
             'return environment.check_dependent_address(address, '
             '(address & ~std::uint64_t{0xfff}) | offset, *address_value);')
+        # Observe chosen actions and paired intent; the shell independently
+        # computes readiness/completion and all actual acceptance edges.
+        stream = stream.replace('const auto event = ready[random() % ready.size()];',
+            'const auto event = ready[random() % ready.size()];\n        environment.note_selection(event.kind);')
+        stream = stream.replace('if (pair_operands) {\n                work.paired_initial = true;',
+            'if (pair_operands) {\n                environment.select_pair(work.store);\n                work.paired_initial = true;')
         source = source.replace('// PRODUCTION_STREAM', stream)
         execute = method('cpp/scenarios/mixed_scheduler.cpp', 'bool MixedScenario::execute()')
         source = source.replace('// PRODUCTION_EXECUTE', execute.replace('MixedScenario::', 'BudgetFixture::'))
@@ -197,6 +203,19 @@ class MixedStreamTest(unittest.TestCase):
         self.assertGreaterEqual(max(run['peak_accepted'] for run in results), 2)
         self.assertGreater(sum(run['overlap_admissions'] for run in results), 0)
         self.assertGreater(sum(run['continued_admissions'] for run in results), 0)
+
+    def test_persistent_offers_allow_stalled_admission_retirement_and_mixed_handshakes(self):
+        results = [self.stream(seed, timing=1, family=0, limit=64) for seed in range(1, 33)]
+        self.assertGreater(sum(run['stream_transport'][6] for run in results), 0)
+        self.assertGreater(sum(run['stream_transport'][7] for run in results), 0)
+        self.assertGreaterEqual(max(run['stream_transport'][5] for run in results), 3)
+        observed = {mask for run in results for mask, count in enumerate(run['stream_issue_ports']) if count}
+        self.assertTrue(any(mask.bit_count() >= 3 for mask in observed))
+        self.assertTrue(any(mask & 1 and mask & 8 for mask in observed))
+        for run in results:
+            counts = run['stream_transport']
+            self.assertEqual(counts[0], sum(counts[1:4]))
+            self.assertEqual(counts[2:5], [0, 0, 0])  # This shell imposes <=5 rejected edges.
 
     def test_seed_changes_structural_instruction_and_producer_schedules(self):
         results = [self.stream(seed) for seed in range(1, 65)]
@@ -561,7 +580,7 @@ class MixedStreamTest(unittest.TestCase):
 
     def test_private_store_pair_direction_and_skew_faults_reject(self):
         faults = [
-            ('all_together', '++pairs[edges[0] == edges[1] ? 0U : edges[0] < edges[1] ? 1U : 2U];', '++pairs[0];'),
+            ('all_together', '++pairs[a == d ? 0U : a < d ? 1U : 2U];', '++pairs[0];'),
             ('missing_skew', 'pairs[3] += skew;', 'pairs[3] += 0;'),
             ('sum_as_max', 'pairs[4] = std::max(pairs[4], skew);', 'pairs[4] += skew;'),
         ]

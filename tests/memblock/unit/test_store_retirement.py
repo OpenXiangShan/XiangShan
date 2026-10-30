@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -452,11 +453,15 @@ class StreamStoreRetirementAccountingTest(unittest.TestCase):
                              text=True, capture_output=True, timeout=20)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         report = self.modules['run_regression'].parse_summary(ran.stdout)
-        self.assertEqual(report['constraint_schema'], 76)
+        self.assertEqual(report['constraint_schema'], 77)
+        # These synchronous producer histories predate persistent sessions.
+        # Keep their schema76 contract without inventing transport events.
+        summary = re.sub(r'\bconstraint_schema=\d+\b', 'constraint_schema=76', ran.stdout)
+        report = self.modules['run_regression'].parse_summary(summary)
         for field in RETIREMENT_FIELDS:
             self.assertEqual(report[field], ','.join(map(lambda n: str(int(n)), rows[field])), field)
         self.records.append({'kind': 'serialized-history', 'store_retirement': report['stream_store_retirement'],
-                             'summary': ran.stdout})
+                             'summary': summary})
         return report
 
     def accepted(self, report, *, complete=True, label='valid'):

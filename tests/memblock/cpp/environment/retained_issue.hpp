@@ -34,10 +34,12 @@ public:
     bool empty() const {
         return std::none_of(slots_.begin(), slots_.end(), [](const auto &slot) { return slot.has_value(); });
     }
+    bool events_pending() const { return !events_.empty(); }
     bool available(Kind kind, unsigned lane) const { return !slots_[index(kind, lane)]; }
 
-    void offer_load(std::uint64_t tag, unsigned lane, const generated::ScalarLoadIssue &issue) {
-        offer(tag, Kind::load, lane, issue);
+    void offer_load(std::uint64_t tag, unsigned lane, const generated::ScalarLoadIssue &issue,
+                    Acceptance acceptance = {}) {
+        offer(tag, Kind::load, lane, issue, std::move(acceptance));
     }
     void offer_store_address(std::uint64_t tag, unsigned lane, const generated::ScalarStoreIssue &issue,
                              Acceptance acceptance = {}) {
