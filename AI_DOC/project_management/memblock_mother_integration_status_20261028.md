@@ -11,7 +11,7 @@
   原seed1992896882完整10000笔及真实DUT专项/邻接合计21/21严格PASS，四类必要软件专项另计通过；
   本BugTuring最终独立review PASS并已提交；1343版fault3恢复99曾出现新ROLLBACK_XMR并进入`PAUSED_ANALYSIS`，该新Bug现已专项闭环并提交bba3008；
   1343基线矩阵前5组50/50严格通过，第6组因新首错联停9PASS/1ABORTED、0功能FAIL。新rollback责任/方案/最终实现review均PASS，软件1/1及真实DUT20/20专项通过（18邻接加两个原根各10000笔），已提交bba3008ba。
-  新SV矩阵25组250/250已全部严格/clean通过，controller rc0退出；fault3剩98（jobs20）继续运行。当前最终名额已确认252/350（两个原根加矩阵250项），不用旧51或250项填充；BasicTest非RTL 11组110/110全部通过。
+  新SV矩阵25组250/250已全部严格/clean通过，controller rc0退出并获独立review PASS；fault3恢复98出现新cancel-depth首错551576067，已联停收敛为20PASS/1FAIL/19ABORTED/58NOT_RUN、unknown0。当前`PAUSED_ANALYSIS`，仅运行原seed带波形复现；新Bug未修复，不恢复批量或收集最终coverage。
   strict-NC单组保持`STOPPED_RTL_CONFIRMED`，母任务全部回归和最终覆盖率仍未完成。
 - 工作区状态按 `git status --short` 实时检查；文档提交不改变本轮已编译源码。
 
@@ -554,5 +554,11 @@ fault3余98入口：`basicTest / memblock_dispatch_real_smoke_vseq / tc_l2tlb_fa
 当前只本地提交：没有指定私有push目标，不向公共upstream origin上传。
 
 2026-10-30矩阵独立复核：250份日志/六计数/正常finish、25组成对campaign状态、精确入口/seed/参数/冻结cfg、2540输入与bba提交/已验二进制绑定全部PASS。
-fault3 98条恢复队列阶段观察为controller 7PASS/0FAIL，仍有活动任务；这些未完成整批严格验收，不加入当前252/350最终验收数。
-继续保持jobs20滚动补充待执行seed，无新worktree或源码修改；实际最新计数以该结果目录progress/results为准。
+fault3 98条恢复队列已结束：20PASS/1FAIL/19ABORTED/58NOT_RUN，unknown0；20条controller PASS尚未完成整批严格验收，不加入252/350最终验收数。
+新首错seed551576067在411428.500ns报local cancel snapshot depth15>14；原参数独立debug fresh compile已启动。
+分析入口：`AI_DOC/analysis/framework_design/memblock_cancel_snapshot_depth_seed551576067_20261030.md`。
+当前只做原seed复现及责任分析，不修改深度、不放宽检查、不新建worktree；新Bug关闭/专项/单Bug提交前不继续批量。
+
+覆盖率交付工具核对：旧基线实际数据库在sim同级`mother_matrix_pass_coverage_20261030.vdb`，r2聚合测试名为`merged_r2`，不是旧README所写的目录内`merged_r2.vdb`；数据库未丢失。
+本机URG help和实际单记录探针确认`-dbname 目录/测试名`语义；最终collector已改用`<输出>/merged/accepted350`并检查`<输出>/merged.vdb`及URG读回唯一聚合测试。
+探针不计作最终350项或最终coverage，旧目录仍只是旧SV历史基线。
