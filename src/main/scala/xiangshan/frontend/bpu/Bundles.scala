@@ -202,14 +202,12 @@ class BpuConstCtrl extends Bundle {
 }
 
 // Bpu -> Ftq
-class BpuPrediction(implicit p: Parameters) extends BpuBundle {
+// One prediction block, which becomes one Ftq entry.
+class BpuPredictionBlock(implicit p: Parameters) extends BpuBundle {
   val startPc:     GuardedPc = GuardedPc()
   val target:      GuardedPc = GuardedPc()
   val taken:       Bool      = Bool()
   val endPosition: UInt      = UInt(CfiPositionWidth.W)
-  // override valid
-  val s2Override: Bool = Bool()
-  val s3Override: Bool = Bool()
 
   def fromStage(startPc: GuardedPc, prediction: Prediction): Unit = {
     this.startPc     := startPc
@@ -217,6 +215,21 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle {
     this.taken       := prediction.taken
     this.endPosition := prediction.cfiPosition
   }
+}
+
+// Bpu -> Ftq
+// Blocks of one enqueue are written to consecutive Ftq entries, and blocks(i+1) starts at blocks(i)'s target,
+// so Ftq keeps deriving a block's target from its successor's startPc.
+// The blocks are enqueued atomically: either all valid blocks are accepted, or none of them is.
+// Ftq records one redirect meta per enqueue and gives it to every block, so a block whose cfi pushes or pops the
+// return stack must be the last valid block.
+class BpuPrediction(implicit p: Parameters) extends BpuBundle {
+  val blocks: Vec[Valid[BpuPredictionBlock]] = Vec(MaxPredictionNum, Valid(new BpuPredictionBlock))
+  // override valid
+  val s2Override: Bool = Bool()
+  val s3Override: Bool = Bool()
+
+  def numBlocks: UInt = PopCount(blocks.map(_.valid))
 }
 
 // Backend & Ftq -> Bpu
