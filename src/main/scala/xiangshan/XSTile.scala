@@ -101,6 +101,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
+      val cold_reset = Option.when(EnableColdReset)(Input(Reset()))
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val msiAck = Output(Bool())
@@ -126,6 +127,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
       val lcrdy = Option.when(txSourceReady) (new LCrdyIn)
     })
+    l2top.module.io.cold_reset.zip(io.cold_reset).foreach { case (l2topReset, tileReset) =>
+      l2topReset := tileReset
+    }
 
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
