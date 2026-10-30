@@ -406,7 +406,7 @@ trait MachineLevel { self: NewCSR =>
       }
       // Count overflow never results from writes to the mhpmcountern or mhpmeventn registers, only from
       // hardware increments of counter registers.
-      toMhpmeventOF := !countingInhibit & counterAdd.head(1)
+      toMhpmeventOF := !w.wen && !fromSireg.valid && !countingInhibit && counterAdd.head(1).asBool
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
