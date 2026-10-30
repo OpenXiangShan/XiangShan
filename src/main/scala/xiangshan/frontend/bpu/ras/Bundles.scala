@@ -82,7 +82,7 @@ object RasInternalMeta {
 
 class RasRedirectMeta(implicit p: Parameters) extends RasInternalMeta {
   // Only used by the FTQ return-address diagnostic; drop it in release to save the meta storage.
-  val topRetAddr: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(GuardedPc())
+  val debug_topRetAddr: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(GuardedPc())
 }
 
 class RasSpecReadReq(implicit p: Parameters) extends RasBundle {
