@@ -593,6 +593,21 @@ class TlbAccessCheckInfo(implicit p: Parameters) extends TlbBundle {
   val mptCheckOnly = Option.when(HasMptCheck)(Bool())
 }
 
+class TlbAccessRequest(implicit p: Parameters) extends TlbBundle {
+  val info = new TlbAccessCheckInfo
+  val mptPerm = Option.when(HasMptCheck)(new MptPermBundle(isTlbPort = true))
+  val perm = new TlbPermBundle()
+  val gPerm = new TlbPermBundle(hasV = false)
+  val pbmt = UInt(ptePbmtLen.W)
+  val gPbmt = UInt(ptePbmtLen.W)
+}
+
+class TlbAccessResult(implicit p: Parameters) extends TlbBundle {
+  val excp = new TlbRespExcp
+  val isForVSnonLeafPTE = Bool()
+  val pbmt = UInt(ptePbmtLen.W)
+}
+
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val gpaddr = Vec(nDups, Output(UInt(XLEN.W)))

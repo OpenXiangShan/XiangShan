@@ -278,10 +278,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val pmpCmd = Mux(req_out(i).hlvx, TlbCmd.read_exec, req_out(i).cmd)
     pmp_check(addr, req_out(i).size, pmpCmd, noTranslateReg, i)
     for (d <- 0 until nRespDups) {
-      pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), accessInfo(i).s2xlate)
-      val mptTemp = Option.when(HasMptCheck) (mptPerm.get(i)(d))
-      perm_check(mptTemp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))), perm(i)(d),
-        accessInfo(i).cmd, i, d, g_perm(i)(d), accessInfo(i).hlvx, accessInfo(i).s2xlate, prepf(i), pregpf(i), preaf(i))
+      val mptTemp = Option.when(HasMptCheck)(mptPerm.get(i)(d))
+      access_check(perm(i)(d), i, d, g_perm(i)(d), pbmt(i)(d), g_pbmt(i)(d), prepf(i), pregpf(i), preaf(i), mptPerm = mptTemp)
     }
     hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
   }
@@ -437,95 +435,23 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     pmp(idx).bits.cmd := cmd
   }
 
-  def pbmt_check(idx: Int, d: Int, pbmt: UInt, g_pbmt: UInt, s2xlate: UInt):Unit = {
-    val res = MuxLookup(s2xlate, 0.U)(Seq(
-      onlyStage1 -> pbmt,
-      onlyStage2 -> g_pbmt,
-      allStage -> Mux(pbmt =/= 0.U, pbmt, g_pbmt),
-      noS2xlate -> pbmt
-    ))
-    resp(idx).bits.pbmt(d) := Mux(accessInfo(idx).translateEnable, res, 0.U)
-  }
-
-  def perm_check(mptPerm: MptPermBundle, perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int,
-    g_perm: TlbPermBundle, hlvx: Bool, s2xlate: UInt, prepf: Bool = false.B, pregpf: Bool = false.B, preaf: Bool = false.B) = {
-    val onlyS2 = s2xlate === onlyStage2
-    val allS2xlate = s2xlate === allStage
-    // noS2xlate || onlyS1 -> perm.af
-    // onlyS2 -> g_perm.af
-    // allS2xlate -> perm.af || g_perm.af
-    val af = (!onlyS2 && perm.af) || ((onlyS2 || allS2xlate) && g_perm.af)
-
-    // Stage 1 perm check
-    val pf = perm.pf
+  def access_check(perm: TlbPermBundle, idx: Int, nDups: Int,
+    g_perm: TlbPermBundle, pbmt: UInt, gPbmt: UInt,
+    prepf: Bool = false.B, pregpf: Bool = false.B, preaf: Bool = false.B, mptPerm: Option[MptPermBundle] = None): Unit = {
+    val check = Module(new TlbAccessCheck)
+    check.io.in.info := accessInfo(idx)
+    if (HasMptCheck) { check.io.in.mptPerm.get := mptPerm.get }
+    check.io.in.perm := perm
+    check.io.in.gPerm := g_perm
+    check.io.in.pbmt := pbmt
+    check.io.in.gPbmt := gPbmt
+    resp(idx).bits.excp(nDups) := check.io.out.excp
+    resp(idx).bits.isForVSnonLeafPTE := check.io.out.isForVSnonLeafPTE
+    resp(idx).bits.pbmt(nDups) := check.io.out.pbmt
+    val cmd = accessInfo(idx).cmd
     val isLd = TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
     val isSt = TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)
     val isInst = TlbCmd.isExec(cmd)
-    val ldUpdate = !perm.a && isLd // update A/D through exception
-    val stUpdate = (!perm.a || !perm.d) && isSt // update A/D through exception
-    val instrUpdate = !perm.a && isInst // update A/D through exception
-    val modeCheck = !(accessInfo(idx).mode === ModeU && !perm.u || accessInfo(idx).mode === ModeS && perm.u && (!accessInfo(idx).sum || accessInfo(idx).ifetch))
-    val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || accessInfo(idx).s1Mxr && perm.x))
-    val stPermFail = !(modeCheck && perm.w)
-    val instrPermFail = !(modeCheck && perm.x)
-    val ldPf = (ldPermFail || pf) && isLd
-    val stPf = (stPermFail || pf) && isSt
-    val instrPf = (instrPermFail || pf) && isInst
-    val isFakePte = !perm.v.get && !perm.pf && !perm.af && !onlyS2
-    val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v.get && !perm.pf && !perm.af
-    val s1_valid = accessInfo(idx).translateEnable && !onlyS2
-
-    // mptcheck val
-    val mptValid = Option.when(HasMptCheck) (accessInfo(idx).mptCheckOnly.get)
-    val mptInstf = Option.when(HasMptCheck) (!mptPerm.x && isInst)
-    val mptWf = Option.when(HasMptCheck) (!(mptPerm.r && mptPerm.w) && isSt)
-    val mptRf = Option.when(HasMptCheck) (!mptPerm.r && isLd)
-    val mptAf = Option.when(HasMptCheck) (mptPerm.af.get)
-
-    // Stage 2 perm check
-    val gpf = g_perm.pf
-    val g_ldUpdate = !g_perm.a && isLd
-    val g_stUpdate = (!g_perm.a || !g_perm.d) && isSt
-    val g_instrUpdate = !g_perm.a && isInst
-    val g_ldPermFail = !Mux(hlvx, g_perm.x, (g_perm.r || accessInfo(idx).s2Mxr && g_perm.x))
-    val g_stPermFail = !g_perm.w
-    val g_instrPermFail = !g_perm.x
-    val ldGpf = (g_ldPermFail || gpf) && isLd
-    val stGpf = (g_stPermFail || gpf) && isSt
-    val instrGpf = (g_instrPermFail || gpf) && isInst
-    val s2_valid = accessInfo(idx).translateEnable && (onlyS2 || allS2xlate)
-
-    val fault_valid = s1_valid || s2_valid
-
-    // when pf and gpf can't happens simultaneously
-    val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
-    // it will be sent to CSR in order to modify the m/htinst.
-    // Ref: The RISC-V Instruction Set Manual: Volume II: Privileged Architecture - 19.6.3. Transformed Instruction or Pseudoinstruction for mtinst or htinst
-    val isForVSnonLeafPTE = isNonLeaf || isFakePte
-    resp(idx).bits.isForVSnonLeafPTE := isForVSnonLeafPTE
-    resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    // NOTE: pf need && with !af, page fault has higher priority than access fault
-    // but ptw may also have access fault, then af happens, the translation is wrong.
-    // In this case, pf has lower priority than af
-
-    resp(idx).bits.excp(nDups).gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !af && !hasPf
-    resp(idx).bits.excp(nDups).gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
-    resp(idx).bits.excp(nDups).gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
-
-    resp(idx).bits.excp(nDups).af.ld := (af && TlbCmd.isRead(cmd) && fault_valid) ||
-      (if (HasMptCheck) ((mptRf.get || (mptAf.get && TlbCmd.isRead(cmd))) && mptValid.get) else false.B)
-    // Mpt always on and valid, even if s1 s2 in bare mode
-    resp(idx).bits.excp(nDups).af.st := (af && TlbCmd.isWrite(cmd) && fault_valid) ||
-      (if (HasMptCheck) ((mptWf.get || (mptAf.get && TlbCmd.isWrite(cmd))) && mptValid.get) else false.B)
-    resp(idx).bits.excp(nDups).af.instr := (af && TlbCmd.isExec(cmd) && fault_valid) ||
-      (if (HasMptCheck) ((mptInstf.get || (mptAf.get && TlbCmd.isExec(cmd))) && mptValid.get) else false.B)
-    // mptAf is af
-
-    resp(idx).bits.excp(nDups).vaNeedExt := true.B
-
     when (RegNext(prepf || pregpf || preaf)) {
       resp(idx).bits.isForVSnonLeafPTE := false.B
       resp(idx).bits.excp(nDups).pf.ld := RegNext(prepf) && isLd
@@ -551,8 +477,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       // DTLB requests carry a full XLEN va, so keeping it as-is.
       resp(idx).bits.gpaddr(nDups) := Mux(isInst, ZeroExt(req_out(idx).fullva(VAddrBits, 0), XLEN), req_out(idx).fullva)
     }
-
-    resp(idx).bits.excp(nDups).isHyper := accessInfo(idx).isHyper
   }
 
   def handle_nonblock(idx: Int): Unit = {
@@ -714,4 +638,99 @@ class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends T
     re.access(io.page.access.map(_.sets), io.page.access.map(_.touch_ways))
     io.page.refillIdx := { if (q.NWays == 1) 0.U else re.way(io.page.chosen_set) }
   }
+}
+
+// Check permissions and select PBMT
+class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst {
+  val io = IO(new Bundle {
+    val in = Input(new TlbAccessRequest)
+    val out = Output(new TlbAccessResult)
+  })
+  val perm = io.in.perm
+  val g_perm = io.in.gPerm
+  val accessInfo = io.in.info
+  val cmd = accessInfo.cmd
+  val hlvx = accessInfo.hlvx
+  val s2xlate = accessInfo.s2xlate
+  val onlyS2 = s2xlate === onlyStage2
+  val allS2xlate = s2xlate === allStage
+  // noS2xlate || onlyS1 -> perm.af
+  // onlyS2 -> g_perm.af
+  // allS2xlate -> perm.af || g_perm.af
+  val af = (!onlyS2 && perm.af) || ((onlyS2 || allS2xlate) && g_perm.af)
+
+  // Stage 1 perm check
+  val pf = perm.pf
+  val isLd = TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
+  val isSt = TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)
+  val isInst = TlbCmd.isExec(cmd)
+  val ldUpdate = !perm.a && isLd // update A/D through exception
+  val stUpdate = (!perm.a || !perm.d) && isSt // update A/D through exception
+  val instrUpdate = !perm.a && isInst // update A/D through exception
+  val modeCheck = !(accessInfo.mode === ModeU && !perm.u || accessInfo.mode === ModeS && perm.u && (!accessInfo.sum || accessInfo.ifetch))
+  val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || accessInfo.s1Mxr && perm.x))
+  val stPermFail = !(modeCheck && perm.w)
+  val instrPermFail = !(modeCheck && perm.x)
+  val ldPf = (ldPermFail || pf) && isLd
+  val stPf = (stPermFail || pf) && isSt
+  val instrPf = (instrPermFail || pf) && isInst
+  val isFakePte = !perm.v.get && !perm.pf && !perm.af && !onlyS2
+  val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v.get && !perm.pf && !perm.af
+  val s1_valid = accessInfo.translateEnable && !onlyS2
+
+  // Stage 2 perm check
+  val gpf = g_perm.pf
+  val g_ldUpdate = !g_perm.a && isLd
+  val g_stUpdate = (!g_perm.a || !g_perm.d) && isSt
+  val g_instrUpdate = !g_perm.a && isInst
+  val g_ldPermFail = !Mux(hlvx, g_perm.x, (g_perm.r || accessInfo.s2Mxr && g_perm.x))
+  val g_stPermFail = !g_perm.w
+  val g_instrPermFail = !g_perm.x
+  val ldGpf = (g_ldPermFail || gpf) && isLd
+  val stGpf = (g_stPermFail || gpf) && isSt
+  val instrGpf = (g_instrPermFail || gpf) && isInst
+  val s2_valid = accessInfo.translateEnable && (onlyS2 || allS2xlate)
+
+  val fault_valid = s1_valid || s2_valid
+
+  // when pf and gpf can't happens simultaneously
+  val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+  // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
+  // it will be sent to CSR in order to modify the m/htinst.
+  // Ref: The RISC-V Instruction Set Manual: Volume II: Privileged Architecture - 19.6.3. Transformed Instruction or Pseudoinstruction for mtinst or htinst
+  val isForVSnonLeafPTE = isNonLeaf || isFakePte
+  io.out.isForVSnonLeafPTE := isForVSnonLeafPTE
+  io.out.excp.pf.ld := (ldPf || ldUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+  io.out.excp.pf.st := (stPf || stUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+  io.out.excp.pf.instr := (instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+  // NOTE: pf need && with !af, page fault has higher priority than access fault
+  // but ptw may also have access fault, then af happens, the translation is wrong.
+  // In this case, pf has lower priority than af
+
+  io.out.excp.gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !af && !hasPf
+  io.out.excp.gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
+  io.out.excp.gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
+
+  val mptValid = accessInfo.mptCheckOnly
+  val mptPerm = io.in.mptPerm
+  val mptInstf = Option.when(HasMptCheck)(!mptPerm.get.x && isInst)
+  val mptWf = Option.when(HasMptCheck)(!(mptPerm.get.r && mptPerm.get.w) && isSt)
+  val mptRf = Option.when(HasMptCheck)(!mptPerm.get.r && isLd)
+  val mptAf = Option.when(HasMptCheck)(mptPerm.get.af.get)
+  io.out.excp.af.ld := (af && TlbCmd.isRead(cmd) && fault_valid) ||
+    (if (HasMptCheck) ((mptRf.get || (mptAf.get && TlbCmd.isRead(cmd))) && mptValid.get) else false.B)
+  io.out.excp.af.st := (af && TlbCmd.isWrite(cmd) && fault_valid) ||
+    (if (HasMptCheck) ((mptWf.get || (mptAf.get && TlbCmd.isWrite(cmd))) && mptValid.get) else false.B)
+  io.out.excp.af.instr := (af && TlbCmd.isExec(cmd) && fault_valid) ||
+    (if (HasMptCheck) ((mptInstf.get || (mptAf.get && TlbCmd.isExec(cmd))) && mptValid.get) else false.B)
+
+  io.out.excp.vaNeedExt := true.B
+  io.out.excp.isHyper := accessInfo.isHyper
+  val pbmt = MuxLookup(s2xlate, 0.U)(Seq(
+    onlyStage1 -> io.in.pbmt,
+    onlyStage2 -> io.in.gPbmt,
+    allStage -> Mux(io.in.pbmt =/= 0.U, io.in.pbmt, io.in.gPbmt),
+    noS2xlate -> io.in.pbmt
+  ))
+  io.out.pbmt := Mux(accessInfo.translateEnable, pbmt, 0.U)
 }
