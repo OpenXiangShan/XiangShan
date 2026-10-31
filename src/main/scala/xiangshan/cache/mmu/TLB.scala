@@ -66,13 +66,19 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   (if (HasMptCheck) csr.mmpt.changed else false.B)
   val flush_pipe = io.flushPipe
   val redirect = io.redirect
-  val EffectiveVa = Wire(Vec(Width, UInt(XLEN.W)))
   val req_in = req
+  val preCheck = (0 until Width).map { i =>
+    val prepare = Module(new TlbRequestPrepare(q))
+    prepare.io.req.bits := req_in(i).bits
+    prepare.io.req.valid := req_in(i).valid
+    prepare.io.csr := csr
+    prepare.io.resp
+  }
   val req_out = Reg(Vec(Width, new TlbReq))
   for (i <- 0 until Width) {
     when (req(i).fire) {
       req_out(i) := req(i).bits
-      req_out(i).fullva := EffectiveVa(i)
+      req_out(i).fullva := preCheck(i).effectiveVa
     }
   }
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
@@ -82,12 +88,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val mode_tmp = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   val virt_in = csr.priv.virt
   val virt_out = req.map(a => RegEnable(csr.priv.virt, a.fire))
-  val queries = (0 until Width).map { i =>
-    val query = Wire(new TlbQuery)
-    query.vpn := get_pn(req_in(i).bits.vaddr)
-    query.s2xlate := getS2xlate(virt_in || req_in(i).bits.hyperinst, csr.vsatp.mode, csr.hgatp.mode)
-    query
-  }
   val need_gpa = RegInit(false.B)
   val need_gpa_wire = WireInit(false.B)
   private val NeedGpaRespCountLimit = 512
@@ -119,12 +119,12 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     need_gpa_count := need_gpa_count + 1.U
   }
 
-  val Sv39Enable = csr.satp.mode === 8.U
-  val Sv48Enable = csr.satp.mode === 9.U
-  val Sv39vsEnable = csr.vsatp.mode === 8.U
-  val Sv48vsEnable = csr.vsatp.mode === 9.U
-  val Sv39x4Enable = csr.hgatp.mode === 8.U
-  val Sv48x4Enable = csr.hgatp.mode === 9.U
+  val Sv39Enable = csr.satp.mode === Sv39
+  val Sv48Enable = csr.satp.mode === Sv48
+  val Sv39vsEnable = csr.vsatp.mode === Sv39
+  val Sv48vsEnable = csr.vsatp.mode === Sv48
+  val Sv39x4Enable = csr.hgatp.mode === Sv39
+  val Sv48x4Enable = csr.hgatp.mode === Sv48
 
   val BareMode = Option.when(HasMptCheck)(
     csr.hgatp.mode === 0.U && csr.vsatp.mode === 0.U && csr.satp.mode === 0.U)
@@ -160,92 +160,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val isRobMatch = (0 until Width).map(i => req_out(i).debug.robIdx === io.robPendingPtr)
   val canGetGpa = (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd) || req_out(i).frm_mabuf)
 
-  // pre fault: check fault before real do translate
-  val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
-  val pregpf = WireInit(VecInit(Seq.fill(Width)(false.B)))
-  val preaf = WireInit(VecInit(Seq.fill(Width)(false.B)))
-  val premode = (0 until Width).map(i => Mux(req_in(i).bits.hyperinst, csr.priv.spvp, mode_tmp))
   for (i <- 0 until Width) {
-    resp(i).bits.fullva := RegEnable(EffectiveVa(i), req(i).valid)
-  }
-  val prevmEnable = (0 until Width).map(i => !(virt_in || req_in(i).bits.hyperinst) && (
-    if (EnableTlbDebug) (Sv39Enable || Sv48Enable)
-    else (Sv39Enable || Sv48Enable) && (premode(i) < ModeM))
-  )
-  val pres2xlateEnable = (0 until Width).map(i =>
-    (virt_in || req_in(i).bits.hyperinst) &&
-    (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) &&
-    (premode(i) < ModeM)
-  )
-
-  (0 until Width).foreach{i =>
-
-    val pmm = WireInit(0.U(2.W))
-
-    when (ifetch || req(i).bits.hlvx) {
-      pmm := 0.U
-    } .elsewhen (premode(i) === ModeM) {
-      pmm := csr.pmm.mseccfg
-    } .elsewhen (Mux(virt_in || req_in(i).bits.hyperinst, csr.priv.vmxr || csr.priv.mxr, csr.priv.mxr)) {
-      pmm := 0.U
-    } .elsewhen (!(virt_in || req_in(i).bits.hyperinst) && premode(i) === ModeS) {
-      pmm := csr.pmm.menvcfg
-    } .elsewhen ((virt_in || req_in(i).bits.hyperinst) && premode(i) === ModeS) {
-      pmm := csr.pmm.henvcfg
-    } .elsewhen (req_in(i).bits.hyperinst && csr.priv.imode === ModeU) {
-      pmm := csr.pmm.hstatus
-    } .elsewhen (premode(i) === ModeU) {
-      pmm := csr.pmm.senvcfg
-    }
-
-    when (prevmEnable(i) || (pres2xlateEnable(i) && csr.vsatp.mode =/= 0.U)) {
-      when (pmm === PMLEN7) {
-        EffectiveVa(i) := SignExt(req_in(i).bits.fullva(56, 0), XLEN)
-      } .elsewhen (pmm === PMLEN16) {
-        EffectiveVa(i) := SignExt(req_in(i).bits.fullva(47, 0), XLEN)
-      } .otherwise {
-        EffectiveVa(i) := req_in(i).bits.fullva
-      }
-    } .otherwise {
-      when (pmm === PMLEN7) {
-        EffectiveVa(i) := ZeroExt(req_in(i).bits.fullva(56, 0), XLEN)
-      } .elsewhen (pmm === PMLEN16) {
-        EffectiveVa(i) := ZeroExt(req_in(i).bits.fullva(47, 0), XLEN)
-      } .otherwise {
-        EffectiveVa(i) := req_in(i).bits.fullva
-      }
-    }
-
-    val pf48 = SignExt(EffectiveVa(i)(47, 0), XLEN) =/= EffectiveVa(i)
-    val pf39 = SignExt(EffectiveVa(i)(38, 0), XLEN) =/= EffectiveVa(i)
-    val gpf48 = EffectiveVa(i)(XLEN - 1, 48 + 2) =/= 0.U
-    val gpf39 = EffectiveVa(i)(XLEN - 1, 39 + 2) =/= 0.U
-    val af = EffectiveVa(i)(XLEN - 1, PAddrBits) =/= 0.U
-    when (req(i).valid && req(i).bits.checkfullva) {
-      when (prevmEnable(i) || pres2xlateEnable(i)) {
-        when (queries(i).s2xlate === onlyStage2) {
-          when (Sv48x4Enable) {
-            pregpf(i) := gpf48
-          } .elsewhen (Sv39x4Enable) {
-            pregpf(i) := gpf39
-          }
-        } .elsewhen (queries(i).s2xlate === onlyStage1 || queries(i).s2xlate === allStage) {
-          when (Sv48vsEnable) {
-            prepf(i) := pf48
-          } .elsewhen (Sv39vsEnable) {
-            prepf(i) := pf39
-          }
-        } .otherwise { // noS2xlate
-          when (Sv48Enable) {
-            prepf(i) := pf48
-          } .elsewhen (Sv39Enable) {
-            prepf(i) := pf39
-          }
-        }
-      } .otherwise {
-        preaf(i) := af
-      }
-    }
+    resp(i).bits.fullva := RegEnable(preCheck(i).effectiveVa, req(i).valid)
   }
 
   val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill && !flush_mmu || (if (HasMptCheck) (ptw.resp.fire && BareMode.get) else false.B)
@@ -259,7 +175,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   entries.io.w_apply(refill, ptw.resp.bits)
   for (i <- 0 until Width) {
     entries.io.r.req(i).valid := io.requestor(i).req.valid
-    entries.io.r.req(i).bits := queries(i)
+    entries.io.r.req(i).bits := preCheck(i).query
     // TODO: RegNext enable:req.valid
     resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
     resp(i).bits.debug.robIdx := RegEnable(req(i).bits.debug.robIdx, req(i).valid)
@@ -285,7 +201,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     pmp_check(addr, req_out(i).size, pmpCmd, noTranslateReg, i)
     for (d <- 0 until nRespDups) {
       val mptTemp = Option.when(HasMptCheck)(mptPerm.get(i)(d))
-      access_check(perm(i)(d), i, d, g_perm(i)(d), pbmt(i)(d), g_pbmt(i)(d), prepf(i), pregpf(i), preaf(i), mptPerm = mptTemp)
+      access_check(perm(i)(d), i, d, g_perm(i)(d), pbmt(i)(d), g_pbmt(i)(d), preCheck(i).preFault, mptPerm = mptTemp)
     }
     hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
   }
@@ -299,7 +215,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     // HasMptCheck, add mptperm
     val (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate,
       p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_hit_fast, p_mptPerm) =
-      ptw_resp_bypass(queries(i))
+      ptw_resp_bypass(preCheck(i).query)
     val enable = accessInfo(i).translateEnable
     val mptOnlyEnable = Option.when(HasMptCheck) (accessInfo(i).mptCheckOnly.get)
     // when in check only mode, assign miss to true to start query mpt in l2tlb
@@ -443,7 +359,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
   def access_check(perm: TlbPermBundle, idx: Int, nDups: Int,
     g_perm: TlbPermBundle, pbmt: UInt, gPbmt: UInt,
-    prepf: Bool = false.B, pregpf: Bool = false.B, preaf: Bool = false.B, mptPerm: Option[MptPermBundle] = None): Unit = {
+    preFault: TlbPreFault, mptPerm: Option[MptPermBundle] = None): Unit = {
     val check = Module(new TlbAccessCheck)
     check.io.in.info := accessInfo(idx)
     if (HasMptCheck) { check.io.in.mptPerm.get := mptPerm.get }
@@ -458,19 +374,19 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val isLd = TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
     val isSt = TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)
     val isInst = TlbCmd.isExec(cmd)
-    when (RegNext(prepf || pregpf || preaf)) {
+    when (RegNext(preFault.pf || preFault.gpf || preFault.af)) {
       resp(idx).bits.isForVSnonLeafPTE := false.B
-      resp(idx).bits.excp(nDups).pf.ld := RegNext(prepf) && isLd
-      resp(idx).bits.excp(nDups).pf.st := RegNext(prepf) && isSt
-      resp(idx).bits.excp(nDups).pf.instr := RegNext(prepf) && isInst
+      resp(idx).bits.excp(nDups).pf.ld := RegNext(preFault.pf) && isLd
+      resp(idx).bits.excp(nDups).pf.st := RegNext(preFault.pf) && isSt
+      resp(idx).bits.excp(nDups).pf.instr := RegNext(preFault.pf) && isInst
 
-      resp(idx).bits.excp(nDups).gpf.ld := RegNext(pregpf) && isLd
-      resp(idx).bits.excp(nDups).gpf.st := RegNext(pregpf) && isSt
-      resp(idx).bits.excp(nDups).gpf.instr := RegNext(pregpf) && isInst
+      resp(idx).bits.excp(nDups).gpf.ld := RegNext(preFault.gpf) && isLd
+      resp(idx).bits.excp(nDups).gpf.st := RegNext(preFault.gpf) && isSt
+      resp(idx).bits.excp(nDups).gpf.instr := RegNext(preFault.gpf) && isInst
 
-      resp(idx).bits.excp(nDups).af.ld := RegNext(preaf) && TlbCmd.isRead(cmd)
-      resp(idx).bits.excp(nDups).af.st := RegNext(preaf) && TlbCmd.isWrite(cmd)
-      resp(idx).bits.excp(nDups).af.instr := RegNext(preaf) && isInst
+      resp(idx).bits.excp(nDups).af.ld := RegNext(preFault.af) && TlbCmd.isRead(cmd)
+      resp(idx).bits.excp(nDups).af.st := RegNext(preFault.af) && TlbCmd.isWrite(cmd)
+      resp(idx).bits.excp(nDups).af.instr := RegNext(preFault.af) && isInst
 
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
       // overwrite miss & gpaddr when exception related to high address truncation happens
@@ -610,7 +526,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
         difftest.valid := false.B
       }
       difftest.index := TLBDiffId(p(XSCoreParamsKey).HartId).U
-      difftest.vpn := RegEnable(queries(i).vpn, req_in(i).valid)
+      difftest.vpn := RegEnable(preCheck(i).query.vpn, req_in(i).valid)
       difftest.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
       difftest.satp := Cat(csr.satp.mode, csr.satp.asid, csr.satp.ppn)
       difftest.vsatp := Cat(csr.vsatp.mode, csr.vsatp.asid, csr.vsatp.ppn)
@@ -741,4 +657,101 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
     noS2xlate -> io.in.pbmt
   ))
   io.out.pbmt := Mux(accessInfo.translateEnable, pbmt, 0.U)
+}
+
+// Prepare request addresses and check pre-faults in S0
+class TlbRequestPrepare(q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst {
+  val io = IO(new Bundle {
+    val req = Input(ValidIO(new TlbReq))
+    val csr = Input(new TlbCsrBundle)
+    val resp = Output(new TlbPreCheckResp)
+  })
+  val req = io.req.bits
+  val csr = io.csr
+  val virt_in = csr.priv.virt
+  val ifetch = if (q.fetchi) true.B else false.B
+  val mode_tmp = if (q.useDmode) csr.priv.dmode else csr.priv.imode
+  val premode = Mux(req.hyperinst, csr.priv.spvp, mode_tmp)
+  val Sv39Enable = csr.satp.mode === Sv39
+  val Sv48Enable = csr.satp.mode === Sv48
+  val Sv39vsEnable = csr.vsatp.mode === Sv39
+  val Sv48vsEnable = csr.vsatp.mode === Sv48
+  val Sv39x4Enable = csr.hgatp.mode === Sv39
+  val Sv48x4Enable = csr.hgatp.mode === Sv48
+
+  val prevmEnable = !(virt_in || req.hyperinst) && (
+    if (EnableTlbDebug) (Sv39Enable || Sv48Enable)
+    else (Sv39Enable || Sv48Enable) && (premode < ModeM))
+  val pres2xlateEnable = (virt_in || req.hyperinst) &&
+    (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (premode < ModeM)
+  io.resp.query.vpn := get_pn(req.vaddr)
+  io.resp.query.s2xlate := getS2xlate(virt_in || req.hyperinst, csr.vsatp.mode, csr.hgatp.mode)
+  io.resp.preFault := 0.U.asTypeOf(new TlbPreFault)
+  val pmm = WireInit(0.U(2.W))
+
+  when (ifetch || req.hlvx) {
+    pmm := 0.U
+  } .elsewhen (premode === ModeM) {
+    pmm := csr.pmm.mseccfg
+  } .elsewhen (Mux(virt_in || req.hyperinst, csr.priv.vmxr || csr.priv.mxr, csr.priv.mxr)) {
+    pmm := 0.U
+  } .elsewhen (!(virt_in || req.hyperinst) && premode === ModeS) {
+    pmm := csr.pmm.menvcfg
+  } .elsewhen ((virt_in || req.hyperinst) && premode === ModeS) {
+    pmm := csr.pmm.henvcfg
+  } .elsewhen (req.hyperinst && csr.priv.imode === ModeU) {
+    pmm := csr.pmm.hstatus
+  } .elsewhen (premode === ModeU) {
+    pmm := csr.pmm.senvcfg
+  }
+
+  when (prevmEnable || (pres2xlateEnable && csr.vsatp.mode =/= 0.U)) {
+    when (pmm === PMLEN7) {
+      io.resp.effectiveVa := SignExt(req.fullva(56, 0), XLEN)
+    } .elsewhen (pmm === PMLEN16) {
+      io.resp.effectiveVa := SignExt(req.fullva(47, 0), XLEN)
+    } .otherwise {
+      io.resp.effectiveVa := req.fullva
+    }
+  } .otherwise {
+    when (pmm === PMLEN7) {
+      io.resp.effectiveVa := ZeroExt(req.fullva(56, 0), XLEN)
+    } .elsewhen (pmm === PMLEN16) {
+      io.resp.effectiveVa := ZeroExt(req.fullva(47, 0), XLEN)
+    } .otherwise {
+      io.resp.effectiveVa := req.fullva
+    }
+  }
+
+  val pf48 = SignExt(io.resp.effectiveVa(47, 0), XLEN) =/= io.resp.effectiveVa
+  val pf39 = SignExt(io.resp.effectiveVa(38, 0), XLEN) =/= io.resp.effectiveVa
+  val gpf48 = io.resp.effectiveVa(XLEN - 1, 48 + 2) =/= 0.U
+  val gpf39 = io.resp.effectiveVa(XLEN - 1, 39 + 2) =/= 0.U
+  val af = io.resp.effectiveVa(XLEN - 1, PAddrBits) =/= 0.U
+  when (io.req.valid && req.checkfullva) {
+    when (prevmEnable || pres2xlateEnable) {
+      when (io.resp.query.s2xlate === onlyStage2) {
+        when (Sv48x4Enable) {
+          io.resp.preFault.gpf := gpf48
+        } .elsewhen (Sv39x4Enable) {
+          io.resp.preFault.gpf := gpf39
+        }
+      } .elsewhen (io.resp.query.s2xlate === onlyStage1 || io.resp.query.s2xlate === allStage) {
+        when (Sv48vsEnable) {
+          io.resp.preFault.pf := pf48
+        } .elsewhen (Sv39vsEnable) {
+          io.resp.preFault.pf := pf39
+        }
+      } .otherwise { // noS2xlate
+        when (Sv48Enable) {
+          io.resp.preFault.pf := pf48
+        } .elsewhen (Sv39Enable) {
+          io.resp.preFault.pf := pf39
+        }
+      }
+    } .otherwise {
+      io.resp.preFault.af := af
+    }
+  }
+
 }
