@@ -57,7 +57,7 @@ class PtwResponseOrderTest(unittest.TestCase):
             self.assertEqual(r.returncode==0,valid,r.stdout+r.stderr)
             if valid:
                 self.assertIn('target_ptw_response_reorder='+value+' ',r.stdout)
-                self.assertIn('constraint_schema=85',r.stdout)
+                self.assertIn('constraint_schema=86',r.stdout)
 
     def test_independent_accepted_and_completion_histories_reduce_to_valid_ledgers(self):
         for seed in range(128):

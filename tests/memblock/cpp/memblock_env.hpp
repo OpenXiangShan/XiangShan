@@ -1383,6 +1383,7 @@ public:
     // restore_after_walk atomically exposes the first high pendingst/scommit
     // tuple for an already-completed surviving H after the ordinary busy hold.
     bool retire_store(const StoreTransaction &transaction, bool restore_after_walk = false);
+    bool retire_store_after_nonmemory_head(const StoreTransaction &transaction, std::uint64_t anchor);
     bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions);
     const StoreRetirementStats &store_retirement_stats() const;
 

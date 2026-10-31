@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4976,6 +4976,36 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
 
 
 
+def _check_stream_operand_ready(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 86:
+        return
+    rate, maximum = result.get("target_stream_operand_delay"), result.get("target_stream_operand_delay_max")
+    _require(type(rate) is int and 0 <= rate <= 1000 and type(maximum) is int and 1 <= maximum <= 4096,
+             "invalid stream operand readiness constraints")
+    counts = _csv_counts(result, "stream_operand_ready", 30)
+    operations = _csv_counts(result, "stream_ops", 5)
+    canceled = _csv_counts(result, "stream_cancel", 29)
+    issues = _csv_counts(result, "stream_issue", 6)
+    transport = _csv_counts(result, "stream_transport", 10)
+    stream = _csv_counts(result, "stream", 12)
+    for cls in range(5):
+        selected, accepted, killed = (counts[cls + offset] for offset in (0, 5, 10))
+        _require(selected == accepted + killed and selected <= operations[cls] + canceled[1+cls] and
+                 killed <= canceled[1+cls], "delayed address operands were not accepted or canceled exactly once")
+    _require(counts[15] == counts[16] + counts[17] and counts[15] <= operations[2] + canceled[3] and
+             counts[17] <= canceled[3], "delayed store data operands were not accepted or canceled exactly once")
+    # Overlap bins count actual acceptances (including retries), not unique
+    # instructions, and require at least one selected older delayed source.
+    limits = [issues[0], transport[1], issues[2], issues[3] + stream[9], issues[4] + stream[9], issues[5]]
+    for base, population in ((18, sum(counts[:5])), (24, counts[15])):
+        _require(all(n <= limit for n, limit in zip(counts[base:base+6], limits)) and
+                 sum(counts[base:base+6]) <= transport[1] and
+                 (population != 0 or not any(counts[base:base+6])),
+                 "operand readiness overlaps exceed accepted producer populations")
+    if rate == 0:
+        _require(not any(counts), "disabled operand readiness generated delays")
+
+
 def _check_stream_disjoint_bypass(result: dict[str, Any]) -> None:
     if result.get("constraint_schema", 0) < 84:
         return
@@ -5569,6 +5599,7 @@ def _check_result(
         _check_stream_dependency_pages(result)
         _check_stream_disjoint_bypass(result)
         _check_stream_byte_bypass(result)
+        _check_stream_operand_ready(result)
         _check_stream_recovery_accounting(result)
         _check_scalar_dependency_accounting(result)
         _check_vector_index_accounting(result)

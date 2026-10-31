@@ -18,6 +18,18 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema86 adds independently delayed ordinary address sources and scalar STD
+  sources to the canonical mixed scheduler. Distinct omitted nonmemory producers
+  reserve separate ROB entries; the latest-ready producer remains public head
+  through its source deadline and existing WB/head guard. Unrelated younger
+  memory work can issue meanwhile, with unchanged independent byte expectations.
+  Deadlines freeze at admission, retries do not resample them, and bounded
+  progress checks allow declared source waits. Accepted/canceled source ledgers
+  cover all five ordinary classes; vector children share address readiness.
+  This abstracts omitted nonmemory computation, not a literal ALU latency or
+  complete rename/IQ model. Extra survivor waiting beyond the normal recovery
+  hold is scripted branch sensitivity, not current native reachability.
+
 - Schema85 adds ordinary same-line, active-physical-byte-disjoint integer/FP
   and vector load bypass within the canonical mixed stream. Natural address,
   width, mask and index choices determine eligibility; no address or expected
@@ -517,6 +529,9 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| Ordinary independent-source availability | Frozen runtime-v2 passes 22 finite cases / 23040 actions across forced SPEC-profile, U-mode translated, permission/cancellation, unmodified spec/corner and two max4096-delay cases. All six full finite artifact verifiers pass. 8886 delayed sources conserve 8865 first acceptances plus21 unaccepted cancellations; all12 accepted-producer/older-source-wait bins are positive. All10258 tracked final words compare. Seed8601 replays exactly; disabled source delays match425 preceding semantic fields. | `build/memblock/operand-ready-20261031/{qualification-v2.json,artifact-verifiers-v2.json,replay-compat-v2.json,provenance-v2.json}`. All102 prepared-source pairs match; model/RTL/dependency hashes are unchanged. Twenty same-seed comparisons preserve preceding execution fields after the watchdog repair. Native cancellation covers all five address classes but no canceled STD; independent host histories qualify that lifecycle separately. Finite block stimulus, not SPEC execution, full-core timing or closure. |
+| Source readiness and cancellation host contracts | 80 production-scheduler histories independently compare all30 source bins: 5026 selections conserve4860 first acceptances and166 cancellations, including canceled address classes51/30/15/26/29 and15 STD sources. The64 ordinary histories have64 event-only schedules and allow unrelated younger progress. Production2048-budget probes accept legal delay4096 and reject permanently blocked issue. Twenty-four public-return/ledger scripts cover two producer identities, both redirect levels and ROB wraps; omitting the surviving-anchor hold rejects. | `build/memblock/operand-ready-20261031/{host-report-final-v2.json,endpoint-recovery-v4.log,review-v2/review.json,review-fixture-delta-v2.json}`. The final whole-suite replay includes corrected two-entry fixture spacing. The extra-over-busy hold scripts isolate defensive logic; the current generic scalar/vector-load victim already accepted its shared address source, so those scripts do not establish reachable mixed-stream/native extra waiting. |
+| Current schema86 integration and review | The complete host suite passes725 tests. CPU source audit traces dispatch/IQ readiness, distinct STA/STD sources, vector sharing and ROB head legality. Fresh non-author decision review approves the bounded production logic after a legal-endpoint watchdog false timeout is fixed. The corrected fixture uses two producer entries. Four adjacent forwarding/recovery directed cases pass; fixed-eight-load evidence retains64 distinct schedules,41 admission/retirement interleavings and43 issue orders after excluding values, delays and dependency choices. | `build/memblock/operand-ready-20261031/{full-unit-v2.log,cpu-audit/audit.md,review-v2/review.json,review-disposition-v2.json,directed-v2.json}`. The superseded full-unit-v1 run was invalidated by source changes during hash-pinned tests and is excluded. No CPU RTL bug, full-core dynamic equivalence, RTL mutation sensitivity or closure claim. |
 | Ordinary same-line byte-disjoint bypass | Frozen runtime-v2 passes 20 finite cases / 22528 actions across forced SPEC-profile, U-mode translated, mixed permission/cancellation and unmodified spec/corner profiles. All five complete finite artifact verifiers pass. 213 selections conserve 212 first acceptances and one unaccepted vector cancellation. All nine class/blocker and all nine 64/16/8-byte spatial bins are positive across the aggregate; all 10058 tracked final words compare. Seed8501 replay matches and disabling byte bypass matches 422 preceding semantic fields. | `build/memblock/byte-bypass-20261031/{qualification-v2.json,artifact-verifiers-v2.json,replay-compat-v2.json,provenance-v2.json}`. All 101 prepared sources match; model/RTL/dependency hashes match the preceding runtime. Corrected coverage attribution leaves 428 other fields unchanged in each of20 same-seed comparisons. Default SPEC-profile cases select five byte-mode loads but observe no unresolved same-line witness; selection alone is not temporal coverage. Finite block-level evidence, not SPEC execution, broad overlapping speculation or closure. Superseded runtime-v1 witness counts are excluded. |
 | Byte footprints and temporal coverage sensitivity | 64 seed/timing host histories produce64 distinct event-only schedules; 104 selected loads conserve104 acceptances (44 integer,25 FP,35 vector). Literal physical aliases, every scalar offset, masks/VSTART, translated vector element crossings and repeated indexed gathers pass; nine destinations retain checks despite six unique bytes. Ten private temporal mutants reject; byte-overlap mutant rejects and a byte-only predictor mutant rejects23/32 seeds. | `build/memblock/byte-bypass-20261031/{host-report-final-v2.json,footprint-host-v2-final.log,temporal-host-v2-final.log,host-predictor-v2-final.json,review-v2/review.json}`. Host schedule signatures exclude addresses/data/cycles/delays. Independent review adds24576 masked/duplicate/same-edge/future-uop witness cases. Synthetic completion timing and instruction-level shell counts are distinct from native uop-specific witnesses. |
 | Current schema85 integration checks | The complete stable-source host suite passes717 tests. Generated-interface, semantic mapping, documentation, catalog and prepared-RTL checks pass. Non-author decision and final evidence audits approve the bounded contract and recompute all five native aggregates. Four adjacent forwarding/recovery directed cases pass. | `build/memblock/byte-bypass-20261031/{full-unit-final-v2.log,host-report-final-v2.json,check-rtl-final-v2.log,directed-v2.json,final-evidence-review-v2/review.json}`. The independent audit left the host terminal pending; the completed log supplies the separate final PASS. Superseded/interrupted source-drift and pre-fix test runs are excluded. Finite development qualification, not closure. |
@@ -662,6 +677,25 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Schema86 has fresh non-author actual-diff approval for the bounded independent
+source abstraction, accepted-edge readiness and overlap checks, source lifecycle
+accounting, distinct producer identities and atomic completed-store head handoff.
+The initial legal4096-delay false timeout is fixed by an admission-frozen
+source/head watchdog boundary, with the normal progress budget afterward and
+finite epoch backstop. Independent blocked-issue and never-completing probes
+still reject. Sixteen actual permission scheduler histories cover all canceled
+address classes and scalar STD cancellation. The24 additional tail scripts test
+defensive branch/ledger sensitivity; they do not establish native extra-over-busy
+survivor waiting under the current load-only victim filter. The review's fixture
+spacing comment is corrected to two producer entries and included in the final
+725-test suite. Review, dispositions and authorized fixture delta:
+`build/memblock/operand-ready-20261031/{review-v2/review.json,review-disposition-v2.json,review-fixture-delta-v2.json}`.
+The final evidence audit independently recomputes all native/host totals, checks
+source/runtime hashes and reruns all six finite artifact verifiers:
+`build/memblock/operand-ready-20261031/final-evidence-review-v2/review.json`.
+Exact full-core producer timing, native canceled STD and full rename/IQ modeling
+remain outside these claims. This is finite development evidence, not closure.
 
 Schema85 has non-author actual-diff approval for byte-disjoint admission, cold
 predictor legality, immutable active-byte mapping, unchanged value oracles and

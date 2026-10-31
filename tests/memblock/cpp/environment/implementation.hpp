@@ -1023,6 +1023,7 @@ public:
     bool track_store_release_inputs(const StoreTransaction &transaction);
     bool track_vector_release_inputs(const VectorMemoryTransaction &transaction);
     bool retire_store(const StoreTransaction &transaction, bool restore_after_walk = false);
+    bool retire_store_after_nonmemory_head(const StoreTransaction &transaction, std::uint64_t anchor);
     bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions);
     const StoreRetirementStats &store_retirement_stats() const;
 

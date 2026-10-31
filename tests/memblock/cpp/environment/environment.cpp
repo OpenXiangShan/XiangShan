@@ -2089,6 +2089,9 @@ auto Environment::retire_store(const StoreTransaction &transaction, bool restore
     return impl_->retire_store(transaction, restore_after_walk);
 }
 
+auto Environment::retire_store_after_nonmemory_head(const StoreTransaction &transaction, std::uint64_t anchor) -> bool
+{ return impl_->retire_store_after_nonmemory_head(transaction, anchor); }
+
 auto Environment::retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions) -> bool
 {
     return impl_->retire_vector_stores(transactions);

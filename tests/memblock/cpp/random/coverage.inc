@@ -3318,6 +3318,10 @@ struct MixedCoverage {
     // Integer/FP/vector: once-per-load unresolved older store sharing 64/16/8
     // physical-byte granules. Every witness remains active-byte-disjoint.
     std::array<std::uint64_t, 9> stream_byte_bypass_granules{};
+    // Delayed address selected/first accepted/canceled, each in five stream
+    // classes; delayed scalar STD selected/accepted/canceled; then six accepted
+    // producer classes crossing older address/data-ready deadlines (12 bins).
+    std::array<std::uint64_t, 30> stream_operand_ready{};
     // Epochs exceeding32, maximum epoch retirements, admissions after ordinal32
     // with older accepted pending work, ROB value/wrap identity reuse admissions.
     std::array<std::uint64_t, 4> stream_history{};
@@ -3716,6 +3720,7 @@ struct MixedCoverage {
                " stream_disjoint_bypass=" + csv(stream_disjoint_bypass) +
                " stream_byte_bypass=" + csv(stream_byte_bypass) +
                " stream_byte_bypass_granules=" + csv(stream_byte_bypass_granules) +
+               " stream_operand_ready=" + csv(stream_operand_ready) +
                " stream_recovery=" + csv(stream_recovery) +
                " stream_recovery_shapes=" + csv(stream_recovery_shapes) +
                " stream_recovery_victims=" + csv(stream_recovery_victims) +

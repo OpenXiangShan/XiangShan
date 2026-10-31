@@ -9,6 +9,7 @@
 #include "scenarios/mixed/stream_cancellation.hpp"
 #include "scenarios/mixed/stream_dependency.hpp"
 #include "scenarios/mixed/stream_footprint.hpp"
+#include "scenarios/mixed/stream_operand_ready.hpp"
 #include "scenarios/mixed/translation_permutation.hpp"
 #include <functional>
 #include <map>
@@ -46,6 +47,8 @@ struct SyntheticEnvironment {
         unsigned address_attempts = 0, address_retries = 0;
         std::uint64_t address_due = 0, data_due = 0, sq_target = 0;
         std::uint64_t translation_due = 0;
+        std::uint64_t source_address_ready = 0, source_data_ready = 0, source_head_release = 0;
+        std::optional<unsigned> source_anchor;
         std::vector<Uop> uops;
         bool is_store() const { return kind == 2 || kind == 3; }
     };
@@ -69,6 +72,42 @@ struct SyntheticEnvironment {
     mutable bool successor_recorded = false;
     struct Dependency { unsigned consumer, producer; bool data; };
     std::vector<Dependency> dependencies;
+    bool at_operand_anchor = false;
+    std::map<unsigned,std::pair<unsigned,unsigned>> reserved_operand_producers;
+    void reserve_operand_producers(unsigned id,std::uint64_t anchor,unsigned count) {
+        require(count>0&&count<=2&&anchor%(2U*kRobEntries)==next_rob%(2U*kRobEntries),"operand producer reservation broke ROB prefix");
+        require(reserved_operand_producers.emplace(id,std::pair{unsigned(anchor%(2U*kRobEntries)),count}).second,"duplicate operand producer reservation");
+        next_rob+=count;
+    }
+    std::array<std::uint64_t,30> observed_operand_ready{};
+    std::set<unsigned> delayed_addresses, delayed_data, consumed_addresses, consumed_data;
+    void bind_operand_ready(unsigned id, unsigned address_delay, unsigned data_delay,
+        std::optional<std::uint64_t> anchor) {
+        auto &w=instructions.at(id);
+        w.source_address_ready=tick+address_delay;w.source_data_ready=tick+data_delay;
+        w.source_head_release=tick+std::max(address_delay,data_delay)+4;
+        const unsigned count=unsigned(address_delay!=0)+unsigned(data_delay!=0);
+        require(count==0 ? !anchor : anchor.has_value(), "operand producer anchor population disagrees");
+        if(anchor){
+            require(reserved_operand_producers.count(id)&&reserved_operand_producers.at(id)==std::pair{unsigned(*anchor%(2U*kRobEntries)),count},
+                "operand producers differ from pre-dispatch reservation");
+            w.source_anchor=unsigned(*anchor%(2U*kRobEntries));
+            require((w.source_anchor.value()+count)%(2U*kRobEntries)==identity(w.rob,w.flag),
+                "operand producer anchors are not immediately before consumer");
+        }
+        if(address_delay){delayed_addresses.insert(id);++observed_operand_ready[w.kind];}
+        if(data_delay){require(w.kind==2,"independent data wait on non-scalar store");delayed_data.insert(id);++observed_operand_ready[15];}
+    }
+    void check_operand_acceptance(const Instruction&w,bool data,unsigned cls,std::uint64_t edge) {
+        require(edge>=(data?w.source_data_ready:w.source_address_ready),"accepted operand before independent ready deadline");
+        if(data){if(delayed_data.count(w.id)&&consumed_data.insert(w.id).second)++observed_operand_ready[16];}
+        else if(delayed_addresses.count(w.id)&&consumed_addresses.insert(w.id).second)++observed_operand_ready[5+w.kind];
+        bool address_wait=false,data_wait=false;
+        for(unsigned i=retired;i<w.id;++i){const auto&o=instructions[i];if(o.canceled)continue;
+            address_wait|=delayed_addresses.count(i)&&!consumed_addresses.count(i)&&edge<o.source_address_ready;
+            data_wait|=delayed_data.count(i)&&!consumed_data.count(i)&&edge<o.source_data_ready;}
+        observed_operand_ready[18+cls]+=address_wait;observed_operand_ready[24+cls]+=data_wait;
+    }
     unsigned dependency_operand_checks = 0, late_overlap_admissions = 0, rob_reuses = 0;
     std::set<unsigned> rob_history;
     void bind_dependency(unsigned consumer, const LoadTransaction &source, bool data, std::uint64_t value) {
@@ -288,7 +327,7 @@ struct SyntheticEnvironment {
     void select_pair(const StoreTransaction &store) { selected_pairs.insert(find(store.rob, store.rob_flag).id); }
     void note_selection(unsigned kind) {
         if (kind == 0 || kind == 5 || kind == 7 || kind == 8 || kind == 9 || kind == 11) return;
-        issues_with_completed_head += !at_anchor && !at_exception_anchor && retired < instructions.size() && complete(instructions[retired]);
+        issues_with_completed_head += !at_anchor && !at_exception_anchor && !at_operand_anchor && retired < instructions.size() && complete(instructions[retired]);
         if (kind != 6) ++observed_transport[9];
     }
     bool begin_issue_session() { require(!session, "nested issue session"); session = true; return true; }
@@ -373,6 +412,8 @@ struct SyntheticEnvironment {
                 else if constexpr (std::is_same_v<T, VectorMemoryTransaction>) return transaction.store ? 4 : 3;
                 else return it->kind == OrdinaryIssueKind::store_address ? 1 : 2;
             }, it->payload);
+            std::visit([&](const auto&t){const auto&w=find(t.rob,t.rob_flag);
+                check_operand_acceptance(w,it->kind==OrdinaryIssueKind::store_data,access_kind,edge);},it->payload);
             ++observed_access_issue[access_kind];
             ++observed_transport[1];
             observed_ports[edge] |= 1U << unsigned(it->kind);
@@ -685,7 +726,7 @@ struct SyntheticEnvironment {
         require(enqueued.insert(key(t, kind, uop)).second, "duplicate dispatch");
         if (uop == 0) {
             observed_transport[6] += held_live();
-            admissions_with_completed_head += !at_anchor && !at_exception_anchor && retired < instructions.size() && complete(instructions[retired]);
+            admissions_with_completed_head += !at_anchor && !at_exception_anchor && !at_operand_anchor && retired < instructions.size() && complete(instructions[retired]);
             for (unsigned index = retired; index < instructions.size(); ++index)
                 require(!instructions[index].needs_restart_flush(), "younger admission escaped VSTART barrier");
             const unsigned next = instructions.size();
@@ -877,11 +918,11 @@ struct SyntheticEnvironment {
                 const bool disjoint = (allow_disjoint_bypass && line_disjoint) ||
                     (allow_byte_bypass && byte_disjoint);
                 if (disjoint) {
-                    if (work.kind == 0) require(!work.load.store_set_hit && !work.load.load_wait_bit &&
-                        !work.load.load_wait_strict && !work.load.wait_for_rob_flag && !work.load.wait_for_rob_value,
-                        "disjoint bypass retained non-cold predictor metadata");
                     const bool unresolved = older.kind == 2 ? !older.address || tick < older.address_due : !complete(older);
                     if (unresolved) {
+                        if (work.kind == 0) require(!work.load.store_set_hit && !work.load.load_wait_bit &&
+                            !work.load.load_wait_strict && !work.load.wait_for_rob_flag && !work.load.wait_for_rob_value,
+                            "disjoint bypass retained non-cold predictor metadata");
                         bypassed = true;
                         disjoint_relations += disjoint_pairs.emplace(work.id, older.id).second;
                         byte_bypass_acceptances += allow_byte_bypass && !line_disjoint;
@@ -905,12 +946,13 @@ struct SyntheticEnvironment {
         const auto &head = instructions.at(retired);
         const bool flush_blocked = head.restart_blocked &&
             (!head.restart_boundary || tick < *head.restart_boundary + 6U);
-        require(pending_store_level == (!at_anchor && !at_exception_anchor && head.is_store() && !flush_blocked), "accepted producer with wrong pending-store level");
+        require(pending_store_level == (!at_anchor && !at_exception_anchor && !at_operand_anchor && head.is_store() && !flush_blocked), "accepted producer with wrong pending-store level");
     }
     void check_head(const Instruction &work, bool ordered = false) {
         if (work.needs_head || ordered) {
             ++head_checks;
             require(work.id == retired, "head-constrained instruction issued behind an older instruction");
+            require(!at_operand_anchor, "head-constrained producer issued behind nonmemory operand anchor");
         }
     }
     void sample_accepted() {
@@ -1139,6 +1181,14 @@ struct SyntheticEnvironment {
         register_retired_store(work.sq_target, work.id, false);
         return true;
     }
+    bool retire_store_after_nonmemory_head(const StoreTransaction&t,std::uint64_t anchor) {
+        const auto&w=find(t.rob,t.rob_flag);
+        require(w.id==retired&&at_operand_anchor&&w.source_anchor==anchor%(2U*kRobEntries)&&
+            tick>=w.source_head_release&&complete(w)&&!pending_store_level,
+            "scalar nonmemory-head handoff violated independent producer anchor");
+        at_operand_anchor=false;pending_store_level=true;
+        return retire_store(t);
+    }
     bool retire_vector_stores(const std::vector<VectorMemoryTransaction> &transactions) {
         require(!transactions.empty(), "empty vector retirement");
         auto &work = find(transactions.front().rob, transactions.front().rob_flag);
@@ -1172,7 +1222,10 @@ struct SyntheticEnvironment {
             return true;
         }
         auto &head = instructions.at(retired);
-        if (recovery_enabled && active_group && retired == first_graph && anchor_identity == identity(rob, flag)) {
+        if (head.source_anchor && identity(rob,flag)==*head.source_anchor) {
+            require(identity(rob,flag)==*head.source_anchor&&!pending_store,"operand anchor lost oldest producer head");
+            at_operand_anchor=true;at_anchor=at_exception_anchor=false;
+        } else if (recovery_enabled && active_group && retired == first_graph && anchor_identity == identity(rob, flag)) {
             require(!pending_store, "nonmemory recovery anchor asserted pendingst");
             at_anchor = true;
         } else if (exception_anchors.count(retired)) {
@@ -1181,6 +1234,7 @@ struct SyntheticEnvironment {
             at_exception_anchor = true;
             at_anchor = false;
         } else {
+            require(!head.source_anchor||tick>=head.source_head_release,"operand anchor released before source completion guard");
             if (head.is_store() && head.needs_restart_flush() && !pending_store && !head.restart_boundary) {
                 require(complete(head) && tick + 1U >= completion_edge(head) + 3U,
                     "VSTART low pendingst preceded completed writeback and ROB flush blocking");
@@ -1189,7 +1243,9 @@ struct SyntheticEnvironment {
             const bool flush_blocked = head.restart_blocked &&
                 (!head.restart_boundary || tick < *head.restart_boundary + 6U);
             require(head.rob == rob && head.flag == flag && pending_store == (head.is_store() && !flush_blocked),
-                "installed ROB head or pending-store level disagreed with oldest live instruction");
+                "installed ROB head or pending-store level disagreed with oldest live instruction id="+std::to_string(head.id)+
+                " edge="+std::to_string(tick)+" release="+std::to_string(head.source_head_release)+
+                " got="+std::to_string(identity(rob,flag))+" expected="+std::to_string(identity(head.rob,head.flag)));
             if (recovery_enabled && active_group && retired == first_graph) {
                 for (const auto &work : instructions) if (work.group == active_group)
                     require(complete(work) && !work.refetch_pending, "released recovery anchor before all obligations completed");
@@ -1197,6 +1253,7 @@ struct SyntheticEnvironment {
             }
             at_anchor = false;
             at_exception_anchor = false;
+            at_operand_anchor = false;
         }
         installed_head = retired; pending_store_level = pending_store;
         capture_store_edge(); retired_pending_heads += advanced && retirement_stats.pending_before_last_edge != 0;
@@ -1215,6 +1272,10 @@ struct SyntheticEnvironment {
     }
     void finish(unsigned count, const MixedCoverage &coverage, const ConstraintCoverage &constraints) {
         synchronize_retirement();
+        for(auto id:delayed_addresses)if(instructions.at(id).canceled&&!consumed_addresses.count(id))
+            ++observed_operand_ready[10+instructions.at(id).kind];
+        for(auto id:delayed_data)if(instructions.at(id).canceled&&!consumed_data.count(id))++observed_operand_ready[17];
+        require(coverage.stream_operand_ready==observed_operand_ready,"operand readiness coverage disagrees with independent acceptance ledger");
         require(context_handoffs == (count ? 1U : 0U), "ordinary context handoff omitted or repeated");
         if (permission_enabled) {
             require(retired == instructions.size() && retired == count + canceled_generations &&
@@ -1349,6 +1410,7 @@ public:
         constraints.stream_dependency_pages_per_mille = 0;
         constraints.stream_disjoint_bypass_per_mille = 0;
         constraints.stream_byte_bypass_per_mille = 0;
+        constraints.stream_operand_delay_per_mille = 0;
         constraints.stream_unresolved_per_mille = 0;
         constraints.stream_unresolved_inflight_per_mille = 0;
         constraints.misaligned_per_mille = 450;
@@ -1514,10 +1576,17 @@ int main(int argc, char **argv) {
                 "oracle checkpoint failed to remove canceled-store bytes");
             std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
                 << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
-        } else if (mode == "stream" || mode == "byte-bypass" || mode == "disjoint-bypass" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
+        } else if (mode == "stream" || mode == "operand-ready" || mode == "operand-permission" || mode == "byte-bypass" || mode == "disjoint-bypass" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
             require(argc == 6 || (mode == "permission" && argc == 7) || (mode == "independent" && argc == 7) || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "operand-ready") {
+                fixture.constraints.stream_operand_delay_per_mille = 1000;
+                fixture.constraints.stream_operand_delay_max = 64;
+                fixture.constraints.stream_disjoint_bypass_per_mille = fixture.constraints.stream_byte_bypass_per_mille = 1000;
+                fixture.environment.allow_disjoint_bypass = fixture.environment.allow_byte_bypass = true;
+                fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = limit;
+            }
             if (mode == "byte-bypass") {
                 fixture.constraints.stream_byte_bypass_per_mille = 1000;
                 fixture.constraints.stream_dependency_per_mille = 0;
@@ -1535,7 +1604,7 @@ int main(int argc, char **argv) {
                 fixture.environment.delayed_store_feedback = true;
             }
             if (mode == "vector-replay") fixture.environment.inject_vector_replay = true;
-            if (mode == "permission") {
+            if (mode == "permission" || mode == "operand-permission") {
                 fixture.environment.permission_enabled = true;
                 fixture.environment.permission_context.regime = RandomConstraints::translation_stage1;
                 fixture.constraints.stream_permission_load_per_mille = 1000;
@@ -1545,6 +1614,11 @@ int main(int argc, char **argv) {
                 fixture.constraints.scalar_fp_per_mille = argc == 7 ? std::stoul(argv[6]) : 0;
                 fixture.constraints.stream_dependency_per_mille = 1000;
                 fixture.environment.bytes.define_seeded_random(0x520000000ULL, 0x10000, 719);
+                if (mode == "operand-permission") {
+                    fixture.constraints.stream_operand_delay_per_mille = 1000;
+                    fixture.constraints.stream_operand_delay_max = 4096;
+                    fixture.constraints.stream_dependency_per_mille = 0;
+                }
             }
             if (mode == "independent" && argc >= 7) fixture.constraints.apply(std::string("stream-arena=") + argv[6]);
             if (mode == "pair-rate") fixture.constraints.apply(std::string("stream-store-pair=") + argv[6]);
@@ -1664,6 +1738,9 @@ int main(int argc, char **argv) {
             std::cout << "],\"stream_byte_bypass_granules\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_byte_bypass_granules.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_byte_bypass_granules[i];
+            std::cout << "],\"stream_operand_ready\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_operand_ready.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_operand_ready[i];
             std::cout << "]"
                 << ",\"cold_attempts\":" << fixture.coverage.stream_recovery_inflight[0]
                 << ",\"cold_unavailable\":" << fixture.coverage.stream_recovery_inflight[1]

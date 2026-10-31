@@ -591,6 +591,33 @@ auto Environment::Impl::authorize_release_store_inputs() -> bool
     return true;
 }
 
+auto Environment::Impl::retire_store_after_nonmemory_head(const StoreTransaction &transaction, std::uint64_t anchor) -> bool
+{
+    const auto target = queues_.scalar_store_target(scalar_store_key(transaction));
+    const unsigned identity = unsigned(transaction.rob) + unsigned(transaction.rob_flag) * kRobEntries;
+    const unsigned distance = (identity + 2U * kRobEntries - unsigned(anchor % (2U * kRobEntries))) % (2U * kRobEntries);
+    if (distance < 1 || distance > 2 || transaction.rob >= kRobEntries ||
+        static_cast<unsigned>(transaction.op) > static_cast<unsigned>(StoreOp::sd) ||
+        !transaction.cacheable || transaction.expected_exception_mask || transaction.input_exception_mask ||
+        transaction.input_flush_pipe || transaction.input_trigger != kTriggerNone ||
+        transaction.expected_output_flush_pipe.value_or(false) ||
+        transaction.expected_debug_is_mmio.value_or(false) || transaction.expected_debug_is_ncio.value_or(false) ||
+        store_scoreboard_.pending(transaction) || !target || !queues_.valid_store_retirement_target(*target) ||
+        dut_.queues.backend.pending_ptr_value.value() != rob_pointer_value(anchor) ||
+        dut_.queues.backend.pending_ptr_flag.value() != rob_pointer_flag(anchor) ||
+        dut_.queues.backend.pendingst.boolean() || dut_.queues.backend.pending_mmi_old.boolean() ||
+        dut_.queues.backend.scommit.boolean()) {
+        error_.record("scalar nonmemory-head handoff requires a completed normal store and adjacent held producer anchor");
+        return false;
+    }
+    // The first registered tuple naming an already-complete scalar store
+    // carries pendingst and scommit together. No intermediate high/zero edge.
+    dut_.queues.backend.pending_ptr_value.set(transaction.rob);
+    dut_.queues.backend.pending_ptr_flag.set(transaction.rob_flag);
+    dut_.queues.backend.pendingst.set(std::uint64_t{1});
+    return retire_store(transaction);
+}
+
 auto Environment::Impl::retire_store(const StoreTransaction &transaction, bool restore_after_walk) -> bool
 {
     const auto target = queues_.scalar_store_target(scalar_store_key(transaction));

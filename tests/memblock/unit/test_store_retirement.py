@@ -23,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 METHODS = {
     'completion.cpp': (
+        'auto Environment::Impl::retire_store_after_nonmemory_head(',
         'auto Environment::Impl::retire_store(',
         'auto Environment::Impl::retire_vector_stores(',
         'auto Environment::Impl::record_committed_store(',
@@ -42,7 +43,7 @@ DEPENDENCIES = (
 )
 CASES = (
     'scalar_retained', 'scalar_already_dequeued', 'scalar_widths',
-    'scalar_invalid', 'scalar_walk_restore', 'vector_retained', 'vector_already_dequeued',
+    'scalar_invalid', 'scalar_walk_restore', 'scalar_nonmemory_handoff', 'vector_retained', 'vector_already_dequeued',
     'vector_invalid', 'mixed_prefix', 'cancellation_retains',
     'cumulative_wrap_reuse', 'ledger_rejection', 'invalid_target_order', 'redirect_targets',
 )
@@ -151,6 +152,10 @@ class StoreRetirementTest(unittest.TestCase):
         # translation unit. Require its designated assertion, not a compile or
         # fixture setup failure, to reject it.
         faults = (
+            ('split_nonmemory_handoff',
+             '    dut_.queues.backend.pendingst.set(std::uint64_t{1});\n    return retire_store(transaction);',
+             '    dut_.queues.backend.pendingst.set(std::uint64_t{1}); tick();\n    return retire_store(transaction);',
+             'scalar_nonmemory_handoff', 'nonmemory handoff split'),
             ('split_walk_restore_commit',
              '        dut_.queues.backend.pendingst.set(std::uint64_t{1});',
              '        dut_.queues.backend.pendingst.set(std::uint64_t{1}); tick();',
@@ -462,7 +467,7 @@ class StreamStoreRetirementAccountingTest(unittest.TestCase):
                              text=True, capture_output=True, timeout=20)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         report = self.modules['run_regression'].parse_summary(ran.stdout)
-        self.assertEqual(report['constraint_schema'], 85)
+        self.assertEqual(report['constraint_schema'], 86)
         # These synchronous producer histories predate persistent sessions.
         # Keep their schema76 contract without inventing transport events.
         summary = re.sub(r'\bconstraint_schema=\d+\b', 'constraint_schema=76', ran.stdout)

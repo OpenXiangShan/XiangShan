@@ -40,10 +40,13 @@ class RedirectTailTest(unittest.TestCase):
         stream = (ROOT / 'cpp/scenarios/mixed_stream.cpp').read_text()
         begin = stream.index('            StreamCanceledGeneration record;')
         end = stream.index('        canceled += killed;', begin)
-        cls.ledger = ('if (!return_ordinary_redirect(environment, 100, false, true)) return false;\n'
+        cls.ledger = ('if (!return_ordinary_redirect(environment, rob, flag, flush_itself, source_hold)) return false;\n'
                       'if (!consume_issue_events()) return false;\n'
                       '            ++coverage.stream_cancel[0];\n'
                       'for (auto &item : live) { if (!kills(item)) continue;\n' + stream[begin:end])
+        hold_begin = stream.index('        // A flush-self victim')
+        hold_end = stream.index('        lq_offset -= lq_canceled;', hold_begin)
+        cls.source = cls.source.replace('// PRODUCTION_SURVIVING_OPERAND_HOLD', stream[hold_begin:hold_end])
         cls.source = cls.source.replace('// PRODUCTION_RETURN_AND_CANCELLATION_LEDGER', cls.ledger)
         cls.binary = cls.compile(cls.source, 'baseline')
 
@@ -132,6 +135,16 @@ class RedirectTailTest(unittest.TestCase):
 
     def test_final_canceled_STA_state_includes_every_return_feedback_edge(self):
         self.run_mode('feedback')
+
+    def test_delayed_operand_cancellation_retains_surviving_anchor(self):
+        self.run_mode('operand-cancellation')
+
+    def test_private_skipped_surviving_operand_hold_rejects(self):
+        original = 'if (!killed_anchor && environment.cycle() < first_killed->operand_anchor_release &&'
+        self.assertEqual(self.source.count(original), 1)
+        self.run_mode('operand-cancellation', self.compile(
+            self.source.replace(original, 'if (false && environment.cycle() < first_killed->operand_anchor_release &&'),
+            'skipped-operand-hold'), passing=False)
 
     def test_private_early_canceled_STA_accounting_fault_rejects(self):
         boundary = self.ledger.index('            ++coverage.stream_cancel[0];')

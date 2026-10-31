@@ -198,6 +198,18 @@ speculation, vector-result dependencies, predictor histories and general
 context/mapping overlap remain gaps. CPU producer trace and bounded qualification
 belong in RESULTS.md; this capability alone is not coverage closure.
 
+Independent nonmemory-source readiness now gates ordinary address operands and
+scalar STD separately, without serializing unrelated producers. Explicit
+nonmemory ROB anchors keep pendingPtr before the consumer until the latest
+source deadline plus WB/head guard; vector children share address readiness.
+Actual accepted-event older-wait relations and accepted/canceled source
+lifecycles accompany strict data/identity checks. Literal full-CPU producer
+latencies, arbitrary rename/source sharing and vector-data deadlines remain gaps.
+The defensive extra-survivor hold is branch/ledger tested only: current generic
+scalar/vector-load victims already accepted their shared address source before
+redirect, and the normal recovery hold exceeds that source/head guard. No native
+extra-over-busy survivor wait is claimed.
+
 Ordinary scalar streams return to event selection after an accepted STA rather
 than synchronously waiting for its slow feedback. One per-store attempt cursor
 matches lane/SQ value/wrap, preserves miss cooldown and suppresses retries after

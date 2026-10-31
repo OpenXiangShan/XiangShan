@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=85`.
+`constraint_schema=86`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -81,6 +81,8 @@ they do not imply arbitrary numeric suffix support.
 | `stream-dependency-pages` | Conditional page-displacement ALU rate for an already selected address edge, default 250 in all presets. Result bits above bit5 select a cyclic page displacement inside the ordinary identity/permuted window or selected 64-KiB NAPOT region, reserving one guard page at each end. A selected ALU may retain the page; only actual page changes count as cross-page edges. Zero preserves the preceding RNG draws and same-page addresses. |
 | `stream-disjoint-bypass` | Conditional admission rate for ordinary scalar integer/FP or vector loads disjoint in physical cache lines from every live older store; default 250 in every preset. Selected loads may issue past unresolved older scalar STA/translation or vector sibling issue, retaining operand/head/VSTART/ordered-indexed constraints and exact normal data. Scalar metadata uses a reachable cold predictor with no store-set/wait/strict bits. Graph, permission and auxiliary survival roles are excluded. Zero preserves preceding RNG/scheduling. This rate selects capability, not a promised issue/completion ratio. |
 | `stream-byte-bypass` | Conditional admission rate for ordinary scalar integer/FP or vector loads sharing a physical line with at least one live older store but no active physical byte with any live older store; default 250 in every preset. Line- and byte-mode selection are exclusive. Uses the same cold predictor, dependency, head/VSTART, vector and strict byte rules as line bypass. Zero adds no draws and preserves preceding scheduling. |
+| `stream-operand-delay` | Conditional independent nonmemory-source delay rate, default250 in every preset. Ordinary address operands and scalar STD data are sampled separately unless that operand already has a checked load-result dependency. Graph, permission and auxiliary-survival roles are excluded. Zero adds no draws or producer anchors. |
+| `stream-operand-delay-max` | Maximum selected source-ready delay after completed admission, default64, legal1..4096. A selected delay is uniform1..maximum. Vector split uops share one address deadline; no independent external vector-data deadline is inferred. |
 | `stream-store-pair` | Conditional rate offering an ordinary scalar store's initial STA and STD together when both operand events are ready. Independent retained lane handshakes permit same-edge, STA-first or STD-first acceptance. Default 500 in all presets; zero retains separate scheduling. Graph operands and STA retries remain separate. |
 | `stream-arena` | Ordinary eight-line stream-arena selection rate; default 750 preserves the previous seeded draw. Zero uses the configured locality/working set for every ordinary selection; 1000 always selects the eight-line arena. Dependencies, permission reservations and unresolved-graph addresses retain their own constraints. This is an address-choice rate, not an observed cache-miss percentage. |
 | `stream-permission-load` | Conditional scalar/FP load admission rate for immutable execute-only pages in translated ordinary streams; default 50, zero for cmo-stress. A seeded 1..4-probe epoch budget bounds canceled/replacement work; one denied probe may be live. Bare epochs and unresolved graph roles are excluded. |
@@ -1503,6 +1505,42 @@ obey word <= region <= line <= accepted and line is the union of the three
 blocker classes. No positive bins are required for sparse runs. The verifier
 also checks exclusive line/byte-mode selections against eligible/canceled
 populations. These are accepted-edge relations, not evidence of early completion.
+
+### Independent ordinary operand availability
+
+Schema86 adds independent address and scalar-store data availability to the
+canonical ready-event scheduler. Admission reserves one nonmemory ROB producer
+entry per selected independent source, immediately before the memory consumer.
+Distinct address/data sources have distinct producer identities; choose the
+later-ready producer older so a single held head represents the latest
+outstanding producer. This abstracts omitted nonmemory computation/long-latency
+production, not a literal ALU execution latency or a complete rename/IQ model.
+The nonmemory anchor has no LSQ entry, memory-pending flag or memory commit
+count. It remains head through max(source deadlines)+the existing four-edge
+scalar WB/head guard; source completion is eligibility, not mandatory issue.
+
+Deadlines freeze at completed memory admission and are not resampled on retry.
+The no-progress watchdog allows the latest fixed live source/head boundary
+before its normal bounded memory-progress budget; idle loops cannot rearm it.
+Checked memory-result dependencies retain their independent completion gate.
+Vector instructions share one source-ready boundary across split uops, while
+ordered/head/VSTART and repeated-destination dependencies still apply. A
+completed scalar store reached from its nonmemory anchor exposes its first
+pendingst/scommit tuple atomically; cancellation retains surviving producer
+anchors through readiness before replacement head installation. The extra wait
+is defensive branch coverage: current generic load victims have already consumed
+their shared address source before redirect; no native extra-over-busy survivor
+wait is claimed.
+
+`stream_operand_ready` has30 counters: delayed address selections, first
+acceptances and canceled-before-first acceptances, each in five stream classes
+(integer/FP scalar load combined, vector load, scalar store, vector store,
+prefetch); then selected/accepted/canceled scalar STD operands. The final12
+count actual accepted producer events crossing an older address/data deadline,
+six classes each (scalar load, STA, STD, vector load, vector store, prefetch).
+Retries are separate accepted events; per-operand lifecycle counts deduplicate.
+Same-edge readiness is ready, not a waiting witness. No positive sparse bins
+are required; accounting rejects early acceptance and population violations.
 
 ### Sustained ordinary histories
 

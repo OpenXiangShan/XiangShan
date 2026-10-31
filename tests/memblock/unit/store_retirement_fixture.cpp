@@ -34,6 +34,7 @@ void trace_reference_store(const SparseMemory &, const char *, std::uint64_t,
 
 class StoreRetirementFixture {
 public:
+    bool retire_store_after_nonmemory_head(const StoreTransaction &transaction, std::uint64_t anchor);
     FailureState error_{"host-store-retirement", "contract"};
     QueueAccounting queues_{error_};
     StoreScoreboard store_scoreboard_;
@@ -268,6 +269,29 @@ static void scalar_walk_restore() {
             "walk restoration lost exactly-once retirement/drain obligation");
         check_bytes(e,{{0,0x11},{1,0x22},{2,0x33},{3,0x44},{4,0x55},{5,0x66},{6,0x77},{7,0x88}});
     }
+}
+static void scalar_nonmemory_handoff() {
+    for(unsigned rob: {0U,1U,159U})for(unsigned flag=0;flag<2;++flag)for(unsigned distance=1;distance<=2;++distance)
+        for(unsigned fault=0;fault<8;++fault) {
+            StoreRetirementFixture e;initial_bytes(e);auto t=scalar(rob,55);t.rob_flag=flag;
+            scalar_allocate(e,t);scalar_expect(e,t);
+            auto anchor=(rob+flag*kRobEntries+2U*kRobEntries-distance)%(2U*kRobEntries);
+            e.head(rob_pointer_value(anchor),rob_pointer_flag(anchor),false);
+            if(fault==1)anchor=(anchor+3)%(2U*kRobEntries);
+            if(fault==2)e.dut_.queues.backend.pendingst.set(1);
+            if(fault==3)e.dut_.queues.backend.scommit.set(1);
+            if(fault==4)e.dut_.queues.backend.pending_mmi_old.set(1);
+            if(fault==5)t.cacheable=false;
+            if(fault==6)t.expected_exception_mask=kExceptionStorePageFault;
+            if(fault==7)e.head((rob_pointer_value(anchor)+3)%kRobEntries,rob_pointer_flag(anchor),false);
+            const auto before=snapshot(e);const auto edges=e.samples.size();
+            const bool result=e.retire_store_after_nonmemory_head(t,anchor);
+            if(fault){require(!result,"invalid nonmemory handoff accepted");require(snapshot(e)==before,"invalid nonmemory handoff mutated");continue;}
+            require(result,"valid nonmemory handoff rejected");
+            require(e.samples.size()==edges+1&&e.samples.back().rob==rob&&e.samples.back().flag==flag&&
+                e.samples.back().pending==1&&e.samples.back().commit==1,"nonmemory handoff split first pendingst and commit");
+            require(stats(e)[0]==1&&stats(e)[6]==1,"nonmemory handoff lost exactly-once store retirement");
+        }
 }
 static void scalar_invalid() {
     for(unsigned fault=0;fault<16;++fault) {
@@ -524,6 +548,7 @@ int main(int argc,char **argv) {
             {"scalar_retained",scalar_retained},{"scalar_already_dequeued",scalar_already_dequeued},
             {"scalar_widths",scalar_widths},{"scalar_invalid",scalar_invalid},
             {"scalar_walk_restore",scalar_walk_restore},
+            {"scalar_nonmemory_handoff",scalar_nonmemory_handoff},
             {"vector_retained",vector_retained},{"vector_already_dequeued",vector_already_dequeued},
             {"vector_invalid",vector_invalid},{"mixed_prefix",mixed_prefix},
             {"cancellation_retains",cancellation_retains},{"cumulative_wrap_reuse",cumulative_wrap_reuse},

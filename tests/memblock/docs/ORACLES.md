@@ -489,6 +489,21 @@ bounds. RAW partial-PA matches and unaligned SQ forwarding may
 legally replay; existing explicit cancellation/strict replacement expectations
 remain required, without weakening data or side-effect checking.
 
+Ordinary independent-source deadlines freeze after admission and gate both
+ready selection and actual acceptance. They do not replace checked memory
+dependencies or change expected bytes. One distinct nonmemory producer entry
+per delayed source precedes the consumer; the latest-ready producer owns the
+older anchor until readiness plus the declared WB/head guard. No memory-pending
+or memory commit count belongs to those anchors. Completed scalar-store
+handoff couples the first store-head pendingst and scommit; wrong identity,
+incomplete/faulting work or nonadjacent anchors reject before pin writes.
+Canceled memory operands conserve selected=accepted+unaccepted cancellation.
+Progress waits honor fixed source/head deadlines, then retain the normal
+bounded memory-progress check; this does not waive missing DUT completions.
+Accepted-event overlaps require a strictly earlier unresolved source deadline
+in an older live memory consumer; they do not establish full-core producer
+latency or general dependency-graph fidelity.
+
 Epoch length is independently configurable up to 4096 instructions, with a
 single reference-byte image and 2..8 live instructions. Admission checks current
 flow capacity and rejects duplicate live ROB value/wrap identities. Prefix

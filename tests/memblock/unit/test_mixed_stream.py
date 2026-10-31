@@ -19,6 +19,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 INPUTS = (
     'cpp/scenarios/mixed/stream_footprint.hpp',
+    'cpp/scenarios/mixed/stream_operand_ready.hpp',
     'cpp/scenarios/mixed/stream_dependency.hpp', 'cpp/scenarios/mixed/translation_permutation.hpp',
     'cpp/scenarios/mixed_stream.cpp', 'cpp/scenarios/mixed_scheduler.cpp',
     'cpp/scenarios/mixed_initialization.cpp',
@@ -62,6 +63,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.retirement = []
         cls.bypass = []
         cls.byte_bypass = []
+        cls.operand_ready = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -98,6 +100,12 @@ class MixedStreamTest(unittest.TestCase):
         # computes readiness/completion and all actual acceptance edges.
         stream = stream.replace('const auto event = ready[random() % ready.size()];',
             'const auto event = ready[random() % ready.size()];\n        environment.note_selection(event.kind);')
+        stream = stream.replace('            live.push_back(std::move(work));',
+            '            environment.bind_operand_ready(admitted, work.address_ready.delay, work.data_ready.delay, work.operand_anchor);\n'
+            '            live.push_back(std::move(work));')
+        stream = stream.replace('                    rob_offset += producers;',
+            '                    environment.reserve_operand_producers(admitted, rob_offset, producers);\n'
+            '                    rob_offset += producers;')
         stream = stream.replace('if (pair_operands) {\n                work.paired_initial = true;',
             'if (pair_operands) {\n                environment.select_pair(work.store);\n                work.paired_initial = true;')
         stream = stream.replace('survivor = StoreSurvivalProbe{load.address, checkpoint.scalar_load(load)};',
@@ -182,6 +190,7 @@ class MixedStreamTest(unittest.TestCase):
                 'retirement_cases': cls.retirement,
                 'disjoint_bypass_cases': cls.bypass,
                 'byte_bypass_cases': cls.byte_bypass,
+                'operand_ready_cases': cls.operand_ready,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
@@ -308,6 +317,73 @@ class MixedStreamTest(unittest.TestCase):
             c = r['stream_byte_bypass']
             self.assertEqual(c[:3], [a+b for a,b in zip(c[3:6],c[6:9])])
         self.assertEqual(results[0], self.run_fixture('byte-bypass', 1, 0, 0, 64))
+
+    def test_independent_operand_ready_deadlines_keep_younger_work_live(self):
+        results=[self.run_fixture('operand-ready',seed,timing,0,64)
+                 for timing in (0,1) for seed in range(1,33)]
+        self.operand_ready.extend(results)
+        self.assertEqual(results[0],self.run_fixture('operand-ready',1,0,0,64))
+        self.assertGreater(len({r['schedule'] for r in results}),32)
+        totals=[sum(r['stream_operand_ready'][i] for r in results) for i in range(30)]
+        self.assertTrue(all(totals[:5]),totals)
+        self.assertGreater(totals[15],0)
+        self.assertGreater(sum(totals[18:24]),0)
+        self.assertGreater(sum(totals[24:30]),0)
+        self.assertEqual(totals[:5],totals[5:10])
+        self.assertEqual(totals[15],totals[16])
+
+    def test_operand_maximum_delay_keeps_bounded_progress_watchdog(self):
+        source = self.source.replace(
+            'static constexpr unsigned constrained_completion_timeout = 512;',
+            'static constexpr unsigned constrained_completion_timeout = 2048;')
+        source = source.replace('fixture.constraints.stream_operand_delay_max = 64;',
+                                'fixture.constraints.stream_operand_delay_max = 4096;')
+        sample = 'constraints.stream_operand_delay_per_mille, constraints.stream_operand_delay_max);'
+        self.assertEqual(source.count(sample), 2)
+        # Force a legal endpoint rather than wait for a rare uniform sample.
+        source = source.replace(sample, sample + '\n                if (work.address_ready.delay) work.address_ready.delay = 4096;', 1)
+        binary = self.compile(source, 'operand-endpoint4096')
+        for seed in (7, 27):
+            result = self.run_fixture('operand-ready', seed, 1, 1, 1, binary=binary)
+            self.assertEqual(result['actions'], 1)
+            self.assertEqual(result['stream_operand_ready'][0], 1)
+        # Readiness must not grant an unbounded DUT/completion wait.
+        blocked = source.replace('work.address_ready.delay = 4096;', 'work.address_ready.delay = 64;')
+        blocked = blocked.replace('work.address_ready.ready(environment.cycle()) &&', 'false &&')
+        run = subprocess.run([str(self.compile(blocked, 'operand-never-issues')),
+                              'operand-ready', '7', '1', '1', '1'],
+                             capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('no-accepted-or-retired-progress', run.stderr)
+
+    def test_delayed_operand_lifecycles_include_permission_cancellation(self):
+        results = [self.run_fixture('operand-permission', seed, timing, 0, 32)
+                   for timing in (0, 1) for seed in range(1, 9)]
+        totals = [sum(r['stream_operand_ready'][i] for r in results) for i in range(30)]
+        self.assertTrue(all(totals[10:15]), totals)
+        self.assertGreater(totals[17], 0)
+        self.assertEqual(totals[:5], [a+b for a,b in zip(totals[5:10], totals[10:15])])
+        self.assertEqual(totals[15], totals[16]+totals[17])
+        self.operand_ready.extend(results)
+
+    def test_private_operand_early_issue_head_and_coverage_faults_reject(self):
+        mutations=[
+            ('early-address','work.address_ready.ready(environment.cycle()) &&','true &&'),
+            ('early-data','work.data_ready.ready(environment.cycle()) &&','true &&'),
+            ('early-anchor','environment.cycle() >= live.front().operand_anchor_release','true'),
+            ('missing-witness','coverage.stream_operand_ready[18U + access_issue] += older_address_wait;',''),
+        ]
+        for name,old,new in mutations:
+            self.assertIn(old,self.source)
+            binary=self.compile(self.source.replace(old,new),name);failed=[]
+            for seed in range(1,9):
+                r=subprocess.run([str(binary),'operand-ready',str(seed),'1','0','64'],capture_output=True,text=True,timeout=10)
+                if r.returncode:
+                    self.assertTrue(any(x in r.stderr for x in ('before independent ready','operand-before-producer-ready',
+                        'operand anchor lost','operand anchor released','oldest live instruction','operand readiness coverage','VSTART low pendingst')),r.stderr)
+                    failed.append(seed)
+            self.assertTrue(failed,name+' escaped')
+            self.mutations[name]=failed
 
     def test_private_byte_overlap_and_predictor_faults_reject(self):
         old = 'return !older.is_store() || (!older.recovery_id && stream_disjoint(work.byte_footprint, older.byte_footprint));'

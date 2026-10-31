@@ -7,6 +7,7 @@
 #include "scenarios/mixed/stream_recovery.hpp"
 #include "scenarios/mixed/stream_cancellation.hpp"
 #include "scenarios/mixed/store_address_replay.hpp"
+#include "scenarios/mixed/stream_operand_ready.hpp"
 
 struct Pin {
     std::uint64_t bits = 0;
@@ -419,6 +420,9 @@ struct StoreWork {
     bool address_issued = true, data_issued = false, restart_flushed = false;
     bool address_source = false, data_source = false, address_consumed = false, data_consumed = false;
     bool cross_page_address = false;
+    StreamOperandReady address_ready, data_ready;
+    std::optional<std::uint64_t> operand_anchor;
+    std::uint64_t operand_anchor_release = 0;
     bool disjoint_bypass = false, byte_bypass = false, bypass_accepted = false;
     LoadTransaction load;
     std::vector<bool> issued;
@@ -432,10 +436,12 @@ struct CancellationCoverage {
     std::array<std::uint64_t, 15> stream_dependency_pages{};
     std::array<std::uint64_t, 18> stream_disjoint_bypass{};
     std::array<std::uint64_t, 18> stream_byte_bypass{};
+    std::array<std::uint64_t, 30> stream_operand_ready{};
     std::array<std::uint64_t, 11> stream_sta{};
 };
 static bool return_and_classify(Harness &environment, std::vector<StoreWork> &live,
-                                CancellationCoverage &coverage)
+                                CancellationCoverage &coverage, std::uint8_t rob = 100, bool flag = false,
+                                bool flush_itself = true, bool source_hold = false)
 {
     Environment::MemoryViolationStats violation;
     violation.last.rob_value = 100; violation.last.level = true;
@@ -449,6 +455,12 @@ static bool return_and_classify(Harness &environment, std::vector<StoreWork> &li
         return true;
     };
     // PRODUCTION_RETURN_AND_CANCELLATION_LEDGER
+    if (source_hold) {
+        if (!wait_ordinary_redirect_backend(environment)) return false;
+        const bool trap = false;
+        auto first_killed = live.begin();
+        // PRODUCTION_SURVIVING_OPERAND_HOLD
+    }
     return true;
 }
 
@@ -493,6 +505,54 @@ static void feedback_states()
     std::cout << "propagation_STA_feedback_cases=" << cases << " sampled_after_edges=1,2,3\n";
 }
 
+static void operand_cancellation()
+{
+    unsigned cases = 0;
+    for (unsigned victim : {0U, 159U, 160U, 319U})
+    for (unsigned relation = 0; relation < 3; ++relation)
+    for (bool accepted_address : {false, true}) {
+        Harness h; CancellationCoverage coverage; std::vector<StoreWork> live(1);
+        auto &w = live[0];
+        // Flush-self retains a consumer's preceding producer; a younger
+        // consumer's producer at the victim survives only flush-after.
+        const bool flush_self = relation != 1;
+        const unsigned consumer = (victim + 2U * (relation != 0)) % 320U;
+        const unsigned anchor = (consumer + 318U) % 320U;
+        w.store = obligation(Kind::store, consumer).store;
+        w.address_issued = accepted_address; w.data_issued = false;
+        w.address_ready = {4092, 4092, accepted_address};
+        w.data_ready = {4093, 4093, false};
+        w.operand_anchor = anchor; w.operand_anchor_release = 4097;
+        install(h, obligation(Kind::store, consumer));
+        if (accepted_address) {
+            // An accepted address may be canceled while its data is unready.
+            h.dut_.edge = 4092;
+            require(w.address_replay.accept(0, 4092), "ready STA setup failed");
+        }
+        const auto return_edge = h.cycle();
+        h.dut_.queues.backend.pending_ptr_value.set(anchor % 160U);
+        h.dut_.queues.backend.pending_ptr_flag.set(anchor / 160U);
+        h.feedback_.sample = [&](auto) {
+            require(h.dut_.queues.backend.pending_ptr_value.value() == anchor % 160U &&
+                h.dut_.queues.backend.pending_ptr_flag.boolean() == bool(anchor / 160U) &&
+                !h.dut_.queues.backend.pendingst.boolean() &&
+                !h.dut_.queues.backend.pending_mmi_old.boolean() &&
+                !h.dut_.queues.backend.scommit.boolean(), "surviving nonmemory producer was skipped");
+        };
+        require(return_and_classify(h, live, coverage, victim % 160U, victim / 160U,
+            flush_self, true), "source cancellation failed victim=" + std::to_string(victim) +
+            " relation=" + std::to_string(relation) + " accepted=" + std::to_string(accepted_address) +
+            " error=" + h.error_.message());
+        const bool survives = relation != 2;
+        const auto expected_edge = survives ? std::max<std::uint64_t>(return_edge + 1028U, 4097U) : return_edge + 1028U;
+        require(h.cycle() == expected_edge, "surviving operand hold released early or delayed killed producer");
+        require(coverage.stream_operand_ready[12] == !accepted_address &&
+            coverage.stream_operand_ready[17] == 1, "wrong delayed-source cancellation lifecycle");
+        ++cases;
+    }
+    std::cout << "operand_cancellation_cases=" << cases << " lifecycle_and_survivor_edges=checked\n";
+}
+
 int main(int argc, char **argv)
 {
     try {
@@ -505,6 +565,7 @@ int main(int argc, char **argv)
         else if (mode == "feedback") feedback_states();
         else if (mode == "exception-anchor") exception_anchor();
         else if (mode == "ordinary-walk") ordinary_walk();
+        else if (mode == "operand-cancellation") operand_cancellation();
         else require(false, "unknown mode");
     } catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
 }
