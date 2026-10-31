@@ -397,39 +397,34 @@ object Pbmt {
   def isIO(a: UInt) = a===io
 }
 
+class TlbQuery(implicit p: Parameters) extends TlbBundle {
+  val vpn = UInt(vpnLen.W)
+  val s2xlate = UInt(2.W)
+}
+
+class TlbStorageResult(nDups: Int)(implicit p: Parameters) extends TlbBundle {
+  val hit = Bool()
+  val ppn = Vec(nDups, UInt(ppnLen.W))
+  val pbmt = Vec(nDups, UInt(ptePbmtLen.W))
+  val g_pbmt = Vec(nDups, UInt(ptePbmtLen.W))
+  val perm = Vec(nDups, new TlbPermBundle())
+  val g_perm = Vec(nDups, new TlbPermBundle(hasV = false))
+  val s2xlate = Vec(nDups, UInt(2.W))
+  val mptperm = Option.when(HasMptCheck)(Vec(nDups, new MptPermBundle(isTlbPort = true)))
+}
+
+class TlbStorageReadIO(ports: Int, nDups: Int)(implicit p: Parameters) extends TlbBundle {
+  val req = Vec(ports, Flipped(DecoupledIO(new TlbQuery)))
+  val resp = Vec(ports, ValidIO(new TlbStorageResult(nDups)))
+}
+
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
-  val r = new Bundle {
-    val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
-      val vpn = Output(UInt(vpnLen.W))
-      val s2xlate = Output(UInt(2.W))
-    })))
-    val resp = Vec(ports, ValidIO(new Bundle{
-      val hit = Output(Bool())
-      val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
-      val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val perm = Vec(nDups, Output(new TlbPermBundle()))
-      val g_perm = Vec(nDups, Output(new TlbPermBundle(hasV = false)))
-      val s2xlate = Vec(nDups, Output(UInt(2.W)))
-      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true)))) // add mptperm
-    }))
-  }
+  val r = new TlbStorageReadIO(ports, nDups)
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwRespS2)
   }))
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
-
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate:UInt): Unit = {
-    this.r.req(i).valid := valid
-    this.r.req(i).bits.vpn := vpn
-    this.r.req(i).bits.s2xlate := s2xlate
-
-  }
-
-  def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
-  }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2): Unit = {
     this.w.valid := valid
@@ -455,38 +450,11 @@ class MptPermBundle(isTlbPort: Boolean = true) (implicit p: Parameters) extends 
   }
 }
 class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
-  val r = new Bundle {
-    val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
-      val vpn = Output(UInt(vpnLen.W))
-      val s2xlate = Output(UInt(2.W))
-    })))
-    val resp = Vec(ports, ValidIO(new Bundle{
-      val hit = Output(Bool())
-      val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
-      val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val perm = Vec(nDups, Output(new TlbPermBundle()))
-      val g_perm = Vec(nDups, Output(new TlbPermBundle(hasV = false)))
-      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true))))
-      // HasMptCheck,add mptperm
-      val s2xlate = Vec(nDups, Output(UInt(2.W)))
-    }))
-  }
+  val r = new TlbStorageReadIO(ports, nDups)
   val w = Flipped(ValidIO(new Bundle {
     val data = Output(new PtwRespS2)
   }))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
-
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate: UInt): Unit = {
-    this.r.req(i).valid := valid
-    this.r.req(i).bits.vpn := vpn
-    this.r.req(i).bits.s2xlate := s2xlate
-  }
-
-  def r_resp_apply(i: Int) = { // HasMptCheck,add mptperm
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, 
-      this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt,this.r.resp(i).bits.mptperm)
-  }
 
   def w_apply(valid: Bool, data: PtwRespS2): Unit = {
     this.w.valid := valid

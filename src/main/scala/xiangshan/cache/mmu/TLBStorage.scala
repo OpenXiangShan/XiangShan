@@ -351,44 +351,8 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     SoftTLB = coreParams.softTLB
   )
 
-  for (i <- 0 until ports) {
-    page.r_req_apply(
-      valid = io.r.req(i).valid,
-      vpn = io.r.req(i).bits.vpn,
-      i = i,
-      s2xlate = io.r.req(i).bits.s2xlate
-    )
-  }
-
-  for (i <- 0 until ports) {
-    val q = page.r.req(i)
-    val p = page.r.resp(i)
-    val rq = io.r.req(i)
-    val rp = io.r.resp(i)
-    rq.ready := q.ready // actually, not used
-    rp.valid := p.valid // actually, not used
-    rp.bits.hit := p.bits.hit
-    for (d <- 0 until nDups) {
-      rp.bits.ppn(d) := p.bits.ppn(d)
-      rp.bits.perm(d).pf := p.bits.perm(d).pf
-      rp.bits.perm(d).af := p.bits.perm(d).af
-      rp.bits.perm(d).v := p.bits.perm(d).v
-      rp.bits.perm(d).d := p.bits.perm(d).d
-      rp.bits.perm(d).a := p.bits.perm(d).a
-      rp.bits.perm(d).g := p.bits.perm(d).g
-      rp.bits.perm(d).u := p.bits.perm(d).u
-      rp.bits.perm(d).x := p.bits.perm(d).x
-      rp.bits.perm(d).w := p.bits.perm(d).w
-      rp.bits.perm(d).r := p.bits.perm(d).r
-      rp.bits.s2xlate(d) := p.bits.s2xlate(d)
-      rp.bits.g_perm(d) := p.bits.g_perm(d)
-      rp.bits.pbmt(d) := p.bits.pbmt(d)
-      rp.bits.g_pbmt(d) := p.bits.g_pbmt(d)
-      if (HasMptCheck) {
-        rp.bits.mptperm.get(d) := p.bits.mptperm.get(d)
-      }
-    }
-  }
+  page.r.req <> io.r.req
+  io.r.resp := page.r.resp
 
   page.sfence <> io.sfence
   page.csr <> io.csr
