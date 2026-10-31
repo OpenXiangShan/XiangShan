@@ -543,6 +543,18 @@ class TlbRespExcp(implicit p: Parameters) extends TlbBundle {
   val af = new TlbExceptionBundle
 }
 
+class TlbPreFault(implicit p: Parameters) extends TlbBundle {
+  val pf = Bool()
+  val gpf = Bool()
+  val af = Bool()
+}
+
+class TlbPreCheckResp(implicit p: Parameters) extends TlbBundle {
+  val effectiveVa = UInt(XLEN.W)
+  val query = new TlbQuery
+  val preFault = new TlbPreFault
+}
+
 // Access information for permission and PBMT checks
 class TlbAccessCheckInfo(implicit p: Parameters) extends TlbBundle {
   val cmd = TlbCmd()
