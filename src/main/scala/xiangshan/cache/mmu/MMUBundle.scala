@@ -575,6 +575,24 @@ class TlbRespExcp(implicit p: Parameters) extends TlbBundle {
   val af = new TlbExceptionBundle
 }
 
+// Access information for permission and PBMT checks
+class TlbAccessCheckInfo(implicit p: Parameters) extends TlbBundle {
+  val cmd = TlbCmd()
+  val hlvx = Bool()
+  val mode = UInt(2.W)
+  val sum = Bool()
+  // S/VS-stage MXR uses mstatus.MXR || vsstatus.MXR for virtual accesses,
+  // and mstatus.MXR otherwise. When set, PTE.X can satisfy read permission
+  val s1Mxr = Bool()
+  // G-stage uses only mstatus.MXR; when set, PTE.X can satisfy read permission
+  val s2Mxr = Bool()
+  val ifetch = Bool()
+  val translateEnable = Bool()
+  val s2xlate = UInt(2.W)
+  val isHyper = Bool()
+  val mptCheckOnly = Option.when(HasMptCheck)(Bool())
+}
+
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val gpaddr = Vec(nDups, Output(UInt(XLEN.W)))

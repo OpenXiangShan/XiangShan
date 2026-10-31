@@ -77,20 +77,12 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   }
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
-  val isHyperInst = (0 until Width).map(i => req_out_v(i) && req_out(i).hyperinst)
-
-  // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
-  // because, csr will influence tlb behavior.
+  // CSR and flush from the backend are delayed together
   val ifetch = if (q.fetchi) true.B else false.B
   val mode_tmp = if (q.useDmode) csr.priv.dmode else csr.priv.imode
-  val mode = (0 until Width).map(i => Mux(isHyperInst(i), csr.priv.spvp, mode_tmp))
-  val pmpMode = (0 until Width).map(i => Mux(req_out(i).isPrefetch, mode_tmp, mode(i)))
   val virt_in = csr.priv.virt
   val virt_out = req.map(a => RegEnable(csr.priv.virt, a.fire))
-  val sum = (0 until Width).map(i => Mux(virt_out(i) || isHyperInst(i), csr.priv.vsum, csr.priv.sum))
-  val mxr = (0 until Width).map(i => Mux(virt_out(i) || isHyperInst(i), csr.priv.vmxr || csr.priv.mxr, csr.priv.mxr))
   val req_in_s2xlate = (0 until Width).map(i => getS2xlate(virt_in || req_in(i).bits.hyperinst, csr.vsatp.mode, csr.hgatp.mode))
-  val req_out_s2xlate = (0 until Width).map(i => getS2xlate(virt_out(i) || isHyperInst(i), csr.vsatp.mode, csr.hgatp.mode))
   val need_gpa = RegInit(false.B)
   val need_gpa_wire = WireInit(false.B)
   private val NeedGpaRespCountLimit = 512
@@ -129,34 +121,40 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val Sv39x4Enable = csr.hgatp.mode === 8.U
   val Sv48x4Enable = csr.hgatp.mode === 9.U
 
-  val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (
-    if (EnableTlbDebug) (Sv39Enable || Sv48Enable)
-    else (Sv39Enable || Sv48Enable) && (mode(i) < ModeM))
-  )
-  val s2xlateEnable = (0 until Width).map(i =>
-    (isHyperInst(i) || virt_out(i)) &&
-    (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) &&
-    (mode(i) < ModeM)
-  )
-  val isRobMatch = (0 until Width).map(i => req_out(i).debug.robIdx === io.robPendingPtr)
-  val canGetGpa =  (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd) || req_out(i).frm_mabuf)
-
-  val BareMode = Option.when(HasMptCheck) (
-    csr.hgatp.mode === 0.U && csr.vsatp.mode === 0.U && csr.satp.mode === 0.U
-  ) // will start mpt only check if not in M mode
+  val BareMode = Option.when(HasMptCheck)(
+    csr.hgatp.mode === 0.U && csr.vsatp.mode === 0.U && csr.satp.mode === 0.U)
   val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
-  val privNeedTranslate = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)))
-  val portTranslateEnable = (0 until Width).map(i => privNeedTranslate(i) && !useReqS1Paddr(i))
-
-  val mptEn = Option.when(HasMptCheck) (csr.mmpt.mode =/= 0.U)
-  val mptCheckOnly = Option.when(HasMptCheck) ((0 until Width).map( i =>
-    BareMode.get && RegEnable(!req(i).bits.no_translate, req(i).valid) && mptEn.get && (mode(i) < ModeM)
-  )) // need mptcheck even when ptw disable, but dont need it when req.no_trans
-  (0 until Width).foreach{ i =>
+  val mptEn = Option.when(HasMptCheck)(csr.mmpt.mode =/= 0.U)
+  val vmEnable = Seq.fill(Width)(Wire(Bool()))
+  val accessInfo = (0 until Width).map { i =>
+    val info = Wire(new TlbAccessCheckInfo)
+    info.cmd := req_out(i).cmd
+    info.hlvx := req_out(i).hlvx
+    info.isHyper := req_out_v(i) && req_out(i).hyperinst
+    info.mode := Mux(info.isHyper, csr.priv.spvp, mode_tmp)
+    val isVirt = virt_out(i) || info.isHyper
+    info.sum := Mux(isVirt, csr.priv.vsum, csr.priv.sum)
+    info.s1Mxr := Mux(isVirt, csr.priv.vmxr || csr.priv.mxr, csr.priv.mxr)
+    info.s2Mxr := csr.priv.mxr
+    info.ifetch := ifetch
+    info.s2xlate := getS2xlate(isVirt, csr.vsatp.mode, csr.hgatp.mode)
+    vmEnable(i) := !isVirt && (
+      if (EnableTlbDebug) (Sv39Enable || Sv48Enable)
+      else (Sv39Enable || Sv48Enable) && (info.mode < ModeM))
+    val s2xlateEnable = isVirt &&
+      (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (info.mode < ModeM)
+    info.translateEnable := (vmEnable(i) || s2xlateEnable) && !useReqS1Paddr(i)
     if (HasMptCheck) {
-      io.ptw.req(i).bits.mptOnly.get := mptCheckOnly.get(i)
-    } // assign mptCheckonly to io req
+      info.mptCheckOnly.get := BareMode.get && RegEnable(!req(i).bits.no_translate, req(i).valid) &&
+        mptEn.get && (info.mode < ModeM)
+      io.ptw.req(i).bits.mptOnly.get := info.mptCheckOnly.get
+    }
+    info
   }
+  val pmpMode = (0 until Width).map(i => Mux(req_out(i).isPrefetch, mode_tmp, accessInfo(i).mode))
+  val isRobMatch = (0 until Width).map(i => req_out(i).debug.robIdx === io.robPendingPtr)
+  val canGetGpa = (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd) || req_out(i).frm_mabuf)
+
   // pre fault: check fault before real do translate
   val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val pregpf = WireInit(VecInit(Seq.fill(Width)(false.B)))
@@ -280,10 +278,10 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val pmpCmd = Mux(req_out(i).hlvx, TlbCmd.read_exec, req_out(i).cmd)
     pmp_check(addr, req_out(i).size, pmpCmd, noTranslateReg, i)
     for (d <- 0 until nRespDups) {
-      pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), req_out_s2xlate(i))
+      pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), accessInfo(i).s2xlate)
       val mptTemp = Option.when(HasMptCheck) (mptPerm.get(i)(d))
       perm_check(mptTemp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))), perm(i)(d),
-        req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i), prepf(i), pregpf(i), preaf(i))
+        accessInfo(i).cmd, i, d, g_perm(i)(d), accessInfo(i).hlvx, accessInfo(i).s2xlate, prepf(i), pregpf(i), preaf(i))
     }
     hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
   }
@@ -298,11 +296,11 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate,
       p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_hit_fast, p_mptPerm) =
       ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
-    val enable = portTranslateEnable(i)
-    val mptOnlyEnable = Option.when(HasMptCheck) (mptCheckOnly.get(i))
+    val enable = accessInfo(i).translateEnable
+    val mptOnlyEnable = Option.when(HasMptCheck) (accessInfo(i).mptCheckOnly.get)
     // when in check only mode, assign miss to true to start query mpt in l2tlb
-    val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
-    val need_gpa_req_match = need_gpa_vpn === get_pn(req_out(i).vaddr) && need_gpa_s2xlate === req_out_s2xlate(i)
+    val isOnlys2xlate = accessInfo(i).s2xlate === onlyStage2
+    val need_gpa_req_match = need_gpa_vpn === get_pn(req_out(i).vaddr) && need_gpa_s2xlate === accessInfo(i).s2xlate
     val isitlb = TlbCmd.isExec(req_out(i).cmd)
     val isPrefetch = req_out(i).isPrefetch
     val currentRedirect = req_out(i).debug.robIdx.needFlush(redirect)
@@ -327,7 +325,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
         need_gpa_wire := true.B
         need_gpa := true.B
         need_gpa_vpn := get_pn(req_out(i).vaddr)
-        need_gpa_s2xlate := req_out_s2xlate(i)
+        need_gpa_s2xlate := accessInfo(i).s2xlate
         resp_gpa_refill := false.B
         need_gpa_robidx := req_out(i).debug.robIdx
         need_gpa_robidx_valid := true.B
@@ -446,7 +444,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       allStage -> Mux(pbmt =/= 0.U, pbmt, g_pbmt),
       noS2xlate -> pbmt
     ))
-    resp(idx).bits.pbmt(d) := Mux(portTranslateEnable(idx), res, 0.U)
+    resp(idx).bits.pbmt(d) := Mux(accessInfo(idx).translateEnable, res, 0.U)
   }
 
   def perm_check(mptPerm: MptPermBundle, perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int,
@@ -466,8 +464,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val ldUpdate = !perm.a && isLd // update A/D through exception
     val stUpdate = (!perm.a || !perm.d) && isSt // update A/D through exception
     val instrUpdate = !perm.a && isInst // update A/D through exception
-    val modeCheck = !(mode(idx) === ModeU && !perm.u || mode(idx) === ModeS && perm.u && (!sum(idx) || ifetch))
-    val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || mxr(idx) && perm.x))
+    val modeCheck = !(accessInfo(idx).mode === ModeU && !perm.u || accessInfo(idx).mode === ModeS && perm.u && (!accessInfo(idx).sum || accessInfo(idx).ifetch))
+    val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || accessInfo(idx).s1Mxr && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && isLd
@@ -475,10 +473,10 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val instrPf = (instrPermFail || pf) && isInst
     val isFakePte = !perm.v.get && !perm.pf && !perm.af && !onlyS2
     val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v.get && !perm.pf && !perm.af
-    val s1_valid = portTranslateEnable(idx) && !onlyS2
+    val s1_valid = accessInfo(idx).translateEnable && !onlyS2
 
     // mptcheck val
-    val mptValid = Option.when(HasMptCheck) (mptCheckOnly.get(idx))
+    val mptValid = Option.when(HasMptCheck) (accessInfo(idx).mptCheckOnly.get)
     val mptInstf = Option.when(HasMptCheck) (!mptPerm.x && isInst)
     val mptWf = Option.when(HasMptCheck) (!(mptPerm.r && mptPerm.w) && isSt)
     val mptRf = Option.when(HasMptCheck) (!mptPerm.r && isLd)
@@ -489,13 +487,13 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val g_ldUpdate = !g_perm.a && isLd
     val g_stUpdate = (!g_perm.a || !g_perm.d) && isSt
     val g_instrUpdate = !g_perm.a && isInst
-    val g_ldPermFail = !Mux(hlvx, g_perm.x, (g_perm.r || csr.priv.mxr && g_perm.x))
+    val g_ldPermFail = !Mux(hlvx, g_perm.x, (g_perm.r || accessInfo(idx).s2Mxr && g_perm.x))
     val g_stPermFail = !g_perm.w
     val g_instrPermFail = !g_perm.x
     val ldGpf = (g_ldPermFail || gpf) && isLd
     val stGpf = (g_stPermFail || gpf) && isSt
     val instrGpf = (g_instrPermFail || gpf) && isInst
-    val s2_valid = portTranslateEnable(idx) && (onlyS2 || allS2xlate)
+    val s2_valid = accessInfo(idx).translateEnable && (onlyS2 || allS2xlate)
 
     val fault_valid = s1_valid || s2_valid
 
@@ -554,7 +552,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       resp(idx).bits.excp(nDups).vaNeedExt := true.B
     }
 
-    resp(idx).bits.excp(nDups).isHyper := isHyperInst(idx)
+    resp(idx).bits.excp(nDups).isHyper := accessInfo(idx).isHyper
   }
 
   def handle_nonblock(idx: Int): Unit = {
@@ -635,17 +633,17 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val result_ok = req_in.map(a => GatedValidRegNext(a.fire))
   val perfEvents =
     Seq(
-      ("access", PopCount((0 until Width).map{i => portTranslateEnable(i) && result_ok(i) })),
+      ("access", PopCount((0 until Width).map{i => accessInfo(i).translateEnable && result_ok(i) })),
       ("miss  ", PopCount((0 until Width).map{i => ptw.req(i).fire })),
     )
   generatePerfEvent()
 
   // perf log
   for (i <- 0 until Width) {
-    XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
-    XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i))
-    XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
-    XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
+    XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
+    XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable)
+    XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable && missVec(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
+    XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && accessInfo(i).translateEnable && missVec(i))
     XSPerfAccumulate(s"ptw_req${i}", ptw.req(i).fire)
     XSPerfAccumulate(s"tlb_replay${i}", io.tlbreplay(i))
   }
@@ -675,7 +673,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       val af = io.requestor(i).resp.bits.excp(0).af.instr || io.requestor(i).resp.bits.excp(0).af.st || io.requestor(i).resp.bits.excp(0).af.ld
       val difftest = DifftestModule(new DiffL1TLBEvent)
       difftest.coreid := io.hartId
-      difftest.valid := RegNext(io.requestor(i).req.fire) && !io.requestor(i).req_kill && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && !gpf && portTranslateEnable(i)
+      difftest.valid := RegNext(io.requestor(i).req.fire) && !io.requestor(i).req_kill && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && !gpf && accessInfo(i).translateEnable
       if (!Seq("itlb", "ldtlb", "sttlb").contains(q.name)) {
         difftest.valid := false.B
       }
