@@ -3303,6 +3303,10 @@ struct MixedCoverage {
     // Address/data edges, consumed address/data, pending sources at selection,
     // consumed before/after source retirement, maximum dependent chain depth.
     std::array<std::uint64_t, 9> stream_dependencies{};
+    // FP source FLH/FLW/FLD: selected, first STD accepted, canceled unconsumed,
+    // pending at selection (four groups of3); consumed before/after producer
+    // retirement; accepted3x3 source/destination width matrix; selected integer-address edge.
+    std::array<std::uint64_t, 24> stream_fp_data{};
     // Cross-page address edges by scalar load/vector load/scalar store/
     // vector store/prefetch: selected, first accepted, canceled unaccepted.
     std::array<std::uint64_t, 15> stream_dependency_pages{};
@@ -3716,6 +3720,7 @@ struct MixedCoverage {
                " stream_vstart_flush=" + csv(stream_vstart_flush) +
                " stream_history=" + csv(stream_history) +
                " stream_dependencies=" + csv(stream_dependencies) +
+               " stream_fp_data=" + csv(stream_fp_data) +
                " stream_dependency_pages=" + csv(stream_dependency_pages) +
                " stream_disjoint_bypass=" + csv(stream_disjoint_bypass) +
                " stream_byte_bypass=" + csv(stream_byte_bypass) +

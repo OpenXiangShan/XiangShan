@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=86`.
+`constraint_schema=87`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -78,6 +78,7 @@ they do not imply arbitrary numeric suffix support.
 | `stream-unresolved-inflight` | Conditional conflicting stream-graph rate, default 250 in all presets, selecting one youngest held cold scalar/FP role when at least two load slots fit. Requires a same-page physical line without accepted A coverage, explicit reference bytes or older admitted store bytes. Unavailable attempts retain the completed-load path; zero disables selection. |
 | `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the page offset; `stream-dependency-pages` may also select a page within the declared mapping. Scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
+| `stream-fp-data` | Conditional FP-source selection rate for an ordinary scalar-store data dependency when eligible older FP loads exist; default250 per mille in every preset. `stream-dependency` still gates edge selection. Zero preserves the preceding integer-only source draw;1000 selects an FP source instead of an integer source at that eligible site. FP sources never feed addresses directly. Consumer widths are FSH/FSW/FSD, with full boxed/raw source bits retained. |
 | `stream-dependency-pages` | Conditional page-displacement ALU rate for an already selected address edge, default 250 in all presets. Result bits above bit5 select a cyclic page displacement inside the ordinary identity/permuted window or selected 64-KiB NAPOT region, reserving one guard page at each end. A selected ALU may retain the page; only actual page changes count as cross-page edges. Zero preserves the preceding RNG draws and same-page addresses. |
 | `stream-disjoint-bypass` | Conditional admission rate for ordinary scalar integer/FP or vector loads disjoint in physical cache lines from every live older store; default 250 in every preset. Selected loads may issue past unresolved older scalar STA/translation or vector sibling issue, retaining operand/head/VSTART/ordered-indexed constraints and exact normal data. Scalar metadata uses a reachable cold predictor with no store-set/wait/strict bits. Graph, permission and auxiliary survival roles are excluded. Zero preserves preceding RNG/scheduling. This rate selects capability, not a promised issue/completion ratio. |
 | `stream-byte-bypass` | Conditional admission rate for ordinary scalar integer/FP or vector loads sharing a physical line with at least one live older store but no active physical byte with any live older store; default 250 in every preset. Line- and byte-mode selection are exclusive. Uses the same cold predictor, dependency, head/VSTART, vector and strict byte rules as line bypass. Zero adds no draws and preserves preceding scheduling. |
@@ -110,7 +111,7 @@ they do not imply arbitrary numeric suffix support.
 
 | Keys | Type and meaning |
 | --- | --- |
-| `dcache-load-error`, `dcache-load-error-denied` | Rates: cold cacheable scalar-load error injection, then conditional denied share; the alternative error is independent corrupt. |
+| `dcache-load-error`, `dcache-load-error-denied` | Rates: cold cacheable scalar-load error injection, then conditional denied share; the alternative error is independent corrupt. After draining outstanding DCache/queues, the Gray-sequence chooser skips every line with prior accepted A history at any of its64 bytes, including hardware-prefetch or narrow requests. Exhaustion fails explicitly rather than expecting an error from a cache hit. |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas`; `atomic-w`, `atomic-d` | Relative family and width weights. |
 | `atomic-error`, `atomic-error-denied` | Rates: atomic cold-refill error injection, then conditional denied share. |
 | `atomic-probe-depth0` .. `atomic-probe-depth8` | Relative successful-atomic Probe burst depth. Zero selects no burst; nonzero depths use clean auxiliary lines and controlled C/D backpressure. Error atomics do not issue these Probes. |
@@ -689,7 +690,8 @@ Array order and sampling code are authoritative in
 | `stream_store_retirement` | Schema 74: scalar architectural retirements, vector instruction retirements, vector uop drain records; records still in SQ at retirement, records already dequeued; maximum pending committed records; accepted initial-admission completion edges, regular producer acceptance edges, and retirement-driven head-update edges with pending committed records; records drained by public SQ dequeue. Record totals conserve scalar retirements plus retired vector uops (admitted uops minus canceled uops), and physical records must drain at epoch end. Recovery-store STA/STD and vector replay helper edges are excluded from the producer-overlap count; strict refetch load acceptance is included. |
 | `stream_vstart_flush` | Schema 74: admitted nonzero-VSTART vector load/store instructions, completed same-instruction flush-after redirects, and those redirects with pending committed SQ records. Admitted load plus store counts equal completed flush-after redirects plus canceled unflushed VSTART obligations; physical cancellation must be zero at each completed flush-after boundary. The serialized suffix is a conservative stimulus constraint. |
 | `stream_history` | Schema 72: epochs longer than 32 instructions, maximum actual epoch length, admissions after the first 32 with older accepted work pending, and reuse of a full ROB value/wrap identity within one epoch. These observations distinguish sustained queue overlap from repeated short epochs; lifetime reuse is driver history, not an oracle excluding arbitrary stale responses. Sparse accounting checks length/overlap bounds without requiring positive bins. |
-| `stream_dependencies` | Schema 71: address/data edges, consumed address/data edges, pending address/data sources at selection, consumption before/after source retirement, maximum chain depth. Both accounting modes require exactly-once consumption or explicit unconsumed-edge cancellation, consumed-source lifetime conservation, source/consumer eligibility and depth bounds. Disabled dependencies and all-FP sources cannot produce edges. |
+| `stream_dependencies` | Schema 71: address/data edges, consumed address/data edges, pending address/data sources at selection, consumption before/after source retirement, maximum chain depth. Both accounting modes require exactly-once consumption or explicit unconsumed-edge cancellation, consumed-source lifetime conservation, source/consumer eligibility and depth bounds. Disabled dependencies cannot produce edges. Before schema87 all-FP sources cannot produce edges; schema87 permits only FP-to-store-data edges in an all-FP stream. |
+| `stream_fp_data` | Schema87: source FLH/FLW/FLD selections, first STD acceptances, unconsumed cancellations and pending-at-selection counts (four groups of3); consumed while producer live/retired; accepted source/consumer FLH/FLW/FLD x FSH/FSW/FSD width matrix (9); selected edges also having an independent integer address dependency. Lifecycle/source/width bounds apply in both verifier modes, without a positive sparse-bin gate. |
 | `stream_recovery` | Schema 68: started windows, conflict windows, controls, graph stores/loads admitted, initial strictly checked loads, returned rounds, invalidated completed executions, strictly checked refetches, graph stores/loads retired, starts with accepted pending prefix, prefix retirements during the barrier, ordinary admissions after release with graph roles live, observed LQ cancellations, invalidated FP executions, maximum stores/loads/rounds, resolved windows. Refetch executions do not add architectural initial issue/action counts. Both verifier modes enforce sparse conservation, suffix/capacity/shape and emitter-domain bounds, including graph-role counts versus the observed maximum live instructions. |
 | `stream_recovery_inflight` | Schema 69: attempts, unavailable fresh lines, selected cold roles, observed held initial roles, explicit initial cancellations, target old Grant drained plus quiet completion, strict cold refetch completions, selected FP cold roles, release-gap sum, and prefix producer/retirement selections during release/drain phases. Sparse runs require conservation without nonzero coverage gates. |
 | `stream_recovery_shapes`, `stream_recovery_victims` | Store-count 1..4, load-count 1..4 and round-count 0..4 histograms; per-round victim ages 0..3. Marginals support necessary bounds only; they do not reconstruct every joint history. |
@@ -1430,8 +1432,9 @@ consumed address edges, consumed data edges, pending sources at address/data
 selection, consumption before/after producer retirement, and maximum chain depth.
 Each selected edge must be consumed exactly once. Edge selection varies producer
 identity and direction; ordinary integer-load chains can feed scalar/FP loads,
-vector bases, prefetch bases and store addresses/data. FP results and unresolved
-graph roles do not serve as producers. Recovery preserves older ordinary edges
+vector bases, prefetch bases and store addresses/data. FP results can supply scalar-store data from schema87; they never supply address
+arithmetic. Unresolved graph roles and faulting/auxiliary loads remain excluded
+from both source classes. Recovery preserves older ordinary edges
 but does not admit unrelated consumers into its invalidated suffix. Address
 arithmetic retains the input byte offset/alignment before scalar stores crossing
 the page end are clamped to `page+4096-width`, potentially changing alignment;
@@ -1449,6 +1452,26 @@ Expected bytes remain frozen in admission order, independently of DUT responses.
 Live depth and boundary drains retain their existing rules; schema 72 extends
 configurable epoch lengths as described below. General vector-result/index
 chains and unbounded continuous histories remain gaps.
+
+### FP load to scalar-store data
+
+Schema87 selects successful older live FP loads as ordinary scalar-store data
+producers. The edge still uses `stream-dependency`; `stream-fp-data` selects the
+FP source class when an eligible FP load exists, otherwise integer selection is
+unchanged. At zero, no FP-source PRNG draw occurs. Address edges remain integer
+only, and a store may combine an integer address source with a different FP data
+source. Selected values freeze from the admission-order independent byte image;
+actual successful checked producer completion, not mere issue or fast wakeup,
+gates STD. A shared producer lifetime survives its retirement from the deque.
+
+FLH/FLW are NaN-boxed and FLD preserves all64 bits. STD forwards the full source
+bit pattern; the FSH/FSW/FSD consumer writes its low16/32/64 bits with no numeric
+conversion or XOR. Cross-width source/consumer pairs are legal. This choice
+excludes the nonexistent byte-width FP store. The scalar boundary carries
+resolved data and store ROB/SQ identity, not an FP source tag; upstream physical
+register wiring and exact FP-wakeup latency are not simulated. STA/STD still
+have independent readiness, pairing, retry and cancellation rules. Expected
+loads and final readback include the selected store input bytes unchanged.
 
 ### Disjoint ordinary load bypass
 

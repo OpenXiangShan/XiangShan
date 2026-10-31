@@ -189,6 +189,7 @@ struct RandomConstraints {
     unsigned stream_min_instructions = 8;
     unsigned stream_max_instructions = 256;
     unsigned stream_dependency_per_mille = 250;
+    unsigned stream_fp_data_per_mille = 250;
     unsigned stream_dependency_pages_per_mille = 250;
     unsigned stream_disjoint_bypass_per_mille = 250;
     unsigned stream_byte_bypass_per_mille = 250;
@@ -1136,6 +1137,8 @@ struct RandomConstraints {
             stream_max_instructions = parsed;
         } else if (key == "stream-dependency") {
             stream_dependency_per_mille = parsed;
+        } else if (key == "stream-fp-data") {
+            stream_fp_data_per_mille = parsed;
         } else if (key == "stream-dependency-pages") {
             stream_dependency_pages_per_mille = parsed;
         } else if (key == "stream-disjoint-bypass") {
@@ -1866,7 +1869,7 @@ struct RandomConstraints {
         if (concurrent_actions_per_mille > 1000 ||
             concurrent_stream_per_mille > 1000 ||
             stream_dependency_per_mille > 1000 ||
-            stream_dependency_pages_per_mille > 1000 ||
+            stream_dependency_pages_per_mille > 1000 || stream_fp_data_per_mille > 1000 ||
             stream_disjoint_bypass_per_mille > 1000 ||
             stream_byte_bypass_per_mille > 1000 ||
             stream_operand_delay_per_mille > 1000 || stream_operand_delay_max == 0 || stream_operand_delay_max > 4096 ||
@@ -3124,7 +3127,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=86 constraints=" << name
+        stream << "constraint_schema=87 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3236,6 +3239,7 @@ struct RandomConstraints {
                << " target_stream_min_instructions=" << stream_min_instructions
                << " target_stream_max_instructions=" << stream_max_instructions
                << " target_stream_dependency=" << stream_dependency_per_mille
+               << " target_stream_fp_data=" << stream_fp_data_per_mille
                << " target_stream_dependency_pages=" << stream_dependency_pages_per_mille
                << " target_stream_disjoint_bypass=" << stream_disjoint_bypass_per_mille
                << " target_stream_byte_bypass=" << stream_byte_bypass_per_mille

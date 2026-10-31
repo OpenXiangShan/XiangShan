@@ -1489,7 +1489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -4962,8 +4962,11 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
             generation_length = canceled[24] if result.get("constraint_schema", 0) >= 75 else longest
             _require(depth <= max(0, generation_length - 1), "stream dependency depth exceeds observed epoch length")
         _require(depth <= operations[0] + canceled_classes[0], "stream dependency depth exceeds scalar load producers")
-        if operations[0] + canceled_classes[0] == 0 or result.get("target_scalar_fp") == 1000:
+        fp_data_enabled = result.get("constraint_schema", 0) >= 87 and result.get("target_stream_fp_data", 0) != 0
+        if operations[0] + canceled_classes[0] == 0 or (result.get("target_scalar_fp") == 1000 and not fp_data_enabled):
             _require(address == data == 0, "stream dependencies have no eligible integer load producer")
+        elif result.get("target_scalar_fp") == 1000:
+            _require(address == 0, "FP-only stream generated an integer address dependency")
         _require(live_source + retired_source == used_address + used_data,
                  "stream dependency source lifetimes disagree")
         _require((address + data == 0 and depth == 0) or
@@ -4974,6 +4977,34 @@ def _check_stream_accounting(result: dict[str, Any]) -> None:
     if rate == 0 or result.get("target_concurrent") == 0:
         _require(epochs == 0, "disabled stream generated traffic")
 
+
+
+def _check_stream_fp_data(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema", 0) < 87:
+        return
+    rate = result.get("target_stream_fp_data")
+    _require(type(rate) is int and 0 <= rate <= 1000, "invalid target_stream_fp_data")
+    counts = _csv_counts(result, "stream_fp_data", 24)
+    deps = _csv_counts(result, "stream_dependencies", 9)
+    canceled = _csv_counts(result, "stream_cancel", 29)
+    weights = _csv_counts(result, "target_scalar_fp_widths", 3)
+    selected, accepted, killed, pending = (counts[i:i+3] for i in (0, 3, 6, 9))
+    _require(all(a == b+c and p <= a for a,b,c,p in zip(selected,accepted,killed,pending)),
+             "FP store-data dependencies were not consumed or canceled exactly once")
+    _require(sum(selected) <= deps[1] and sum(accepted) <= deps[3] and
+             sum(killed) <= canceled[17] and sum(pending) <= deps[5] and
+             counts[12] <= deps[6] and counts[13] <= deps[7] and
+             counts[12]+counts[13] == sum(accepted) == sum(counts[14:23]) and
+             counts[23] <= min(sum(selected), deps[0]),
+             "FP store-data dependency source or consumer populations disagree")
+    _require(all(sum(counts[14+3*i:17+3*i]) == accepted[i] for i in range(3)),
+             "FP store-data width pairs disagree with accepted source widths")
+    _require(all(w != 0 or n == 0 for w,n in zip(weights, selected)),
+             "FP store-data dependency uses a disabled source width")
+    if result.get("target_scalar_fp") == 1000:
+        _require(deps[0] == 0 and deps[1] == sum(selected), "FP-only stream dependency classes disagree")
+    if rate == 0 or result.get("target_scalar_fp") == 0 or result.get("target_stream_dependency") == 0:
+        _require(not any(counts), "disabled FP store-data dependencies generated edges")
 
 
 def _check_stream_operand_ready(result: dict[str, Any]) -> None:
@@ -5599,6 +5630,7 @@ def _check_result(
         _check_stream_dependency_pages(result)
         _check_stream_disjoint_bypass(result)
         _check_stream_byte_bypass(result)
+        _check_stream_fp_data(result)
         _check_stream_operand_ready(result)
         _check_stream_recovery_accounting(result)
         _check_scalar_dependency_accounting(result)

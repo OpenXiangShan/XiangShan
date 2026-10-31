@@ -18,6 +18,22 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema87 adds ordinary successful FP-load-result to scalar-store-data edges
+  inside the canonical mixed scheduler. Source selection varies independently
+  from integer address edges; FLH/FLW boxed bits and FLD raw bits feed the low
+  FSH/FSW/FSD store bytes without conversion. Checked source completion gates
+  STD and source lifetimes survive retirement. Exact data, cancellation and
+  final-byte checks stay active. `stream-fp-data=0` preserves preceding draws.
+  Upstream FP physical-register wiring and exact wakeup latency are abstracted.
+
+- Scalar DCache-error targets now skip any line covered by prior accepted A
+  history after the declared drain. A new Gray-sequence address may already be
+  prefetched; it cannot justify a cold-refill exception expectation. All64 bytes
+  are checked, including narrow-request coverage, and exhaustion fails explicitly.
+  Fault and manager error-accounting checks remain strict. Synthetic delayed STA
+  feedback also belongs to its accepted generation: already-due propagation
+  samples publish before only future killed-generation events are removed.
+
 - Schema86 adds independently delayed ordinary address sources and scalar STD
   sources to the canonical mixed scheduler. Distinct omitted nonmemory producers
   reserve separate ROB entries; the latest-ready producer remains public head
@@ -529,6 +545,10 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| Ordinary FP-result store dataflow | Frozen runtime-v2 passes36 finite cases/32768 actions/15286 tracked final-word comparisons across unmodified spec/corner, FP-heavy, U-mode translated, integer-address/FP-data and mixed cancellation profiles. All nine full finite artifact verifiers pass. 2114 FP data edges conserve2106 first STD acceptances plus8 unconsumed cancellations; every source width and all nine source/consumer width pairs occur. Consumption observes1865 live and241 retired sources;302 selections combine an integer address edge. Seed8751 replays exactly; disabled FP sources match428 preceding semantic fields. | `build/memblock/fp-store-data-20261031/{qualification-v2.json,artifact-verifiers-v2.json,replay-compat-v2.json,provenance-v2.json}`. All102 prepared-source pairs match; RTL/model/dependency hashes are unchanged. The initial low scalar weights yielded one edge in targeted-final-v2 and zero in translated-v2/mixed-cancel-v2; dense profiles establish the positive dataflow evidence. Selection ratios are conditional, not instruction percentages. No SPEC execution, complete register/wakeup model or closure claim. |
+| FP dataflow host decisions and sensitivity | 96 scheduler histories have96 event-only schedules and independently check source class/identity, frozen expected bits, completion gate, source lifetime and all24 coverage bins. 1938 selections conserve1876 STD acceptances plus62 cancellations; all nine width pairs occur. Integer address/FP-data combinations occur312 times. Early STD, corrupted data and omitted accepted-coverage mutants reject;48 independent zero-knob comparisons preserve complete preceding host results. | `build/memblock/fp-store-data-20261031/{host-v4.json,host-v4.log,review-v1/targeted-host.log,review-v1/disable-parity.json,review-v2/targeted-host.log}`. Histories use synthetic pins and completion timing; native results independently qualify externally checked bytes. FLH/FLW/FLD to FSH/FSW/FSD are direct bit transfers, not numerical arithmetic. Exact upstream FP wakeup remains outside scope. |
+| Cold-refill error stimulus and feedback provenance | Seeds8771..8774 fail the prior cold assumption and pass their full1024-action budgets with the repaired target selection. Public accepted-A records show each failed line was prefetched; seed8771 exactly replays, and private diagnostic objects reproduce the complete original failures for8772/8773 while printing only public history. All64 narrow-request offsets, boundaries and exhaustion pass; missing-history/base-only/byte63 mutants reject. Synthetic canceled STA feedback tests reject both stale future reuse and erased already-due propagation samples. | `build/memblock/fp-store-data-20261031/{cold-proof-v1/proof.json,replay-failure8771-v1.log,dense-cancel-v1/results.json,dense-cancel-v2/results.json,error-freshness-v1.log,host-v4.log,review-v2/verdict.json}`. Thirty-two preceding successful histories preserve435 retained result fields each after the cold-target repair (`cold-repair-comparison-v2.json`). This corrects stimulus and host-fixture defects; fault/data oracles are unchanged. Queues/manager drain does not prove all internal prefetch activity is quiet; line-specific injection is armed before the next tick and strict checks remain active. No CPU RTL bug is established. |
+| Current schema87 integration and review | The stable-source complete host suite passes733 tests; all26 host-report production hashes match. Generated-interface, semantic mapping, documentation, catalog and prepared-RTL checks pass. Four adjacent forwarding/recovery directed cases pass. The non-author final evidence audit recomputes all nine native aggregates, reruns their complete finite verifiers and checks102 source/prepared pairs plus five runtime artifact hashes. Fixed-eight-load evidence retains64 distinct schedules,41 admission/retirement interleavings and43 issue orders excluding values, delays and dependency choices. | `build/memblock/fp-store-data-20261031/{full-unit-v3.log,host-final-v3.json,check-rtl-final-v3.log,directed-v2.json,final-evidence-review-v3/review.json,review-disposition-v3.json}`. The interrupted source-repair run and superseded stale-schema expectation failure are excluded. The final reviewer observes the terminal733-test PASS and verifies the report hashes. Finite development qualification, not SPEC execution, CPU RTL bug confirmation or closure. |
 | Ordinary independent-source availability | Frozen runtime-v2 passes 22 finite cases / 23040 actions across forced SPEC-profile, U-mode translated, permission/cancellation, unmodified spec/corner and two max4096-delay cases. All six full finite artifact verifiers pass. 8886 delayed sources conserve 8865 first acceptances plus21 unaccepted cancellations; all12 accepted-producer/older-source-wait bins are positive. All10258 tracked final words compare. Seed8601 replays exactly; disabled source delays match425 preceding semantic fields. | `build/memblock/operand-ready-20261031/{qualification-v2.json,artifact-verifiers-v2.json,replay-compat-v2.json,provenance-v2.json}`. All102 prepared-source pairs match; model/RTL/dependency hashes are unchanged. Twenty same-seed comparisons preserve preceding execution fields after the watchdog repair. These22 cases cover all five address cancellation classes but no canceled STD; the separately qualified four-case long-delay run covers canceled STD. Finite block stimulus, not SPEC execution, full-core timing or closure. |
 | Long-delay native source cancellation | Four further finite corner cases with max4096 source delay pass4096 actions,1735 final-word comparisons and the complete frozen-runtime artifact verifier. All five address cancellation classes are observed;371 scalar-data selections conserve365 first acceptances and6 unaccepted cancellations. Combined with the22-case qualification,26 cases pass27136 actions/11993 final-word checks, with11156 selections=11101 acceptances+55 cancellations. | `build/memblock/operand-ready-20261031/{long-delay-cancel-qualification-v2.json,long-delay-cancel-v2-verify.log,qualification-final-v2.json}`. Seeds8661..8664 add native scalar-data cancellation evidence to the original22 cases; they do not establish arbitrary recovery stages, special-operation tails or extra-over-busy producer survival. Finite development qualification only. |
 | Source readiness and cancellation host contracts | 80 production-scheduler histories independently compare all30 source bins: 5026 selections conserve4860 first acceptances and166 cancellations, including canceled address classes51/30/15/26/29 and15 STD sources. The64 ordinary histories have64 event-only schedules and allow unrelated younger progress. Production2048-budget probes accept legal delay4096 and reject permanently blocked issue. Twenty-four public-return/ledger scripts cover two producer identities, both redirect levels and ROB wraps; omitting the surviving-anchor hold rejects. | `build/memblock/operand-ready-20261031/{host-report-final-v2.json,endpoint-recovery-v4.log,review-v2/review.json,review-fixture-delta-v2.json}`. The final whole-suite replay includes corrected two-entry fixture spacing. The extra-over-busy hold scripts isolate defensive logic; the current generic scalar/vector-load victim already accepted its shared address source, so those scripts do not establish reachable mixed-stream/native extra waiting. |
@@ -678,6 +698,25 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Schema87 has fresh non-author review of FP source selection, boxed/raw value
+preservation, checked completion, independent address/data sources, widths and
+accepted/canceled edge accounting. The CPU source audit traces FP register
+rename/WB, the distinct STA/STD queues and the resolved64-bit scalar boundary.
+Zero-knob host comparisons preserve preceding schedules and values. Review
+exposed a synthetic feedback repair that erased already-due propagation samples;
+publishing those before canceling future killed-generation events fixes it, and
+a dedicated omission mutant rejects. The current bounded implementation review
+accepts that correction and the all-byte accepted-A cold-target chooser:
+`build/memblock/fp-store-data-20261031/{cpu-audit/audit.md,review-v2/verdict.json}`.
+Native failure provenance and repaired seeds are qualified separately in the
+current table. The final evidence audit independently recomputes all36 native
+cases, reruns all nine complete finite artifact verifiers, verifies the source
+and runtime hashes, checks all four cold-target failures and repaired budgets,
+and observes the stable-source733-test terminal PASS:
+`build/memblock/fp-store-data-20261031/final-evidence-review-v3/review.json`.
+Full-core FP register wiring, exact wakeup cycles, arbitrary recovery stages and
+verification closure remain unclaimed.
 
 Schema86 has fresh non-author actual-diff approval for the bounded independent
 source abstraction, accepted-edge readiness and overlap checks, source lifecycle

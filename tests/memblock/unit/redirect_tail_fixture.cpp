@@ -421,6 +421,7 @@ struct StoreWork {
     bool address_source = false, data_source = false, address_consumed = false, data_consumed = false;
     bool cross_page_address = false;
     StreamOperandReady address_ready, data_ready;
+    std::optional<unsigned> fp_data_width;
     std::optional<std::uint64_t> operand_anchor;
     std::uint64_t operand_anchor_release = 0;
     bool disjoint_bypass = false, byte_bypass = false, bypass_accepted = false;
@@ -437,6 +438,7 @@ struct CancellationCoverage {
     std::array<std::uint64_t, 18> stream_disjoint_bypass{};
     std::array<std::uint64_t, 18> stream_byte_bypass{};
     std::array<std::uint64_t, 30> stream_operand_ready{};
+    std::array<std::uint64_t, 24> stream_fp_data{};
     std::array<std::uint64_t, 11> stream_sta{};
 };
 static bool return_and_classify(Harness &environment, std::vector<StoreWork> &live,

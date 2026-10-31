@@ -146,16 +146,28 @@ bool MixedScenario::execute_scalar_load(ActionWindow &window)
             random() % 1000 < constraints.stride_stream_per_mille;
         std::uint64_t address = 0;
         if (error_response) {
+            if (!environment.run_until_dcache_idle(constrained_completion_timeout) ||
+                !environment.run_until_queues_retired(constrained_completion_timeout)) return false;
             constexpr std::uint64_t error_lines =
                 dcache_error_span / 64;
-            if (dcache_error_line >= error_lines) {
+            // A new generator sequence is not necessarily a cold cache line:
+            // hardware prefetch may already have fetched it. Use all accepted
+            // A history, including narrow requests touching any line byte.
+            bool fresh = false;
+            while (dcache_error_line < error_lines) {
+                const std::uint64_t sequence = dcache_error_line++;
+                const std::uint64_t line = sequence ^ (sequence >> 1);
+                address = dcache_error_base + line * 64 +
+                    ((sequence & 1U) != 0 ? 0x38 : 0x18);
+                fresh = true;
+                for (unsigned byte = 0; byte < 64 && fresh; ++byte)
+                    fresh &= environment.dcache_requests_covering_since((address & ~std::uint64_t{63}) + byte, 0) == 0;
+                if (fresh) break;
+            }
+            if (!fresh) {
                 phase = "random-dcache-load-error-address-space-exhausted";
                 return false;
             }
-            const std::uint64_t sequence = dcache_error_line++;
-            const std::uint64_t line = sequence ^ (sequence >> 1);
-            address = dcache_error_base + line * 64 +
-                ((sequence & 1U) != 0 ? 0x38 : 0x18);
             ordinary_leaf_addressed = true;
         } else if (stride_shaped) {
             address = random_stride_base +
@@ -178,12 +190,6 @@ bool MixedScenario::execute_scalar_load(ActionWindow &window)
             phase = *dcache_load_error_denied
                 ? "random-dcache-load-denied"
                 : "random-dcache-load-corrupt";
-            if (!environment.run_until_dcache_idle(
-                    constrained_completion_timeout) ||
-                !environment.run_until_queues_retired(
-                    constrained_completion_timeout)) {
-                return false;
-            }
             transaction.expected_exception_mask =
                 *dcache_load_error_denied
                 ? memblock::kExceptionLoadAccessFault

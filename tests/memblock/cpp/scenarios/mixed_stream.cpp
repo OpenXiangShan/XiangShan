@@ -56,6 +56,7 @@ struct StreamWork {
     struct Producer { bool complete = false, retired = false; unsigned depth = 0; };
     std::shared_ptr<Producer> result = std::make_shared<Producer>();
     std::shared_ptr<Producer> address_source, data_source;
+    std::optional<unsigned> fp_data_width;
     std::shared_ptr<StreamByteOracle::Checkpoint> oracle_before;
     std::uint8_t rob() const {
         if (kind == 0) return load.rob;
@@ -256,6 +257,11 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 ++coverage.stream_dependencies[data ? 3U : 2U];
                 if (!data && work.cross_page_address) ++coverage.stream_dependency_pages[5U + work.kind];
                 ++coverage.stream_dependencies[source->retired ? 7U : 6U];
+                if (data && work.fp_data_width) {
+                    ++coverage.stream_fp_data[3U + *work.fp_data_width];
+                    ++coverage.stream_fp_data[source->retired ? 13U : 12U];
+                    ++coverage.stream_fp_data[14U + 3U * *work.fp_data_width + unsigned(work.store.op) - 1U];
+                }
                 (data ? work.data_consumed : work.address_consumed) = true;
                 return true;
             };
@@ -698,6 +704,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             if (item.address_ready.delay && !item.address_ready.consumed)
                 ++coverage.stream_operand_ready[10U + item.kind];
             if (item.data_ready.delay && !item.data_ready.consumed) ++coverage.stream_operand_ready[17];
+            if (item.fp_data_width && !item.data_consumed) ++coverage.stream_fp_data[6U + *item.fp_data_width];
             if ((item.disjoint_bypass || item.byte_bypass) && !item.bypass_accepted)
                 ++(item.byte_bypass ? coverage.stream_byte_bypass : coverage.stream_disjoint_bypass)
                     [6U + (item.kind == 1 ? 2U : unsigned(item.load.fp_wen))];
@@ -1327,13 +1334,17 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 random() % 1000U < constraints.stream_permission_load_per_mille;
             std::optional<std::uint64_t> address_value, data_value;
             if (!graph_admission && !work.permission_probe && !work.store_survival_probe && constraints.stream_dependency_per_mille != 0) {
-                std::vector<const StreamWork *> sources;
+                std::vector<const StreamWork *> sources, fp_sources;
                 for (const auto &older : live)
-                    if (older.kind == 0 && !older.fault() && !older.load.fp_wen && !older.recovery_id && !older.store_survival_probe)
-                        sources.push_back(&older);
+                    if (older.kind == 0 && !older.fault() && !older.recovery_id && !older.store_survival_probe)
+                        (older.load.fp_wen ? fp_sources : sources).push_back(&older);
                 const auto choose_source = [&](bool data) {
-                    if (sources.empty() || random() % 1000U >= constraints.stream_dependency_per_mille) return;
-                    const auto &source = *sources[random() % sources.size()];
+                    const auto *eligible = &sources;
+                    if (data && !fp_sources.empty() && constraints.stream_fp_data_per_mille != 0 &&
+                        (constraints.stream_fp_data_per_mille == 1000 || random() % 1000U < constraints.stream_fp_data_per_mille))
+                        eligible = &fp_sources;
+                    if (eligible->empty() || random() % 1000U >= constraints.stream_dependency_per_mille) return;
+                    const auto &source = *eligible->at(random() % eligible->size());
                     (data ? work.data_source : work.address_source) = source.result;
                     (data ? data_value : address_value) = source.expected_scalar;
                     work.result->depth = std::max(work.result->depth, source.result->depth + 1U);
@@ -1341,6 +1352,12 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     ++counts[data ? 1U : 0U];
                     counts[data ? 5U : 4U] += !source.result->complete;
                     counts[8] = std::max<std::uint64_t>(counts[8], work.result->depth);
+                    if (data && source.load.fp_wen) {
+                        work.fp_data_width = unsigned(source.load.op) - 1U;
+                        ++coverage.stream_fp_data[*work.fp_data_width];
+                        coverage.stream_fp_data[9U + *work.fp_data_width] += !source.result->complete;
+                        coverage.stream_fp_data[23] += work.address_source != nullptr;
+                    }
                 };
                 choose_source(false);
                 if (work.kind == 2) choose_source(true);
@@ -1487,7 +1504,8 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             } else if (work.kind == 2) {
                 if (graph_admission && !recovery->stores.empty()) ++rob_offset;
                 const auto op = static_cast<memblock::StoreOp>(graph_admission ?
-                    std::countr_zero(recovery->bytes[work.recovery_index].width) : random() % 4U);
+                    std::countr_zero(recovery->bytes[work.recovery_index].width) :
+                    work.fp_data_width ? 1U + random() % 3U : random() % 4U);
                 const unsigned width = 1U << static_cast<unsigned>(op);
                 auto address = graph_admission ? line + recovery->bytes[work.recovery_index].offset :
                     dependent_address(constrained_window_address(line, width));

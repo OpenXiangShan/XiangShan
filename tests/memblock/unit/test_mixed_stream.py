@@ -64,6 +64,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.bypass = []
         cls.byte_bypass = []
         cls.operand_ready = []
+        cls.fp_data = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -87,8 +88,8 @@ class MixedStreamTest(unittest.TestCase):
         stream = (ROOT / 'cpp/scenarios/mixed_stream.cpp').read_text()
         stream = '\n'.join(line for line in stream.splitlines() if not line.startswith('#include'))
         # Observe selected edges and operand arithmetic, never the ready list.
-        stream = stream.replace('const auto &source = *sources[random() % sources.size()];',
-            'const auto &source = *sources[random() % sources.size()];\n'
+        stream = stream.replace('const auto &source = *eligible->at(random() % eligible->size());',
+            'const auto &source = *eligible->at(random() % eligible->size());\n'
             '                    environment.bind_dependency(admitted, source.load, data, source.expected_scalar);')
         stream = stream.replace('return (address & ~std::uint64_t{0xfff}) | offset;',
             'return environment.check_dependent_address(address, '
@@ -191,6 +192,7 @@ class MixedStreamTest(unittest.TestCase):
                 'disjoint_bypass_cases': cls.bypass,
                 'byte_bypass_cases': cls.byte_bypass,
                 'operand_ready_cases': cls.operand_ready,
+                'fp_data_cases': cls.fp_data,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
@@ -317,6 +319,61 @@ class MixedStreamTest(unittest.TestCase):
             c = r['stream_byte_bypass']
             self.assertEqual(c[:3], [a+b for a,b in zip(c[3:6],c[6:9])])
         self.assertEqual(results[0], self.run_fixture('byte-bypass', 1, 0, 0, 64))
+
+    def test_fp_load_data_dependencies_preserve_values_widths_and_lifecycles(self):
+        results = [self.run_fixture(mode,seed,timing,0,64)
+                   for mode in ('fp-data','fp-data-mixed','fp-data-permission') for timing in (0,1) for seed in range(1,17)]
+        self.fp_data.extend(results)
+        totals = [sum(r['stream_fp_data'][i] for r in results) for i in range(24)]
+        self.assertTrue(all(totals[:6]),totals)
+        self.assertTrue(all(totals[9:12]),totals)
+        self.assertTrue(all(totals[14:23]),totals)
+        self.assertGreater(sum(totals[6:9]),0)
+        self.assertEqual(totals[:3],[a+b for a,b in zip(totals[3:6],totals[6:9])])
+        self.assertGreater(totals[23],0)
+        self.assertEqual(results[0],self.run_fixture('fp-data',1,0,0,64))
+        self.assertGreater(len({r['schedule'] for r in results}),32)
+
+    def test_private_fp_source_early_wrong_data_and_coverage_faults_reject(self):
+        changes = [
+            ('fp-data-before-wb','(!work.data_source || work.data_source->complete);','true;'),
+            ('fp-data-wrong-value','op, random() % memblock::kScalarStoreLanes);',
+             'op, random() % memblock::kScalarStoreLanes);\n                if (work.fp_data_width) work.store.data ^= 1U;'),
+            ('fp-data-missing-coverage','++coverage.stream_fp_data[3U + *work.fp_data_width];',''),
+        ]
+        for name,old,new in changes:
+            self.assertIn(old,self.source)
+            binary=self.compile(self.source.replace(old,new),name)
+            failures=[]
+            for seed in range(1,9):
+                r=subprocess.run([str(binary),'fp-data',str(seed),'1','0','64'],capture_output=True,text=True,timeout=10)
+                if r.returncode:
+                    self.assertTrue(any(x in r.stderr for x in ('before independent producer completion',
+                        'dependency-before-producer-completion','dependent store data','FP store-data coverage')),r.stderr)
+                    failures.append(seed)
+            self.assertTrue(failures,name+' escaped')
+            self.mutations[name]=failures
+
+    def test_canceled_synthetic_feedback_cannot_attach_to_reused_SQ(self):
+        self.run_fixture('fp-data-permission',10,0,0,64)
+        old='[&](const auto &feedback) { return instructions.at(feedback.owner).canceled; }'
+        self.assertEqual(self.source.count(old),1)
+        binary=self.compile(self.source.replace(old,'[&](const auto &) { return false; }'),'stale-synthetic-STA')
+        run=subprocess.run([str(binary),'fp-data-permission','10','0','0','64'],
+                           capture_output=True,text=True,timeout=10)
+        self.assertNotEqual(run.returncode,0)
+        self.assertIn('STA retried before its own miss feedback/cooldown',run.stderr)
+
+    def test_redirect_cancellation_preserves_already_due_STA_feedback(self):
+        boundary='        iq_slow_feedback_stats();\n        for (const auto &feedback : future_store_feedback)'
+        self.assertEqual(self.source.count(boundary),1)
+        for seed in (3,5,10,15):self.run_fixture('fp-data-permission',seed,0,0,64)
+        binary=self.compile(self.source.replace(boundary,
+            '        for (const auto &feedback : future_store_feedback)'), 'erased-propagation-feedback')
+        run=subprocess.run([str(binary),'fp-data-permission','10','0','0','64'],
+                           capture_output=True,text=True,timeout=10)
+        self.assertNotEqual(run.returncode,0)
+        self.assertIn('already-due feedback erased at redirect return',run.stderr)
 
     def test_independent_operand_ready_deadlines_keep_younger_work_live(self):
         results=[self.run_fixture('operand-ready',seed,timing,0,64)

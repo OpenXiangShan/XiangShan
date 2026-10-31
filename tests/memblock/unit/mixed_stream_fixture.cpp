@@ -72,6 +72,8 @@ struct SyntheticEnvironment {
     mutable bool successor_recorded = false;
     struct Dependency { unsigned consumer, producer; bool data; };
     std::vector<Dependency> dependencies;
+    std::array<std::uint64_t,24> observed_fp_data{};
+    std::set<unsigned> fp_data_selected, fp_data_accepted;
     bool at_operand_anchor = false;
     std::map<unsigned,std::pair<unsigned,unsigned>> reserved_operand_producers;
     void reserve_operand_producers(unsigned id,std::uint64_t anchor,unsigned count) {
@@ -112,12 +114,22 @@ struct SyntheticEnvironment {
     std::set<unsigned> rob_history;
     void bind_dependency(unsigned consumer, const LoadTransaction &source, bool data, std::uint64_t value) {
         const auto &producer = find(source.rob, source.rob_flag);
-        require(producer.kind == 0 && !producer.load.fp_wen && producer.id < consumer,
-            "dependency source was not an older integer load");
+        require(producer.kind == 0 && (!producer.load.fp_wen || data) && producer.id < consumer,
+            "dependency source was not a legal older scalar load");
         require(producer.load.expected_exception_mask == 0, "faulting load became a value producer");
         require(value == load_expectations.at(identity(source.rob, source.rob_flag)),
             "dependency value was not frozen from the older load expectation");
         dependencies.push_back({consumer, producer.id, data});
+        if (producer.load.fp_wen) {
+            require(data && unsigned(producer.load.op)>=1 && unsigned(producer.load.op)<=3,
+                "FP source used as an address or has an illegal width");
+            require(fp_data_selected.insert(consumer).second,"duplicate selected FP data edge");
+            const unsigned width=unsigned(producer.load.op)-1;
+            ++observed_fp_data[width];
+            observed_fp_data[9+width]+=!complete(producer);
+            observed_fp_data[23]+=std::any_of(dependencies.begin(),dependencies.end(),
+                [&](const auto&edge){return edge.consumer==consumer&&!edge.data;});
+        }
         trace.push_back("D" + std::to_string(consumer) + ":" + std::to_string(producer.id) + (data ? ":data" : ":address"));
     }
     void check_dependency(unsigned consumer, bool data) {
@@ -126,6 +138,14 @@ struct SyntheticEnvironment {
             if (data) require(instructions.at(consumer).store.data ==
                 load_expectations.at(identity(instructions.at(edge.producer).rob, instructions.at(edge.producer).flag)),
                 "dependent store data disagrees with producer expectation");
+            const auto &producer=instructions.at(edge.producer);
+            if (data&&producer.load.fp_wen&&fp_data_accepted.insert(consumer).second) {
+                const unsigned op=unsigned(instructions.at(consumer).store.op);
+                require(op>=1&&op<=3,"FP store consumer has no legal FSH/FSW/FSD width");
+                ++observed_fp_data[3+unsigned(producer.load.op)-1];
+                ++observed_fp_data[producer.id<retired?13:12];
+                ++observed_fp_data[14+3*(unsigned(producer.load.op)-1)+op-1];
+            }
             ++dependency_operand_checks;
         }
     }
@@ -274,14 +294,15 @@ struct SyntheticEnvironment {
     unsigned replay_bound_checks = 0, replay_retry_bound_checks = 0, vector_retries = 0;
     bool delayed_store_feedback = false;
     mutable Environment::IqSlowFeedbackStats store_feedback;
-    mutable std::vector<Environment::StoreSlowFeedbackSample> future_store_feedback;
+    struct PendingStoreFeedback { unsigned owner; Environment::StoreSlowFeedbackSample sample; };
+    mutable std::vector<PendingStoreFeedback> future_store_feedback;
     std::map<unsigned, std::uint64_t> address_retry_after;
     unsigned address_misses = 0;
     std::vector<std::array<std::uint64_t, 2>> accepted_operand_pairs;
     const Environment::IqSlowFeedbackStats &iq_slow_feedback_stats() const {
         for (auto it = future_store_feedback.begin(); it != future_store_feedback.end();) {
-            if (it->cycle > tick) { ++it; continue; }
-            store_feedback.sta_samples.push_back(*it);
+            if (it->sample.cycle > tick) { ++it; continue; }
+            store_feedback.sta_samples.push_back(it->sample);
             it = future_store_feedback.erase(it);
         }
         return store_feedback;
@@ -491,6 +512,14 @@ struct SyntheticEnvironment {
     bool cancel_pending_for_redirect(std::uint8_t, bool, bool) {
         if (!permission_enabled) return true;
         require(trap_edge && tick == *trap_edge + 3U, "cancellation left exact return boundary");
+        // Synthetic backend feedback belongs to its accepted generation, not
+        // a later store reusing the rewound SQ value/wrap. Propagation samples
+        // through R+2 remain observable; only unproduced killed events cancel.
+        iq_slow_feedback_stats();
+        for (const auto &feedback : future_store_feedback)
+            require(feedback.sample.cycle > tick, "already-due feedback erased at redirect return");
+        future_store_feedback.erase(std::remove_if(future_store_feedback.begin(), future_store_feedback.end(),
+            [&](const auto &feedback) { return instructions.at(feedback.owner).canceled; }), future_store_feedback.end());
         for (auto &work : instructions) if (work.canceled) {
             const auto rob = identity(work.rob, work.flag);
             for (auto it = expected.begin(); it != expected.end();)
@@ -1048,8 +1077,8 @@ struct SyntheticEnvironment {
         ++work.address_attempts;
         const auto feedback_at = delayed_store_feedback ? accepted_at + 19U + (work.id % 7U) : tick;
         if (!miss) work.translation_due = feedback_at;
-        future_store_feedback.push_back({.lane=t.address_lane, .hit=!miss,
-            .sq_flag=t.sq_flag, .sq_value=t.sq, .cycle=feedback_at});
+        future_store_feedback.push_back({work.id, {.lane=t.address_lane, .hit=!miss,
+            .sq_flag=t.sq_flag, .sq_value=t.sq, .cycle=feedback_at}});
         address_retry_after[work.id] = miss ? feedback_at + 8U : std::numeric_limits<std::uint64_t>::max();
         return true;
     }
@@ -1272,6 +1301,10 @@ struct SyntheticEnvironment {
     }
     void finish(unsigned count, const MixedCoverage &coverage, const ConstraintCoverage &constraints) {
         synchronize_retirement();
+        for(const auto&edge:dependencies)if(edge.data&&instructions.at(edge.producer).load.fp_wen&&
+            instructions.at(edge.consumer).canceled&&!fp_data_accepted.count(edge.consumer))
+            ++observed_fp_data[6+unsigned(instructions.at(edge.producer).load.op)-1];
+        require(coverage.stream_fp_data==observed_fp_data,"FP store-data coverage differs from independent dependency ledger");
         for(auto id:delayed_addresses)if(instructions.at(id).canceled&&!consumed_addresses.count(id))
             ++observed_operand_ready[10+instructions.at(id).kind];
         for(auto id:delayed_data)if(instructions.at(id).canceled&&!consumed_data.count(id))++observed_operand_ready[17];
@@ -1411,6 +1444,7 @@ public:
         constraints.stream_disjoint_bypass_per_mille = 0;
         constraints.stream_byte_bypass_per_mille = 0;
         constraints.stream_operand_delay_per_mille = 0;
+        constraints.stream_fp_data_per_mille = 0;
         constraints.stream_unresolved_per_mille = 0;
         constraints.stream_unresolved_inflight_per_mille = 0;
         constraints.misaligned_per_mille = 450;
@@ -1576,10 +1610,20 @@ int main(int argc, char **argv) {
                 "oracle checkpoint failed to remove canceled-store bytes");
             std::cout << "{\"before\":" << before << ",\"overlaid\":" << overlaid
                 << ",\"restored\":" << oracle.scalar_load(load) << "}\n";
-        } else if (mode == "stream" || mode == "operand-ready" || mode == "operand-permission" || mode == "byte-bypass" || mode == "disjoint-bypass" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
+        } else if (mode == "stream" || mode == "fp-data" || mode == "fp-data-mixed" || mode == "fp-data-permission" || mode == "operand-ready" || mode == "operand-permission" || mode == "byte-bypass" || mode == "disjoint-bypass" || mode == "vector-replay" || mode == "pair-rate" || mode == "recovery" || mode == "profile" || mode == "dependency-pages" || mode == "dependency" || mode == "independent" || mode == "sustained" || mode == "feedback" || mode == "permission") {
             require(argc == 6 || (mode == "permission" && argc == 7) || (mode == "independent" && argc == 7) || (mode == "pair-rate" && argc == 7) || (mode == "recovery" && (argc == 7 || argc == 8 || argc == 9)), "stream seed/timing/family/limit required");
             MixedScenario fixture(std::stoull(argv[2]), std::stoul(argv[3]), std::stoul(argv[4]), mode == "profile");
             const unsigned limit = std::stoul(argv[5]);
+            if (mode == "fp-data" || mode == "fp-data-mixed" || mode == "fp-data-permission") {
+                fixture.constraints.operation_weights.fill(0);
+                fixture.constraints.operation_weights[RandomConstraints::scalar_load] = 3;
+                fixture.constraints.operation_weights[RandomConstraints::scalar_store] = 2;
+                fixture.constraints.scalar_fp_per_mille = mode == "fp-data-mixed" ? 500 : 1000;
+                fixture.constraints.stream_fp_data_per_mille = 1000;
+                fixture.constraints.stream_dependency_per_mille = 1000;
+                fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = limit;
+                fixture.environment.delayed_store_feedback = true;
+            }
             if (mode == "operand-ready") {
                 fixture.constraints.stream_operand_delay_per_mille = 1000;
                 fixture.constraints.stream_operand_delay_max = 64;
@@ -1604,14 +1648,14 @@ int main(int argc, char **argv) {
                 fixture.environment.delayed_store_feedback = true;
             }
             if (mode == "vector-replay") fixture.environment.inject_vector_replay = true;
-            if (mode == "permission" || mode == "operand-permission") {
+            if (mode == "permission" || mode == "operand-permission" || mode == "fp-data-permission") {
                 fixture.environment.permission_enabled = true;
                 fixture.environment.permission_context.regime = RandomConstraints::translation_stage1;
                 fixture.constraints.stream_permission_load_per_mille = 1000;
                 fixture.constraints.stream_mxr_per_mille = std::stoul(argv[4]) == 1 ? 1000 : 0;
                 fixture.constraints.stream_min_instructions = fixture.constraints.stream_max_instructions = limit;
                 fixture.constraints.vector_nonzero_vstart_per_mille = 0;
-                fixture.constraints.scalar_fp_per_mille = argc == 7 ? std::stoul(argv[6]) : 0;
+                fixture.constraints.scalar_fp_per_mille = mode == "fp-data-permission" ? 1000 : argc == 7 ? std::stoul(argv[6]) : 0;
                 fixture.constraints.stream_dependency_per_mille = 1000;
                 fixture.environment.bytes.define_seeded_random(0x520000000ULL, 0x10000, 719);
                 if (mode == "operand-permission") {
@@ -1726,6 +1770,9 @@ int main(int argc, char **argv) {
                 << ",\"dependency_counts\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_dependencies.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_dependencies[i];
+            std::cout << "],\"stream_fp_data\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_fp_data.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_fp_data[i];
             std::cout << "],\"stream_dependency_pages\":[";
             for (unsigned i = 0; i < fixture.coverage.stream_dependency_pages.size(); ++i)
                 std::cout << (i ? "," : "") << fixture.coverage.stream_dependency_pages[i];

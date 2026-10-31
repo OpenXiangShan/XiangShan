@@ -489,6 +489,17 @@ bounds. RAW partial-PA matches and unaligned SQ forwarding may
 legally replay; existing explicit cancellation/strict replacement expectations
 remain required, without weakening data or side-effect checking.
 
+Ordinary FP-load-to-store data edges freeze the independent full boxed/raw FP
+result at admission and require successful checked producer completion before
+STD. Address dependencies remain integer-only. FP source FLH/FLW/FLD and consumer
+FSH/FSW/FSD widths vary independently; low16/32/64 stored bytes follow the consumer
+width, including boxed high bits in wider stores. No observed DUT data determines
+expected store bytes. FP edges conserve first accepted STD or explicit unconsumed
+cancellation and source lifetime. The boundary has resolved data rather than FP
+psrc/type; these checks do not prove upstream register wiring or exact wakeup
+latency. Synthetic delayed STA feedback is generation-owned and canceled only at
+the completed return boundary, preserving already sampled propagation feedback.
+
 Ordinary independent-source deadlines freeze after admission and gate both
 ready selection and actual acceptance. They do not replace checked memory
 dependencies or change expected bytes. One distinct nonmemory producer entry
@@ -1240,6 +1251,12 @@ The following cannot independently establish architectural correctness:
   next load must see it without a modeled invalidation/coherence action.
 - Counting reset-held pin activity or a selected input class as a checked
   semantic operation.
+
+Cold scalar DCache-error stimulus chooses only a line with no accepted external
+A history at any byte after the declared DCache/queue drain. A previously unused
+generator sequence is insufficient because hardware prefetch may warm that line.
+The manager error-response and exact fault/identity expectations remain strict;
+no expected exception is removed to accommodate a warmed target.
 
 ## Implementation Limitations
 
