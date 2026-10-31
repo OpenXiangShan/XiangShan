@@ -2,6 +2,16 @@
 
 ## 最新验收结论（2026-10-31，优先于后文历史台账）
 
+### 2026-10-31 Buglist与最终方案文档补全
+
+- 本次只做文档闭环，以`153977460c..d96427b89e`的Git差异、当前实现和已存结果为依据，没有新修复、没有启动仿真，也不重建工作区。
+- 21项已落地根因分为测试框架17项、RM4项；6项原记录较完整，15项已在原周文件原章节补最终提交、完整入口、证据可读性和后续验收。记录字段已补明，不等于找回所有被删除的原日志或补得历史审批。
+- 两处过期口径已同步：default最终为公共ISSUE=1（a15，非runner特例）；PMA/PMP最终为持续service与issue/request边界共用同一prepare/commit ticket（91d之后5c），不是禁用全部请求边界replay。
+- 新建通俗总review：`AI_DOC/plan/test_framework/review_doc/undo/memblock_mother_tb_rm_bug_final_solution_review_20261031.md`，框架/RM分开，逐项写场景、修改原因、最终解法与边界；附录A列130个classification日志精确tc/ts/cfg/seed，其中126个是分类首错，4个safe先Store AF后分类，不重复计数。
+- 原FAIL/FSDB未找到可核验备份、B04 a15未找到专门事前review、部分旧review未署名的历史缺口均明确保留；source Planck review用Git对象追溯，不把源33软件负测冒充母分支迁移/重跑。Dalton独立只读复核`DOCUMENT_REVIEW_PASS`，无P0/P1/P2阻断项；结论仅当前文档一致性，非历史审批追认，review仍保留undo。
+
+### 仿真与覆盖率结论（本次不变）
+
 - 唯一后续修改工作区：`.codex_mother_integration_20261028`；任务分支`codex/memblock-csr-prefix-fix-20261025`，不是主线；本轮未创建新worktree。
 - 最新单Bug实现提交：`50e80d275eb17750df5fb69f021d2ddfd7fd6e26`，修复取消窗口被无关延迟出队阻塞；仅4个SV和7份对应文档，无RTL修改。
 - **绕开已确认RTL组的回归子任务：COMPLETE，350/350已严格/clean验收。** 矩阵25组250＋fault3完整10000笔压力100；310条真实DUT，40条原计划软件别名单列。专项与邻接额外记录不增加350分子。
@@ -18,6 +28,7 @@
 | 产物 | 路径与验收 |
 |---|---|
 | 本轮问题与方案总review | `AI_DOC/plan/test_framework/review_doc/undo/memblock_mother_regression_problem_solution_review_20261030.md`，保持undo，不因实现完成擅自归档 |
+| Git审计后的框架/RM最终解法review | `AI_DOC/plan/test_framework/review_doc/undo/memblock_mother_tb_rm_bug_final_solution_review_20261031.md`，补15项原章、同步2处过期方案，框架17/RM4分开，含原130项精确入口；历史审批/原日志缺口不隐去 |
 | 新源码矩阵250 | `mem_ut/ver/ut/memblock/sim/mother_post_cancel_matrix_20261030_results`；25组250/250，Boole独立MATRIX_250_INDEPENDENT_REVIEW_PASS |
 | fault3原551根1 | `mem_ut/ver/ut/memblock/sim/mother_cancel_dependency_original551576067_20261030_results`；MAIN10000严格PASS |
 | fault3最终99 | `mem_ut/ver/ut/memblock/sim/mother_post_cancel_fault3_final99_20261030_results`；summary99PASS，strict_acceptance99PASS，source_commit50e80d275 |

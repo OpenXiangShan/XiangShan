@@ -1,5 +1,19 @@
 # PMA/PMP Raw CSR FIFO Final Independent Implementation Review
 
+## 术语与版本边界（2026-10-31补记）
+
+`FIFO`为有序CSR写事实队列；`ticket`为冻结前缀/版本的原子提交凭据；`replay`为按生效时刻更新RM模型；`C+2`为捕获后两拍生效边界。
+本原review签核clean r13/91d隔离实现，不能用于宣称后来5c没有request/issue调用。当前mother在`5c131a18de`恢复共用`prepare_pma_pmp_csr_replay()`/`commit_pma_pmp_csr_replay()`的请求边界wrapper，持续service与wrapper共享同一破坏性提交入口，不是第二个裸pop消费者。
+当前最终方案同步于`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_mother_integration_20261028/AI_DOC/plan/rm_plan/do/memblock_pma_pmp_raw_csr_fifo_single_consumer_fix_plan_20261027.md`第1.1节。5c集成review为同仓库`AI_DOC/plan/test_framework/review_doc/undo/memblock_l2tlb_pbmt_response_fault_production_integration_review_20261028.md`；此处不改变原Kant结论或审核日期。
+
+### Plan对齐与证据保全
+
+原“service callers限于持续入口”是91d时点；5c新增边界helper是后续实现差异，按Git如实记录，不倒签成原方案已覆盖。r13原工作区及原日志已删除，原绝对路径保留为历史标识，尚未确认同hash备份；Git tree与当前mother本review可读。母后续PBMT和350项结果是后续复验，不替代缺失的原日志。
+
+### 非本次修改的逻辑分析
+
+本次仅文档补记，无源码改变；四项既有V2知识库脏文档及signal.rc不属于本次。以下原英文正文保持原审查时点，不据其中report-free/WIP叙述推导当前mother行为。
+
 ## Review Input
 
 - Worktree: `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_fifo_cached_verify_20261027_r13`

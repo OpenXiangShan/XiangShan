@@ -1,6 +1,6 @@
 # V2 PMA/PMP raw CSR FIFO 持续消费者修复计划
 
-日期：2026-10-27；分支：`codex/memblock-csr-prefix-fix-20261025`。状态：round2 REVIEW_FAIL blocker 已修订，等待 round3 独立复审。
+日期：2026-10-27；最终实现同步：2026-10-31；分支：`codex/memblock-csr-prefix-fix-20261025`。状态：91d持续消费修复已实现并验证，5c随后扩展同一ticket提交链到请求边界；历史round2/round3措辞不再表示当前待review。
 本版取代此前六轮复杂方案；用户明确授权本问题 RM/测试框架编码、专项验证及独立提交。
 
 ## 1. 术语与职责
@@ -20,10 +20,21 @@
 
 主职责：CSR producer 只记录事实；持续 service 独立维护 model 和 FIFO；barrier/startup 只等待全部预期写成熟且表匹配；issue residency 只读已提交 history；end_test_check 只审计。
 
+### 1.1 当前mother最终稿与历史隔离方案的区别
+
+Git依据：`91d403eb1290cd0d21394479a0a528f81542a224`先实现持续消费者；`5c131a18de6d781cad3474647dfc578c2183220d`恢复`apply_pma_pmp_csr_writes_before_request()`及issue/L2 request调用。下文“删除该helper”“不再有request/issue消费”只属于91d隔离方案，不能按它改回当前源码。未采用的source issue-residency/capture/report-free ROB实验不构成mother前置。
+
+抽象功能描述：请求边界wrapper在本次请求冻结权限上下文前，使用同一成熟前缀事务追平可生效的CSR写；它不创建第二个FIFO所有者，也不直接裸pop或修改producer顺序。
+实际行为：issue上下文先做完整prepare，按当前issue采样调用wrapper，replay后重新prepare上下文再提交；L2 request-fire在C-2 CSR身份核对后按请求采样调用wrapper。wrapper调用既有prepare/commit：空成熟前缀正常返回，非法sample、准备或提交失败保留原fatal及零半更新。C+2生效、reset/revision/ticket防重、模型与FIFO联合提交及终局只审计均保持。持续service仍使“后面没有请求”的场景能完成。
+
+当前源码绝对路径：`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_mother_integration_20261028/mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv:9248,9549,9698`，函数分别为`register_uid_tlb_record_on_issue()`、`apply_pma_pmp_csr_writes_before_request()`、`mark_waiting_uid_records_on_request_fire()`。共同破坏性提交入口仍是`commit_pma_pmp_csr_replay()`。
+
+91d隔离实现review见当前mother绝对路径`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_mother_integration_20261028/AI_DOC/plan/rm_review_doc/undo/memblock_pma_pmp_raw_csr_fifo_implementation_review_20261027.md`；5c母集成最终review见同仓库`AI_DOC/plan/test_framework/review_doc/undo/memblock_l2tlb_pbmt_response_fault_production_integration_review_20261028.md`，不把前者当后者的事前批准。旧r13工作区删除造成原日志不可读，只保留Git tree及review历史；后来母侧44主场景/20软件邻接及最终350签核为独立后续证据，不伪装成原r13文件已恢复。
+
 ## 2. 技术边界与明确删除项
 
 RTL `MemBlock.scala` 对 csrCtrl 使用 DelayN(...,2)，本任务不修改 RTL、Scala、DUT interface 或 driver 激励。
-事件 C 仅在 producer-complete W 满足 `W>=C+2` 时成熟，history 记录生效时间 C+2，查询使用 `effective_sample<=issue_sample`。
+事件C仅在传入的采样边界W满足`W>=C+2`时成熟：持续service传producer-complete published sample；issue wrapper传当前issue sample，L2 wrapper传精确request sample。三入口共用prepare/commit，不把wrapper的W误称为producer-complete。history记录C+2，查询仍使用`effective_sample<=issue_sample`。
 不再保留“普通同拍 request 必须旧 generation”的设计；删除 prospective generation helper 和 residency/replay composite transaction。
 保留已有 UID capture ticket：它属于混合工作树的 stale-TLB 实现，不属于本问题，不撤销也不提交。
 保留已有 model batch prepare 和 raw FIFO revision，只实现一份 replay destructive owner。
@@ -61,7 +72,7 @@ prepare 建立可观测 `pma_pmp_csr_replay_outcome_e`：`ACCEPTED_CHANGED`、`A
 
 ## 4. 唯一消费者与原子性
 
-`prepare_pma_pmp_csr_replay(W, ticket)` 抽象职责：为已发布采样 W 的成熟连续前缀准备离线 model post-state，不改变共享状态。
+`prepare_pma_pmp_csr_replay(W, ticket)` 抽象职责：为调用者传入采样边界W的成熟连续前缀准备离线model post-state，不改变共享状态；各入口W的来源见第2节。
 内部流程：校验 model，并用统一 epoch-current helper 验证 startup 0 或 runtime 非零 domain；从 FIFO head 按索引扫描，仅扫描成熟前缀及第一个 future head；验证 valid、sample/time 非零、同 epoch、严格递增、capture watermark、`C<=MAX_U64-2`；冻结 raw revision、service revision、capture 原值。复制事件给 model 前将 sample 改为 C+2；调用已有 model batch prepare。失败返回 0，queue/model/history/watermark/count 不变。空前缀直接成功且不创建 model ticket。
 
 `commit_pma_pmp_csr_replay(ticket)` 抽象职责：作为唯一生产 destructive owner，一次提交完整成熟前缀。
@@ -80,7 +91,7 @@ prepare 建立可观测 `pma_pmp_csr_replay_outcome_e`：`ACCEPTED_CHANGED`、`A
 `service_csr_pmp_pma_write_observations()` 抽象职责：主 monitor 和 dedicated completion 共用的持续入口。
 内部流程固定为：reset或FIFO空返回；读取producer-complete W，W=0返回；prepare失败fatal；prepare成功但 `ticket.events.size()==0` 作为正常no-work返回，不调用commit；只有非空ticket才commit，commit失败fatal。空ticket必须非null并冻结reset/service/raw revision，`model_ticket=null`；它只证明当前head未成熟，不可提交。每拍空FIFO O(1)，非空只扫描pending prefix和第一个future head，不扫描UID主表。
 `collect_runtime_context_events()` 在 reset gate 后 drain runtime CSR，再调用该 service。adapter reset 分支调用上述 reset helper。startup 自己也复用 service，因此无需后续 request。
-删除 `apply_pma_pmp_csr_writes_before_request()`；issue residency 不调用 consumer，也不提交 model/FIFO。
+91d隔离方案曾删除`apply_pma_pmp_csr_writes_before_request()`；5c后的当前helper及两个调用者依第1.1节保留，仍共用唯一ticket提交链。未采用issue-residency不作为当前生产consumer。
 
 ## 5. Startup、dynamic barrier 和收尾
 
@@ -116,7 +127,7 @@ directed 结果矩阵：
 
 overflow directed分别覆盖 expected add、producer push、applied batch、raw/service/model revision、PMP/PMA generation、capture=`MAX_U64-2`可成熟和capture=`MAX_U64-1`拒绝；每项验证FIFO、table、history、counter、revision、candidate零半更新。C/C+1还验证FIFO非空时no-work无fatal且所有revision不变。未初始化lifecycle+epoch0负例验证发送前失败及所有状态不变。
 
-caller白名单固定为：raw producer生产路径仅CSR monitor，software directed为显式测试例外；service production caller仅`collect_runtime_context_events()`、startup wait、control/dynamic completion；raw prefix commit与model batch commit的生产caller仅`commit_pma_pmp_csr_replay()`；`apply_csr_write()`只保留model兼容wrapper及已列software provenance测试；issue residency/end-test禁止service/prepare/commit/pop及裸raw queue mutation。checker扫描function、task、全文件API引用和裸queue mutation。
+91d隔离时caller白名单为下述service范围；5c最终稿增加第1.1节的issue/request wrapper，但raw prefix commit与model batch commit的生产caller仍只有`commit_pma_pmp_csr_replay()`。raw producer生产路径仅CSR monitor，software directed为显式测试例外；持续service caller为`collect_runtime_context_events()`、startup wait、control/dynamic completion。end-test禁止消费及裸raw queue mutation；不再用旧“没有request wrapper”的静态白名单判当前集成回归。
 每次 EDA 命令前 source `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.envrc`；仅 eda01 编译仿真，新 mode，监控/record 开启，源码变更后重编译。
 首测原失败：basicTest / memblock_dispatch_real_smoke_vseq / tc_dispatch_real_multi_store_wb_smoke / seed=1。
 再测 nonblocking multi-store（runtime plusarg）、static Sv39、CSR random 已知 seed 903730789/1611682665/2124399471/1596235805、PBMT/PMA directed、issue-fire/provenance/ROB 门禁。记录每条实际命令和严格结果；未跑的母任务 original10/known10/fresh30 明确未执行。

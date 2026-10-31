@@ -1,5 +1,19 @@
 # MemBlock functional coverage default issue enable implementation Review
 
+## 术语与当前结论（2026-10-31补记）
+
+`issue`指已有sequence向DUT真正发射请求；`override`指运行期覆盖cfg的参数；`default`指公共默认配置，不是矩阵一行的专有参数。
+本文件原review只证明`7c3d766b84`的单行override，原FINAL PASS保持历史范围。随后Git提交`a15c8e82739023e3cbbe44899aa8b2655d36b99f`改公共default的ISSUE_SEQ_EN为1并删runner override；下文default=0、精确override及“不影响普通default”的叙述不再代表现状。
+当前实现及原方案差异已同步同仓库`AI_DOC/plan/test_framework/plan/do/memblock_functional_default_issue_enable_plan_20261023.md`。当前母矩阵default行10/10的证据为`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_mother_integration_20261028/mem_ut/ver/ut/memblock/sim/mother_post_cancel_matrix_20261030_results/default`。未找到a15对应的事前独立review，不能把旧review倒签成新方案获批或宣称全部default拓扑均覆盖。
+
+### Plan对齐检查
+
+旧7c实现与原plan一致；a15主动替换了原plan的公共default不变约束，本次按Git同步最终稿。这里只补文档，不改变任何运行行为；当前最终事实与旧5＋10专项证据分开记录。
+
+### 非本次修改的逻辑分析
+
+2026-10-31仅更新说明；已有四项V2知识库脏文档及signal.rc不属于本次，不修改不提交。以下英文标题及历史结论保留原始review时点，不作为新的独立审核凭据。
+
 ## 1. Review scope
 
 本 review 检查 coverage runner 对 `default + tc_dispatch_real_smoke + virtual_base_sequence` 的
