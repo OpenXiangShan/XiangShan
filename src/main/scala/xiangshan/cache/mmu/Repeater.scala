@@ -440,7 +440,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   }
 
-  val ptw_arb = Module(new RRArbiterInit(new PtwReq, 3))
+  val ptw_arb = Module(new Arbiter(new PtwReq, 3))
   for (i <- 0 until 3) {
     ptw_arb.io.in(i).valid := filter(i).ptw.req(0).valid
     ptw_arb.io.in(i).bits.vpn := filter(i).ptw.req(0).bits.vpn
