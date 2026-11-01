@@ -258,9 +258,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, csr.satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
+  entries.io.w_apply(refill, ptw.resp.bits)
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, req_in_s2xlate(i))
-    entries.io.w_apply(refill, ptw.resp.bits)
     // TODO: RegNext enable:req.valid
     resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
     resp(i).bits.debug.robIdx := RegEnable(req(i).bits.debug.robIdx, req(i).valid)
