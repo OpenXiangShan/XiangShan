@@ -590,7 +590,7 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val hyperinst = Output(Bool())
   val hlvx = Output(Bool())
   val size = Output(UInt(log2Ceil(log2Ceil(VLEN/8)+1).W))
-  val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
+  val kill = Output(Bool()) // Kill the response for this request
   val memidx = Output(new MemBlockidxBundle)
   val isPrefetch = Output(Bool())
   // do not translate, but still do pmp/pma check
@@ -603,7 +603,6 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
     val isFirstIssue = Output(Bool())
   }
 
-  // Maybe Block req needs a kill: for itlb, itlb and icache may not sync, itlb should wait icache to go ahead
   override def toPrintable: Printable = {
     p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} kill:${kill} pc:0x${Hexadecimal(debug.pc)} robIdx:${debug.robIdx}"
   }

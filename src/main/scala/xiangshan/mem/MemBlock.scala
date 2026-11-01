@@ -664,9 +664,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   println(f"  TLB #$L2toL1DTLBPortIndex%-2d => L2Prefetcher")
 
   // dtlb instantiation
-  val dtlb_ld_tlb_ld = Module(new TLBNonBlock(TlbSubSizeVec(dtlb_ld_idx), 2, ldtlbParams))
-  val dtlb_st_tlb_st = Module(new TLBNonBlock(TlbSubSizeVec(dtlb_st_idx), 1, sttlbParams))
-  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(TlbSubSizeVec(dtlb_pf_idx), 2, pftlbParams))
+  val dtlb_ld_tlb_ld = Module(new TLB(TlbSubSizeVec(dtlb_ld_idx), 2, ldtlbParams))
+  val dtlb_st_tlb_st = Module(new TLB(TlbSubSizeVec(dtlb_st_idx), 1, sttlbParams))
+  val dtlb_prefetch_tlb_prefetch = Module(new TLB(TlbSubSizeVec(dtlb_pf_idx), 2, pftlbParams))
   val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
   val dtlb_st = Seq(dtlb_st_tlb_st.io)
   val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)

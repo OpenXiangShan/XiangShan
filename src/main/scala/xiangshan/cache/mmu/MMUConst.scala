@@ -35,7 +35,6 @@ case class TLBParameters
   Replacer: Option[String] = Some("plru"),
   Associative: String = "fa", // must be fa
   outReplace: Boolean = false,
-  outsideRecvFlush: Boolean = false, // if outside moudle waiting for tlb recv flush pipe
   lgMaxSize: Int = 3
 )
 
