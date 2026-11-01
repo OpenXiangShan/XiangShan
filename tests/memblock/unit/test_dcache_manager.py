@@ -202,5 +202,68 @@ class DcacheManagerTest(unittest.TestCase):
                 result = self.run_case(name)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_pristine_readonly_alias_lifecycle_and_frozen_independent_bytes(self):
+        for name in ("readonly", "post-checkpoint-prefetch", "clean-reacquire",
+                     "early-e-late-d", "final-d-before-e", "checkpoint-promotes",
+                     "wrong-byte0", "wrong-byte63", "new-image", "torn-image", "changed-source"):
+            with self.subTest(case=name):
+                result = self.run_case("pristine-" + name)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_pristine_certificate_rejects_writable_and_pending_input_owners(self):
+        for name in ("write-cap", "upgrade-block", "upgrade-perm", "same-colour-write",
+                     "authorized-input", "early-c-reacquire"):
+            with self.subTest(case=name):
+                result = self.run_case("pristine-" + name)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_every_explicit_reference_or_backing_byte_vetoes_pristine_certificate(self):
+        for provenance in ("reference", "backing"):
+            for offset in range(64):
+                with self.subTest(provenance=provenance, offset=offset):
+                    result = self.run_case(f"pristine-{provenance}-write-{offset}")
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_private_pristine_alias_faults_are_detected(self):
+        production = (ROOT / "cpp/environment/dcache_agent.inc").read_text()
+        fixture = (ROOT / "unit/dcache_manager_fixture.cpp").read_text()
+        veto = "!reference_memory_.has_explicit_byte(request_line + byte) &&\n                            !memory_.has_explicit_byte(request_line + byte)"
+        faults = (
+            ("pristine_writable", "bool pristine = cap == 1;", "bool pristine = true;",
+             "write-cap", "uncertified owner escaped"),
+            ("pristine_ignore_reference", veto, "!memory_.has_explicit_byte(request_line + byte)",
+             "reference-write-63", "uncertified owner escaped"),
+            ("pristine_ignore_backing", veto, "!reference_memory_.has_explicit_byte(request_line + byte)",
+             "early-c-reacquire", "uncertified owner escaped"),
+            ("pristine_skip_final_byte", "byte < kLineBytes && pristine", "byte + 1 < kLineBytes && pristine",
+             "backing-write-63", "uncertified owner escaped"),
+            ("pristine_keep_block_upgrade", "if (cap == 0 && owner->second.pristine_read_only)", "if (false)",
+             "upgrade-block", "uncertified owner escaped"),
+            ("pristine_keep_perm_upgrade", "if (owner.pristine_read_only)", "if (false)",
+             "upgrade-perm", "uncertified owner escaped"),
+            ("pristine_ignore_legacy_updates", "!owner->second.updates.empty() || tracked_pending", "tracked_pending",
+             "same-colour-write", "uncertified owner escaped"),
+            ("pristine_ignore_authorized_inputs", "!owner->second.updates.empty() || tracked_pending", "!owner->second.updates.empty()",
+             "authorized-input", "uncertified owner escaped"),
+            ("pristine_use_current_reference", "owner->second.expected_data, owner->second.alias,",
+             "reference_memory_.read_beat(line, kLineBytes), owner->second.alias,",
+             "readonly", "pristine recall byte/identity decision incorrect"),
+            ("pristine_ignore_byte63", "response.data.at(byte) != expected.expected_data[offset + byte]",
+             "offset + byte != 63 && response.data.at(byte) != expected.expected_data[offset + byte]",
+             "wrong-byte63", "pristine recall byte/identity decision incorrect"),
+        )
+        for name, before, after, case, diagnostic in faults:
+            with self.subTest(fault=name):
+                self.assertEqual(production.count(before), 1, "fault anchor changed: " + name)
+                mutant = self.work / (name + ".inc")
+                mutant.write_text(production.replace(before, after, 1))
+                source = self.work / (name + ".cpp")
+                source.write_text(fixture.replace('#include "environment/dcache_agent.inc"',
+                                                 '#include "' + str(mutant) + '"'))
+                binary = self.compile(name, source)
+                result = self.run_case("pristine-" + case, binary=binary)
+                self.assertNotEqual(result.returncode, 0, "private fault escaped: " + name)
+                self.assertIn(diagnostic, result.stderr)
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,12 +33,15 @@ struct Fixture {
     TileLinkMemoryAgent manager{bus, reference};
     DutAdapter dut;
     std::vector<unsigned char> old_image, new_image;
-    Fixture() : old_image(64, 0), new_image(64, 0) {
+    Fixture(bool lazy = false) : reference(&bus), old_image(64, 0), new_image(64, 0) {
+        if (lazy) reference.define_repeating_incrementing(line, 128, 64, 0x31);
         for (unsigned b=0; b<64; ++b) {
             old_image[b] = 0x31 + b;
             new_image[b] = 0xa0 ^ b;
-            bus.write_byte(line+b, 0);
-            reference.write_reference_byte(line+b, old_image[b]);
+            if (!lazy) {
+                bus.write_byte(line+b, 0);
+                reference.write_reference_byte(line+b, old_image[b]);
+            }
         }
         dut.dcache.b.ready.set(1);
         dut.dcache.d.ready.set(1);
@@ -118,6 +121,127 @@ struct Fixture {
         throw std::runtime_error("replacement grant missing");
     }
 };
+
+static void pristine_alias_baseline(const std::string &test)
+{
+    Fixture f(true);
+    const auto reject_missing = [&]() {
+        require(!f.manager.ok() && f.manager.error().find("reference checkpoint") != std::string::npos,
+            "uncertified owner escaped independent checkpoint requirement");
+    };
+    const auto grant = [&](unsigned grow = 0, unsigned opcode = 6) {
+        f.acquire(1, 0, grow, line, opcode);
+        f.step(); f.ack(); f.ok();
+        require(f.manager.responses_idle() && f.manager.grant_acks_idle(), "old grant did not finish");
+    };
+    if (test.starts_with("reference-write-") || test.starts_with("backing-write-")) {
+        const bool reference = test.starts_with("reference-write-");
+        const unsigned offset = std::stoul(test.substr(reference ? 16 : 14));
+        require(offset < 64, "invalid provenance byte");
+        // Even an identical-value explicit write vetoes the entire line.
+        if (reference) f.reference.write_reference_byte(line+offset, f.old_image[offset]);
+        else f.bus.write_byte(line+offset, f.old_image[offset]);
+        grant(); f.acquire(2); reject_missing(); return;
+    }
+    if (test == "checkpoint-promotes") {
+        grant();
+        require(f.manager.checkpoint_alias_reference(line,64), f.manager.error());
+        grant(2,7); // A real drained checkpoint survives later T permission.
+        f.acquire(2); f.manager.drive(f.dut);
+        require(f.dut.dcache.b.valid.boolean(), "checkpoint image lost after upgrade");
+        f.step(); f.c(5,1,0); f.c(5,1,1); f.ok(); return;
+    }
+    if (test == "write-cap" || test == "upgrade-block" || test == "upgrade-perm") {
+        grant(test == "write-cap" ? 1 : 0);
+        if (test != "write-cap") grant(2,test == "upgrade-perm" ? 7 : 6);
+        f.acquire(2); reject_missing(); return;
+    }
+    if (test == "same-colour-write" || test == "authorized-input") {
+        grant();
+        if (test == "authorized-input") {
+            require(f.manager.begin_release_input_epoch(),f.manager.error());
+            require(f.manager.register_release_store(20,line+8,line+0x1008,{0xa7}),f.manager.error());
+            require(f.manager.authorize_release_store(20),f.manager.error());
+        } else {
+            f.reference.write_reference_byte(line+8,0xa7);
+            f.manager.note_reference_store(line+8,line+0x1008,{0xa7});
+        }
+        f.acquire(2); reject_missing(); return;
+    }
+    if (test == "early-c-reacquire") {
+        require(f.manager.begin_release_input_epoch(),f.manager.error());
+        grant(1); // No read-only certificate for a potentially writable owner.
+        require(f.manager.register_release_store(20,line+8,line+0x1008,{0xa7}),f.manager.error());
+        require(f.manager.authorize_release_store(20),f.manager.error());
+        auto applied=f.old_image; applied[8]=0xa7;
+        f.c(7,1,0,9,&applied); f.c(7,1,1,9,&applied); f.step(); f.ok();
+        require(f.reference.read_beat(line,64)==f.old_image && f.bus.read_beat(line,64)==applied,
+            "early C did not precede independent reference commit");
+        grant(); f.acquire(2); reject_missing(); return;
+    }
+    if (test == "post-checkpoint-prefetch") {
+        require(f.manager.checkpoint_alias_reference(line,64),f.manager.error());
+        auto &a=f.dut.dcache.a;
+        a.valid.set(1);a.opcode.set(6);a.param.set(0);a.size.set(6);a.source.set(0);
+        a.address.set(line);a.mask.set(0xffffffff);a.user_alias.set(1);
+        a.user_vaddr.set(0x40);a.user_req_source.set(6);
+        f.step();a.valid.set(0);f.step();f.ack();f.ok();
+    } else {
+        f.acquire(1,0,0);
+        if (test == "early-e-late-d") {
+            f.ack();f.dut.dcache.d.ready.set(0);
+            f.acquire(2,1);f.manager.drive(f.dut);
+            require(!f.dut.dcache.b.valid.boolean(), "pristine certificate bypassed final D");
+            f.dut.dcache.d.ready.set(1);f.step();
+        } else if (test == "final-d-before-e") {
+            f.step();f.step();f.acquire(2,1);f.manager.drive(f.dut);
+            require(!f.dut.dcache.b.valid.boolean(), "pristine certificate bypassed E");
+            f.ack();
+        } else {
+            f.ack(); // E on first D remains legal.
+            f.step();
+        }
+        f.ok();
+    }
+    if (test == "clean-reacquire") {
+        f.c(6,2);f.step();f.ok();grant();
+    }
+    if (test != "early-e-late-d" && test != "final-d-before-e") {
+        // New-colour architectural bytes may advance before its cache request.
+        for (unsigned byte=0;byte<64;++byte) {
+            f.reference.write_reference_byte(line+byte,f.new_image[byte]);
+            f.manager.note_reference_write(line+byte,line+0x2000+byte,f.new_image[byte]);
+        }
+        f.acquire(2);
+    }
+    f.manager.drive(f.dut);
+    require(f.dut.dcache.b.valid.boolean() && f.dut.dcache.b.data.bytes()[0]==3,
+        "pristine old-owner recall missing or wrong alias");
+    require(!f.dut.dcache.d.valid.boolean(), "replacement escaped before old image");
+    f.dut.dcache.b.ready.set(0);f.step();
+    require(f.dut.dcache.b.valid.boolean(), "stalled recall B disappeared");
+    f.dut.dcache.b.ready.set(1);f.step();
+    auto image=f.old_image;
+    if (test == "wrong-byte0") image[0]^=1;
+    if (test == "wrong-byte63") image[63]^=1;
+    if (test == "new-image") image=f.new_image;
+    if (test == "torn-image") std::copy(f.new_image.begin()+32,f.new_image.end(),image.begin()+32);
+    f.c(5,2,0,9,&image);
+    if (f.manager.ok()) {
+        f.manager.drive(f.dut);require(!f.dut.dcache.d.valid.boolean(), "replacement escaped partial recall");
+        f.c(5,2,1,test == "changed-source" ? 10 : 9,&image);
+    }
+    const bool bad = test == "wrong-byte0" || test == "wrong-byte63" || test == "new-image" ||
+        test == "torn-image" || test == "changed-source";
+    require(f.manager.ok() != bad, "pristine recall byte/identity decision incorrect: "+f.manager.error());
+    if (bad) return;
+    f.check_recovered_grant();f.step();
+    f.ack(test == "early-e-late-d" || test == "final-d-before-e" ? 2 : 1);f.ok();
+    require(f.manager.alias_recalls()==1 && f.manager.alias_recall_responses()==1,
+        "pristine recall lifecycle not exactly once");
+    require(f.manager.responses_idle() && f.manager.grant_acks_idle() && f.manager.probes_idle(),
+        "pristine recall failed to drain");
+}
 
 void exhaustive_versions()
 {
@@ -643,6 +767,7 @@ int main(int argc, char **argv)
 {
     try {
         const std::string test = argc>1 ? argv[1] : "dirty";
+        if (test.starts_with("pristine-")) {pristine_alias_baseline(test.substr(9));return 0;}
         if (test.starts_with("release-cancel-")) {input_cancellations(test.substr(15));return 0;}
         if (test == "release-input-exhaustive") {exhaustive_input_versions();return 0;}
         if (test.starts_with("release-input-")) {input_versions(test.substr(14));return 0;}

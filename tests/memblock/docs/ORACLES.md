@@ -1043,7 +1043,7 @@ not an ordering oracle.
 | --- | --- | --- |
 | Accepted A legality | [dcache_a_contract.inc](../cpp/environment/dcache_a_contract.inc) validates supported opcode, size and corruption. Acquires require full-line alignment/size/mask, miss-source range, legal grow and request-source classes, and VA alias/page-offset consistency. Get checks param, alignment, mask and source range. CMO checks line size/alignment and the dedicated source. | Get user fields and CMO unspecified fields are intentionally unconstrained. Opcode legality does not by itself match an instruction to an A request. |
 | A source credit | [update_after_tick](../cpp/environment/dcache_agent.inc) rejects reuse while the source is active, activates on A acceptance, frees on final corresponding D; same-edge D completion is processed before new A. | Credit is not retained through GrantAck. It is separate from E-sink lifetime. |
-| Cross-colour alias ownership | PA-line directory stores granted VA alias/maximum permission. Acquires queue per line until prior final D and E, same-line Probes and active ReleaseData complete; unrelated lines can progress. An alias change sends forced-data toN to the stored old alias and constructs GrantData only after complete recovery. | Automatic recall requires an independent drained reference checkpoint; unsupported uncheckpointed simultaneous synonyms fail as a manager-contract limitation. Error-grant and synonym CMO ownership are unqualified. |
+| Cross-colour alias ownership | PA-line directory stores granted VA alias/maximum permission. Acquires queue per line until prior final D and E, same-line Probes and active ReleaseData complete; unrelated lines can progress. An alias change sends forced-data toN to the stored old alias and constructs GrantData only after complete recovery. | Automatic recall requires an independent drained reference checkpoint or the bounded pristine read-only certificate below, with no pending old-owner updates. Unsupported owners fail as a manager-contract limitation. Error-grant and synonym CMO ownership are unqualified. |
 | D response | The manager constructs response beats from captured A and backing memory, then compares its driven handshake fields/data to queued beats. Seeded arbitration selects only complete eligible normal messages and locks first/interbeat delays and stalled payload through final D; same-line/sink/coherence and explicit hold gates remain active. GrantData supports keyword beat order; denied is fixed and implies corrupt on data beats; independent corrupt injection can select first/last/all beats. Accepted-A completion-age and queued-selection populations are separately observed; ReleaseAck consumes only C-source ownership. | This is a manager/adapter consistency check of manager-owned output, not an independent DUT response scoreboard or malformed-response campaign. |
 | E GrantAck | Sink must match a queued expectation; matching consumes exactly one entry. An E is accepted only after the first corresponding Grant/GrantData D beat, or in that same cycle, and every sink stays busy from first D acceptance until E. Drains check expected E entries separately from D response queues. | The expectation entry is still created when `respond` constructs Grant/GrantData; the first-D/sink-busy check supplies the causal eligibility gate. A same-cycle D/E is accepted. A sink's A source may still be reused only after its final D, which is separately checked. |
 | Probe lifecycle | Rotating 6-bit B sources, accepted-B provenance and source reuse/wrap/depth accounting. Same-PA B presentation is serialized through final matching C and waits for prior final D plus E. Standalone and automatic Probes use the recorded old VA alias. | This is a single-client manager schedule; broad manager reordering remains outside the current direction. |
@@ -1090,6 +1090,28 @@ Epoch exit clears covered records only after the explicit drain; existing exact
 alias checkpoints are refreshed for covered owners. Uncheckpointed legacy owners
 retain their separate oracle contract.
 
+A new successful B/read-only AcquireBlock owner may instead freeze its initial
+line from independent reference inputs when all64 bytes have no explicit write
+in either reference or operational backing memory. This includes a lazy initial
+line first prefetched or reacquired after a checkpoint that had no resident
+owner. Lazy initial-image definitions must remain immutable during traffic.
+Backing write provenance is only a conservative veto; backing values, refill
+payloads and received C bytes never supply this certificate's expected data.
+Even a same-value explicit write disqualifies the entire line. Both provenance
+domains are necessary: an authorized ReleaseData can reach backing before its
+architectural reference commit, consume its input witness, and precede reacquire.
+
+The initial certificate is invalidated by a successful same-owner T/write
+AcquireBlock or AcquirePerm. A writable legacy owner may change before its
+commit-time notification, so downgrading it to B does not create a certificate.
+A real drained checkpoint, or a covered release-input epoch exit, promotes an
+existing initial certificate to the ordinary checkpoint contract. Pending
+same-alias committed updates and authorized input groups continue to block an
+automatic exact alias recall. A later new-colour reference commit cannot change
+the frozen old-owner bytes. This bounded rule does not establish independent
+baselines for arbitrary previously written ownerless lines or permit concurrent
+synonym writes.
+
 The reference checkpoint follows producer retirement, an explicit SBuffer flush
 and an idle D/E link. It reads only independent architectural reference bytes.
 Store-reference notifications use declared mapped PA/VA and input data. They
@@ -1099,8 +1121,8 @@ whole-line feasibility check permits subsets of known updates, preserves atomic
 aligned store/element groups and requires older overlapping updates before later
 ones. Disjoint updates may propagate independently; misaligned byte pieces need
 not be atomic. Candidates freeze at first C acceptance, so later reference writes
-cannot change a multibeat decision. Automatic alias recalls require a refreshed
-drain checkpoint and stay exact. Received
+cannot change a multibeat decision. Automatic alias recalls require the
+independent owner baseline above with no pending old-owner updates and stay exact. Received
 C bytes update operational backing memory only; they never change architectural
 expectations. Final Bare word readback remains an independent end-to-end check.
 A new-colour store may commit its reference bytes before its Acquire; comparing

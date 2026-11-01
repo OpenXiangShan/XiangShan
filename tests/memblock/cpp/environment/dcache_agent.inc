@@ -1042,6 +1042,7 @@ public:
             if (owner != owners_.end() && !owner->second.expected_data.empty()) {
                 owner->second.expected_data = reference_memory_.read_beat(line, kLineBytes);
                 owner->second.updates.clear();
+                owner->second.pristine_read_only = false;
             }
         }
         release_input_lines_.clear();
@@ -1196,6 +1197,7 @@ public:
             if (line >= base && line - base < bytes && owner.present) {
                 owner.expected_data = reference_memory_.read_beat(line, kLineBytes);
                 owner.updates.clear();
+                owner.pristine_read_only = false;
                 const auto tracked = release_input_lines_.find(line);
                 if (tracked != release_input_lines_.end()) {
                     // This explicit drained checkpoint proves every authorized
@@ -1551,6 +1553,7 @@ private:
         std::vector<unsigned char> expected_data;
         std::vector<OwnerUpdate> updates;
         std::vector<unsigned char> refill_data;
+        bool pristine_read_only = false;
     };
     struct PendingAcquire { ARequest request; bool recall_started; };
     struct GrantLifetime {
@@ -1709,8 +1712,24 @@ private:
                 if (owner == owners_.end() || !owner->second.present ||
                     owner->second.alias != request.alias) {
                     owners_[request_line] = Owner{request.alias, cap, true, {}, {}};
+                    auto &created = owners_.at(request_line);
+                    // A read-only initial line needs no prior owner at a
+                    // checkpoint. Expected bytes come only from reference
+                    // inputs; backing write provenance can only veto them.
+                    bool pristine = cap == 1;
+                    for (unsigned byte = 0; byte < kLineBytes && pristine; ++byte)
+                        pristine = !reference_memory_.has_explicit_byte(request_line + byte) &&
+                            !memory_.has_explicit_byte(request_line + byte);
+                    if (pristine) {
+                        created.expected_data = reference_memory_.read_beat(request_line, kLineBytes);
+                        created.pristine_read_only = true;
+                    }
                 } else {
                     owner->second.permission = cap;
+                    if (cap == 0 && owner->second.pristine_read_only) {
+                        owner->second.expected_data.clear();
+                        owner->second.pristine_read_only = false;
+                    }
                 }
                 owners_.at(request_line).refill_data = refill;
                 const auto tracked = release_input_lines_.find(request_line);
@@ -1735,6 +1754,10 @@ private:
             grants_.push_back({request_line, sink});
             if (!denied) {
                 auto &owner = owners_[request_line];
+                if (owner.pristine_read_only) {
+                    owner.expected_data.clear();
+                    owner.pristine_read_only = false;
+                }
                 owner.alias = request.alias;
                 owner.permission = 0;
                 owner.present = true;
