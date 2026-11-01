@@ -68,6 +68,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val hartId = Input(UInt(hartIdLen.W))
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
+    val dip = Option.when(backendParams.teaEn)(Output(new DipRob))
     val teaMembers = Option.when(backendParams.teaEn)(Input(Vec(RenameWidth, Valid(new TeaRenameMember))))
     val flushOut = ValidIO(new Redirect)
     val flushPcInfo = Output(new RobFlushPcInfo)
@@ -2235,6 +2236,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         assert(PopCount(tracker.io.committed.slice(lane * RenameWidth, (lane + 1) * RenameWidth).map(_.valid)) ===
           commitInstrCntByEntry(lane), "TEA members disagree with architectural retirement count")
       }
+    }
+
+    io.dip.foreach { dip =>
+      dip := 0.U.asTypeOf(new DipRob)
+      dip.cycle := teaSelector.io.cycle
+      dip.retired := PopCount(tracker.io.committed.map(_.valid))
+      dip.commits := tracker.io.commits
+      // ROB flush is observed here, before the later redirect echo clears state.
+      dip.flush.valid := io.flushOut.valid || io.redirect.valid && !teaRobFlushEcho
+      dip.flush.bits.robIdx := Mux(io.flushOut.valid, io.flushOut.bits.robIdx, teaRedirectPtr)
+      dip.flush.bits.self := Mux(io.flushOut.valid, io.flushOut.bits.flushItself(), io.redirect.bits.flushItself())
+      dip.flush.bits.pc := Mux(io.flushOut.valid, teaExceptionPc, teaRedirectPc)
+      dip.flush.bits.cause := Mux(io.flushOut.valid,
+        Mux(teaExceptionFlush, 2.U, Mux(intrEnable, 16.U, 8.U)),
+        Mux(teaRedirectCtrlMispred, 1.U, Mux(teaRedirectMemVio, 4.U, 8.U)))
     }
 
     val sample = WireInit(teaSelector.io.sample)

@@ -30,7 +30,7 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
       drive(true, 0, 2)
       dut.io.interval.valid.expect(true.B)
       dut.io.interval.bits.start.expect(0.U)
-      dut.io.interval.bits.end.expect(2.U)
+      dut.io.interval.bits.endCycle.expect(2.U)
       dut.io.interval.bits.leftCensored.expect(true.B)
       step(true, 0, 2)
       for (_ <- 0 until 8) step(true, 1)

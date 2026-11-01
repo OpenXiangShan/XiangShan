@@ -106,6 +106,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val renameIn = Vec(RenameWidth, Flipped(ValidIO(new DecodeOutUop)))
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new RenameOutUop)))
     val toRenameAllFire = Output(Bool())
+    val dip = Option.when(backendParams.teaEn)(Output(new DipDispatch))
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
     // IssueQueues
@@ -936,6 +937,38 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val fusedVec = (0 until RenameWidth).map{ case i =>
     if (i == 0 || !backendParams.debugEn) false.B
     else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.debug.get.fusionNum =/= 0.U)
+  }
+
+  io.dip.foreach { dip =>
+    dip := 0.U.asTypeOf(new DipDispatch)
+    dip.validMask := VecInit(fromRename.map(_.valid)).asUInt
+    dip.fireMask := VecInit(fromRename.map(_.fire)).asUInt
+    for (lane <- 0 until RenameWidth) {
+      dip.uops(lane).robIdx := fromRename(lane).bits.robIdx
+      // CtrlBlock extends the virtual PC using the current translation mode.
+      dip.uops(lane).pc := fromRename(lane).bits.debug.get.pc
+      dip.uops(lane).psv := fromRename(lane).bits.teaPsv
+    }
+    val blocked = VecInit(fromRename.map(x => x.valid && !x.ready))
+    val idx = PriorityEncoder(blocked)
+    val fu = fromRename(idx).bits.fuType
+    val iqCause = Mux(FuType.isInt(fu), DipCause.bit(DipCause.intIq),
+      Mux(FuType.isFArith(fu), DipCause.bit(DipCause.fpIq),
+        Mux(FuType.isVArith(fu), DipCause.bit(DipCause.vecIq), DipCause.bit(DipCause.memIq))))
+    val iqPortOffsets = allIssueParams.map(_.numEnq).scanLeft(0)(_ + _)
+    val iqFull = VecInit(allIssueParams.indices.map(iq =>
+      uopBlockMatrix(idx)(iq) && !io.toIssueQueues(iqPortOffsets(iq)).ready)).asUInt.orR
+    val iqPolicy = VecInit(allIssueParams.indices.map(iq =>
+      uopBlockMatrix(idx)(iq) && io.toIssueQueues(iqPortOffsets(iq)).ready)).asUInt.orR
+    val causes = Mux(blocked.asUInt.orR,
+      Mux(!io.enqRob.canAcceptForDispatch, DipCause.bit(DipCause.rob), 0.U) |
+      Mux(iqFull, iqCause, 0.U) |
+      Mux(iqPolicy, DipCause.bit(DipCause.policy), 0.U) |
+      Mux(!allowDispatch(idx) && FuType.isLoad(fu), DipCause.bit(DipCause.lq), 0.U) |
+      Mux(!allowDispatch(idx) && FuType.isStore(fu), DipCause.bit(DipCause.sq), 0.U) |
+      Mux(blockedByWaitForward(idx) || !notBlockedByPrevious(idx) || hasSpecialInst, DipCause.bit(DipCause.serial), 0.U) |
+      Mux(lsqRecoverStall, DipCause.bit(DipCause.lsqRecovery), 0.U), 0.U)
+    dip.stallCause := Mux(blocked.asUInt.orR && !causes.orR, DipCause.bit(DipCause.policy), causes)
   }
 
   // Topdown collect start
