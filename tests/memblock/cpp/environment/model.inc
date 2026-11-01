@@ -1079,9 +1079,20 @@ public:
         return bytes_.find(address) != bytes_.end();
     }
 
+    // Monotonic provenance for a physical line.  A lazy definition does not
+    // advance it; explicit input writes and manager-observed backing writes do.
+    // Consumers use the line value to retain a previously validated image
+    // without mistaking later writes for the same version.
+    std::uint64_t mutation_serial(std::uint64_t address) const
+    {
+        const auto it = mutation_serials_.find(address & ~std::uint64_t{63});
+        return it == mutation_serials_.end() ? 0 : it->second;
+    }
+
     void write_byte(std::uint64_t address, std::uint8_t value)
     {
         bytes_[address] = value;
+        mutation_serials_[address & ~std::uint64_t{63}] = ++mutation_counter_;
         if (write_mirror_ != nullptr) {
             write_mirror_->write_reference_byte(address, value);
         }
@@ -1090,6 +1101,7 @@ public:
     void write_reference_byte(std::uint64_t address, std::uint8_t value)
     {
         bytes_[address] = value;
+        mutation_serials_[address & ~std::uint64_t{63}] = ++mutation_counter_;
     }
 
     void define_repeating_incrementing(
@@ -1318,6 +1330,8 @@ private:
 
     SparseMemory *write_mirror_;
     std::unordered_map<std::uint64_t, std::uint8_t> bytes_;
+    std::unordered_map<std::uint64_t, std::uint64_t> mutation_serials_;
+    std::uint64_t mutation_counter_ = 0;
     std::vector<RepeatingIncrementingRegion> repeating_incrementing_;
     std::vector<SeededRandomRegion> seeded_random_;
 };

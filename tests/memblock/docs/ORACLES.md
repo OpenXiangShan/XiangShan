@@ -1043,7 +1043,7 @@ not an ordering oracle.
 | --- | --- | --- |
 | Accepted A legality | [dcache_a_contract.inc](../cpp/environment/dcache_a_contract.inc) validates supported opcode, size and corruption. Acquires require full-line alignment/size/mask, miss-source range, legal grow and request-source classes, and VA alias/page-offset consistency. Get checks param, alignment, mask and source range. CMO checks line size/alignment and the dedicated source. | Get user fields and CMO unspecified fields are intentionally unconstrained. Opcode legality does not by itself match an instruction to an A request. |
 | A source credit | [update_after_tick](../cpp/environment/dcache_agent.inc) rejects reuse while the source is active, activates on A acceptance, frees on final corresponding D; same-edge D completion is processed before new A. | Credit is not retained through GrantAck. It is separate from E-sink lifetime. |
-| Cross-colour alias ownership | PA-line directory stores granted VA alias/maximum permission. Acquires queue per line until prior final D and E, same-line Probes and active ReleaseData complete; unrelated lines can progress. An alias change sends forced-data toN to the stored old alias and constructs GrantData only after complete recovery. | Automatic recall requires an independent drained reference checkpoint or the bounded pristine read-only certificate below, with no pending old-owner updates. Unsupported owners fail as a manager-contract limitation. Error-grant and synonym CMO ownership are unqualified. |
+| Cross-colour alias ownership | PA-line directory stores granted VA alias/maximum permission. Acquires queue per line until prior final D and E, same-line Probes and active ReleaseData complete; unrelated lines can progress. An alias change sends forced-data toN to the stored old alias and constructs GrantData only after complete recovery. | Automatic recall requires an independent drained reference checkpoint or a bounded read-only certificate below, with no pending old-owner updates. Certificates cover pristine initial inputs and complete independently validated Probe images retained across owner absence. Unsupported owners fail as a manager-contract limitation. Error-grant and synonym CMO ownership are unqualified. |
 | D response | The manager constructs response beats from captured A and backing memory, then compares its driven handshake fields/data to queued beats. Seeded arbitration selects only complete eligible normal messages and locks first/interbeat delays and stalled payload through final D; same-line/sink/coherence and explicit hold gates remain active. GrantData supports keyword beat order; denied is fixed and implies corrupt on data beats; independent corrupt injection can select first/last/all beats. Accepted-A completion-age and queued-selection populations are separately observed; ReleaseAck consumes only C-source ownership. | This is a manager/adapter consistency check of manager-owned output, not an independent DUT response scoreboard or malformed-response campaign. |
 | E GrantAck | Sink must match a queued expectation; matching consumes exactly one entry. An E is accepted only after the first corresponding Grant/GrantData D beat, or in that same cycle, and every sink stays busy from first D acceptance until E. Drains check expected E entries separately from D response queues. | The expectation entry is still created when `respond` constructs Grant/GrantData; the first-D/sink-busy check supplies the causal eligibility gate. A same-cycle D/E is accepted. A sink's A source may still be reused only after its final D, which is separately checked. |
 | Probe lifecycle | Rotating 6-bit B sources, accepted-B provenance and source reuse/wrap/depth accounting. Same-PA B presentation is serialized through final matching C and waits for prior final D plus E. Standalone and automatic Probes use the recorded old VA alias. | This is a single-client manager schedule; broad manager reordering remains outside the current direction. |
@@ -1101,16 +1101,33 @@ Even a same-value explicit write disqualifies the entire line. Both provenance
 domains are necessary: an authorized ReleaseData can reach backing before its
 architectural reference commit, consume its input witness, and precede reacquire.
 
-The initial certificate is invalidated by a successful same-owner T/write
-AcquireBlock or AcquirePerm. A writable legacy owner may change before its
+A complete ProbeAckData may retain its frozen independent expected image after
+all beats pass identity, permission and byte checks. The image must equal the
+owner's independent baseline, with no recorded owner updates. Actual C payloads
+do not supply retained expectations. The manager records both backing and
+reference line write serials at completion; any other backing write between C
+beats prevents this certificate. Probe writes still update backing per validated
+beat, so this guard does not assert atomic Probe side effects.
+
+A later successful new B/read-only owner may freeze that retained image only
+while both line serials still match. Every explicit write, including an
+identical-value write, advances its domain's serial; reads and writes to other
+lines do not. An early ReleaseData before reference commit therefore invalidates
+the backing serial even when reference memory remains unchanged. Current
+reference bytes may already describe a later colour: reusing the frozen input
+image preserves the exact old version that was validated and refilled.
+
+Successful T/write AcquireBlock and AcquirePerm clear retained Probe images and
+invalidate a read-only certificate on the current owner. A writable legacy owner may change before its
 commit-time notification, so downgrading it to B does not create a certificate.
 A real drained checkpoint, or a covered release-input epoch exit, promotes an
-existing initial certificate to the ordinary checkpoint contract. Pending
+existing read-only certificate to the ordinary checkpoint contract. Link reset
+clears retained images. Pending
 same-alias committed updates and authorized input groups continue to block an
 automatic exact alias recall. A later new-colour reference commit cannot change
-the frozen old-owner bytes. This bounded rule does not establish independent
-baselines for arbitrary previously written ownerless lines or permit concurrent
-synonym writes.
+the frozen old-owner bytes. This bounded rule does not establish baselines for
+arbitrary ownerless lines lacking a validated image or permit concurrent synonym
+writes. General ReleaseData-to-reacquire certification remains outside it.
 
 The reference checkpoint follows producer retirement, an explicit SBuffer flush
 and an idle D/E link. It reads only independent architectural reference bytes.

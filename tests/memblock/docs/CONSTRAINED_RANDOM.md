@@ -1052,10 +1052,13 @@ then checks a complete line consistent with whole aligned scalar-store/vector-
 element updates and overlapping update order; disjoint updates may propagate
 independently. Misaligned bytes may tear. A new-alias recall requires an
 independent owner baseline with no pending owner updates: a drained checkpoint,
-or a new B/read-only owner's pristine initial-image certificate as specified in
-ORACLES.md. Every explicit reference or backing byte vetoes that certificate;
-a successful T grant invalidates it. Expected bytes come only from reference
-inputs. Final
+or a new B/read-only owner's initial/retained-Probe certificate as specified in
+ORACLES.md. Pristine certification requires no explicit reference or backing
+byte. Retained certification requires a complete independently checked Probe
+image and unchanged per-line reference/backing write serials. Successful T
+grants invalidate both read-only forms; link reset clears retained images.
+Expected bytes come from reference inputs or their already checked frozen
+images. Final
 physical observation takes the same checkpoint before its Bare readbacks. This
 is a bounded quiescent context transition contract: arbitrary simultaneous
 synonym stores, error-grant ownership and synonym CMO remain unqualified.
@@ -1161,7 +1164,7 @@ remain outside this direction.
 - Ordinary 4-KiB translations now include seeded host and nested page
   permutations, with byte-wise data checks and physical final readback. The
   bounded 132-page maps are static and may change cache colour. The manager's
-  automatic recalls use drained context checkpoints or pristine read-only certificates for independent old-owner
+  automatic recalls use drained context checkpoints or bounded read-only certificates for independent old-owner
   byte checks; general simultaneous synonym writes are not generated.
   NAPOT/special helper pools retain their
   own mappings, and context transitions drain SBuffer. Arbitrary root/ASID/VMID

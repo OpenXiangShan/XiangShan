@@ -23,6 +23,9 @@ class DcacheManagerTest(unittest.TestCase):
             cls.work = Path(cls.workspace.name)
         cls.results, cls.commands = [], []
         cls.paths = [ROOT / "cpp/environment/dcache_agent.inc",
+                     ROOT / "cpp/environment/model.inc", ROOT / "cpp/memblock_env.hpp",
+                     ROOT / "cpp/environment/dcache_a_contract.inc",
+                     ROOT / "cpp/generated_interface_types.hpp", ROOT / "cpp/failure.hpp",
                      ROOT / "unit/dcache_manager_fixture.cpp", Path(__file__).resolve()]
         cls.before = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in cls.paths}
         cls.binary = cls.compile("manager", ROOT / "unit/dcache_manager_fixture.cpp")
@@ -217,6 +220,23 @@ class DcacheManagerTest(unittest.TestCase):
                 result = self.run_case("pristine-" + name)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_historical_pristine_owner_reacquire_and_later_write_veto(self):
+        for name in ("historical-reacquire", "historical-checkpoint-reacquire",
+                     "historical-upgrade-block", "historical-upgrade-perm", "historical-reset",
+                     "historical-neighbor-write", "historical-interbeat-write", "historical-reference-ahead"):
+            with self.subTest(case=name):
+                result = self.run_case("pristine-" + name)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for domain in ("reference", "backing"):
+            for offset in range(64):
+                with self.subTest(domain=domain, offset=offset):
+                    result = self.run_case(f"pristine-historical-{domain}-write-{offset}")
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_line_write_provenance_is_conservative_independent_and_local(self):
+        result = self.run_case("write-serials")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_every_explicit_reference_or_backing_byte_vetoes_pristine_certificate(self):
         for provenance in ("reference", "backing"):
             for offset in range(64):
@@ -237,9 +257,9 @@ class DcacheManagerTest(unittest.TestCase):
              "early-c-reacquire", "uncertified owner escaped"),
             ("pristine_skip_final_byte", "byte < kLineBytes && pristine", "byte + 1 < kLineBytes && pristine",
              "backing-write-63", "uncertified owner escaped"),
-            ("pristine_keep_block_upgrade", "if (cap == 0 && owner->second.pristine_read_only)", "if (false)",
+            ("pristine_keep_block_upgrade", "if (cap == 0 && owner->second.read_only_certificate)", "if (false)",
              "upgrade-block", "uncertified owner escaped"),
-            ("pristine_keep_perm_upgrade", "if (owner.pristine_read_only)", "if (false)",
+            ("pristine_keep_perm_upgrade", "if (owner.read_only_certificate)", "if (false)",
              "upgrade-perm", "uncertified owner escaped"),
             ("pristine_ignore_legacy_updates", "!owner->second.updates.empty() || tracked_pending", "tracked_pending",
              "same-colour-write", "uncertified owner escaped"),
@@ -253,6 +273,40 @@ class DcacheManagerTest(unittest.TestCase):
              "wrong-byte63", "pristine recall byte/identity decision incorrect"),
         )
         for name, before, after, case, diagnostic in faults:
+            with self.subTest(fault=name):
+                self.assertEqual(production.count(before), 1, "fault anchor changed: " + name)
+                mutant = self.work / (name + ".inc")
+                mutant.write_text(production.replace(before, after, 1))
+                source = self.work / (name + ".cpp")
+                source.write_text(fixture.replace('#include "environment/dcache_agent.inc"',
+                                                 '#include "' + str(mutant) + '"'))
+                binary = self.compile(name, source)
+                result = self.run_case("pristine-" + case, binary=binary)
+                self.assertNotEqual(result.returncode, 0, "private fault escaped: " + name)
+                self.assertIn(diagnostic, result.stderr)
+
+        historical_faults = (
+            ("historical_ignore_reference_serial",
+             "historical->second.reference_serial == reference_memory_.mutation_serial(request_line)",
+             "true", "historical-reference-write-63", "historical owner certificate ignored"),
+            ("historical_ignore_backing_serial",
+             "historical->second.backing_serial == memory_.mutation_serial(request_line)",
+             "true", "historical-backing-write-63", "historical owner certificate ignored"),
+            ("historical_keep_block_write_permission",
+             "if (cap == 0) historical_owner_images_.erase(request_line);", "",
+             "historical-upgrade-block", "historical owner certificate ignored"),
+            ("historical_keep_perm_write_permission",
+             "                historical_owner_images_.erase(request_line);", "",
+             "historical-upgrade-perm", "historical owner certificate ignored"),
+            ("historical_keep_after_reset", "        historical_owner_images_.clear();", "",
+             "historical-reset", "historical owner certificate ignored"),
+            ("historical_ignore_interbeat_write", "expected.backing_uninterrupted &&", "true &&",
+             "historical-interbeat-write", "uncertified owner escaped"),
+            ("historical_use_current_reference", "created.expected_data = historical->second.expected_data;",
+             "created.expected_data = reference_memory_.read_beat(request_line, kLineBytes);",
+             "historical-reference-ahead", "DCache ProbeAckData byte mismatch"),
+        )
+        for name, before, after, case, diagnostic in historical_faults:
             with self.subTest(fault=name):
                 self.assertEqual(production.count(before), 1, "fault anchor changed: " + name)
                 mutant = self.work / (name + ".inc")

@@ -134,6 +134,78 @@ static void pristine_alias_baseline(const std::string &test)
         f.step(); f.ack(); f.ok();
         require(f.manager.responses_idle() && f.manager.grant_acks_idle(), "old grant did not finish");
     };
+    if (test == "historical-reacquire" || test == "historical-checkpoint-reacquire" ||
+        test == "historical-neighbor-write" || test == "historical-interbeat-write" ||
+        test == "historical-reference-ahead") {
+        // Establish a pristine B owner, validate its complete independent
+        // ProbeAckData image, then reacquire after the owner directory has
+        // been retired. The second alias must still recall the retained image.
+        grant();
+        if (test == "historical-checkpoint-reacquire")
+            require(f.manager.checkpoint_alias_reference(line,64),f.manager.error());
+        require(f.manager.request_probe(line,2,true,2,f.old_image), "initial pristine probe enqueue failed");
+        f.step();
+        f.c(5,2,0,9,&f.old_image);
+        if (test == "historical-interbeat-write") f.bus.write_byte(line,f.old_image[0]);
+        if (test == "historical-reference-ahead") {
+            for (unsigned byte=0;byte<64;++byte) {
+                f.reference.write_reference_byte(line+byte,f.new_image[byte]);
+                f.manager.note_reference_write(line+byte,line+0x3000+byte,f.new_image[byte]);
+            }
+        }
+        f.c(5,2,1,9,&f.old_image); f.ok();
+        require(f.manager.probes_idle(), "initial pristine probe did not drain");
+        if (test == "historical-neighbor-write") {
+            f.bus.write_byte(line+64,0xa7);
+            f.reference.write_reference_byte(line+127,0xb8);
+        }
+        f.acquire(2,1,0); f.step(); f.ack(2); f.ok();
+        require(f.manager.responses_idle() && f.manager.grant_acks_idle(),
+            "historical B reacquire did not drain");
+        f.acquire(3,2,0);
+        if (test == "historical-interbeat-write") {
+            reject_missing();return;
+        }
+        f.manager.drive(f.dut);
+        require(f.dut.dcache.b.valid.boolean() && f.dut.dcache.b.data.bytes()[0] == 5,
+            "historical owner image did not drive alias recall");
+        f.step();
+        f.c(5,2,0,9,&f.old_image); f.c(5,2,1,9,&f.old_image);
+        require(f.manager.ok(), f.manager.error());
+        f.check_recovered_grant(); f.step(); f.ack(3); f.ok();
+        require(f.manager.alias_recalls() == 1 && f.manager.alias_recall_responses() == 1,
+            "historical alias recall lifecycle not exactly once");
+        return;
+    }
+    if (test.starts_with("historical-reference-write-") || test.starts_with("historical-backing-write-") ||
+        test == "historical-upgrade-block" || test == "historical-upgrade-perm" ||
+        test == "historical-reset") {
+        grant();
+        require(f.manager.request_probe(line,2,true,2,f.old_image), "initial historical probe enqueue failed");
+        f.step();
+        f.c(5,2,0,9,&f.old_image); f.c(5,2,1,9,&f.old_image); f.ok();
+        if (test == "historical-upgrade-block" || test == "historical-upgrade-perm") {
+            f.acquire(2,1,0);f.step();f.ack(2);f.ok();
+            f.acquire(2,1,2,line,
+                test == "historical-upgrade-block" ? 6 : 7);
+            f.step();f.ack(2);f.ok();
+            f.c(6,1);f.step();f.ok();
+        } else if (test == "historical-reset") {
+            f.manager.reset_link_state();
+        } else {
+            const bool reference = test.starts_with("historical-reference-write-");
+            const unsigned offset = std::stoul(test.substr(reference ? 27 : 25));
+            require(offset < 64,"invalid historical provenance byte");
+            if (reference) f.reference.write_reference_byte(line+offset, f.old_image[offset]);
+            else f.bus.write_byte(line+offset, f.old_image[offset]);
+        }
+        f.acquire(2,1,0); f.step(); f.ack(2); f.ok();
+        f.acquire(3,2,0); f.manager.drive(f.dut);
+        require(!f.manager.ok() &&
+            f.manager.error().find("reference checkpoint") != std::string::npos,
+            "historical owner certificate ignored later write provenance");
+        return;
+    }
     if (test.starts_with("reference-write-") || test.starts_with("backing-write-")) {
         const bool reference = test.starts_with("reference-write-");
         const unsigned offset = std::stoul(test.substr(reference ? 16 : 14));
@@ -767,6 +839,31 @@ int main(int argc, char **argv)
 {
     try {
         const std::string test = argc>1 ? argv[1] : "dirty";
+        if (test == "write-serials") {
+            SparseMemory backing, reference(&backing);
+            reference.define_repeating_incrementing(line,128,64,0x31);
+            require(reference.mutation_serial(line)==0 && backing.mutation_serial(line+63)==0,
+                "lazy definitions changed write provenance");
+            reference.write_reference_byte(line+63,0x70);
+            auto r=reference.mutation_serial(line);
+            require(r!=0 && r==reference.mutation_serial(line+63) && backing.mutation_serial(line)==0,
+                "reference-only write provenance was not independent and line-scoped");
+            reference.write_reference_byte(line+63,0x70);
+            require(reference.mutation_serial(line)>r,"same-value reference write lost provenance");
+            reference.write_byte(line,0x31);
+            r=reference.mutation_serial(line);
+            auto b=backing.mutation_serial(line);
+            require(b!=0,"mirrored input write lost backing provenance");
+            backing.write_byte(line+63,0x70);
+            require(backing.mutation_serial(line)>b && reference.mutation_serial(line)==r,
+                "backing write provenance was not independent");
+            b=backing.mutation_serial(line);
+            backing.read_beat(line,64); reference.read_beat(line,64);
+            reference.write_byte(line+64,0x31);
+            require(backing.mutation_serial(line)==b && reference.mutation_serial(line)==r,
+                "read or neighboring line changed write provenance");
+            return 0;
+        }
         if (test.starts_with("pristine-")) {pristine_alias_baseline(test.substr(9));return 0;}
         if (test.starts_with("release-cancel-")) {input_cancellations(test.substr(15));return 0;}
         if (test == "release-input-exhaustive") {exhaustive_input_versions();return 0;}

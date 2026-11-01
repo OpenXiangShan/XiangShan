@@ -255,6 +255,7 @@ public:
     {
         b_beats_.clear();
         owners_.clear();
+        historical_owner_images_.clear();
         release_input_epoch_ = false;
         release_input_lines_.clear();
         release_input_orders_.clear();
@@ -1042,7 +1043,7 @@ public:
             if (owner != owners_.end() && !owner->second.expected_data.empty()) {
                 owner->second.expected_data = reference_memory_.read_beat(line, kLineBytes);
                 owner->second.updates.clear();
-                owner->second.pristine_read_only = false;
+                owner->second.read_only_certificate = false;
             }
         }
         release_input_lines_.clear();
@@ -1197,7 +1198,7 @@ public:
             if (line >= base && line - base < bytes && owner.present) {
                 owner.expected_data = reference_memory_.read_beat(line, kLineBytes);
                 owner.updates.clear();
-                owner.pristine_read_only = false;
+                owner.read_only_certificate = false;
                 const auto tracked = release_input_lines_.find(line);
                 if (tracked != release_input_lines_.end()) {
                     // This explicit drained checkpoint proves every authorized
@@ -1544,6 +1545,8 @@ private:
         std::uint8_t permission = 0; // granted maximum: T=0, B=1
         std::uint8_t response_opcode = 0;
         std::uint8_t response_report = 0;
+        std::uint64_t last_backing_serial = 0;
+        bool backing_uninterrupted = true;
     };
 
     struct Owner {
@@ -1553,7 +1556,12 @@ private:
         std::vector<unsigned char> expected_data;
         std::vector<OwnerUpdate> updates;
         std::vector<unsigned char> refill_data;
-        bool pristine_read_only = false;
+        bool read_only_certificate = false;
+    };
+    struct HistoricalOwnerImage {
+        std::vector<unsigned char> expected_data;
+        std::uint64_t backing_serial;
+        std::uint64_t reference_serial;
     };
     struct PendingAcquire { ARequest request; bool recall_started; };
     struct GrantLifetime {
@@ -1707,28 +1715,41 @@ private:
             expected_grant_acks_.emplace_back(sink, denied || corrupt);
             grants_.push_back({request_line, sink});
             if (!denied && !corrupt) {
+                if (cap == 0) historical_owner_images_.erase(request_line);
                 const auto refill = memory_.read_beat(request_line, kLineBytes);
                 auto owner = owners_.find(request_line);
                 if (owner == owners_.end() || !owner->second.present ||
                     owner->second.alias != request.alias) {
                     owners_[request_line] = Owner{request.alias, cap, true, {}, {}};
                     auto &created = owners_.at(request_line);
-                    // A read-only initial line needs no prior owner at a
-                    // checkpoint. Expected bytes come only from reference
-                    // inputs; backing write provenance can only veto them.
+                    // A read-only owner can retain an independently checked
+                    // complete Probe image across owner absence. Any later
+                    // backing/reference write vetoes that certificate.
                     bool pristine = cap == 1;
+                    const auto historical = historical_owner_images_.find(request_line);
+                    const bool historical_usable = pristine && historical != historical_owner_images_.end() &&
+                        historical->second.backing_serial == memory_.mutation_serial(request_line) &&
+                        historical->second.reference_serial == reference_memory_.mutation_serial(request_line) &&
+                        historical->second.expected_data.size() == kLineBytes;
+                    if (historical_usable) {
+                        created.expected_data = historical->second.expected_data;
+                        created.read_only_certificate = true;
+                        pristine = false;
+                    }
+                    // Otherwise an untouched lazy initial line needs no prior
+                    // checkpoint. Backing values never supply expected bytes.
                     for (unsigned byte = 0; byte < kLineBytes && pristine; ++byte)
                         pristine = !reference_memory_.has_explicit_byte(request_line + byte) &&
                             !memory_.has_explicit_byte(request_line + byte);
                     if (pristine) {
                         created.expected_data = reference_memory_.read_beat(request_line, kLineBytes);
-                        created.pristine_read_only = true;
+                        created.read_only_certificate = true;
                     }
                 } else {
                     owner->second.permission = cap;
-                    if (cap == 0 && owner->second.pristine_read_only) {
+                    if (cap == 0 && owner->second.read_only_certificate) {
                         owner->second.expected_data.clear();
-                        owner->second.pristine_read_only = false;
+                        owner->second.read_only_certificate = false;
                     }
                 }
                 owners_.at(request_line).refill_data = refill;
@@ -1753,10 +1774,11 @@ private:
             expected_grant_acks_.emplace_back(sink, denied);
             grants_.push_back({request_line, sink});
             if (!denied) {
+                historical_owner_images_.erase(request_line);
                 auto &owner = owners_[request_line];
-                if (owner.pristine_read_only) {
+                if (owner.read_only_certificate) {
                     owner.expected_data.clear();
-                    owner.pristine_read_only = false;
+                    owner.read_only_certificate = false;
                 }
                 owner.alias = request.alias;
                 owner.permission = 0;
@@ -1876,6 +1898,9 @@ private:
         expected.response_opcode = response.opcode;
         expected.response_report = response.param;
         if (with_data) {
+            if (expected.received != 0 &&
+                expected.last_backing_serial != memory_.mutation_serial(expected.base))
+                expected.backing_uninterrupted = false;
             const std::size_t offset = expected.received * kBeatBytes;
             if (offset + kBeatBytes > expected.expected_data.size()) {
                 error_.record("DCache ProbeAckData exceeded one cache line");
@@ -1893,11 +1918,24 @@ private:
                 memory_.write_byte(
                     expected.base + offset + byte, response.data.at(byte));
             }
+            expected.last_backing_serial = memory_.mutation_serial(expected.base);
             ++expected.received;
             if (expected.received != kLineBytes / kBeatBytes) {
                 return;
             }
             ++probe_data_count_;
+            const auto owner = owners_.find(expected.base);
+            if (owner != owners_.end() &&
+                expected.backing_uninterrupted &&
+                owner->second.expected_data.size() == kLineBytes &&
+                owner->second.updates.empty() &&
+                expected.expected_data == owner->second.expected_data) {
+                historical_owner_images_[expected.base] = HistoricalOwnerImage{
+                    expected.expected_data,
+                    memory_.mutation_serial(expected.base),
+                    reference_memory_.mutation_serial(expected.base),
+                };
+            }
         }
         shrink_owner(expected.base, response.param);
         alias_recall_response_count_ += expected.automatic;
@@ -2332,6 +2370,7 @@ private:
     SparseMemory &memory_;
     const SparseMemory &reference_memory_;
     std::unordered_map<std::uint64_t, Owner> owners_;
+    std::unordered_map<std::uint64_t, HistoricalOwnerImage> historical_owner_images_;
     bool release_input_epoch_ = false;
     std::unordered_map<std::uint64_t, ReleaseInputLine> release_input_lines_;
     std::unordered_map<std::uint64_t, std::uint64_t> release_input_orders_;
