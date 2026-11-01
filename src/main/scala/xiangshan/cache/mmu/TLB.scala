@@ -94,18 +94,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val virt_out = req.map(a => RegEnable(csr.priv.virt, a.fire))
   val sum = (0 until Width).map(i => Mux(virt_out(i) || isHyperInst(i), csr.priv.vsum, csr.priv.sum))
   val mxr = (0 until Width).map(i => Mux(virt_out(i) || isHyperInst(i), csr.priv.vmxr || csr.priv.mxr, csr.priv.mxr))
-  val req_in_s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
-      (!(virt_in || req_in(i).bits.hyperinst)) -> noS2xlate,
-      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
-      (csr.vsatp.mode === 0.U) -> onlyStage2,
-      (csr.hgatp.mode === 0.U) -> onlyStage1
-    )))
-  val req_out_s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
-    (!(virt_out(i) || isHyperInst(i))) -> noS2xlate,
-    (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
-    (csr.vsatp.mode === 0.U) -> onlyStage2,
-    (csr.hgatp.mode === 0.U) -> onlyStage1
-  )))
+  val req_in_s2xlate = (0 until Width).map(i => getS2xlate(virt_in || req_in(i).bits.hyperinst, csr.vsatp.mode, csr.hgatp.mode))
+  val req_out_s2xlate = (0 until Width).map(i => getS2xlate(virt_out(i) || isHyperInst(i), csr.vsatp.mode, csr.hgatp.mode))
   val need_gpa = RegInit(false.B)
   val need_gpa_wire = WireInit(false.B)
   private val NeedGpaRespCountLimit = 512
@@ -593,13 +583,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     XSError(!io.requestor(idx).resp.ready, s"${q.name} port ${idx} is non-block, resp.ready must be true.B")
 
     val req_need_gpa = hasGpf(idx)
-    val req_s2xlate = Wire(UInt(2.W))
-    req_s2xlate := MuxCase(noS2xlate, Seq(
-      (!(virt_out(idx) || req_out(idx).hyperinst)) -> noS2xlate,
-      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
-      (csr.vsatp.mode === 0.U) -> onlyStage2,
-      (csr.hgatp.mode === 0.U) -> onlyStage1
-    ))
+    val req_s2xlate = getS2xlate(virt_out(idx) || req_out(idx).hyperinst, csr.vsatp.mode, csr.hgatp.mode)
 
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
@@ -643,13 +627,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val req_need_gpa = hasGpf(idx)
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
     val miss_req_memidx = req_out(idx).memidx
-    val miss_req_s2xlate = Wire(UInt(2.W))
-    miss_req_s2xlate := MuxCase(noS2xlate, Seq(
-      (!(virt_out(idx) || req_out(idx).hyperinst)) -> noS2xlate,
-      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
-      (csr.vsatp.mode === 0.U) -> onlyStage2,
-      (csr.hgatp.mode === 0.U) -> onlyStage1
-    ))
+    val miss_req_s2xlate = getS2xlate(virt_out(idx) || req_out(idx).hyperinst, csr.vsatp.mode, csr.hgatp.mode)
     val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire)
     val hit = io.ptw.resp.bits.hit(miss_req_vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true, ignoreAsid = false) && io.ptw.resp.valid && miss_req_s2xlate_reg === io.ptw.resp.bits.s2xlate
 
@@ -828,13 +806,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.vsatp := Cat(csr.vsatp.mode, csr.vsatp.asid, csr.vsatp.ppn)
       difftest.hgatp := Cat(csr.hgatp.mode, csr.hgatp.vmid, csr.hgatp.ppn)
       val req_need_gpa = gpf
-      val req_s2xlate = Wire(UInt(2.W))
-      req_s2xlate := MuxCase(noS2xlate, Seq(
-        (!RegNext(virt_in || req_in(i).bits.hyperinst)) -> noS2xlate,
-        (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
-        (csr.vsatp.mode === 0.U) -> onlyStage2,
-        (csr.hgatp.mode === 0.U) -> onlyStage1
-      ))
+      val req_s2xlate = getS2xlate(RegNext(virt_in || req_in(i).bits.hyperinst), csr.vsatp.mode, csr.hgatp.mode)
       difftest.s2xlate := req_s2xlate
     }
   }

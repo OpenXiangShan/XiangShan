@@ -182,6 +182,16 @@ trait HasTlbConst extends HasXSParameter {
   def onlyStage1 = "b01".U
   def onlyStage2 = "b10".U
 
+  // Select translation stages from virtual mode and the VS/G-stage page-table modes
+  def getS2xlate(isVirt: Bool, vsatpMode: UInt, hgatpMode: UInt): UInt = {
+    MuxCase(noS2xlate, Seq(
+      !isVirt -> noS2xlate,
+      (vsatpMode =/= 0.U && hgatpMode =/= 0.U) -> allStage,
+      (vsatpMode === 0.U) -> onlyStage2,
+      (hgatpMode === 0.U) -> onlyStage1
+    ))
+  }
+
   def noSfence = "b00".U
   def isSfence = "b01".U
   def isVSfence = "b10".U
