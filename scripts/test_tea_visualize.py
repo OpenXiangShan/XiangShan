@@ -219,7 +219,7 @@ class TeaAnalysisTest(unittest.TestCase):
             row = dict.fromkeys(fields, 0)
             row.update(ID=1, CYCLE=10, RETIRED=4, CENSOREDGAPS=1, CLOSED=1, STATES_0=2, STATES_1=5, STATES_2=3)
             con.execute("INSERT INTO TeaCycleSummary_0 VALUES (" + ",".join("?" for _ in fields) + ")", list(row.values()))
-            con.execute("CREATE TABLE TeaNoCommit_0 (START INTEGER, END INTEGER, STATES_0 INTEGER, "
+            con.execute("CREATE TABLE TeaNoCommit_0 (START INTEGER, ENDCYCLE INTEGER, STATES_0 INTEGER, "
                         "STATES_1 INTEGER, STATES_2 INTEGER, LEFTCENSORED INTEGER, RIGHTCENSORED INTEGER)")
             con.execute("INSERT INTO TeaNoCommit_0 VALUES (2,10,5,3,0,0,1)")
         export_cycle_stats(self.database, Path(self.directory.name))
@@ -242,7 +242,7 @@ class TeaAnalysisTest(unittest.TestCase):
             interval, = csv.DictReader(stream)
         self.assertEqual((interval["start"], interval["end"]), ("2", "10"))
         with sqlite3.connect(self.database) as con:
-            con.execute("UPDATE TeaNoCommit_0 SET END=11")
+            con.execute("UPDATE TeaNoCommit_0 SET ENDCYCLE=11")
         with self.assertRaisesRegex(ValueError, "inconsistent no-commit"):
             export_cycle_stats(self.database, Path(self.directory.name))
 

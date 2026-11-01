@@ -17,7 +17,7 @@ class TeaCycleSummary extends Bundle {
 
 class TeaNoCommit extends Bundle {
   val start = UInt(64.W)
-  val end = UInt(64.W) // exclusive
+  val endCycle = UInt(64.W) // exclusive
   val states = Vec(3, UInt(64.W)) // Stalled, Flushed, Drained
   val leftCensored = Bool()
   val rightCensored = Bool()
@@ -89,7 +89,7 @@ class TeaCycleStats extends Module {
 
   io.interval.valid := closeGap && (pending >= io.gapThreshold || censored)
   io.interval.bits.start := io.cycle - pending
-  io.interval.bits.end := io.cycle
+  io.interval.bits.endCycle := io.cycle
   io.interval.bits.states := gapStates
   io.interval.bits.leftCensored := leftCensored
   io.interval.bits.rightCensored := stopped
