@@ -220,22 +220,6 @@ trait HasTlbConst extends HasXSParameter {
     vpn(log2Up(nSets)-1, 0)
   }
 
-  def drop_set_idx(vpn: UInt, nSets: Int): UInt = {
-    require(nSets >= 1)
-    require(vpn.getWidth > log2Ceil(nSets))
-    vpn(vpn.getWidth-1, log2Ceil(nSets))
-  }
-
-  def drop_set_equal(vpn1: UInt, vpn2: UInt, nSets: Int): Bool = {
-    require(nSets >= 1)
-    require(vpn1.getWidth == vpn2.getWidth)
-    if (vpn1.getWidth <= log2Ceil(nSets)) {
-      true.B
-    } else {
-      drop_set_idx(vpn1, nSets) === drop_set_idx(vpn2, nSets)
-    }
-  }
-
   def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {
     val width = v.getWidth
     val emptyIdx = ParallelPriorityMux((0 until width).map( i => (!v(i), i.U(log2Up(width).W))))

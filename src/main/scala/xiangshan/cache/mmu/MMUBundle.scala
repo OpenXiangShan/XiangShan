@@ -25,10 +25,9 @@ import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.LazyModuleImp
 import freechips.rocketchip.tilelink._
-import xiangshan.backend.fu.{PMPReqBundle, PMPConfig}
-import xiangshan.backend.fu.PMPBundle
+import xiangshan.backend.fu.PMPReqBundle
 
 
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
@@ -47,22 +46,6 @@ class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   override def toPrintable: Printable = {
     p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// +
     //(if(hasV) (p"v:${v}") else p"")
-  }
-}
-
-class TlbPMBundle(implicit p: Parameters) extends TlbBundle {
-  val r = Bool()
-  val w = Bool()
-  val x = Bool()
-  val c = Bool()
-  val atomic = Bool()
-
-  def assign_ap(pm: PMPConfig) = {
-    r := pm.r
-    w := pm.w
-    x := pm.x
-    c := pm.c
-    atomic := pm.atomic
   }
 }
 
@@ -176,35 +159,6 @@ class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
 
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
-  }
-}
-
-// multi-read && single-write
-// input is data, output is hot-code(not one-hot)
-class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(implicit p: Parameters) extends TlbModule {
-  val io = IO(new Bundle {
-    val r = new Bundle {
-      val req = Input(Vec(readWidth, gen))
-      val resp = Output(Vec(readWidth, Vec(set, Bool())))
-    }
-    val w = Input(new Bundle {
-      val valid = Bool()
-      val bits = new Bundle {
-        val index = UInt(log2Up(set).W)
-        val data = gen
-      }
-    })
-  })
-
-  val wordType = UInt(gen.getWidth.W)
-  val array = Reg(Vec(set, wordType))
-
-  io.r.resp.zipWithIndex.map{ case (a,i) =>
-    a := array.map(io.r.req(i).asUInt === _)
-  }
-
-  when (io.w.valid) {
-    array(io.w.bits.index) := io.w.bits.data.asUInt
   }
 }
 
@@ -430,13 +384,6 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.s2xlate := item.s2xlate
     this
   }
-  // 4KB is normal entry, 2MB/1GB is considered as super entry
-  def is_normalentry(): Bool = {
-    if (!pageSuper) { true.B }
-    else if (!pageNormal) { false.B }
-    else { level.get === 0.U }
-  }
-
 
   def genPPN(saveLevel: Boolean = false, valid: Bool = false.B)(vpn: UInt) : UInt = {
     val inner_level = level.getOrElse(0.U)
