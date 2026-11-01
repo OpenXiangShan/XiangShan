@@ -241,35 +241,11 @@ trait HasTlbConst extends HasXSParameter {
   import scala.language.implicitConversions
 
   implicit def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
-    val tp = Wire(new TlbPermBundle)
-    val ptePerm = hptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    tp.pf := hptwResp.gpf
-    tp.af := hptwResp.gaf
-    tp.v := DontCare
-    tp.d := ptePerm.d
-    tp.a := ptePerm.a
-    tp.g := ptePerm.g
-    tp.u := ptePerm.u
-    tp.x := ptePerm.x
-    tp.w := ptePerm.w
-    tp.r := ptePerm.r
-    tp
+    Wire(new TlbPermBundle(hasV = false)).applyS2(hptwResp)
   }
 
   implicit def ptwresp_to_tlbperm(ptwResp: PtwSectorResp): TlbPermBundle = {
-    val tp = Wire(new TlbPermBundle)
-    val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    tp.pf := ptwResp.pf
-    tp.af := ptwResp.af
-    tp.v := ptwResp.entry.v
-    tp.d := ptePerm.d
-    tp.a := ptePerm.a
-    tp.g := ptePerm.g
-    tp.u := ptePerm.u
-    tp.x := ptePerm.x
-    tp.w := ptePerm.w
-    tp.r := ptePerm.r
-    tp
+    Wire(new TlbPermBundle()).apply(ptwResp)
   }
 }
 

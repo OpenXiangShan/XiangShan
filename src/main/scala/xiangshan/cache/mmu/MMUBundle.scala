@@ -49,10 +49,12 @@ class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   }
 }
 
-class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
+class TlbPermBundle(hasV: Boolean = true)(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
   val af = Bool() // NOTE: if this is true, just raise af
-  val v = Bool() // if stage1 pte is fake_pte, v is false
+  // S/VS-stage permissions use v to identify fake PTEs (v = false)
+  // G-stage permissions do not need v, so hasV is false
+  val v = Option.when(hasV)(Bool())
   // pagetable perm (software defined)
   val d = Bool()
   val a = Bool()
@@ -66,7 +68,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.pf
     this.af := item.af
-    this.v := item.v
+    this.v.foreach(_ := item.entry.v)
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -82,7 +84,6 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.gpf
     this.af := item.gaf
-    this.v := false.B
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -97,55 +98,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   def apply(pte: PteBundle, pf: Bool, af: Bool, entryValid: Bool) = {
     this.pf := pf
     this.af := af
-    this.v := entryValid
-    this.d := pte.perm.d
-    this.a := pte.perm.a
-    this.g := pte.perm.g
-    this.u := pte.perm.u
-    this.x := pte.perm.x
-    this.w := pte.perm.w
-    this.r := pte.perm.r
-
-    this
-  }
-
-  override def toPrintable: Printable = {
-    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
-  }
-}
-
-class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
-  val pf = Bool() // NOTE: if this is true, just raise pf
-  val af = Bool() // NOTE: if this is true, just raise af
-  val v = Bool() // if stage1 pte is fake_pte, v is false
-  // pagetable perm (software defined)
-  val d = Bool()
-  val a = Bool()
-  val g = Bool()
-  val u = Bool()
-  val x = Bool()
-  val w = Bool()
-  val r = Bool()
-
-  def apply(item: PtwSectorResp) = {
-    val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    this.pf := item.pf
-    this.af := item.af
-    this.v := item.v
-    this.d := ptePerm.d
-    this.a := ptePerm.a
-    this.g := ptePerm.g
-    this.u := ptePerm.u
-    this.x := ptePerm.x
-    this.w := ptePerm.w
-    this.r := ptePerm.r
-
-    this
-  }
-  def apply(pte: PteBundle, pf: Bool, af: Bool, entryValid: Bool) = {
-    this.pf := pf
-    this.af := af
-    this.v := entryValid
+    this.v.foreach(_ := entryValid)
     this.d := pte.perm.d
     this.a := pte.perm.a
     this.g := pte.perm.g
@@ -178,13 +131,13 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   val n = UInt(pteNLen.W)
   val pbmt = UInt(ptePbmtLen.W)
   val g_pbmt = UInt(ptePbmtLen.W)
-  val perm = new TlbSectorPermBundle
+  val perm = new TlbPermBundle()
   val valididx = Vec(tlbcontiguous, Bool())
   val pteidx = Vec(tlbcontiguous, Bool())
   val ppn_low = Vec(tlbcontiguous, UInt(sectortlbwidth.W))
 
   val mptperm = Option.when(HasMptCheck) (new MptPermBundle(isTlbPort = false))
-  val g_perm = new TlbPermBundle
+  val g_perm = new TlbPermBundle(hasV = false)
   val vmid = UInt(vmidLen.W)
   val s2xlate = UInt(2.W)
 
@@ -455,8 +408,8 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
       val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
       val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val perm = Vec(nDups, Output(new TlbSectorPermBundle()))
-      val g_perm = Vec(nDups, Output(new TlbPermBundle()))
+      val perm = Vec(nDups, Output(new TlbPermBundle()))
+      val g_perm = Vec(nDups, Output(new TlbPermBundle(hasV = false)))
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
       val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true)))) // add mptperm
     }))
@@ -513,7 +466,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
       val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val perm = Vec(nDups, Output(new TlbPermBundle()))
-      val g_perm = Vec(nDups, Output(new TlbPermBundle()))
+      val g_perm = Vec(nDups, Output(new TlbPermBundle(hasV = false)))
       val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true))))
       // HasMptCheck,add mptperm
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
