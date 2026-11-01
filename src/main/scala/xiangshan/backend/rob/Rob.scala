@@ -2145,6 +2145,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
 
+    out.dip.foreach { dip =>
+      dip := 0.U.asTypeOf(new DipRob)
+      dip.cycle := teaSelector.io.cycle
+      dip.retired := PopCount(tracker.io.committed.map(_.valid))
+      dip.commits := tracker.io.commits
+      // ROB flush is observed here, before the later redirect echo clears state.
+      dip.flush.valid := out.flushOut.valid || in.redirect.valid && !teaRobFlushEcho
+      dip.flush.bits.robIdx := Mux(out.flushOut.valid, out.flushOut.bits.robIdx, teaRedirectPtr)
+      dip.flush.bits.self := Mux(out.flushOut.valid, out.flushOut.bits.flushItself(), in.redirect.bits.flushItself())
+      dip.flush.bits.pc := Mux(out.flushOut.valid, teaExceptionPc, teaRedirectPc)
+      dip.flush.bits.cause := Mux(out.flushOut.valid,
+        Mux(teaExceptionFlush, 2.U, Mux(intrEnable, 16.U, 8.U)),
+        Mux(teaRedirectCtrlMispred, 1.U, Mux(teaRedirectMemVio, 4.U, 8.U)))
+    }
+
     val sample = WireInit(teaSelector.io.sample)
     sample.context.retired := PopCount(tracker.io.committed.map(_.valid))
     // Bit order is part of the trace schema; preserve overlapping raw conditions.
@@ -2667,6 +2682,7 @@ object Rob {
   class Out(params: BackendParams)(implicit p: Parameters) extends XSBundle {
     // ROB occupancy.
     val robFull = Output(Bool())
+    val dip = Option.when(backendParams.teaEn)(Output(new DipRob))
 
     // ROB commit notifications.
     val commits = Output(new RobCommitIO)

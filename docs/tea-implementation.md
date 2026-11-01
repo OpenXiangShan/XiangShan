@@ -335,7 +335,7 @@ GSIM 分支的 CI 在 TEA-only 模式下自动导出上述四表，继续使用�
 - `GAPS_0..4` 统计完整无提交区间的 1–7、8–31、32–127、128–511、512+ 周期直方图。
   采集开启时已经无提交的区间标为 left-censored，关闭时尚未结束的区间标为 right-censored；
   二者均不进入完整区间直方图，而是计入 `CENSOREDGAPS`。截断区间不受明细阈值限制。
-- `TeaNoCommit` 保存 `[START, END)` 和区间内 Stalled/Flushed/Drained 周期数；三者之和等于区间长度。
+- `TeaNoCommit` 保存 `[START, ENDCYCLE)` 和区间内 Stalled/Flushed/Drained 周期数；三者之和等于区间长度。
   区间可能跨越多个队首或恢复原因，不把整个区间归给恢复提交的 PC。可按 CYCLE 查找附近 TEA 样本。
 - 关闭采集后必须再执行一个采样时钟，才能写出关闭快照及截断区间。
   若仿真直接结束，最后快照只覆盖其 `CYCLE` 之前的启用周期，最多可能漏掉 4095 个尾部周期；

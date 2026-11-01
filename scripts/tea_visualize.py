@@ -268,11 +268,11 @@ def export_cycle_stats(path, directory):
         if "TeaNoCommit_0" in tables:
             def intervals():
                 for row in con.execute("SELECT * FROM TeaNoCommit_0 ORDER BY START"):
-                    length = row["END"] - row["START"]
+                    length = row["ENDCYCLE"] - row["START"]
                     states = {state: row[f"STATES_{i}"] for i, state in enumerate(STATES[1:])}
                     if length <= 0 or sum(states.values()) != length:
                         raise ValueError(f"{path}: inconsistent no-commit interval at {row['START']}")
-                    yield dict(start=row["START"], end=row["END"], cycles=length,
+                    yield dict(start=row["START"], end=row["ENDCYCLE"], cycles=length,
                                left_censored=row["LEFTCENSORED"], right_censored=row["RIGHTCENSORED"], **states)
             write_csv(directory / "no_commit_intervals.csv", intervals(),
                       ("start", "end", "cycles", "left_censored", "right_censored", *STATES[1:]))
