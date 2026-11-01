@@ -229,7 +229,6 @@ case class XSCoreParameters
     NWays = 48,
     outReplace = false,
     outsideRecvFlush = true,
-    saveLevel = false,
     lgMaxSize = 4
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -237,7 +236,6 @@ case class XSCoreParameters
     NWays = 48,
     outReplace = false,
     outsideRecvFlush = true,
-    saveLevel = false,
     lgMaxSize = 4
   ),
   hytlbParameters: TLBParameters = TLBParameters(
@@ -245,7 +243,6 @@ case class XSCoreParameters
     NWays = 48,
     outReplace = false,
     outsideRecvFlush = true,
-    saveLevel = false,
     lgMaxSize = 4
   ),
   pftlbParameters: TLBParameters = TLBParameters(
@@ -253,7 +250,6 @@ case class XSCoreParameters
     NWays = 48,
     outReplace = false,
     outsideRecvFlush = true,
-    saveLevel = false,
     lgMaxSize = 4
   ),
   l2ToL1tlbParameters: TLBParameters = TLBParameters(
@@ -261,7 +257,6 @@ case class XSCoreParameters
     NWays = 48,
     outReplace = false,
     outsideRecvFlush = true,
-    saveLevel = false
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
