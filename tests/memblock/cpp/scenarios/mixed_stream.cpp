@@ -229,7 +229,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 }
                 continue;
             }
-            if (recovery && recovery->old_response_active()) ++inflight[9];
+            if (recovery && recovery->old_response_active() && work.recovery_id != recovery->id) ++inflight[9];
             if (event.privilege != translation.expected_privilege()) {
                 phase += ":accepted-producer-privilege-context"; return false;
             }
@@ -286,6 +286,16 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 initial_events = !work.refetch;
                 coverage.stream_issue[work.kind == 0 ? 0U : 5U] += initial_events;
                 if (recovery && work.recovery_id == recovery->id) {
+                    if (recovery->split_refetch && work.recovery_index != *recovery->group.unfinished) {
+                        auto &overlap = coverage.stream_recovery_overlap;
+                        ++overlap[2];
+                        if (recovery->old_response_active()) {
+                            ++overlap[recovery->phase == StreamRecovery::Phase::release_old ? 4U : 5U];
+                            overlap[8] += work.load.fp_wen;
+                            overlap[10] += !recovery->overlap_accepted;
+                            recovery->overlap_accepted = true;
+                        }
+                    }
                     ++recovery->issue;
                     if (recovery->issue < recovery->issue_order().size())
                         recovery->ready_cycle = environment.cycle() + recovery->issue_delays()[recovery->issue];
@@ -307,7 +317,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 work.data_first = !work.address_issued;
                 work.data_issued = true; ++coverage.stream_issue[2];
                 if (work.paired_initial) work.pair_edges[1] = event.edge;
-                if (recovery && work.recovery_id == recovery->id && recovery->phase == StreamRecovery::Phase::refetch)
+                if (recovery && work.recovery_id == recovery->id && recovery->refetching())
                     recovery->promoted[work.recovery_index] = true;
             } else {
                 if (attempt.replay) { ++coverage.stream[9]; initial_events = 0; }
@@ -498,35 +508,59 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
         ++coverage.stream_recovery_shapes[4U + episode.group.loads.size() - 1U];
     };
 
-    const auto prepare_refetch = [&]() {
+    const auto enqueue_refetch = [&](unsigned index) {
+        auto &episode = *recovery;
+        auto &load_work = graph_work(index, false);
+        const bool initially_canceled = episode.rounds == 1 && episode.group.unfinished && index == *episode.group.unfinished;
+        if (pending(load_work) || (!initially_canceled && !load_work.checked)) return false;
+        if (!initially_canceled) {
+            // Each invalidated completed execution was strictly checked.
+            // The final execution is sampled at architectural retirement.
+            coverage.sample(load_work.load);
+            coverage.sample_fp_load(load_work.load, load_work.expected_scalar, 1);
+            recovery_counts[15] += load_work.load.fp_wen;
+            ++recovery_counts[7];
+        }
+        auto &load = episode.loads[index];
+        load.lq = memblock::lq_pointer_value(lq_offset);
+        load.lq_flag = memblock::lq_pointer_flag(lq_offset++);
+        load.store_set_hit = episode.trained[index];
+        load_work.load = load;
+        load_work.expected_scalar = episode.expected(index);
+        load_work.issued[0] = load_work.checked = false;
+        load_work.retire_ready_cycle.reset();
+        load_work.refetch = true;
+        environment.expect_load_data(load_work.load, load_work.expected_scalar);
+        if (!environment.enqueue_load(load_work.load)) return false;
+        return true;
+    };
+    const auto prepare_refetch = [&](bool split = false) {
         auto &episode = *recovery;
         const unsigned victim = episode.refetch_victim;
         reset_unresolved_ftq_suffix(episode.loads, victim);
-        for (unsigned index = victim; index < episode.loads.size(); ++index) {
-            auto &load_work = graph_work(index, false);
-            const bool initially_canceled = episode.rounds == 1 && episode.group.unfinished && index == *episode.group.unfinished;
-            if (pending(load_work) || (!initially_canceled && !load_work.checked)) return false;
-            if (!initially_canceled) {
-                // Each invalidated completed execution was strictly checked.
-                // The final execution is sampled at architectural retirement.
-                coverage.sample(load_work.load);
-                coverage.sample_fp_load(load_work.load, load_work.expected_scalar, 1);
-                recovery_counts[15] += load_work.load.fp_wen;
-                ++recovery_counts[7];
-            }
-            auto &load = episode.loads[index];
-            load.lq = memblock::lq_pointer_value(lq_offset);
-            load.lq_flag = memblock::lq_pointer_flag(lq_offset++);
-            load.store_set_hit = episode.trained[index];
-            load_work.load = load;
-            load_work.expected_scalar = episode.expected(index);
-            load_work.issued[0] = load_work.checked = false;
-            load_work.retire_ready_cycle.reset();
-            load_work.refetch = true;
-            environment.expect_load_data(load_work.load, load_work.expected_scalar);
-            if (!environment.enqueue_load(load_work.load)) return false;
+        episode.split_refetch = split;
+        episode.split_issue_order.clear();
+        if (split) {
+            episode.split_issue_order = episode.group.rounds.at(episode.rounds - 1U).issue_order;
+            const auto cold = *episode.group.unfinished;
+            // Preserve the random order among available roles. The youngest
+            // canceled identity remains unavailable until its original gate.
+            episode.split_issue_order.erase(std::find(episode.split_issue_order.begin(), episode.split_issue_order.end(), cold));
+            episode.split_issue_order.push_back(cold);
+            ++coverage.stream_recovery_overlap[0];
         }
-        episode.phase = StreamRecovery::Phase::refetch;
+        for (unsigned index = victim; index < episode.loads.size(); ++index) {
+            if (split && index == *episode.group.unfinished) {
+                auto &work = graph_work(index, false);
+                work.issued[0] = work.checked = false;
+                work.refetch = true;
+                work.retire_ready_cycle.reset();
+                continue;
+            }
+            if (!enqueue_refetch(index)) return false;
+            coverage.stream_recovery_overlap[1] += split;
+        }
+        episode.phase = split ? StreamRecovery::Phase::release_old : StreamRecovery::Phase::refetch;
         episode.issue = 0;
         episode.ready_cycle = environment.cycle() + episode.issue_delays().front();
         return true;
@@ -901,7 +935,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 environment.scalar_load_redirect_canceled() != episode.scalar_cancel_before + unsigned(episode.cold_canceled)) {
                 phase += ":surviving-prefix-queue-contract"; return false;
             }
-            if (episode.phase == StreamRecovery::Phase::initial || episode.phase == StreamRecovery::Phase::refetch) {
+            if (episode.phase == StreamRecovery::Phase::initial || episode.refetching()) {
                 bool complete = episode.loads.size() == episode.group.loads.size();
                 for (unsigned index = 0; index < episode.loads.size(); ++index) {
                     auto &work = graph_work(index, false);
@@ -917,6 +951,16 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                             if (!episode.obligation->refetched(index, work.load)) return false;
                             ++recovery_counts[8];
                             inflight[6] += episode.group.unfinished && index == *episode.group.unfinished;
+                            if (episode.split_refetch && index != *episode.group.unfinished) {
+                                auto &overlap = coverage.stream_recovery_overlap;
+                                ++overlap[3];
+                                if (episode.old_response_active()) {
+                                    ++overlap[episode.phase == StreamRecovery::Phase::release_old ? 6U : 7U];
+                                    overlap[9] += work.load.fp_wen;
+                                    overlap[11] += !episode.overlap_checked;
+                                    episode.overlap_checked = true;
+                                }
+                            }
                         }
                         work.checked = true;
                     }
@@ -924,7 +968,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 }
                 if (complete) {
                     inflight[3] += episode.phase == StreamRecovery::Phase::initial && episode.group.unfinished.has_value();
-                    if (episode.phase == StreamRecovery::Phase::refetch && !episode.obligation->finish_round()) return false;
+                    if (episode.refetching() && !episode.obligation->finish_round()) return false;
                     episode.phase = StreamRecovery::Phase::operands;
                     episode.ready_cycle = environment.cycle() + (episode.operand < episode.plan.after_provisional.size()
                         ? episode.plan.after_provisional[episode.operand].delay : 0U);
@@ -965,7 +1009,10 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     if (environment.dcache_response_held_at(*episode.cold_physical) ||
                         pending(graph_work(*episode.group.unfinished, false))) return false;
                     ++inflight[5];
-                    if (!prepare_refetch()) return false;
+                    if (episode.split_refetch) {
+                        episode.phase = StreamRecovery::Phase::refetch;
+                        if (!enqueue_refetch(*episode.group.unfinished)) return false;
+                    } else if (!prepare_refetch()) return false;
                 }
             }
             if (episode.phase == StreamRecovery::Phase::quiet && environment.cycle() >= episode.ready_cycle) {
@@ -1072,7 +1119,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
             (store_survival_probe ? lq_free != 0 :
                 std::accumulate(weights.begin(), weights.end(), std::uint64_t{0}) != 0))
             ready.push_back({0, 0, 0});
-        if (recovery && recovery->phase == StreamRecovery::Phase::release_old && environment.cycle() >= recovery->ready_cycle)
+        if (recovery && recovery->phase == StreamRecovery::Phase::release_old && environment.cycle() >= recovery->old_release_cycle)
             ready.push_back({7, 0, 0});
         // Never feed observed DUT data back into generation. The scoreboard
         // validates a producer before this external backend releases consumers.
@@ -1103,8 +1150,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 (!work.data_source || work.data_source->complete);
             if (work.kind == 0 && graph_role) {
                 const auto &episode = *recovery;
-                const bool executing = episode.phase == StreamRecovery::Phase::initial ||
-                    episode.phase == StreamRecovery::Phase::refetch;
+                const bool executing = episode.phase == StreamRecovery::Phase::initial || episode.refetching();
                 bool data_ready = true;
                 for (unsigned index = 0; index < episode.stores.size(); ++index) {
                     const auto &store = graph_work(index, true);
@@ -1112,6 +1158,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                         data_ready &= store.data_issued;
                 }
                 if (executing && !work.issued[0] && !work.offered[0] &&
+                    !(episode.split_refetch && episode.old_response_active() && work.recovery_index == *episode.group.unfinished) &&
                     environment.issue_session_available(IssueKind::load, work.load.lane) && prefix_addresses_known && data_ready &&
                     episode.issue < episode.issue_order().size() &&
                     episode.issue_order()[episode.issue] == work.recovery_index && environment.cycle() >= episode.ready_cycle)
@@ -1127,7 +1174,7 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                 const auto &episode = *recovery;
                 const bool early = (episode.phase == StreamRecovery::Phase::admission ||
                     episode.phase == StreamRecovery::Phase::initial) && episode.plan.stores[work.recovery_index].data_before_load;
-                const bool promote = episode.phase == StreamRecovery::Phase::refetch && work.address_issued;
+                const bool promote = episode.refetching() && work.address_issued;
                 if (!work.data_issued && !work.data_offered &&
                     environment.issue_session_available(IssueKind::store_data, work.store.data_lane) && (early || promote)) ready.push_back({3, i, 0});
             } else if (work.kind == 2) {
@@ -1280,9 +1327,13 @@ bool MixedScenario::run_concurrent_stream(unsigned instruction_limit)
                     episode.refetch_victim = victim;
                     if (episode.rounds == 1 && episode.group.unfinished) {
                         episode.phase = StreamRecovery::Phase::release_old;
+                        const bool split = constraints.stream_unresolved_overlap_per_mille != 0 &&
+                            (constraints.stream_unresolved_overlap_per_mille == 1000 ||
+                             random() % 1000U < constraints.stream_unresolved_overlap_per_mille);
+                        if (split && !prepare_refetch(true)) return false;
                         const auto gap = random() % 8U;
                         inflight[8] += gap;
-                        episode.ready_cycle = environment.cycle() + gap;
+                        episode.old_release_cycle = environment.cycle() + gap;
                     } else if (!prepare_refetch()) return false;
                 }
             }

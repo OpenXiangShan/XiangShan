@@ -37,6 +37,7 @@ struct SyntheticEnvironment {
     struct Instruction {
         unsigned kind = 0, id = 0, flows = 0, group = 0, epoch = 0;
         bool refetch_pending = false, initial_cold = false, cold_canceled = false, canceled = false;
+        bool split_refetch = false;
         LoadTransaction load;
         StoreTransaction store;
         std::uint8_t rob = 0;
@@ -186,10 +187,26 @@ struct SyntheticEnvironment {
         return after;
     }
     unsigned cold_cancellations = 0, cold_releases = 0, cold_refetches = 0;
+    std::array<std::uint64_t, 12> observed_recovery_overlap{};
+    std::set<unsigned> split_groups, split_accepted_groups, split_checked_groups;
+    std::set<std::pair<unsigned,unsigned>> refetch_checks;
     unsigned prefix_old_producers = 0, prefix_old_retirements = 0;
     std::uint64_t grant_idle_at = 0;
     bool old_response_active() const { return cold_snapshot && !cold_refetches_for_epoch; }
     bool cold_refetches_for_epoch = false;
+    void observe_refetch_checked(const LoadTransaction &load) {
+        const auto &work = find(load.rob, load.rob_flag);
+        require(work.epoch && complete(work) && refetch_checks.insert({work.id,work.epoch}).second,
+            "refetch check was premature or duplicated");
+        if (work.split_refetch && work.epoch == 1) {
+            ++observed_recovery_overlap[3];
+            if (old_response_active()) {
+                ++observed_recovery_overlap[held_line ? 6U : 7U];
+                observed_recovery_overlap[9] += work.load.fp_wen;
+                observed_recovery_overlap[11] += split_checked_groups.insert(work.group).second;
+            }
+        }
+    }
     std::uint64_t dcache_requests_covering_since(std::uint64_t address, std::uint64_t) const {
         const auto line = address & ~std::uint64_t{63};
         // A completed successor may be visible only through counted accepted-A
@@ -742,6 +759,11 @@ struct SyntheticEnvironment {
         require(expected.insert(key(t, kind, uop)).second, "duplicate expectation");
     }
     void expect_load_data(const LoadTransaction &t, std::uint64_t value) {
+        if (cold_snapshot && t.rob == cold_snapshot->rob && t.rob_flag == cold_snapshot->rob_flag &&
+            find(t.rob,t.rob_flag).epoch == 0) {
+            require(released_at && tick >= grant_idle_at + (successor_history ? 8U : 0U) + 32U,
+                "cold expectation registered before old response separation gate");
+        }
         expect(t, 0); load_expectations[identity(t.rob, t.rob_flag)] = value;
     }
     void expect_store(const StoreTransaction &t) { expect(t, 2); }
@@ -850,6 +872,13 @@ struct SyntheticEnvironment {
                         "cold refetch preceded old Grant completion and bounded quiet witness");
                     cold_refetches_for_epoch = true;
                     ++cold_refetches;
+                } else if (work.epoch == 0 && old_response_active() &&
+                    (!released_at || tick < grant_idle_at + (successor_history ? 8U : 0U) + 32U)) {
+                    require(redirect_boundary && tick >= *redirect_boundary + 8U,
+                        "noncold refetch preceded queue recovery guard");
+                    work.split_refetch = true;
+                    observed_recovery_overlap[0] += split_groups.insert(work.group).second;
+                    ++observed_recovery_overlap[1];
                 }
                 work.load = t; work.refetch_pending = false; ++work.epoch;
                 work.uops[0].issued = work.uops[0].completed = false; work.uops[0].due = 0;
@@ -995,13 +1024,13 @@ struct SyntheticEnvironment {
         return tick + (cold_enabled && !work.group && work.kind == 1 ? 63U + (work.id * 11U + uop * 17U) % 81U :
             cold_enabled && !work.group && work.kind == 3 ? 143U : latency ? 37U + ((work.id * 7U + uop * 11U) % 31U) : 3U + (work.id + uop) % 5U);
     }
-    void note_producer() {
+    void note_producer(const Instruction &work) {
         if (suppress_producer_note) return;
-        prefix_old_producers += old_response_active();
+        prefix_old_producers += old_response_active() && work.group != active_group;
     }
     void issue(Instruction &work, unsigned index, const char *tag) {
         check_installed_head();
-        note_producer();
+        note_producer(work);
         check_dependency(work.id, false);
         auto &uop = work.uops.at(index);
         require(!uop.issued, "duplicate uop acceptance");
@@ -1009,6 +1038,14 @@ struct SyntheticEnvironment {
         uop.due = inject_vector_replay && work.kind == 3 ? std::numeric_limits<std::uint64_t>::max() : due(work, index);
         ++producer_counts[work.id]; ++issues;
         if (work.kind == 0 && work.epoch) ++refetch_issues;
+        if (work.kind == 0 && work.split_refetch && work.epoch == 1) {
+            ++observed_recovery_overlap[2];
+            if (old_response_active()) {
+                ++observed_recovery_overlap[held_line ? 4U : 5U];
+                observed_recovery_overlap[8] += work.load.fp_wen;
+                observed_recovery_overlap[10] += split_accepted_groups.insert(work.group).second;
+            }
+        }
         trace.push_back(std::string(tag) + std::to_string(work.id) + ":" + std::to_string(index));
         sample_accepted(); capture_store_edge();
         retired_pending_issues += retirement_stats.pending_before_last_edge != 0;
@@ -1068,7 +1105,7 @@ struct SyntheticEnvironment {
         const bool miss = delayed_store_feedback && work.address_attempts == 0;
         const auto accepted_at = tick;
         if (miss) {
-            check_installed_head(); check_head(work); check_dependency(work.id, false); note_producer();
+            check_installed_head(); check_head(work); check_dependency(work.id, false); note_producer(work);
             ++issues; ++producer_counts[work.id]; ++address_misses;
             trace.push_back("SM" + std::to_string(work.id)); capture_store_edge();
             retired_pending_issues += retirement_stats.pending_before_last_edge != 0;
@@ -1085,7 +1122,7 @@ struct SyntheticEnvironment {
     bool issue_store_address_until_tlb_hit(const StoreTransaction &t, unsigned) {
         observed_transport[8] += !session;
         auto &work = find(t.rob, t.rob_flag);
-        check_installed_head(); check_head(work); note_producer();
+        check_installed_head(); check_head(work); note_producer(work);
         if (recovery_enabled && work.group == active_group && active_group) {
             for (unsigned index = work.id + 1; index < instructions.size(); ++index) {
                 const auto &load = instructions[index];
@@ -1120,7 +1157,7 @@ struct SyntheticEnvironment {
     bool issue_store_data(const StoreTransaction &t, unsigned) {
         observed_transport[8] += !session;
         auto &work = find(t.rob, t.rob_flag); check_installed_head(); require(!work.data, "duplicate scalar store data");
-        note_producer();
+        note_producer(work);
         check_dependency(work.id, true);
         work.data = true; work.data_due = due(work, 1); ++producer_counts[work.id]; ++issues;
         trace.push_back("SD" + std::to_string(work.id)); sample_accepted(); capture_store_edge();
@@ -1131,7 +1168,7 @@ struct SyntheticEnvironment {
         // identity; production retained-pin timing has separate host contracts.
         acceptances = {};
         const auto mode = find(t.rob, t.rob_flag).id % 3U;
-        note_producer();
+        note_producer(find(t.rob, t.rob_flag));
         suppress_producer_note = true;
         defer_producer_edge = mode == 0U;
         if (mode == 2U) {
@@ -1383,6 +1420,14 @@ struct SyntheticEnvironment {
         require(coverage.stream_recovery_inflight[9] == prefix_old_producers &&
             coverage.stream_recovery_inflight[10] == prefix_old_retirements,
             "old-response prefix scheduling accounting disagreed");
+        if (coverage.stream_recovery_overlap != observed_recovery_overlap) {
+            std::ostringstream detail;
+            detail << "split recovery coverage differs from independent refetch ledger: production=";
+            for (auto count : coverage.stream_recovery_overlap) detail << count << ',';
+            detail << " observed=";
+            for (auto count : observed_recovery_overlap) detail << count << ',';
+            require(false,detail.str());
+        }
         std::array<std::uint64_t, 5> operations{};
         for (const auto &work : instructions) {
             ++operations[work.kind];
@@ -1447,6 +1492,7 @@ public:
         constraints.stream_fp_data_per_mille = 0;
         constraints.stream_unresolved_per_mille = 0;
         constraints.stream_unresolved_inflight_per_mille = 0;
+        constraints.stream_unresolved_overlap_per_mille = 0;
         constraints.misaligned_per_mille = 450;
         constraints.scalar_fp_per_mille = 350;
         if (validated_profile) {
@@ -1691,7 +1737,9 @@ int main(int argc, char **argv) {
                 fixture.constraints.stream_unresolved_inflight_per_mille = argc >= 8 ? std::stoul(argv[7]) : 0;
                 fixture.environment.cold_enabled = fixture.constraints.stream_unresolved_inflight_per_mille != 0;
                 if (argc == 9) {
-                    if (std::string(argv[8]) == "unavailable") {
+                    if (std::string(argv[8]).starts_with("overlap=")) {
+                        fixture.constraints.stream_unresolved_overlap_per_mille = std::stoul(std::string(argv[8]).substr(8));
+                    } else if (std::string(argv[8]) == "unavailable") {
                         for (std::uint64_t address = 0x80010000; address < 0x80012000; ++address)
                             fixture.environment.bytes.write_reference_byte(address, (address * 17U) >> 3U);
                     } else {
@@ -1790,6 +1838,10 @@ int main(int argc, char **argv) {
                 std::cout << (i ? "," : "") << fixture.coverage.stream_operand_ready[i];
             std::cout << "]"
                 << ",\"cold_attempts\":" << fixture.coverage.stream_recovery_inflight[0]
+                << ",\"stream_recovery_overlap\":[";
+            for (unsigned i = 0; i < fixture.coverage.stream_recovery_overlap.size(); ++i)
+                std::cout << (i ? "," : "") << fixture.coverage.stream_recovery_overlap[i];
+            std::cout << "]"
                 << ",\"cold_unavailable\":" << fixture.coverage.stream_recovery_inflight[1]
                 << ",\"cold_selected\":" << fixture.coverage.stream_recovery_inflight[2]
                 << ",\"cold_canceled\":" << env.cold_cancellations

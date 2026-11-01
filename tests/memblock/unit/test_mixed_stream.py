@@ -65,6 +65,7 @@ class MixedStreamTest(unittest.TestCase):
         cls.byte_bypass = []
         cls.operand_ready = []
         cls.fp_data = []
+        cls.recovery_overlap = []
         cls.workspace = tempfile.TemporaryDirectory(prefix='memblock-mixed-stream-')
         cls.addClassCleanup(cls.workspace.cleanup)
         cls.addClassCleanup(cls.finalize)
@@ -97,6 +98,9 @@ class MixedStreamTest(unittest.TestCase):
         stream = stream.replace('const auto target = stream_dependency_address(address, *address_value, base, pages);',
             'const auto target = environment.check_cross_page_address(address, *address_value, base, pages, '
             'stream_dependency_address(address, *address_value, base, pages));')
+        stream = stream.replace('if (!episode.obligation->refetched(index, work.load)) return false;',
+            'if (!episode.obligation->refetched(index, work.load)) return false;\n'
+            '                            environment.observe_refetch_checked(work.load);')
         # Observe chosen actions and paired intent; the shell independently
         # computes readiness/completion and all actual acceptance edges.
         stream = stream.replace('const auto event = ready[random() % ready.size()];',
@@ -195,6 +199,7 @@ class MixedStreamTest(unittest.TestCase):
                 'fp_data_cases': cls.fp_data,
                 'validated_profile_masks': sorted({case['mask'] for case in cls.profiles}),
                 'cold_recovery_cases': cls.cold_recoveries,
+                'recovery_overlap_cases': cls.recovery_overlap,
                 'cold_structural_schedules': len({run['result']['schedule'] for run in cls.cold_recoveries}),
                 'recovery_observations': {field: sum(run['result'][field] for run in cls.recoveries)
                     for field in ('recovery_windows', 'recovery_rounds', 'recovery_prefix',
@@ -807,6 +812,46 @@ class MixedStreamTest(unittest.TestCase):
             else:
                 self.assertEqual(sum(r['cold_attempts'] for r in results), 0)
 
+    def test_completed_suffix_refetch_overlaps_canceled_cold_response(self):
+        results = [self.run_fixture('recovery',seed,timing,0,32,1000,1000,'overlap='+str(rate))
+                   for rate in (500,1000) for timing in (0,1) for seed in range(1,33)]
+        self.recovery_overlap.extend(results)
+        totals = [sum(r['stream_recovery_overlap'][i] for r in results) for i in range(12)]
+        self.assertGreater(totals[0],32)
+        self.assertEqual(totals[1],totals[2]);self.assertEqual(totals[2],totals[3])
+        self.assertTrue(all(totals[i] for i in (4,5,6,7,8,9,10,11)),totals)
+        schedules = {','.join(e for e in r['schedule'].split(',') if not e.startswith('D')) for r in results}
+        self.assertGreater(len(schedules),64)
+        for seed in (1,7,29):
+            legacy = self.run_fixture('recovery',seed,1,0,32,1000,1000)
+            self.assertEqual(legacy,self.run_fixture('recovery',seed,1,0,32,1000,1000,'overlap=0'))
+        self.assertEqual(results[0],self.run_fixture('recovery',1,0,0,32,1000,1000,'overlap=500'))
+
+    def test_private_split_recovery_data_lifecycle_and_coverage_faults_reject(self):
+        cases = (
+            ('overlap-wrong-data','load_work.expected_scalar = episode.expected(index);',
+             'load_work.expected_scalar = episode.expected(index) ^ unsigned(episode.split_refetch && index != *episode.group.unfinished);',
+             'expected value disagreed with independent input byte history'),
+            ('overlap-missing-accept','++overlap[2];','',
+             'split recovery coverage differs from independent refetch ledger'),
+            ('overlap-early-cold','if (split && index == *episode.group.unfinished) {','if (false) {',
+             'cold expectation registered before old response separation gate'),
+            ('overlap-no-queue-guard','!episode.obligation->returned() || !environment.run_cycles(8)',
+             '!episode.obligation->returned() || !environment.run_cycles(0)',
+             'noncold refetch preceded queue recovery guard'),
+        )
+        for name,old,new,diagnostic in cases:
+            self.assertEqual(self.source.count(old),1)
+            binary=self.compile(self.source.replace(old,new),name)
+            rejected=[]
+            for seed in range(1,17):
+                r=subprocess.run([str(binary),'recovery',str(seed),'1','0','32','1000','1000','overlap=1000'],
+                                 capture_output=True,text=True,timeout=10)
+                if r.returncode:
+                    self.assertIn(diagnostic,r.stderr);rejected.append(seed)
+            self.assertTrue(rejected,name+' escaped')
+            self.mutations[name]=rejected
+
     def test_narrow_prior_A_anywhere_in_line_prevents_cold_selection(self):
         old = 'environment.dcache_requests_covering_since(physical + byte, 0)'
         self.assertEqual(self.source.count(old), 1)
@@ -835,7 +880,7 @@ class MixedStreamTest(unittest.TestCase):
             result = subprocess.run([str(binary), 'recovery', str(seed), '1', '0', '32', '1000', '1000', 'successor-history'],
                                     capture_output=True, text=True, timeout=10)
             if result.returncode:
-                self.assertIn('cold refetch preceded old Grant completion', result.stderr)
+                self.assertIn('cold expectation registered before old response separation gate', result.stderr)
                 detected = dict(rejected=True, seed=seed, reason=result.stderr.strip())
                 break
         self.assertIsNotNone(detected)
@@ -849,7 +894,7 @@ class MixedStreamTest(unittest.TestCase):
             ('lost_cold_cancel', '!environment.cancel_scalar_load_after_redirect(cold)',
              'false', 'surviving-prefix-queue-contract'),
             ('early_cold_refetch', '!environment.dcache_line_grants_idle(*episode.cold_physical)',
-             'false', 'cold refetch preceded old Grant completion'),
+             'false', 'cold expectation registered before old response separation gate'),
             ('wrong_cold_data', 'episode.cold_expected = oracle.scalar_load(cold);',
              'episode.cold_expected = oracle.scalar_load(cold) ^ 1U;',
              'expected value disagreed with independent input byte history'),

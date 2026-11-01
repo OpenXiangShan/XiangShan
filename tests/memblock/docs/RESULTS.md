@@ -18,6 +18,16 @@ None.
 
 ## Current Changes Qualified Below
 
+- Schema88 allows completed noncold recovery suffix roles to refetch while the
+  canceled youngest cold response remains held/draining. Allocation stays in
+  age order, with cold last; the available roles retain their random issue
+  permutation. Exact epoch bytes, STD readiness and the full-round completion
+  barrier remain active. Only the canceled cold identity retains D/E+32quiet
+  separation. The local eight-cycle guard does not establish arbitrary full-CPU
+  ROB/RAB/rename recovery. `stream-unresolved-overlap=0` preserves prior draws.
+  A default-spec manager failure remains open below; it is excluded from the
+  accepting finite datasets and prevents an overall regression-acceptance claim.
+
 - Schema87 adds ordinary successful FP-load-result to scalar-store-data edges
   inside the canonical mixed scheduler. Source selection varies independently
   from integer address edges; FLH/FLW boxed bits and FLD raw bits feed the low
@@ -545,6 +555,9 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| Ordinary recovery refetch overlap | Frozen runtime-v1 passes22 finite cases/19456 actions/7256 tracked final-word comparisons across targeted, FP-heavy, U-mode translated, mixed corner, unmodified corner and disabled profiles. Seven full finite artifact verifiers pass, including the separate preceding-runtime control. 267 split selections prepare/accept/check338 noncold roles;141 accept and33 strictly complete while the old response is held. Another197 accept and303 complete after release but before the cold separation gate; this phase includes quiet time. FP subsets are188 accepted/186 checked before the gate. | `build/memblock/recovery-overlap-20261101/{qualification-v1.json,all-verifiers-v1.json,provenance-v1.json}`. All102 prepared-source pairs match and RTL/model/xcomm hashes are unchanged. Positive overlap comes from targeted profiles; default-corner and disabled controls add no selected overlap. The failed default-spec campaign is excluded entirely. These are finite functional/accounting checks, not strict coverage, SPEC execution or closure. |
+| Schema88 host integration and sensitivity | The stable-source complete host suite passes738 tests; all26 report source hashes match. 128 overlap histories yield93 schedules excluding values, addresses, delays and dependency records;46 selected histories retain45 such schedules. 61 selected episodes prepare/accept/check86 roles with an independent12-bin ledger. Wrong epoch bytes, omitted acceptance coverage, premature cold expectation and missing local queue guard all reject. Independent zero-rate comparison matches64 paired HEAD scheduler histories. | `build/memblock/recovery-overlap-20261101/{full-unit-v1.log,host-final-v1.json,host-recovery-v1.log,host-mutants-v1.log,review-v1/verdict.json}`. Two native disabled cases preserve430 preceding semantic fields each; seed8801 replays exactly and four adjacent directed cases pass (`replay-compat-v1.json`, `directed-v1.json`). Synthetic host timing does not prove full-CPU timing. |
+| Open default-spec manager limitation | Default spec seeds8842..8844 complete1024 actions, but8841 stops at660 with `DCache cross-alias Acquire requires a drained reference checkpoint`. Exact current replay matches the complete failure line; the preceding runtime matches after removing only the three added schema/report fields. No held-cold or split-refetch role was selected. An isolated stderr-only manager diagnostic reproduces the original failure and identifies old alias2/new alias1 at PA line0xb021a4c0 with zero expected baseline bytes, owner updates or pending tracked writes. | `build/memblock/recovery-overlap-20261101/{default-spec-v1/results.json,failure8841-classification-v1.json,failure8841-replay-v1.json,alias-proof-v1/proof.json}`. This is a reproduced pre-existing manager-contract limitation, not a confirmed CPU RTL bug. The entire four-case dataset remains non-accepting. Establishing an independent baseline for such old owners remains required; the rejection is retained and no oracle is weakened. |
 | Ordinary FP-result store dataflow | Frozen runtime-v2 passes36 finite cases/32768 actions/15286 tracked final-word comparisons across unmodified spec/corner, FP-heavy, U-mode translated, integer-address/FP-data and mixed cancellation profiles. All nine full finite artifact verifiers pass. 2114 FP data edges conserve2106 first STD acceptances plus8 unconsumed cancellations; every source width and all nine source/consumer width pairs occur. Consumption observes1865 live and241 retired sources;302 selections combine an integer address edge. Seed8751 replays exactly; disabled FP sources match428 preceding semantic fields. | `build/memblock/fp-store-data-20261031/{qualification-v2.json,artifact-verifiers-v2.json,replay-compat-v2.json,provenance-v2.json}`. All102 prepared-source pairs match; RTL/model/dependency hashes are unchanged. The initial low scalar weights yielded one edge in targeted-final-v2 and zero in translated-v2/mixed-cancel-v2; dense profiles establish the positive dataflow evidence. Selection ratios are conditional, not instruction percentages. No SPEC execution, complete register/wakeup model or closure claim. |
 | FP dataflow host decisions and sensitivity | 96 scheduler histories have96 event-only schedules and independently check source class/identity, frozen expected bits, completion gate, source lifetime and all24 coverage bins. 1938 selections conserve1876 STD acceptances plus62 cancellations; all nine width pairs occur. Integer address/FP-data combinations occur312 times. Early STD, corrupted data and omitted accepted-coverage mutants reject;48 independent zero-knob comparisons preserve complete preceding host results. | `build/memblock/fp-store-data-20261031/{host-v4.json,host-v4.log,review-v1/targeted-host.log,review-v1/disable-parity.json,review-v2/targeted-host.log}`. Histories use synthetic pins and completion timing; native results independently qualify externally checked bytes. FLH/FLW/FLD to FSH/FSW/FSD are direct bit transfers, not numerical arithmetic. Exact upstream FP wakeup remains outside scope. |
 | Cold-refill error stimulus and feedback provenance | Seeds8771..8774 fail the prior cold assumption and pass their full1024-action budgets with the repaired target selection. Public accepted-A records show each failed line was prefetched; seed8771 exactly replays, and private diagnostic objects reproduce the complete original failures for8772/8773 while printing only public history. All64 narrow-request offsets, boundaries and exhaustion pass; missing-history/base-only/byte63 mutants reject. Synthetic canceled STA feedback tests reject both stale future reuse and erased already-due propagation samples. | `build/memblock/fp-store-data-20261031/{cold-proof-v1/proof.json,replay-failure8771-v1.log,dense-cancel-v1/results.json,dense-cancel-v2/results.json,error-freshness-v1.log,host-v4.log,review-v2/verdict.json}`. Thirty-two preceding successful histories preserve435 retained result fields each after the cold-target repair (`cold-repair-comparison-v2.json`). This corrects stimulus and host-fixture defects; fault/data oracles are unchanged. Queues/manager drain does not prove all internal prefetch activity is quiet; line-specific injection is armed before the next tick and strict checks remain active. No CPU RTL bug is established. |
@@ -698,6 +711,17 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Schema88 has fresh non-author actual-diff approval of split suffix allocation,
+deferred cold expectation, exact cancellation, STD readiness, full-round gating,
+phase accounting and zero-rate compatibility. The CPU source audit traces the
+independent ROB/RAB/rename recovery and miss-response lifecycles and qualifies
+the local eight-cycle guard; it does not establish general full-CPU restart
+timing. Independent host review reruns five methods and64 zero-rate comparisons:
+`build/memblock/recovery-overlap-20261101/{cpu-audit/audit.md,review-v1/verdict.json}`.
+Full-suite and native development evidence have the finite and failed-dataset
+boundaries in the current table. Early D release during redirect propagation,
+multiple unfinished roles and unrestricted postredirect admission remain gaps.
 
 Schema87 has fresh non-author review of FP source selection, boxed/raw value
 preservation, checked completion, independent address/data sources, widths and

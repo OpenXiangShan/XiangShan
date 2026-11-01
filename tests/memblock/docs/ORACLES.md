@@ -579,12 +579,26 @@ unexpected. Release after filter recovery and a seeded 0..7-cycle gap, retaining
 prefix producer/replay/retirement eligibility. Wait only for the target-line
 cacheable Acquire/Grant lifecycle, including pending acquires, held responses
 and both final D and E, then observe 32 quiet cycles before same-identity
-refetch. An accepted target-line A history change restarts quiet time, including
+cold refetch. An accepted target-line A history change restarts quiet time, including
 a successor lifecycle wholly inside a multi-tick prefix helper between idle
 samples. This checks bounded late-response behavior; it does not prove universal
 pipeline emptiness. Every later cold refetch completes strictly. Broader
 unfinished overlap, early-release races and arbitrary younger classes remain
 open.
+
+The first returned cold round may independently refetch already-completed
+noncold suffix roles while that response remains held/draining. New allocation
+keeps architectural age order, with cold last; issue preserves the random order
+among available roles. Each new noncold execution uses the current independent
+known-store byte overlay and checked completion; it cannot start another round
+until every suffix role, including cold, completes. Its distinct ROB identity
+cannot absorb an old cold terminal. The cold expectation remains absent until
+the original D/E+quiet separation gate; no data or identity waiver is added.
+Selected roles conserve preparation, actual acceptance and strict checking.
+Held/released-before-gate and FP subsets distinguish selected capability from
+actual overlap. The released phase includes the quiet interval. Existing local
+eight-cycle queue recovery remains, without claiming a universal full-CPU
+ROB/RAB/rename recovery duration.
 
 ### Scalar completion details
 

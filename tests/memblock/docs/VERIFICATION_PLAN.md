@@ -144,6 +144,13 @@ members are not controllable ports. IO_COVERAGE.md is the semantic map.
 
 ## Known Boundary Gaps
 
+The cross-alias manager requires an independent drained baseline for the old
+owner. Ordinary translated traffic can reach an old owner without that baseline
+and stop at the manager precondition before any architectural mismatch is
+established. Such failures are non-accepting manager limitations; maintain their
+reproducer and strengthen independent owner-baseline/recall coverage rather
+than treating the rejection as a CPU RTL bug or weakening the check.
+
 Prioritize gaps that ordinary user workloads can reach: scalar/FP values and
 byte forwarding, older-store/younger-load dependencies, address translation,
 cache refill/replacement, overlapping queues and observable committed bytes.
@@ -306,8 +313,11 @@ independent epoch ledger. Generic mixed-suffix cancellation additionally records
 generations, accepted issue phases, unconsumed dependencies and final STA
 feedback state, with retired-or-canceled conservation in schema 75.
 Target-line old Grant completion through both final D
-and E plus 32 quiet cycles precedes same-identity refetch; prefix producers and
-retirement remain eligible. That quiet interval is a bounded witness, not a full
+and E plus 32 quiet cycles precedes same-identity cold refetch; completed noncold
+suffix roles can refetch independently while that response remains held/draining,
+with age-ordered allocation and unchanged strict epoch bytes. Prefix producers
+and retirement remain eligible. The local eight-cycle queue/filter guard does
+not prove arbitrary ROB/RAB/rename restart timing. The quiet interval is a bounded witness, not a full
 CPU pipeline-empty proof. Next ordinary-workload work should interleave broader
 unfinished recovery and early-release/late-response overlap, broaden store-headed redirect/walk and producer
 history, and reduce bounded stream/context drains where supported. Canonical FP formats now share

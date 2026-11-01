@@ -45,6 +45,9 @@ struct StreamRecovery {
     std::optional<std::uint64_t> cold_address, cold_physical, old_quiet_since;
     std::uint64_t cold_expected = 0, old_quiet_requests = 0;
     bool cold_canceled = false;
+    bool split_refetch = false, overlap_accepted = false, overlap_checked = false;
+    std::vector<unsigned> split_issue_order;
+    std::uint64_t old_release_cycle = 0;
     unsigned first_ftq = 0, halfword = 0;
     std::uint64_t pc = 0, ready_cycle = 0;
     std::uint64_t sq_dequeue_limit = 0, sq_cancel_before = 0, scalar_cancel_before = 0;
@@ -56,12 +59,16 @@ struct StreamRecovery {
     bool old_response_active() const {
         return phase == Phase::release_old || phase == Phase::drain_old;
     }
+    bool refetching() const {
+        return phase == Phase::refetch || (split_refetch && old_response_active());
+    }
     unsigned size() const { return plan.stores.size() + group.loads.size(); }
     const std::vector<unsigned> &issue_order() const {
-        return phase == Phase::refetch ? group.rounds.at(rounds - 1U).issue_order : group.issue_order;
+        if (split_refetch && refetching()) return split_issue_order;
+        return refetching() ? group.rounds.at(rounds - 1U).issue_order : group.issue_order;
     }
     const std::vector<unsigned> &issue_delays() const {
-        return phase == Phase::refetch ? group.rounds.at(rounds - 1U).issue_delays : group.issue_delays;
+        return refetching() ? group.rounds.at(rounds - 1U).issue_delays : group.issue_delays;
     }
 };
 

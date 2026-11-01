@@ -6,7 +6,7 @@ The executable scenario is `constrained-random`. `RandomConstraints` supplies
 four profiles: `coverage`, `spec`, `corner`, and `cmo-stress`. Directions share
 one mixed scheduler, transaction builders, managers, architectural reference
 memory, scoreboards, and final accounting. The serialized interface is
-`constraint_schema=87`.
+`constraint_schema=88`.
 
 This document defines the implemented constraint interface and observations.
 [IO_COVERAGE.md](IO_COVERAGE.md) maps top-level pins;
@@ -76,6 +76,7 @@ they do not imply arbitrary numeric suffix support.
 | `concurrent` | Rate allocating the mixed concurrency action budget, subject to the serial reservation capped at half the initial available budget. |
 | `concurrent-stream` | Rate selecting a variable ordinary mixed stream instead of a fixed heterogeneous window at an eligible concurrency site. Default 750 in all presets; 0 preserves the legacy prefix schedule, 1000 selects streams only. A residual budget below seven actions always uses a stream when enabled. |
 | `stream-unresolved-inflight` | Conditional conflicting stream-graph rate, default 250 in all presets, selecting one youngest held cold scalar/FP role when at least two load slots fit. Requires a same-page physical line without accepted A coverage, explicit reference bytes or older admitted store bytes. Unavailable attempts retain the completed-load path; zero disables selection. |
+| `stream-unresolved-overlap` | Conditional first returned cold-round rate, default250 in every preset. Refetch completed noncold suffix loads after local queue recovery while the canceled youngest cold response remains held/draining. Only that cold identity retains its D/E+32quiet gate. Age-ordered allocation and the random order among available noncold issues remain intact. Zero adds no draw and preserves preceding scheduling. |
 | `stream-min-instructions`, `stream-max-instructions` | Inclusive epoch-length bounds, defaults 8 and 256 in all presets; require `1 <= min <= max <= 4096`. The sampled length is clipped to the remaining action budget, including below min. Live depth remains 2..8. |
 | `stream-dependency` | Conditional independent address/data edge rate, default 250 in all presets. Ordinary admissions sample older live ordinary integer loads as producers. Each address edge adds the predicted low six result bits times 64 modulo the page offset; `stream-dependency-pages` may also select a page within the declared mapping. Scalar store data can independently use the predicted full result. Consumer operand issue waits for the producer's checked completion; its lifetime survives retirement. Zero disables edges. |
 | `stream-fp-data` | Conditional FP-source selection rate for an ordinary scalar-store data dependency when eligible older FP loads exist; default250 per mille in every preset. `stream-dependency` still gates edge selection. Zero preserves the preceding integer-only source draw;1000 selects an FP source instead of an integer source at that eligible site. FP sources never feed addresses directly. Consumer widths are FSH/FSW/FSD, with full boxed/raw source bits retained. |
@@ -519,8 +520,8 @@ completed warm suffix entries as well, and alone determine cursor rewind. Keep
 the response held through filter recovery and a random 0..7-cycle release gap.
 Release is a ready event; prefix producers, replay and retirement remain eligible
 while the old target-line Acquire/Grant lifecycle completes through both final D
-and E. Then observe 32 quiet cycles before registering any same-identity strict
-refetch. Accepted target-line A history restarts the interval even when a
+and E. Then observe 32 quiet cycles before registering the canceled cold identity's
+strict refetch. Accepted target-line A history restarts the interval even when a
 successor Acquire/Grant completes inside a multi-tick prefix helper between idle
 observations. Other lines need not become idle. This is a bounded old-writeback witness,
 not proof that every CPU pipeline stage is empty. Every later cold execution must
@@ -528,6 +529,20 @@ complete strictly; only its first initial execution may cancel. Initial strict
 completions plus cold cancellations equal admitted graph loads. Strict refetches
 equal invalidated completed executions plus initial cold cancellations. Every
 selected first round also refetches an older completed warm victim.
+
+`stream-unresolved-overlap` can split that first refetch: already-completed
+noncold suffix roles enqueue in age order after the existing eight-cycle local
+queue/filter guard and retain exact current store-overlay expectations. Their
+original random issue permutation remains, with the unavailable youngest cold
+role deferred last. STD readiness and older-prefix progress remain independent.
+The cold expectation stays absent through the original target-line lifecycle
+and quiet guard, so no new noncold expectation can consume its forbidden old
+writeback. The cold role then allocates last and strictly completes before
+another graph round. D release is still a random ready event after preparation
+and the0..7-cycle gap; selection does not force acceptance or completion overlap.
+The eight-cycle guard is a bounded MemBlock abstraction, not a general ROB/RAB/
+rename restart proof. Early D release during redirect propagation, multiple
+unfinished roles and unrestricted postredirect admission remain gaps.
 
 Broader unfinished graph overlap, arbitrary younger-class cancellation,
 full rename/producer wall-clock history, atomics/CMO,
@@ -694,6 +709,7 @@ Array order and sampling code are authoritative in
 | `stream_fp_data` | Schema87: source FLH/FLW/FLD selections, first STD acceptances, unconsumed cancellations and pending-at-selection counts (four groups of3); consumed while producer live/retired; accepted source/consumer FLH/FLW/FLD x FSH/FSW/FSD width matrix (9); selected edges also having an independent integer address dependency. Lifecycle/source/width bounds apply in both verifier modes, without a positive sparse-bin gate. |
 | `stream_recovery` | Schema 68: started windows, conflict windows, controls, graph stores/loads admitted, initial strictly checked loads, returned rounds, invalidated completed executions, strictly checked refetches, graph stores/loads retired, starts with accepted pending prefix, prefix retirements during the barrier, ordinary admissions after release with graph roles live, observed LQ cancellations, invalidated FP executions, maximum stores/loads/rounds, resolved windows. Refetch executions do not add architectural initial issue/action counts. Both verifier modes enforce sparse conservation, suffix/capacity/shape and emitter-domain bounds, including graph-role counts versus the observed maximum live instructions. |
 | `stream_recovery_inflight` | Schema 69: attempts, unavailable fresh lines, selected cold roles, observed held initial roles, explicit initial cancellations, target old Grant drained plus quiet completion, strict cold refetch completions, selected FP cold roles, release-gap sum, and prefix producer/retirement selections during release/drain phases. Sparse runs require conservation without nonzero coverage gates. |
+| `stream_recovery_overlap` | Schema88: selected first cold rounds; prepared/accepted/strictly checked noncold refetch roles; accepted while D held/after release before cold gate; checked while held/after release before gate; FP accepted/checked before gate; episodes accepting/checking before gate. Prepared=accepted=checked, with1..3 roles per selection. Phase bins are subsets; the released phase includes D/E activity and the quiet interval, not a claim of outstanding D on every sample. Zero rates require zero observations; sparse positive profiles need no nonzero bin. |
 | `stream_recovery_shapes`, `stream_recovery_victims` | Store-count 1..4, load-count 1..4 and round-count 0..4 histograms; per-round victim ages 0..3. Marginals support necessary bounds only; they do not reconstruct every joint history. |
 | `concurrent` | Windows, counted window actions, unresolved-overlap samples, maximum unresolved transactions, maximum unresolved producer classes. |
 | `backpressure` | DCache request stalls/response delays, PTW request stalls/response delays, Uncache request stalls/response delays. These can be zero. |

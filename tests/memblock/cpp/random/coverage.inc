@@ -3340,6 +3340,10 @@ struct MixedCoverage {
     // Attempt/unavailable/selected/held/canceled/old-grant-drained/cold-refetch/
     // FP cold roles/release-gap sum/prefix producer and retirement progress.
     std::array<std::uint64_t, 11> stream_recovery_inflight{};
+    // First cold round: selected episodes; prepared/accepted/checked noncold
+    // refetch roles; accepted held/released-before-gate; checked held/released;
+    // FP accepted/checked before gate; episodes accepting/checking before gate.
+    std::array<std::uint64_t, 12> stream_recovery_overlap{};
     static constexpr unsigned kConcurrentClasses = 5;
     std::array<std::uint64_t, memblock::generated::kLsqEnqueueLanes>
         dispatch_widths{};
@@ -3730,6 +3734,7 @@ struct MixedCoverage {
                " stream_recovery_shapes=" + csv(stream_recovery_shapes) +
                " stream_recovery_victims=" + csv(stream_recovery_victims) +
                " stream_recovery_inflight=" + csv(stream_recovery_inflight) +
+               " stream_recovery_overlap=" + csv(stream_recovery_overlap) +
                " scalar_misaligned=" +
                std::to_string(scalar_misaligned) + " store_misaligned=" +
                std::to_string(scalar_store_misaligned) + ',' +

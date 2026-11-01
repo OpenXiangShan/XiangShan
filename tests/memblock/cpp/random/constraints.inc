@@ -205,6 +205,7 @@ struct RandomConstraints {
     std::array<unsigned, 3> stream_access_weights{{2, 1, 1}};
     unsigned stream_unresolved_per_mille = 125;
     unsigned stream_unresolved_inflight_per_mille = 250;
+    unsigned stream_unresolved_overlap_per_mille = 250;
     unsigned special_concurrent_per_mille = 0;
     unsigned translation_switches_per_mille = 0;
     unsigned tlb_flushes_per_mille = 0;
@@ -1171,6 +1172,8 @@ struct RandomConstraints {
             stream_unresolved_per_mille = parsed;
         } else if (key == "stream-unresolved-inflight") {
             stream_unresolved_inflight_per_mille = parsed;
+        } else if (key == "stream-unresolved-overlap") {
+            stream_unresolved_overlap_per_mille = parsed;
         } else if (key == "special-concurrent") {
             special_concurrent_per_mille = parsed;
         } else if (key == "translation-switch") {
@@ -1879,6 +1882,7 @@ struct RandomConstraints {
             stream_permission_load_per_mille > 1000 || stream_mxr_per_mille > 1000 ||
             stream_unresolved_per_mille > 1000 ||
             stream_unresolved_inflight_per_mille > 1000 ||
+            stream_unresolved_overlap_per_mille > 1000 ||
             special_concurrent_per_mille > 1000 ||
             translation_switches_per_mille > 1000 ||
             stage1_napot_per_mille > 1000 ||
@@ -3127,7 +3131,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=87 constraints=" << name
+        stream << "constraint_schema=88 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -3255,6 +3259,7 @@ struct RandomConstraints {
                << stream_access_weights[1] << ',' << stream_access_weights[2]
                << " target_stream_unresolved=" << stream_unresolved_per_mille
                << " target_stream_unresolved_inflight=" << stream_unresolved_inflight_per_mille
+               << " target_stream_unresolved_overlap=" << stream_unresolved_overlap_per_mille
                << " target_special_concurrent="
                << special_concurrent_per_mille
                << " target_translation_switch="

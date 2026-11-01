@@ -24,7 +24,7 @@ vector-segment-noncanonical and translation-alias are catalogued but not
 benchmark-selected. This
 is registration, not passing-run or coverage evidence. MixedScenario implements
 the canonical constrained-random catalog entry. Constraint input/output uses
-constraint_schema=87. The legal field definitions and per-run observed counters
+constraint_schema=88. The legal field definitions and per-run observed counters
 are in [CONSTRAINED_RANDOM.md](CONSTRAINED_RANDOM.md), not duplicated here.
 
 ## Generated interface inventory
@@ -160,8 +160,10 @@ dependencies within and across declared mapped pages, checked FP-load-to-scalar-
 1..4-older-store/1..4-load unresolved-address recovery with strict per-epoch
 suffix data and an optional youngest held cold role in isolated or retained-prefix
 sliding graphs. Sliding selection excludes older input-store bytes and explicit
-reference bytes without a global drain; target-line final D and E plus a bounded
-quiet interval precede strict refetch. The generator also varies vector shape and bounded
+reference bytes without a global drain. Completed noncold suffix roles can
+strictly refetch while the canceled youngest response remains held/draining;
+that cold identity alone retains target-line final D/E and the bounded quiet
+gate. The generator also varies vector shape and bounded
 index permutations/repeated gathers with disjoint scatter spans, static
 unrestricted host/VS/G page permutations with independent byte expectations
 and physical final observation, translation/protection, errors, probes and independent response latency. A sampled field is
