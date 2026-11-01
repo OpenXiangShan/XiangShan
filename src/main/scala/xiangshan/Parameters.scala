@@ -228,7 +228,6 @@ case class XSCoreParameters
     name = "ldtlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
     outsideRecvFlush = true,
     saveLevel = false,
     lgMaxSize = 4
@@ -237,7 +236,6 @@ case class XSCoreParameters
     name = "sttlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
     outsideRecvFlush = true,
     saveLevel = false,
     lgMaxSize = 4
@@ -246,7 +244,6 @@ case class XSCoreParameters
     name = "hytlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
     outsideRecvFlush = true,
     saveLevel = false,
     lgMaxSize = 4
@@ -255,7 +252,6 @@ case class XSCoreParameters
     name = "pftlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
     outsideRecvFlush = true,
     saveLevel = false,
     lgMaxSize = 4
@@ -264,7 +260,6 @@ case class XSCoreParameters
     name = "l2tlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
     outsideRecvFlush = true,
     saveLevel = false
   ),
