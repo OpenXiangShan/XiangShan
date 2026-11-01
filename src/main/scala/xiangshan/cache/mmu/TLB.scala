@@ -31,10 +31,8 @@ import difftest._
 import xiangshan._
 import utils._
 import utility._
-import xiangshan.backend.fu.{PMPChecker, PMPReqBundle, PMPConfig => XSPMPConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
-import freechips.rocketchip.rocket.PMPConfig
 
 /** TLB module
   * support block request and non-block request io at the same time
@@ -287,7 +285,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     for (d <- 0 until nRespDups) {
       pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), req_out_s2xlate(i))
       val mptTemp = Option.when(HasMptCheck) (mptPerm.get(i)(d))
-      perm_check(mptTemp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))), mptEn.getOrElse(false.B), perm(i)(d),
+      perm_check(mptTemp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))), perm(i)(d),
         req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i), prepf(i), pregpf(i), preaf(i))
     }
     hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
@@ -452,25 +450,17 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
 
   def pbmt_check(idx: Int, d: Int, pbmt: UInt, g_pbmt: UInt, s2xlate: UInt):Unit = {
-    val onlyS1 = s2xlate === onlyStage1 || s2xlate === noS2xlate
-    val pbmtRes = pbmt
-    val gpbmtRes = g_pbmt
     val res = MuxLookup(s2xlate, 0.U)(Seq(
-      onlyStage1 -> pbmtRes,
-      onlyStage2 -> gpbmtRes,
-      allStage -> Mux(pbmtRes =/= 0.U, pbmtRes, gpbmtRes),
-      noS2xlate -> pbmtRes
+      onlyStage1 -> pbmt,
+      onlyStage2 -> g_pbmt,
+      allStage -> Mux(pbmt =/= 0.U, pbmt, g_pbmt),
+      noS2xlate -> pbmt
     ))
     resp(idx).bits.pbmt(d) := Mux(portTranslateEnable(idx), res, 0.U)
   }
 
-  // for timing optimization, pmp check is divided into dynamic and static
-  def perm_check(mptPerm: MptPermBundle, mptEn: Bool, perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int,
+  def perm_check(mptPerm: MptPermBundle, perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int,
     g_perm: TlbPermBundle, hlvx: Bool, s2xlate: UInt, prepf: Bool = false.B, pregpf: Bool = false.B, preaf: Bool = false.B) = {
-    // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
-    // static: 4K pages (or sram entries) -> check pmp with pre-checked results
-    val hasS2xlate = s2xlate =/= noS2xlate
-    val onlyS1 = s2xlate === onlyStage1
     val onlyS2 = s2xlate === onlyStage2
     val allS2xlate = s2xlate === allStage
     // noS2xlate || onlyS1 -> perm.af
@@ -675,7 +665,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         resp(idx).bits.paddr(d) := Mux(s2xlate === onlyStage2 || s2xlate === allStage, s2_paddr, s1_paddr)
         resp(idx).bits.gpaddr(d) := Mux(s2xlate === onlyStage2, req_out(idx).vaddr, s1_gpaddr)
         pbmt_check(idx, d, io.ptw.resp.bits.s1.entry.pbmt, io.ptw.resp.bits.s2.entry.pbmt, s2xlate)
-        perm_check(mptResp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))), mptEn.getOrElse(false.B),
+        perm_check(mptResp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))),
           stage1, req_out(idx).cmd, idx, d, stage2, req_out(idx).hlvx, s2xlate)
       }
       val pmpCmd = Mux(req_out(idx).hlvx, TlbCmd.read_exec, req_out(idx).cmd)
@@ -715,9 +705,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // Bypass ptw resp to check.
   def ptw_resp_bypass(vpn: UInt, s2xlate: UInt) = {
     // TODO: RegNext enable: ptw.resp.valid
-    val hasS2xlate = s2xlate =/= noS2xlate
     val onlyS2 = s2xlate === onlyStage2
-    val onlyS1 = s2xlate === onlyStage1
     val s2xlate_hit = s2xlate === ptw.resp.bits.s2xlate
     val resp_hit = ptw.resp.bits.hit(vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
     val p_hit_fast = resp_hit && io.ptw.resp.fire && s2xlate_hit    // valid in the same cycle as tlb_req and ptw_resp
@@ -805,7 +793,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.satp := Cat(csr.satp.mode, csr.satp.asid, csr.satp.ppn)
       difftest.vsatp := Cat(csr.vsatp.mode, csr.vsatp.asid, csr.vsatp.ppn)
       difftest.hgatp := Cat(csr.hgatp.mode, csr.hgatp.vmid, csr.hgatp.ppn)
-      val req_need_gpa = gpf
       val req_s2xlate = getS2xlate(RegNext(virt_in || req_in(i).bits.hyperinst), csr.vsatp.mode, csr.hgatp.mode)
       difftest.s2xlate := req_s2xlate
     }
