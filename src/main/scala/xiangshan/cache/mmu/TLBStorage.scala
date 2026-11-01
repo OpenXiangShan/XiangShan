@@ -21,67 +21,8 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import freechips.rocketchip.formal.PropertyClass
 import xiangshan.backend.fu.util.HasCSRConst
 
-import scala.math.min
-
-// For Direct-map TLBs, we do not use it now
-class BankedAsyncDataModuleTemplateWithDup[T <: Data](
-  gen: T,
-  numEntries: Int,
-  numRead: Int,
-  numDup: Int,
-  numBanks: Int
-) extends Module {
-  val io = IO(new Bundle {
-    val raddr = Vec(numRead, Input(UInt(log2Ceil(numEntries).W)))
-    val rdata = Vec(numRead, Vec(numDup, Output(gen)))
-    val wen   = Input(Bool())
-    val waddr = Input(UInt(log2Ceil(numEntries).W))
-    val wdata = Input(gen)
-  })
-  require(numBanks > 1)
-  require(numEntries > numBanks)
-
-  val numBankEntries = numEntries / numBanks
-  def bankOffset(address: UInt): UInt = {
-    address(log2Ceil(numBankEntries) - 1, 0)
-  }
-
-  def bankIndex(address: UInt): UInt = {
-    address(log2Ceil(numEntries) - 1, log2Ceil(numBankEntries))
-  }
-
-  val dataBanks = Seq.tabulate(numBanks)(i => {
-    val bankEntries = if (i < numBanks - 1) numBankEntries else (numEntries - (i * numBankEntries))
-    Mem(bankEntries, gen)
-  })
-
-  // async read, but regnext
-  for (i <- 0 until numRead) {
-    val data_read = Reg(Vec(numDup, Vec(numBanks, gen)))
-    val bank_index = Reg(Vec(numDup, UInt(numBanks.W)))
-    for (j <- 0 until numDup) {
-      bank_index(j) := UIntToOH(bankIndex(io.raddr(i)))
-      for (k <- 0 until numBanks) {
-        data_read(j)(k) := Mux(io.wen && (io.waddr === io.raddr(i)),
-          io.wdata, dataBanks(k)(bankOffset(io.raddr(i))))
-      }
-    }
-    // next cycle
-    for (j <- 0 until numDup) {
-      io.rdata(i)(j) := Mux1H(bank_index(j), data_read(j))
-    }
-  }
-
-  // write
-  for (i <- 0 until numBanks) {
-    when (io.wen && (bankIndex(io.waddr) === i.U)) {
-      dataBanks(i)(bankOffset(io.waddr)) := io.wdata
-    }
-  }
-}
 
 class TLBFA(
   parentName: String,
@@ -395,7 +336,6 @@ object TlbStorage {
   def apply
   (
     parentName: String,
-    associative: String,
     ports: Int,
     nDups: Int = 1,
     nSets: Int,
@@ -423,7 +363,6 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
 
   val page = TlbStorage(
     parentName = q.name + "_storage",
-    associative = q.Associative,
     ports = ports,
     nDups = nDups,
     nSets = q.NSets,
@@ -492,11 +431,4 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     data = io.w.bits.data
   )
 
-    // replacement
-  def get_access(one_hot: UInt, valid: Bool): Valid[UInt] = {
-    val res = Wire(Valid(UInt(log2Up(one_hot.getWidth).W)))
-    res.valid := Cat(one_hot).orR && valid
-    res.bits := OHToUInt(one_hot)
-    res
-  }
 }
