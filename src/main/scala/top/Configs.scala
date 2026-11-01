@@ -221,28 +221,24 @@ class MinimalConfig(n: Int = 1) extends Config(
           ldtlbParameters = TLBParameters(
             name = "ldtlb",
             NWays = 4,
-            outsideRecvFlush = true,
             outReplace = false,
             lgMaxSize = 4
           ),
           sttlbParameters = TLBParameters(
             name = "sttlb",
             NWays = 4,
-            outsideRecvFlush = true,
             outReplace = false,
             lgMaxSize = 4
           ),
           hytlbParameters = TLBParameters(
             name = "hytlb",
             NWays = 4,
-            outsideRecvFlush = true,
             outReplace = false,
             lgMaxSize = 4
           ),
           pftlbParameters = TLBParameters(
             name = "pftlb",
             NWays = 4,
-            outsideRecvFlush = true,
             outReplace = false,
             lgMaxSize = 4
           ),

@@ -191,7 +191,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   }
 
   // icache use a non-block tlb port
-  private val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq(false), itlbParams))
+  private val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, itlbParams))
   itlb.io.hartId := io.hartId
   itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
   itlb.io.redirect      := DontCare // itlb has flushpipe, don't need redirect signal

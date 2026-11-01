@@ -35,15 +35,13 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
 /** TLB module
-  * support block request and non-block request io at the same time
-  * return paddr at next cycle, then go for pmp/pma check
+  * Accepts a virtual address request and returns its translated physical address in the next cycle;
+  * PMP/PMA checks follow address translation
   * @param Width: The number of requestors
-  * @param Block: Blocked or not for each requestor ports
-  * @param q: TLB Parameters, like entry number, each TLB has its own parameters
-  * @param p: XiangShan Paramemters, like XLEN
+  * @param q: TLB parameters, like entry number, each TLB has its own parameters
+  * @param p: XiangShan parameters, like XLEN
   */
-
-class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)(implicit p: Parameters) extends TlbModule
+class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TlbModule
   with HasCSRConst
   with HasPerfEvents
 {
@@ -66,7 +64,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   val flush_mmu = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virt_changed ||
   (if (HasMptCheck) csr.mmpt.changed else false.B)
-  val mmu_flush_pipe = sfence.valid && sfence.bits.flushPipe // for svinval, won't flush pipe
   val flush_pipe = io.flushPipe
   val redirect = io.redirect
   val EffectiveVa = Wire(Vec(Width, UInt(XLEN.W)))
@@ -291,14 +288,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
   }
 
-  // handle block or non-block io
-  // for non-block io, just return the above result, send miss to ptw
-  // for block io, hold the request, send miss to ptw,
-  //   when ptw back, return the result
-  (0 until Width) foreach {i =>
-    if (Block(i)) handle_block(i)
-    else handle_nonblock(i)
-  }
+  (0 until Width).foreach(handle_nonblock)
   io.ptw.resp.ready := true.B
 
   /************************  main body above | method/log/perf below ****************************/
@@ -608,99 +598,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     io.ptw.req(idx).bits.memidx := req_out(idx).memidx
   }
 
-  def handle_block(idx: Int): Unit = {
-    // three valid: 1.if exist a entry; 2.if sent to ptw; 3.unset resp.valid
-    io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire
-    // req_out_v for if there is a request, may long latency, fixme
-
-    // miss request entries
-    val req_need_gpa = hasGpf(idx)
-    val miss_req_vpn = get_pn(req_out(idx).vaddr)
-    val miss_req_memidx = req_out(idx).memidx
-    val miss_req_s2xlate = getS2xlate(virt_out(idx) || req_out(idx).hyperinst, csr.vsatp.mode, csr.hgatp.mode)
-    val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire)
-    val hit = io.ptw.resp.bits.hit(miss_req_vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true, ignoreAsid = false) && io.ptw.resp.valid && miss_req_s2xlate_reg === io.ptw.resp.bits.s2xlate
-
-    val new_coming_valid = WireInit(false.B)
-    new_coming_valid := req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx)
-    val new_coming = GatedValidRegNext(new_coming_valid)
-    val miss_wire = new_coming && missVec(idx)
-    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire, flush_pipe(idx))
-    val miss_req_v = ValidHoldBypass(miss_wire || (miss_v && flush_mmu && !mmu_flush_pipe),
-      io.ptw.req(idx).fire || resp(idx).fire, flush_pipe(idx))
-
-    // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
-    resp(idx).valid := req_out_v(idx) && (!(miss_v && portTranslateEnable(idx)) &&
-      (if (HasMptCheck) !(miss_v && mptCheckOnly.get(idx)) else true.B))
-    when (io.ptw.resp.fire && hit && req_out_v(idx) && (portTranslateEnable(idx) ||
-      (if (HasMptCheck) mptCheckOnly.get(idx) else false.B))) {
-      // add condition, equivalently make it = true.B, always return
-      val stage1 = io.ptw.resp.bits.s1
-      val stage2 = io.ptw.resp.bits.s2
-      val s2xlate = io.ptw.resp.bits.s2xlate
-      val mptResp = Option.when(HasMptCheck) (Wire (new MptPermBundle(isTlbPort = true)))
-      if (HasMptCheck) {mptResp.get.resp_apply(io.ptw.resp.bits.mpt.get)}
-      resp(idx).valid := true.B
-      resp(idx).bits.miss := false.B
-      val vpn = get_pn(req_out(idx).vaddr)
-      val s1_ppn = stage1.genPPN(vpn)(ppnLen - 1, 0)
-      val s2_gvpn = Mux(s2xlate === onlyStage2, vpn, s1_ppn)
-      val s2_ppn = stage2.genPPNS2(s2_gvpn)(ppnLen - 1, 0)
-      val s1_paddr = Cat(s1_ppn, get_off(req_out(idx).vaddr))
-      val s2_paddr = Cat(s2_ppn, get_off(req_out(idx).vaddr))
-
-      // This block of code is used to generate the gpaddr in allStage, for:
-      //   1. G-for-VS-Stage failed (isFakePte || isNonLeaf)
-      //   2. Normal G-Stage failed
-      // Similar to the code in TLBRead.
-      val vpn_idx = Mux1H(Seq(
-        (stage1.isFakePte() && csr.vsatp.mode === Sv39) -> 2.U,
-        (stage1.isFakePte() && csr.vsatp.mode === Sv48) -> 3.U,
-        (!stage1.isFakePte()) -> (stage1.entry.level.get - 1.U),
-      ))
-      val s1_gpaddr_offset = Mux(stage1.isLeaf(), get_off(req_out(idx).vaddr), Cat(getVpnn(get_pn(req_out(idx).vaddr), vpn_idx), 0.U(log2Up(XLEN/8).W)))
-      val s1_gpaddr = Cat(stage1.genGVPN(vpn), s1_gpaddr_offset)
-
-      for (d <- 0 until nRespDups) {
-        resp(idx).bits.paddr(d) := Mux(s2xlate === onlyStage2 || s2xlate === allStage, s2_paddr, s1_paddr)
-        resp(idx).bits.gpaddr(d) := Mux(s2xlate === onlyStage2, req_out(idx).vaddr, s1_gpaddr)
-        pbmt_check(idx, d, io.ptw.resp.bits.s1.entry.pbmt, io.ptw.resp.bits.s2.entry.pbmt, s2xlate)
-        perm_check(mptResp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))),
-          stage1, req_out(idx).cmd, idx, d, stage2, req_out(idx).hlvx, s2xlate)
-      }
-      val pmpCmd = Mux(req_out(idx).hlvx, TlbCmd.read_exec, req_out(idx).cmd)
-      pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, pmpCmd, false.B, idx)
-
-      // NOTE: the unfiltered req would be handled by Repeater
-    }
-    assert(RegNext(!resp(idx).valid || resp(idx).ready, true.B), "when tlb resp valid, ready should be true, must")
-    assert(RegNext(req_out_v(idx) || !(miss_v || miss_req_v), true.B), "when not req_out_v, should not set miss_v/miss_req_v")
-
-    val ptw_req = io.ptw.req(idx)
-    ptw_req.valid := miss_req_v
-    ptw_req.bits.vpn := miss_req_vpn
-    ptw_req.bits.s2xlate := miss_req_s2xlate
-    ptw_req.bits.getGpa := req_need_gpa && hitVec(idx)
-    ptw_req.bits.memidx := miss_req_memidx
-
-    io.tlbreplay(idx) := false.B
-
-    // NOTE: when flush pipe, tlb should abandon last req
-    // however, some outside modules like icache, dont care flushPipe, and still waiting for tlb resp
-    // just resp valid and raise page fault to go through. The pipe(ifu) will abandon it.
-    if (!q.outsideRecvFlush) {
-      when (req_out_v(idx) && flush_pipe(idx) && portTranslateEnable(idx)) {
-        resp(idx).valid := true.B
-        for (d <- 0 until nRespDups) {
-          resp(idx).bits.pbmt(d) := 0.U
-          resp(idx).bits.excp(d).pf.ld := true.B // sfence happened, pf for not to use this addr
-          resp(idx).bits.excp(d).pf.st := true.B
-          resp(idx).bits.excp(d).pf.instr := true.B
-        }
-      }
-    }
-  }
-
   // when ptw resp, tlb at refill_idx maybe set to miss by force.
   // Bypass ptw resp to check.
   def ptw_resp_bypass(vpn: UInt, s2xlate: UInt) = {
@@ -738,22 +635,17 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val result_ok = req_in.map(a => GatedValidRegNext(a.fire))
   val perfEvents =
     Seq(
-      ("access", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire else portTranslateEnable(i) && result_ok(i) })),
-      ("miss  ", PopCount((0 until Width).map{i => if (Block(i)) portTranslateEnable(i) && result_ok(i) && missVec(i) else ptw.req(i).fire })),
+      ("access", PopCount((0 until Width).map{i => portTranslateEnable(i) && result_ok(i) })),
+      ("miss  ", PopCount((0 until Width).map{i => ptw.req(i).fire })),
     )
   generatePerfEvent()
 
   // perf log
   for (i <- 0 until Width) {
-    if (Block(i)) {
-      XSPerfAccumulate(s"access${i}",result_ok(i) && portTranslateEnable(i))
-      XSPerfAccumulate(s"miss${i}", result_ok(i) && missVec(i))
-    } else {
-      XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
-      XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i))
-      XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
-      XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
-    }
+    XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
+    XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i))
+    XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
+    XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
     XSPerfAccumulate(s"ptw_req${i}", ptw.req(i).fire)
     XSPerfAccumulate(s"tlb_replay${i}", io.tlbreplay(i))
   }
@@ -811,9 +703,6 @@ object TLBDiffId {
     i - 1
   }
 }
-
-class TLBNonBlock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(false), q)
-class TLBBLock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(true), q)
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbReplaceIO(Width, q))
