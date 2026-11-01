@@ -370,13 +370,13 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
     val pbmt = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePbmtLen.W))))
-    val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
+    val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle()))))
     val gvpn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePPNLen.W))))
     val level = WireInit(VecInit(Seq.fill(nRespDups)(0.U(log2Up(Level + 1).W))))
     val isLeaf = WireInit(VecInit(Seq.fill(nRespDups)(false.B)))
     val isFakePte = WireInit(VecInit(Seq.fill(nRespDups)(false.B)))
     val g_pbmt = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePbmtLen.W))))
-    val g_perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
+    val g_perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle(hasV = false)))))
     val r_s2xlate = WireInit(VecInit(Seq.fill(nRespDups)(0.U(2.W))))
 
     val mptPerm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new MptPermBundle)))) // HasMptCheck
@@ -473,8 +473,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val ldPf = (ldPermFail || pf) && isLd
     val stPf = (stPermFail || pf) && isSt
     val instrPf = (instrPermFail || pf) && isInst
-    val isFakePte = !perm.v && !perm.pf && !perm.af && !onlyS2
-    val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v && !perm.pf && !perm.af
+    val isFakePte = !perm.v.get && !perm.pf && !perm.af && !onlyS2
+    val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v.get && !perm.pf && !perm.af
     val s1_valid = portTranslateEnable(idx) && !onlyS2
 
     // mptcheck val
