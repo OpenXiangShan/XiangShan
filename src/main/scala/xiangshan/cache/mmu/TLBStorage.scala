@@ -23,7 +23,6 @@ import utils._
 import utility._
 import xiangshan.backend.fu.util.HasCSRConst
 
-
 class TLBFA(
   parentName: String,
   ports: Int,
@@ -53,12 +52,12 @@ class TLBFA(
     val OnlyS2 = req.bits.s2xlate === onlyStage2
     val OnlyS1 = req.bits.s2xlate === onlyStage1
     val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
-    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
-      case (e, m) => {
-        val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
-        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
-        s2xlate_hit && hit && m._1 && !m._2
-      }
+    val hitVec = VecInit(entries.zip(v zip refill_mask.asBools).map {
+      case (entry, (valid, refilling)) =>
+        val stageMatch = entry.s2xlate === req.bits.s2xlate
+        val hit = entry.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid),
+          vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
+        stageMatch && hit && valid && !refilling
     })
 
     hitVec.suggestName("hitVec")
@@ -70,44 +69,23 @@ class TLBFA(
     resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     val reqVpn   = RegNext(vpn)
-    val pbmt     = entries.map(_.pbmt)
-    val gpbmt    = entries.map(_.g_pbmt)
-    val perm     = entries.map(_.perm)
-    val gPerm    = entries.map(_.g_perm)
-    val s2xLate  = entries.map(_.s2xlate)
-    val mptperm = Option.when(HasMptCheck) (entries.map(_.mptperm.get)) // hasmptcheck
-    if (nWays == 1) {
-      for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := entries(0).genPPN(saveLevel, resp.valid)(reqVpn)
-        resp.bits.pbmt(d) := pbmt(0)
-        resp.bits.g_pbmt(d) := gpbmt(0)
-        resp.bits.perm(d) := perm(0)
-        resp.bits.g_perm(d) := gPerm(0)
-        resp.bits.s2xlate(d) := s2xLate(0)
-        if (HasMptCheck) {
-          resp.bits.mptperm.get(d).x := mptperm.get(0).x
-          resp.bits.mptperm.get(d).w := mptperm.get(0).w
-          resp.bits.mptperm.get(d).r := mptperm.get(0).r
-          resp.bits.mptperm.get(d).af.get := false.B
-        }
-      }
-    } else {
-      for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := Mux1H(hitVecReg zip entries.map(_.genPPN(saveLevel, resp.valid)(reqVpn)))
-        resp.bits.pbmt(d) := Mux1H(hitVecReg zip pbmt)
-        resp.bits.g_pbmt(d) := Mux1H(hitVecReg zip gpbmt)
-        resp.bits.perm(d) := Mux1H(hitVecReg zip perm)
-        resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPerm)
-        resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
-        if (HasMptCheck) {
-          val mptpermtmp = Mux1H(hitVecReg zip mptperm.get)
-          if (HasMptCheck) {
-            resp.bits.mptperm.get(d).x := mptpermtmp.x
-            resp.bits.mptperm.get(d).w := mptpermtmp.w
-            resp.bits.mptperm.get(d).r := mptpermtmp.r
-            resp.bits.mptperm.get(d).af.get := false.B
-          }
-        }
+    def selectHit[T <: Data](values: Seq[T]): T = {
+      if (nWays == 1) values.head else Mux1H(hitVecReg zip values)
+    }
+
+    for (d <- 0 until nDups) {
+      resp.bits.ppn(d) := selectHit(entries.map(_.genPPN(saveLevel, resp.valid)(reqVpn)))
+      resp.bits.pbmt(d) := selectHit(entries.map(_.pbmt))
+      resp.bits.g_pbmt(d) := selectHit(entries.map(_.g_pbmt))
+      resp.bits.perm(d) := selectHit(entries.map(_.perm))
+      resp.bits.g_perm(d) := selectHit(entries.map(_.g_perm))
+      resp.bits.s2xlate(d) := selectHit(entries.map(_.s2xlate))
+      if (HasMptCheck) {
+        val mptPerm = selectHit(entries.map(_.mptperm.get))
+        resp.bits.mptperm.get(d).x := mptPerm.x
+        resp.bits.mptperm.get(d).w := mptPerm.w
+        resp.bits.mptperm.get(d).r := mptPerm.r
+        resp.bits.mptperm.get(d).af.get := false.B
       }
     }
 
@@ -430,5 +408,4 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     wayIdx = refill_idx,
     data = io.w.bits.data
   )
-
 }
