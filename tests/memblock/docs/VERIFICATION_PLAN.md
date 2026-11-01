@@ -277,7 +277,10 @@ evidence; the native ordinary scheduler still holds exact store heads. Forcing
 a missing operand after head passage is defensive synthetic stimulus;
 whole-line version checking supports eviction before reference commit. Entry and
 exit SBuffer/link drains isolate these epochs from untracked legacy classes;
-there is no such barrier within an epoch. Unintegrated legacy pre-notification
+there is no such barrier within an epoch. Input journals retain their independent
+anchor and validated group progress across grants; operational refill cannot
+replace either. Outside a certified epoch, a missing independent owner baseline
+rejects first registration. Unintegrated legacy pre-notification
 releases and exact early-effect timing remain oracle gaps.
 
 Ordinary mixed streams vary producer counts and instruction ages, choose ready

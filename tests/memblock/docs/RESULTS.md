@@ -18,6 +18,13 @@ None.
 
 ## Current Changes Qualified Below
 
+- Release-input journals retain certified reference/owner anchors and independently
+  reconstructed applied progress across grants and reacquires. Operational refill
+  and newer current-reference bytes cannot replace those anchors; first registration
+  outside a certified epoch requires a complete independent owner image. Missing
+  provenance rejects. This qualifies the ReleaseData value checker, while general
+  writable-owner baseline ownership and versioned Probe continuity remain open.
+
 - Ordinary scalar release-input permission uses wrapped head-or-older age,
   including already-completed stores skipped by a public head advance. A kill
   observed before authorization remains ineligible through redirect propagation;
@@ -575,6 +582,8 @@ retained prepared-model evidence is not a new full-catalog run for each change.
 
 | Check | Current result | Scope limit |
 | --- | --- | --- |
+| Independent release-input anchors | The complete stable-source snapshot passes745 host tests; generated-interface, documentation, catalog and prepared-RTL checks pass. Production-manager host tests pass16 methods/475 fixture processes with39 compiles and eight stable input hashes. The new77-case matrix covers every refill byte, all eight bytes of a previously consumed aligned store, a later-colour reference commit and four missing-provenance states. Fresh non-author review approves the seven-file implementation/contract snapshot; independent challenges cover192 all-byte corruption/rollback cases, nine cross-grant/colour histories, five cleanup states and exact overrides. Six private faults reject in nine runs. | `build/memblock/writable-history-20261102/{full-unit-v1.log,suite-summary-v1.json,check-rtl-v1.log,host-v1.log,host-v1/,review-v1/verdict.json}`. Private backing corruption establishes checker sensitivity, not native CPU corruption or full-CPU reachability. Initial fixture checkpoints certify setup only; reacquires preserve residual groups and applied progress. General writable-owner/Probe continuity remains unsupported. |
+| Release-input anchor finite integration | Frozen runtime-v1 passes six cases/6144 actions/2027 final-word comparisons across U-mode translated, FP-heavy and mixed corner profiles. All three complete finite artifact verifiers pass; each case preserves433 preceding semantic fields. Five adjacent alias/forwarding/recovery scenarios pass. All102 source/prepared pairs and five runtime artifact hashes are recorded; RTL/model/xcomm are unchanged. | `build/memblock/writable-history-20261102/{qualification-v1.json,all-verifiers-v1.json,native-parity-v1.json,directed-v1.json,provenance-v1.json,residual-provenance-v1.json}`. Default-spec8841 remains excluded: its complete terminal and structured failure match the preceding runtime except the shifted source line. The failure remains the independent writable-owner baseline limitation. Finite integration does not establish native sensitivity to private corruption, SPEC execution, strict coverage or closure. |
 | Scalar store input authorization | The complete logic snapshot passes744 host tests. Focused production extraction passes18 behavior cases and rejects18 private faults, including102080 independent unwrapped-age comparisons/51200 eligible. Independent review adds eight completed-store head skips, an exact-head counterfactual rejection, eight half-range exclusions and six kill/cancel/refetch lifetimes plus an authorized survivor. The old fixture's ROB255 is corrected to legal159. | `build/memblock/modified-owner-20261102/{full-unit-v1.log,suite-summary-v1.json,host-v4.log,host-v4/,review-v1/}`. Final source/fixture deltas after the full suite are comments only (`scope-delta-v2.json`) and the focused extraction checks the final snapshot. Head-skip evidence is host-only; native generation, exact S2/effect timing, vector commit feedback and broader manager history are not qualified by it. |
 | Scalar authorization finite integration | Frozen runtime-v1 passes six cases/6144 actions/2027 final-word comparisons across U-mode translated, FP-heavy and mixed corner profiles. All three complete finite artifact verifiers pass and all six cases match433 preceding summary fields. Five adjacent alias/forwarding/recovery directed scenarios pass. The independent evidence audit verifies102 source/prepared pairs and five recorded runtime hashes; RTL/model/xcomm remain unchanged. A final comment-only rebuild matches the binary/model/xcomm/RTL artifacts byte-for-byte and the final102 source/prepared pairs. | `build/memblock/modified-owner-20261102/{qualification-v1.json,all-verifiers-v1.json,native-parity-v1.json,directed-v1.json,provenance-v2.json,final-evidence-review-v1/verdict.json,review-v2/verdict.json}`. These qualify finite integration of the changed value oracle, not new native head-skip generation, strict coverage, SPEC execution or closure. The fail-fast default-spec dataset is excluded in full. |
 | Ordinary recovery refetch overlap | Frozen runtime-v1 passes22 finite cases/19456 actions/7256 tracked final-word comparisons across targeted, FP-heavy, U-mode translated, mixed corner, unmodified corner and disabled profiles. Seven full finite artifact verifiers pass, including the separate preceding-runtime control. 267 split selections prepare/accept/check338 noncold roles;141 accept and33 strictly complete while the old response is held. Another197 accept and303 complete after release but before the cold separation gate; this phase includes quiet time. FP subsets are188 accepted/186 checked before the gate. | `build/memblock/recovery-overlap-20261101/{qualification-v1.json,all-verifiers-v1.json,provenance-v1.json}`. All102 prepared-source pairs match and RTL/model/xcomm hashes are unchanged. Positive overlap comes from targeted profiles; default-corner and disabled controls add no selected overlap. The failed default-spec campaign is excluded entirely. These are finite functional/accounting checks, not strict coverage, SPEC execution or closure. |
@@ -737,6 +746,20 @@ are defined in VERIFICATION_PLAN.md. No closure claim follows from a short
 capability run or a controller/verifier return code alone.
 
 ## Current Review
+
+Release-input anchor retention has fresh non-author actual-diff approval with no
+open source findings: `build/memblock/writable-history-20261102/review-v1/verdict.json`.
+The reviewer checks independent baseline selection, failure cleanup before input
+or legacy-state mutation, residual/progress retention, first-C freezing and exact
+overrides. Its private counterfactuals and three rerun production unittest methods
+are host sensitivity evidence. They do not establish native CPU corruption or
+complete writable-owner/Probe continuity. Initial fixture checkpoints are explicit
+setup certificates; later grants cannot certify away outstanding input history.
+Finite integration counts,433-field parity, the three complete finite
+verifiers, five directed scenarios, the excluded8841 rejection,102 prepared-source
+pairs, five runtime hashes and terminal745-test PASS are primary-verified. The
+independent approval above covers the pinned source/contracts and host sensitivity;
+no additional final evidence-review approval is claimed.
 
 Scalar head-or-older authorization has fresh non-author source and host review.
 The reviewer found one scope overclaim: normal ROB advancement cannot pass a

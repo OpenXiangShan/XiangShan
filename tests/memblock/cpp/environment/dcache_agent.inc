@@ -1089,8 +1089,13 @@ public:
             const auto owner = owners_.find(line);
             version.baseline = release_input_epoch_
                 ? reference_memory_.read_beat(line, kLineBytes)
-                : owner != owners_.end() && !owner->second.expected_data.empty()
-                    ? owner->second.expected_data : memory_.read_beat(line, kLineBytes);
+                : owner != owners_.end() && owner->second.expected_data.size() == kLineBytes
+                    ? owner->second.expected_data : std::vector<unsigned char>{};
+            if (version.baseline.size() != kLineBytes) {
+                release_input_lines_.erase(position);
+                error_.record("ordinary ReleaseData input requires an independent owner baseline or certified epoch");
+                return false;
+            }
             if (owner != owners_.end()) {
                 version.legacy_alias = owner->second.alias;
                 // Epoch entry certified all pre-epoch producers drained. Their
@@ -1753,8 +1758,9 @@ private:
                     }
                 }
                 owners_.at(request_line).refill_data = refill;
-                const auto tracked = release_input_lines_.find(request_line);
-                if (tracked != release_input_lines_.end()) tracked->second.baseline = refill;
+                // Refill is operational backing data, not an independent
+                // expected image. Keep the epoch/owner anchor and previously
+                // reconstructed applied progress across every reacquire.
             }
             break;
         }

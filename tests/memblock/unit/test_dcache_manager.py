@@ -73,6 +73,16 @@ class DcacheManagerTest(unittest.TestCase):
                 result = self.run_case("release-input-" + name)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_input_anchors_do_not_learn_refill_or_erase_verified_progress(self):
+        cases = [f"refill-byte-{byte}" for byte in range(64)]
+        cases += [f"rollback-byte-{byte}" for byte in range(8, 16)]
+        cases += ["reference-ahead", "missing-owner", "missing-writable",
+                  "missing-reference-ahead", "missing-reset"]
+        for case in cases:
+            with self.subTest(case=case):
+                result = self.run_case("input-anchor-" + case)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_cancellation_removes_only_unapplied_groups_after_certified_redirect(self):
         for name in ("empty", "canceled-bytes", "removed-order", "numeric-reuse", "unaffected",
                      "multiple-groups", "multiple-lines", "frozen-first-c", "frozen-forbidden", "baseline",
@@ -151,8 +161,8 @@ class DcacheManagerTest(unittest.TestCase):
             ("unauthorized_input", "if (input.authorized && ((input.virtual_address >> 12U) & 3U) == owner->second.alias)",
              "if (((input.virtual_address >> 12U) & 3U) == owner->second.alias)",
              "noneligible", "ordinary input release decision incorrect"),
-            ("drop_residual_on_acquire", "if (tracked != release_input_lines_.end()) tracked->second.baseline = refill;",
-             "if (tracked != release_input_lines_.end()) { tracked->second.baseline = refill; tracked->second.inputs.clear(); }",
+            ("drop_residual_on_acquire", "                owners_.at(request_line).refill_data = refill;",
+             "                owners_.at(request_line).refill_data = refill; if (release_input_lines_.contains(request_line)) release_input_lines_.at(request_line).inputs.clear();",
              "residual", "ordinary input release decision incorrect"),
             ("forget_validated_progress", "            version.baseline = promoted;",
              "            /* private fault: retain historical baseline */",
@@ -173,6 +183,16 @@ class DcacheManagerTest(unittest.TestCase):
              "epoch-legacy-history", "ordinary input release decision incorrect"),
             ("permit_late_older_input", "((version.applied_order_mask >> offset) & 1U) && order <= version.applied_order[offset]",
              "false", "late-older-order", "registration reintroduced already observed same-byte history"),
+            ("reseed_anchor_from_refill", "                owners_.at(request_line).refill_data = refill;",
+             "                owners_.at(request_line).refill_data = refill; if (release_input_lines_.contains(request_line)) release_input_lines_.at(request_line).baseline = refill;",
+             ("input-anchor-refill-byte-63", "input-anchor-rollback-byte-8"),
+             "ordinary input release decision incorrect"),
+            ("trust_unqualified_backing", ": std::vector<unsigned char>{};",
+             ": memory_.read_beat(line, kLineBytes);", "input-anchor-missing-owner",
+             "uncertified input baseline accepted operational bytes"),
+            ("replace_old_anchor_with_current_reference", "                owners_.at(request_line).refill_data = refill;",
+             "                owners_.at(request_line).refill_data = refill; if (release_input_lines_.contains(request_line)) release_input_lines_.at(request_line).baseline = reference_memory_.read_beat(request_line, kLineBytes);",
+             "input-anchor-reference-ahead", "ordinary input release decision incorrect"),
         )
         for name, before, after, case, diagnostic in faults:
             with self.subTest(fault=name):
@@ -183,9 +203,11 @@ class DcacheManagerTest(unittest.TestCase):
                 source.write_text(fixture.replace('#include "environment/dcache_agent.inc"',
                                                  '#include "' + str(mutant) + '"'))
                 binary = self.compile(name, source)
-                result = self.run_case("release-input-" + case, binary=binary)
-                self.assertNotEqual(result.returncode, 0, "private fault escaped: " + name)
-                self.assertIn(diagnostic, result.stderr)
+                for selected in ((case,) if isinstance(case, str) else case):
+                    selected = selected if selected.startswith("input-anchor-") else "release-input-" + selected
+                    result = self.run_case(selected, binary=binary)
+                    self.assertNotEqual(result.returncode, 0, "private fault escaped: " + name)
+                    self.assertIn(diagnostic, result.stderr)
 
     def test_line_grant_lifecycle_uses_manager_transaction_provenance(self):
         for name in ("holds", "final-d-before-e", "e-before-final-d", "same-pa-pending",

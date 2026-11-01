@@ -1721,7 +1721,11 @@ redirect kill before authorization stays ineligible through late propagation
 acceptances. Already authorized stores retain their obligations. These are
 optional data-version permissions, not exact S2 or cache-effect timing checks. The manager
 keeps grouped independent versions across eviction/refill and validates a frozen
-whole-line candidate at first C. This covers old images and applied store bytes
+whole-line candidate at first C. First registration uses the certified epoch's
+reference anchor or an existing independent owner image; missing provenance
+outside an epoch rejects. Acquire/reacquire never import operational refill or
+newer current-reference bytes into that anchor. Validated progress is reconstructed
+from independent input groups and survives subsequent grants. This covers old images and applied store bytes
 before architectural reference commit; it makes no exact early-effect timing
 claim. General canceled-store journals and legacy pre-notification images remain
 outside the scope.

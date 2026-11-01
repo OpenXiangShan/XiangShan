@@ -1070,7 +1070,10 @@ Entry drains LSQ, SBuffer and the public memory link before enabling the journal
 exit does the same after every architectural instruction and physical SQ record
 finishes. There is no such drain between ordinary instructions within the epoch.
 The initial line anchor is independent reference memory certified by that entry
-drain. Every ordinary write in the epoch is registered before it can change that
+drain. Outside such an epoch, first registration requires an existing complete
+independent owner image; missing provenance is a manager-contract rejection.
+Operational backing bytes never initialize an input journal. Every ordinary
+write in the epoch is registered before it can change that
 reference. A scalar group requires both accepted STA and STD; a vector group
 requires its accepted uop. Registration precedes the accepting edge, and matching
 public `pendingPtr` authorizes it before a head-eligible edge. For scalar stores,
@@ -1094,7 +1097,11 @@ The [manager](../cpp/environment/dcache_agent.inc) retains eligible groups acros
 owner absence, Release and reacquire. It freezes one candidate set at first C,
 validates all beats together, then consumes only a least applied-update witness.
 The new baseline is reconstructed from independent inputs; omitted updates remain
-possible. This retains ABA alternatives while rejecting observable rollback.
+possible. AcquireBlock and reacquire retain that baseline and all residual
+groups. Their operational refill bytes neither replace the expected image nor
+erase previously validated applied progress. Current reference bytes may already
+contain a newer alias's commit and also cannot replace the frozen anchor merely
+because a grant occurs. This retains ABA alternatives while rejecting observable rollback.
 Exact scenario overrides stay exact. Registration/authorization do not mutate
 architectural memory; retirement does so exactly once, without duplicate legacy
 notifications. This is a byte-value oracle, not an exact early-effect timing
@@ -1142,6 +1149,10 @@ automatic exact alias recall. A later new-colour reference commit cannot change
 the frozen old-owner bytes. This bounded rule does not establish baselines for
 arbitrary ownerless lines lacking a validated image or permit concurrent synonym
 writes. General ReleaseData-to-reacquire certification remains outside it.
+
+Keeping a release-input journal independent across a grant is distinct from
+certifying a new owner's automatic Probe image. The journal rule above does not
+establish general writable-owner continuity or versioned Probe observations.
 
 The reference checkpoint follows producer retirement, an explicit SBuffer flush
 and an idle D/E link. It reads only independent architectural reference bytes.

@@ -507,9 +507,13 @@ void line_grants_lifecycle(const std::string &test)
 
 
 static void input_owner(Fixture &f, bool initialize=true, unsigned alias=0,
-    std::uint64_t address=line) {
+    std::uint64_t address=line, bool certify_initial=true) {
     if (initialize) for(unsigned b=0;b<64;++b)f.bus.write_byte(address+b,f.old_image[b]);
     f.acquire(alias,0,1,address);f.step();f.ack();f.ok();
+    // Initial setup certifies the fixture's drained independent input image.
+    // Reacquires retain the journal; they do not manufacture a checkpoint.
+    if (initialize && certify_initial)
+        require(f.manager.checkpoint_alias_reference(address,64),f.manager.error());
 }
 static void input_group(Fixture &f,std::uint64_t order,unsigned offset,unsigned count,
     unsigned char value,bool authorize=true,unsigned alias=0,std::uint64_t address=line) {
@@ -526,6 +530,67 @@ static void input_release(Fixture &f,const std::vector<unsigned char> &image,boo
     require(f.manager.ok()==accepted,"ordinary input release decision incorrect: "+f.manager.error());
     if(accepted){require(f.bus.read_beat(address,64)==image,"validated release did not update backing");f.step();f.ok();}
     else require(f.bus.read_beat(address,64)==before,"rejected whole-line C changed backing");
+}
+static void independent_input_anchor(const std::string &test) {
+    Fixture f(true);
+    if(test.starts_with("missing-")) {
+        if(test=="missing-writable") input_owner(f,false);
+        else if(test=="missing-reset") {
+            input_owner(f,false);
+            require(f.manager.checkpoint_alias_reference(line,64),f.manager.error());
+            f.manager.reset_link_state();
+        } else if(test=="missing-reference-ahead") {
+            f.reference.write_reference_byte(line+24,0xee);
+        } else require(test=="missing-owner","unknown missing-baseline case");
+        f.bus.write_byte(line+24,0xee);
+        const auto reference=f.reference.read_beat(line,64),backing=f.bus.read_beat(line,64);
+        require(!f.manager.register_release_store(10,line+8,line+8,{0xa7}),
+            "uncertified input baseline accepted operational bytes");
+        require(f.manager.error().find("independent owner baseline")!=std::string::npos,
+            "missing independent baseline lost manager-contract attribution");
+        require(f.reference.read_beat(line,64)==reference&&f.bus.read_beat(line,64)==backing,
+            "rejected registration changed byte memory");
+        require(!f.manager.authorize_release_store(10),"failed registration retained an order");
+        return;
+    }
+    require(f.manager.begin_release_input_epoch(),f.manager.error());
+    const auto reference=f.reference.read_beat(line,64);
+    const auto serial=f.reference.mutation_serial(line);
+    if(test=="reference-ahead") {
+        input_group(f,10,8,8,0xa7);
+        input_group(f,20,24,1,0xee,true,1);
+        f.reference.write_reference_byte(line+24,0xee);
+        input_owner(f,false);
+        // This owner's old image remains legal even when independent reference
+        // already contains the other colour's later committed input.
+        input_release(f,f.old_image);
+        require(f.reference.read_byte(line+24)==0xee,"grant changed newer architectural input");
+        return;
+    }
+    auto wrong=f.old_image;
+    if(test.starts_with("refill-byte-")) {
+        const auto byte=std::stoul(test.substr(12));require(byte<64,"invalid refill byte");
+        input_group(f,10,8,8,0xa7,false);
+        wrong[byte]^=0x80;f.bus.write_byte(line+byte,wrong[byte]);
+        input_owner(f,false);
+    } else if(test.starts_with("rollback-byte-")) {
+        const auto byte=std::stoul(test.substr(14));require(byte>=8&&byte<16,"invalid rollback byte");
+        input_owner(f,false);input_group(f,10,8,8,0xa7);
+        auto applied=f.old_image;std::fill(applied.begin()+8,applied.begin()+16,0xa7);
+        input_release(f,applied); // Promotes independent group bytes and consumes its witness.
+        wrong=applied;wrong[byte]=f.old_image[byte];f.bus.write_byte(line+byte,wrong[byte]);
+        input_owner(f,false);
+    } else throw std::runtime_error("unknown independent input-anchor case");
+    // Deliberately wrong manager backing, not CPU-generated corruption. Hold
+    // independent inputs fixed and require the complete C value oracle to reject.
+    const auto verified=f.manager.release_data_verified_count();
+    input_release(f,wrong,false);
+    require(f.manager.error().find("permitted independent owner image")!=std::string::npos,
+        "refill corruption failed outside the independent data comparison");
+    require(f.manager.release_data_verified_count()==verified,
+        "wrong refill became a verified independent C image");
+    require(f.reference.read_beat(line,64)==reference&&f.reference.mutation_serial(line)==serial,
+        "manager corruption changed independent reference bytes or provenance");
 }
 static void input_versions(const std::string &test) {
     Fixture f;
@@ -578,10 +643,10 @@ static void input_versions(const std::string &test) {
         require(!f.manager.end_release_input_epoch(),"epoch silently discarded unaccepted future eligibility");return;
     }
     if(test=="before-acquire") {
+        require(f.manager.begin_release_input_epoch(),f.manager.error());
         input_group(f,1024,8,8,0xa7);
-        // Cold registration uses the independent backing supplied by the grant.
-        // Initialize backing before acquire, as a real input image does.
-        input_owner(f); // acquire refreshes the frozen input line's backing baseline
+        // The certified reference anchor exists before the first grant.
+        input_owner(f,true,0,line,false);
     } else input_owner(f);
     auto updated=f.old_image;std::fill(updated.begin()+8,updated.begin()+16,0xa7);
     if(test=="before-acquire" || test=="old" || test=="applied" || test=="torn" || test=="noneligible") {
@@ -650,7 +715,8 @@ static void input_versions(const std::string &test) {
         require(!f.manager.register_release_store(20,line+8,line+8,{0xb8}),"input registration changed immutable bytes");
     } else if(test=="reset") {
         input_group(f,20,8,8,0xa7);f.manager.reset_link_state();
-        input_group(f,20,8,8,0xa7);input_owner(f);input_release(f,updated);
+        require(f.manager.begin_release_input_epoch(),f.manager.error());
+        input_group(f,20,8,8,0xa7);input_owner(f,true,0,line,false);input_release(f,updated);
     } else throw std::runtime_error("unknown input-version case");
 }
 // Manager-only redirect bookkeeping tests. The fixture certifies the external
@@ -867,6 +933,7 @@ int main(int argc, char **argv)
         if (test.starts_with("pristine-")) {pristine_alias_baseline(test.substr(9));return 0;}
         if (test.starts_with("release-cancel-")) {input_cancellations(test.substr(15));return 0;}
         if (test == "release-input-exhaustive") {exhaustive_input_versions();return 0;}
+        if (test.starts_with("input-anchor-")) {independent_input_anchor(test.substr(13));return 0;}
         if (test.starts_with("release-input-")) {input_versions(test.substr(14));return 0;}
         if (test == "release-version-exhaustive") {
             exhaustive_versions(); return 0;
