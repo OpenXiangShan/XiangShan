@@ -1710,7 +1710,16 @@ An ordinary epoch explicitly drains SBuffer and the public memory link on entry
 and exit to isolate tracked inputs from unintegrated legacy actions. Within the
 epoch, there is no per-store physical-drain barrier. Each store's release-image
 inputs are tracked after allocation, registered before its accepting scalar
-operands/vector uop edge, and authorized by its matching public head. The manager
+operands/vector uop edge. Scalar groups authorize when their legal wrapped ROB
+age is at or older than the public head, including an already-completed store
+whose identity a head advance skips; vector groups retain exact-head authorization.
+Both operands register before that legal transition. Missing-operand head passage
+and inconsistent redirect/head combinations are defensive synthetic host checks.
+The current native ordinary executor still holds exact store heads; no new
+head-skip generation capability is claimed. A scalar
+redirect kill before authorization stays ineligible through late propagation
+acceptances. Already authorized stores retain their obligations. These are
+optional data-version permissions, not exact S2 or cache-effect timing checks. The manager
 keeps grouped independent versions across eviction/refill and validates a frozen
 whole-line candidate at first C. This covers old images and applied store bytes
 before architectural reference commit; it makes no exact early-effect timing

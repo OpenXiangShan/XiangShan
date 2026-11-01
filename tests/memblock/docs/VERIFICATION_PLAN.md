@@ -269,7 +269,12 @@ vectors retain their required whole-instruction flush-after through a serialized
 suffix barrier with low `pendingst`, zero cancellation and conservative local
 recovery; `stream_vstart_flush` records that lifecycle. This direction does not
 establish cancellation for every mixed suffix or adjacent redirect. Ordinary scalar/vector input groups
-are independently registered before acceptance and authorized by public head;
+are independently registered before acceptance. Scalar authorization includes
+wrapped head-or-older ROB ages and retains pre-authorization redirect kills
+through propagation; vectors retain an exact-head witness. These permissions
+do not assert exact S2 or cache-effect timing. Head-skip authorization has host
+evidence; the native ordinary scheduler still holds exact store heads. Forcing
+a missing operand after head passage is defensive synthetic stimulus;
 whole-line version checking supports eviction before reference commit. Entry and
 exit SBuffer/link drains isolate these epochs from untracked legacy classes;
 there is no such barrier within an epoch. Unintegrated legacy pre-notification

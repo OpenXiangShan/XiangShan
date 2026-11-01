@@ -965,8 +965,9 @@ data and identity scoreboards own terminal correctness. Split-edge acceptance
 remains legal. Scalar STA/STD helpers and ordinary initial same-store operand
 pairs now use the binding. Each accepted operand marks its independent store
 scoreboard obligation before same-edge writeback sampling, registers release
-input groups when both operands have accepted and authorizes only the public
-head owner before manager capture. Same-store STA/STD may accept together or
+input groups when both operands have accepted and authorizes eligible scalar
+head-or-older inputs before manager capture. Vector groups retain an exact-head
+witness. Same-store STA/STD may accept together or
 on different edges. The slow-feedback cursor begins at the actual STA edge;
 miss retries remain separate. Ordinary sliding load/vector/STA/STD/prefetch
 issue now uses persistent slots and a generation/attempt ledger. Admission and
@@ -1048,7 +1049,7 @@ not an ordering oracle.
 | E GrantAck | Sink must match a queued expectation; matching consumes exactly one entry. An E is accepted only after the first corresponding Grant/GrantData D beat, or in that same cycle, and every sink stays busy from first D acceptance until E. Drains check expected E entries separately from D response queues. | The expectation entry is still created when `respond` constructs Grant/GrantData; the first-D/sink-busy check supplies the causal eligibility gate. A same-cycle D/E is accepted. A sink's A source may still be reused only after its final D, which is separately checked. |
 | Probe lifecycle | Rotating 6-bit B sources, accepted-B provenance and source reuse/wrap/depth accounting. Same-PA B presentation is serialized through final matching C and waits for prior final D plus E. Standalone and automatic Probes use the recorded old VA alias. | This is a single-client manager schedule; broad manager reordering remains outside the current direction. |
 | ProbeAck/Data | Match one accepted same-PA B; C source is client-owned and fixed across beats. Exact scenario-owned expectations remain exact. Forced-data automatic toN accepts present TtoN/BtoN with full data or absent NtoN without data, rejects a B-to-T report, and checks all data bytes against the frozen independent owner image. Size/address/report/opcode/corrupt and multibeat identity are checked. | C user/echo fields do not carry reliable alias identity. NtoN does not remove an unobserved voluntary Release obligation. Arbitrary in-flight versioned data images are not modeled. |
-| Release/Data | Full-line Release validates size/alignment/shrink param before ReleaseAck. ReleaseData compares exact declared bytes, else checks a complete independent version for tracked ordinary inputs or checkpointed mapped traffic, else compares architectural reference. Backing bytes change only after complete validation. Raw address/size/source/param/beat count remain fixed. Completed shrink updates ownership; a racing release can complete before its outstanding Probe. | Ordinary input groups are registered at accepted scalar operands/vector uops and authorized by matching public head identity. First C freezes eligibility, including before-reference-commit effects. Aligned store/element groups stay indivisible; misaligned pieces can vary by byte. C user/echo fields supply no identity. Unintegrated legacy classes retain their existing fallback/notification limits, including pre-notification releases; bounded search exhaustion is a manager-contract limitation. |
+| Release/Data | Full-line Release validates size/alignment/shrink param before ReleaseAck. ReleaseData compares exact declared bytes, else checks a complete independent version for tracked ordinary inputs or checkpointed mapped traffic, else compares architectural reference. Backing bytes change only after complete validation. Raw address/size/source/param/beat count remain fixed. Completed shrink updates ownership; a racing release can complete before its outstanding Probe. | Ordinary input groups are registered at accepted scalar operands/vector uops. Scalar authorization uses wrap-aware head-or-older age and excludes redirect-killed unpermitted lifetimes; vectors retain an exact-head witness. First C freezes eligibility, including before-reference-commit effects. Aligned store/element groups stay indivisible; misaligned pieces can vary by byte. C user/echo fields supply no identity. Unintegrated legacy classes retain their existing fallback/notification limits, including pre-notification releases; bounded search exhaustion is a manager-contract limitation. |
 | C under stall | A snapshot includes all sampled C fields and data. Dropped valid or a changed payload after a stalled cycle fails. Target release windows count attributed stalls and comparisons. | Stability between stalled cycles is distinct from multibeat identity across accepted beats. The latter is incomplete. |
 
 All DCache lifecycle details above come from
@@ -1072,8 +1073,21 @@ The initial line anchor is independent reference memory certified by that entry
 drain. Every ordinary write in the epoch is registered before it can change that
 reference. A scalar group requires both accepted STA and STD; a vector group
 requires its accepted uop. Registration precedes the accepting edge, and matching
-public `pendingPtr` authorizes it before a head-eligible edge. Normal cacheable SQ
-eligibility does not additionally require `pendingst`. Absolute SQ targets plus
+public `pendingPtr` authorizes it before a head-eligible edge. For scalar stores,
+this includes already-completed allocated scalar identities skipped by a public
+head advance, with both operands registered before that transition and wrap-aware
+age comparison. Normal ROB advancement cannot pass a scalar store before both
+STA/STD complete. Host cases forcing a missing operand after head passage are
+defensive synthetic checks, not full-CPU timing or native generation evidence.
+Younger scalar identities and opposite-flag equal values do not qualify. A
+redirect kill observed before authorization remains sticky through propagation,
+including late accepted operands, until the returned cancellation boundary
+removes the record. Previously authorized inputs retain their obligations.
+Vector groups keep their exact-head witness; the scalar rule does not establish
+vector commit-feedback eligibility. Normal cacheable SQ
+eligibility does not additionally require `pendingst` or scalar `scommit`. This
+optional-version value oracle does not assert exact S2, registered-head or
+cache-application timing. Absolute SQ targets plus
 element/byte positions order groups even when inputs arrive out of order.
 
 The [manager](../cpp/environment/dcache_agent.inc) retains eligible groups across

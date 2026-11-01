@@ -226,20 +226,111 @@ static void pressure_replay() {
     e.tick(); require(e.memory_agent_.registrations==1 && e.memory_agent_.authorizations==1,"replay duplicated manager group");
 }
 static void younger_head_flags() {
-    ReleaseInputFixture e; auto older=scalar(255,62), younger=scalar(0,0); younger.rob_flag=true; younger.sq_flag=true;
+    ReleaseInputFixture e; auto older=scalar(159,62), younger=scalar(0,0); younger.rob_flag=true; younger.sq_flag=true;
     auto v=vector(0,1); v.rob_flag=true; v.sq_flag=true; v.vstart=0;
-    e.allocate(older,64); e.allocate(younger,65); e.allocate(v,66); e.head(255);
+    e.allocate(older,64); e.allocate(younger,65); e.allocate(v,66); e.head(159);
     require(e.track_store_release_inputs(older)&&e.track_store_release_inputs(younger)&&e.track_vector_release_inputs(v),"head setup rejected");
     require(e.issue_store_address(younger)&&e.issue_store_data(younger)&&e.issue_vector(v),"younger input rejected");
     require(e.memory_agent_.authorizations==0,"younger input authorized before matching head");
     e.head(0,false); e.tick(); require(e.memory_agent_.authorizations==0,"ROB flag mismatch authorized input");
-    e.head(1,true); e.tick(); require(e.memory_agent_.authorizations==0,"nonmatching younger head authorized input");
+    e.head(1,true); e.tick();
+    require(!e.vector_release_inputs_.at(ReleaseInputFixture::vector_store_key(v)).authorized,
+        "scalar passed-head permission widened vector authorization");
+    require(e.memory_agent_.authorizations==1,"passed scalar head did not authorize input");
     e.head(0,true,false); e.tick();
     require(e.memory_agent_.authorizations==4,"matching low-pendingst head did not authorize groups");
     group(e,66560,0x80002000,0x80002000,{0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88},true);
     group(e,67616,0x80002002,0x80002002,{0xa2,0xa3},true);
     e.head(12,false,true); e.tick(); e.head(0,true,false); e.tick();
     require(e.memory_agent_.authorizations==4,"head revisit duplicated authorization");
+}
+static void scalar_head_age_space() {
+    require(kRobEntries==160,"refresh literal ROB-age enumeration for configuration change");
+    unsigned cases=0,eligible=0;
+    // Independent unwrapped instruction ages. All legal live separations below
+    // one ROB capacity are checked in both directions and both wrap phases.
+    for(int head_age=320;head_age<640;++head_age)
+        for(int displacement=-159;displacement<=159;++displacement) {
+            const int store_age=head_age+displacement;
+            ReleaseInputFixture e; auto t=scalar(store_age%160);
+            t.rob_flag=(store_age/160)%2; e.allocate(t,1);
+            e.head(head_age%160,(head_age/160)%2,false);
+            require(e.track_store_release_inputs(t),"legal age tracking rejected");
+            const auto key=ReleaseInputFixture::scalar_store_key(t);
+            require(e.accept_release_store_input(key,false,false)&&
+                e.accept_release_store_input(key,false,true)&&e.authorize_release_store_inputs(),
+                "age-space accepted input rejected");
+            const bool expected=store_age<=head_age;
+            require(e.memory_agent_.groups.at(1024).authorized==expected,
+                "scalar public-head age decision differs from unwrapped instruction age");
+            eligible+=expected; ++cases;
+        }
+    std::cout<<"HEAD_AGE cases="<<cases<<" eligible="<<eligible<<'\n';
+}
+static void scalar_late_operands() {
+    // Defensive host schedules: normal ROB advancement cannot pass a scalar
+    // store before both STA/STD complete. This directly challenges bookkeeping.
+    for(bool data_first:{false,true}) for(unsigned start:{0U,158U,159U,318U,319U}) {
+        ReleaseInputFixture e; auto t=scalar(start%160); t.rob_flag=(start/160)%2;
+        e.allocate(t,1); e.head((start+319)%160,((start+319)/160)%2);
+        require(e.track_store_release_inputs(t),"late-operand tracking rejected");
+        require(data_first?e.issue_store_data(t):e.issue_store_address(t),"late first operand rejected");
+        require(e.memory_agent_.groups.empty(),"one late operand registered input");
+        e.head((start+1)%160,((start+1)/160)%2);
+        e.inspect_edge=[&](auto &f) {
+            require(f.memory_agent_.registrations==1&&f.memory_agent_.authorizations==1,
+                "second operand after passed head missed pre-edge authorization");
+        };
+        require(data_first?e.issue_store_address(t):e.issue_store_data(t),"late second operand rejected");
+        e.inspect_edge={}; e.tick();
+        require(e.memory_agent_.authorizations==1,"passed-head authorization repeated");
+    }
+}
+static void scalar_redirect_authorization() {
+    // Defensive public-port combinations, including inconsistent advanced heads;
+    // these exclusion checks are not claims of full-CPU redirect reachability.
+    for(unsigned anchor:{0U,158U,159U,160U,318U,319U})
+        for(int displacement:{-1,0,1}) for(bool flush:{false,true}) {
+            const unsigned store_age=320+anchor+displacement;
+            const unsigned boundary=320+anchor;
+            ReleaseInputFixture e; auto t=scalar(store_age%160);t.rob_flag=(store_age/160)%2;
+            e.allocate(t,1);e.head(t.rob,t.rob_flag,false);
+            auto &r=e.dut_.queues.redirect;
+            r.valid.set(1);r.rob_idx_value.set(boundary%160);r.rob_idx_flag.set((boundary/160)%2);r.level.set(flush);
+            require(e.track_store_release_inputs(t)&&e.issue_store_address(t)&&e.issue_store_data(t),
+                "redirect authorization setup rejected");
+            const bool survives=displacement<0||(displacement==0&&!flush);
+            require(e.memory_agent_.groups.at(1024).authorized==survives,
+                "redirect-killed input became eligible for release versions");
+        }
+    ReleaseInputFixture invalid;auto t=scalar(160);invalid.allocate(t,1);
+    require(!invalid.track_store_release_inputs(t)&&invalid.scalar_release_inputs_.empty(),
+        "invalid scalar ROB value entered age comparison");
+}
+static void scalar_redirect_late_operands() {
+    // Defensive host propagation and survivor checks, not native CPU timing.
+    for(bool data_first:{false,true})for(unsigned accepted_before:{0U,1U,2U}) {
+        ReleaseInputFixture e;auto t=scalar(0);t.rob_flag=true;e.allocate(t,1);e.head(159,false,false);
+        require(e.track_store_release_inputs(t),"redirect late tracking rejected");
+        if(accepted_before>0)require(data_first?e.issue_store_data(t):e.issue_store_address(t),"redirect first operand rejected");
+        if(accepted_before>1)require(data_first?e.issue_store_address(t):e.issue_store_data(t),"redirect second operand rejected");
+        auto &r=e.dut_.queues.redirect;r.valid.set(1);r.rob_idx_value.set(159);r.rob_idx_flag.set(false);r.level.set(false);
+        e.tick();r.valid.set(0);
+        // Challenge an advanced public head after the pulse. The sticky kill
+        // must exclude versions throughout propagation, before record removal.
+        e.head(1,true,false);
+        if(accepted_before==0)require(data_first?e.issue_store_data(t):e.issue_store_address(t),"redirect late first rejected");
+        if(accepted_before<2)require(data_first?e.issue_store_address(t):e.issue_store_data(t),"redirect late second rejected");
+        e.tick();e.tick();
+        require(e.memory_agent_.registrations==1&&e.memory_agent_.authorizations==0,
+            "redirect propagation authorized killed input");
+    }
+    ReleaseInputFixture survivor;auto t=scalar();survivor.allocate(t,1);survivor.head(t.rob);
+    require(survivor.track_store_release_inputs(t)&&survivor.issue_store_address(t)&&survivor.issue_store_data(t),
+        "authorized survivor setup rejected");
+    auto &r=survivor.dut_.queues.redirect;r.valid.set(1);r.rob_idx_value.set(t.rob);r.level.set(true);survivor.tick();
+    require(survivor.memory_agent_.authorizations==1&&!survivor.scalar_release_inputs_.begin()->second.redirect_killed,
+        "redirect revoked an already-authorized store input");
 }
 static void scalar_grouping() {
     for(auto [op,width]:{std::pair{StoreOp::sb,1U},{StoreOp::sh,2U},{StoreOp::sw,4U},{StoreOp::sd,8U}}) {
@@ -387,6 +478,9 @@ int main(int argc,char **argv) {
         require(argc==2,"one fixture case required"); std::string name=argv[1];
         if(name=="sta_first")scalar_orders(false); else if(name=="std_first")scalar_orders(true);
         else if(name=="pressure_replay")pressure_replay(); else if(name=="head_flags_wrap")younger_head_flags();
+        else if(name=="scalar_head_age_space")scalar_head_age_space(); else if(name=="scalar_late_operands")scalar_late_operands();
+        else if(name=="scalar_redirect_authorization")scalar_redirect_authorization();
+        else if(name=="scalar_redirect_late_operands")scalar_redirect_late_operands();
         else if(name=="scalar_grouping")scalar_grouping(); else if(name=="scalar_pages")scalar_pages();
         else if(name=="vector_mask_replay")vector_mask_replay(); else if(name=="vector_addresses")vector_addresses();
         else if(name=="vector_misaligned_inactive")vector_misaligned_inactive();

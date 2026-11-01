@@ -494,7 +494,7 @@ auto Environment::Impl::track_store_release_inputs(const StoreTransaction &trans
 {
     const auto key = scalar_store_key(transaction);
     const auto target = queues_.scalar_store_target(key);
-    if (!target || !transaction.cacheable || static_cast<unsigned>(transaction.op) > 3U ||
+    if (!target || transaction.rob >= kRobEntries || !transaction.cacheable || static_cast<unsigned>(transaction.op) > 3U ||
         transaction.expected_exception_mask || transaction.input_exception_mask ||
         transaction.input_flush_pipe || transaction.input_trigger != kTriggerNone ||
         transaction.expected_output_flush_pipe.value_or(false) ||
@@ -573,14 +573,38 @@ auto Environment::Impl::accept_release_store_input(std::uint64_t key, bool vecto
 
 auto Environment::Impl::authorize_release_store_inputs() -> bool
 {
+    const auto head = dut_.queues.backend.pending_ptr_value.value();
+    const bool head_flag = dut_.queues.backend.pending_ptr_flag.boolean();
+    const auto &redirect = dut_.queues.redirect;
     for (auto *tracked : {&scalar_release_inputs_, &vector_release_inputs_})
         for (auto &[key, inputs] : *tracked) {
-            if (!inputs.registered || inputs.authorized ||
-                dut_.queues.backend.pending_ptr_value.value() != inputs.rob ||
-                dut_.queues.backend.pending_ptr_flag.value() != inputs.flag) continue;
-            // Normal cacheable SQ effects use the public oldest identity.
-            // pendingst controls special-store/ROB modes and is not a further
-            // normal scalar/vector SQ eligibility condition.
+            if (inputs.authorized) continue;
+            if (tracked == &scalar_release_inputs_ && redirect.valid.boolean()) {
+                const bool same = inputs.rob == redirect.rob_idx_value.value() &&
+                    inputs.flag == redirect.rob_idx_flag.boolean();
+                const bool younger = inputs.flag == redirect.rob_idx_flag.boolean()
+                    ? inputs.rob > redirect.rob_idx_value.value()
+                    : inputs.rob < redirect.rob_idx_value.value();
+                // Keep killed, unregistered inputs ineligible when a delayed
+                // accepting operand arrives during redirect propagation. The
+                // returned cancellation boundary still owns record removal.
+                inputs.redirect_killed |= younger || (same && redirect.level.boolean());
+            }
+            if (!inputs.registered || inputs.redirect_killed) continue;
+            const bool same_head = inputs.rob == head && inputs.flag == head_flag;
+            // Scalar SQ eligibility includes already-completed allocated stores
+            // skipped by a public head advance. Missing-operand head passage is
+            // defensive host stimulus, not CPU timing. Compare legal live ROB
+            // ages across wrap; opposite-flag equal values are not live older.
+            // Vector commit feedback has a separate contract; keep its exact
+            // head witness rather than widening it with the scalar rule.
+            const bool eligible = tracked == &vector_release_inputs_ ? same_head :
+                head < kRobEntries && (inputs.flag == head_flag
+                    ? inputs.rob <= head : inputs.rob > head);
+            if (!eligible) continue;
+            // This optional-version value oracle does not assert exact S2,
+            // registered-head or cache-effect timing. pendingst/scommit are not
+            // additional normal scalar SQ eligibility conditions.
             for (const auto &group : inputs.groups)
                 if (!memory_agent_.authorize_release_store(group.order)) {
                     error_.merge(memory_agent_.failures());

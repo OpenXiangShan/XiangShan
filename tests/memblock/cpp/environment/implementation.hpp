@@ -1574,6 +1574,7 @@ private:
     struct ReleaseStoreInputs {
         unsigned rob;
         bool flag, address = false, data = false, registered = false, authorized = false;
+        bool redirect_killed = false;
         std::vector<ReleaseInputGroup> groups;
     };
     std::map<std::uint64_t, ReleaseStoreInputs> scalar_release_inputs_, vector_release_inputs_;
