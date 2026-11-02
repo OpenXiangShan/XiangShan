@@ -27,9 +27,14 @@ on:
         required: false
         type: string
       cst_file:
-          description: Constantin file path (empty for default init setting, or file path for specific file)
-          required: false
-          type: string
+        description: Constantin file path (empty for default init setting, or file path for specific file)
+        required: false
+        type: string
+      disable_diff:
+        description: Disable difftest
+        required: false
+        type: boolean
+        default: false
       enable_db:
         description: Enable ChiselDB dump
         required: false
@@ -152,6 +157,10 @@ jobs:
           else
             echo "CST_COMPILE_OPT=" >> $GITHUB_ENV
             echo "CST_RUN_OPT=" >> $GITHUB_ENV
+          fi
+          # prepend -nodiff to SPEC_TAG if disable_diff is true, to prevent no-diff runs are treated as normal runs in the report
+          if [[ "${{ inputs.disable_diff }}" == "true" ]]; then
+            SPEC_TAG="${SPEC_TAG}-nodiff"
           fi
           SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}${SPEC_TAG}"
 
@@ -283,7 +292,7 @@ jobs:
             --emu-path "$SPEC_DIR/emu-${{ inputs.emulator }}" \
             --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
             --server-list "$SERVER_LIST" \
-            --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
+            ${{ !inputs.disable_diff && '--nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so' || '' }} \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
             ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
             --run \

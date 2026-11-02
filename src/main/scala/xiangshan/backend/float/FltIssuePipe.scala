@@ -6,23 +6,18 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
 import utility.{PerfCCT, XSPerfAccumulate}
-import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
+import xiangshan.backend.datapath.DataConfig.FpData
 import xiangshan.backend.datapath.RdConfig._
-import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.vector.Bundles.Vxrm
-import xiangshan.backend.regfile.PregParams
-import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue
-import xiangshan.backend.vector.datapath.VecImmExtractor
 import xiangshan.backend.vector.ExuParam
 import xiangshan.backend.vector.fu.VecFuConfig
 import xiangshan.backend.float.FltIssueQueue.{FltEarlyWakeUpBundle, FltWakeUpBundle}
 import xiangshan.backend.float.FltIssueQueue.FltRespBundle
 import xiangshan.backend.vector.Exu
 import xiangshan.backend.vector.IssuePipe.{RfReadAddrBundle, RfReadDataBundle}
-import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, RespBundle, WakeUpBundle}
-import xiangshan.mem.StoreQueueDataWrite
+import xiangshan.backend.vector.VecIssueQueue.BypassDelay
 import xiangshan.{HasXSParameter, LoadCancelIO, Redirect, XSBundle}
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
@@ -33,7 +28,6 @@ class FltIssuePipe(
   override def desiredName: String = param.getDefinitionNameOfPipe
 
   val readPortCfgs: Seq[Set[RdConfig]] = param.readPortCfgs.map(_.toSet)
-  val vlReadPortCfgs: VlRD = param.vlRD
 
   val in = IO(Input(new FltIssuePipe.In(param)))
   val out = IO(Output(new FltIssuePipe.Out(param)))
@@ -64,16 +58,6 @@ class FltIssuePipe(
 
   is0.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueArb.id.U, is0.valid, clock, reset))
   is1.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is1.valid, clock, reset))
-
-   private def hasScalarRfRead(gpRen: Vec[Bool], fpRen: Vec[Bool], bypassDelay: Vec[UInt]): Bool = {
-    val gpRfRead = gpRen.zip(bypassDelay).map {
-      case (ren, delay) => ren && delay >= BypassDelay.delay2
-    }
-    val fpRfRead = fpRen.zip(bypassDelay).map {
-      case (ren, delay) => ren && delay >= BypassDelay.delay2
-    }
-    (gpRfRead ++ fpRfRead).foldLeft(false.B)(_ || _)
-  }
 
   /**
    * is0 stage
@@ -209,15 +193,6 @@ class FltIssuePipe(
     is1.bits := is1Next.bits
   }
 
-
-  val is2ImmNext: Option[UInt] = Option.when(is1.bits.imm.nonEmpty)(VecImmExtractor(
-    VLEN, param.immTypes
-  )(
-    is1.bits.imm.get,
-    is1.bits.immType.get,
-    is1.bits.vtype.get.vsew
-  ))
-
   ex0Next.valid := is1.valid && !is1Flush &&
     !ex0RespSrcCancelNext.reduce(_ || _) && !is1FmaM4NoM2Cancel
   ex0Next.bits.ctrl.fromIssueDeq(is1.bits)
@@ -248,7 +223,7 @@ class FltIssuePipe(
   }
   exu.in.busyTableEmpty.foreach(_ := in.busyTableEmpty.get)
   exu.in.frm.zip(in.frm).foreach { case (sink, source) => sink := source }
-  for ((rdCfgs, srcIdx) <- param.readPortCfgs.zipWithIndex) {
+  for (srcIdx <- param.readPortCfgs.indices) {
     exu.in.fpRdData(srcIdx) := Mux(
       ex0Next.bits.bypassCtrl.fpRen(srcIdx),
       in.is1FpRdDataNext.find(_.srcIdx == srcIdx).get.data,
@@ -257,7 +232,6 @@ class FltIssuePipe(
   }
   exu.in.fpWb0Next := in.fpWb0Next
   exu.in.fpWb0 := in.fpWb0
-  exu.in.fpWb1 := in.fpWb1
 
   out.gpWbNext.foreach(_ := exu.out.uop.bits.toGpRf.get)
   out.fpWbNext.foreach(_ := exu.out.uop.bits.toFpRf.get)
@@ -359,14 +333,12 @@ object FltIssuePipe {
     val flush = ValidIO(new Redirect)
     val is0Next: ValidIO[VecIssueQueue.Deq] = ValidIO(new VecIssueQueue.Deq(param))
     val is0RdFail = Bool()
-    val is0WtFail = Bool()
     val ldCancel = Vec(backendParams.LdExuCnt, Input(new LoadCancelIO))
     val ex0RespFailLat1 = Vec(backendParams.getFltRegionParam.getFpWriteSize, Bool())
     val fpWbM2Vec = Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
     val is1FpRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.fpPregParams)
     val fpWb0Next = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
-    val fpWb1 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     val frm = Option.when(param.readFrm)(Frm())
     val busyTableEmpty = Option.when(param.fuConfigs.find(_.isFdiv).nonEmpty)(Bool())
     val busyTableI2F = Option.when(param.fuConfigs.contains(VecFuConfig.FcvtCfg))(UInt(3.W)) // i2f latency = 3

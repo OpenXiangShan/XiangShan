@@ -8,6 +8,8 @@ env:
   FUZZ_NUM: 20 # per json file
   CKPT_BASE: /nfs/share/checkpoints_profiles
   CKPT_BASE_LEGACY: /nfs/share/checkpoints_profiles/legacy
+  PROFILE_PATH: /nfs/share/ci-workloads/env-scripts/perf_trigger/profile/data
+  ETA_THRESHOLD: 30000 # do not run checkpoints longer than this, in seconds, see PROFILE_PATH/xxx.json for ETA
 
 jobs:
   run:
@@ -32,6 +34,8 @@ jobs:
           RESULT_LIST=$(python3 $GITHUB_WORKSPACE/.github/workflows/ckpt_select.py \
             --output list \
             --seed ${{ github.run_number }} \
+            --profile "${PROFILE_PATH}" \
+            --eta-threshold "${ETA_THRESHOLD}" \
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0-int.json" \
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
@@ -47,10 +51,13 @@ jobs:
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
           SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}-DefaultConfig"
           # save list
-          RESULT_PATH="${SPEC_DIR}/fuzz.f"
+          RESULT_PATH="${SPEC_DIR}/fuzz-$(date '+%y%m%d').f"
           mkdir -p "${SPEC_DIR}"
           echo "${RESULT_LIST}" > "${RESULT_PATH}"
           echo "RESULT_PATH=${RESULT_PATH}" >> "$GITHUB_OUTPUT"
+          # display to log
+          echo "Selected checkpoints:"
+          cat "${RESULT_PATH}"
 
   run-fuzz:
     needs: select

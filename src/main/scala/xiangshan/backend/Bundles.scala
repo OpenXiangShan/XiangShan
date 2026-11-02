@@ -201,7 +201,7 @@ object Bundles {
     val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
 
     def isSoftPrefetch: Bool = {
-      fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
+      FuType.isLoad(fuType) && LSUOpType.isPrefetch(fuOpType)
     }
 
     def connectDecodeInUop(source: DecodeInUop): Unit = {
