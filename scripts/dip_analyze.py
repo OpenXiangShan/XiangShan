@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Finalize dispatch samples using the complete Dip_<hart> lifecycle trace."""
+"""Finalize sparse DIP samples using their selected-target events."""
 import argparse
 from collections import Counter, defaultdict
 import csv
@@ -34,109 +34,75 @@ def cause_name(state, cause):
     return '+'.join(name for bit, name in enumerate(CAUSES[state]) if cause & (1 << bit)) or 'None'
 
 
-def analyze(rows, width, commit_width, warmup_instr=0, end_cycle=None):
-    # Key includes wrap flag and Former/Latter. All members/uops sharing a ROB
-    # slot share retirement fate, but retain their own static PC in the Counter.
+def target(row, prefix):
+    return (row[prefix + '_GENERATION'], *pointer(row, prefix + '_ROBIDX'))
+
+
+def analyze(samples, finals, width, warmup_instr=0, end_cycle=None):
+    # Events precede the sample at the same cycle, just as in the RTL tracker.
+    from heapq import merge
     pending = defaultdict(Counter)
-    waiting = Counter()
+    waiting = defaultdict(Counter)
     profile = Counter()
-    sampled_cycles = 0
-    trace_rows = 0
-    reclassified = 0
-    retired = 0
-    retired_at_begin = 0
-    begin_cycle = None
-    last_cycle = None
-    last_flush_target = None
-    last_flush_settled = False
-
-    for row in rows:
-        trace_rows += 1
-        cycle = row['ROB_CYCLE']
-        inside_end = end_cycle is None or cycle < end_cycle
-        if inside_end:
-            last_cycle = cycle
-        if begin_cycle is None and warmup_instr == 0:
-            begin_cycle = cycle
-        if inside_end:
-            retired += row['ROB_RETIRED']
-        if begin_cycle is None and retired >= warmup_instr:
-            begin_cycle = cycle + 1
-            retired_at_begin = retired
-        flush = row['ROB_FLUSH_VALID']
-        if flush:
-            culprit = pointer(row, 'ROB_FLUSH_BITS_ROBIDX')
-            last_flush_target = culprit
-            last_flush_settled = False
-            pc = row['ROB_FLUSH_BITS_PC'] & ((1 << 64) - 1)
-            cause = row['ROB_FLUSH_BITS_CAUSE']
-            lost = sum(waiting.values())
-            newly_reclassified = lost
-            waiting.clear()
-            for target in list(pending):
-                if target is not None and killed(target, culprit, row['ROB_FLUSH_BITS_SELF']):
-                    counts = pending.pop(target)
-                    lost += sum(counts.values())
-                    newly_reclassified += sum(count for (state, _, _), count in counts.items() if state != 3)
-            if lost:
-                pending[culprit][(3, cause, pc)] += lost
-            reclassified += newly_reclassified
-
-        for lane in range(2 * commit_width):
-            prefix = f'ROB_COMMITS_{lane}'
-            if row[prefix + '_VALID']:
-                target = pointer(row, prefix + '_BITS')
-                profile.update(pending.pop(target, Counter()))
-                # A self-flushed exception/load need not retire at its old
-                # slot. An in-order commit at or beyond it settles the older
-                # context before ROB indices can be reused.
-                for cause_target in list(pending):
-                    if cause_target is not None and killed(target, cause_target, True):
-                        counts = pending[cause_target]
-                        settled = Counter({key: count for key, count in counts.items() if key[0] == 3})
+    sampled_cycles = reclassified = sample_rows = final_rows = 0
+    first = last = None
+    records = merge(((r['CYCLE'], 1, r) for r in samples),
+                    ((r['CYCLE'], 0, r) for r in finals), key=lambda x: x[:2])
+    for cycle, is_sample, row in records:
+        if not is_sample:
+            final_rows += 1
+            kind = row['KIND']
+            ref = target(row, 'TARGET')
+            if kind == 0:  # selected ROB slot committed
+                profile.update(pending.pop(ref, Counter()))
+            elif kind == 1:  # selected work was squashed: keep the cause provisional
+                lost = Counter()
+                for counts in waiting.values():
+                    lost.update(counts)
+                waiting.clear()
+                for old in list(pending):
+                    if killed(old[1:], ref[1:], row['SELF']):
+                        lost.update(pending.pop(old))
+                reclassified += sum(n for (state, _, _), n in lost.items() if state != 3)
+                if lost:
+                    pending[ref][(3, row['CAUSE'], row['PC'] & ((1 << 64) - 1))] += sum(lost.values())
+            elif kind == 2:  # the first Dispatch successor resolves frontend/rename waiting
+                successor = target(row, 'NEXT')
+                pc = row['PC'] & ((1 << 64) - 1)
+                for (state, cause, _), count in waiting.pop(ref[0], Counter()).items():
+                    pending[successor][(state, row['CAUSE'] if state == 2 else cause, pc)] += count
+            elif kind == 3:  # a commit at/beyond a self-flushed cause settles it
+                for old in list(pending):
+                    if killed(ref[1:], old[1:], True):
+                        settled = Counter({k: n for k, n in pending[old].items() if k[0] == 3})
                         profile.update(settled)
-                        counts -= settled
-                        if not counts:
-                            del pending[cause_target]
-                if last_flush_target is not None and killed(target, last_flush_target, True):
-                    last_flush_settled = True
+                        pending[old] -= settled
+                        if not pending[old]:
+                            del pending[old]
+            continue
 
-        if row['DISPATCH_VALIDMASK'] and not flush:
-            first = (row['DISPATCH_VALIDMASK'] & -row['DISPATCH_VALIDMASK']).bit_length() - 1
-            prefix = f'DISPATCH_UOPS_{first}'
-            target = pointer(row, prefix + '_ROBIDX')
-            pc = row[prefix + '_PC'] & ((1 << 64) - 1)
-            frontend_cause = row[prefix + '_PSV'] & 3 or 4
-            for (state, cause), count in waiting.items():
-                pending[target][(state, frontend_cause if state == 2 else cause, pc)] += count
-            waiting.clear()
-
-        if not row['SAMPLED'] or begin_cycle is None or cycle < begin_cycle or not inside_end:
+        sample_rows += 1
+        if row['TOTALRETIRED'] < warmup_instr or end_cycle is not None and cycle >= end_cycle:
             continue
         sampled_cycles += 1
+        if first is None:
+            first = row
+        last = row
         for lane in range(width):
             prefix = f'SLOTS_{lane}'
-            state = row[prefix + '_STATE']
-            cause = row[prefix + '_CAUSE']
-            if row[prefix + '_TARGETVALID']:
-                pc = row[prefix + '_TARGET_PC'] & ((1 << 64) - 1)
-                if state == 3:
-                    # A younger mispredicted branch can itself be squashed by
-                    # an older redirect. Keep its slots provisional too.
-                    if last_flush_settled:
-                        profile[(state, cause, pc)] += 1
-                    else:
-                        pending[last_flush_target][(state, cause, pc)] += 1
-                else:
-                    target = pointer(row, prefix + '_TARGET_ROBIDX')
-                    pending[target][(state, cause, pc)] += 1
+            key = (row[prefix + '_STATE'], row[prefix + '_CAUSE'], row[prefix + '_PC'] & ((1 << 64) - 1))
+            kind = row[prefix + '_KIND']
+            ref = target(row, prefix + '_TARGET')
+            if kind == 0:
+                profile[key] += 1
+            elif kind == 1:
+                pending[ref][key] += 1
             else:
-                waiting[(state, cause)] += 1
+                waiting[ref[0]][key] += 1
 
-    if begin_cycle is None or last_cycle is None or last_cycle < begin_cycle:
-        raise ValueError('trace does not contain a measurement window after warmup')
-    roi_cycles = last_cycle - begin_cycle + 1
-    unresolved = sum(waiting.values()) + sum(sum(counts.values()) for counts in pending.values())
+    if first is None:
+        raise ValueError('DIP contains no samples inside the requested measurement window')
+    unresolved = sum(sum(c.values()) for c in waiting.values()) + sum(sum(c.values()) for c in pending.values())
     resolved = sum(profile.values())
     total = sampled_cycles * width
     if resolved + unresolved != total:
@@ -144,13 +110,17 @@ def analyze(rows, width, commit_width, warmup_instr=0, end_cycle=None):
     states = Counter()
     for (state, cause, pc), count in profile.items():
         states[STATES[state]] += count
+    span = last['CYCLE'] - first['CYCLE'] + 1
+    retired = last['TOTALRETIRED'] + last['RETIRED'] - first['TOTALRETIRED']
     summary = {
         'dispatch_width': width,
-        'roi_begin_cycle': begin_cycle,
-        'roi_end_cycle': last_cycle,
-        'roi_cycles': roi_cycles,
-        'roi_retired': retired - retired_at_begin,
-        'roi_ipc': (retired - retired_at_begin) / roi_cycles,
+        'warmup_instr': warmup_instr,
+        'end_cycle': end_cycle,
+        'sampled_begin_cycle': first['CYCLE'],
+        'sampled_end_cycle': last['CYCLE'],
+        'sampled_span_cycles': span,
+        'sampled_span_retired': retired,
+        'sampled_span_ipc': retired / span,
         'sampled_cycles': sampled_cycles,
         'sampled_slots': total,
         'resolved_slots': resolved,
@@ -158,7 +128,9 @@ def analyze(rows, width, commit_width, warmup_instr=0, end_cycle=None):
         'unresolved_cycles': unresolved / width,
         'reclassified_slots': reclassified,
         'state_cycles': {state: states[state] / width for state in STATES},
-        'trace_rows': trace_rows,
+        'sample_rows': sample_rows,
+        'final_rows': final_rows,
+        'trace_rows': sample_rows + final_rows,
         'weight_unit': 'sampled cycles (one slot = 1 / dispatch_width)',
     }
     return profile, summary
@@ -169,18 +141,21 @@ def main():
     parser.add_argument('database', type=Path)
     parser.add_argument('--hart', type=int, default=0)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--warmup-instr', type=int, default=0, help='exclude cycles up to the first retirement boundary reaching this count')
-    parser.add_argument('--end-cycle', type=int, help='exclusive measurement end; later lifecycle records still finalize samples')
+    parser.add_argument('--warmup-instr', type=int, default=0, help='exclude samples whose preceding retirement prefix is below this count')
+    parser.add_argument('--end-cycle', type=int, help='exclusive measurement end; later final records still finalize samples')
     args = parser.parse_args()
     with sqlite3.connect(f'file:{args.database.resolve()}?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
         table = f'Dip_{args.hart}'
         columns = [row[1] for row in db.execute(f'PRAGMA table_info({table})')]
         width = sum(column.endswith('_STATE') and column.startswith('SLOTS_') for column in columns)
-        commit_width = sum(column.endswith('_VALID') and column.startswith('ROB_COMMITS_') for column in columns) // 2
-        if not width or not commit_width:
-            raise ValueError(f'{table} is missing; build WITH_TEA=1 and record --dump-select-db {table}')
-        profile, summary = analyze(db.execute(f'SELECT * FROM {table} ORDER BY ROB_CYCLE, ID'), width, commit_width, args.warmup_instr, args.end_cycle)
+        final_table = f'DipDelayedFinal_{args.hart}'
+        if not width or not db.execute('SELECT 1 FROM sqlite_master WHERE name=?', (final_table,)).fetchone():
+            raise ValueError(f'record both {table} and {final_table} with WITH_TEA=1')
+        profile, summary = analyze(
+            db.execute(f'SELECT * FROM {table} ORDER BY CYCLE, ID'),
+            db.execute(f'SELECT * FROM {final_table} ORDER BY CYCLE, CASE KIND WHEN 1 THEN 0 WHEN 0 THEN 1 WHEN 3 THEN 2 ELSE 3 END, ID'),
+            width, args.warmup_instr, args.end_cycle)
     args.output.mkdir(parents=True, exist_ok=True)
     with (args.output / 'pics.csv').open('w', newline='') as stream:
         writer = csv.writer(stream)
