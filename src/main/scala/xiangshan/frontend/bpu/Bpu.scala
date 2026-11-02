@@ -354,11 +354,21 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   })
 
   private val s2_takenMask = VecInit(mbtb.io.result.zipWithIndex.map { case (entry, i) =>
-    val tagePredValid = tage.io.prediction.fastTakenVec(i).valid
-    val tagePred      = tage.io.prediction.fastTakenVec(i).bits
-    s2_isJumpVec(i) || (s2_isCondVec(i) && Mux(tagePredValid, tagePred, entry.bits.taken))
+    val isCond = s2_isCondVec(i)
+    val isJump = s2_isJumpVec(i)
+
+    val tageTakenValid = tage.io.prediction.fastTakenVec(i).valid
+    val tageTaken      = tage.io.prediction.fastTakenVec(i).bits
+
+    // tageTaken arrives last, so precompute both candidates and use it only for the final selection.
+    // Substitute tageTaken = false/true into isJump || (isCond && Mux(tageTakenValid, tageTaken, entry.bits.taken)).
+    val candidateIfTageNotTaken = isJump || (isCond && (!tageTakenValid && entry.bits.taken))
+    val candidateIfTageTaken    = isJump || (isCond && (tageTakenValid || entry.bits.taken))
+
+    Mux(tageTaken, candidateIfTageTaken, candidateIfTageNotTaken)
   })
-  private val s2_taken              = s2_takenMask.reduce(_ || _)
+  private val s2_taken = s2_takenMask.reduce(_ || _)
+  // If s2_takenMask is all zero, s2_firstTakenBranchOH is also all zero.
   private val s2_firstTakenBranchOH = s2_compareMatrix.getLeastElementOH(s2_takenMask)
   private val s2_firstTakenBranch   = Mux1H(s2_firstTakenBranchOH, mbtb.io.result)
 
@@ -367,16 +377,23 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s2_prediction       := Mux(s2_taken, s2_firstTakenBranch.bits, s2_fallThroughPrediction)
   s2_prediction.taken := s2_taken
 
-  private val s2_mbtbCfiPositionDiffVec =
-    VecInit(mbtb.io.result.map(_.bits.cfiPosition =/= s2_s1Prediction.cfiPosition))
-  private val s2_mbtbAttributeDiffVec = VecInit(mbtb.io.result.map(_.bits.attribute =/= s2_s1Prediction.attribute))
-
+  // S2 does not compare targets to avoid incorrectly overriding the S1 uRAS target with the MBTB target.
   s2_override := {
-    val takenDiff       = s2_taken =/= s2_s1Prediction.taken
-    val cfiPositionDiff = s2_taken && Mux1H(s2_firstTakenBranchOH, s2_mbtbCfiPositionDiffVec)
-    val attributeDiff   = s2_taken && Mux1H(s2_firstTakenBranchOH, s2_mbtbAttributeDiffVec)
+    // Precompute the override assuming each candidate is the first taken branch.
+    val overrideCandidates = mbtb.io.result.map { entry =>
+      val takenDiff     = !s2_s1Prediction.taken
+      val positionDiff  = entry.bits.cfiPosition =/= s2_s1Prediction.cfiPosition
+      val attributeDiff = entry.bits.attribute =/= s2_s1Prediction.attribute
 
-    s2_valid && (takenDiff || cfiPositionDiff || attributeDiff)
+      s2_valid && (takenDiff || positionDiff || attributeDiff)
+    }
+
+    val notTakenOverride = s2_valid && s2_s1Prediction.taken
+
+    Mux1H(
+      s2_firstTakenBranchOH.toSeq :+ !s2_taken,
+      overrideCandidates :+ notTakenOverride
+    )
   }
 
   /* *** s3 prediction selection *** */
@@ -392,27 +409,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_isCondVec      = RegEnable(s2_isCondVec, s2_fire)
 
   private val s3_s2FirstTakenBranchOH = RegEnable(s2_firstTakenBranchOH, s2_fire)
-
-  // S2 does not compare targets. An S2 override already uses the selected MBTB target, so a later MBTB target
-  // comparison is redundant; a changed MBTB branch is caught by firstTakenBranchDiff. Only RAS/ITTAGE need target
-  // comparison after an S2 override.
-  private val s3_mbtbTargetDiffVec = VecInit(s3_mbtbResult.map { entry =>
-    Mux(
-      s3_s2Override,
-      false.B,
-      entry.bits.targetLower =/= s3_s1Prediction.targetLower
-    )
-  })
-  private val s3_ittageTargetDiff = Mux(
-    s3_s2Override,
-    ittage.io.prediction.target =/= s3_s2Prediction.target,
-    ittage.io.prediction.target =/= s3_s1Prediction.target
-  )
-  private val s3_rasTargetDiff = Mux(
-    s3_s2Override,
-    ras.io.topRetAddr =/= s3_s2Prediction.target,
-    ras.io.topRetAddr =/= s3_s1Prediction.target
-  )
 
   private val s3_takenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
     val useTage   = s3_tagePrediction.takenVec(i).valid
@@ -456,21 +452,51 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
     )
 
-  private val s3_targetDiff =
-    MuxCase(
-      false.B,
-      Seq(
-        (s3_taken && s3_useRas)    -> s3_rasTargetDiff,
-        (s3_taken && s3_useIttage) -> s3_ittageTargetDiff,
-        s3_taken                   -> Mux1H(s3_firstTakenBranchOH, s3_mbtbTargetDiffVec)
-      )
-    )
+  private val s3_targetDiff = Wire(Bool())
+  private val s3_ittageTargetDiff = Mux(
+    s3_s2Override,
+    ittage.io.prediction.target =/= s3_s2Prediction.target,
+    ittage.io.prediction.target =/= s3_s1Prediction.target
+  )
+  private val s3_rasTargetDiff = Mux(
+    s3_s2Override,
+    ras.io.topRetAddr =/= s3_s2Prediction.target,
+    ras.io.topRetAddr =/= s3_s1Prediction.target
+  )
 
   s3_override := {
-    val takenDiff            = s3_taken =/= s3_s2Prediction.taken
-    val firstTakenBranchDiff = !(s3_firstTakenBranchOH === s3_s2FirstTakenBranchOH)
+    // Precompute the override assuming each candidate is the first taken branch.
+    val (targetDiffCandidates, overrideCandidates) = s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
+      // Also detects an S2 prediction with no taken branch, whose one-hot mask is zero.
+      val firstTakenBranchDiff = !s3_s2FirstTakenBranchOH(i)
 
-    s3_valid && (takenDiff || firstTakenBranchDiff || s3_targetDiff)
+      val useRas    = entry.bits.attribute.isReturn && ras.io.enable
+      val useIttage = entry.bits.attribute.needIttage && ittage.io.prediction.hit
+
+      // An S2 override already uses the MBTB target; changing candidates is detected above.
+      val mbtbTargetDiff = !s3_s2Override && (entry.bits.targetLower =/= s3_s1Prediction.targetLower)
+      val targetDiff = MuxCase(
+        mbtbTargetDiff,
+        Seq(
+          useRas    -> s3_rasTargetDiff,
+          useIttage -> s3_ittageTargetDiff
+        )
+      )
+
+      (targetDiff, s3_valid && (firstTakenBranchDiff || targetDiff))
+    }.unzip
+
+    s3_targetDiff := Mux1H(
+      s3_firstTakenBranchOH.toSeq :+ !s3_taken,
+      targetDiffCandidates :+ false.B
+    )
+
+    val notTakenOverride = s3_valid && s3_s2Prediction.taken
+
+    Mux1H(
+      s3_firstTakenBranchOH.toSeq :+ !s3_taken,
+      overrideCandidates :+ notTakenOverride
+    )
   }
 
   private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
