@@ -612,7 +612,8 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 ) with DeprecatedConfigWarning
 
 class DefaultConfig(n: Int = 1) extends Config(
-  OpenLLCConfig("32MB", ways = 16, banks = 4)
+  new WithOceanusPrefetch(OceanusPrefetchParameters(bop = false, recv = false, vbop = false, cdp = false))
+    ++ OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
     ++ L2CacheConfig("2MB", ways = 8, inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, nCCHIChannels = 2)
