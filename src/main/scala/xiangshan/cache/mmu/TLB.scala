@@ -183,14 +183,14 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
   // read TLB, get hit/miss, paddr, perm bits
   val readResult = (0 until Width).map(TLBRead(_))
-  val hitVec = readResult.map(_._1)
-  val missVec = readResult.map(_._2)
-  val pmp_addr = readResult.map(_._3)
-  val perm = readResult.map(_._4)
-  val g_perm = readResult.map(_._5)
-  val pbmt = readResult.map(_._6)
-  val g_pbmt = readResult.map(_._7)
-  val mptPerm = Option.when(HasMptCheck) (readResult.map(_._8))
+  val hitVec = readResult.map(_.hit)
+  val missVec = readResult.map(_.miss)
+  val pmp_addr = resp.map(_.bits.paddr(0))
+  val perm = readResult.map(_.perm)
+  val g_perm = readResult.map(_.gPerm)
+  val pbmt = readResult.map(_.pbmt)
+  val g_pbmt = readResult.map(_.gPbmt)
+  val mptPerm = Option.when(HasMptCheck)(readResult.map(_.mptPerm.get))
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
@@ -268,74 +268,61 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       need_gpa_state_clear_vec(i) := true.B
     }
 
-    val hit = storage.hit || bypass.hit
-    val miss = (!hit && enable) || hasGpf(i) && !bypass.hit &&
+    val result = Wire(new TlbReadResult(nRespDups))
+    result.hit := storage.hit || bypass.hit
+    result.miss := (!result.hit && enable) || hasGpf(i) && !bypass.hit &&
       !(resp_gpa_refill && need_gpa_req_match) && !isOnlys2xlate &&
       !isPrefetch && !lastCycleRedirect ||
-      (if (HasMptCheck) mptOnlyEnable.get && !hit else false.B) // for mpt only either hit or miss
-    hit.suggestName(s"hit_read_${i}")
-    miss.suggestName(s"miss_read_${i}")
+      (if (HasMptCheck) mptOnlyEnable.get && !result.hit else false.B) // for mpt only either hit or miss
+    result.hit.suggestName(s"hit_read_${i}")
+    result.miss.suggestName(s"miss_read_${i}")
 
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
     val notTranslatePaddr = Mux(useReqS1Paddr(i), req_in(i).bits.pmp_addr, SignExt(req_out(i).vaddr, PAddrBits))
-    resp(i).bits.miss := miss
-    resp(i).bits.ptwBack := ptw.resp.fire
-    resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
-    resp(i).bits.fastMiss := !hit && enable
-
-    val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
-    val pbmt = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePbmtLen.W))))
-    val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle()))))
-    val gvpn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePPNLen.W))))
-    val level = WireInit(VecInit(Seq.fill(nRespDups)(0.U(log2Up(Level + 1).W))))
-    val isLeaf = WireInit(VecInit(Seq.fill(nRespDups)(false.B)))
-    val isFakePte = WireInit(VecInit(Seq.fill(nRespDups)(false.B)))
-    val g_pbmt = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePbmtLen.W))))
-    val g_perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle(hasV = false)))))
-    val r_s2xlate = WireInit(VecInit(Seq.fill(nRespDups)(0.U(2.W))))
-
-    val mptPerm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new MptPermBundle)))) // HasMptCheck
+    val ppn = storage.ppn.map(storedPpn => Mux(bypass.hit, bypass.ppn, storedPpn))
     for (d <- 0 until nRespDups) {
-      ppn(d) := Mux(bypass.hit, bypass.ppn, storage.ppn(d))
-      pbmt(d) := Mux(bypass.hit, bypass.pbmt, storage.pbmt(d))
-      perm(d) := Mux(bypass.hit, bypass.perm, storage.perm(d))
-      gvpn(d) :=  Mux(bypass.hit, bypass.gvpn, resp_gpa_gvpn)
-      level(d) := Mux(bypass.hit, bypass.s1Level, resp_s1_level)
-      isLeaf(d) := Mux(bypass.hit, bypass.s1IsLeaf, resp_s1_isLeaf)
-      isFakePte(d) := Mux(bypass.hit, bypass.s1IsFakePte, resp_s1_isFakePte)
-      g_pbmt(d) := Mux(bypass.hit, bypass.gPbmt, storage.g_pbmt(d))
-      g_perm(d) := Mux(bypass.hit, bypass.gPerm, storage.g_perm(d))
-      r_s2xlate(d) := Mux(bypass.hit, bypass.s2xlate, storage.s2xlate(d))
+      result.pbmt(d) := Mux(bypass.hit, bypass.pbmt, storage.pbmt(d))
+      result.perm(d) := Mux(bypass.hit, bypass.perm, storage.perm(d))
+      val gvpn = Mux(bypass.hit, bypass.gvpn, resp_gpa_gvpn)
+      val level = Mux(bypass.hit, bypass.s1Level, resp_s1_level)
+      val isLeaf = Mux(bypass.hit, bypass.s1IsLeaf, resp_s1_isLeaf)
+      val isFakePte = Mux(bypass.hit, bypass.s1IsFakePte, resp_s1_isFakePte)
+      result.gPbmt(d) := Mux(bypass.hit, bypass.gPbmt, storage.g_pbmt(d))
+      result.gPerm(d) := Mux(bypass.hit, bypass.gPerm, storage.g_perm(d))
+      val s2xlate = Mux(bypass.hit, bypass.s2xlate, storage.s2xlate(d))
       if (HasMptCheck) {
-        mptPerm(d) := Mux(bypass.hit, bypass.mptPerm.get, storage.mptperm.get(d))
+        result.mptPerm.get(d) := Mux(bypass.hit, bypass.mptPerm.get, storage.mptperm.get(d))
       }
       val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
       val vpn_idx = Mux1H(Seq(
-        (isFakePte(d) && csr.vsatp.mode === Sv39) -> 2.U,
-        (isFakePte(d) && csr.vsatp.mode === Sv48) -> 3.U,
-        (!isFakePte(d)) -> (level(d) - 1.U),
+        (isFakePte && csr.vsatp.mode === Sv39) -> 2.U,
+        (isFakePte && csr.vsatp.mode === Sv48) -> 3.U,
+        (!isFakePte) -> (level - 1.U),
       ))
       // We use `fullva` here when `isLeaf`, in order to cope with the situation of an unaligned load/store cross page
       // for example, a `ld` instruction on address 0x81000ffb will be splited into two loads
-      // 1. ld 0x81000ff8. vaddr = 0x81000ff8, fullva = 0x80000ffb
-      // 2. ld 0x81001000. vaddr = 0x81001000, fullva = 0x80000ffb
+      // 1. ld 0x81000ff8. vaddr = 0x81000ff8, fullva = 0x81000ffb
+      // 2. ld 0x81001000. vaddr = 0x81001000, fullva = 0x81000ffb
       // When load 1 trigger a guest page fault, we should use offset of fullva when generate gpaddr
-      // and when load 2 trigger a guest page fault, we should just use offset of vaddr(all zero).
+      // and when load 2 trigger a guest page fault, we should just use offset of vaddr(all zero)
       // Also, when onlyS2, if crosspage, gpaddr = vaddr(start address of a new page), else gpaddr = fullva(original vaddr)
-      // By the way, frontend handles the cross page instruction fetch by itself, so TLB doesn't need to do anything extra.
-      // Also, the fullva of iTLB is not used and always zero. crossPageVaddr should never use fullva in iTLB.
+      // By the way, frontend handles the cross page instruction fetch by itself, so TLB doesn't need to do anything extra
+      // Also, the fullva of iTLB is not used and always zero. crossPageVaddr should never use fullva in iTLB
       val crossPageVaddr = Mux(isitlb || req_out(i).fullva(12) =/= vaddr(12), req_out(i).vaddr, req_out(i).fullva)
-      val gpaddr_offset = Mux(isLeaf(d), get_off(crossPageVaddr), Cat(getVpnn(get_pn(crossPageVaddr), vpn_idx), 0.U(log2Up(XLEN/8).W)))
-      val gpaddr = Cat(gvpn(d), gpaddr_offset)
-      resp(i).bits.paddr(d) := Mux(enable, paddr, notTranslatePaddr)
-      resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, crossPageVaddr, gpaddr)
+      val gpaddr_offset = Mux(isLeaf, get_off(crossPageVaddr), Cat(getVpnn(get_pn(crossPageVaddr), vpn_idx), 0.U(log2Up(XLEN/8).W)))
+      val gpaddr = Cat(gvpn, gpaddr_offset)
+      result.paddr(d) := Mux(enable, paddr, notTranslatePaddr)
+      result.gpaddr(d) := Mux(s2xlate === onlyStage2, crossPageVaddr, gpaddr)
     }
+    resp(i).bits.paddr := result.paddr
+    resp(i).bits.gpaddr := result.gpaddr
+    resp(i).bits.miss := result.miss
+    resp(i).bits.ptwBack := ptw.resp.fire
+    resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
+    resp(i).bits.fastMiss := !result.hit && enable
 
-    XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
-
-    val pmp_paddr = resp(i).bits.paddr(0)
-
-    (hit, miss, pmp_paddr, perm, g_perm, pbmt, g_pbmt, mptPerm)
+    XSDebug(req_out_v(i), p"(${i.U}) hit:${result.hit} miss:${result.miss} ppn:${Hexadecimal(ppn(0))} perm:${result.perm(0)}\n")
+    result
   }
 
   def pmp_check(addr: UInt, size: UInt, cmd: UInt, noTranslate: Bool, idx: Int): Unit = {

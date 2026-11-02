@@ -604,6 +604,18 @@ class TlbPtwBypassResult(implicit p: Parameters) extends TlbBundle {
   val mptPerm = Option.when(HasMptCheck)(new MptPermBundle(isTlbPort = true))
 }
 
+class TlbReadResult(nDups: Int)(implicit p: Parameters) extends TlbBundle {
+  val hit = Bool()
+  val miss = Bool()
+  val paddr = Vec(nDups, UInt(PAddrBits.W))
+  val gpaddr = Vec(nDups, UInt(XLEN.W))
+  val perm = Vec(nDups, new TlbPermBundle())
+  val gPerm = Vec(nDups, new TlbPermBundle(hasV = false))
+  val pbmt = Vec(nDups, UInt(ptePbmtLen.W))
+  val gPbmt = Vec(nDups, UInt(ptePbmtLen.W))
+  val mptPerm = Option.when(HasMptCheck)(Vec(nDups, new MptPermBundle(isTlbPort = true)))
+}
+
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val gpaddr = Vec(nDups, Output(UInt(XLEN.W)))
