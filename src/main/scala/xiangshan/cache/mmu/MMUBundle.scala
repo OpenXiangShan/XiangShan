@@ -23,6 +23,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
+import utility.PopCount
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}

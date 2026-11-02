@@ -32,6 +32,7 @@ import freechips.rocketchip.tilelink._
 import huancun.{AliasKey, DirtyKey, PrefetchKey}
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utility.PopCount
 import xiangshan._
 import xiangshan.mem.LqPtr
 import xiangshan.mem.prefetch._

@@ -22,6 +22,7 @@ import chisel3.util._
 import chisel3.util.experimental.decode._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
+import utility.PopCount
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}

@@ -6,6 +6,7 @@ import chisel3.util._
 import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
+import utility.PopCount
 import utils.SeqUtils._
 import utils._
 import xiangshan._

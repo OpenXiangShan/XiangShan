@@ -10,6 +10,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.regfile.PregParams
 import utility._
+import utility.PopCount
 import xiangshan.backend.rob.RobPtr
 import yunsuan.vector.LZD
 

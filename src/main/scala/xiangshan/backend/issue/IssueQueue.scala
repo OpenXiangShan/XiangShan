@@ -4,6 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility._
+import utility.PopCount
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.EntryBundles._

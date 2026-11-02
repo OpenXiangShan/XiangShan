@@ -22,6 +22,7 @@ import chisel3.experimental.hierarchy.{Definition, instantiable}
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
+import utility.PopCount
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnitInput, UncertainLatency}
 import xiangshan.backend.Bundles._
 import xiangshan.{AddrTransType, FPUCtrlSignals, HasXSParameter, Redirect, Resolve, XSBundle, XSModule}

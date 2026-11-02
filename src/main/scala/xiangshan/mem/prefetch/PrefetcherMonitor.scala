@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
+import utility.PopCount
 import xiangshan._
 import xiangshan.mem.L1PrefetchReq
 import xiangshan.mem.Bundles.LsPrefetchTrainBundle

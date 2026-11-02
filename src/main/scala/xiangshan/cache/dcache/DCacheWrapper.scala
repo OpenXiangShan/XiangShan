@@ -26,6 +26,7 @@ import freechips.rocketchip.util.BundleFieldBase
 import huancun.{AliasField, PrefetchField}
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utility.PopCount
 import utils._
 import xiangshan._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}

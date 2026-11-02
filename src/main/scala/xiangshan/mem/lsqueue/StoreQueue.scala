@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility._
+import utility.PopCount
 import utils._
 import xiangshan._
 import xiangshan.ExceptionNO._

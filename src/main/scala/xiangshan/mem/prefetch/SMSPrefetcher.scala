@@ -31,6 +31,7 @@ import chisel3.util._
 import utils._
 import utility.sram.SRAMTemplate
 import utility._
+import utility.PopCount
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.mem.L1PrefetchReq

@@ -24,6 +24,7 @@ import utility.HasPerfEvents
 import utility.SignExt
 import utility.XSDebug
 import utility.XSPerfAccumulate
+import utility.PopCount
 import utility.XSPerfHistogram
 import xiangshan.Redirect
 import xiangshan.TopDownCounters

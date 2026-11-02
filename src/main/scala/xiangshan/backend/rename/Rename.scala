@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
 import utility._
+import utility.PopCount
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodeOutUop, RenameOutUop, connectSamePort}

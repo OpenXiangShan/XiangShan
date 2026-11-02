@@ -49,7 +49,7 @@ object ArgParser {
       |--disable-perf
       |--disable-alwaysdb
       |--enable-dfx
-      |--wolvrix-sim-primitives <none|priority-encode>
+      |--wolvrix-sim-primitives <none|priority-encode|popcount>
       |--enable-simfrontend
       |""".stripMargin
 
@@ -78,7 +78,7 @@ object ArgParser {
           if(tail == Nil) exit(0)
           nextOption(config, tail)
         case "--wolvrix-sim-primitives" :: mode :: tail =>
-          require(Set("none", "priority-encode").contains(mode))
+          require(Set("none", "priority-encode", "popcount").contains(mode))
           nextOption(config.alter((site, here, up) => {
             case SimulationPrimitivesKey => mode
           }), tail)

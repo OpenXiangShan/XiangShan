@@ -45,6 +45,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.PmpCheckBundle
 import utility.PriorityEncoder
+import utility.PopCount
 
 class Ifu(implicit p: Parameters) extends IfuModule
     with PreDecodeHelper
@@ -234,9 +235,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val instrCountBeforeCurrent =
     WireDefault(VecInit.fill(FetchBlockInstNum + 1)(0.U(log2Ceil(FetchBlockInstNum + 1).W)))
   for (i <- 0 until FetchBlockInstNum) {
-    instrCountBeforeCurrent(i) := PopCount(dealInstrValid.take(i))
+    val countBefore = if (i == 0) {
+      0.U
+    } else {
+      PopCount(dealInstrValid.asUInt(i - 1, 0))
+    }
+    instrCountBeforeCurrent(i) := countBefore
   }
-  instrCountBeforeCurrent(FetchBlockInstNum)    := PopCount(dealInstrValid)
+  instrCountBeforeCurrent(FetchBlockInstNum)    := PopCount(dealInstrValid.asUInt)
   instrCompactor.io.req.fetchBlockSelect        := s1_fetchBlockSelect
   instrCompactor.io.req.twoFetchPcLower         := s1_twoFetchPcLower
   instrCompactor.io.req.twoFetchInstrOffset     := s1_twoFetchInstrOffset
@@ -291,8 +297,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s2_ready := s2_fire || !s2_valid
 
   private val s2_instrCompactInfo = RegEnable(instrCompactInfo, s1_fire)
-  private val s2_instrCount       = RegEnable(PopCount(rawInstrEndVec), s1_fire)
-  private val s2_instrValid       = RegEnable(UIntToMask(PopCount(rawInstrEndVec), FetchBlockInstNum), s1_fire)
+  private val s2_instrCount       = RegEnable(PopCount(rawInstrEndVec.asUInt), s1_fire)
+  private val s2_instrValid       = RegEnable(UIntToMask(PopCount(rawInstrEndVec.asUInt), FetchBlockInstNum), s1_fire)
 
   private val s2_rawIndex           = RegEnable(instrCountBeforeCurrent, s1_fire)
   private val s2_rawInstrEndVec     = RegEnable(rawInstrEndVec, s1_fire)
@@ -653,7 +659,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   val enqVec = io.toIBuffer.bits.enqEnable
   val allocateSeqNum = VecInit((0 until IBufferEnqueueWidth).map { i =>
-    val idx  = PopCount(enqVec.take(i + 1))
+    val idx  = PopCount(enqVec(i, 0))
     val pc   = s3_alignPc(i).toUInt
     val code = io.toIBuffer.bits.instrs(i)
     val seq  = PerfCCT.createInstMetaAtFetch(idx, pc, code, s3_fire & enqVec(i), clock, reset)

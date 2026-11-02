@@ -23,6 +23,7 @@ import xiangshan._
 import xiangshan.backend.rename.SnapshotGenerator
 import utils._
 import utility._
+import utility.PopCount
 
 
 abstract class BaseFreeList(

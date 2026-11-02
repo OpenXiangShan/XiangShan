@@ -6,6 +6,7 @@ import chisel3.util._
 import utility.HasCircularQueuePtrHelper
 import utils._
 import utility._
+import utility.PopCount
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.VAddrData

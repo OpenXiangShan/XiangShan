@@ -9,6 +9,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, Resolve, XSBundle}
 import utility._
+import utility.PopCount
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg, FcmpCfg, I2fCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm

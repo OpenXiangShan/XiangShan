@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
+import utility.PopCount
 import xiangshan._
 
 class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boolean = false, moduleName: String = "")(implicit p: Parameters) extends XSModule

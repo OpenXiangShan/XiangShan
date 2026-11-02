@@ -22,6 +22,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
+import utility.PopCount
 
 
 class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends BaseFreeList(size, commitWidth) with HasPerfEvents {

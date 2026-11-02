@@ -23,6 +23,7 @@ import xiangshan._
 import xiangshan.backend.rename._
 import utils._
 import utility._
+import utility.PopCount
 
 
 class StdFreeList(

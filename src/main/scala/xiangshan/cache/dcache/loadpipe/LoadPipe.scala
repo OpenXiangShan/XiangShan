@@ -21,6 +21,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utility.PopCount
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._

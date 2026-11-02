@@ -5,6 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utility.PopCount
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.HasDCacheParameters

@@ -24,6 +24,7 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utility.PopCount
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}

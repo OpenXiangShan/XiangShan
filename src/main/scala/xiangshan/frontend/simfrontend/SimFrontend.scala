@@ -27,6 +27,7 @@ import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
 import utility._
+import utility.PopCount
 import utility.InstSeqNum
 import utility.PerfCCT
 import xiangshan._

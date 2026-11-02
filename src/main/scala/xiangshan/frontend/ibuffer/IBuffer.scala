@@ -33,6 +33,7 @@ import xiangshan.frontend.BpuTopDownInfo
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
 import utility.PriorityEncoder
+import utility.PopCount
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
@@ -135,7 +136,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
    */
   allowEnq := io.in.bits.prevInstrCount < nextNumInvalid
 
-  private val enqOffset = VecInit.tabulate(EnqueueWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
+  private val enqOffset = VecInit.tabulate(EnqueueWidth) { i =>
+    if (i == 0) 0.U else PopCount(io.in.bits.valid(i - 1, 0))
+  }
   private val enqData   = VecInit.tabulate(EnqueueWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
   private val enqBankOffset =
     WireDefault(0.U.asTypeOf(Vec(NumWriteBank, Vec(EnqueueWidth / NumWriteBank, UInt(log2Ceil(EnqueueWidth).W)))))
@@ -391,7 +394,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   }
 
   private val matchBubble   = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
-  private val deqValidCount = PopCount(validVec.asBools)
+  private val deqValidCount = PopCount(validVec)
   private val deqWasteCount = DecodeWidth.U - deqValidCount
   matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdownStage.reasons.reverse)
 

@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.BufferParams
 import utils._
 import utility._
+import utility.PopCount
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.rob.RobPtr

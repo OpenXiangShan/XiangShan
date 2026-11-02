@@ -31,6 +31,7 @@ import chisel3.experimental.BundleLiterals._
 import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
+import utility.PopCount
 import utils._
 import xiangshan._
 import xiangshan.PerfDebugInfo

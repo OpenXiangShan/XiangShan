@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.Instructions
 import utility._
+import utility.PopCount
 import utils._
 import xiangshan._
 import xiangshan.backend.fu.FuType

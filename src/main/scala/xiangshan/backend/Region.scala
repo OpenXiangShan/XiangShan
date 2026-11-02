@@ -28,6 +28,7 @@ import xiangshan.backend.regfile.RfWritePortBundle
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.mem._
 import utility._
+import utility.PopCount
 import xiangshan.backend.fu.vector.Bundles.{VType, Vstart}
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.backend.issue.EntryBundles.RespType

@@ -30,6 +30,7 @@ import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import difftest._
 import utility.PriorityEncoder
+import utility.PopCount
 
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())

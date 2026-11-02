@@ -26,6 +26,7 @@ import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import system.{HasSoCParameter, SoCParamsKey}
 import utility._
+import utility.PopCount
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
 import utils._

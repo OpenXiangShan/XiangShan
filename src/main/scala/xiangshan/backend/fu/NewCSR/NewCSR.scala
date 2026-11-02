@@ -6,6 +6,7 @@ import difftest._
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
 import utility._
+import utility.PopCount
 import utils.OptionWrapper
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
