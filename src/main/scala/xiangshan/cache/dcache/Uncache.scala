@@ -448,7 +448,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     difftest.coreid := io.hartId
     difftest.index  := 0.U
     difftest.valid  := mem_acquire.fire && isStore(entries(q0_canSentIdx)) && entries(q0_canSentIdx).memBackTypeMM
-    difftest.addr   := entries(q0_canSentIdx).addr
+    // data and mask are positioned in the 8-byte lane: the golden-memory write starts at the aligned address
+    // (like the Sbuffer ncmm store event)
+    val mmStoreAddr = entries(q0_canSentIdx).addr
+    difftest.addr   := Cat(mmStoreAddr(mmStoreAddr.getWidth - 1, log2Ceil(DataBytes)), 0.U(log2Ceil(DataBytes).W))
     difftest.data   := entries(q0_canSentIdx).data.asTypeOf(Vec(DataBytes, UInt(8.W)))
     difftest.mask   := entries(q0_canSentIdx).mask
   }
