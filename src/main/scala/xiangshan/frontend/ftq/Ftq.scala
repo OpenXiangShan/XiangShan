@@ -118,15 +118,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // metaQueueRedirect stores speculation information needed by BPU when redirect happens.
   private val metaQueueRedirect = Reg(Vec(FtqSize, new BpuRedirectMeta))
+  private val metaQueueCommit   = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // metaQueue stores information needed to train BPU.
   private val metaQueueResolve = Reg(Vec(FtqSize, new BpuResolveMeta))
 
   // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
-
-  // commitQueue caches branch commit information from backend.
-  private val commitQueue = Module(new CommitQueue)
 
   // prefetchQueue stores non-FDIP prefetch requests (e.g. Zicbop prefetch.i instruction) and send to ICache.
   private val prefetchQueue = Module(new PrefetchQueue)
@@ -226,6 +224,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
     metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
     metaQueueResolve(s3BpuPtr)  := io.fromBpu.meta.bits.resolveMeta
+    metaQueueCommit(s3BpuPtr)   := io.fromBpu.meta.bits.commitMeta
 
     s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
@@ -513,17 +512,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   private val reWrite = Wire(Valid(new CallRetCommit))
-  reWrite.valid                           := redirect.valid
-  reWrite.bits.ftqPtr                     := redirect.bits.ftqIdx
-  reWrite.bits.rasAction                  := redirect.bits.attribute.rasAction
-  commitQueue.io.bpuWrite.valid           := RegNext(io.fromBpu.meta.valid, init = false.B)
-  commitQueue.io.bpuWrite.bits.ftqPtr     := RegNext(io.fromBpu.s3FtqPtr)
-  commitQueue.io.bpuWrite.bits.commitMeta := RegNext(io.fromBpu.meta.bits.commitMeta)
-  commitQueue.io.reWrite                  := RegNext(reWrite, init = 0.U.asTypeOf(Valid(new CallRetCommit)))
-  commitQueue.io.commit                   := commit
+  reWrite.valid          := redirect.valid
+  reWrite.bits.ftqPtr    := redirect.bits.ftqIdx
+  reWrite.bits.rasAction := redirect.bits.attribute.rasAction
+  val commitReWrite = RegNext(reWrite, init = 0.U.asTypeOf(Valid(new CallRetCommit)))
+  when(commitReWrite.valid) {
+    metaQueueCommit(commitReWrite.bits.ftqPtr.value).attribute.rasAction := commitReWrite.bits.rasAction
+  }
 
-  io.toBpu.commit.valid     := commitQueue.io.bpuTrain.valid
-  io.toBpu.commit.bits.meta := commitQueue.io.bpuTrain.bits
+  io.toBpu.commit.valid     := commit
+  io.toBpu.commit.bits.meta := metaQueueCommit(commitPtr(1).value)
 
   // --------------------------------------------------------------------------------
   // Performance monitoring
