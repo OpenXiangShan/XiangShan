@@ -23,6 +23,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.cache._
+import utility.PriorityEncoder
 
 trait HasStorePrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // common

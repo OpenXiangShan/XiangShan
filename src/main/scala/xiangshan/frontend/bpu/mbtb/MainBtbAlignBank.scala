@@ -24,6 +24,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
+import utility.PriorityEncoder
 
 class MainBtbAlignBank(
     alignIdx: Int

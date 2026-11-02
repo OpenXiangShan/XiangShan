@@ -29,6 +29,7 @@ import xiangshan.backend.fu.FuType._
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import difftest._
+import utility.PriorityEncoder
 
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())

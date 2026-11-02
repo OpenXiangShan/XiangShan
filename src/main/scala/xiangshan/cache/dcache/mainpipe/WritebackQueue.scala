@@ -23,6 +23,7 @@ import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utils.HasTLDump
 import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility.PriorityEncoder
 
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {

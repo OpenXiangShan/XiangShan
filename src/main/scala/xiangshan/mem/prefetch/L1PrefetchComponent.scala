@@ -11,6 +11,7 @@ import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem.{L1PrefetchReq, L1PrefetchSource}
+import utility.PriorityEncoder
 
 case class StreamStrideParams() extends PrefetcherParams{
   override def name = "StreamStride"

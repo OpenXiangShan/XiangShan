@@ -17,6 +17,7 @@
 
 package top
 
+import utility.{SimulationPrimitives, SimulationPrimitivesKey}
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -181,11 +182,16 @@ object XiangShanSim extends App {
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
-  Generator.execute(
-    firrtlOpts,
-    DisableMonitors(p => DifftestModule.top(new XiangShanSim()(p)))(config),
-    firtoolOpts
-  )
+  require(!envInFPGA || config(SimulationPrimitivesKey) == "none",
+    "Simulation primitives require the simulation target")
+  SimulationPrimitives.withMode(config(SimulationPrimitivesKey),
+    Some(java.nio.file.Paths.get(sys.env.getOrElse("NOOP_HOME", "."), "build", "simulation_primitives.json"))) {
+    Generator.execute(
+      firrtlOpts,
+      DisableMonitors(p => DifftestModule.top(new XiangShanSim()(p)))(config),
+      firtoolOpts
+    )
+  }
 
   // tools: write cpp files
   ChiselDB.addToFileRegisters

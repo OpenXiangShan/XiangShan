@@ -32,6 +32,7 @@ import xiangshan.TopDownCounters
 import xiangshan.frontend.BpuTopDownInfo
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
+import utility.PriorityEncoder
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {

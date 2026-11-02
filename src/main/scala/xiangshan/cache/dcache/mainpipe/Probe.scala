@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
 import utils.HasTLDump
 import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility.PriorityEncoder
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {

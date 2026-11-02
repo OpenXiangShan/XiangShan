@@ -20,6 +20,7 @@ package xiangshan.frontend.icache
 import chisel3._
 import chisel3.util._
 import utility.CircularQueuePtr
+import utility.PriorityEncoder
 
 class DeMultiplexerIO[T <: Data](gen: T, n: Int) extends Bundle {
   val in:     DecoupledIO[T]      = Flipped(DecoupledIO(gen))

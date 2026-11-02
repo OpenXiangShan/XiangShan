@@ -130,7 +130,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     VecInit((0 until IBufferEnqueueWidth).map(i =>
       jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i) || notCfiTaken(i)
     ))
-  private val remaskIdx  = ParallelPriorityEncoder(remaskFault.asUInt)
+  private val remaskIdx  = ParallelPriorityEncoder(remaskFault)
   private val needRemask = ParallelOR(remaskFault)
   // NOTE: we need a minimal pow2 that greater than IBufferEnqueueWidth, so we do a log2Up then pow(2)
   private val fixedRange =

@@ -44,6 +44,7 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.PmpCheckBundle
+import utility.PriorityEncoder
 
 class Ifu(implicit p: Parameters) extends IfuModule
     with PreDecodeHelper
@@ -617,7 +618,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val enq    = io.toIBuffer.bits.enqEnable
 
   private val s3_rvcException       = ExceptionType.fromRvcExpander((enq & s3_alignRvcIll.asUInt).orR, s3_valid)
-  private val s3_rvcExceptionOffset = PriorityEncoder(enq & s3_alignRvcIll.asUInt)
+  private val s3_rvcExceptionOffset = PriorityEncoder(
+    (0 until IBufferEnqueueWidth).map(i => enq(i) && s3_alignRvcIll(i))
+  )
 
   io.toIBuffer.bits.isLastInFtqEntry := (0 until IBufferEnqueueWidth).map { i =>
     if (i == IBufferEnqueueWidth - 1) enq(i)

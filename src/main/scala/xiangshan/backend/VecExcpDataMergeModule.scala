@@ -6,6 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles._
+import utility.PriorityEncoder
 
 class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
   private val MaxLMUL = 8

@@ -49,6 +49,7 @@ object ArgParser {
       |--disable-perf
       |--disable-alwaysdb
       |--enable-dfx
+      |--wolvrix-sim-primitives <none|priority-encode>
       |--enable-simfrontend
       |""".stripMargin
 
@@ -76,6 +77,11 @@ object ArgParser {
           println(os.read(os.resource / "publishVersion"))
           if(tail == Nil) exit(0)
           nextOption(config, tail)
+        case "--wolvrix-sim-primitives" :: mode :: tail =>
+          require(Set("none", "priority-encode").contains(mode))
+          nextOption(config.alter((site, here, up) => {
+            case SimulationPrimitivesKey => mode
+          }), tail)
         case "--config" :: confString :: tail =>
           nextOption(getConfigByName(confString), tail)
         case "--issue" :: issueString :: tail =>

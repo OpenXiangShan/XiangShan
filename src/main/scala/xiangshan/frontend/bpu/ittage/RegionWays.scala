@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
 import utility.XSError
 import utility.XSPerfAccumulate
+import utility.PriorityEncoder
 
 class RegionWays(implicit p: Parameters) extends IttageModule {
   class RegionWaysIO extends Bundle {

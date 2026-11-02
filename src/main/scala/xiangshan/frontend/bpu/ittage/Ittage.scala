@@ -40,6 +40,7 @@ import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
+import utility.PriorityEncoder
 
 class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParameters with Helpers {
   class IttageIO extends BasePredictorIO {

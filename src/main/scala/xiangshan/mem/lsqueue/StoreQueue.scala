@@ -35,6 +35,7 @@ import xiangshan.cache._
 import xiangshan.cache.{CMOReq, CMOResp, DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import difftest._
 import difftest.common.DifftestMem
+import utility.PriorityEncoder
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize

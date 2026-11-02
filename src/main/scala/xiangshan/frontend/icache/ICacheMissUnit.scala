@@ -29,6 +29,7 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.WfiReqBundle
 import xiangshan.XSCoreParamsKey
+import utility.PriorityEncoder
 
 class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
   class ICacheMissUnitIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {

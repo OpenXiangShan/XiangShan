@@ -23,6 +23,7 @@ import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.XSModule
+import utility.PriorityEncoder
 
 /**
  * A write buffer that supports multiple write ports and read ports, including the following features:
