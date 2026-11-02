@@ -864,7 +864,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   toUncache.bits.flush := f3_ftq_flush_self || f3_ftq_flush_by_older || mmioF3Flush && !f3_need_not_flush
   // if !pmp_mmio, then we're actually sending a MMIO request to main memory, it must be pbmt.nc/io
   // we need to tell L2 Cache about this to make it work correctly
-  toUncache.bits.memBackTypeMM := !f3_pmp_mmio
+  // PMA C=0 on a PmemRanges (DRAM) address is non-cacheable main memory, not a device
+  toUncache.bits.memBackTypeMM := !f3_pmp_mmio || PmemRanges.map(_.cover(toUncache.bits.addr)).reduce(_ || _)
   toUncache.bits.memPageTypeNC := f3_itlb_pbmt === Pbmt.nc
   // always ready to receive response: we just send one request at same time
   fromUncache.ready := true.B
