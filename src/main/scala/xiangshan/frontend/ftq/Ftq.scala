@@ -112,6 +112,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // an entry has passed the point of no return, so Bpu can no longer override it
   private def passedPnr(ptr: FtqPtr): Bool = pnrPtr > ptr
 
+  // an entry is retired here, driven in the commit section below
+  private val commit = Wire(Bool())
+
   // entryQueue stores predictions made by BPU.
   private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
 
@@ -120,7 +123,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // metaQueue stores information needed to train BPU.
   private val metaQueueResolve = Reg(Vec(FtqSize, new BpuResolveMeta))
-  private val metaQueueCommit  = Reg(Vec(FtqSize, new BpuCommitMeta))
+  // Bpu writes one resolve meta per lookup, at the entry that lookup started from. A group's later blocks are
+  // enqueued without one, so they must not be trained from whatever the index happened to hold before.
+  private val metaQueueResolveValid = RegInit(VecInit.fill(FtqSize)(false.B))
+  private val metaQueueCommit       = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
@@ -184,14 +190,34 @@ class Ftq(implicit p: Parameters) extends FtqModule
     bpTrainStallCnt := 0.U
   }
 
+  // Entries not yet allocated by Bpu. One enqueue carries up to MaxPredictionNum blocks and cannot be partially
+  // accepted, so that many entries must be free before we accept one.
+  // This is tracked as a counter, and the comparison is registered, so that prediction.ready is a register output
+  // rather than a pointer subtraction feeding Bpu's fire path. It is not stale: freeNumNext already accounts for the
+  // enqueue of this cycle, so registering the comparison yields exactly "freeNum of that cycle >= MaxPredictionNum".
+  // Two levels, because a group that carries no second block does not need a second entry. Holding a whole group's
+  // worth back for every enqueue stalls Bpu on a queue that had room for what it was actually offering, and Bpu is
+  // the frontend's rate limiter, so that stall costs a prediction group outright.
+  private val freeNum          = RegInit(FtqSize.U(log2Ceil(FtqSize + 1).W))
+  private val ftqHasRoom       = RegInit(true.B)
+  private val ftqHasRoomForOne = RegInit(true.B)
+
   // We limit the distance between BP and IF and stall counts of BP train so that branch update can be written back to
   // BPU
-  io.fromBpu.prediction.ready := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U &&
-    distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U &&
+  // Registered as well, so that prediction.ready is a plain register output. Unlike the capacity check this one lags
+  // by a cycle, which costs nothing: it is a throttle rather than a correctness check, and Bpu cannot enqueue in the
+  // cycle right after a redirect or an override anyway, as its s1 is flushed then.
+  private val bpNotRunTooFar = RegInit(true.B)
+  bpNotRunTooFar := distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U &&
     bpTrainStallCnt < BpTrainStallLimit.U
+
+  // still a plain register select: which level applies is decided by Bpu, whose group width does not depend on ready
+  io.fromBpu.prediction.ready :=
+    Mux(io.fromBpu.predictionIsGroup, ftqHasRoom, ftqHasRoomForOne) && bpNotRunTooFar
   io.fromBpu.meta.ready := true.B
 
-  private val prediction = io.fromBpu.prediction
+  private val prediction       = io.fromBpu.prediction
+  private val predictionBlocks = prediction.bits.blocks
 
   private val bpuS2Redirect = prediction.valid && prediction.bits.s2Override
   private val bpuS3Redirect = prediction.valid && prediction.bits.s3Override
@@ -206,39 +232,101 @@ class Ftq(implicit p: Parameters) extends FtqModule
       prediction.bits.s2Override -> io.fromBpu.s2FtqPtr
     )
   )
+  // blocks of one enqueue occupy consecutive entries starting from predictionPtr
+  private val predictionPtrVec = VecInit.tabulate(MaxPredictionNum)(i => predictionPtr + i.U)
 
   when(prediction.bits.s3Override) {
-    bpuPtr := io.fromBpu.s3FtqPtr + 1.U
+    bpuPtr := io.fromBpu.s3FtqPtr + prediction.bits.numBlocks
   }.elsewhen(prediction.bits.s2Override) {
-    bpuPtr := io.fromBpu.s2FtqPtr + 1.U
+    bpuPtr := io.fromBpu.s2FtqPtr + prediction.bits.numBlocks
   }.elsewhen(bpuEnqueue) {
-    bpuPtr := bpuPtr + 1.U
+    bpuPtr := bpuPtr + prediction.bits.numBlocks
   }
 
-  when((prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid) {
-    entryQueue(predictionPtr.value).startPc     := prediction.bits.startPc
-    entryQueue(predictionPtr.value).taken       := prediction.bits.taken
-    entryQueue(predictionPtr.value).endPosition := prediction.bits.endPosition
+  // Track free entries alongside bpuPtr: an enqueue takes as many entries as it carries, a commit gives one back, and
+  // the cases that move bpuPtr backwards release everything they cut away. This mirrors the bpuPtr update above, so
+  // the cases must stay in the same priority order.
+  private def freeNumAfterRewind(newBpuPtr: FtqPtr): UInt =
+    hasFreeEntries(newBpuPtr, commitPtr(0)) + commit
+
+  private val freeNumNext = MuxCase(
+    freeNum - Mux(bpuEnqueue, prediction.bits.numBlocks, 0.U) + commit,
+    Seq(
+      redirect.valid             -> freeNumAfterRewind(redirect.bits.newFtqIdx),
+      prediction.bits.s3Override -> freeNumAfterRewind(io.fromBpu.s3FtqPtr + prediction.bits.numBlocks),
+      prediction.bits.s2Override -> freeNumAfterRewind(io.fromBpu.s2FtqPtr + prediction.bits.numBlocks)
+    )
+  )
+  freeNum          := freeNumNext
+  ftqHasRoom       := freeNumNext >= MaxPredictionNum.U
+  ftqHasRoomForOne := freeNumNext >= 1.U
+
+  XSError(freeNumNext > FtqSize.U, "Ftq free entry count overflows\n")
+
+  private val entryEnqueue = (prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
+  when(entryEnqueue) {
+    predictionBlocks.zip(predictionPtrVec).foreach { case (block, ptr) =>
+      when(block.valid) {
+        metaQueueResolveValid(ptr.value)  := false.B
+        entryQueue(ptr.value).startPc     := block.bits.startPc
+        entryQueue(ptr.value).taken       := block.bits.taken
+        entryQueue(ptr.value).endPosition := block.bits.endPosition
+      }
+    }
+  }
+
+  // Enqueue contract: blocks are enqueued atomically into consecutive entries with no holes, a block only exists
+  // because its predecessor jumped, and it starts where its predecessor jumped to. The last property is what lets
+  // consumers keep reading a block's target from its successor's startPc.
+  predictionBlocks.zip(predictionBlocks.tail).zipWithIndex.foreach { case ((previous, block), i) =>
+    XSError(
+      prediction.valid && block.valid && !previous.valid,
+      s"prediction block ${i + 1} is valid while block $i is not\n"
+    )
+    XSError(
+      prediction.valid && block.valid && !previous.bits.taken,
+      s"prediction block ${i + 1} is valid while block $i is not taken\n"
+    )
+    XSError(
+      prediction.valid && block.valid && block.bits.startPc =/= previous.bits.target,
+      s"prediction block ${i + 1} does not start at block $i's target\n"
+    )
   }
 
   private val s3PerfQueue = WireInit(perfQueue)
   when(io.fromBpu.meta.valid) {
-    val s3BpuPtr = io.fromBpu.s3FtqPtr.value
-    metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
-    metaQueueResolve(s3BpuPtr)  := io.fromBpu.meta.bits.resolveMeta
-    metaQueueCommit(s3BpuPtr)   := io.fromBpu.meta.bits.commitMeta
-
-    s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
-    s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
-    s3PerfQueue(s3BpuPtr).mispredict := false.B
+    // Recovery state belongs to every entry of a group, not just the one the lookup started from. A redirect can name
+    // any of them, and for a return it takes its target from the return stack top recorded here, so an entry left
+    // holding whatever the index last had would send that return to a stale address. The group shares one state
+    // because a block that moves the return stack is not allowed to carry a successor, see Bpu's second block.
+    (0 until MaxPredictionNum).foreach { i =>
+      when(i.U < io.fromBpu.s3NumBlocks) {
+        val groupPtr = (io.fromBpu.s3FtqPtr + i.U).value
+        metaQueueRedirect(groupPtr) := io.fromBpu.meta.bits.redirectMeta
+        // Only the entry the lookup started from has a resolve meta. A group's later blocks are enqueued without one.
+        if (i == 0) {
+          metaQueueResolve(groupPtr)      := io.fromBpu.meta.bits.resolveMeta
+          metaQueueResolveValid(groupPtr) := true.B
+        }
+        // Commit meta belongs to the group for the same reason the recovery state does: any of its entries can be the
+        // one that commits, and this is what the return stack is trained from. An entry left holding what the index
+        // last carried would train it from a block that retired long ago.
+        metaQueueCommit(groupPtr) := io.fromBpu.meta.bits.commitMeta
+        // Likewise the performance meta. Leaving it stale does not change what the core does, but it does decide what
+        // every commit-time counter says about a group's later block, which is how the block gets judged.
+        s3PerfQueue(groupPtr).bpuPerf := io.fromBpu.perfMeta
+        s3PerfQueue(groupPtr).isCfi.foreach(_ := false.B)
+        s3PerfQueue(groupPtr).mispredict := false.B
+      }
+    }
   }
 
-  // The entry sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
+  // The group sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
   // its final prediction straight into Ftq instead of sending it around the Bpu pipeline again. So by the next cycle
-  // it has passed the point of no return, and pnrPtr can be advanced past it.
+  // every entry it occupies has passed the point of no return, and pnrPtr can be advanced past all of them.
   // A redirect resets pnrPtr along with the other pointers, see the redirect section below.
   when(io.fromBpu.meta.valid) {
-    pnrPtr := io.fromBpu.s3FtqPtr + 1.U
+    pnrPtr := io.fromBpu.s3FtqPtr + io.fromBpu.s3NumBlocks
   }
 
   // The entry in s3 can still be overridden, so pnrPtr must never have passed it. In steady state pnrPtr equals
@@ -248,8 +336,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "pnrPtr passed the entry that is still in Bpu s3\n"
   )
 
-  resolveQueue.io.bpuEnqueue    := bpuEnqueue
-  resolveQueue.io.bpuEnqueuePtr := predictionPtr
+  resolveQueue.io.bpuEnqueue    := VecInit(predictionBlocks.map(block => bpuEnqueue && block.valid))
+  resolveQueue.io.bpuEnqueuePtr := predictionPtrVec
 
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
@@ -363,9 +451,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with backend
   // --------------------------------------------------------------------------------
 
-  io.toBackend.wen     := (prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
-  io.toBackend.ftqIdx  := predictionPtr.value
-  io.toBackend.startPc := prediction.bits.startPc
+  io.toBackend.wen     := VecInit(predictionBlocks.map(block => entryEnqueue && block.valid))
+  io.toBackend.ftqIdx  := VecInit(predictionPtrVec.map(_.value))
+  io.toBackend.startPc := VecInit(predictionBlocks.map(_.bits.startPc))
 
   // --------------------------------------------------------------------------------
   // Redirect from backend and IFU
@@ -427,7 +515,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val needFlush = backendRedirect.valid && resolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx ||
       RegNext(backendRedirect.valid) && resolveQueue.io.bpuTrain.bits.ftqIdx > RegNext(backendRedirect.bits.ftqIdx)
 
-    trainCache.valid     := !needFlush
+    // an entry Bpu never wrote a resolve meta for has nothing to train the predictors with
+    trainCache.valid     := !needFlush && metaQueueResolveValid(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
     trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
     trainCache.bits.startPcVec.foreach { dup =>
       dup.zipWithIndex.foreach { case (startPc, i) =>
@@ -508,7 +597,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     FtqPtr(true.B, (FtqSize - 1).U),
     io.fromBackend.commit.valid
   )
-  private val commit = commitPtr <= robCommitPtr
+  commit := commitPtr <= robCommitPtr
   when(commit) {
     commitPtr := commitPtr + 1.U
   }
@@ -534,18 +623,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.backendRedirectTopdown.scMissBubble     := false.B // TODO: add SC info
   io.backendRedirectTopdown.ittageMissBubble := backendRedirect.bits.attribute.needIttage
   io.backendRedirectTopdown.rasMissBubble    := backendRedirect.bits.attribute.isReturn
-
   private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
   // only driven by clock, not valid-ready
   topdownStage := io.fromBpu.topdownReasons
   topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
   io.toIfu.topdownInfo := topdownStage
 
-  when(!(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U)) {
+  when(!Mux(io.fromBpu.predictionIsGroup, ftqHasRoom, ftqHasRoomForOne)) {
     topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
-  }.elsewhen(
-    !(distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U && bpTrainStallCnt < BpTrainStallLimit.U)
-  ) {
+  }.elsewhen(!bpNotRunTooFar) {
     topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
   }
 
@@ -607,6 +693,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate("resolve_branch_mispredicts", backendRedirect.valid && backendRedirect.bits.isMisPred)
   XSPerfAccumulate("resolve_other_redirects", backendRedirect.valid && !backendRedirect.bits.isMisPred)
 
+  // how many blocks the groups Bpu enqueued carried
+  XSPerfAccumulate("groupEnqueueSize1", entryEnqueue && prediction.bits.numBlocks === 1.U)
+  XSPerfAccumulate("groupEnqueueSize2", entryEnqueue && prediction.bits.numBlocks === 2.U)
+
   // Commit-time statistics, should be correct-path only
   XSPerfSeqAccumulate(
     "commit_branch",
@@ -640,7 +730,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
     )
   )
 
-  private val perf_commitHasMispredict = commit && commitPerfMeta.mispredict
+  // An entry Bpu wrote no meta for has perf meta from whichever block last held the index, so a mispredict there
+  // cannot be attributed to a prediction.
+  private val perf_commitHasMispredict =
+    commit && commitPerfMeta.mispredict && metaQueueResolveValid(commitPtr(0).value)
   private val perf_commitHasMispredictConditional =
     perf_commitHasMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
 

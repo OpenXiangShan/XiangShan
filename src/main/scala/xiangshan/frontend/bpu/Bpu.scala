@@ -508,13 +508,21 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** bpu to ftq io *** */
   io.toFtq.prediction.valid := s1_valid && s2_ready || s2_override || s3_override
+
+  private val firstBlock = io.toFtq.prediction.bits.blocks.head
+  firstBlock.valid := true.B
   when(s3_override) {
-    io.toFtq.prediction.bits.fromStage(s3_startPc.get, s3_prediction)
+    firstBlock.bits.fromStage(s3_startPc.get, s3_prediction)
   }.elsewhen(s2_override) {
-    io.toFtq.prediction.bits.fromStage(s2_startPc.get, s2_prediction)
+    firstBlock.bits.fromStage(s2_startPc.get, s2_prediction)
   }.otherwise {
-    io.toFtq.prediction.bits.fromStage(s1_startPc.get, s1_prediction)
+    firstBlock.bits.fromStage(s1_startPc.get, s1_prediction)
   }
+  // a group holds a single block so far
+  private val secondBlock = io.toFtq.prediction.bits.blocks(1)
+  secondBlock.valid          := false.B
+  secondBlock.bits           := 0.U.asTypeOf(secondBlock.bits)
+  io.toFtq.predictionIsGroup := false.B
   io.toFtq.prediction.bits.s2Override := s2_override
   io.toFtq.prediction.bits.s3Override := s3_override
 
@@ -523,6 +531,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
   io.toFtq.s2FtqPtr := s2_ftqPtr
   io.toFtq.s3FtqPtr := s3_ftqPtr
+  io.toFtq.s3NumBlocks := 1.U
 
   io.toFtq.meta.valid             := s3_valid
   io.toFtq.meta.bits.redirectMeta := s3_redirectMeta
@@ -715,13 +724,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate("toFtqFire", io.toFtq.prediction.fire)
   XSPerfAccumulate("s2Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s2Override)
   XSPerfAccumulate("s3Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s3Override)
+  private def perf_blockSize(block: BpuPredictionBlock): UInt =
+    Mux(block.taken, getFtqOffset(block.startPc, block.endPosition), FetchBlockInstNum.U)
+
   XSPerfHistogram(
     "fetchBlockSize",
-    Mux(
-      io.toFtq.prediction.bits.taken,
-      getFtqOffset(io.toFtq.prediction.bits.startPc, io.toFtq.prediction.bits.endPosition),
-      FetchBlockInstNum.U
-    ),
+    perf_blockSize(firstBlock.bits),
     io.toFtq.prediction.fire,
     0,
     FetchBlockInstNum + 1
