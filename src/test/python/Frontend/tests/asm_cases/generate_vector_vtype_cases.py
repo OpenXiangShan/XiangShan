@@ -51,6 +51,10 @@ def _stress_lines(configs: tuple[str | None, ...]) -> list[str]:
     return lines
 
 
+def _dense_config_lines() -> list[str]:
+    return [f"    {instruction}" for _ in range(8) for _, instruction in CASES]
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -91,6 +95,7 @@ def _render(case_name: str) -> str:
             ]
         )
     lines.extend(_stress_lines(tuple(instruction for _, instruction in CASES)))
+    lines.extend(_dense_config_lines())
     for _, instruction in EDGE_CASES:
         lines.extend(
             [
@@ -136,6 +141,7 @@ def _render_vsetvl(case_name: str) -> str:
         "    vadd.vv v6, v2, v4",
     ]
     lines.extend(_stress_lines((None, *(instruction for _, instruction in CASES[:3]))))
+    lines.extend(_dense_config_lines())
     lines.extend([
         "    addi a1, zero, 1",
         "    addi a0, zero, 0",

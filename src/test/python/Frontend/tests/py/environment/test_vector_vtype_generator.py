@@ -31,7 +31,7 @@ def test_vector_vtype_generator_is_deterministic_and_covers_config_forms(
         for line in rendered.splitlines()
         if line.strip().startswith(("vsetvli ", "vsetivli "))
     ]
-    assert instructions == 2 * [instruction for _name, instruction in generate_vector_vtype_cases.CASES] + [
+    assert instructions == 10 * [instruction for _name, instruction in generate_vector_vtype_cases.CASES] + [
         "vsetvli t0, zero, e32, m1, ta, ma",
     ]
     assert [instruction for _name, instruction in generate_vector_vtype_cases.CASES] == [
@@ -48,6 +48,7 @@ def test_vector_vtype_generator_is_deterministic_and_covers_config_forms(
         "    vadd.vv v8, v16, v24\n    addi s0, s0, 1\n"
     ) in rendered
     assert rendered.count("    .rept 64\n") == 4
+    assert len(generate_vector_vtype_cases._dense_config_lines()) == 32
     assert all(f"    {instruction}\n" in rendered for instruction in (
         "vadd.vv v8, v16, v24", "vsub.vv v16, v8, v24",
         "vxor.vv v24, v8, v16", "vand.vv v8, v24, v16", "vor.vv v16, v8, v24",
@@ -65,5 +66,7 @@ def test_vector_vsetvl_generator_sets_source_registers(tmp_path: Path, monkeypat
     assert "vsetvli t0, zero, e32, m1, ta, ma\n    li t1, 0x49\n    vsetvl t3, t0, t1\n" in rendered
     assert "vsetvl t3, t0, t1\n    vadd.vv v6, v2, v4\n" in rendered
     assert rendered.count("    .rept 64\n") == 4
+    assert rendered.count("    vsetvl t3, t0, t1\n") == 1
+    assert all(rendered.count(f"    {instruction}\n") >= 8 for _, instruction in generate_vector_vtype_cases.CASES)
     assert rendered.index("vsetvl t3, t0, t1") < rendered.index("vadd.vv v8, v16, v24")
     assert rendered.index("vadd.vv v8, v16, v24") < rendered.index("vsetivli t0, 4, e16, m2, tu, mu")
