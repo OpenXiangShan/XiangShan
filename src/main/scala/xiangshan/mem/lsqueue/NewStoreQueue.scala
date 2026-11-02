@@ -1296,7 +1296,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     }
 
     io.writeToSbuffer    <> dataQueue.io.toSbuffer
-    io.fromUnalignQueue.ready := headrdataPtr === io.fromUnalignQueue.bits.sqIdx && writeSbufferWire.head.fire
+    // Keep the second-page forwarding guard until the matching Store actually leaves the SQ.
+    io.fromUnalignQueue.ready := headDeqPtr === io.fromUnalignQueue.bits.sqIdx && io.sqDeqCnt.orR
 
     /*============================================ deqPtr generate ===================================================*/
     /*
