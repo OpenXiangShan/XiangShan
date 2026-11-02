@@ -77,3 +77,18 @@ def test_pre_drive_observer_samples_before_agents_and_regular_observer(monkeypat
         "backend_drive",
         "regular",
     ]
+
+
+def test_reference_model_enable_controls_shared_checker(monkeypatch) -> None:
+    dut = FakeDUTFrontend()
+    dut._is_fake_frontend_dut = False
+    monkeypatch.setenv("TB_ENABLE_REFERENCE_MODEL", "0")
+    disabled = FrontendEnv(dut, register_callbacks=False)
+    assert disabled.reference_model_enabled is False
+    assert disabled.ubtb_checker is None
+
+    monkeypatch.setenv("TB_ENABLE_REFERENCE_MODEL", "1")
+    enabled = FrontendEnv(dut, register_callbacks=False)
+    assert enabled.reference_model_enabled is True
+    assert enabled.ubtb_checker is not None
+    assert enabled.ubtb_checker.on_cycle in enabled._cycle_observers

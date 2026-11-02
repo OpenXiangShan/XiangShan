@@ -84,6 +84,8 @@ Environment variables:
   TB_BASE_ADDR         Program load base addr for DUT test (default: 0x80000000)
   TB_RESET_VECTOR      DUT reset/start PC for bin run (default: TB_BASE_ADDR)
   TB_LOG_LEVEL         Default env and pytest CLI log level (default: INFO)
+  TB_ENABLE_REFERENCE_MODEL
+                       Enable shared reference model comparisons (default: 1)
   TB_LOG_CLI_LEVEL     Pytest CLI log level; overrides TB_LOG_LEVEL for pytest only
   TB_ENV_LOG_LEVEL     Environment logger level; overrides TB_LOG_LEVEL for env only
   PYTEST_ADDOPTS       Extra pytest args

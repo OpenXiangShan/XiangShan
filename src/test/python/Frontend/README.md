@@ -197,6 +197,7 @@ def test_generated_stream(env):
   - 可用 `TB_LINE_COVERAGE_OMIT=/path/to/file.omit` 覆盖默认 omit 文件。
   - 可用 `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` 关闭 pytest teardown 阶段的 toffee line coverage 上报。
   - `TB_ENABLE_FUNCTIONAL_COVERAGE=0` 可关闭正式 SampleHub + Toffee 功能覆盖率装配；默认 `1`。
+  - `TB_ENABLE_REFERENCE_MODEL=0` 可关闭共享参考模型比较；默认 `1`。当前接入 uBTB，关闭后仍运行其他 DUT/trace 检查。
 - `scripts/report_raw_code_coverage.py`
   - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py --data-dir build-frontend/artifacts/<run_id>/coverage`
   - 合并指定同版本 run/suite 的 `.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率

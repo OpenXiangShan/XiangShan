@@ -74,6 +74,8 @@ def test_bin_trace(env):
     trace_entries = api_Frontend_load_golden_trace(env, str(trace_path), max_cycles=0, start_index=trace_start_index)
     run_ok = api_Frontend_run_until_golden_complete(env, max_cycles=_trace_cycle_limit())
     result = getattr(env, "_last_run_until_golden_result", None)
+    checked = "disabled" if env.ubtb_checker is None else str(env.ubtb_checker.checked_count)
+    print(f"[frontend] uBTB reference comparisons: {checked}", flush=True)
     if result is not None:
         logger.info(
             "bin trace stop reason: status=%s completed=%s ok=%s cycles=%d cursor=%d/%d target_cursor=%d pending_work=%d monitor_errors=%d",

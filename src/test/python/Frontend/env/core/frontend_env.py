@@ -15,6 +15,7 @@ from ..agents.uncache_agent import UncacheAgent
 from ..checkers.frontend_flow_checker import FrontendFlowChecker
 from ..checkers.ptw_checker import PTWFullPpnChecker, PTWRespInputChecker
 from ..checkers.translation_scenario_checker import TranslationScenarioChecker
+from ..checkers.ubtb_reference_checker import UbtbReferenceChecker
 from .backend_model import BackendModel
 from ..bundles import (
     BackendCfVecBundle,
@@ -71,6 +72,7 @@ class FrontendEnv:
         bp_ctrl_tage_enable: int = 1,
         bp_ctrl_sc_enable: int = 1,
         bp_ctrl_ittage_enable: int = 1,
+        reference_model_enable: Optional[bool] = None,
     ) -> None:
         configure_env_logging(log_level)
         self.logger = logging.getLogger("env.frontend_env")
@@ -108,6 +110,15 @@ class FrontendEnv:
         self._connect_collaborators()
         self.icache_ecc_agent = ICacheECCInjectionAgent(self)
         self.bpu_ftq_scheduler = BpuFtqScheduler(self)
+        if reference_model_enable is None:
+            reference_model_enable = os.getenv(
+                "TB_ENABLE_REFERENCE_MODEL", "1"
+            ).strip().lower() not in {"0", "false", "off", "no"}
+        self.reference_model_enabled = bool(reference_model_enable)
+        self.ubtb_checker = None
+        if self.reference_model_enabled and not getattr(dut, "_is_fake_frontend_dut", False):
+            self.ubtb_checker = UbtbReferenceChecker()
+            self.register_cycle_observer(self.ubtb_checker.on_cycle)
 
         self._init_inputs()
         self._register_callbacks(register_callbacks)
