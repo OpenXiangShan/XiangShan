@@ -467,7 +467,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                     (s2_trigger_debug_mode || ExceptionNO.selectByFuAndUnSelect(s2_out.uop.exceptionVec, StaCfg, Seq(storeAddrMisaligned)).asUInt.orR)
 
   val s2_mmio = (s2_in.mmio || (Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio)) && RegNext(s1_feedback.bits.hit)
-  val s2_memBackTypeMM = !s2_pmp.mmio
+  // PMA C=0 on a PmemRanges (DRAM) address is non-cacheable main memory, not a device
+  val s2_inPmem = PmemRanges.map(_.cover(s2_in.paddr)).reduce(_ || _)
+  val s2_memBackTypeMM = !s2_pmp.mmio || s2_inPmem
   // The response signal of `pmp/pma` is credible only after the physical address is actually generated.
   // Therefore, the response signals of pmp/pma generated after an address translation has produced an `access fault` or a `page fault` are completely unreliable.
   val s2_un_access_exception =  s2_vecActive && (
