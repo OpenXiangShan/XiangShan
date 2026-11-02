@@ -59,14 +59,13 @@ class DipTest extends XSTester {
       dut.io.dispatch.fireMask.poke("b0100".U)
       dut.io.dispatch.stallCause.poke(3.U) // ROB + IntIQ, retaining both causes
       dut.io.trace.valid.expect(true.B)
-      dut.io.trace.bits.sampled.expect(true.B)
       dut.io.trace.bits.slots(0).state.expect(DipState.base.U)
-      dut.io.trace.bits.slots(0).target.pc.expect(0x1008.U)
+      dut.io.trace.bits.slots(0).pc.expect(0x1008.U)
       dut.io.trace.bits.slots.tail.foreach { slot =>
         slot.state.expect(DipState.stall.U)
         slot.cause.expect(3.U)
-        slot.targetValid.expect(true.B)
-        slot.target.pc.expect(0x100c.U)
+        slot.kind.expect(DipTargetKind.rob.U)
+        slot.pc.expect(0x100c.U)
       }
     }
   }
@@ -77,7 +76,7 @@ class DipTest extends XSTester {
       dut.io.rob.flush.valid.poke(true.B)
       dut.io.trace.bits.slots.foreach { slot =>
         slot.state.expect(DipState.misspeculation.U)
-        slot.target.pc.expect(0x2000.U)
+        slot.pc.expect(0x2000.U)
       }
       dut.clock.step()
       dut.io.rob.flush.valid.poke(false.B)
@@ -88,40 +87,151 @@ class DipTest extends XSTester {
       dut.io.dispatch.stallCause.poke(1.U)
       dut.io.trace.bits.slots.foreach { slot =>
         slot.state.expect(DipState.stall.U)
-        slot.target.pc.expect(0x1000.U)
+        slot.pc.expect(0x1000.U)
       }
       dut.clock.step()
       dut.io.dispatch.validMask.poke(0.U)
       dut.io.dispatch.stallCause.poke(0.U)
       dut.io.trace.bits.slots.foreach { slot =>
         slot.state.expect(DipState.frontend.U)
-        slot.targetValid.expect(false.B)
+        slot.kind.expect(DipTargetKind.successor.U)
       }
     }
   }
 
-  it should "sample periodically while retaining lifecycle events after sampling is disabled" in {
+  it should "sample periodically without exporting unsampled lifecycle events" in {
     simulate(new DipSampler()(dipConfig)) { dut =>
       init(dut)
       dut.io.period.poke(3.U)
       for (cycle <- 0 until 7) {
-        dut.io.trace.bits.sampled.expect((cycle % 3 == 0).B)
+        dut.io.trace.valid.expect((cycle % 3 == 0).B)
         dut.clock.step()
       }
       dut.io.enable.poke(false.B)
       dut.io.rob.commits(0).valid.poke(true.B)
-      dut.io.trace.valid.expect(true.B)
-      dut.io.trace.bits.sampled.expect(false.B)
+      dut.io.trace.valid.expect(false.B)
+      dut.io.finals.foreach(_.valid.expect(false.B))
       dut.clock.step()
       dut.io.rob.commits(0).valid.poke(false.B)
       dut.io.enable.poke(true.B)
       dut.io.dispatch.stallCause.poke((BigInt(1) << DipCause.rename).U)
-      dut.io.trace.bits.sampled.expect(true.B)
+      dut.io.trace.valid.expect(true.B)
       dut.io.trace.bits.slots.foreach { slot =>
         slot.state.expect(DipState.stall.U)
-        slot.targetValid.expect(false.B)
+        slot.kind.expect(DipTargetKind.successor.U)
         slot.cause.expect((BigInt(1) << DipCause.rename).U)
       }
     }
   }
+  it should "emit terminal events only for selected targets, including after sampling stops" in {
+    simulate(new DipSampler()(dipConfig)) { dut =>
+      init(dut)
+      dut.io.period.poke(10.U)
+      dut.io.dispatch.validMask.poke(15.U)
+      dut.io.dispatch.fireMask.poke(15.U)
+      dut.io.dispatch.uops.foreach(_.robIdx.value.poke(1.U))
+      dut.clock.step()
+      dut.io.rob.cycle.poke(1.U)
+      dut.io.dispatch.validMask.poke(1.U)
+      dut.io.dispatch.fireMask.poke(1.U)
+      dut.io.dispatch.uops(0).robIdx.value.poke(2.U)
+      dut.io.trace.valid.expect(false.B)
+      dut.io.finals.foreach(_.valid.expect(false.B))
+      dut.clock.step()
+      dut.io.rob.cycle.poke(2.U)
+      dut.io.enable.poke(false.B)
+      dut.io.dispatch.validMask.poke(0.U)
+      dut.io.dispatch.fireMask.poke(0.U)
+      dut.io.rob.commits(0).valid.poke(true.B)
+      dut.io.rob.commits(0).bits.value.poke(2.U)
+      dut.io.finals.foreach(_.valid.expect(false.B))
+      dut.clock.step()
+      dut.io.rob.cycle.poke(3.U)
+      dut.io.rob.commits(0).bits.value.poke(1.U)
+      dut.io.finals(0).valid.expect(true.B)
+      dut.io.finals(0).bits.target.generation.expect(0.U)
+      dut.clock.step()
+      dut.io.rob.commits(0).valid.poke(false.B)
+      dut.io.finals.foreach(_.valid.expect(false.B))
+    }
+  }
+
+  it should "bind frontend waiting once and create a new generation after ROB reuse" in {
+    simulate(new DipSampler()(dipConfig)) { dut =>
+      init(dut)
+      dut.clock.step()
+      dut.io.rob.cycle.poke(1.U)
+      dut.io.dispatch.validMask.poke(1.U)
+      dut.io.dispatch.fireMask.poke(1.U)
+      dut.io.dispatch.uops(0).robIdx.value.poke(1.U)
+      dut.io.dispatch.uops(0).psv.poke(3.U)
+      dut.io.finals(5).valid.expect(true.B)
+      dut.io.finals(5).bits.target.generation.expect(0.U)
+      dut.io.finals(5).bits.next.generation.expect(1.U)
+      dut.io.finals(5).bits.cause.expect(3.U)
+      dut.clock.step()
+      dut.io.rob.cycle.poke(2.U)
+      dut.io.enable.poke(false.B)
+      dut.io.dispatch.validMask.poke(0.U)
+      dut.io.dispatch.fireMask.poke(0.U)
+      dut.io.rob.commits(0).valid.poke(true.B)
+      dut.io.rob.commits(0).bits.value.poke(1.U)
+      dut.io.finals(0).valid.expect(true.B)
+      dut.io.finals(0).bits.target.generation.expect(1.U)
+      dut.clock.step()
+      dut.io.rob.cycle.poke(3.U)
+      dut.io.rob.commits(0).valid.poke(false.B)
+      dut.io.enable.poke(true.B)
+      dut.io.dispatch.validMask.poke(1.U)
+      dut.io.dispatch.fireMask.poke(1.U)
+      dut.io.dispatch.uops(0).robIdx.flag.poke(true.B)
+      dut.io.trace.bits.slots(0).target.generation.expect(3.U)
+      dut.clock.step()
+      dut.io.rob.cycle.poke(4.U)
+      dut.io.enable.poke(false.B)
+      dut.io.dispatch.validMask.poke(0.U)
+      dut.io.dispatch.fireMask.poke(0.U)
+      dut.io.rob.commits(0).valid.poke(true.B)
+      dut.io.rob.commits(0).bits.flag.poke(true.B)
+      dut.io.finals(0).bits.target.generation.expect(3.U)
+    }
+  }
+
+  it should "track nested flush causes and settle self-flushed slots at a later commit" in {
+    simulate(new DipSampler()(dipConfig)) { dut =>
+      init(dut)
+      dut.io.dispatch.validMask.poke(1.U)
+      dut.io.dispatch.fireMask.poke(1.U)
+      dut.io.dispatch.uops(0).robIdx.value.poke(3.U)
+      dut.clock.step()
+      dut.io.rob.cycle.poke(1.U)
+      dut.io.dispatch.validMask.poke(0.U)
+      dut.io.dispatch.fireMask.poke(0.U)
+      dut.io.rob.flush.valid.poke(true.B)
+      dut.io.rob.flush.bits.robIdx.value.poke(2.U)
+      dut.io.finals(4).valid.expect(true.B)
+      dut.io.finals(4).bits.target.generation.expect(1.U)
+      dut.clock.step()
+      dut.io.rob.cycle.poke(2.U)
+      dut.io.rob.flush.bits.robIdx.value.poke(1.U)
+      dut.io.rob.flush.bits.robIdx.isFormer.poke(false.B)
+      dut.io.rob.flush.bits.self.poke(true.B)
+      dut.io.finals(4).valid.expect(true.B)
+      dut.io.finals(4).bits.target.generation.expect(2.U)
+      dut.clock.step()
+      dut.io.rob.cycle.poke(3.U)
+      dut.io.rob.flush.valid.poke(false.B)
+      dut.io.rob.commits(0).valid.poke(true.B)
+      dut.io.rob.commits(0).bits.value.poke(2.U)
+      dut.io.finals(6).valid.expect(true.B)
+      dut.io.finals(6).bits.kind.expect(DipEventKind.watermark.U)
+      dut.io.trace.bits.slots.foreach(_.kind.expect(DipTargetKind.resolved.U))
+      dut.clock.step()
+      dut.io.rob.cycle.poke(4.U)
+      dut.io.rob.commits(0).valid.poke(false.B)
+      dut.io.finals.foreach(_.valid.expect(false.B))
+      dut.io.trace.bits.slots.foreach(_.kind.expect(DipTargetKind.resolved.U))
+    }
+  }
+
 }

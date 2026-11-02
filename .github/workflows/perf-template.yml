@@ -315,7 +315,7 @@ jobs:
               DB_TABLES+=(Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0)
             fi
             if [[ "${{ inputs.enable_dip }}" == "true" ]]; then
-              DB_TABLES+=(Dip_0)
+              DB_TABLES+=(Dip_0 DipDelayedFinal_0)
             fi
             DB_OPTS+=(--dump-select-db "${DB_TABLES[*]}")
           fi

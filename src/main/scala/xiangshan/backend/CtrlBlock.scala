@@ -824,6 +824,10 @@ class CtrlBlockImp(
     }
     val table = ChiselDB.createTable(s"Dip_$hartId", new DipEntry, basicDB = true)
     table.log(dip.io.trace, "", clock, reset)
+    val finalTable = ChiselDB.createTable(s"DipDelayedFinal_$hartId", new DipDelayedFinal, basicDB = true)
+    dip.io.finals.zipWithIndex.foreach { case (event, lane) =>
+      finalTable.log(event, s"event$lane", clock, reset)
+    }
   }
 
   dispatch.io.stallReason <> rename.io.stallReason.out
