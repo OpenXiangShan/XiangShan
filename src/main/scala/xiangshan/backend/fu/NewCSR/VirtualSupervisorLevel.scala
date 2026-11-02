@@ -18,7 +18,7 @@ import scala.collection.immutable.SeqMap
 trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with HypervisorLevel =>
 
   val vsstatus = Module(
-    new CSRModule("VSstatus", new SstatusBundle)
+    new CSRModule("VSstatus", new SstatusBundle(HasZicfilp))
       with SretEventSinkBundle
       with SretEventSDTSinkBundle
       with MretEventSinkBundle

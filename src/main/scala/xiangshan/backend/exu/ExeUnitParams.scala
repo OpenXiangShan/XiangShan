@@ -89,12 +89,18 @@ case class ExeUnitParams(
   val needIsRVC: Boolean = fuConfigs.map(_.hasIsRVC).reduce(_ || _)
   val hasRasAction: Boolean = fuConfigs.map(_.hasRasAction).reduce(_ || _)
   val exceptionOut: Seq[Int] = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
+  // Zicfilp
+  def effectiveExceptionOut(hasZicfilp: Boolean): Seq[Int] =
+    fuConfigs.flatMap(_.effectiveExceptionOut(hasZicfilp)).distinct.sorted
   val hasLoadError: Boolean = fuConfigs.map(_.hasLoadError).reduce(_ || _)
   val flushPipe: Boolean = fuConfigs.map(_.flushPipe).reduce(_ || _)
   val satpFlush: Boolean = fuConfigs.map(_.isCsr).reduce(_ || _)
   val replayInst: Boolean = fuConfigs.map(_.replayInst).reduce(_ || _)
   val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
+  // Zicfilp
+  def needExceptionGen(hasZicfilp: Boolean): Boolean =
+    effectiveExceptionOut(hasZicfilp).nonEmpty || flushPipe || replayInst || trigger
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
   val aluBjuNeedPc: Boolean = fuConfigs.map(_.aluBjuNeedPc).reduce(_ || _)
   def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR

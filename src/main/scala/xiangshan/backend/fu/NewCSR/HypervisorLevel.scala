@@ -70,7 +70,7 @@ trait HypervisorLevel { self: NewCSR =>
   val hvictl = Module(new CSRModule("Hvictl", new HvictlBundle))
     .setAddr(CSRs.hvictl)
 
-  val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
+  val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg(HasZicfilp)) with HasHypervisorEnvBundle {
     when(!menvcfg.STCE) {
       regOut.STCE := 0.U
     }
@@ -361,7 +361,10 @@ class HgatpBundle extends CSRBundle {
   val PPN = RW(43, 0).withReset(0.U).withDescription("Root page-table physical page number for G-stage translation.")
 }
 
-class HEnvCfg extends EnvCfg {
+class HEnvCfg(hasZicfilp: Boolean = false) extends EnvCfg {
+  if (hasZicfilp) {
+    this.LPE.setRW()
+  }
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
   }

@@ -41,7 +41,7 @@ class NewRobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends
     val deq_w = Vec(CommitWidth, Input(Bool()))
     val hasCommitted = Vec(CommitWidth, Input(Bool()))
     val allCommitted = Input(Bool())
-    val exception_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params))))
+    val exception_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params, HasZicfilp))))
     // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
     val intrBitSetReg = Input(Bool())
     val allowOnlyOneCommit = Input(Bool())

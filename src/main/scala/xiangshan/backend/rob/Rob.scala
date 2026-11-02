@@ -73,11 +73,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val exception = ValidIO(new ExceptionInfo)
     val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Bool()))
     val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Input(Valid(Bool())))
+    val ZicfilpELP = OptionWrapper(HasZicfilp, Input(Bool()))
     // exu + brq
     val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val writebackNums = Flipped(Vec(writeback.size, ValidIO(UInt(writeback.size.U.getWidth.W))))
-    val writebackNeedFlush = Input(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
+    val writebackNeedFlush = Input(Vec(params.getWrite2RobSize(_.needExceptionGen(HasZicfilp)), Bool()))
     val commits = Output(new RobCommitIO)
     val trace = new Bundle {
       val blockCommit = Input(Bool())
@@ -154,7 +155,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
 
   val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback
-  val exceptionWBs = io.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
+  val exceptionWBs = io.writeback.filter(x => x.bits.params.needExceptionGen(HasZicfilp)).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
   val isBrhOrJmpWBs = io.exuWriteback.filter(x => (x.bits.params.hasBrhFu || x.bits.params.hasJmpFu)).toSeq
@@ -915,6 +916,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionDebug = debugMeta(exceptionUop)
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(exceptionDebug.pc, exceptionHappen)
+  io.exception.bits.ZicfilpELP.foreach(_ := RegEnable(io.ZicfilpELP.get, exceptionHappen))
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
   io.exception.bits.isForVSnonLeafPTE := io.readGPAMemData.isForVSnonLeafPTE
   io.exception.bits.instr := RegEnable(exceptionDebug.instr, exceptionHappen)
@@ -1753,7 +1755,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   println(s"ExceptionGen:")
-  println(s"num of exceptions: ${params.numException}")
+  println(s"num of exceptions: ${params.numException(HasZicfilp)}")
   require(exceptionWBs.length == exceptionGen.io.wb.length,
     f"exceptionWBs.length: ${exceptionWBs.length}, " +
       f"exceptionGen.io.wb.length: ${exceptionGen.io.wb.length}")

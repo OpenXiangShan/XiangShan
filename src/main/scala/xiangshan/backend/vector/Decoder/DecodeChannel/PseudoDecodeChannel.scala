@@ -2,13 +2,13 @@ package xiangshan.backend.vector.Decoder.DecodeChannel
 
 import chisel3._
 import chisel3.experimental.hierarchy.{instantiable, public}
-import chisel3.util.{BitPat, ValidIO}
+import chisel3.util.{BitPat, ValidIO, is, switch}
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.decode.opcode.OpcodeTraits._
 import sourcecode.{Name => SourceName}
 import top.ArgParser
-import xiangshan.{XSCoreParameters, XSCoreParamsKey}
+import xiangshan.{HasXSParameter, XSCoreParameters, XSCoreParamsKey}
 import xiangshan.CommitType
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
@@ -24,7 +24,6 @@ import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
-import xiangshan.backend.vector.HasVectorSettings
 import xiangshan.backend.decode.ImmUnion
 
 import scala.collection.SeqMap
@@ -33,7 +32,7 @@ import scala.language.implicitConversions
 @instantiable
 class PseudoDecodeChannel(
   instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq
-)(implicit val p: Parameters) extends Module with HasVectorSettings {
+)(implicit val p: Parameters) extends Module with HasXSParameter {
   import PseudoDecodeChannel._
 
   @public
@@ -43,7 +42,7 @@ class PseudoDecodeChannel(
 
   val instBitFields: XSInstBitFields = in.rawInst.asTypeOf(new XSInstBitFields)
 
-  val patterns = instSeq
+  val patterns = if (HasZicfilp) instSeq else instSeq.filterNot(_ == InstPatterns.LPAD)
 
   val fields = Seq(
     legalField,
@@ -62,11 +61,16 @@ class PseudoDecodeChannel(
     canRobCompressField,
     isJField,
     isJrField,
+    isLPADField,
   )
 
   val table = new DecodeTable(patterns, fields)
 
   val bundle = table.decode(in.rawInst)
+
+  val lpadEnabled = if (HasZicfilp) {
+    in.fromCSR.enableZicfilp.get && in.ZicfilpELP.get && in.ZicfilpPCAligned.get
+  } else false.B
 
   val selImm = Wire(ValidIO(DecodeSelImm()))
   val imm = Wire(UInt(32.W))
@@ -76,18 +80,22 @@ class PseudoDecodeChannel(
     selImm.bits,
     Seq(
       DecodeSelImm.I         -> ImmUnion.I.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.I.len),
+      DecodeSelImm.U         -> ImmUnion.U.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.U.len),
       DecodeSelImm.UJ        -> ImmUnion.J.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.J.len),
       DecodeSelImm.CSRRVLENB -> (VLEN / 8).U,
       DecodeSelImm.S         -> ImmUnion.S.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.S.len),
     )
   )
 
-  out.valid := bundle(legalField)
+  out.valid := bundle(legalField) && (!bundle(isLPADField) || lpadEnabled)
   out.bits.fuType := bundle(fuTypeField)
   out.bits.opcode := bundle(opcodeField)
   out.bits.src1RenType := bundle(src1Field)
   out.bits.src2RenType := bundle(src2Field)
   out.bits.lsrc1 := instBitFields.RS1
+  switch(bundle(isLPADField)) {
+    is(true.B) { out.bits.lsrc1 := 7.U }
+  }
   out.bits.lsrc2 := instBitFields.RS2
   out.bits.ldest := instBitFields.RD
   out.bits.gpWen := bundle(gpWenField)
@@ -126,6 +134,8 @@ object PseudoDecodeChannel {
   class In(implicit p: Parameters) extends Bundle {
     val rawInst = UInt(32.W)
     val fromCSR = new CSRToDecode
+    val ZicfilpELP = Option.when(p(XSCoreParamsKey).HasZicfilp)(Bool())
+    val ZicfilpPCAligned = Option.when(p(XSCoreParamsKey).HasZicfilp)(Bool())
   }
 
   class Out extends Bundle {
@@ -161,6 +171,7 @@ object PseudoDecodeChannel {
 
     val J            = PseudoInstPattern(PseudoInstructions.J)
     val JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
+    val LPAD         = PseudoInstPattern(PseudoInstructions.LPAD)
   }
 
   class DecodeFieldGen[-T <: InstPattern, +D <: Data](
@@ -193,6 +204,7 @@ object PseudoDecodeChannel {
     PREFETCH_W    -> (LduOpcodes.prefetch_w + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
     J             -> (JmpOpcodes.j),
     JALR_RD_ZERO  -> (JmpOpcodes.jr),
+    LPAD          -> JmpOpcodes.j.copy().setTraits(Src1Gp, Src2Imm(DecodeSelImm.U), CannotRobCompress),
   )
 
   val legalField = new DecodeFieldGen(
@@ -328,6 +340,11 @@ object PseudoDecodeChannel {
   val isJrField = new DecodeFieldGen(
     Bool(),
     (op: InstPattern) => (op == JALR_RD_ZERO).toBitPat
+  )
+
+  val isLPADField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (op == LPAD).toBitPat,
   )
 
   def makeCSRRBitPat(csrno: Int): BitPat = {

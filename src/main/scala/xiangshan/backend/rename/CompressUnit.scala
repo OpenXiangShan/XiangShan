@@ -104,10 +104,16 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       inst.OPCODE === "b1110111".U
   })
   val cannotCompressVec = VecInit(io.in.zip(isVectorInstrVec).map { case (x, isVectorInstr) =>
+    // Zicfilp: ELP-changing instructions must keep a dedicated ROB entry.
+    val changesELP = if (HasZicfilp) {
+      x.bits.ZicfilpInfos.get.ZicfilpJalr || x.bits.ZicfilpLPAD.get
+    } else {
+      false.B
+    }
     // All vector instructions retain the mainline retirement/exception path.
     // Split instructions also keep its firstUop/lastUop allocation semantics.
     x.valid && (x.bits.waitForward || x.bits.blockBackward ||
-      isVectorInstr ||
+      isVectorInstr || changesELP ||
       !x.bits.firstUop || !x.bits.lastUop)
   })
 
