@@ -33,7 +33,7 @@ import utility.XSPerfHistogram
 import utility.XSPerfRolling
 import utility.XSPerfSeqAccumulate
 import utility.XSPerfSeqRolling
-import xiangshan.CallRetCommit
+import xiangshan.CallRetRedirect
 import xiangshan.RedirectLevel
 import xiangshan.SoftIPrefetchBundle
 import xiangshan.TopDownCounters
@@ -118,7 +118,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // metaQueueRedirect stores speculation information needed by BPU when redirect happens.
   private val metaQueueRedirect = Reg(Vec(FtqSize, new BpuRedirectMeta))
-  private val metaQueueCommit   = Reg(Vec(FtqSize, new BpuCommitMeta))
+  // metaQueueCommit stores RAS commit information needed by BPU when a fetch block commits.
+  private val metaQueueCommit = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // metaQueue stores information needed to train BPU.
   private val metaQueueResolve = Reg(Vec(FtqSize, new BpuResolveMeta))
@@ -511,17 +512,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
     commitPtr := commitPtr + 1.U
   }
 
-  private val reWrite = Wire(Valid(new CallRetCommit))
+  private val reWrite = Wire(Valid(new CallRetRedirect))
   reWrite.valid          := redirect.valid
   reWrite.bits.ftqPtr    := redirect.bits.ftqIdx
   reWrite.bits.rasAction := redirect.bits.attribute.rasAction
-  val commitReWrite = RegNext(reWrite, init = 0.U.asTypeOf(Valid(new CallRetCommit)))
+  val commitReWrite = RegNext(reWrite, init = 0.U.asTypeOf(Valid(new CallRetRedirect)))
   when(commitReWrite.valid) {
     metaQueueCommit(commitReWrite.bits.ftqPtr.value).attribute.rasAction := commitReWrite.bits.rasAction
   }
 
   io.toBpu.commit.valid     := commit
-  io.toBpu.commit.bits.meta := metaQueueCommit(commitPtr(1).value)
+  io.toBpu.commit.bits.meta := metaQueueCommit(commitPtr(0).value)
 
   // --------------------------------------------------------------------------------
   // Performance monitoring

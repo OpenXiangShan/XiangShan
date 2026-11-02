@@ -282,7 +282,13 @@ class Resolve(implicit p: Parameters) extends XSBundle {
   val debug_isRVC: Option[Bool] = Option.when(!env.FPGAPlatform)(Bool())
 }
 
+// TODO: remove CallRetCommit once the related backend code is cleaned up.
 class CallRetCommit(implicit p: Parameters) extends XSBundle {
+  val rasAction: UInt = BranchAttribute.RasAction()
+  val ftqPtr: FtqPtr = new FtqPtr
+}
+
+class CallRetRedirect(implicit p: Parameters) extends XSBundle {
   val rasAction: UInt = BranchAttribute.RasAction()
   val ftqPtr: FtqPtr = new FtqPtr
 }
