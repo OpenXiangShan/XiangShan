@@ -588,6 +588,22 @@ class TlbAccessResult(implicit p: Parameters) extends TlbBundle {
   val pbmt = UInt(ptePbmtLen.W)
 }
 
+class TlbPtwBypassResult(implicit p: Parameters) extends TlbBundle {
+  val hit = Bool()
+  val hitFast = Bool()
+  val ppn = UInt(ppnLen.W)
+  val pbmt = UInt(ptePbmtLen.W)
+  val perm = new TlbPermBundle()
+  val gvpn = UInt(ptePPNLen.W)
+  val gPbmt = UInt(ptePbmtLen.W)
+  val gPerm = new TlbPermBundle(hasV = false)
+  val s2xlate = UInt(2.W)
+  val s1Level = UInt(log2Up(Level + 1).W)
+  val s1IsLeaf = Bool()
+  val s1IsFakePte = Bool()
+  val mptPerm = Option.when(HasMptCheck)(new MptPermBundle(isTlbPort = true))
+}
+
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val gpaddr = Vec(nDups, Output(UInt(XLEN.W)))
