@@ -70,36 +70,6 @@ class MissTrackLookupEntry(implicit p: Parameters) extends DCacheBundle {
   val block_paddr = UInt((PAddrBits - blockOffBits).W)
 }
 
-object MissTrack {
-  def balancedHashBitPairs(addr: UInt, hi: Int, lo: Int, step: Int = 2): UInt = {
-    require(hi >= lo)
-    require(step > 0)
-    if ((hi - lo + 1) <= step) {
-      addr(hi, lo)
-    } else {
-      val remain = (hi - lo + 1) % step
-      val chunks = (lo to (hi - remain) by step).map(i => addr(i + step - 1, i))
-      val xor = ParallelXOR(chunks)
-      if (remain == 0) xor else Cat(xor(step - 1, remain), xor(remain - 1, 0) ^ addr(hi, hi - remain + 1))
-    }
-  }
-
-  /** One-cycle XOR fold with only small local parity reductions before the
-    * register boundary. Bit positions match XORFold, including a short final
-    * chunk. Registers capture unconditionally so late query valid does not
-    * drive their enables. */
-  def registeredXORFold(addr: UInt, width: Int, maxTerms: Int): UInt = {
-    require(width > 0 && width <= addr.getWidth)
-    require(maxTerms > 0)
-    VecInit((0 until width).map { bit =>
-      val terms = (bit until addr.getWidth by width).map(addr(_))
-      val partials = VecInit(terms.grouped(maxTerms).map(ParallelXOR(_)).toSeq)
-      val s1Partials = RegNext(partials)
-      ParallelXOR(s1Partials.toSeq)
-    }).asUInt
-  }
-}
-
 /** Small, lossy history table for speculative-miss eligibility.
   * Existing records are maintained in parallel. One new record per cycle is sampled
   * by a round-robin arbiter; losing insertion opportunities affects coverage only.
@@ -124,28 +94,12 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   private val entries = RegInit(VecInit(Seq.fill(cfg.missTrackEntries)(0.U.asTypeOf(new MissTrackEntry))))
   private def block(pa: UInt): UInt = pa(PAddrBits - 1, blockOffBits)
   private def hash(va: UInt): UInt = XORFold(va(VAddrBits - 1, untagBits), cfg.missTrackHashBits)
-  private def index(va: UInt): UInt = modeId match {
-    case 1 => Cat(
-      MissTrack.balancedHashBitPairs(va, PAddrBits - 1, pgIdxBits),
-      va(untagBits - 1 - (untagBits - pgUntagBits), blockOffBits)
-    )(idxBits - 1, 0)
-    case 2 => va(untagBits - 1, blockOffBits)
-    case _ => throw new IllegalArgumentException(s"Invalid MissTrack index modeId: $modeId")
-  }
-  private def registeredIndex(va: UInt): UInt = modeId match {
-    case 1 => Cat(
-      MissTrack.registeredXORFold(va(PAddrBits - 1, pgIdxBits), 2 min (PAddrBits - pgIdxBits), 6),
-      RegNext(va(pgUntagBits - 1, blockOffBits))
-    )(idxBits - 1, 0)
-    case 2 => RegNext(va(untagBits - 1, blockOffBits))
-    case _ => throw new IllegalArgumentException(s"Invalid MissTrack index modeId: $modeId")
-  }
   private def sameLine(a: MissTrackEntry, b: MissTrackEntry): Bool =
     a.idx === b.idx && a.block_paddr === b.block_paddr
   private def ownerMatches(e: MissTrackEntry): Bool = {
     val owner = io.owners(e.mshr_id)
     owner.valid && block(owner.bits.paddr) === e.block_paddr &&
-      index(owner.bits.vaddr) === e.idx
+      get_dcache_idx(owner.bits.vaddr) === e.idx
   }
   private def overlaps(idx: UInt, way: UInt, inv: Valid[MissTrackInvalidate]): Bool =
     inv.valid && inv.bits.idx === idx && (inv.bits.way & way).orR
@@ -186,7 +140,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   def makeEntry(va: UInt, pa: UInt, way: UInt, pending: Bool, id: UInt): MissTrackEntry = {
     val e = WireDefault(0.U.asTypeOf(new MissTrackEntry))
     e.valid := true.B
-    e.idx := index(va)
+    e.idx := get_dcache_idx(va)
     e.src_hash := hash(va)
     e.block_paddr := block(pa)
     e.is_pending := pending
@@ -209,7 +163,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     val owner = io.owners(a.bits.mshr_id)
     when (a.valid) {
       assert(owner.valid && block(owner.bits.paddr) === block(a.bits.paddr) &&
-        index(owner.bits.vaddr) === index(a.bits.vaddr),
+        get_dcache_idx(owner.bits.vaddr) === get_dcache_idx(a.bits.vaddr),
         "MissTrack allocation must match its registered owner on the following cycle")
     }
   }
@@ -218,13 +172,13 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     val truth = q.s2.bits
     val training = events(1 + allocPorts + w)
     training.bits := makeEntry(truth.vaddr, truth.paddr, truth.way, false.B, 0.U)
-    val truthIdx = index(truth.vaddr)
+    val truthIdx = get_dcache_idx(truth.vaddr)
     training.valid := q.s2.valid && truth.hit && PopCount(truth.way) === 1.U && !previousClear &&
       !overlaps(truthIdx, truth.way, io.invalidate) &&
       !overlaps(truthIdx, truth.way, previousInvalidate)
 
-    val queryIdx = registeredIndex(q.s0_vaddr)
-    val queryHash = MissTrack.registeredXORFold(q.s0_vaddr(VAddrBits - 1, untagBits), cfg.missTrackHashBits, 4)
+    val queryIdx = RegNext(get_dcache_idx(q.s0_vaddr))
+    val queryHash = RegNext(hash(q.s0_vaddr))
     val sampled = RegNext(q.s0_valid, false.B)
     val matches = VecInit(lookupSnapshot.map(e => e.valid && e.idx === queryIdx && e.src_hash === queryHash))
     val multi = ParallelORR(matches.zip(collisionSnapshot).map { case (hit, collision) => hit && collision })
