@@ -143,6 +143,7 @@ package seq_pkg;
     `include "memblock_dtlb_hwpf_training_vseq.sv"
     `include "memblock_dtlb_0101_source_vseq.sv"
     `include "memblock_dtlb_0102_pipeline_vseq.sv"
+    `include "memblock_dtlb_0103_0105_vseq.sv"
 
 endpackage
 

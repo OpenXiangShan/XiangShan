@@ -5,6 +5,7 @@
 +incdir+./virtual_sequence
 +incdir+./virtual_sequence/dtlb_0101
 +incdir+./virtual_sequence/dtlb_0102
++incdir+./virtual_sequence/dtlb_0103_0105
 +incdir+./csr_scalar_stress/base_seq
 +incdir+./csr_scalar_stress/main_sequence
 +incdir+./csr_scalar_stress/virtual_sequence
