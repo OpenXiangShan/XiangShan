@@ -99,7 +99,7 @@ class TrapHandleModule extends Module {
     interruptNO - 1.U, // map VSSIP, VSTIP, VSEIP to SSIP, STIP, SEIP
     interruptNO,
   )
-  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, adjustinterruptNO(5, 0), 0.U), 0.U(2.W))
+  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, adjustinterruptNO(11, 0), 0.U), 0.U(2.W))
 
   io.out.entryPrivState := MuxCase(default = PrivState.ModeM, mapping = Seq(
     traptoVS -> PrivState.ModeVS,
@@ -118,7 +118,7 @@ class TrapHandleIO extends Bundle {
   val in = Input(new Bundle {
     val trapInfo = ValidIO(new Bundle {
       val trapVec = UInt(64.W)
-      val intrVec = UInt(8.W)
+      val intrVec = UInt(12.W)
       val isInterrupt = Bool()
       val singleStep = Bool()
       // trap to x mode

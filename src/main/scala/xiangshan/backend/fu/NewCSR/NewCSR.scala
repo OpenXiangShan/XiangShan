@@ -421,7 +421,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   trapHandleMod.io.in.trapInfo.valid := hasTrap
   trapHandleMod.io.in.trapInfo.bits.trapVec := trapVec.asUInt
-  trapHandleMod.io.in.trapInfo.bits.intrVec := intrVec
+  trapHandleMod.io.in.trapInfo.bits.intrVec := Mux(virtualInterruptIsHvictlInject, hvictl.regOut.IID.asUInt, intrVec)
   trapHandleMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   trapHandleMod.io.in.trapInfo.bits.irToHS := irToHS
   trapHandleMod.io.in.trapInfo.bits.irToVS := irToVS
