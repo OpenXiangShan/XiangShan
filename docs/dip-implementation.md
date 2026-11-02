@@ -2,7 +2,7 @@
 
 基于当前 TEA 的 debug/ChiselDB/Constantin 基础设施实现 ASPLOS 2026 DIP 的 Dispatch 归因规则。论文依据为作者稿 `dip-asplos26-aam.pdf` 的 Figure 3、Section 3.1–3.2。
 
-当前是用于 RTL 仿真验证的实现：RTL 按固定周期间隔采样并分类槽位，完整生命周期 trace 供离线 DIT 定案；尚未实现论文的 CSR、采样中断和低存储开销 DIT。没有将 BOOM 的 49 B 开销作为香山开销。
+RTL 按固定周期间隔采样并分类槽位，只跟踪被采中的 ROB slot 和前端后继。数据库保存采样点及必要的终结/重归因事件，不导出逐周期 Dispatch/ROB 生命周期。尚未实现论文的 CSR 和采样中断；没有将 BOOM 的 49 B 开销作为香山开销。
 
 ## 归因规则
 
@@ -39,16 +39,27 @@ enableTea0 1
 teaSamplePeriod0 1
 ```
 
-`enableDip` 独立于 `enableTea`；两者共用 `WITH_TEA=1` 的 elaboration 开关。周期为 1 可作逐周期验证，默认周期为 256。关闭采样后生命周期 trace 继续跟踪，以便已有样本定案。
+`enableDip` 独立于 `enableTea`；两者共用 `WITH_TEA=1` 的 elaboration 开关。周期为 1 可作逐周期验证，默认周期为 256。关闭采样后，已采目标继续跟踪并输出必要事件，以便已有样本定案。
 
-CI 中设置 `enable_dip=true`、`cst_file=scripts/ci/dip-period1000.cst`，保持 `enable_tea`、`enable_db`、`enable_rolling` 为 false，即只导出 `Dip_0`。同时选择 `enable_tea` 时导出 DIP 和四张 TEA 表，并在 CST 中启用两种采样器；选择 `enable_db` 或 `enable_rolling` 时导出全部可用表。
+CI 中设置 `enable_dip=true`、`cst_file=scripts/ci/dip-period1000.cst`，保持 `enable_tea`、`enable_db`、`enable_rolling` 为 false，即只导出 `Dip_0` 和 `DipDelayedFinal_0`。同时选择 `enable_tea` 时导出 DIP 和四张 TEA 表，并在 CST 中启用两种采样器；选择 `enable_db` 或 `enable_rolling` 时导出全部可用表。
 
 ```bash
 build/emu -s 0 -i ready-to-run/coremark-2-iteration.bin \
   --diff ready-to-run/riscv64-nemu-interpreter-so --max-instr 5000 \
-  --cst-file build/dip.cst --dump-select-db 'Dip_0 Tea_0 TeaDelayedFinal_0' \
+  --cst-file build/dip.cst --dump-select-db 'Dip_0 DipDelayedFinal_0 Tea_0 TeaDelayedFinal_0' \
   --db-path build/dip.db
 python3 scripts/dip_analyze.py build/dip.db --output build/dip-profile
 ```
 
-模拟器产物路径以实际构建输出为准。必须保留 `Dip_0` 的完整 trace，不能先按采样周期过滤生命周期记录。可用 `--warmup-instr N` 从 trace 的真实架构退休计数确定预热边界，配合 `--end-cycle C` 设定排他的测量终点，输出同一 ROI 的退休数、周期数和 IPC。终点后的记录仍用于样本定案。模拟器最终摘要经过流水，强制 dump 也会多执行尾部周期，因此与摘要比较时须使用其 `cycleCnt` 作为终点，不能直接累计整个数据库。输出 `pics.csv` 按 PC、最终状态和多热原因组合聚合；`summary.json` 给出采样数、重归因数、各状态周期和未定案槽位。
+模拟器产物路径以实际构建输出为准。分析必须同时保留两张 DIP 表：
+
+| 表 | 内容 |
+| --- | --- |
+| `Dip_0` | 仅在采样点记录周期、该周期之前的累计退休数、当周期退休数，以及各槽位的状态、原因、PC 和目标身份 |
+| `DipDelayedFinal_0` | 被采目标的提交、相关 flush、前端后继绑定，以及确认自身清除原因稳定的提交水位 |
+
+RTL 为每个 ROB Former/Latter slot 保存是否被引用、环绕 flag、首次被引用的周期 generation 和是否作为恢复原因。未被采样引用的分派/提交不产生记录。前端等待共享一个 generation；遇到下一条 Dispatch 指令时，仅输出一次绑定。同一目标可被任意多个周期样本引用，不占用逐样本硬件队列。flush 只在影响已采工作时输出；离线将其重归到原因目标，保留后续更老 flush 再次重归的能力。generation 避免 ROB 索引复用与旧样本串联。
+
+`--warmup-instr N` 使用每个样本之前的累计架构退休数，精确排除预热边界及之前的采样点。`--end-cycle C` 设定排他的采样终点；更晚的终结事件仍参与归因。输出 `pics.csv` 按 PC、最终状态和多热原因组合聚合；`summary.json` 给出采样数、重归因数、各状态周期和未定案槽位。
+
+稀疏日志不再提供任意非采样周期的退休前缀。`sampled_span_*` 只描述首尾入选采样点之间（含首尾周期）的真实退休数、周期数和 IPC，不将其冒充整个测量 ROI。整段性能数据使用模拟器原生统计；原生最终摘要存在流水延迟，分析时仍以其 `cycleCnt` 设置排他采样终点。
