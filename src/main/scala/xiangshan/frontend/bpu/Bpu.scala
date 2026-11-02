@@ -457,6 +457,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
 
   // used for mainBTB replacer
   mbtb.io.s3_takenMask := s3_takenMask
+  // a group's later block trains tage against what the btb's own read of that block found
+  tage.io.t1_mbtbRereadMeta := mbtb.io.t1_rereadMeta
 
   s3_prediction       := Mux(s3_taken, s3_firstTakenBranch.bits, s3_fallThroughPrediction)
   s3_prediction.taken := s3_taken
@@ -512,6 +514,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s3_resolveMeta.phr      := s3_phrMeta
   // s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
   s3_resolveMeta.utage := s3_utageMeta
+
+  s3_resolveMeta.isLaterBlock := false.B
 
   private val s3_commitMeta = Wire(new BpuCommitMeta)
   s3_commitMeta.ras := ras.io.commitMeta

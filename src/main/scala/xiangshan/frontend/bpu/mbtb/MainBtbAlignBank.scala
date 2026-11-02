@@ -25,6 +25,7 @@ import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
 
@@ -85,6 +86,13 @@ class MainBtbAlignBank(
 
     // fast path of train pc, used to read replacer in advance for better timing
     val t0_startPc: Pc = Input(new Pc)
+
+    // A training event that carries no meta of its own reads the entries back instead. The read shares the arrays'
+    // single port with prediction, so it is refused while prediction holds the bank it needs.
+    val t0_trainRead:          Bool                  = Input(Bool())
+    val t0_trainPosHigherBits: UInt                  = Input(UInt(AlignBankIdxLen.W))
+    val t0_trainReadConflict:  Bool                  = Output(Bool())
+    val t1_rereadMeta:         Vec[MainBtbMetaEntry] = Output(Vec(NumWay + 1, new MainBtbMetaEntry))
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
@@ -127,10 +135,48 @@ class MainBtbAlignBank(
   // so here we should always see getAlignBankIndex(s0_startPc) == physical alignIdx.
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
+  // A training read only has to keep out of the bank prediction reads this cycle: s1 keeps its own copy of what it
+  // read, so a later read of the same bank cannot change a prediction under way.
+  private val t0_trainSetIdx   = getSetIndex(io.t0_startPc)
+  private val t0_trainBankMask = UIntToOH(getInternalBankIndex(io.t0_startPc), NumInternalBanks)
+  private val t0_trainReadFire = io.stageCtrl.t0_fire && io.t0_trainRead
+  io.t0_trainReadConflict := io.t0_trainRead && s0_fire && (t0_trainBankMask & s0_internalBankMask).orR
+  assert(!(t0_trainReadFire && io.t0_trainReadConflict), "a training read was let through onto a busy bank")
+
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i)
-    b.io.read.req.bits.setIdx := s0_setIdx
+    val predictRead = s0_fire && s0_internalBankMask(i)
+    b.io.read.req.valid       := predictRead || t0_trainReadFire && t0_trainBankMask(i)
+    b.io.read.req.bits.setIdx := Mux(predictRead, s0_setIdx, t0_trainSetIdx)
   }
+
+  // what the training read found, in the same form a prediction's meta takes
+  private val t1_trainStartPc   = RegEnable(io.t0_startPc, t0_trainReadFire)
+  private val t1_trainBankMask  = RegEnable(t0_trainBankMask, t0_trainReadFire)
+  private val t1_trainTag       = getTag(t1_trainStartPc)
+  private val t1_trainPosHigher = RegEnable(io.t0_trainPosHigherBits, t0_trainReadFire)
+  private val t1_rereadEntries  = Mux1H(t1_trainBankMask, internalBanks.map(_.io.read.resp.entries))
+  private val t1_rereadCounters = Mux1H(t1_trainBankMask, internalBanks.map(_.io.read.resp.counters))
+  io.t1_rereadMeta.take(NumWay).zip(t1_rereadEntries.zip(t1_rereadCounters)).foreach { case (meta, (e, c)) =>
+    meta.rawHit    := e.valid && e.tag === t1_trainTag
+    meta.position  := Cat(t1_trainPosHigher, e.position)
+    meta.attribute := e.attribute
+    meta.counter   := c
+  }
+  // The victim btb is held in flops, so its slot is taken straight from the entries as they stand, chosen the way a
+  // prediction chooses: the earliest entry of the block that starts at or after the block's own start.
+  private val t1_rereadVbtbHitMask =
+    VecInit((getVictimBtbRawHitMask(vbtbEntries, t1_trainStartPc) zip vbtbEntries).map { case (rawHit, e) =>
+      rawHit && e.entry.position >= getAlignedInstOffset(t1_trainStartPc)
+    })
+  private val t1_rereadVbtbOH = CompareMatrix(
+    VecInit(vbtbEntries.map(_.entry.position)),
+    order = (a: UInt, b: UInt) => a <= b
+  ).getLeastElementOH(t1_rereadVbtbHitMask).asUInt
+  private val t1_rereadVbtbEntry = Mux1H(t1_rereadVbtbOH, vbtbEntries)
+  io.t1_rereadMeta.last.rawHit    := t1_rereadVbtbOH.orR
+  io.t1_rereadMeta.last.position  := Cat(t1_trainPosHigher, t1_rereadVbtbEntry.entry.position)
+  io.t1_rereadMeta.last.attribute := t1_rereadVbtbEntry.entry.attribute
+  io.t1_rereadMeta.last.counter   := t1_rereadVbtbEntry.counter
 
   /* *** s1 ***
    * receive read resp from internal banks
@@ -146,14 +192,21 @@ class MainBtbAlignBank(
   private val s1_tag               = getTag(s1_startPc)
   private val s1_alignedInstOffset = getAlignedInstOffset(s1_startPc)
 
-  private val s1_rawEntries = Mux1H(
+  // The array answers once, in the cycle after the read; a stalled s1 goes on from its own copy, since a training read
+  // may have reused the array in between.
+  private val s1_respCycle = RegNext(s0_fire, init = false.B)
+  private val s1_respEntries = Mux1H(
     s1_internalBankMask,
     internalBanks.map(_.io.read.resp.entries)
   )
-  private val s1_rawCounters = Mux1H(
+  private val s1_respCounters = Mux1H(
     s1_internalBankMask,
     internalBanks.map(_.io.read.resp.counters)
   )
+  private val s1_heldEntries  = RegEnable(s1_respEntries, s1_respCycle)
+  private val s1_heldCounters = RegEnable(s1_respCounters, s1_respCycle)
+  private val s1_rawEntries   = Mux(s1_respCycle, s1_respEntries, s1_heldEntries)
+  private val s1_rawCounters  = Mux(s1_respCycle, s1_respCounters, s1_heldCounters)
 
   // send rawHit for training
   private val s1_rawHitMask = VecInit(s1_rawEntries.map(e => e.valid && e.tag === s1_tag))
