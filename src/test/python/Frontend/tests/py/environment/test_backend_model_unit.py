@@ -1792,6 +1792,27 @@ def test_redirect_stale_guards_follow_flush_slot_reuse(ftq_flag, ftq_value, offs
         model._assert_redirect_ftq_not_committed(*older, **kwargs)
 
 
+def test_fetch_fault_redirect_keeps_commit_pointer_behind_older_correct_queue_entry() -> None:
+    model = BackendModel()
+    model.commit_ptr_flag, model.commit_ptr_value = 1, 28
+    older = _queue_instr(0x80000108, 1, 29)
+    older.path_state = PATH_STATE_CORRECT
+    older.rob_commit_state = ROB_COMMIT_STATE_COMMITTED
+    older.is_last_in_entry = True
+    model._cfvec_queue = deque([older, _queue_instr(0x7FE00000, 1, 31)])
+    state = model._sync_backend_state()
+
+    model._ftq_scoreboard.apply_redirect_flush(
+        ftq_flag=1, ftq_value=31, ftq_offset=0,
+        flush_itself=True, keep_cycle=10, current_cycle=10, is_rvc=False,
+        pending_event_survives=state.pending_event_survives_redirect,
+    )
+    model._apply_backend_state()
+
+    assert (model.commit_ptr_flag, model.commit_ptr_value) == (1, 28)
+    assert list(model._cfvec_queue)[0] is older
+
+
 @pytest.mark.parametrize("mode", ["queue", "fallback"])
 def test_committing_reused_slot_restores_stale_redirect_rejection(mode) -> None:
     model = BackendModel()

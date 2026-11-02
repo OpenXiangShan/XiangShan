@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Callable
 
-from .backend_state import BackendEvent, BackendState, ResolveEntry
+from .backend_state import BackendEvent, BackendState, PATH_STATE_CORRECT, ResolveEntry
 
 
 class FtqScoreboard:
@@ -112,9 +112,18 @@ class FtqScoreboard:
             )
         )
         if flush_itself:
-            self.state.commit_ptr_flag = int(ftq_flag)
-            self.state.commit_ptr_value = int(ftq_value)
-            self.state.reuse_commit_ptr_once = self.state.redirect_reuses_same_ftq_slot(ftq_offset, bool(is_rvc))
+            older_correct_queued = any(
+                entry.path_state == PATH_STATE_CORRECT
+                and 0 < self.state.ftq_ptr_rank_after_commit(entry.ftq_flag, entry.ftq_value) < redirect_rank
+                for entry in self.state.cfvec_queue
+            )
+            if not older_correct_queued:
+                self.state.commit_ptr_flag = int(ftq_flag)
+                self.state.commit_ptr_value = int(ftq_value)
+            self.state.reuse_commit_ptr_once = (
+                not older_correct_queued
+                and self.state.redirect_reuses_same_ftq_slot(ftq_offset, bool(is_rvc))
+            )
             self.state.ftq_entries = deque(
                 entry
                 for entry in self.state.ftq_entries
