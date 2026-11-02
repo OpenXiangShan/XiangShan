@@ -222,6 +222,15 @@ trait HasTlbConst extends HasXSParameter {
     addr(offLen-1, 0)
   }
 
+  def getVpnn(vpn: UInt, idx: UInt): UInt = {
+    MuxLookup(idx, 0.U)(Seq(
+      0.U -> vpn(vpnnLen - 1, 0),
+      1.U -> vpn(vpnnLen * 2 - 1, vpnnLen),
+      2.U -> vpn(vpnnLen * 3 - 1, vpnnLen * 2),
+      3.U -> vpn(vpnnLen * 4 - 1, vpnnLen * 3))
+    )
+  }
+
   def get_set_idx(vpn: UInt, nSets: Int): UInt = {
     require(nSets >= 1)
     vpn(log2Up(nSets)-1, 0)
@@ -348,15 +357,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def getVpnn(vpn: UInt, idx: Int): UInt = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
-  }
-
-  def getVpnn(vpn: UInt, idx: UInt): UInt = {
-    MuxLookup(idx, 0.U)(Seq(
-      0.U -> vpn(vpnnLen - 1, 0),
-      1.U -> vpn(vpnnLen * 2 - 1, vpnnLen),
-      2.U -> vpn(vpnnLen * 3 - 1, vpnnLen * 2),
-      3.U -> vpn(vpnnLen * 4 - 1, vpnnLen * 3))
-    )
   }
 
   def getGVpnn(vpn: UInt, idx: UInt, mode: UInt): UInt = {

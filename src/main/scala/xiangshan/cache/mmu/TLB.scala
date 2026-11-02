@@ -341,15 +341,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     (hit, miss, pmp_paddr, perm, g_perm, pbmt, g_pbmt, mptPerm)
   }
 
-  def getVpnn(vpn: UInt, idx: UInt): UInt = {
-    MuxLookup(idx, 0.U)(Seq(
-      0.U -> vpn(vpnnLen - 1, 0),
-      1.U -> vpn(vpnnLen * 2 - 1, vpnnLen),
-      2.U -> vpn(vpnnLen * 3 - 1, vpnnLen * 2),
-      3.U -> vpn(vpnnLen * 4 - 1, vpnnLen * 3))
-    )
-  }
-
   def pmp_check(addr: UInt, size: UInt, cmd: UInt, noTranslate: Bool, idx: Int): Unit = {
     pmp(idx).valid := resp(idx).valid || noTranslate
     pmp(idx).bits.addr := addr
