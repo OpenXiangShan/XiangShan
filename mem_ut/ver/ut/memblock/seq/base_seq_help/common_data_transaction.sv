@@ -197,6 +197,8 @@ class common_data_transaction extends uvm_object;
     // CSR monitor 的 raw write 回放更新；UID request-fire 冻结 generation 后，RM
     // 只能通过只读 API 查询对应历史快照，不能读取当前可变表。
     memblock_pma_pmp_model   pma_pmp_model;
+    // 中文注释：只有窄窗口main在发布ready之前登记；运行期builder只读，reset清空。
+    memblock_routed_ppn_intent_t routed_ppn_intent_by_vpn[memblock_routed_ppn_vpn_t];
     // 中文注释：已被 PMA/PMP model 回放的最后一个 generic CSR write sample。
     // 只允许单调增加；同 edge request 使用旧表，因此 sample 相等的写入保留给
     // 下一笔 request 才消费。
@@ -547,6 +549,7 @@ class common_data_transaction extends uvm_object;
         main_table_by_uid = new[main_trans_num_i];
         status_by_uid     = new[main_trans_num_i];
         cancel_waiting_uid_tlb_records("reset_all_tables");
+        routed_ppn_intent_by_vpn.delete();
         tlb_entry_by_key.delete();
         tlb_anchor_keys_by_range_key.delete();
         tlb_parent_occupancy_count.delete();
@@ -928,6 +931,42 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA", $sformatf("%s got invalid uid=%0d main_trans_num=%0d", caller, uid, main_trans_num))
         end
     endfunction:check_uid
+
+    // 中文注释：仅登记输入生成约束；不创建TLB条目、不设置RM预期结果。
+    function bit register_routed_ppn_intent(input bit [37:0] vpn,
+                                            input memblock_routed_ppn_intent_t intent);
+        bit [63:0] first, limit;
+        if (!intent.valid || intent.first_offset > intent.last_offset ||
+            seq_csr_common::get_main_mem_ranges_en() ||
+            seq_csr_common::get_l2tlb_ppn_reuse_en()) return 1'b0;
+        first = {8'b0, intent.ppn, 12'b0} + intent.first_offset;
+        limit = {8'b0, intent.ppn, 12'b0} + intent.last_offset + 1;
+        if (!memblock_routed_ppn_policy::is_external_span(first, limit)) return 1'b0;
+        if (routed_ppn_intent_by_vpn.exists(vpn) &&
+            routed_ppn_intent_by_vpn[vpn] != intent) return 1'b0;
+        routed_ppn_intent_by_vpn[vpn] = intent;
+        return 1'b1;
+    endfunction:register_routed_ppn_intent
+
+    // 中文注释：只向builder传递已提交的固定版本。raw写消费仍由已有request/service owner完成。
+    function void configure_builder_routed_context(input tlb_map_builder builder,
+        input memblock_tlb_lookup_key_t key, input mmu_csr_runtime_state csr,
+        input longint unsigned query_sample = 0);
+        longint unsigned pmp_gen, pma_gen;
+        memblock_routed_ppn_intent_t intent;
+        if (seq_csr_common::get_main_mem_ranges_en() ||
+            memblock_sync_pkg::csr_special_sequence_active) return;
+        if (builder == null || csr == null || pma_pmp_model == null || !pma_pmp_model.is_ready())
+            `uvm_fatal("L2TLB_ROUTED_PPN", "routed construction has no initialized PMA owner")
+        if (query_sample != 0) begin
+            if (!pma_pmp_model.get_generations_before_sample(query_sample, pmp_gen, pma_gen))
+                `uvm_fatal("L2TLB_ROUTED_PPN", "no effective PMA generation for request sample")
+        end else pma_pmp_model.get_current_generations(pmp_gen, pma_gen);
+        intent = '{default:'0};
+        if (routed_ppn_intent_by_vpn.exists(key.vpn[37:0]))
+            intent = routed_ppn_intent_by_vpn[key.vpn[37:0]];
+        builder.configure_routed_ppn(pma_pmp_model, pma_gen, csr.priv_debug, intent);
+    endfunction:configure_builder_routed_context
 
     function void set_main_transaction(input memblock_uid_t uid, input main_control_transaction tr);
         check_uid(uid, "set_main_transaction");
@@ -8152,6 +8191,19 @@ class common_data_transaction extends uvm_object;
             lookup_result, entry, created);
     endfunction:get_or_create_tlb_entry_by_req_with_snapshot
 
+    function bit check_routed_ppn_intent_hit(input memblock_tlb_lookup_key_t key,
+                                               input memblock_tlb_entry entry);
+        bit [43:0] actual_ppn;
+        if (!routed_ppn_intent_by_vpn.exists(key.vpn[37:0])) return 1'b1;
+        if (entry == null || entry.s2_stage_active || entry.s1_level != 0 || entry.s1_pte_n)
+            `uvm_fatal("L2TLB_ROUTED_INTENT", "narrow intent conflicts with existing translation shape")
+        actual_ppn = entry.s1_resolved_ppn;
+        if (!entry.s1_resolved_ppn_valid ||
+            actual_ppn != routed_ppn_intent_by_vpn[key.vpn[37:0]].ppn)
+            `uvm_fatal("L2TLB_ROUTED_INTENT", "narrow intent conflicts with existing physical translation")
+        return 1'b1;
+    endfunction:check_routed_ppn_intent_hit
+
     // 中文注释：L2TLB responder 专用 lookup。exact/range hit 保持完全只读，
     // 只有 miss build 在 canonical entry 插表前可按已冻结的 reuse policy 覆写最终 PPN。
     function bit get_or_create_l2tlb_entry_by_req_with_snapshot(
@@ -8164,12 +8216,15 @@ class common_data_transaction extends uvm_object;
         output memblock_tlb_lookup_key_t entry_anchor_key,
         output memblock_tlb_lookup_result_e lookup_result,
         output memblock_tlb_entry entry,
-        output bit created);
+        output bit created,
+        input longint unsigned pma_query_sample = 0);
         bit reused_ppn;
 
         if (csr_snapshot == null) begin
             `uvm_fatal("COMMON_DATA", "get_or_create_l2tlb_entry_by_req_with_snapshot got null csr_snapshot")
         end
+        if (pma_query_sample != 0 &&
+            !apply_pma_pmp_csr_writes_before_request(pma_query_sample)) return 1'b0;
         request_key = csr_snapshot.make_lookup_key({26'b0, vpn}, s2xlate);
         entry_anchor_key = '{default:'0};
         lookup_result = MEMBLOCK_TLB_LOOKUP_MISS_BUILD;
@@ -8178,6 +8233,7 @@ class common_data_transaction extends uvm_object;
             if (entry.range_index_keys.size() == 0) begin
                 `uvm_fatal("COMMON_DATA", "exact L2TLB hit has no registered range index ownership")
             end
+            if (!check_routed_ppn_intent_hit(request_key, entry)) return 1'b0;
             entry.last_hit_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
             entry_anchor_key = request_key;
             lookup_result = MEMBLOCK_TLB_LOOKUP_EXACT_HIT;
@@ -8186,15 +8242,19 @@ class common_data_transaction extends uvm_object;
         end
         if (find_tlb_range_hit_by_req(request_key, csr_snapshot,
                                       entry_anchor_key, entry)) begin
+            if (!check_routed_ppn_intent_hit(request_key, entry)) return 1'b0;
             entry.last_hit_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
             lookup_result = MEMBLOCK_TLB_LOOKUP_RANGE_HIT;
             created = 1'b0;
             return 1'b1;
         end
-        entry = build_tlb_entry_for_key_with_csr(request_key, csr_snapshot);
+        entry = build_tlb_entry_for_key_with_csr(request_key, csr_snapshot, pma_query_sample);
         reused_ppn = 1'b0;
         if (ppn_reuse_en) begin
-            try_apply_l2tlb_ppn_reuse_to_new_entry(entry, ppn_reuse_wt, reused_ppn);
+            if (routed_ppn_intent_by_vpn.exists(vpn))
+                `uvm_fatal("L2TLB_ROUTED_INTENT", "narrow PPN intent cannot use completed PPN reuse")
+            try_apply_l2tlb_ppn_reuse_to_new_entry(entry, ppn_reuse_wt, reused_ppn,
+                                                csr_snapshot, pma_query_sample);
         end
         publish_live_tlb_entry(request_key, entry, csr_snapshot);
         entry_anchor_key = request_key;
@@ -8806,7 +8866,9 @@ class common_data_transaction extends uvm_object;
     function void try_apply_l2tlb_ppn_reuse_to_new_entry(
         ref memblock_tlb_entry entry,
         input int unsigned ppn_reuse_wt,
-        output bit reused_ppn);
+        output bit reused_ppn,
+        input mmu_csr_runtime_state csr_snapshot = null,
+        input longint unsigned pma_query_sample = 0);
         tlb_map_builder builder;
         int unsigned candidate_indices[$];
         int unsigned candidate_count;
@@ -8828,13 +8890,17 @@ class common_data_transaction extends uvm_object;
         if (builder == null) begin
             `uvm_fatal("COMMON_DATA", "failed to create PPN reuse builder")
         end
+        if (csr_snapshot != null)
+            configure_builder_routed_context(builder, entry.lookup_key, csr_snapshot, pma_query_sample);
         if (!builder.can_apply_reused_final_ppn(entry, '0)) begin
             return;
         end
         foreach (l2tlb_ppn_history_q[idx]) begin
             if (l2tlb_ppn_history_q[idx].ppn_valid &&
                 builder.can_apply_reused_final_ppn(entry,
-                                                   l2tlb_ppn_history_q[idx].ppn)) begin
+                                                   l2tlb_ppn_history_q[idx].ppn) &&
+                builder.check_reused_routed_ppn(entry,
+                                                l2tlb_ppn_history_q[idx].ppn)) begin
                 candidate_indices.push_back(idx);
             end
         end
@@ -8874,7 +8940,8 @@ class common_data_transaction extends uvm_object;
 
     function memblock_tlb_entry build_tlb_entry_for_key_with_csr(
         input memblock_tlb_lookup_key_t key,
-        input mmu_csr_runtime_state csr_snapshot);
+        input mmu_csr_runtime_state csr_snapshot,
+        input longint unsigned pma_query_sample = 0);
         memblock_tlb_entry entry;
         memblock_tlb_entry prepared_entry;
         tlb_map_builder    builder;
@@ -8890,6 +8957,7 @@ class common_data_transaction extends uvm_object;
         if (builder == null) begin
             `uvm_fatal("COMMON_DATA", "failed to create tlb_map_builder")
         end
+        configure_builder_routed_context(builder, key, csr_snapshot, pma_query_sample);
         prepared_entry = builder.prepare_tlb_payload_context(key, csr_snapshot);
         allowed_shape_mask = derive_allowed_tlb_shape_mask_with_global_fallback(
             key.vpn, prepared_entry, pte_g_overridden);
@@ -8909,7 +8977,7 @@ class common_data_transaction extends uvm_object;
             forced_4k_fallback_count++;
             if (forced_4k_fallback_count <= MEMBLOCK_TLB_FALLBACK_WARNING_LIMIT) begin
                 `uvm_warning("L2TLB_SHAPE_FALLBACK",
-                             $sformatf("force ordinary 4KB after occupancy filtering vpn=0x%0h s2xlate=%0d occurrence=%0d",
+                             $sformatf("force ordinary 4KB after occupancy/address filtering vpn=0x%0h s2xlate=%0d occurrence=%0d",
                                        key.vpn, key.s2xlate,
                                        forced_4k_fallback_count))
             end

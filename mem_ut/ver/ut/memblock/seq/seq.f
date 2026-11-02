@@ -72,3 +72,12 @@ seq_pkg.sv
 // ./virtual_sequence/memblock_dispatch_manual_control_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_cancel_reconcile_vseq.sv
 // ./virtual_sequence/memblock_l2tlb_pbmt_response_fault_vseq.sv
+
+// Routed PPN sources are included by seq_pkg.sv; do not compile twice.
+// ./base_seq_help/memblock_routed_ppn_intent.svh
+// ./base_seq_help/memblock_routed_ppn_policy.sv
+// ./base_seq_help/memblock_routed_ppn_profile_v2.svh
+// ./base_seq/soft_test/soft_test_l2tlb_routed_ppn_sequence.sv
+// ./base_seq/memblock_main_dispatch_routed_ppn_sequence.sv
+// ./virtual_sequence/soft_test/memblock_l2tlb_routed_ppn_soft_vseq.sv
+// ./virtual_sequence/memblock_l2tlb_routed_ppn_vseq.sv

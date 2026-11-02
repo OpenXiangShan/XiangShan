@@ -25,6 +25,12 @@ mode 从对应 sample 的 CSR history 获得。
 | `owner` | 唯一拥有 responder token、ready、response 与 release 的 sequence 实例。 | `l2tlb_lifecycle_owner_*` | legacy default 和显式 vseq 不能并发启动。 |
 | `mailbox` | driver 与 owner 之间的单槽 frozen sample 状态机。 | sequencer transport slot | owner ack 后 driver 下一 `drv_cb` recycle。 |
 | `release grant` | parent 在所有 owner/adapter/fence proof 收敛后发送的一次释放许可。 | `grant_l2tlb_final_release()` | owner 不能自行 clear claim。 |
+| `PMA generation / snapshot` | 按request sample选择的已提交物理属性表版本及只读副本。 | `configure_builder_routed_context()`、`pma_history` | 区别于lookup使用的C-2 MMU CSR。 |
+| `PPN / shape / NAPOT` | 物理页号、完整映射覆盖范围、连续64K页编码。 | `tlb_map_builder`、`memblock_routed_ppn_policy` | 大页完整范围都需外部可达。 |
+| `PBMT / NC / IO / MMIO` | 页面属性、不缓存主存、IO属性、按PMA判定的设备访问。 | `effective_pbmt()` | PBMT00+c0重选仍保持c0。 |
+| `GPA / stage` | S1输出的中间物理地址及翻译阶段。 | S1/S2 raw/resolved字段 | allStage只限制最终S2 PA路由。 |
+| `intent` | 上游在主表ready前固定的物理页和合法页内偏移约束。 | `routed_ppn_intent_by_vpn` | UART128B与外部部分页。 |
+
 
 | 函数/task | 抽象功能描述 |
 |---|---|
@@ -69,7 +75,14 @@ flowchart TD
     D --> E[semantic owner]
     E --> F{request fire}
     F -->|yes| G[capture_fired_request]
-    G --> H[exact/range lookup or build logical entry]
+    G --> P[apply_pma_pmp_csr_writes_before_request]
+    P --> H[exact/range lookup or build logical entry]
+    H -->|miss| Q[configure_builder_routed_context]
+    Q --> R[configure_routed_ppn / read_pma_attribute_spans]
+    R --> S[prepare / allowed shape / finalize]
+    S --> T[select_final_routed_ppn / select_ppn]
+    T --> U[reuse同版本检查 / publish_live_tlb_entry]
+    U --> I
     H --> I[deep-copy pending entry snapshot]
     I --> J[pending_q]
     J --> K[select_due_response]
@@ -85,8 +98,10 @@ flowchart TD
 2. driver 在真实 drv_cb 冻结 request valid/vpn/s2xlate、ready、response 和 metadata，写入单槽 mailbox。
 3. owner 消费该 mailbox。request fire 时按当前 sample 的 C-2 CSR 创建 request lookup key，并为同
    `{vpn,s2xlate}` 的 WAITING UID 写 request-fire marker；UID issue-time CSR 只保留历史/debug，不能拒绝该 marker。
-4. exact hit 复用 canonical logical entry；range lookup 专项完成后 exact miss 可以按 secondary range index 复用 entry；
-   两者都要深拷贝 entry 到 token 私有 snapshot。miss 才随机 build 新 entry。
+4. common-data在get/create之前使用request sample应用已成熟PMA/PMP写入；exact/range hit复用已有entry，
+   只校验可选intent一致性，不重选已有映射。miss才固定该sample的PMA generation并构造新entry；
+   prepare冻结PBMT，finalize对最终PA stage执行完整shape路由及PMA c类别选择，插表前reuse复用同版检查。
+   所有分支最后深拷贝entry到token私有snapshot。
 5. token 到 due sample 后按 ordered/reorder 选择 response。response fire 后才完成 token，并使用 response fire 拍 C-2 CSR
    对全部 WAITING UID 做 raw-hit multicast；token 不与唯一 UID 绑定。
 6. response snapshot 已冻结，因此 live entry 后续被 SFENCE 删除不会改变已经接受的 response payload。
@@ -103,11 +118,61 @@ response payload；它不处理 future fence raw 或直接驱动 response。
 读取 request 的 vpn/s2xlate。
 在分配任何 token 或 UID marker 前检查 local/shared admission cutoff；close 后若仍观察到真实 fire 立即 fatal。
 从当前 global sample 查询 C-2 CSR history；warm-up 未完成时 ready 保持 0，已 fire 后缺失 history 则 fatal。
-调用 common_data 的 get_or_create lookup API 得到 canonical entry；随后逐字段 copy 到 token entry_snapshot。
+调用 common_data 的 get_or_create lookup API，并传入sample_seq作为PMA查询边界；
+公共owner先回放成熟CSR写，miss按该sample固定PMA generation并选择最终PA，hit保持条目不变；
+随后逐字段 copy 到 token entry_snapshot。
 调用 mark_waiting_uid_records_on_request_fire：只使用 token 保存的 request-fire C-2 CSR 在 ROB-bounded
 {vpn,s2xlate} bucket 中确认候选 UID，并写首次 fire sample；不使用 UID issue-time CSR 做第二次 key 比较。
 分配 request_token、due_sample 和 latency bucket，push pending_q。
 ```
+
+### 新条目的可路由物理页构造（2026-11-02）
+
+源码位置：`common_data_transaction.sv::configure_builder_routed_context()`、
+`tlb_map_builder.sv::prepare_tlb_payload_context()/finalize_tlb_payload_shape_and_payload()/select_final_routed_ppn()`、
+`memblock_routed_ppn_policy.sv::select_ppn()`。
+
+抽象功能描述：公共owner为新映射提供按请求sample选择的PMA版本，builder将普通sparse的最终PA限制到实际外部路由集合；
+lookup所用MMU CSR仍为C-2快照，PMA构造版本不替代RM动态访问上下文。
+
+真实逻辑摘要：
+
+```systemverilog
+// capture_fired_request()中的普通入口，末参是本次request sample。
+data.get_or_create_l2tlb_entry_by_req_with_snapshot(
+    pending.vpn, pending.s2xlate, pending.csr_snapshot,
+    ppn_reuse_en, ppn_reuse_wt,
+    pending.request_lookup_key, pending.entry_anchor_key,
+    pending.lookup_result, live_entry, created, sample_seq);
+// common-data配置builder时按同一sample选已提交PMA版本。
+if (query_sample != 0) begin
+    if (!pma_pmp_model.get_generations_before_sample(query_sample, pmp_gen, pma_gen))
+        `uvm_fatal("L2TLB_ROUTED_PPN", "no effective PMA generation for request sample")
+end
+builder.configure_routed_ppn(pma_pmp_model, pma_gen, csr.priv_debug, intent);
+```
+
+中文文字伪代码：
+
+```text
+真实request C传递sample=C，common-data先通过既有回放应用C时已成熟的写事件；
+  CSR写在C0采集，到C0+2成熟；未成熟写不提前影响本次生成；
+miss时configure_builder_routed_context按sample选PMA历史版本，按原始VPN读intent；
+policy配置只复制值型属性区间，不自己消费raw FIFO；
+prepare只随机一次各stage PBMT，之后依据occupancy允许集合选择shape；
+普通sparse恢复旧XOR候选，对最终PA stage执行路由和同c检查；
+  安全PBMT00+c1候选保留；c0候选只换到同c0；NC/IO可选外部合法全集；
+  allStage只对S2最终PA选择，S1中间GPA仅满足S2输入模式位宽；
+  intent只在静态4K专项按已保证offset选择物理页；
+  strict、CSR权限专项、有效fault与非LEGAL路径保留原候选构造；
+无候选的普通大shape最多降为4K一次，显式shape或4K仍失败则报错；
+reuse在发布前按同一PMA版本及完整页路由过滤，不修改history或已有entry；
+publish后pending复制冻结结果，后续CSR写和sfence均不改本token payload。
+```
+
+完整路由集合、部分页intent及实际到达观察见
+[`l2tlb_routed_ppn_generation_flow.md`](l2tlb_routed_ppn_generation_flow.md)。
+本补充描述源码入口，不将静态检查视为真实DUT专项通过。
 
 ### UID request-fire marker
 
@@ -241,3 +306,21 @@ make eda_compile tc=basicTest ts=virtual_base_sequence mode=base_fun
 注册/注销和 64 KiB NAPOT validation 已由
 `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md` 完成；stage-aware C4 delete
 通过统一 delete helper 同时删除 canonical map entry 与其 range index。
+
+
+## 2026-11-02 端到端物理页行为补充
+
+```text
+cacheable新映射：request fire → 成熟CSR回放 → sample对应PMA版本 → miss builder
+  → PBMT00+c1且完整shape可路由 → 保留旧XOR候选 → 发布 → 冻结response。
+
+B08地址洞：request → 普通候选PA落APLIC洞 → select_ppn拒绝route
+  → 按PBMT及原c类别选择合法窗口 → 编码发布 → 原DTLB响应调度。
+
+已有映射：request → exact/range hit → intent一致性检查 → 冻结已有payload，
+  不按新权重或新PMA配置后台重写canonical。
+```
+
+端到端文字伪代码：新条目才进入物理页策略，CSR FIFO由公共回放owner按成熟边界消费；属性版本固定后，
+builder选择完整可路由形状并在发布前过滤reuse。已有命中沿原映射回复。UART等窄目标由上游主表保障offset，
+DTLB接口不携带也不新增offset字段，真实访问证据仍需外部A.fire及原RM结束状态。

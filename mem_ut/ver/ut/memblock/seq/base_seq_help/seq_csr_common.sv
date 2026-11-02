@@ -266,6 +266,9 @@ class seq_csr_common;
     // 中文注释：L2TLB PPN reuse 的运行期冻结配置。
     // 仅 responder sequence 在启动时读取；EN=0 时不允许读写 completed-response history。
     // HISTORY_SIZE 是 software FIFO 上限，不映射到 DUT 物理资源，最大值固定为 256。
+    // 中文注释：初始化时冻结，builder只读；-1随机窗口，0..6为profile窗口ID。
+    static int unsigned l2tlb_ppn_region_random_wt = 50;
+    static int signed   l2tlb_ppn_region_id = -1;
     static bit          l2tlb_ppn_reuse_en = 1'b0;
     static int unsigned l2tlb_ppn_reuse_history_size = 5;
     static int unsigned l2tlb_ppn_reuse_wt = 40;
@@ -645,6 +648,9 @@ class seq_csr_common;
         l2tlb_resp_mid_wt           = get_non_negative_int("MEMBLOCK_L2TLB_RESP_MID_WT", plus::MEMBLOCK_L2TLB_RESP_MID_WT);
         l2tlb_resp_long_wt          = get_non_negative_int("MEMBLOCK_L2TLB_RESP_LONG_WT", plus::MEMBLOCK_L2TLB_RESP_LONG_WT);
         l2tlb_idle_stop_cycle       = get_non_negative_int("MEMBLOCK_L2TLB_IDLE_STOP_CYCLE", plus::MEMBLOCK_L2TLB_IDLE_STOP_CYCLE);
+        l2tlb_ppn_region_random_wt = get_non_negative_int(
+            "MEMBLOCK_L2TLB_PPN_REGION_RANDOM_WT", plus::MEMBLOCK_L2TLB_PPN_REGION_RANDOM_WT);
+        l2tlb_ppn_region_id = plus::MEMBLOCK_L2TLB_PPN_REGION_ID;
         l2tlb_ppn_reuse_en          = plus::MEMBLOCK_L2TLB_PPN_REUSE_EN;
         l2tlb_ppn_reuse_history_size = get_non_negative_int(
             "MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE",
@@ -688,6 +694,9 @@ class seq_csr_common;
     // 中文注释：只校验 PPN reuse 参数的表达范围，不读取 history、不随机且不修改 TLB entry。
     // ENABLE 打开时 FIFO 容量必须非零；关闭时允许容量为零以保持旧路径完全旁路。
     static function void check_l2tlb_ppn_reuse_cfg();
+        if (l2tlb_ppn_region_random_wt > 100 ||
+            l2tlb_ppn_region_id < -1 || l2tlb_ppn_region_id > 6)
+            `uvm_fatal("SEQ_CSR_CFG", "invalid routed PPN window probability or ID")
         if (l2tlb_ppn_reuse_history_size > 256) begin
             `uvm_fatal("SEQ_CSR_CFG",
                        $sformatf("MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE=%0d exceeds framework bound=256",
@@ -2146,6 +2155,16 @@ class seq_csr_common;
         check_initialized("get_l2tlb_idle_stop_cycle");
         return l2tlb_idle_stop_cycle;
     endfunction:get_l2tlb_idle_stop_cycle
+
+    static function int unsigned get_l2tlb_ppn_region_random_wt();
+        check_initialized("get_l2tlb_ppn_region_random_wt");
+        return l2tlb_ppn_region_random_wt;
+    endfunction
+
+    static function int signed get_l2tlb_ppn_region_id();
+        check_initialized("get_l2tlb_ppn_region_id");
+        return l2tlb_ppn_region_id;
+    endfunction
 
     static function bit get_l2tlb_ppn_reuse_en();
         check_initialized("get_l2tlb_ppn_reuse_en");

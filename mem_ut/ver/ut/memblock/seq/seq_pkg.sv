@@ -76,6 +76,8 @@ package seq_pkg;
     `include "memblock_op_behavior_util.sv"
     `include "status_transaction.sv"
     `include "memblock_tlb_entry.sv"
+    `include "memblock_routed_ppn_policy.sv"
+    `include "memblock_routed_ppn_intent.svh"
     `include "tlb_map_builder.sv"
     `include "common_data_transaction.sv"
     `include "lsq_ctrl_model.sv"
@@ -107,12 +109,14 @@ package seq_pkg;
     `include "memblock_redirect_dispatch_base_sequence.sv"
     `include "memblock_l2tlb_base_sequence.sv"
     `include "soft_test_l2tlb_ppn_reuse_sequence.sv"
+    `include "soft_test_l2tlb_routed_ppn_sequence.sv"
     // memblock_main_dispatch_auto_build_main_table_base_sequence 的终态审计
     // 需要调用 mem_access_base_sequence 的共享 memory helper；先声明 responder
     // 基类，再声明依赖它的 main orchestration class。
     `include "mem_base_sequence.sv"
     `include "soft_test_l2tlb_pbmt_csr_gate_sequence.sv"
     `include "memblock_main_dispatch_auto_build_main_table_base_sequence.sv"
+    `include "memblock_main_dispatch_routed_ppn_sequence.sv"
     `include "memblock_csr_scalar_stress_main_sequence_base.sv"
     `include "memblock_csr_scalar_load_10k_main_sequence.sv"
     `include "memblock_csr_scalar_store_10k_main_sequence.sv"
@@ -139,6 +143,8 @@ package seq_pkg;
     `include "memblock_rm_provenance_followup_directed_vseq.sv"
     `include "memblock_rm_uncache_d_error_ledger_directed_vseq.sv"
     `include "memblock_dispatch_real_smoke_vseq.sv"
+    `include "memblock_l2tlb_routed_ppn_vseq.sv"
+    `include "soft_test/memblock_l2tlb_routed_ppn_soft_vseq.sv"
     `include "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq.sv"
     `include "memblock_csr_random_config_vseq.sv"
     `include "memblock_csr_mapping_transport_negative_vseq.sv"

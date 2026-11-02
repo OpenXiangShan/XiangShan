@@ -1561,7 +1561,7 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
                      pending.vpn, pending.s2xlate, pending.csr_snapshot,
                      ppn_reuse_en, ppn_reuse_wt,
                      pending.request_lookup_key, pending.entry_anchor_key,
-                     pending.lookup_result, live_entry, created) ||
+                     pending.lookup_result, live_entry, created, sample_seq) ||
                  live_entry == null) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("failed to get/create L2TLB entry vpn=0x%0h s2xlate=%0d",

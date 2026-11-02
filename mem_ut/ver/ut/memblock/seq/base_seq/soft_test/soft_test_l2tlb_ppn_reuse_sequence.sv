@@ -110,50 +110,41 @@ function void soft_test_l2tlb_ppn_reuse_sequence::check_smoke_cfg_snapshot();
                 "PPN reuse smoke cfg must force deterministic 4KB page shape");
     expect_true(seq_csr_common::get_main_mem_ranges_en() == 1'b0,
                 "PPN reuse smoke cfg must exercise sparse PPN generation");
+    // 中文注释：保持合法原候选的地址策略稳定，使两次miss构造的差异只来自reuse。
+    // 地址洞保护仍生效；不能通过关闭路由策略来让历史非法PPN通过。
+    expect_true(seq_csr_common::get_l2tlb_ppn_region_random_wt() == 0 &&
+                seq_csr_common::get_l2tlb_ppn_region_id() == -1,
+                "PPN reuse smoke must disable independent voluntary region reselection");
 endfunction:check_smoke_cfg_snapshot
 
+// 抽象职责：raw候选只保证确定性与页形状；最终可达性由新routed专项检查。
 task soft_test_l2tlb_ppn_reuse_sequence::check_sparse_ppn_manager_reachability();
-    localparam bit [47:0] SPARSE_BASE  = 48'h0080_0000_0000;
-    localparam bit [47:0] SPARSE_LIMIT = 48'h00ff_ffff_ffff;
     bit [37:0] historical_vpn;
     bit [43:0] historical_root_ppn;
     bit [43:0] first_ppn;
     bit [43:0] repeated_ppn;
-    bit [47:0] first_paddr;
+    bit [43:0] expected_ppn;
 
     historical_vpn = 38'h000_008d_2f5;
     historical_root_ppn = 44'h0000_0008_0000;
-
-    for (int unsigned level = 0; level <= 3; level++) begin
-        first_ppn = builder.make_canonical_ppn(
-            historical_vpn, historical_root_ppn, level[1:0], 1'b0);
-        repeated_ppn = builder.make_canonical_ppn(
-            historical_vpn, historical_root_ppn, level[1:0], 1'b0);
-        first_paddr = {first_ppn, 12'b0};
-        expect_true(first_ppn == repeated_ppn,
-                    $sformatf("sparse PPN must be deterministic at level=%0d", level));
-        expect_true(first_paddr >= SPARSE_BASE && first_paddr <= SPARSE_LIMIT,
-                    $sformatf("sparse PPN must stay in routable DRAM level=%0d paddr=0x%0h",
-                              level, first_paddr));
-        case (level)
-            1: expect_true(first_ppn[8:0] == '0,
-                           "2 MiB sparse PPN must keep level alignment");
-            2: expect_true(first_ppn[17:0] == '0,
-                           "1 GiB sparse PPN must keep level alignment");
-            3: expect_true(first_ppn[26:0] == '0,
-                           "512 GiB sparse PPN must keep level alignment");
-            default: begin end
-        endcase
+    for (int unsigned stage = 0; stage < 2; stage++) begin
+        for (int unsigned level = 0; level <= 3; level++) begin
+            first_ppn = builder.make_canonical_ppn(
+                historical_vpn, historical_root_ppn, level[1:0], stage[0]);
+            repeated_ppn = builder.make_canonical_ppn(
+                historical_vpn, historical_root_ppn, level[1:0], stage[0]);
+            expected_ppn = historical_root_ppn ^ {6'b0,historical_vpn} ^
+                (stage ? 44'h0000_005a_5a5 : 44'h0000_003c_3c3);
+            case (level)
+                1: expected_ppn[8:0] = '0;
+                2: expected_ppn[17:0] = '0;
+                3: expected_ppn[26:0] = '0;
+                default: begin end
+            endcase
+            expect_true(first_ppn == repeated_ppn && first_ppn == expected_ppn,
+                $sformatf("sparse raw candidate must retain deterministic XOR/alignment stage=%0d level=%0d", stage, level));
+        end
     end
-
-    first_ppn = builder.make_canonical_ppn(
-        historical_vpn, historical_root_ppn, 2'd0, 1'b1);
-    first_paddr = {first_ppn, 12'b0};
-    expect_true(first_paddr >= SPARSE_BASE && first_paddr <= SPARSE_LIMIT,
-                $sformatf("S2 sparse PPN must stay in routable DRAM paddr=0x%0h",
-                          first_paddr));
-    expect_true(first_paddr != 48'h0000_3113_6000,
-                "historical APLIC manager hole must not be regenerated");
 endtask:check_sparse_ppn_manager_reachability
 
 function mmu_csr_runtime_state

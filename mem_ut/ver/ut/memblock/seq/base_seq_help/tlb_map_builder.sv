@@ -9,9 +9,8 @@
 class tlb_map_builder extends uvm_object;
     localparam bit [3:0] MEMBLOCK_SV39_MODE = 4'd8;
     localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
-    // Sparse payloads still have to target a manager reachable from MemBlock's
-    // uncache port.  Keep them in a 512 GiB-aligned cacheable DRAM window so
-    // 4 KiB through 512 GiB page shapes remain routable after level alignment.
+    // 中文注释：固定B08窗口仅供权限/fault专项旁路保留历史行为；
+    // 普通sparse恢复XOR候选，并由PMA快照和外部路由策略决定最终PPN。
     localparam bit [47:0] MEMBLOCK_SPARSE_PADDR_BASE  = 48'h0080_0000_0000;
     localparam bit [47:0] MEMBLOCK_SPARSE_PADDR_RANGE = 48'h0080_0000_0000;
 
@@ -24,9 +23,114 @@ class tlb_map_builder extends uvm_object;
         longint unsigned weight;
     } memblock_tlb_shape_bucket_t;
 
+    // 中文注释：仅用于本次新entry构造的只读PMA快照；不拥有CSR FIFO或UID context。
+    memblock_routed_ppn_policy routed_policy;
+    memblock_routed_ppn_intent_t routed_intent;
+
     `uvm_object_utils(tlb_map_builder)
 
     function new(string name = "tlb_map_builder"); super.new(name); endfunction:new
+
+    // 中文注释：公共owner已处理成熟CSR写后，固定本次构造的版本与可选窄窗口意图。
+    function void configure_routed_ppn(input memblock_pma_pmp_model model,
+                                       input longint unsigned generation,
+                                       input bit debug,
+                                       input memblock_routed_ppn_intent_t intent);
+        routed_policy = memblock_routed_ppn_policy::type_id::create("routed_ppn_policy");
+        if (model == null || !routed_policy.configure(model, generation, debug))
+            `uvm_fatal("L2TLB_ROUTED_PPN", "PMA snapshot unavailable for routed PPN construction")
+        routed_intent = intent;
+    endfunction:configure_routed_ppn
+
+    // 中文注释：权限/fault专项保持旧候选，不能由地址修复消除专门构造的异常。
+    function bit routed_policy_active(input memblock_tlb_entry entry);
+        return entry != null && !seq_csr_common::get_main_mem_ranges_en() &&
+            !memblock_sync_pkg::csr_special_sequence_active &&
+            !entry.has_effective_fault() && !entry.pmaAF &&
+            (!entry.s1_stage_active || entry.s1_pte_mode_at_build ==
+                memblock_tlb_entry::MEMBLOCK_TLB_PTE_MODE_LEGAL) &&
+            (!entry.s2_stage_active || entry.s2_pte_mode_at_build ==
+                memblock_tlb_entry::MEMBLOCK_TLB_PTE_MODE_LEGAL);
+    endfunction:routed_policy_active
+
+    function bit [1:0] effective_pbmt(input memblock_tlb_entry entry);
+        case (entry.s2xlate)
+            2'd0, 2'd1: return entry.s1_entry_pbmt;
+            2'd2: return entry.s2_entry_pbmt;
+            default: return entry.s1_entry_pbmt != 0 ?
+                entry.s1_entry_pbmt : entry.s2_entry_pbmt;
+        endcase
+    endfunction:effective_pbmt
+
+    function int unsigned routed_shape_shift(input bit [1:0] level, input bit napot);
+        case (level)
+            1: return 21;
+            2: return 30;
+            3: return 39;
+            default: return napot ? 16 : 12;
+        endcase
+    endfunction:routed_shape_shift
+
+    // 中文注释：将最终PA stage的新候选合法化。失败仅触发一次普通4K降级，不修改其它stage。
+    function bit select_final_routed_ppn(input memblock_tlb_entry entry,
+                                         input bit s1,
+                                         input bit [37:0] input_vpn,
+                                         input bit directed_shape,
+                                         ref bit [43:0] canonical_ppn,
+                                         output bit fell_back);
+        bit [1:0] level;
+        bit napot;
+        bit [43:0] anchor, selected_ppn;
+        int signed region;
+        int unsigned shift;
+        bit [63:0] intent_first, intent_limit;
+        fell_back = 1'b0;
+        if (!routed_policy_active(entry)) return 1'b1;
+        if (routed_policy == null) begin
+            memblock_pma_pmp_model model;
+            longint unsigned pmp_gen, pma_gen;
+            model = memblock_pma_pmp_model::get();
+            if (!model.is_ready())
+                `uvm_fatal("L2TLB_ROUTED_PPN", "routed PPN requires initialized PMA model")
+            model.get_current_generations(pmp_gen, pma_gen);
+            configure_routed_ppn(model, pma_gen, 1'b0, '{default:'0});
+        end
+        level = s1 ? entry.s1_level : entry.s2_level;
+        napot = s1 ? entry.s1_pte_n : entry.s2_pte_n;
+        if (routed_intent.valid) begin
+            intent_first = {8'b0, routed_intent.ppn, 12'b0} + routed_intent.first_offset;
+            intent_limit = {8'b0, routed_intent.ppn, 12'b0} + routed_intent.last_offset + 1;
+            if (level != 0 || napot ||
+                !memblock_routed_ppn_policy::is_external_span(intent_first, intent_limit))
+                `uvm_fatal("L2TLB_ROUTED_INTENT", "narrow intent has invalid shape or route")
+            canonical_ppn = routed_intent.ppn;
+            return 1'b1;
+        end
+        for (int attempt = 0; attempt < 2; attempt++) begin
+            shift = routed_shape_shift(level, napot);
+            anchor = resolve_ppn_from_raw(canonical_ppn, input_vpn, level, napot);
+            if (routed_policy.select_ppn(canonical_ppn, anchor, shift,
+                    effective_pbmt(entry), seq_csr_common::get_l2tlb_ppn_region_random_wt(),
+                    seq_csr_common::get_l2tlb_ppn_region_id(), selected_ppn, region)) begin
+                canonical_ppn = selected_ppn;
+                apply_legal_napot_ppn_encoding(s1, level, napot, canonical_ppn, entry);
+                `uvm_info("L2TLB_ROUTED_PPN",
+                    $sformatf("vpn=0x%0h s2xlate=%0d final_stage=%s ppn=0x%0h pbmt=%0d window=%0d shift=%0d fallback=%0b",
+                        entry.lookup_key.vpn, entry.s2xlate, s1 ? "S1" : "S2",
+                        canonical_ppn, effective_pbmt(entry), region, shift, fell_back), UVM_LOW)
+                return 1'b1;
+            end
+            if (directed_shape || (level == 0 && !napot)) return 1'b0;
+            level = 0; napot = 0;
+            if (s1) begin entry.s1_level = 0; entry.s1_pte_n = 0; end
+            else begin entry.s2_level = 0; entry.s2_pte_n = 0; end
+            // 中文注释：保留第一次resolved anchor作4K候选，冻结PBMT00原c类别。
+            // 重新hash会改变地址，可能把原c0权限域静默变为c1。
+            canonical_ppn = anchor;
+            fell_back = 1'b1;
+        end
+        return 1'b0;
+    endfunction:select_final_routed_ppn
 
     // Abstract responsibility: sample one Boolean payload field from its
     // configured percentage.  It does not alter any other field or retry a
@@ -160,7 +264,8 @@ class tlb_map_builder extends uvm_object;
     function bit [43:0] make_canonical_ppn(input bit [37:0] vpn,
                                            input bit [43:0] root_ppn,
                                            input bit [1:0] level,
-                                           input bit s2);
+                                           input bit s2,
+                                           input bit legacy_sparse = 1'b0);
         bit [43:0] ppn;
         bit [63:0] page_count;
         bit [63:0] page_offset;
@@ -174,18 +279,15 @@ class tlb_map_builder extends uvm_object;
             ppn = (seq_csr_common::get_paddr_base() >> 12) + page_offset;
         end
         else begin
-            // The old full-space XOR could land in PMA-permitted peripheral
-            // holes (for example APLIC's unimplemented subranges). Uncache
-            // accepts such a request into its input TLBuffer, while TLXbar has
-            // no matching manager and permanently backpressures the request.
-            // Hash within cacheable DRAM instead; sparse memory remains lazily
-            // allocated by the responder and no fixed main-memory table is
-            // required.
-            page_count = MEMBLOCK_SPARSE_PADDR_RANGE >> 12;
-            page_offset = (root_ppn ^ {6'b0, vpn} ^
-                           (s2 ? 44'h0000_005a_5a5 : 44'h0000_003c_3c3)) %
-                          page_count;
-            ppn = (MEMBLOCK_SPARSE_PADDR_BASE >> 12) + page_offset;
+            // 中文注释：普通sparse恢复确定性候选；最终PA由select_final_routed_ppn合法化。
+            // 权限/fault旁路仍使用旧B08窗口，保持该专项原始响应构造语义。
+            ppn = root_ppn ^ {6'b0, vpn} ^
+                  (s2 ? 44'h0000_005a_5a5 : 44'h0000_003c_3c3);
+            if (legacy_sparse) begin
+                page_count = MEMBLOCK_SPARSE_PADDR_RANGE >> 12;
+                page_offset = ppn % page_count;
+                ppn = (MEMBLOCK_SPARSE_PADDR_BASE >> 12) + page_offset;
+            end
         end
         case (level)
             2'd1: ppn[8:0]   = '0;
@@ -241,6 +343,27 @@ class tlb_map_builder extends uvm_object;
         endcase
         return 1'b0;
     endfunction:can_apply_reused_final_ppn
+
+    // 中文注释：复用资格额外受同一只读PMA快照约束；不修改entry或完成history。
+    function bit check_reused_routed_ppn(input memblock_tlb_entry entry,
+                                         input bit [43:0] candidate_ppn);
+        bit target_c;
+        bit [43:0] current_ppn;
+        bit [63:0] current_pa;
+        if (!routed_policy_active(entry)) return 1'b1;
+        if (routed_policy == null) begin
+            memblock_pma_pmp_model model;
+            longint unsigned pmp_gen, pma_gen;
+            model = memblock_pma_pmp_model::get();
+            model.get_current_generations(pmp_gen, pma_gen);
+            configure_routed_ppn(model, pma_gen, 1'b0, '{default:'0});
+        end
+        if (routed_intent.valid) return 1'b0;
+        current_ppn = entry.s2_stage_active ? entry.s2_resolved_ppn : entry.s1_resolved_ppn;
+        current_pa = {8'b0, current_ppn, 12'b0};
+        if (!routed_policy.query_c(current_pa, target_c)) return 1'b0;
+        return routed_policy.check_mapping(candidate_ppn, 12, effective_pbmt(entry), target_c);
+    endfunction:check_reused_routed_ppn
 
     // 中文注释：按 V2 response wire 的既有编码覆写新 entry 的最终 PPN。
     // 调用者已在 canonical table 插入前完成候选选择；本函数不改 key、权限、tag 或 live-index ownership。
@@ -856,6 +979,15 @@ class tlb_map_builder extends uvm_object;
 
         if (entry.s1_stage_active) finalize_pte_fields(1'b1, entry);
         if (entry.s2_stage_active) finalize_pte_fields(1'b0, entry);
+        // 中文注释：PBMT只在prepare随机一次，最终PA选择读取同一冻结值。
+        if (entry.s1_stage_active) begin
+            entry.s1_entry_pbmt = choose_pbmt(1'b1, entry.s2xlate, csr_state);
+            check_pbmt_build_csr_compatibility(1'b1, entry.s2xlate, csr_state, entry.s1_entry_pbmt);
+        end
+        if (entry.s2_stage_active) begin
+            entry.s2_entry_pbmt = choose_pbmt(1'b0, entry.s2xlate, csr_state);
+            check_pbmt_build_csr_compatibility(1'b0, entry.s2xlate, csr_state, entry.s2_entry_pbmt);
+        end
         entry.check_inactive_stage_defaults("PREPARE");
         entry.payload_phase = memblock_tlb_entry::MEMBLOCK_TLB_PAYLOAD_PREPARED;
         return entry;
@@ -888,6 +1020,7 @@ class tlb_map_builder extends uvm_object;
         bit        s2_request_in_range;
         bit [1:0]  directed_level;
         bit        directed_napot;
+        bit        address_fallback;
 
         if (prepared_entry == null || csr_state == null ||
             prepared_entry.lookup_key != key ||
@@ -1027,16 +1160,24 @@ class tlb_map_builder extends uvm_object;
             prepared_entry.s1_tag = key.vpn[37:3];
             s1_canonical_ppn = make_canonical_ppn(key.vpn[37:0],
                                                    prepared_entry.s1_root_ppn_at_build,
-                                                   prepared_entry.s1_level, 1'b0);
+                                                   prepared_entry.s1_level, 1'b0,
+                                                   !routed_policy_active(prepared_entry));
+            if (prepared_entry.s2_stage_active && routed_policy_active(prepared_entry)) begin
+                // 中文注释：GPA只受S2输入位宽约束，不按最终PA路由窗口收窄。
+                if (prepared_entry.s2_translation_mode_at_build == MEMBLOCK_SV39_MODE)
+                    s1_canonical_ppn[43:29] = '0;
+                else s1_canonical_ppn[43:38] = '0;
+            end
             apply_legal_napot_ppn_encoding(1'b1, prepared_entry.s1_level,
                                             prepared_entry.s1_pte_n,
                                             s1_canonical_ppn, prepared_entry);
+            if (!prepared_entry.s2_stage_active) begin
+                if (!select_final_routed_ppn(prepared_entry, 1'b1, key.vpn[37:0],
+                        directed_shape_override_valid, s1_canonical_ppn, address_fallback))
+                    `uvm_fatal("L2TLB_ROUTED_PPN", "no legal physical mapping for selected S1 shape/window")
+                forced_4k |= address_fallback;
+            end
             build_s1_sector_payload(s1_canonical_ppn, prepared_entry);
-            prepared_entry.s1_entry_pbmt = choose_pbmt(
-                1'b1, prepared_entry.s2xlate, csr_state);
-            check_pbmt_build_csr_compatibility(
-                1'b1, prepared_entry.s2xlate, csr_state,
-                prepared_entry.s1_entry_pbmt);
             if (!prepared_entry.has_effective_fault()) begin
                 reject_unsupported_valid_s1_nonleaf(prepared_entry);
                 s1_resolvable = prepared_entry.s1_pte_v &&
@@ -1079,17 +1220,17 @@ class tlb_map_builder extends uvm_object;
             prepared_entry.s2_tag = s2_input_vpn;
             s2_canonical_ppn = make_canonical_ppn(s2_input_vpn,
                                                    prepared_entry.s2_root_ppn_at_build,
-                                                   prepared_entry.s2_level, 1'b1);
+                                                   prepared_entry.s2_level, 1'b1,
+                                                   !routed_policy_active(prepared_entry));
             apply_legal_napot_ppn_encoding(1'b0, prepared_entry.s2_level,
                                             prepared_entry.s2_pte_n,
                                             s2_canonical_ppn, prepared_entry);
+            if (!select_final_routed_ppn(prepared_entry, 1'b0, s2_input_vpn,
+                    directed_shape_override_valid, s2_canonical_ppn, address_fallback))
+                `uvm_fatal("L2TLB_ROUTED_PPN", "no legal physical mapping for selected S2 shape/window")
+            forced_4k |= address_fallback;
             prepared_entry.s2_entry_ppn_raw = encode_s2_entry_ppn(
                 s2_canonical_ppn);
-            prepared_entry.s2_entry_pbmt = choose_pbmt(
-                1'b0, prepared_entry.s2xlate, csr_state);
-            check_pbmt_build_csr_compatibility(
-                1'b0, prepared_entry.s2xlate, csr_state,
-                prepared_entry.s2_entry_pbmt);
             if (!prepared_entry.has_effective_fault()) begin
                 s2_resolvable = (key.s2xlate != 2'd2 || s2_request_in_range) &&
                                 napot_raw_ppn_is_model_resolvable(1'b0,

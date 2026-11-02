@@ -27,6 +27,12 @@
 | ready opportunity | reset或flush阻塞解除后至少发送一拍可接受ready的机会，不等同于request fire | ready_opportunity_since_lifecycle_block |
 | first split | mabuf实际低段request/S2取数/response，不是初始RS issue | `status.first_split_access` |
 | observation frontier | 同reset已完整消费split事实的连续sample边界；缺口不能跨过 | `split_observed_sample_seq/reset_epoch` |
+| PMA generation / snapshot | 根据request sample固定的物理属性表版本及只读分段，区别于C-2 MMU CSR | `configure_builder_routed_context()`、`pma_history` |
+| PBMT / NC / IO / MMIO | 页属性、不缓存主存、IO属性、按PMA判定的设备访问 | `effective_pbmt()` |
+| shape / NAPOT / canonical | 完整映射形状、连续64K编码、shape对齐物理基页 | `select_final_routed_ppn()` |
+| GPA / final stage | S1中间地址、产生最终PA的翻译阶段 | allStage约束S2，S1不套外设route |
+| intent | 上游ready前登记的目标物理页及合法页内偏移 | `routed_ppn_intent_by_vpn` |
+
 
 该 sequence 的抽象职责是每拍推进一次 responder service：从稳定的 clocking block sample 识别真实 request fire，为每次 fire 冻结 CSR、lookup key、TLB entry 和 response payload，按 due/order 策略逐拍返回，并在 reset、flush、stop 时闭合 token 生命周期。
 
@@ -300,38 +306,34 @@ driving_req 在下一 sample 完成前仍占容量，因此不能在 select_due_
 
 ~~~systemverilog
 pending.request_token = next_request_token;
-next_request_token++;
 pending.vpn = sampled_req_vpn;
 pending.s2xlate = sampled_req_s2xlate;
-get_request_csr_snapshot(pending.csr_snapshot);
-pending.lookup_key = pending.csr_snapshot.make_lookup_key(
+get_csr_snapshot_for_sample(sample_seq, pending.csr_snapshot);
+pending.request_lookup_key = pending.csr_snapshot.make_lookup_key(
     {26'b0, pending.vpn}, pending.s2xlate);
-data.get_or_create_tlb_entry_by_req(..., returned_key, live_entry, created);
+data.get_or_create_l2tlb_entry_by_req_with_snapshot(
+    pending.vpn, pending.s2xlate, pending.csr_snapshot,
+    ppn_reuse_en, ppn_reuse_wt,
+    pending.request_lookup_key, pending.entry_anchor_key,
+    pending.lookup_result, live_entry, created, sample_seq);
 pending.entry_snapshot.copy_from(live_entry);
-pending.resp_tr = create_l2tlb_xaction(...);
-fill_dtlb_resp_from_entry(pending.entry_snapshot, pending.resp_tr);
-pending.min_latency = choose_latency(pending.latency_bucket);
-pending.accept_sample_seq = sample_seq;
-pending.due_sample_seq = sample_seq + pending.min_latency;
-pending.accept_flush_event_seq = last_seen_flush_event_seq;
-pending_q.push_back(pending);
-accepted_count++;
+// 后续按本次request VPN派生resolved字段、填响应并准备due sample；
+// 规划成功后才提交pending、token计数和UID request-fire marker。
 ~~~
 
 文字伪代码：
 
 ~~~text
-检查 outstanding 未达到 max；
-分配 token 并复制 sampled request；
-取得本次 request-fire 的 C-2 CSR 副本，用同一副本构造 lookup key；
-命中或创建 live TLB entry，返回 key 与 snapshot key 不一致时 fatal；
-显式 copy_from 保存 entry snapshot，避免后续 live table 变化污染回复；
-从 entry snapshot 填 resp_tr；
-按三档权重计算 due sample 并保存接受时 flush 版本；
-push pending_q、accepted 加 1、检查生命周期等式；
-调用 UID request-fire marker helper；该 helper 只用本次 pending 的 C-2 CSR/key 为 bounded
-WAITING candidate 写 marker，不以 UID issue-time CSR 拒绝候选。
-此时不调用 response-to-UID completion helper。
+检查outstanding与admission cutoff；分配pending对象但暂不提交token计数；
+复制sampled request，取得request-fire对应的C-2 MMU CSR快照并构造lookup key；
+普通入口向get_or_create传递真实sample，公共owner先回放本sample已成熟的PMA写；
+  exact/range hit保持已有映射，只检查intent冲突；
+  miss按本sample固定PMA generation，构造最终PA并按同版过滤reuse后发布；
+PBMT RF专项只允许命中既有canonical，保持原专项分支；
+复制entry到token私有snapshot，按本次request VPN重新派生resolved PPN；
+准备响应payload、latency与due sample以及UID请求标记规划；
+全部规划成功后，提交pending队列、token/accepted计数和UID marker；
+此时不调用response-to-UID completion，不把生成器PMA快照替代RM动态上下文。
 ~~~
 
 #### P1：UID request-fire marker 的 CSR 来源
@@ -603,3 +605,114 @@ runtime CSR snapshot、token 调度或单 lifecycle owner 合同。
 专项 software closure 位于
 `seq/base_seq/soft_test/soft_test_l2tlb_ppn_reuse_sequence.sv`，对应 testcase 为
 `tc_l2tlb_ppn_reuse_smoke`，preset 为 `seq/plus_cfg/tc_l2tlb_ppn_reuse_smoke.cfg`。
+
+
+## 12. 2026-11-02 可路由PPN与PMA版本入口补充
+
+关联详细流程：`AI_DOC/mem_ut_flow_doc/l2tlb_routed_ppn_generation_flow.md`。
+
+### 12.1 公共构造入口与查询版本
+
+抽象功能描述：`capture_fired_request()`把本次sample传给公共数据层，后者对新条目固定PMA属性来源；
+sequence仍只负责DTLB请求响应生命周期，不能直接扫描PMA表或消费CSR FIFO。
+
+真实函数图：
+
+```mermaid
+flowchart TD
+ A[capture_fired_request] --> B[get_or_create_l2tlb_entry_by_req_with_snapshot]
+ B --> C[apply_pma_pmp_csr_writes_before_request]
+ C --> D{hit / miss}
+ D -->|hit| E[check_routed_ppn_intent_hit]
+ D -->|miss| F[build_tlb_entry_for_key_with_csr]
+ F --> G[configure_builder_routed_context]
+ G --> H[configure_routed_ppn / read_pma_attribute_spans]
+ F --> I[prepare / allowed shape / finalize]
+ I --> J[select_final_routed_ppn / select_ppn]
+ J --> K[check_reused_routed_ppn / publish_live_tlb_entry]
+ E --> L[pending.entry_snapshot.copy_from]
+ K --> L
+```
+
+函数调用 Flow 图整体文字伪代码：
+
+```text
+request C对应的MMU lookup上下文来自C-2 history；PMA生成查询边界则为真实request sample C；
+公共回放应用已成熟CSR写，再按有效历史选generation；
+命中不重建映射，miss才配置builder只读属性；
+prepare固定PBMT，finalize选择完整shape并限制最终PA；
+reuse同版过滤后发布，pending深拷贝并继续原调度。
+```
+
+真实逻辑摘要：
+
+```systemverilog
+if (pma_query_sample != 0 &&
+    !apply_pma_pmp_csr_writes_before_request(pma_query_sample)) return 1'b0;
+...
+configure_builder_routed_context(builder, key, csr_snapshot, pma_query_sample);
+```
+
+中文文字伪代码：
+
+```text
+成熟回放失败则不创建新entry；
+真实sample按get_generations_before_sample选择PMA版本，兼容无sample入口用当前已提交版本；
+configure_routed_ppn复制值型区间和原VPN对应intent，不另建属性真源；
+C采集的写在C+2成熟，C+1查询不得提前使用它；
+缺少模型或历史版本显式报错，不默认当作c1。
+```
+
+### 12.2 最终stage物理页选择
+
+抽象功能描述：`tlb_map_builder::select_final_routed_ppn()`在普通合法sparse路径上约束最终PA；
+`memblock_routed_ppn_policy::select_ppn()`产生shape对齐canonical，母函数继续编码，不改变DTLB接口。
+
+真实逻辑摘要：
+
+```systemverilog
+anchor = resolve_ppn_from_raw(canonical_ppn, input_vpn, level, napot);
+if (routed_policy.select_ppn(canonical_ppn, anchor, shift,
+        effective_pbmt(entry), seq_csr_common::get_l2tlb_ppn_region_random_wt(),
+        seq_csr_common::get_l2tlb_ppn_region_id(), selected_ppn, region)) begin
+    canonical_ppn = selected_ppn;
+    apply_legal_napot_ppn_encoding(s1, level, napot, canonical_ppn, entry);
+end
+```
+
+中文文字伪代码：
+
+```text
+单S1路径约束S1 PA；S2-only和allStage约束S2最终PA；
+allStage S1仅检查S2输入模式可编码位宽，保留中间GPA与S2 tag关系；
+PBMT00+c1且完整shape可外部路由时保留原XOR候选；
+PBMT00+c0重选只能落同c0；NC/IO在外部合法全集与命名窗口选择；
+超48bit原anchor不截断查PMA，直接合法重选；
+未知offset普通映射保护完整shape，UART128B与部分页由上游intent提供已知offset；
+普通大shape无候选仅降4K一次，显式shape不能静默降级；
+strict、CSR权限专项、fault及非LEGAL旁路，不用地址修复消除预期异常。
+```
+
+### 12.3 复用与端到端边界
+
+抽象功能描述：`check_reused_routed_ppn()`将新entry的固定属性版本及外部页可达性用于history候选筛选，
+不将“曾完成”解释为永久有效，也不改动已有命中和冻结token。
+
+```systemverilog
+builder.can_apply_reused_final_ppn(entry, history_ppn) &&
+builder.check_reused_routed_ppn(entry, history_ppn)
+```
+
+中文文字伪代码：普通reuse先经旧shape资格，再按本次PMA版本检查完整4K页和c类别；不相容候选跳过。
+窄intent关闭reuse。主表reset清intent，窄专项runtime reset终止重跑，不允许清表后继续旧主表。
+
+端到端路径：
+
+```text
+request fire → 成熟写回放 → hit返回旧entry，或miss固定PMA版本
+ → 最终PA路由/属性选择 → reuse过滤 → 发布 → token快照 → response完成。
+```
+
+端到端文字伪代码：生成器只在新建条目时决定物理页，PMA及路由分别约束属性与接收者。
+已有response快照不受后续配置或删表影响；数据与权限比较继续由原RM按真实动态访问上下文完成。
+此处记录源码变更，不宣称已通过真实DUT专项。

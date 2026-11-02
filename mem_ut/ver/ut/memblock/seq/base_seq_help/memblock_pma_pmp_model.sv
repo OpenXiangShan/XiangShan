@@ -43,6 +43,19 @@ typedef struct packed {
     bit [1:0]            origin;
 } pma_pmp_entry_t;
 
+// 中文注释：指定 PMA 历史版本解析后的值型属性区间。first/limit 为半开
+// 49-bit 字节边界，可精确表达 2^48；只读导出者创建，策略实例复制后使用，
+// 不持有内部 snapshot 句柄，也不修改 UID 权限上下文。
+typedef struct packed {
+    bit [48:0] first;
+    bit [48:0] limit;
+    bit c;
+    bit r;
+    bit w;
+    bit x;
+    bit atomic;
+} memblock_pma_attribute_span_t;
+
 typedef struct packed {
     bit                  valid;
     memblock_uid_t       uid;
@@ -368,6 +381,11 @@ class memblock_pma_pmp_model extends uvm_object;
         input bit is_pma,
         input int unsigned index,
         output pma_pmp_entry_t entry
+    );
+    extern function bit read_pma_attribute_spans(
+        input longint unsigned generation,
+        input bit debug,
+        output memblock_pma_attribute_span_t spans[$]
     );
     extern function bit check_invariants(output string message);
     extern function void load_v2_pma_profile();
@@ -1454,6 +1472,84 @@ function bit memblock_pma_pmp_model::read_entry(
     entry = is_pma ? pma_entries[index] : pmp_entries[index];
     return 1'b1;
 endfunction:read_entry
+
+// 抽象职责：把一个已提交历史版本解析为互不重叠的属性区间。仅导出值，
+// 沿用 scalar evaluator 的 first-match/debug 语义，不回放 CSR、不改变模型。
+function bit memblock_pma_pmp_model::read_pma_attribute_spans(
+    input longint unsigned generation,
+    input bit debug,
+    output memblock_pma_attribute_span_t spans[$]
+);
+    pma_pmp_table_snapshot snapshot;
+    bit [48:0] boundaries[$];
+    bit [48:0] unique_boundaries[$];
+    bit [48:0] first;
+    bit [48:0] limit;
+    pma_pmp_entry_t entry;
+    pma_pmp_entry_t matched_entry;
+    memblock_pma_attribute_span_t span;
+    int signed hit_index;
+    int last_index;
+
+    spans.delete();
+    if (!ready) return 1'b0;
+    snapshot = get_table_snapshot(1'b1, generation);
+    if (snapshot == null) return 1'b0;
+    boundaries.push_back(49'd0);
+    boundaries.push_back(49'h1_0000_0000_0000);
+    boundaries.push_back({1'b0, PMA_PMP_DEBUG_START});
+    boundaries.push_back({1'b0, PMA_PMP_DEBUG_END} + 49'd1);
+    for (int unsigned idx = 0; idx < PMA_PMP_ENTRY_COUNT; idx++) begin
+        entry = snapshot.entries[idx];
+        // OFF 的 compare_addr 仍是后一 TOR 项的下界，不得跳过此边界。
+        boundaries.push_back({1'b0, entry.compare_addr});
+        if (!entry.valid) continue;
+        case (entry.a)
+            PMA_PMP_A_NA4: begin
+                first = {1'b0, entry.addr_raw, 2'b00};
+                boundaries.push_back(first);
+                boundaries.push_back(first + 49'd4);
+            end
+            PMA_PMP_A_NAPOT: begin
+                first = {1'b0, (entry.compare_addr & ~entry.match_mask)};
+                limit = first + {1'b0, entry.match_mask} + 49'd1;
+                boundaries.push_back(first);
+                boundaries.push_back(limit);
+            end
+            default: begin end
+        endcase
+    end
+    boundaries.sort();
+    foreach (boundaries[idx]) begin
+        if (unique_boundaries.size() == 0 ||
+            unique_boundaries[unique_boundaries.size()-1] != boundaries[idx])
+            unique_boundaries.push_back(boundaries[idx]);
+    end
+    for (int unsigned idx = 0; idx + 1 < unique_boundaries.size(); idx++) begin
+        span = '{default:'0};
+        span.first = unique_boundaries[idx];
+        span.limit = unique_boundaries[idx+1];
+        // 无匹配时 c/r/w/x/atomic 保持原模型的全零默认值。
+        if (find_first_match(snapshot, span.first[47:0], 1, debug,
+                             hit_index, matched_entry)) begin
+            span.c = matched_entry.c;
+            span.r = matched_entry.r;
+            span.w = matched_entry.w;
+            span.x = matched_entry.x;
+            span.atomic = matched_entry.atomic;
+        end
+        last_index = spans.size() - 1;
+        if (last_index >= 0 && spans[last_index].limit == span.first &&
+            spans[last_index].c == span.c && spans[last_index].r == span.r &&
+            spans[last_index].w == span.w && spans[last_index].x == span.x &&
+            spans[last_index].atomic == span.atomic) begin
+            spans[last_index].limit = span.limit;
+        end else begin
+            spans.push_back(span);
+        end
+    end
+    return spans.size() != 0;
+endfunction:read_pma_attribute_spans
 
 function bit memblock_pma_pmp_model::check_invariants(output string message);
     message = "";

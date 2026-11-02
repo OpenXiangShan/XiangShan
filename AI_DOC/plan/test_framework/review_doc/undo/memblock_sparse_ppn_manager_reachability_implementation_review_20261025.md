@@ -1,5 +1,7 @@
 # MemBlock sparse PPN manager 可达性实现 Review
 
+> 2026-11-02 后续实现说明：本文保留旧B08固定512GiB窗口方案与其历史验证。当前扩展方案恢复安全cacheable候选，并按观测PMA版本与实际外部路由为NC/IO/MMIO选择合法窗口；小窗口由上游偏移意图专项覆盖。后续设计及验证以 `AI_DOC/plan/test_framework/plan/do/memblock_l2tlb_routed_ppn_coverage_plan_20261102.md` 及对应implementation review为准，不把旧PASS当新方案验收。
+
 ## 1. Review 结论
 
 独立只读 reviewer `Anscombe` 于 `2026-10-25` 完成源码、生成 RTL 和历史日志审查，结论为

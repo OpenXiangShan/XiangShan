@@ -63,10 +63,16 @@
 
 - `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 只控制自动主表 normal transaction 的 `src_0/imm/vaddr` 生成范围。
 - `MEMBLOCK_PADDR_BASE/RANGE` 只控制 `tlb_map_builder` 为 TLB entry 选择的物理 PPN 范围。
-- `MEMBLOCK_MAIN_MEM_RANGES_EN` 只控制 DCache/Uncache shared sparse memory 是否把
-  `MEMBLOCK_PADDR_BASE/RANGE` 注册为严格物理访问窗口；默认值为 `1`，设为 `0` 时两个
-  memory-facing responder 都按 48-bit 物理地址懒分配。该开关不改变 TLB PPN 生成、主表虚拟地址
-  或任何 DUT 接口宽度。
+- `MEMBLOCK_MAIN_MEM_RANGES_EN` 同时选择物理访问策略：为 `1` 时两个 memory-facing
+  responder 注册 `MEMBLOCK_PADDR_BASE/RANGE` 为严格窗口，TLB按该配置范围生成PPN；
+  为 `0` 时 backing按48-bit PA懒分配，普通TLB最终PA采用实际外部路由与观测PMA属性交集。
+  该开关不改变主表虚拟地址或任何DUT接口宽度。旧B08固定512GiB规则已由
+  `memblock_l2tlb_routed_ppn_coverage_plan_20261102.md`替代，权限/fault专项保留原候选路径。
+- `MEMBLOCK_L2TLB_PPN_REGION_RANDOM_WT=50` 为普通sparse NC/IO/PMA-MMIO合法候选主动重选
+  窗口的百分比，范围0..100；非法候选总重选，安全PBMT00+c1候选保持原值。
+- `MEMBLOCK_L2TLB_PPN_REGION_ID=-1` 为等权窗口随机；0..6依次为外部全集、DRAM、APLIC M、
+  APLIC S、UART页、TIMER、PLIC。非负值是专项固定窗口，shape不相容时不静默更改PBMT。
+  两参数都经plus→seq_csr_common冻结，静态物理路由profile不可通过runtime参数改拓扑。
 - 两组参数默认数值可以相同以保持 Bare smoke 兼容，但参数语义和 consumer 必须独立；translated testcase 可以配置不同 VA/PA 窗口。
 - `MEMBLOCK_BOUNDARY_PROFILE_GEN_EN=1` 时，自动 boundary profile 是 `MAIN_VADDR` 的一个 consumer：
   它从窗口内选择对齐 anchor，并保证本次访问的末字节仍在窗口内。该局部约束同时避免 Sv39
