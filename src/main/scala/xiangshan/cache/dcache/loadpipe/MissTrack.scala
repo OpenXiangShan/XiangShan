@@ -51,17 +51,6 @@ class MissTrackLoadIO(implicit p: Parameters) extends DCacheBundle {
   val s2 = Valid(new MissTrackLoadResult)
 }
 
-/** S1 qualification for the speculative-miss fast path.  This is only a
-  * permission to prepare a request; the accurate S2 tag/PMP/MissQueue result
-  * still owns the transaction. */
-class MissTrackSpec(implicit p: Parameters) extends DCacheBundle {
-  val valid = Bool()
-  val candidate = Bool()
-  val resident = Bool()
-  val pending = Bool()
-  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
-}
-
 class MissTrackEntry(implicit p: Parameters) extends DCacheBundle {
   val valid = Bool()
   val idx = UInt(idxBits.W)
@@ -73,18 +62,12 @@ class MissTrackEntry(implicit p: Parameters) extends DCacheBundle {
   val age = UInt(3.W)
 }
 
-// Query snapshots omit replacement/training metadata. The retained result only
-// needs the selected payload and qualification, not the table key.
-class MissTrackLookupResult(implicit p: Parameters) extends DCacheBundle {
+// Query snapshots retain only the lookup key and physical block.
+class MissTrackLookupEntry(implicit p: Parameters) extends DCacheBundle {
   val valid = Bool()
-  val block_paddr = UInt((PAddrBits - blockOffBits).W)
-  val is_pending = Bool()
-  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
-}
-
-class MissTrackLookupEntry(implicit p: Parameters) extends MissTrackLookupResult {
   val idx = UInt(idxBits.W)
   val src_hash = UInt(cfg.missTrackHashBits.W)
+  val block_paddr = UInt((PAddrBits - blockOffBits).W)
 }
 
 object MissTrack {
@@ -134,7 +117,8 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     // Tag replacement OR meta invalidation, at the actual write handshake.
     val invalidate = Flipped(Valid(new MissTrackInvalidate))
     val clear = Input(Bool())
-    val spec = Output(Vec(LoadPipelineWidth, new MissTrackSpec))
+    // S1 permission to prepare a request; accurate S2 checks still own confirmation.
+    val spec = Output(Vec(LoadPipelineWidth, Bool()))
   })
 
   private val entries = RegInit(VecInit(Seq.fill(cfg.missTrackEntries)(0.U.asTypeOf(new MissTrackEntry))))
@@ -183,8 +167,6 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     lookupTable(i).idx := entries(i).idx
     lookupTable(i).src_hash := entries(i).src_hash
     lookupTable(i).block_paddr := entries(i).block_paddr
-    lookupTable(i).is_pending := entries(i).is_pending
-    lookupTable(i).mshr_id := entries(i).mshr_id
   }
   val lookupSnapshot = RegNext(lookupTable)
 
@@ -200,14 +182,6 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     })
   })
   val collisionSnapshot = RegNext(keyCollisions)
-  val lookupPayloads = lookupSnapshot.map { e =>
-    val payload = Wire(new MissTrackLookupResult)
-    payload.valid := e.valid
-    payload.block_paddr := e.block_paddr
-    payload.is_pending := e.is_pending
-    payload.mshr_id := e.mshr_id
-    payload
-  }
 
   def makeEntry(va: UInt, pa: UInt, way: UInt, pending: Bool, id: UInt): MissTrackEntry = {
     val e = WireDefault(0.U.asTypeOf(new MissTrackEntry))
@@ -255,26 +229,13 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     val matches = VecInit(lookupSnapshot.map(e => e.valid && e.idx === queryIdx && e.src_hash === queryHash))
     val multi = ParallelORR(matches.zip(collisionSnapshot).map { case (hit, collision) => hit && collision })
     val unique = ParallelORR(matches) && !multi
-    // Four-entry local muxes preserve masked-OR payloads even on multiple hits.
-    val payloadGroups = matches.zip(lookupPayloads).grouped(4).map(ParallelMux(_)).toSeq
-    val candidate = WireDefault(ParallelOR(payloadGroups))
-    candidate.valid := unique && !previousClear
-
-    // A new query uses the current S1 reconstruction directly, without another
-    // request cycle. Save that result at the next edge solely to preserve the
-    // old RegEnable behavior on bubbles while the shared snapshot keeps moving.
-    val retained = RegEnable(candidate, sampled)
-    val retainedMulti = RegEnable(multi, sampled)
-    val s1 = Mux(sampled, candidate, retained)
-    val s1Multi = Mux(sampled, multi, retainedMulti)
-    val s1PaMatch = s1.valid && s1.block_paddr === block(q.s1_paddr)
-    io.spec(w).valid := q.s1_valid && !io.clear && !s1Multi
-    io.spec(w).resident := s1.valid && !s1.is_pending && s1PaMatch
-    io.spec(w).pending := s1.valid && s1.is_pending && s1PaMatch
-    io.spec(w).mshr_id := s1.mshr_id
+    // Four-entry local muxes preserve masked-OR selection of the physical block.
+    val blockGroups = matches.zip(lookupSnapshot.map(_.block_paddr)).grouped(4).map(ParallelMux(_)).toSeq
+    val selectedBlock = ParallelOR(blockGroups)
+    val paMatch = unique && !previousClear && selectedBlock === block(q.s1_paddr)
     // UNKNOWN after PA validation is the only state eligible for a new
     // speculative miss.  A live resident/pending line suppresses duplication.
-    io.spec(w).candidate := io.spec(w).valid && !io.spec(w).resident && !io.spec(w).pending && s1PaMatch === false.B
+    io.spec(w) := q.s1_valid && sampled && !io.clear && !multi && !paMatch
   }
 
   // Collapse simultaneous observations of the same line before insertion. The
