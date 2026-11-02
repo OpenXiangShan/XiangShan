@@ -192,8 +192,8 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     io.spec(w) := q.s1_valid && sampled && !io.clear && !multi && !paMatch
   }
 
-  // Collapse simultaneous observations of the same line before insertion. The
-  // events are ordered by semantic priority: installation, allocation, then hit.
+  // Select one event per line for both maintenance and insertion. The events
+  // are ordered by semantic priority: installation, allocation, then hit.
   val canonicalEvents = Wire(Vec(events.length, Valid(new MissTrackEntry)))
   for (i <- events.indices) {
     canonicalEvents(i).bits := events(i).bits
@@ -204,12 +204,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   }
 
   // Priority is local to a matching line: installation > allocation > hit.
-  // Other lines' events cannot suppress maintenance of an existing record.
-  // Compare against register Q once. Maintenance never changes an existing
-  // entry's (idx, block_paddr), and any matching valid event restores valid,
-  // even if that entry is simultaneously retired or invalidated. Thus an
-  // active event is already present after maintenance iff it matches here.
-  val eventMatches = events.map(u => entries.map(e => e.valid && sameLine(e, u.bits)))
+  val eventMatches = canonicalEvents.map(u => entries.map(e => e.valid && sameLine(e, u.bits)))
   val maintained = WireDefault(entries)
   val retired = Wire(Vec(cfg.missTrackEntries, Bool()))
   val invalidated = Wire(Vec(cfg.missTrackEntries, Bool()))
@@ -219,12 +214,10 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     invalidated(i) := e.valid && !e.is_pending && overlaps(e.idx, e.way, io.invalidate)
     when (e.valid && e.age =/= 7.U) { maintained(i).age := e.age + 1.U }
     when (retired(i) || invalidated(i)) { maintained(i).valid := false.B }
-    val updates = events.indices.map(j => events(j).valid && eventMatches(j)(i))
-    val updateOH = updates.indices.map { j =>
-      updates(j) && (if (j == 0) true.B else !ParallelORR(updates.take(j)))
-    }
+    // Canonical events matching this entry are already mutually exclusive.
+    val updates = canonicalEvents.indices.map(j => canonicalEvents(j).valid && eventMatches(j)(i))
     when (ParallelORR(updates)) {
-      maintained(i) := ParallelMux(updateOH.zip(events.map(_.bits)))
+      maintained(i) := ParallelMux(updates.zip(canonicalEvents.map(_.bits)))
       // These fields already equal the winning event; do not put the event
       // priority network in front of another wide line-address comparison.
       maintained(i).idx := e.idx
