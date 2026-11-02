@@ -36,6 +36,7 @@ import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BpuPrediction
 import xiangshan.frontend.bpu.BpuRedirect
+import xiangshan.frontend.bpu.BpuResolveMeta
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
@@ -60,6 +61,11 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   // whether the group being offered this cycle carries a second block, so Ftq can hold back only the space that
   // group actually needs rather than always reserving a whole group's worth
   val predictionIsGroup: Bool = Output(Bool())
+
+  // The resolve meta of the group's later block, meaningful when s3NumBlocks says there is one. Nothing looked that
+  // block up, so it carries only the history it was predicted under and the pTAGE entry that put it out; its branches
+  // still have to train the predictors.
+  val s3LaterResolveMeta: BpuResolveMeta = Output(new BpuResolveMeta)
 
   // perfMeta uses the same valid signal as meta
   val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)

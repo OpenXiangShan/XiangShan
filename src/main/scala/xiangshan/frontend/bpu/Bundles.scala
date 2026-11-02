@@ -31,6 +31,7 @@ import xiangshan.frontend.bpu.history.phr.PhrMeta
 import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.ptage.PtageMeta
+import xiangshan.frontend.bpu.ptage.PtagePairTag
 import xiangshan.frontend.bpu.ras.RasCommitMeta
 import xiangshan.frontend.bpu.ras.RasRedirectMeta
 import xiangshan.frontend.bpu.sc.ScMeta
@@ -353,6 +354,8 @@ class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
   // This entry is a group's later block. Nothing looked the block up, so the lookup fields are empty, and a predictor
   // that trains from them reads the block back from its own arrays instead.
   val isLaterBlock: Bool = Bool()
+  // for a later block, the pTAGE entry that put it out, so its resolution can be reported back
+  val laterPair: PtagePairTag = new PtagePairTag
 
   // val debug_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
   val utage: MicroTageMeta = new MicroTageMeta
