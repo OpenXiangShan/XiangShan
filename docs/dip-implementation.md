@@ -41,6 +41,8 @@ teaSamplePeriod0 1
 
 `enableDip` 独立于 `enableTea`；两者共用 `WITH_TEA=1` 的 elaboration 开关。周期为 1 可作逐周期验证，默认周期为 256。关闭采样后生命周期 trace 继续跟踪，以便已有样本定案。
 
+CI 中设置 `enable_dip=true`、`cst_file=scripts/ci/dip-period1000.cst`，保持 `enable_tea`、`enable_db`、`enable_rolling` 为 false，即只导出 `Dip_0`。同时选择 `enable_tea` 时导出 DIP 和四张 TEA 表，并在 CST 中启用两种采样器；选择 `enable_db` 或 `enable_rolling` 时导出全部可用表。
+
 ```bash
 build/emu -s 0 -i ready-to-run/coremark-2-iteration.bin \
   --diff ready-to-run/riscv64-nemu-interpreter-so --max-instr 5000 \
