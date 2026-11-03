@@ -28,11 +28,13 @@ import utility.XORFold
 import utility.XSPerfAccumulate
 import utils.DuplicateInit
 import xiangshan.FrontendTdataDistributeIO
+import xiangshan.TopDownCounters
 import xiangshan.cache.mmu.HasTlbConst
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
+import xiangshan.frontend.FrontendTopDownBundle
+import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.ICacheToIfuIO
@@ -79,7 +81,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val csrFsIsOff: Bool = Input(Bool())
 
     // Topdown analysis
-    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
+    val redirectTopdownOverride: Valid[FrontendTopDownBundle] = Flipped(Valid(new FrontendTopDownBundle))
   }
   val io: IfuIO = IO(new IfuIO)
 
@@ -767,6 +769,25 @@ class Ifu(implicit p: Parameters) extends IfuModule
   wbRedirect.halfRviInfo       := wbSelectedEndHalfRvi
   wbRedirect.halfRviInfo.valid := wbSelectedEndHalfRvi.valid && checkerRedirect.bits.invalidTaken
 
+  // Topdown tracks lost slots through s0/s1/s2 on every edge, independently of valid-ready.
+  private val topdownPipe = Module(new FrontendTopDownPipeline(3))
+  topdownPipe.io.in := fromFtq.topdown
+  // A BPU flush discards s0; the lost slot reaches s1 on the next edge.
+  // Older IFU stages survive it. Redirects take precedence over local bubbles.
+  topdownPipe.setReason(
+    1,
+    Seq(
+      io.fromICache.topdown.itlbMissBubble   -> TopDownCounters.ITLBMissBubble,
+      io.fromICache.topdown.iCacheMissBubble -> TopDownCounters.ICacheMissBubble,
+      s0_flushFromBpu                        -> TopDownCounters.IfuFlushBubble
+    )
+  )
+  topdownPipe.setReason(Seq(
+    io.redirectTopdownOverride.valid -> io.redirectTopdownOverride.bits.reason,
+    wbRedirect.valid                 -> TopDownCounters.BTBMissBubble
+  ))
+  io.toIBuffer.bits.topdown := topdownPipe.io.out
+
   private val s1_icachePerfInfo = RegEnable(io.fromICache.perf, s0_fire)
   private val s2_icachePerfInfo = RegEnable(s1_icachePerfInfo, s1_fire)
 
@@ -792,10 +813,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.ifuPerfCtrl.fromBpuFlush     := s0_flushFromBpu
   perfAnalyzer.io.ifuPerfCtrl.fromICacheBubble := false.B
 
-  perfAnalyzer.io.topdownIn.icacheTopdown          := io.fromICache.topdown
-  perfAnalyzer.io.topdownIn.ftqTopdown             := io.fromFtq.topdownInfo
-  perfAnalyzer.io.topdownIn.backendRedirectTopdown := io.backendRedirectTopdown
-
   perfAnalyzer.io.perfInfo.icachePerfInfo                 := s2_icachePerfInfo
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(0)         := wbValid && wbFirstValid
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(1)         := wbValid && wbSecondValid
@@ -814,7 +831,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s2_fetchBlock(0).startVAddr.toUInt
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s2_fetchBlock(1).startVAddr.toUInt
-  io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
 
   XSPerfAccumulate("2fetch_to_ibuffer", io.toIBuffer.fire && s2_secondValid)
 }

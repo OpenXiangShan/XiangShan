@@ -34,9 +34,9 @@ import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
 import xiangshan.backend.BackendToIBufBundle
 import xiangshan.backend.decode.VTypeGen
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
+import xiangshan.frontend.FrontendTopDownPipeline
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
@@ -51,8 +51,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     val fromBackend: BackendToIBufBundle = Input(new BackendToIBufBundle)
 
     // top-down
-    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
-    val stallReason:            StallReasonIO          = new StallReasonIO(DecodeWidth)
+    val redirectTopdownOverride: Valid[FrontendTopDownBundle] = Flipped(Valid(new FrontendTopDownBundle))
+    val stallReason:             StallReasonIO                = new StallReasonIO(DecodeWidth)
   }
 
   val io: IBufferIO = IO(new IBufferIO)
@@ -519,30 +519,19 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private def numStages     = 2
-  private val topdownStages = RegInit(VecInit.fill(numStages)(0.U.asTypeOf(new FrontendTopDownBundle)))
-
-  topdownStages(0) := io.in.bits.topdownInfo
-  for (i <- 1 until numStages) {
-    topdownStages(i) := topdownStages(i - 1)
-  }
-
-  topdownStages.foreach(_.backendRedirectOverride(io.backendRedirectTopdown))
+  private val topdownPipe = Module(new FrontendTopDownPipeline(2))
+  topdownPipe.io.in := io.in.bits.topdown
+  topdownPipe.setReason(Seq(io.redirectTopdownOverride.valid -> io.redirectTopdownOverride.bits.reason))
 
   private val deqValidCount = PopCount(io.out.map(_.valid))
   private val deqWasteCount = DecodeWidth.U - deqValidCount
-  // Other must lose to every specific cause, even if its bit is injected upstream.
-  // Keep it out of the encoder and select it only as the final fallback below.
-  private val bubbleReasons = WireInit(topdownStages.last.reasons)
-  bubbleReasons(TopDownCounters.FrontendOtherCoreStall.id) := false.B
-  private val hasBubbleReason = bubbleReasons.asUInt.orR
-  private val encodedBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
-    bubbleReasons.reverse
-  )
-  // Never use the encoder's zero-input result. Fetch fragmentation also outranks Other.
+  private val bubbleReason  = topdownPipe.io.out.reason
+  private val hasBubbleReason = bubbleReason =/= TopDownCounters.NoStall.id.U &&
+    bubbleReason =/= TopDownCounters.FrontendOtherCoreStall.id.U
+  // Fetch fragmentation and specific causes take precedence over Other.
   private val matchBubble = Mux(
     hasBubbleReason,
-    encodedBubble,
+    bubbleReason,
     Mux(deqValidCount === 0.U, TopDownCounters.FrontendOtherCoreStall.id.U, TopDownCounters.FetchFragBubble.id.U)
   )
 
