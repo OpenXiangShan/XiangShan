@@ -576,6 +576,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // NOTE: we cannot use s2_hits, it will be reset when refilled from L2
   io.perf.rawHits := s1_sramHits(0) // FIXME
   // tell ICache top when handling miss
+  io.perf.supplyStall := io.fromFtq.valid && (!io.fromWayLookup.valid || !toData.ready) && !s0_flush
   io.perf.pendingMiss := s1_valid && !s1_fetchFinish && !s1_isMmio && !s1_flush
   io.perf.bpuFlushS0  := s0_valid && s0_flush && !io.flush
   io.perf.bpuFlushS1  := s1_valid && s1_flush && !io.flush

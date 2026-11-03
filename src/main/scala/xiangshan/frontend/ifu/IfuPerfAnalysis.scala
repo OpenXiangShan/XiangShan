@@ -69,6 +69,8 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     }
 
     class IfuPerfCtrl(implicit p: Parameters) extends IfuBundle {
+      val s1Ready:          Bool = Bool()
+      val s2Ready:          Bool = Bool()
       val uncacheActive:    Bool = Bool()
       val fromFtqBubble:    Bool = Bool()
       val backendRedirect:  Bool = Bool()
@@ -89,20 +91,37 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   private val checkPerfInfo     = io.perfInfo.checkPerfInfo
   private val toIBufferInfo     = io.perfInfo.toIBufferInfo
 
-  private val topdownStages = RegInit(VecInit.fill(3)(0.U.asTypeOf(new FrontendTopDownBundle)))
-  topdownStages(0) := ftqTopdown
-  for (i <- 1 until 3) { topdownStages(i) := topdownStages(i - 1) }
-  when(icacheTopdown.iCacheMissBubble)(topdownStages(1).setReason(TopDownCounters.ICacheMissBubble))
-  when(icacheTopdown.itlbMissBubble && !icacheTopdown.iCacheMissBubble) {
-    topdownStages(1).setReason(TopDownCounters.ITLBMissBubble)
-  }
-  when(icacheTopdown.bpuFlushS0)(topdownStages(0) := io.topdownIn.overrideReasons)
+  // FTQ already registers its supply cause at the ICache S1 boundary. Local
+  // metadata/TLB waits and S0 flushes need that same edge before entering IFU.
+  private val emptyTag = Wire(new FrontendTopDownBundle)
+  emptyTag.setReason(TopDownCounters.FtqEmptyBubble)
+  private val cacheInputTopdown = RegInit(emptyTag)
+  cacheInputTopdown.setReason(TopDownCounters.NoStall)
+  when(icacheTopdown.supplyStall)(cacheInputTopdown.setReason(TopDownCounters.ICacheSupplyBubble))
+  when(icacheTopdown.itlbMissBubble)(cacheInputTopdown.setReason(TopDownCounters.ITLBMissBubble))
+  when(icacheTopdown.bpuFlushS0)(cacheInputTopdown := io.topdownIn.overrideReasons)
+  cacheInputTopdown.redirectOverride(io.topdownIn.redirectTopdown)
+
+  private val cacheOutputTopdown = WireInit(ftqTopdown)
+  when(cacheInputTopdown.reason =/= TopDownCounters.NoStall.id.U)(cacheOutputTopdown := cacheInputTopdown)
+  when(icacheTopdown.iCacheMissBubble)(cacheOutputTopdown.setReason(TopDownCounters.ICacheMissBubble))
   when(icacheTopdown.bpuFlushS1 || io.ifuPerfCtrl.fromBpuFlush) {
-    topdownStages(1) := io.topdownIn.overrideReasons
+    cacheOutputTopdown := io.topdownIn.overrideReasons
   }
-  topdownStages.foreach(_.redirectOverride(io.topdownIn.redirectTopdown))
-  io.topdownOut.topdown := topdownStages.last
-  when(io.ifuPerfCtrl.uncacheActive)(io.topdownOut.topdown.setReason(TopDownCounters.UncacheFetchBubble))
+  cacheOutputTopdown.redirectOverride(io.topdownIn.redirectTopdown)
+
+  // Reasons move on empty cycles as well as valid transfers. A stage held by
+  // downstream backpressure keeps its tag, just like the corresponding data.
+  private val s1Topdown = RegInit(emptyTag)
+  private val s2Topdown = RegInit(emptyTag)
+  when(io.ifuPerfCtrl.s1Ready)(s1Topdown := cacheOutputTopdown)
+  when(io.ifuPerfCtrl.s2Ready)(s2Topdown := s1Topdown)
+  Seq(s1Topdown, s2Topdown).foreach(_.redirectOverride(io.topdownIn.redirectTopdown))
+  io.topdownOut.topdown := s2Topdown
+  // Include waiting, successful single-instruction delivery and cross-page resend.
+  when(io.ifuPerfCtrl.uncacheActive) {
+    io.topdownOut.topdown.setReason(TopDownCounters.UncacheFetchBubble)
+  }
   io.topdownOut.topdown.redirectOverride(io.topdownIn.redirectTopdown)
 
   /** <PERF> f0 fetch bubble */

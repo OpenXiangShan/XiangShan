@@ -55,6 +55,7 @@ xs_custom_rename_map = {
 xs_frontend_rename_map = {
     'FtqFullStall': 'MergeFtqFullStall',
     'FtqEmptyBubble': 'MergeFtqEmptyBubble',
+    'ICacheSupplyBubble': 'MergeICacheSupplyBubble',
     'FtqUpdateBubble': 'MergeFtqUpdateBubble',
     'TAGEMissBubble': 'MergeTAGEMissBubble',
     'SCMissBubble': 'MergeSCMissBubble',
@@ -182,6 +183,7 @@ xs_mem_rename_map = {
 xs_coarse_rename_map = {
     'FtqFullStall': 'MergeFrontend',
     'FtqEmptyBubble': 'MergeFrontend',
+    'ICacheSupplyBubble': 'MergeFrontend',
     'FtqUpdateBubble': 'MergeFrontend',
     'TAGEMissBubble': 'MergeBadSpec',
     'SCMissBubble': 'MergeBadSpec',
@@ -288,6 +290,7 @@ xs_coarse_rename_map = {
 xs_fine_grain_rename_map = {
     'FtqFullStall': 'MergeOtherFrontend',
     'FtqEmptyBubble': 'MergeOtherFrontend',
+    'ICacheSupplyBubble': 'MergeOtherFrontend',
     'FtqUpdateBubble': 'MergeOtherFrontend',
     'TAGEMissBubble': 'MergeBadSpecBubble',
     'SCMissBubble': 'MergeBadSpecBubble',
@@ -365,6 +368,7 @@ targets = {
     'OtherRedirectBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: OtherRedirectBubble,\s+(\d+)',
     'FtqFullStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FtqFullStall,\s+(\d+)',
     'FtqEmptyBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FtqEmptyBubble,\s+(\d+)',
+    'ICacheSupplyBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ICacheSupplyBubble,\s+(\d+)',
 
     'ICacheMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ICacheMissBubble,\s+(\d+)',
     'ITLBMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ITLBMissBubble,\s+(\d+)',

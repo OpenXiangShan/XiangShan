@@ -829,6 +829,7 @@ package object xiangshan {
     val OtherRedirectBubble = Value("OtherRedirectBubble")
     val FtqFullStall = Value("FtqFullStall")
     val FtqEmptyBubble = Value("FtqEmptyBubble") // no fetch target, excluding training/capacity/redirect
+    val ICacheSupplyBubble = Value("ICacheSupplyBubble") // WayLookup metadata or data-array port supply latency
 
     val ICacheMissBubble = Value("ICacheMissBubble")
     val ITLBMissBubble = Value("ITLBMissBubble")

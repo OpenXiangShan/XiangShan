@@ -506,7 +506,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
    * perf
    * ***************************************************************************** */
   // tell ICache top when handling itlb miss
-  io.perf.pendingItlbMiss := s1_valid && !tlbFinish
+  io.perf.pendingItlbMiss := s1_valid && !tlbFinish && !s1_flush
 
   // the number of bpu flush
   XSPerfAccumulate("bpuS0Flush", fromBpuS0Flush)

@@ -791,6 +791,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     ("miss_0_miss_1                ", io.toIBuffer.fire && s2_icachePerfInfo.miss0Miss1)
   )
   generatePerfEvent()
+  perfAnalyzer.io.ifuPerfCtrl.s1Ready := s1_ready
+  perfAnalyzer.io.ifuPerfCtrl.s2Ready := s2_ready
   perfAnalyzer.io.ifuPerfCtrl.fromFtqBubble    := !io.fromICache.req.valid && io.fromICache.req.ready
   perfAnalyzer.io.ifuPerfCtrl.backendRedirect  := backendRedirect
   perfAnalyzer.io.ifuPerfCtrl.ifuWbRedirect    := wbRedirect.valid

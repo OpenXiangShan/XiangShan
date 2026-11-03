@@ -444,6 +444,7 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
 
 // to Ifu -> IBuffer -> Backend
 class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
+  val supplyStall: Bool = Bool()
   val bpuFlushS0:       Bool = Output(Bool())
   val bpuFlushS1:       Bool = Output(Bool())
   val iCacheMissBubble: Bool = Output(Bool())
@@ -455,6 +456,7 @@ class MainPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
   val rawHits:     Vec[Bool] = Vec(PortNumber, Bool())
   val bpuFlushS0:  Bool      = Bool()
   val bpuFlushS1:  Bool      = Bool()
+  val supplyStall: Bool = Bool() // FTQ request waiting for WayLookup metadata or data-array port
   val pendingMiss: Bool      = Bool() // currently handling a miss
 }
 
