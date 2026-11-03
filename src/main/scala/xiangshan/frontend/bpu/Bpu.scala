@@ -380,8 +380,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s2_fallThroughPrediction = RegEnable(fallThrough.io.prediction, s1_fire)
 
+  private val s2_canUseUras = RegEnable(uras.io.specOut.isCanUse, s1_fire)
+  private val s2_urasTarget = RegEnable(uras.io.specOut.retTarget, s1_fire)
   s2_prediction       := Mux(s2_taken, s2_firstTakenBranch.bits, s2_fallThroughPrediction)
   s2_prediction.taken := s2_taken
+  when(s2_prediction.attribute.isReturn && s2_canUseUras) {
+    s2_prediction.target := s2_urasTarget
+  }
 
   // S2 does not compare targets to avoid incorrectly overriding the S1 uRAS target with the MBTB target.
   s2_override := {
