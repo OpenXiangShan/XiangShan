@@ -672,7 +672,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   lsqCanAccept := enqLsqIO.canAccept
   lsqRecoverStall := enqLsqIO.recoverStall
 
-  private val isLoadVec = VecInit(fromRename.map(x => x.valid && FuType.isLoad(x.bits.fuType)))
+  private val isLoadVec = VecInit(fromRename.map(x =>
+    x.valid && FuType.isLoad(x.bits.fuType) && !LSUOpType.isPrefetch(x.bits.fuOpType)))
   private val isStoreVec = VecInit(fromRename.map(x => x.valid && FuType.isStore(x.bits.fuType)))
   private val isAMOVec = fromRename.map(x => x.valid && FuType.isAMO(x.bits.fuType))
   private val isStoreAMOVec = fromRename.map(x => x.valid && (FuType.isStore(x.bits.fuType) || FuType.isAMO(x.bits.fuType)))

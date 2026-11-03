@@ -138,7 +138,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   redirectData.valid   := io.train.redirect.valid
   redirectData.taken   := io.train.redirect.bits.taken
-  redirectData.cfiPc   := io.train.redirect.bits.cfiPc
+  redirectData.cfiPc   := io.train.redirect.bits.cfiPc.unGuard
   redirectData.target  := io.train.redirect.bits.target.unGuard
   redirectData.phrMeta := io.train.redirect.bits.meta.phr
 

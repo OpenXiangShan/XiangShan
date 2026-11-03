@@ -51,7 +51,7 @@ import xiangshan.DebugOptionsKey
 import xiangshan.FrontendToCtrlIO
 import xiangshan.L1BusErrorUnitInfo
 import xiangshan.SfenceBundle
-import xiangshan.SoftIfetchPrefetchBundle
+import xiangshan.SoftIPrefetchBundle
 import xiangshan.TlbCsrBundle
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
@@ -76,8 +76,8 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val fencei:       Bool             = Input(Bool())
   val ptw:          TlbPtwIO         = new TlbPtwIO
   val backend:      FrontendToCtrlIO = new FrontendToCtrlIO
-  val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
-    Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
+  val softPrefetch: Vec[Valid[SoftIPrefetchBundle]] =
+    Vec(backendParams.LduCnt, Flipped(Valid(new SoftIPrefetchBundle)))
   val error: L1BusErrorUnitInfo = Output(new L1BusErrorUnitInfo)
 
   // ctrl
@@ -194,7 +194,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq(false), itlbParams))
   itlb.io.hartId := io.hartId
   itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
-  itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.redirect      := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.robPendingPtr := DontCare // only lsu
   itlb.io.base_connect(sfence, tlbCsr)
 
   private val itlbRequestor = VecInit(Seq(icache.io.itlb))
@@ -211,8 +212,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val itlbRepeater2 =
     PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
-  // ICache-Memblock
-  icache.io.softPrefetchReq <> io.softPrefetch
+  // Ftq-Memblock
+  ftq.io.softPrefetch <> io.softPrefetch
 
   // wfi (backend-icache, backend-instrUncache)
   private val wfiReq = DelayN(io.backend.wfi.wfiReq, WfiReqPortDelay)

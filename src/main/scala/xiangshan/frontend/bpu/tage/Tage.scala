@@ -68,17 +68,18 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val s0_foldedHist = getFoldedHist(io.fromPhr.foldedPathHist)
   private val s0_setIdx = VecInit((tables zip s0_foldedHist).map { case (table, hist) =>
-    table.getSetIndex(s0_startPc, hist.forIdx)
+    table.getSetIndex(s0_startPc, hist.forSetIdx)
   })
 
-  // currently all tables share the same bank index
-  private val s0_bankIdx  = tables.head.getBankIndex(s0_startPc)
-  private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
+  private val s0_bankIdx = VecInit((tables zip s0_foldedHist).map { case (table, hist) =>
+    table.getBankIndex(s0_startPc, hist.forBankIdx)
+  })
+  private val s0_bankMask = VecInit(s0_bankIdx.map(UIntToOH(_, NumBanks)))
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     table.io.readReq(0).valid         := s0_fire
     table.io.readReq(0).bits.setIdx   := s0_setIdx(tableIdx)
-    table.io.readReq(0).bits.bankMask := s0_bankMask
+    table.io.readReq(0).bits.bankMask := s0_bankMask(tableIdx)
   }
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -203,9 +204,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_startPc  = io.train.startPc
   private val t0_branches = io.train.branches
 
-  // currently all tables share the same bank index
-  private val t0_bankIdx  = tables.head.getBankIndex(t0_startPc)
-  private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
+  private val t0_foldedHist = getFoldedHist(io.fromPhr.foldedPathHistForTrain)
+  private val t0_bankIdx = VecInit((tables zip t0_foldedHist).map { case (table, hist) =>
+    table.getBankIndex(t0_startPc, hist.forBankIdx)
+  })
+  private val t0_bankMask = VecInit(t0_bankIdx.map(UIntToOH(_, NumBanks)))
 
   private val t0_condMask = VecInit(t0_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
   private val t0_hasCond  = t0_condMask.reduce(_ || _)
@@ -235,23 +238,25 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }.reduce(_ || _)
   private val t0_useMeta = !t0_needRead
 
-  private val t0_readBankConflict = t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx
+  private val t0_readBankConflict = t0_needRead && s0_fire &&
+    t0_bankIdx.zip(s0_bankIdx).map { case (trainBank, predictBank) => trainBank === predictBank }.reduce(_ || _)
   io.trainReady := !t0_readBankConflict
 
   // t0_readBankConflict can be high even there's no train.valid, causing perf counters to be inaccurate
   // so we use a debug_ signal for perf counters
   private val debug_readBankConflict = io.debug_trainValid && t0_readBankConflict
+  private val debug_readBankNoConflict = io.debug_trainValid && t0_needRead && s0_fire &&
+    !t0_bankIdx.zip(s0_bankIdx).map { case (trainBank, predictBank) => trainBank === predictBank }.reduce(_ || _)
 
-  private val t0_foldedHist = getFoldedHist(io.fromPhr.foldedPathHistForTrain)
   private val t0_setIdx = VecInit((tables zip t0_foldedHist).map { case (table, hist) =>
-    table.getSetIndex(t0_startPc, hist.forIdx)
+    table.getSetIndex(t0_startPc, hist.forSetIdx)
   })
   dontTouch(t0_setIdx)
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     table.io.readReq(1).valid         := t0_fire && t0_needRead
     table.io.readReq(1).bits.setIdx   := t0_setIdx(tableIdx)
-    table.io.readReq(1).bits.bankMask := t0_bankMask
+    table.io.readReq(1).bits.bankMask := t0_bankMask(tableIdx)
   }
 
   // only for perf
@@ -264,7 +269,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val debug_s1BankIdx               = RegEnable(s0_bankIdx, s0_fire)
   // pred target within align 64B,and not blocked by s2
   private val debug_readBankConflictShortLoop = debug_readBankConflictReg && s1_fire &&
-    (debug_s1BankIdx === s0_bankIdx) &&
+    debug_s1BankIdx.zip(s0_bankIdx).map { case (lastBank, bank) => lastBank === bank }.reduce(_ || _) &&
     (debug_s0AlignedPc.toUInt - debug_s1AlignedPc.toUInt <= FetchBlockSize.U ||
       debug_s1AlignedPc.toUInt - debug_s0AlignedPc.toUInt <= FetchBlockSize.U) && s0_fire
   private val debug_readBankConflictShortLoopReg = RegNext(debug_readBankConflictShortLoop)
@@ -612,7 +617,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     table.io.writeReq.valid                := t3_fire && writeWayMask.reduce(_ || _)
     table.io.writeReq.bits.setIdx          := t3_setIdx(tableIdx)
-    table.io.writeReq.bits.bankMask        := t3_bankMask
+    table.io.writeReq.bits.bankMask        := t3_bankMask(tableIdx)
     table.io.writeReq.bits.wayMask         := writeWayMask.asUInt
     table.io.writeReq.bits.writeEntryEn    := writeEntryEn
     table.io.writeReq.bits.writeUsefulEn   := writeUsefulEn
@@ -733,7 +738,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   )
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
   XSPerfAccumulate("train_has_cond", t0_fire)
+  XSPerfAccumulate("total_train_read", t0_fire && t0_needRead)
+  XSPerfAccumulate("both_read", s0_fire && io.debug_trainValid && t0_needRead)
   XSPerfAccumulate("read_conflict", debug_readBankConflict)
+  XSPerfAccumulate("read_no_conflict", debug_readBankNoConflict)
   XSPerfAccumulate("reset_useful", t3_usefulResetStart)
   XSPerfAccumulate(
     "allocate_not_needed_due_to_already_on_highest_table", {

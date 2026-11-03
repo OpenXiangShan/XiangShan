@@ -39,14 +39,13 @@ on:
         options:
           - spec06-rva23-novec-gcc16-0.3c
           - spec06-rva23-novec-gcc16-1.0c
-          - spec06-rva23-novec-xscc-0.3c
-          - spec06-rva23-novec-xscc-1.0c
+          - spec06-rv64gcb-xscc-1.0c
           - spec17-rva23-novec-gcc16-0.3c
           - spec17-rva23-novec-gcc16-1.0c
+          - spec17-rva23-novec-xscc-0.3c
+          - spec17-rva23-novec-xscc-1.0c
           - spec26-gcc15-0.3c
           - spec26-gcc15-1.0c
-          - legacy-spec06-gcc15-0.3c
-          - legacy-spec06-gcc15-1.0c
           - custom
         default: spec06-rva23-novec-gcc16-1.0c
       benchmarks:
@@ -57,6 +56,11 @@ on:
         description: Constantin file path (empty for default init setting, or file path for specific file)
         required: false
         type: string
+      disable_diff:
+        description: Disable difftest
+        required: false
+        type: boolean
+        default: false
       enable_db:
         description: Enable ChiselDB dump (High disk usage, 4~16G/ckpt, use with caution!)
         required: false
@@ -102,6 +106,7 @@ jobs:
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         cst_file: ${{ github.event.inputs.cst_file }}
+        disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
         servers: ${{ github.event.inputs.servers }}

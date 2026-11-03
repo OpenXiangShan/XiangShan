@@ -416,6 +416,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.isPrefetch := isPrefetch
   io.tlbReq.bits.no_translate := noQuery
   io.tlbReq.bits.pmp_addr := DontCare // TODO: move this outside of TlbReq
+  // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
+  io.tlbReq.bits.frm_mabuf := false.B
   io.tlbReq.bits.debug.pc := uop.pc
   io.tlbReq.bits.debug.robIdx := uop.robIdx
   io.tlbReq.bits.debug.isFirstIssue := firstIssue
@@ -544,7 +546,7 @@ class LoadUnitS1(param: ExeUnitParams)(
     val prefetchTrainHint = Output(Bool())
 
     // Software instruction prefetch
-    val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
+    val swInstrPrefetch = ValidIO(new SoftIPrefetchBundle)
 
     // Load trigger
     val csrTrigger = Input(new CsrTriggerBundle)
@@ -907,7 +909,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     */
   val redirect = io.redirect
   val kill = io.kill || robIdx.needFlush(redirect)
-  val endPipe = isHwPrefetch
+  val endPipe = isPrefetch
 
   /**
     * PMP result & exception handling
@@ -922,7 +924,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     uop.exceptionVec(loadPageFault) ||
     uop.exceptionVec(loadGuestPageFault)
   val tlbAccessable = !tlbUnaccessable
-  val pmpUnaccessable = pmp.ld && tlbHit
+  val pmpUnaccessable = (pmp.ld || pmp.instr && LSUOpType.isHlvx(uop.fuOpType)) && tlbHit
 
   val isNC = tlbHit && tlbAccessable && Pbmt.isNC(pbmt)
   val isMMIO = tlbHit && tlbAccessable && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
@@ -1142,8 +1144,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     * 1. `wakeup` should not asserted when exception occurs
     * 2. `wakeup` should not asserted in case of a vaddr / paddr mismatch (debatable yet)
     */
-  val shouldWakeup = !shouldReplay && !isUncache && !exception && !isSwPrefetch
-  val shouldWriteback = shouldWakeup || exception || matchInvalid || isSwPrefetch
+  val shouldWakeup = !shouldReplay && !isUncache && !exception && !isPrefetch
+  val shouldWriteback = shouldWakeup || exception || matchInvalid
 
   /**
     * Pipeline connect
@@ -1373,7 +1375,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val causeOrR = in.causeOrR.get
   val shouldReplay = causeOrR || in.shouldFastReplay.get
 
-  assert(!pipeIn.valid || !accessType.isHwPrefetch(), "HwPrefetch should be killed in S2")
+  assert(!pipeIn.valid || !accessType.isPrefetch(), "Prefetch should be killed in S2")
 
   /**
     * Redirect
@@ -1755,7 +1757,6 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits.ftqIdx := uop.ftqPtr
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel
-  io.rollback.bits.target := uop.pc
   io.rollback.bits.debug_runahead_checkpoint_id := uop.perfDebugInfo.runahead_checkpoint_id
 
   io.exceptionInfo.valid := exceptionInfoValid
@@ -2047,7 +2048,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val prefetchTrainHintS2 = Output(Bool())
   val prefetchTrain = ValidIO(new TrainReqBundle)
   // Software instruction prefetch
-  val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
+  val swInstrPrefetch = ValidIO(new SoftIPrefetchBundle)
   // CSR control signals and load trigger
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val csrTrigger = Input(new CsrTriggerBundle)

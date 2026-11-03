@@ -333,10 +333,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val uncache_xbar = TLXbar()
   val ptw = LazyModule(new L2TLBWrapper())
   val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
-  // muti buffer and port for multi-channel L1-L2 interface
-  val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty)
-    Seq.tabulate(numMemChannelsFromDcache)(i => LazyModule(new TLBuffer))
-  else Seq.empty
+  // Multi-channel L1D-to-L2 ports. Buffering is owned by CustomL1L2Fabric after arbitration.
   val dcache_port = Seq.tabulate(numMemChannelsFromDcache)(i =>
     TLNameNode(s"dcache_client_${i}")
   )
@@ -385,7 +382,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val mem_to_ooo = new mem_to_ooo
     val fetch_to_mem = new fetch_to_mem
 
-    val ifetchPrefetch = Vec(LduCnt, ValidIO(new SoftIfetchPrefetchBundle))
+    val ifetchPrefetch = Vec(LduCnt, ValidIO(new SoftIPrefetchBundle))
 
     // misc
     val dcacheError = Output(new L1BusErrorUnitInfo())
@@ -414,6 +411,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val msiInfo   = ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))
       val teemsiInfo   = Option.when(soc.IMSICParams.HasTEEIMSIC)(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val clintTime = ValidIO(UInt(64.W))
+      val reset_mtvec = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
     })
     val inner_hartId = Output(UInt(hartIdLen.W))
     val inner_reset_vector = Output(UInt(PAddrBits.W))
@@ -590,6 +588,19 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val lsq     = Module(new LsqWrapper)
   val sbuffer = Module(new Sbuffer)
 
+  // Violation rollback: same-ROB redirects that flush themselves take priority.
+  def isOlder(left: Redirect, right: Redirect): Bool = {
+    // If one instruction generates both a replay and a flush-after rollback,
+    // select the replay so the instruction is fetched again with the right data.
+    left.robIdx.isBeforeSlot(right.robIdx) ||
+      (left.robIdx.isSameSlot(right.robIdx) && left.flushItself() && !right.flushItself())
+  }
+  val allRedirect = newLoadUnits.map(_.io.rollback) ++ lsq.io.nack_rollback ++ lsq.io.nuke_rollback
+  val selectOldestRedirect = Module(
+    new SelectOldest(new Redirect, allRedirect.length, isOlder)
+      .suggestName("selectOldestRedirect")
+  )
+
   io.mem_to_ooo.stIssuePtr := lsq.io.issuePtrExt
 
   dcache.io.hartId := io.hartId
@@ -606,7 +617,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val tlbcsr = RegNext(io.ooo_to_mem.tlbCsr)
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = if (!coreParams.softPTW) outer.ptw_to_l2_buffer.module else null
-  private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.map(_.module)
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
@@ -667,11 +677,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
+  val dtlb_pmp_modes = dtlb.map(_.pmpMode).flatten
   dtlb.map(_.hartId := io.hartId)
   dtlb.map(_.sfence := sfence)
   dtlb.map(_.csr := tlbcsr)
   dtlb.map(_.flushPipe.map(a => a := false.B)) // non-block doesn't need
   dtlb.map(_.redirect := redirect)
+  dtlb.map(_.robPendingPtr := io.ooo_to_mem.lsqio.pendingPtr)
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace == hytlbParams.outReplace)
@@ -755,15 +767,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val pmp_checkers = Seq.fill(DTlbSize)(Module(new PMPChecker(4, leaveHitMux = true)))
   val pmp_check = pmp_checkers.map(_.io)
-  for ((p,d) <- pmp_check zip dtlb_pmps) {
+  for (((p, d), pmpMode) <- pmp_check.zip(dtlb_pmps).zip(dtlb_pmp_modes)) {
     if (HasBitmapCheck) {
       if (KeyIDBits > 0) {
-        p.apply(tlbcsr.mbmc.KEYIDEN.asBool, tlbcsr.mbmc.CMODE.asBool, tlbcsr.priv.dmode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
+        p.apply(tlbcsr.mbmc.KEYIDEN.asBool, tlbcsr.mbmc.CMODE.asBool, pmpMode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
       } else {
-        p.apply(tlbcsr.mbmc.CMODE.asBool, tlbcsr.priv.dmode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
+        p.apply(tlbcsr.mbmc.CMODE.asBool, pmpMode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
       }
     } else {
-      p.apply(tlbcsr.priv.dmode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
+      p.apply(pmpMode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
     }
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
@@ -1063,10 +1075,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.wakeupToLRQCancel := wakeupToLRQCancel
   lsq.io.brqRedirect    <> redirect
 
-  //  violation rollback
-  val allRedirect = newLoadUnits.map(_.io.rollback) ++ lsq.io.nack_rollback ++ lsq.io.nuke_rollback
-  val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
-  val oldestRedirect = WireDefault(Mux1H(oldestOneHot, allRedirect))
+  // violation rollback
+  selectOldestRedirect.io.in.zip(allRedirect).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits  := source.bits
+  }
+  val oldestRedirect = WireDefault(selectOldestRedirect.io.out)
   // memory replay would not cause IAF/IPF/IGPF
   oldestRedirect.bits.backendIAF := false.B
   oldestRedirect.bits.backendIPF := false.B
@@ -1282,6 +1296,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       x_teemsiInfo        := DelayNWithValid(io_teemsiInfo, 1)
     }
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
+    x.reset_mtvec.foreach(_ := io.fromTopToBackend.reset_mtvec.get)
   }
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
@@ -1293,7 +1308,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_cpu_wfi := RegNext(io.ooo_to_mem.backendToTopBypass.cpuWfi)
   io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
-  io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError)
+  io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError, false.B)
   io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck
   io.outer_teemsi_ack zip io.ooo_to_mem.backendToTopBypass.teemsiAck foreach { case (teemsi_ack, teemsiAck) =>
     teemsi_ack := teemsiAck
@@ -1325,7 +1340,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         ModuleNode(dcache),
         CellNode(io.reset_backend)
       )
-      ++ l1d_to_l2_buffer.map(ModuleNode(_))
     )
     ResetGen(leftResetTree, reset, sim = false, io.dft_reset)
     ResetGen(rightResetTree, reset, sim = false, io.dft_reset)
@@ -1347,7 +1361,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   )
   traceToL2Top.toEncoder.mstatus := RegNext(traceFromBackend.toEncoder.mstatus)
   (0 until TraceGroupNum).foreach { i =>
-    traceToL2Top.toEncoder.groups(i).valid := RegNext(traceFromBackend.toEncoder.groups(i).valid)
+    traceToL2Top.toEncoder.groups(i).valid := RegNext(traceFromBackend.toEncoder.groups(i).valid, false.B)
     traceToL2Top.toEncoder.groups(i).bits.iretire := RegNext(traceFromBackend.toEncoder.groups(i).bits.iretire)
     traceToL2Top.toEncoder.groups(i).bits.itype := RegNext(traceFromBackend.toEncoder.groups(i).bits.itype)
     traceToL2Top.toEncoder.groups(i).bits.ilastsize := RegEnable(

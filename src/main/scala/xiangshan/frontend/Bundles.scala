@@ -136,7 +136,7 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val ftqIdx: FtqPtr = new FtqPtr
   //
   val canTrain: Bool = Bool()
-  val pc:       UInt = UInt(VAddrBits.W)
+  val pc:       UInt = UInt(GuardedVAddrBits.W)
   val taken:    Bool = Bool()
   // The early end position may not always be a branch instruction.
   val ftqOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W) // maybe use later

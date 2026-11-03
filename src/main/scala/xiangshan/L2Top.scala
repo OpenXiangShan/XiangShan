@@ -19,7 +19,7 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
-import chisel3.util.{Valid, ValidIO}
+import chisel3.util.{Valid, ValidIO, log2Up}
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -75,7 +75,13 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   }
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
-  val l1_xbar = TLXbar()
+  private val specMissEnabled = coreParams.dcacheParametersOpt.exists(_.enMissTrack)
+  val l1_l2_fabric = LazyModule(new CustomL1L2Fabric(
+    specChannels = if (specMissEnabled) numMemChannelsFromDcache else 0,
+    specOwners = if (specMissEnabled) LoadPipelineWidth else 0,
+    specIdBits = if (specMissEnabled) log2Up(dcacheParameters.nMissEntries) else 0,
+    specBlockBytes = if (specMissEnabled) dcacheParameters.blockBytes else 0
+  ))
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = if (enableL2) None else Some(TLIdentityNode())
@@ -90,7 +96,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val sep_tl_port_opt = Option.when(SeperateBus != top.SeperatedBusType.NONE)(TLTempNode())
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
-  val xbar_l2_buffer = TLBuffer()
 
   val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
   val l1d_logger = Seq.tabulate(numMemChannelsFromDcache)(i =>
@@ -143,11 +148,11 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   // l2 to l2_binder, then to memory_port
   l2cache match {
     case Some(l2) =>
-      l2_binder.get :*= l2.node :*= xbar_l2_buffer :*= l1_xbar :=* misc_l2_pmu
+      l2_binder.get :*= l2.node :*= l1_l2_fabric.node :=* misc_l2_pmu
       l2.managerNode := TLXbar() :=* l2_binder.get
       l2.mmioNode := mmio_port
     case None =>
-      memory_port.get := l1_xbar
+      memory_port.get := l1_l2_fabric.node
   }
 
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
@@ -180,6 +185,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromTile = Input(UInt(PAddrBits.W))
         val toCore = Output(UInt(PAddrBits.W))
       }
+      val reset_mtvec = Option.when(enableResetMtvec)(new Bundle {
+        val fromTile = Input(UInt(PAddrBits.W))
+        val toCore = Output(UInt(PAddrBits.W))
+      })
       val hartId = new Bundle() {
         val fromTile = Input(UInt(64.W))
         val toCore = Output(UInt(64.W))
@@ -251,6 +260,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := b })
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
+    io.reset_mtvec.foreach{ mtvec =>
+      mtvec.toCore := mtvec.fromTile
+    }
 
     val (beu_int_out, _) = beu_local_int_source.out(0)
     beu_int_out(0) := beu.module.io.interrupt
@@ -269,7 +281,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       teemsiInfo.toCore.bits := RegEnable(teemsiInfo.fromTile.bits, teemsiInfo.fromTile.valid)
     }
     io.cpu_wfi.toTile := RegNext(io.cpu_wfi.fromCore)
-    io.cpu_critical_error.toTile := RegNext(io.cpu_critical_error.fromCore)
+    io.cpu_critical_error.toTile := RegNext(io.cpu_critical_error.fromCore, false.B)
     io.msiAck.toTile := io.msiAck.fromCore
     io.teemsiAck.foreach( teemsiAck => teemsiAck.toTile := teemsiAck.fromCore)
     io.l3Miss.toCore := RegNext(io.l3Miss.fromTile)
@@ -288,7 +300,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     )
     traceToTile.toEncoder.mstatus := RegNext(traceFromCore.toEncoder.mstatus)
     (0 until TraceGroupNum).foreach{ i =>
-      traceToTile.toEncoder.groups(i).valid := RegNext(traceFromCore.toEncoder.groups(i).valid)
+      traceToTile.toEncoder.groups(i).valid := RegNext(traceFromCore.toEncoder.groups(i).valid, false.B)
       traceToTile.toEncoder.groups(i).bits.iretire := RegNext(traceFromCore.toEncoder.groups(i).bits.iretire)
       traceToTile.toEncoder.groups(i).bits.itype := RegNext(traceFromCore.toEncoder.groups(i).bits.itype)
       traceToTile.toEncoder.groups(i).bits.ilastsize := RegEnable(

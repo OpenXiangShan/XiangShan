@@ -89,3 +89,5 @@ CVMParams:
   HasDelayNoencryption: false
 
 EnableBitmapCheck: true
+
+EnableResetMtvec: false

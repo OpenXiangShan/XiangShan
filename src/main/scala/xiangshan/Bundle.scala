@@ -310,7 +310,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   // val levelTlbHit = UInt(2.W)
 }
 
-class SoftIfetchPrefetchBundle(implicit p: Parameters) extends XSBundle {
+class SoftIPrefetchBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
 }
 
@@ -647,6 +647,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val hd_misalign_st_enable = Output(Bool())
   val hd_misalign_ld_enable = Output(Bool())
   val power_down_enable = Output(Bool())
+  val commit_stuck_check_enable = Output(Bool())
   val flush_l2_enable = Output(Bool())
   // Rename
   val fusion_enable = Output(Bool())

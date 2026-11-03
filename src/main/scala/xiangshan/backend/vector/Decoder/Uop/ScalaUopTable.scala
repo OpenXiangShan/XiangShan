@@ -365,6 +365,22 @@ object ScalaUopTable {
     )
   }
 
+  val tableSdext = {
+    import xiangshan.backend.decode.isa.Instructions.SDEXTType
+
+    SDEXTType.mapUopcode(
+      _.DRET -> jmp, // system i-type
+    )
+  }
+
+  val tableSmrnmi = {
+    import xiangshan.backend.decode.isa.Instructions.SMRNMIType
+
+    SMRNMIType.mapUopcode(
+      _.MNRET -> jmp, // system i-type
+    )
+  }
+
   val tableS = {
     import xiangshan.backend.decode.isa.Instructions.SType
 
@@ -615,7 +631,15 @@ object ScalaUopTable {
     )
   }
 
-  def tableZimop = ???
+  val tableZimop = {
+    import xiangshan.backend.decode.isa.Instructions.ZIMOPType
+
+    // Decode as add rd, x0, x0; SimpleDecodeChannel forces both sources to x0.
+    ZIMOPType.mapUopcode(
+      _.MOP_R_N  -> add,
+      _.MOP_RR_N -> add,
+    )
+  }
 
   val tableZknd = {
     import xiangshan.backend.decode.isa.Instructions.ZKND64Type

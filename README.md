@@ -12,6 +12,8 @@ XiangShan Design Document for Kunminghu V2R2 has been published separately. You 
 
 XiangShan User Guide has been published separately. You can find it at [docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/) or [XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
 
+Our performance tracker is at [XiangShan Dashboard](https://dashboard.xiangshan.cc), you can view all the results from by-commit EMU-Performance CI, nightly 0.3c SPEC regression, and weekly 1.0c SPEC regression there.
+
 We are using [Weblate](https://hosted.weblate.org/projects/openxiangshan/) to translate documentation into English and other languages. Your contributions are welcome—come and help us improve it!
 
 All XiangShan documents are licensed under the CC-BY-4.0.
@@ -104,13 +106,10 @@ make bsp
 make idea
 ```
 
-
 ## Generate Verilog
 
 * Run `make verilog` to generate verilog code. This generates multiple `.sv` files in the `build/rtl/` folder (e.g., `build/rtl/XSTop.sv`).
 * Refer to `Makefile` for more information.
-
-
 
 ## Run Programs by Simulation
 
@@ -184,6 +183,16 @@ HIT GOOD LOOP at pc = 0xf0001cb0
 ## Acknowledgement
 
 The implementation of XiangShan is inspired by several key papers. We list these papers in XiangShan document, see: [Acknowledgements](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/). We very much encourage and expect that more academic innovations can be realised based on XiangShan in the future.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=openxiangshan%2Fxiangshan&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=openxiangshan/xiangshan&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=openxiangshan/xiangshan&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=openxiangshan/xiangshan&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## LICENSE
 

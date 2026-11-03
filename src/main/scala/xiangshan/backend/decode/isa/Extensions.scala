@@ -71,6 +71,8 @@ object Extensions {
 
   case object Zcmop extends UnprivExt(Seq(ZCMOPType))
 
+  case object Zimop extends UnprivExt(Seq(ZIMOPType), tableZimop)
+
   case object Zfa extends UnprivExt
 
   case object Zfh extends UnprivExt(Seq(ZFHType, ZFH64Type), tableZfh)
@@ -136,6 +138,8 @@ object Extensions {
 
   case object Smmtt extends PrivExt(Seq(SMMTTType), tableSmmtt)
 
+  case object Sdext extends PrivExt(Seq(SDEXTType), tableSdext)
+
   case object Sdtrig extends PrivExt
 //  case object Sha extends PrivExt
   case object Shcounterenw extends PrivExt
@@ -144,6 +148,8 @@ object Extensions {
   case object Shtvala extends PrivExt
   case object Shvsatpa extends PrivExt
   case object Shvstvala extends PrivExt
+
+  case object Smrnmi extends PrivExt(Seq(SMRNMIType), tableSmrnmi)
 
   case object Svinval extends PrivExt(Seq(SVINVALType, SVINVAL_HType), tableSvinval)
 
@@ -157,7 +163,7 @@ object Extensions {
 
   def extensions(implicit p: Parameters): Seq[ExtBase] = Seq(
     I, M, A, F, D, Zicsr,
-    System, S, Svinval, Mpt,
+    Sdext, Smrnmi, System, S, Svinval, Mpt,
     Za64rs, Zabha, Zacas, ZacasZabha, Zawrs,
     Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
     V, H,
@@ -166,7 +172,7 @@ object Extensions {
     XSTrap,
     Zicbo,
     Zicond,
-    Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
+    Zifencei, Zimop, Zknd, Zkne, Zknh, Zksed, Zksh,
     // Zcb, Zcmop,
     ZfaF, ZfaD, ZfaZfh, Zfh, Zfhmin, ZfhminD,
   ) ++ Option.when(p(XSCoreParamsKey).HasMptCheck && !p(XSCoreParamsKey).HasBitmapCheck)(Smmtt).toSeq
