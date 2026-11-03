@@ -4,19 +4,9 @@ XiangShan (香山) is an open-source high-performance RISC-V processor project.
 
 English | [中文](README.zh-cn.md)
 
-## Documentation
+## Architecture
 
-XiangShan's documentation is available at [docs.xiangshan.cc](https://docs.xiangshan.cc).
-
-XiangShan Design Document for Kunminghu V2R2 has been published separately. You can find it at [docs.xiangshan.cc/projects/design](https://docs.xiangshan.cc/projects/design/).
-
-XiangShan User Guide has been published separately. You can find it at [docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/) or [XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
-
-Our performance tracker is at [XiangShan Dashboard](https://dashboard.xiangshan.cc), you can view all the results from by-commit EMU-Performance CI, nightly 0.3c SPEC regression, and weekly 1.0c SPEC regression there.
-
-We are using [Weblate](https://hosted.weblate.org/projects/openxiangshan/) to translate documentation into English and other languages. Your contributions are welcome—come and help us improve it!
-
-All XiangShan documents are licensed under the CC-BY-4.0.
+![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
 ## Publications
 
@@ -32,29 +22,7 @@ This paper is awarded all three available badges for artifact evaluation (Availa
 
 [Paper PDF](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan.pdf) | [IEEE Xplore](https://ieeexplore.ieee.org/abstract/document/9923860) | [BibTeX](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan.bib) | [Presentation Slides](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan-slides.pdf) | [Presentation Video](https://www.bilibili.com/video/BV1FB4y1j7Jy)
 
-## Follow us
-
-Wechat/微信：香山开源处理器
-
-<div align=left><img width="340" height="117" src="images/wechat.png"/></div>
-
-Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangshan)
-
-Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
-
-You can contact us through [our mailing list](mailto:xiangshan-all@ict.ac.cn). All mails from this list will be archived [here](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/).
-
-## Architecture
-
-The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) and is [on the yanqihu branch](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu), which has been developed since June 2020.
-
-The second stable micro-architecture of XiangShan is called Nanhu (南湖) and is [on the nanhu branch](https://github.com/OpenXiangShan/XiangShan/tree/nanhu).
-
-The third-generation XiangShan microarchitecture, Kunminghu (昆明湖), is under active development on the `kunminghu-v2` and `kunminghu-v3` branches.
-
-The micro-architecture overview of Kunminghu-V2 is shown below.
-
-![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
+[More publications](https://docs.xiangshan.cc/zh-cn/latest/tutorials/publications/)
 
 ## Branch Maintenance Status
 
@@ -197,10 +165,6 @@ PC[7]: 0x0    Instr: 0x0
 HIT GOOD LOOP at pc = 0xf0001cb0
 ```
 
-## Troubleshooting Guide
-
-[Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
-
 ## Contributing
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting issues/PRs, especially the [Known issues](CONTRIBUTING.md#known-issues), and use the correct issue template.
@@ -209,7 +173,19 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting issues/PRs, esp
 
 The implementation of XiangShan is inspired by several key papers. We list these papers in XiangShan document, see: [Acknowledgements](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/). We very much encourage and expect that more academic innovations can be realised based on XiangShan in the future.
 
-## Star History
+## Documentation
+
+- Main documentation site: [website](https://docs.xiangshan.cc) | [Github Repo](https://github.com/OpenXiangShan/XiangShan-doc)
+- Design doc (for hw developers): [website](https://docs.xiangshan.cc/projects/design/) | [Github Release](https://github.com/OpenXiangShan/XiangShan-Design-Doc/releases)
+- User guide (for sw developers): [website](https://docs.xiangshan.cc/projects/user-guide/) | [Github Release](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases)
+- Performance dashboard: [website](https://dashboard.xiangshan.cc) | [Github Repo](https://github.com/OpenXiangShan/XiangShan-Dashboard)
+- Publications: [website](https://docs.xiangshan.cc/zh-cn/latest/tutorials/publications/)
+- Acknowledgements: [website](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)
+- Talks & tutorials: [website](https://docs.xiangshan.cc/zh-cn/latest/tutorials/talks/)
+
+All XiangShan documents are licensed under the CC-BY-4.0.
+
+We are using [Weblate](https://hosted.weblate.org/projects/openxiangshan/) to translate documentation into English and other languages. Your contributions are welcome—come and help us improve it!
 
 <a href="https://www.star-history.com/?repos=openxiangshan%2Fxiangshan&type=date&legend=top-left">
  <picture>
@@ -218,6 +194,18 @@ The implementation of XiangShan is inspired by several key papers. We list these
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=openxiangshan/xiangshan&type=date&legend=top-left" />
  </picture>
 </a>
+
+## Follow us
+
+Wechat/微信：香山开源处理器
+
+<div align=left><img width="340" height="117" src="images/wechat.png"/></div>
+
+Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangshan)
+
+Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
+
+You can contact us through [our mailing list](mailto:xiangshan-all@ict.ac.cn). All mails from this list will be archived [here](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/).
 
 ## LICENSE
 

@@ -4,19 +4,9 @@
 
 [English](README.md) | 中文
 
-## 文档和报告
+## 处理器架构
 
-香山的文档托管在 [docs.xiangshan.cc](https://docs.xiangshan.cc)。
-
-香山设计文档（适用于昆明湖 V2R2）已经发布，您可在此处查看：[docs.xiangshan.cc/projects/design](https://docs.xiangshan.cc/projects/design/)
-
-香山用户文档已单独发布，您可在此处查看：[docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/)、[XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
-
-我们将性能数据保存到 [XiangShan Dashboard](https://dashboard.xiangshan.cc)，您可以在其中查看每个 commit 的 EMU-Performance CI 数据、每日 0.3c SPEC 回归以及每周 1.0c SPEC 回归的性能数据。
-
-我们正在使用 [Weblate](https://hosted.weblate.org/projects/openxiangshan/) 将本项目文档翻译为英文及其他语言。欢迎大家参与翻译工作，帮助我们一起完善文档！
-
-所有香山文档均采用 CC-BY-4.0 协议授权。
+![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
 ## 论文发表情况
 
@@ -24,35 +14,13 @@
 
 我们在 MICRO'22 会议上的论文介绍了香山处理器及敏捷开发实践经验，包括一些面向设计、功能验证、调试、性能评估等方面的敏捷开发工具。论文得到了 Artifact Evaluation 的所有三个徽章。
 
-![Artifacts Available](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_available_dl.jpg)
-![Artifacts Evaluated — Functional](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/artifacts_evaluated_functional_dl.jpg)
-![Results Reproduced](https://github.com/OpenXiangShan/XiangShan-doc/raw/main/publications/images/results_reproduced_dl.jpg)
+![Artifacts Available](https://talks-pubs.xiangshan.cc/publications/images/artifacts_available_dl.jpg)
+![Artifacts Evaluated — Functional](https://talks-pubs.xiangshan.cc/publications/images/artifacts_evaluated_functional_dl.jpg)
+![Results Reproduced](https://talks-pubs.xiangshan.cc/publications/images/results_reproduced_dl.jpg)
 
-[Paper PDF](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan.pdf) | [IEEE Xplore](https://ieeexplore.ieee.org/abstract/document/9923860) | [BibTeX](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan.bib) | [Presentation Slides](https://github.com/OpenXiangShan/XiangShan-doc/blob/main/publications/micro2022-xiangshan-slides.pdf) | [Presentation Video](https://www.bilibili.com/video/BV1FB4y1j7Jy)
+[Paper PDF](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan.pdf) | [IEEE Xplore](https://ieeexplore.ieee.org/abstract/document/9923860) | [BibTeX](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan.bib) | [Presentation Slides](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan-slides.pdf) | [Presentation Video](https://www.bilibili.com/video/BV1FB4y1j7Jy)
 
-
-## 关注我们
-
-Wechat/微信：香山开源处理器
-
-<div align=left><img width="340" height="117" src="images/wechat.png"/></div>
-
-Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangshan)
-
-Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
-
-可以通过[我们的邮件列表](mailto:xiangshan-all@ict.ac.cn)联系我们。列表中的所有邮件会存档到[这里](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/)。
-
-## 处理器架构
-
-自 2020 年 6 月开始开发的[雁栖湖](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)为香山处理器的首个稳定的微架构。
-
-香山的第二代微架构被命名为[南湖](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)。
-
-香山的第三代微架构（昆明湖）正在 kunminghu-v2 和 kunminghu-v3 分支上不断开发中。
-
-昆明湖 V2 微架构概览：
-![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
+[更多论文](https://docs.xiangshan.cc/zh-cn/latest/tutorials/publications/)
 
 ## 分支维护情况
 
@@ -195,10 +163,6 @@ PC[7]: 0x0    Instr: 0x0
 HIT GOOD LOOP at pc = 0xf0001cb0
 ```
 
-## 错误排除指南
-
-[Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
-
 ## 贡献
 
 请务必在提交 issue 或 PR 之前阅读 [贡献指南](CONTRIBUTING.zh-cn.md)，尤其是[部分已知问题说明](CONTRIBUTING.zh-cn.md#部分已知问题说明)部分，并使用正确的 issue 模板。
@@ -207,7 +171,19 @@ HIT GOOD LOOP at pc = 0xf0001cb0
 
 香山处理器是绝佳的微架构学术研究平台，能够充分支持学术界的试验创新想法。香山处理器中已经实现或参考借鉴了如下论文，列举如下：[致谢](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)。我们非常鼓励并期待，未来能够基于香山处理器实现更多的学术创新。
 
-## Star 历史
+## 文档和报告
+
+- 主文档站点：[网站](https://docs.xiangshan.cc) | [Github 仓库](https://github.com/OpenXiangShan/XiangShan-doc)
+- 设计文档（面向硬件开发者）：[网站](https://docs.xiangshan.cc/projects/design/) | [Github Release](https://github.com/OpenXiangShan/XiangShan-Design-Doc/releases)
+- 用户指南（面向软件开发者）：[网站](https://docs.xiangshan.cc/projects/user-guide/) | [Github Release](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases)
+- 性能看板：[网站](https://dashboard.xiangshan.cc) | [Github 仓库](https://github.com/OpenXiangShan/XiangShan-Dashboard)
+- 论文发表：[网站](https://docs.xiangshan.cc/zh-cn/latest/tutorials/publications/)
+- 致谢：[网站](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)
+- 会议报告：[网站](https://docs.xiangshan.cc/zh-cn/latest/tutorials/talks/)
+
+所有香山文档均采用 CC-BY-4.0 协议授权。
+
+我们正在使用 [Weblate](https://hosted.weblate.org/projects/openxiangshan/) 将本项目文档翻译为英文及其他语言。欢迎大家参与翻译工作，帮助我们一起完善文档！
 
 <a href="https://www.star-history.com/?repos=openxiangshan%2Fxiangshan&type=date&legend=top-left">
  <picture>
@@ -217,12 +193,24 @@ HIT GOOD LOOP at pc = 0xf0001cb0
  </picture>
 </a>
 
+## 关注我们
+
+Wechat/微信：香山开源处理器
+
+<div align=left><img width="340" height="117" src="images/wechat.png"/></div>
+
+Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangshan)
+
+Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
+
+可以通过[我们的邮件列表](mailto:xiangshan-all@ict.ac.cn)联系我们。列表中的所有邮件会存档到[这里](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/)。
+
 ## 许可证
 
-版权所有 © 2020-2026 中国科学院计算技术研究所
+版权所有 © 2020-2026 中国科学院计算技术研究所。
 
-版权所有 © 2021-2026 北京开源芯片研究院
+版权所有 © 2021-2026 北京开源芯片研究院。
 
-版权所有 © 2020-2022 鹏城实验室
+版权所有 © 2020-2022 鹏城实验室。
 
 香山以 [木兰宽松许可证 第2版](LICENSE) 授权。
