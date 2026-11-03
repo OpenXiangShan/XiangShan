@@ -1449,7 +1449,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * DataBase info:
    * log trigger is at writeback valid
    * */
-  if (!env.FPGAPlatform) {
+  if (!env.FPGAPlatform && backendParams.debugEn) {
     val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
     val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
     val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry, basicDB = true)

@@ -203,7 +203,11 @@ override DEBUG_ARGS += --firtool-opt "--default-layer-specialization=enable"
 ifeq ($(FPGA), 1)
 override DEBUG_ARGS	+= --fpga-platform --disable-all --remove-assert
 else
+ifeq ($(DISABLE_DIFFTEST),1)
+override DEBUG_ARGS += --disable-difftest
+else
 override DEBUG_ARGS	+= --enable-difftest
+endif
 endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
