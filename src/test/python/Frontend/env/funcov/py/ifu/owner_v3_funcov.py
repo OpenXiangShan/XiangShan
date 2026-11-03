@@ -74,7 +74,7 @@ OWNER_V3_SOURCE_RULES = (
     OwnerV3SourceRule("BIN-926", ("BIN-432",)),
     OwnerV3SourceRule("BIN-933", ("BIN-832", "BIN-842", "BIN-898")),
     OwnerV3SourceRule("BIN-942", ("BIN-432",)),
-    OwnerV3SourceRule("BIN-944", ("BIN-836",)),
+    # BIN-944 needs its own registered checker/writeback proof.
     OwnerV3SourceRule("BIN-961", ("BIN-874",)),
     OwnerV3SourceRule("BIN-962", ("BIN-432",)),
     OwnerV3SourceRule("BIN-964", ("BIN-878",)),
