@@ -211,8 +211,8 @@ You can contact us through [our mailing list](mailto:xiangshan-all@ict.ac.cn). A
 
 Copyright © 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences.
 
-Copyright © 2021-2026 Beijing Institute of Open Source Chip
+Copyright © 2021-2026 Beijing Institute of Open Source Chip.
 
-Copyright © 2020-2022 by Peng Cheng Laboratory.
+Copyright © 2020-2022 Peng Cheng Laboratory.
 
 XiangShan is licensed under [Mulan PSL v2](LICENSE).
