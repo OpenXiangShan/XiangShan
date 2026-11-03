@@ -17,6 +17,7 @@
 
 package xiangshan.cache
 
+import device.reri.{ErrorSource, SeverityLevel}
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -162,8 +163,11 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
           data
         }
       }.toSeq)
-      io.errors(j).bits.report_to_beu := RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
-      io.errors(j).bits.paddr := RegEnable(io.read(j).bits.addr, io.read(j).fire)
+      val error = RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
+      io.errors(j).valid := error
+      io.errors(j).bits.severity := Mux(error, SeverityLevel.UEC, SeverityLevel.NONE)
+      io.errors(j).bits.errorSource := ErrorSource.dataError
+      io.errors(j).bits.errorPaddr := RegEnable(io.read(j).bits.addr, io.read(j).fire)
     }
 
     io.nacks(j) := false.B

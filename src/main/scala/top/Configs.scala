@@ -24,7 +24,7 @@ import utils._
 import utility._
 import system._
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, MaxHartIdBits, XLen}
+import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
 import xiangshan.frontend.FrontendParameters
 import xiangshan.frontend.bpu.BpuParameters
 import xiangshan.frontend.bpu.TageTableInfo
