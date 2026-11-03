@@ -26,6 +26,10 @@
 
 本文不覆盖前端取指预测细节、具体功能单元内部执行算法、完整 LSQ replay 策略和 V3 差异。
 
+访存结果进入后端后的 PRF 写入、快速/WB 唤醒、旁路/RegCache、向量数据后处理、ROB 记账和
+迟到写回保护边界，见 [V2 访存写回后端数据与控制 Flow](backend_memory_writeback_flow.md)。
+该专题按 2026-10-29 的 mother 源码独立核验；本文其余历史章节的核验元数据不因此整体更新。
+
 ## 主流程图
 
 ```mermaid
@@ -285,12 +289,17 @@ canEnqueue(i) = req.valid && req.bits.firstUop && io.enq.canAccept
 
 ### 5. 写回和提交
 
-ROB 按写回端口的 `robIdx` 匹配 entry：
+ROB 用写回端口携带的 `robIdx` 定位物理槽位；在 2026-10-29 核验的
+`Rob.scala:1033` 完成计数匹配处，具体只比较 `robIdx.value`，不是查询独立的分配世代：
 
 - 普通写回递减 `uopNum`。
 - store data 写回设置 `stdWritebacked`。
 - fflags/vxsat 写回 OR 到 entry。
 - 异常/flush/replay 写回通过 ExceptionGen 保存详细信息，并将 entry 的 `needFlush` 置为需要精确处理。
+
+这一行为依赖上游取消协议。ROB 槽位无效且未复用时不会按普通路径递减计数，但不能由此推出任意
+迟到写回都无害；槽位复用、PRF 写入和唤醒有不同边界，见
+[写回保护边界](backend_memory_writeback_flow.md#114-后端现有保护的实际边界)。
 
 提交时，一个压缩 ROB entry 只占用一个 commit slot，但真实退休数按 `instrSize` 统计：
 
@@ -819,6 +828,7 @@ MAB exception、ROB redirect、SQ cancel 和 redirect 后 slot reuse 的详细�
 
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
+| 2026-10-29 | `2b593d1e9` | 写回章节概括为按 robIdx 匹配，未给出字段级保护边界 | 明确完成计数按 value 定位，取消依赖上游协议，未复用无效槽位的保护不能外推到 PRF/新 owner；关联新端到端 WB flow | 用户要求梳理访存写回后全部数据与控制消费者 | V2 WB/ROB/PRF/redirect；其余章节未整体重新核验 |
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 首次建立，无旧结论修订 | 建立 V2 ROB entry 字段语义、RAB/ExceptionGen 信息归属、后端指令流转和 ROB 压缩条件/上限 | 用户要求将 ROB/RAB/压缩讨论总结并扩展成 RTL 后端分析文档 | V2 Decode/Rename/Dispatch/ROB/RAB/ExceptionGen/LSQ/Commit |
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 文档只列出 `commitType` 包含 normal/load/store/branch/fused，未解释类型含义 | 补充 `CommitType` 编码、NORMAL/BRANCH/LOAD/STORE/fused 的语义、来源和 ROB/下游用途 | 用户追问 normal 和 fused 的具体含义 | V2 Decode/CtrlBlock/Dispatch/ROB commit 分类 |
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 文档已说明 entry 字段和压缩流程，但没有集中说明 ROB 的核心作用、维持该作用的主信息，以及压缩组后续指令进入 entry 的信息 | 补充 ROB 作用、顺序/完成/精确提交三类核心维护信息，并新增压缩组后续指令进入 entry 的信息表 | 用户要求将 ROB 作用和压缩后 entry 保存信息继续整合进文档 | V2 ROB commit/redirect/RAB/ExceptionGen/压缩 entry |

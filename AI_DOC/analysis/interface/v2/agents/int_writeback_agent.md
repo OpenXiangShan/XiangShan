@@ -82,6 +82,7 @@ Scala 内部使用 `DecoupledIO(new MemExuOutput)`。当前 whole-core 生成的
 
 ## 关联 Flow
 
+- [访存写回后端数据与控制 Flow](../../../rtl/v2/flows/backend_memory_writeback_flow.md)：按 2026-10-29 mother 源码核验写回后各消费者、PRF/ROB 分工、提交恢复及迟到写回边界；不改变本文历史接口采样结论。
 - [Memory trigger flow](../../../rtl/v2/flows/memory_trigger_flow.md)：trigger 地址匹配、编码和 ROB 消费。
 - [Memory flushPipe flow](../../../rtl/v2/flows/memory_flush_pipe_flow.md)：普通访存清零、STA0 CBO 动态置位和 `flushAfter`。
 - [ROB 压缩与后端指令信息流](../../../rtl/v2/flows/rob_compress_and_backend_instruction_flow.md)：`replayInst`、ExceptionGen 和 ROB 精确 redirect。

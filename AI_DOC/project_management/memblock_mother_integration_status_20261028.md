@@ -1,6 +1,24 @@
-# Memblock母任务集成与回归状态（更新至2026-10-31）
+# Memblock母任务集成与回归状态（更新至2026-11-02）
 
-## 最新验收结论（2026-10-31，优先于后文历史台账）
+## 最新验收结论（2026-11-02，优先于后文历史台账）
+
+### 2026-11-02 B05上游准入专项重审（仿真于2026-10-31完成）
+
+| 子任务 | 执行人 | 状态 | 交付及限制 |
+|---|---|---|---|
+| LSQ真实RTL等价门控方案 | Carson，`01a1910d-2c8f-7080-a7bb-466ab7ef2d17` | 方案已交；两项阻断，尚不可直接coding | `AI_DOC/plan/test_framework/plan/undo/memblock_lsq_rtl_equivalent_admission_formal_plan_20261031.md`；已补寄存信用、混合前缀、固定lane与真实前级捕获；flush/epoch abort映射和多周期redirect回补归属仍待关闭，不以调大余量常量代替 |
+| B05原seed复跑与ROB/SQ时间线 | Mencius，`01a1910d-2d84-75e2-acc6-8b16275386fd` | 取证完成；运行1/1 PASS，但准入合法性不通过 | `tc_dispatch_real_smoke / virtual_base_sequence / default / 1545815340`，MAIN1000/CHECK0/ISSUE1、timeout1e9ns、wave1/UVM_DEBUG；mode=`mother_b05_rob_sq_lifecycle_20261031`，结果=`mem_ut/ver/ut/memblock/sim/mother_b05_rob_sq_lifecycle_20261031_results`，summary1PASS/rc0/unknown0。报告=`AI_DOC/analysis/framework_design/memblock_b05_rob_sq_lifecycle_recheck_20261031.md`；保留B05过滤，不冒充旧版本逐字节复现 |
+| 方案及动态证据主审 | 主agent | 动态证据已复核；方案保留阻断项 | `AI_DOC/plan/test_framework/review_doc/undo/memblock_lsq_admission_b05_evidence_review_20261102.md`；独立重算指针距离与132个不满足门槛的请求边沿，区分旧SQ驻留与错误准入，不以本次PASS追认历史激励合法 |
+
+本次确定事实（时间单位ns）：UID492于19195.700模拟ROB提交，19210.700由DUT标记SQ committed；UID652于19295.700入队时，UID492仍在SQ等待SBuffer。UID492在19500.700才被SBuffer接收，19505.700真实出队，19513.200软件release。不是两个未提交的真实ROB entry同时占slot12，也不是只有软件map延迟删除。
+
+准入缺口有独立证据：365.700首个不满足联合门槛的请求边沿，LQ/SQ占用67/48、余量5/8；UID652入队前占用66/54、余量6/2，SQ不足4仍发送。该生成RTL未包含相应must-accept断言，运行PASS不能替代准入合法性验收。canAccept由实测完整指针推导，并非直接观测wire；原FAIL日志缺失，不把本次结果冒充历史精确复现。
+
+后续顺序：先关闭方案两项redirect门禁并完成独立复核；再取得当前LSQ方案的明确coding授权，顺序修改mother内框架；fresh compile后跑原seed、余量边界/混合lane/redirect专项，最后决定回归及覆盖率需要重验的范围。当前不自动恢复批量回归，不删除B05过滤，也不把准入缺口直接定责为strict-NC RTL问题的根因。
+
+11月2日独立复核补充：同negedge并行flush生产者可在offer冻结后增加epoch，仅把settled移到service尾部不足以关闭第一项门禁；多周期redirect的RTL公式已明确为旧t3使能时消费上一拍cancel样本，不要求数值变化，第二项剩余的是框架连续采样、软件归属及恢复边界映射。两项均未冒充已修复，评审记录已同步。
+
+本轮仅方案、指定用例仿真及取证；无生产修改授权，不改RTL、RM、cfg或B05过滤，不新建worktree。专项controller已收敛，无待运行seed；11月2日没有追加仿真。既有350项及冻结coverage目录不重跑、不改写；历史350项是原有检查口径下的PASS，尚未按本次发现的RTL等价准入要求重新验收，不能称该激励问题已修复或整套回归激励已等价。
 
 ### 2026-10-31 Buglist与最终方案文档补全
 
