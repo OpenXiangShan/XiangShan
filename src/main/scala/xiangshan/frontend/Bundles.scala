@@ -57,8 +57,8 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
 
   // perfMeta uses the same valid signal as meta
-  val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)
-  val topdownReasons: FrontendTopDownBundle = Output(new FrontendTopDownBundle())
+  val perfMeta: BpuPerfMeta           = Output(new BpuPerfMeta)
+  val topdown:  FrontendTopDownBundle = Output(new FrontendTopDownBundle())
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
@@ -129,7 +129,7 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
 class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
   val redirect:     Valid[Redirect]       = Valid(new Redirect)
   val flushFromBpu: BpuFlushInfo          = new BpuFlushInfo
-  val topdownInfo:  FrontendTopDownBundle = new FrontendTopDownBundle
+  val topdown:      FrontendTopDownBundle = new FrontendTopDownBundle
 }
 
 class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
@@ -325,7 +325,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
   val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
-  val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
+  val topdown:        FrontendTopDownBundle = new FrontendTopDownBundle
 }
 
 class IfuToGpAddrMem(implicit p: Parameters) extends FrontendBundle {
@@ -434,36 +434,8 @@ object BlameBpuSource {
   }
 }
 
-class BackendRedirectTopdown(implicit p: Parameters) extends FrontendBundle {
-  val backendRedirect:         Bool = Bool()
-  val controlFlowRedirect:     Bool = Bool()
-  val memoryViolationRedirect: Bool = Bool()
-
-  val btbMissBubble:    Bool = Bool()
-  val tageMissBubble:   Bool = Bool()
-  val scMissBubble:     Bool = Bool()
-  val ittageMissBubble: Bool = Bool()
-  val rasMissBubble:    Bool = Bool()
-}
-
 class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
-  val reasons:    Vec[Bool] = Vec(TopDownCounters.NumStallReasons.id, Bool())
-  val stallWidth: UInt      = UInt(FetchBlockInstOffsetWidth.W)
-
-  def backendRedirectOverride(backendRedirectTopdown: BackendRedirectTopdown): Unit =
-    when(backendRedirectTopdown.backendRedirect) {
-      when(backendRedirectTopdown.controlFlowRedirect) {
-        reasons(TopDownCounters.BTBMissBubble.id)    := backendRedirectTopdown.btbMissBubble
-        reasons(TopDownCounters.TAGEMissBubble.id)   := backendRedirectTopdown.tageMissBubble
-        reasons(TopDownCounters.SCMissBubble.id)     := backendRedirectTopdown.scMissBubble
-        reasons(TopDownCounters.ITTAGEMissBubble.id) := backendRedirectTopdown.ittageMissBubble
-        reasons(TopDownCounters.RASMissBubble.id)    := backendRedirectTopdown.rasMissBubble
-      }.elsewhen(backendRedirectTopdown.memoryViolationRedirect) {
-        reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-      }.otherwise {
-        reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
-      }
-    }
+  val reason: UInt = UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)
 }
 
 class FrontendDebugTopDownInfo(implicit p: Parameters) extends FrontendBundle {

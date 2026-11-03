@@ -37,11 +37,11 @@ import xiangshan.RedirectLevel
 import xiangshan.SoftIPrefetchBundle
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.BlameBpuSource
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FrontendTopDownBundle
+import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
@@ -87,8 +87,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val softPrefetch: Vec[Valid[SoftIPrefetchBundle]] =
       Vec(backendParams.LduCnt, Flipped(Valid(new SoftIPrefetchBundle)))
 
-    // Topdown analysis
-    val backendRedirectTopdown: BackendRedirectTopdown = Output(new BackendRedirectTopdown)
+    // when a redirect happened, broadcast override to every stage
+    val redirectTopdownOverride: Valid[FrontendTopDownBundle] = Valid(new FrontendTopDownBundle)
   }
 
   val io: FtqIO = IO(new FtqIO)
@@ -525,29 +525,38 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
 
   // Topdown analysis
-  io.backendRedirectTopdown.backendRedirect         := backendRedirect.valid
-  io.backendRedirectTopdown.controlFlowRedirect     := backendRedirect.bits.debugIsCtrl
-  io.backendRedirectTopdown.memoryViolationRedirect := backendRedirect.bits.debugIsMemVio
+  io.redirectTopdownOverride.valid := backendRedirect.valid
+  io.redirectTopdownOverride.bits.reason := MuxCase(
+    TopDownCounters.OtherRedirectBubble.id.U,
+    Seq(
+      backendRedirect.bits.debugIsCtrl -> MuxCase(
+        TopDownCounters.BTBMissBubble.id.U,
+        Seq(
+          backendRedirect.bits.attribute.isConditional -> TopDownCounters.TAGEMissBubble.id.U, // FIXME: btb / sc?
+          backendRedirect.bits.attribute.isReturn      -> TopDownCounters.RASMissBubble.id.U,
+          backendRedirect.bits.attribute.needIttage    -> TopDownCounters.ITTAGEMissBubble.id.U
+        )
+      ),
+      backendRedirect.bits.debugIsMemVio -> TopDownCounters.MemVioRedirectBubble.id.U
+    )
+  )
 
-  io.backendRedirectTopdown.btbMissBubble    := false.B // TODO: add more info to distinguish
-  io.backendRedirectTopdown.tageMissBubble   := backendRedirect.bits.attribute.isConditional
-  io.backendRedirectTopdown.scMissBubble     := false.B // TODO: add SC info
-  io.backendRedirectTopdown.ittageMissBubble := backendRedirect.bits.attribute.needIttage
-  io.backendRedirectTopdown.rasMissBubble    := backendRedirect.bits.attribute.isReturn
-
-  private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  // only driven by clock, not valid-ready
-  topdownStage := io.fromBpu.topdownReasons
-  topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
-  io.toIfu.topdownInfo := topdownStage
-
-  when(!(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U)) {
-    topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
-  }.elsewhen(
-    !(distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U && bpTrainStallCnt < BpTrainStallLimit.U)
-  ) {
-    topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
-  }
+  private val topdownPipe = Module(new FrontendTopDownPipeline(1))
+  topdownPipe.io.in := io.fromBpu.topdown
+  topdownPipe.setReason(
+    0,
+    Seq(
+      io.redirectTopdownOverride.valid -> io.redirectTopdownOverride.bits.reason,
+      (
+        !(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U)
+      ) -> TopDownCounters.FtqFullStall,
+      (
+        !(distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U &&
+          bpTrainStallCnt < BpTrainStallLimit.U)
+      ) -> TopDownCounters.FtqUpdateBubble
+    )
+  )
+  io.toIfu.topdown := topdownPipe.io.out
 
   // Hardware performance monitors
   val perfEvents: Seq[(String, UInt)] = Seq()

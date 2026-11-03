@@ -28,7 +28,7 @@ import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
 import xiangshan.TopDownCounters
 import xiangshan.frontend.BpuToFtqIO
-import xiangshan.frontend.FrontendTopDownBundle
+import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
@@ -725,28 +725,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   // Track lost prediction slots through S1/S2/S3, independently of valid-ready.
   // This tracks prediction bubbles; IFU separately tags fetches flushed by BPU.
-  private val topdownStages = RegInit(VecInit.fill(3)(0.U.asTypeOf(new FrontendTopDownBundle)))
-  topdownStages(0) := 0.U.asTypeOf(new FrontendTopDownBundle)
-  for (i <- 1 until 3) {
-    topdownStages(i) := topdownStages(i - 1)
-  }
+  private val topdownPipe = Module(new FrontendTopDownPipeline(3))
+  topdownPipe.io.in.reason := TopDownCounters.NoStall.id.U
 
   // S0 already uses the corrected PC in the override cycle. The discarded S1
   // slot becomes a bubble in S2 on the next edge; S3 override also discards S2.
-  // Set bits after shifting so overlapping overrides merge with existing bubbles.
   // Redirect wins PC selection and makes concurrent overrides irrelevant.
-  when(redirect.valid) {
-    // Discard pending override tags from the old path as well as new overrides.
-    topdownStages.foreach(_ := 0.U.asTypeOf(new FrontendTopDownBundle))
-  }.otherwise {
-    when(s2_override || s3_override) {
-      topdownStages(1).reasons(TopDownCounters.OverrideBubble.id) := true.B
-    }
-    when(s3_override) {
-      topdownStages(2).reasons(TopDownCounters.OverrideBubble.id) := true.B
-    }
-  }
-  io.toFtq.topdownReasons := topdownStages.last
+  topdownPipe.setReason(1, Seq((s2_override || s3_override) -> TopDownCounters.OverrideBubble))
+  topdownPipe.setReason(2, Seq(s3_override -> TopDownCounters.OverrideBubble))
+  topdownPipe.setReason(Seq(redirect.valid -> TopDownCounters.NoStall))
+  io.toFtq.topdown := topdownPipe.io.out
 
   /* *** BpTrace *** */
   when(io.toFtq.meta.fire) {
