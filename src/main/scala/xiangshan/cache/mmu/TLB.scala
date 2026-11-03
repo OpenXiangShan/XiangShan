@@ -227,7 +227,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
     when (
       (!isitlb && need_gpa_robidx_valid && need_gpa_robidx.needFlush(redirect)) ||
-      (isitlb && flush_pipe(i)) || need_clear_need_gpa || need_gpa_count_full
+      (isitlb && flush_pipe(i)) || need_clear_need_gpa || need_gpa_count_full || entries.io.multiHit
     ) {
       need_gpa := false.B
       need_gpa_state_clear_vec(i) := true.B
