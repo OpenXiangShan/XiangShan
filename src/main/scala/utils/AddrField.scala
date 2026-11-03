@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2026 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -82,42 +82,57 @@ class AddrField(
 
   private var currentStart = 0
   private val fieldInstances = fields.map { case (name, width) =>
+    require(width > 0, s"field '$name' has invalid width ($width)")
     val field = new Field(name, currentStart, width)
     currentStart += width
     field
   }
-
-  private val end = maxWidth.getOrElse(currentStart)
-
-  private val unusedFieldInstance =
-    Option.when(end != currentStart)(new Field("unused", currentStart, end - currentStart))
+  private val fieldsMaxWidth = currentStart
 
   private val extraFieldInstances = extraFields.map { case (name, start, width) =>
+    require(
+      start >= 0 && width > 0,
+      s"extra field '$name' has invalid start ($start) or width ($width)"
+    )
+    currentStart = currentStart max (start + width)
     new Field(name, start, width)
   }
+  private val actualMaxWidth = currentStart
+
+  maxWidth.foreach { w =>
+    require(
+      w >= actualMaxWidth,
+      s"maxWidth ($w) must be greater than or equal to the actual maximum width ($actualMaxWidth)"
+    )
+  }
+
+  private val finalMaxWidth = maxWidth.getOrElse(actualMaxWidth)
+
+  private val unusedFieldInstance =
+    Option.when(finalMaxWidth != fieldsMaxWidth)(new Field("unused", fieldsMaxWidth, finalMaxWidth - fieldsMaxWidth))
 
   def format(indent: Int = 0): Seq[String] = {
     val allInstances = (unusedFieldInstance ++ fieldInstances.reverse).toSeq
     Seq(
       "%s%d|%s|".format(
         " " * indent,
-        end,
+        finalMaxWidth,
         allInstances.map(_.formatStart()).mkString("|")
       ),
       "%s|%s|".format(
-        " " * (indent + end.toString.length),
+        " " * (indent + finalMaxWidth.toString.length),
         allInstances.map(_.formatName()).mkString("|")
       )
     ) ++ extraFieldInstances.map { field =>
       def getOffset(p: Int, f: Field): Int = ((p - f.start).toFloat / (f.width - 1) * f.fieldLength).toInt
 
-      val startIdx = allInstances.indexWhere(f => f.end >= field.start && f.start <= field.start)
+      val startIdx    = allInstances.indexWhere(f => f.end >= field.start && f.start <= field.start)
       val startOffset = getOffset(field.start, allInstances(startIdx))
 
-      val endIdx = allInstances.indexWhere(f => f.end >= field.end && f.start <= field.end)
+      val endIdx    = allInstances.indexWhere(f => f.end >= field.end && f.start <= field.end)
       val endOffset = getOffset(field.end, allInstances(endIdx))
 
-      val leftPosition = allInstances.take(endIdx + 1).foldLeft(indent)(_ + _.fieldLength + 3) - endOffset - 1
+      val leftPosition  = allInstances.take(endIdx + 1).foldLeft(indent)(_ + _.fieldLength + 3) - endOffset - 1
       val rightPosition = allInstances.take(startIdx + 1).foldLeft(indent)(_ + _.fieldLength + 3) - startOffset - 1
 
       val leftPadding = leftPosition
@@ -130,9 +145,8 @@ class AddrField(
   def show(indent: Int = 0): Unit =
     println(format(indent).mkString("\n"))
 
-  def formatList(indent: Int = 0): Seq[String] = {
+  def formatList(indent: Int = 0): Seq[String] =
     (fieldInstances ++ extraFieldInstances).map(_.formatList(indent))
-  }
 
   def showList(indent: Int = 0): Unit =
     println(formatList(indent).mkString("\n"))
@@ -182,7 +196,7 @@ class AddrField(
    */
   def extractFrom(thatName: String, name: String, that: UInt): UInt = {
     val thatField = getField(thatName)
-    val field = getField(name)
+    val field     = getField(name)
     require(
       field.start >= thatField.start && field.end <= thatField.end,
       s"cannot get $field from $thatField"
