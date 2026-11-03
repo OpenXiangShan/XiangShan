@@ -28,7 +28,7 @@ import utility.XSPerfHistogram
 import xiangshan.Redirect
 import xiangshan.TopDownCounters
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.BackendRedirectTopdown
+import xiangshan.frontend.FrontendRedirectTopdown
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.icache.ICachePerfInfo
 import xiangshan.frontend.icache.ICacheTopdownInfo
@@ -47,9 +47,10 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     }
 
     class IfuTopdownIn(implicit p: Parameters) extends IfuBundle {
-      val icacheTopdown:          ICacheTopdownInfo      = new ICacheTopdownInfo
-      val ftqTopdown:             FrontendTopDownBundle  = new FrontendTopDownBundle
-      val backendRedirectTopdown: BackendRedirectTopdown = new BackendRedirectTopdown
+      val icacheTopdown:   ICacheTopdownInfo       = new ICacheTopdownInfo
+      val ftqTopdown:      FrontendTopDownBundle   = new FrontendTopDownBundle
+      val overrideReasons: FrontendTopDownBundle   = new FrontendTopDownBundle
+      val redirectTopdown: FrontendRedirectTopdown = new FrontendRedirectTopdown
     }
     class IfuTopdownOut(implicit p: Parameters) extends IfuBundle {
       val topdown = new FrontendTopDownBundle
@@ -68,7 +69,7 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     }
 
     class IfuPerfCtrl(implicit p: Parameters) extends IfuBundle {
-      val uncacheActive: Bool = Bool()
+      val uncacheActive:    Bool = Bool()
       val fromFtqBubble:    Bool = Bool()
       val backendRedirect:  Bool = Bool()
       val ifuWbRedirect:    Bool = Bool()
@@ -88,45 +89,21 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   private val checkPerfInfo     = io.perfInfo.checkPerfInfo
   private val toIBufferInfo     = io.perfInfo.toIBufferInfo
 
-  private def numOfStage = 3
-  require(numOfStage > 1, "Ifu numOfStage must be greater than 1")
-  private val topdownStages = RegInit(VecInit.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle)))
-  // bubble events in IFU, only happen in stage 1
-  private val icacheMissBubble = icacheTopdown.iCacheMissBubble
-  private val itlbMissBubble   = icacheTopdown.itlbMissBubble
-
-  // only driven by clock, not valid-ready
+  private val topdownStages = RegInit(VecInit.fill(3)(0.U.asTypeOf(new FrontendTopDownBundle)))
   topdownStages(0) := ftqTopdown
-  for (i <- 1 until numOfStage) {
-    topdownStages(i) := topdownStages(i - 1)
+  for (i <- 1 until 3) { topdownStages(i) := topdownStages(i - 1) }
+  when(icacheTopdown.iCacheMissBubble)(topdownStages(1).setReason(TopDownCounters.ICacheMissBubble))
+  when(icacheTopdown.itlbMissBubble && !icacheTopdown.iCacheMissBubble) {
+    topdownStages(1).setReason(TopDownCounters.ITLBMissBubble)
   }
-  // BPU can flush a fetch already in IFU s0. The discarded s0 slot becomes
-  // an s1 bubble on the next edge, independently of the instruction handshake.
-  // Attribute this lost fetch slot to IfuFlushBubble; BPU prediction slots use OverrideBubble.
-  // Older IFU stages survive this flush. Backend/IFU redirects take precedence.
-  when(io.ifuPerfCtrl.fromBpuFlush &&
-    !io.ifuPerfCtrl.backendRedirect && !io.ifuPerfCtrl.ifuWbRedirect) {
-    topdownStages(1).reasons(TopDownCounters.IfuFlushBubble.id) := true.B
+  when(icacheTopdown.bpuFlushS0)(topdownStages(0) := io.topdownIn.overrideReasons)
+  when(icacheTopdown.bpuFlushS1 || io.ifuPerfCtrl.fromBpuFlush) {
+    topdownStages(1) := io.topdownIn.overrideReasons
   }
-  when(icacheMissBubble) {
-    topdownStages(1).reasons(TopDownCounters.ICacheMissBubble.id) := true.B
-  }
-  when(itlbMissBubble) {
-    topdownStages(1).reasons(TopDownCounters.ITLBMissBubble.id) := true.B
-  }
-  topdownStages.foreach(_.backendRedirectOverride(io.topdownIn.backendRedirectTopdown))
-
-  when(io.ifuPerfCtrl.ifuWbRedirect) {
-    for (i <- 0 until numOfStage) {
-      topdownStages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
-    }
-  }
-  io.topdownOut.topdown := topdownStages(numOfStage - 1)
-  when(io.ifuPerfCtrl.uncacheActive) {
-    io.topdownOut.topdown.reasons.foreach(_ := false.B)
-    io.topdownOut.topdown.reasons(TopDownCounters.UncacheFetchBubble.id) := true.B
-  }
-  io.topdownOut.topdown.backendRedirectOverride(io.topdownIn.backendRedirectTopdown)
+  topdownStages.foreach(_.redirectOverride(io.topdownIn.redirectTopdown))
+  io.topdownOut.topdown := topdownStages.last
+  when(io.ifuPerfCtrl.uncacheActive)(io.topdownOut.topdown.setReason(TopDownCounters.UncacheFetchBubble))
+  io.topdownOut.topdown.redirectOverride(io.topdownIn.redirectTopdown)
 
   /** <PERF> f0 fetch bubble */
   XSPerfAccumulate("fetch_bubble_ftq_not_valid", io.ifuPerfCtrl.fromFtqBubble)

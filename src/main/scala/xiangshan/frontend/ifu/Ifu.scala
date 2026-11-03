@@ -32,7 +32,7 @@ import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
-import xiangshan.frontend.BackendRedirectTopdown
+import xiangshan.frontend.FrontendRedirectTopdown
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.ICacheToIfuIO
@@ -79,7 +79,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val csrFsIsOff: Bool = Input(Bool())
 
     // Topdown analysis
-    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
+    val redirectTopdown: FrontendRedirectTopdown = Input(new FrontendRedirectTopdown)
   }
   val io: IfuIO = IO(new IfuIO)
 
@@ -799,7 +799,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   perfAnalyzer.io.topdownIn.icacheTopdown   := io.fromICache.topdown
   perfAnalyzer.io.topdownIn.ftqTopdown      := io.fromFtq.topdownInfo
-  perfAnalyzer.io.topdownIn.backendRedirectTopdown := io.backendRedirectTopdown
+  perfAnalyzer.io.topdownIn.redirectTopdown := io.redirectTopdown
 
   perfAnalyzer.io.perfInfo.icachePerfInfo                 := s2_icachePerfInfo
   perfAnalyzer.io.perfInfo.checkPerfInfo.valid(0)         := wbValid && wbFirstValid
@@ -824,6 +824,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     (s2_prevEndIsHalfRviInfo.valid && s2_prevEndIsHalfRviInfo.bits.uncacheFetch))
   io.toIBuffer.bits.uncacheFetch            := s2_deliversUncacheInstruction
   perfAnalyzer.io.ifuPerfCtrl.uncacheActive := s2_deliversUncacheInstruction && !s2_flush
+  perfAnalyzer.io.topdownIn.overrideReasons := io.fromFtq.overrideReasons
 
   XSPerfAccumulate("2fetch_to_ibuffer", io.toIBuffer.fire && s2_secondValid)
 }

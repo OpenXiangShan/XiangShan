@@ -577,6 +577,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   io.perf.rawHits := s1_sramHits(0) // FIXME
   // tell ICache top when handling miss
   io.perf.pendingMiss := s1_valid && !s1_fetchFinish && !s1_isMmio && !s1_flush
+  io.perf.bpuFlushS0  := s0_valid && s0_flush && !io.flush
+  io.perf.bpuFlushS1  := s1_valid && s1_flush && !io.flush
 
   XSPerfAccumulate("stallCycles_fetch_icacheMain", !s1_fire)
   XSPerfAccumulate("stallCycles_fetch_icacheMain_prefetch", s0_valid && !io.fromWayLookup.valid)

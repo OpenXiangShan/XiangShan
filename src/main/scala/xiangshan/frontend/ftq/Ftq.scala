@@ -36,11 +36,11 @@ import utility.XSPerfSeqRolling
 import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.BlameBpuSource
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
+import xiangshan.frontend.FrontendRedirectTopdown
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
@@ -83,7 +83,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val toBackend:   FtqToCtrlIO = new FtqToCtrlIO
 
     // Topdown analysis
-    val backendRedirectTopdown: BackendRedirectTopdown = Output(new BackendRedirectTopdown)
+    val redirectTopdown: FrontendRedirectTopdown = Output(new FrontendRedirectTopdown)
   }
 
   val io: FtqIO = IO(new FtqIO)
@@ -176,12 +176,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
     bpTrainStallCnt := 0.U
   }
 
-  // We limit the distance between BP and IF and stall counts of BP train so that branch update can be written back to
-  // BPU
-  io.fromBpu.prediction.ready := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U &&
-    distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U &&
-    bpTrainStallCnt < BpTrainStallLimit.U
-  io.fromBpu.meta.ready := true.B
+  private val hasPredictionCapacity    = distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U
+  private val withinPrefetchDepth      = distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U
+  private val trainingYieldsPrediction = bpTrainStallCnt >= BpTrainStallLimit.U
+  // Preserve the functional arbitration; depth backpressure is not a loss reason.
+  io.fromBpu.prediction.ready := hasPredictionCapacity && withinPrefetchDepth && !trainingYieldsPrediction
+  io.fromBpu.meta.ready       := true.B
 
   private val prediction = io.fromBpu.prediction
 
@@ -516,30 +516,52 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Performance monitoring
   // --------------------------------------------------------------------------------
 
-  // Topdown analysis
-  io.backendRedirectTopdown.backendRedirect         := backendRedirect.valid
-  io.backendRedirectTopdown.controlFlowRedirect     := backendRedirect.bits.debugIsCtrl
-  io.backendRedirectTopdown.memoryViolationRedirect := backendRedirect.bits.debugIsMemVio
-
-  io.backendRedirectTopdown.btbMissBubble    := false.B // TODO: add more info to distinguish
-  io.backendRedirectTopdown.tageMissBubble   := backendRedirect.bits.attribute.isConditional
-  io.backendRedirectTopdown.scMissBubble     := false.B // TODO: add SC info
-  io.backendRedirectTopdown.ittageMissBubble := backendRedirect.bits.attribute.needIttage
-  io.backendRedirectTopdown.rasMissBubble    := backendRedirect.bits.attribute.isReturn
+  // Broadcast complete replacement reasons. IFU source is explicit, independent of canTrain.
+  private val backendPerf     = perfQueue(backendRedirect.bits.ftqIdx.value).bpuPerf
+  private val ifuCorrection   = io.fromIfu.wbRedirect
+  private val ifuPerf         = perfQueue(ifuCorrection.bits.ftqIdx.value).bpuPerf
+  private val backendPosition = getAlignedPosition(PcInit(backendRedirect.bits.pc), backendRedirect.bits.ftqOffset)._1
+  private val ifuPosition     = getAlignedPosition(PcInit(ifuCorrection.bits.pc), ifuCorrection.bits.ftqOffset)._1
+  io.redirectTopdown.valid := backendRedirect.valid || ifuCorrection.valid
+  io.redirectTopdown.bits  := 0.U.asTypeOf(new FrontendTopDownBundle)
+  private val ifuBranch = Wire(new BranchInfo)
+  ifuBranch := 0.U.asTypeOf(new BranchInfo)
+  ifuBranch.taken       := ifuCorrection.bits.taken
+  ifuBranch.cfiPosition := ifuPosition
+  ifuBranch.attribute   := ifuCorrection.bits.attribute
+  private val backendBranch = Wire(new BranchInfo)
+  backendBranch := 0.U.asTypeOf(new BranchInfo)
+  backendBranch.taken       := backendRedirect.bits.taken
+  backendBranch.cfiPosition := backendPosition
+  backendBranch.attribute   := backendRedirect.bits.attribute
+  when(ifuCorrection.valid) {
+    when(ifuCorrection.bits.isUncache) {
+      io.redirectTopdown.bits.setReason(TopDownCounters.UncacheFetchBubble)
+    }.otherwise {
+      io.redirectTopdown.bits.setPredictionReason(BlameBpuSource(true.B, ifuPerf, ifuBranch))
+    }
+  }
+  when(backendRedirect.valid) {
+    when(backendRedirect.bits.debugIsCtrl) {
+      io.redirectTopdown.bits.setPredictionReason(BlameBpuSource(true.B, backendPerf, backendBranch))
+    }.elsewhen(backendRedirect.bits.debugIsMemVio) {
+      io.redirectTopdown.bits.setReason(TopDownCounters.MemVioRedirectBubble)
+    }.otherwise {
+      io.redirectTopdown.bits.setReason(TopDownCounters.OtherRedirectBubble)
+    }
+  }
+  io.toBpu.redirectTopdown := io.redirectTopdown
+  io.toIfu.overrideReasons := io.fromBpu.overrideReasons
 
   private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  // only driven by clock, not valid-ready
   topdownStage := io.fromBpu.topdownReasons
-  topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
-  io.toIfu.topdownInfo := topdownStage
-
-  when(!(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U)) {
-    topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
-  }.elsewhen(
-    !(distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U && bpTrainStallCnt < BpTrainStallLimit.U)
-  ) {
-    topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
+  when(!hasPredictionCapacity) {
+    topdownStage.setReason(TopDownCounters.FtqFullStall)
+  }.elsewhen(!withinPrefetchDepth || trainingYieldsPrediction) {
+    topdownStage.setReason(TopDownCounters.FtqUpdateBubble)
   }
+  topdownStage.redirectOverride(io.redirectTopdown)
+  io.toIfu.topdownInfo := topdownStage
 
   // Hardware performance monitors
   val perfEvents: Seq[(String, UInt)] = Seq()

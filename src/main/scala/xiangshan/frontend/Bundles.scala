@@ -23,7 +23,6 @@ import ftq.FtqToMainPipeBundle
 import ftq.FtqToPrefetchBundle
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
-import utility.XSError
 import utils.EnumUInt
 import xiangshan.Redirect
 import xiangshan.TopDownCounters
@@ -35,6 +34,7 @@ import xiangshan.frontend.bpu.BpuCommit
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BpuPrediction
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
@@ -45,8 +45,6 @@ import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
 import xiangshan.frontend.icache.ICacheTopdownInfo
 import xiangshan.frontend.icache.MainPipeToIfuReq
-import xiangshan.frontend.icache.WayLookupBundle
-import xiangshan.frontend.icache.WayLookupWriteBundle
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
 
@@ -57,16 +55,18 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
 
   // perfMeta uses the same valid signal as meta
-  val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)
-  val topdownReasons: FrontendTopDownBundle = Output(new FrontendTopDownBundle())
+  val perfMeta:        BpuPerfMeta           = Output(new BpuPerfMeta)
+  val topdownReasons:  FrontendTopDownBundle = Output(new FrontendTopDownBundle())
+  val overrideReasons: FrontendTopDownBundle = Output(new FrontendTopDownBundle)
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
-  val redirect:        Valid[BpuRedirect]    = Valid(new BpuRedirect)
-  val train:           DecoupledIO[BpuTrain] = Decoupled(new BpuTrain)
-  val commit:          Valid[BpuCommit]      = Valid(new BpuCommit)
-  val bpuPtr:          FtqPtr                = Output(new FtqPtr)
-  val redirectFromIFU: Bool                  = Output(Bool())
+  val redirect:        Valid[BpuRedirect]      = Valid(new BpuRedirect)
+  val train:           DecoupledIO[BpuTrain]   = Decoupled(new BpuTrain)
+  val commit:          Valid[BpuCommit]        = Valid(new BpuCommit)
+  val bpuPtr:          FtqPtr                  = Output(new FtqPtr)
+  val redirectFromIFU: Bool                    = Output(Bool())
+  val redirectTopdown: FrontendRedirectTopdown = new FrontendRedirectTopdown
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
@@ -127,18 +127,20 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
-  val redirect:     Valid[Redirect]       = Valid(new Redirect)
-  val flushFromBpu: BpuFlushInfo          = new BpuFlushInfo
-  val topdownInfo:  FrontendTopDownBundle = new FrontendTopDownBundle
+  val redirect:        Valid[Redirect]       = Valid(new Redirect)
+  val flushFromBpu:    BpuFlushInfo          = new BpuFlushInfo
+  val topdownInfo:     FrontendTopDownBundle = new FrontendTopDownBundle
+  val overrideReasons: FrontendTopDownBundle = new FrontendTopDownBundle
 }
 
 class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val ftqIdx: FtqPtr = new FtqPtr
   //
   val canTrain: Bool = Bool()
-  val isUncache: Bool = Bool() // Explicit redirect origin, independent of training eligibility.
-  val pc:       UInt = UInt(VAddrBits.W)
-  val taken:    Bool = Bool()
+  // Source is independent of whether this correction can train predictors.
+  val isUncache: Bool = Bool()
+  val pc:        UInt = UInt(VAddrBits.W)
+  val taken:     Bool = Bool()
   // The early end position may not always be a branch instruction.
   val ftqOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W) // maybe use later
   val isRVC:     Bool            = Bool()                            // seems unused for now, keep it.
@@ -305,8 +307,9 @@ class InstrEndOffset(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
+  // The first enabled instruction used uncache, including a saved cross-page low half.
+  val uncacheFetch:   Bool                = Bool()
   val instrs:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(32.W))
-  val uncacheFetch: Bool = Bool()
   val valid:          UInt                = UInt(IBufferEnqueueWidth.W)
   val enqEnable:      UInt                = UInt(IBufferEnqueueWidth.W)
   val isRvc:          Vec[Bool]           = Vec(IBufferEnqueueWidth, Bool())
@@ -341,131 +344,80 @@ class IfuToBackendIO(implicit p: Parameters) extends FrontendBundle {
   val gpAddrMem: IfuToGpAddrMem = new IfuToGpAddrMem
 }
 
+// Attribute the first incorrect field: branch existence/type, direction, then target.
 object BlameBpuSource {
-  object BlameType extends EnumUInt(5) {
-    def BTB:    UInt = 0.U(width.W)
-    def TAGE:   UInt = 1.U(width.W)
-    def RAS:    UInt = 2.U(width.W)
-    def ITTAGE: UInt = 3.U(width.W)
-    def SC:     UInt = 4.U(width.W)
+  val BlameType = xiangshan.frontend.bpu.BpuPredictionOrigin
+
+  def earlierPrediction(pred: Prediction, taken: Bool, position: UInt): Bool =
+    pred.taken && (!taken || pred.cfiPosition <= position)
+
+  def fields(
+      pred: Prediction,
+      taken: Bool,
+      position: UInt,
+      attribute: BranchAttribute,
+      known: Bool,
+      direction: UInt,
+      target: UInt,
+      btb: UInt,
+      structuralFault: Bool = false.B
+  ): UInt = {
+    val sameBranch = pred.taken && taken && pred.cfiPosition === position && pred.attribute === attribute
+    val directionWrong = (pred.taken =/= taken) || (pred.taken && taken && pred.cfiPosition =/= position)
+    val result = Mux(sameBranch, target, Mux(directionWrong && known, direction, btb))
+    Mux(structuralFault, btb, result)
   }
 
-  def apply(en: Bool, perf: BpuPerfMeta, branch: BranchInfo)(implicit p: Parameters): UInt = {
-    import BlameType.{BTB, TAGE, RAS, ITTAGE, SC}
-    val src              = perf.bpSource
-    val pred             = perf.bpPred
-    val attr             = branch.attribute
-    val isMatchMask      = perf.mbtbMeta.entries.flatten.map(e => e.hit(branch) && e.attribute === branch.attribute)
-    val isMatchInMbtb    = isMatchMask.reduce(_ || _)
-    val matchBranchOH    = PriorityEncoderOH(isMatchMask)
-    val matchBranchUseSc = Mux1H(matchBranchOH, perf.scUsed.asBools)
-
-    val blame    = WireInit(BTB) // Default to BTB
-    val posError = WireInit(false.B)
-    val retError = WireInit(false.B)
-
-    when(!isMatchInMbtb) {
-      blame := BTB
-    }.elsewhen(src.s3Sc || src.s3Tage) {
-      when(attr.isConditional) {
-        when(branch.cfiPosition < pred.cfiPosition) {
-          blame := Mux(matchBranchUseSc, SC, TAGE)
-        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
-          blame := Mux(branch.taken =/= pred.taken, Mux(src.s3Sc, SC, TAGE), BTB)
-        }.otherwise {
-          blame := Mux(src.s3Sc, SC, TAGE)
-        }
-      }.otherwise {
-        when(branch.cfiPosition <= pred.cfiPosition) {
-          blame := BTB
-        }.otherwise {
-          blame := Mux(src.s3Sc, SC, TAGE)
-        }
-      }
-    }.elsewhen(src.s3Ras || src.s3ITTage || src.s3Mbtb) {
-      when(attr.isConditional) {
-        when(branch.cfiPosition < pred.cfiPosition) {
-          blame := Mux(matchBranchUseSc, SC, TAGE)
-        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
-          blame := BTB
-        }.otherwise {
-          // resolved branch's position > predicted branch(jump)'s position,
-          // which means execution flow error, should trigger assertion.
-          posError := true.B
-        }
-      }.elsewhen(attr.isReturn) {
-        when(branch.cfiPosition < pred.cfiPosition) {
-          blame := BTB
-        }
-        when(branch.cfiPosition === pred.cfiPosition) {
-          // if branch type is return, prediction use ras directly
-          // so blame to ras only when source is ras
-          // and trigger assertion when source is mbtb
-          blame    := Mux(src.s3Ras, RAS, BTB)
-          retError := src.s3Mbtb
-        }.otherwise {
-          posError := true.B
-        }
-      }.elsewhen(attr.isIndirect) {
-        when(branch.cfiPosition < pred.cfiPosition) {
-          blame := BTB
-        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
-          // if branch type is indirect, prediction use ittage when hit, otherwise use mbtb as base table
-          // so blame to ittage when src is ittage(target wrong) or src is mbtb(ittage not hit)
-          blame := Mux(src.s3ITTage || src.s3Mbtb, ITTAGE, BTB)
-        }.otherwise {
-          posError := true.B
-        }
-      }.otherwise { // isDirect
-        when(branch.cfiPosition <= pred.cfiPosition) {
-          blame := BTB
-        }.otherwise {
-          posError := true.B
-        }
-      }
-    }.otherwise { // s3Fallthrough
-      when(attr.isConditional) {
-        blame := Mux(matchBranchUseSc, SC, TAGE)
-      }.otherwise {
-        blame := BTB
-      }
-    }
-    XSError(en && posError, "resolved branch's position cannot be greater than predicted jump's position")
-    XSError(en && retError, "prediction source cannot be mbtb when resolved branch type is return")
-    blame
+  // S3 has validated every prediction that can reach IFU/backend. Early predictors
+  // own override penalties only, regardless of whether S3 needed to override S1.
+  def apply(en: Bool, perf: BpuPerfMeta, branch: BranchInfo): UInt = {
+    import BlameType._
+    val pred = perf.s3Prediction
+    val earlier = earlierPrediction(pred, branch.taken, branch.cfiPosition)
+    val position = Mux(earlier, pred.cfiPosition, branch.cfiPosition)
+    val attribute = Mux(earlier, pred.attribute, branch.attribute)
+    val matches = perf.mbtbMeta.entries.flatten.map(e =>
+      e.rawHit && e.position === position && e.attribute === attribute
+    )
+    val knownConditional = matches.reduce(_ || _) && attribute.isConditional
+    val useSc = (VecInit(matches).asUInt & perf.scUsed).orR
+    val useTage = (VecInit(matches).asUInt & perf.tageUsed).orR
+    val direction = MuxCase(BTB, Seq(useSc -> SC, useTage -> TAGE))
+    val target = MuxCase(BTB, Seq(perf.bpSource.s3Ras -> RAS, perf.bpSource.s3ITTage -> ITTAGE))
+    val typeWrong = pred.taken && branch.taken && pred.cfiPosition === branch.cfiPosition &&
+      pred.attribute =/= branch.attribute
+    Mux(en, fields(pred, branch.taken, branch.cfiPosition, branch.attribute,
+      knownConditional, direction, target, BTB, branch.attribute.isNone || typeWrong), BTB)
   }
 }
 
-class BackendRedirectTopdown(implicit p: Parameters) extends FrontendBundle {
-  val backendRedirect:         Bool = Bool()
-  val controlFlowRedirect:     Bool = Bool()
-  val memoryViolationRedirect: Bool = Bool()
-
-  val btbMissBubble:    Bool = Bool()
-  val tageMissBubble:   Bool = Bool()
-  val scMissBubble:     Bool = Bool()
-  val ittageMissBubble: Bool = Bool()
-  val rasMissBubble:    Bool = Bool()
+class FrontendRedirectTopdown(implicit p: Parameters) extends FrontendBundle {
+  val valid: Bool                  = Bool()
+  val bits:  FrontendTopDownBundle = new FrontendTopDownBundle
 }
 
 class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
-  val reasons:    Vec[Bool] = Vec(TopDownCounters.NumStallReasons.id, Bool())
-  val stallWidth: UInt      = UInt(FetchBlockInstOffsetWidth.W)
+  // Dispatch counts one encoded reason per slot. NoStall also denotes an unused
+  // tag while instructions flow; IBuffer must provide a cause for every absent lane.
+  val reason: UInt = UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)
 
-  def backendRedirectOverride(backendRedirectTopdown: BackendRedirectTopdown): Unit =
-    when(backendRedirectTopdown.backendRedirect) {
-      when(backendRedirectTopdown.controlFlowRedirect) {
-        reasons(TopDownCounters.BTBMissBubble.id)    := backendRedirectTopdown.btbMissBubble
-        reasons(TopDownCounters.TAGEMissBubble.id)   := backendRedirectTopdown.tageMissBubble
-        reasons(TopDownCounters.SCMissBubble.id)     := backendRedirectTopdown.scMissBubble
-        reasons(TopDownCounters.ITTAGEMissBubble.id) := backendRedirectTopdown.ittageMissBubble
-        reasons(TopDownCounters.RASMissBubble.id)    := backendRedirectTopdown.rasMissBubble
-      }.elsewhen(backendRedirectTopdown.memoryViolationRedirect) {
-        reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-      }.otherwise {
-        reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
-      }
-    }
+  def setReason(value: TopDownCounters.Value): Unit = reason := value.id.U
+
+  def setPredictionReason(source: UInt): Unit = {
+    import xiangshan.frontend.bpu.BpuPredictionOrigin._
+    import TopDownCounters._
+    reason := MuxLookup(source, BTBMissBubble.id.U)(Seq(
+      BTB -> BTBMissBubble.id.U, TAGE -> TAGEMissBubble.id.U,
+      RAS -> RASMissBubble.id.U, ITTAGE -> ITTAGEMissBubble.id.U, SC -> SCMissBubble.id.U,
+      UBTB -> UBTBMissBubble.id.U, ABTB -> ABTBMissBubble.id.U,
+      UTAGE -> UTAGEMissBubble.id.U, URAS -> URASMissBubble.id.U
+    ))
+  }
+
+  // Event arbitration happens at the producer: backend redirect > IFU redirect >
+  // local override/wait. Replacing the scalar cannot retain stale causes.
+  def redirectOverride(event: FrontendRedirectTopdown): Unit =
+    when(event.valid)(this := event.bits)
 }
 
 class FrontendDebugTopDownInfo(implicit p: Parameters) extends FrontendBundle {

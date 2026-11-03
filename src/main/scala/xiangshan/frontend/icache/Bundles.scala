@@ -444,6 +444,8 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
 
 // to Ifu -> IBuffer -> Backend
 class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
+  val bpuFlushS0:       Bool = Output(Bool())
+  val bpuFlushS1:       Bool = Output(Bool())
   val iCacheMissBubble: Bool = Output(Bool())
   val itlbMissBubble:   Bool = Output(Bool())
 }
@@ -451,6 +453,8 @@ class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
 // inner MainPipe -> top
 class MainPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
   val rawHits:     Vec[Bool] = Vec(PortNumber, Bool())
+  val bpuFlushS0:  Bool      = Bool()
+  val bpuFlushS1:  Bool      = Bool()
   val pendingMiss: Bool      = Bool() // currently handling a miss
 }
 

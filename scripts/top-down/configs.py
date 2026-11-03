@@ -53,19 +53,21 @@ xs_custom_rename_map = {
 }
 
 xs_frontend_rename_map = {
-    'OverrideBubble': 'MergeOverrideBubble',
-    'IfuFlushBubble': 'MergeIfuFlushBubble',
     'FtqFullStall': 'MergeFtqFullStall',
     'FtqUpdateBubble': 'MergeFtqUpdateBubble',
     'TAGEMissBubble': 'MergeTAGEMissBubble',
     'SCMissBubble': 'MergeSCMissBubble',
     'ITTAGEMissBubble': 'MergeITTAGEMissBubble',
     'RASMissBubble': 'MergeRASMissBubble',
+    'UBTBMissBubble': 'MergeUBTBMissBubble',
+    'ABTBMissBubble': 'MergeABTBMissBubble',
+    'UTAGEMissBubble': 'MergeUTAGEMissBubble',
+    'URASMissBubble': 'MergeURASMissBubble',
+    'UncacheFetchBubble': 'MergeUncacheFetchBubble',
+    'IbufferStructure': 'MergeIbufferStructure',
     'ICacheMissBubble': 'MergeICacheMissBubble',
     'ITLBMissBubble': 'MergeITLBMissBubble',
     'BTBMissBubble': 'MergeBTBMissBubble',
-    'UncacheFetchBubble': 'MergeUncacheFetchBubble',
-    'IbufferStructure': 'MergeIbufferStructure',
     'FetchFragBubble': 'MergeFetchFragBubble',
     'FrontendOtherCoreStall': "MergeCoreOther",
 
@@ -75,6 +77,7 @@ xs_frontend_rename_map = {
 
     'OtherRedirectStall': 'MergeBadSpec',
     'OtherRedirectBubble': 'MergeMisc',
+    'MemVioRedirectBubble': 'MergeMemVioRedirect',
 
 
     'NoStall': 'MergeBase',
@@ -176,19 +179,21 @@ xs_mem_rename_map = {
 }
 
 xs_coarse_rename_map = {
-    'OverrideBubble': 'MergeFrontend',
-    'IfuFlushBubble': 'MergeFrontend',
     'FtqFullStall': 'MergeFrontend',
-    'FtqUpdateBubble': 'MergeBadSpec',
+    'FtqUpdateBubble': 'MergeFrontend',
     'TAGEMissBubble': 'MergeBadSpec',
     'SCMissBubble': 'MergeBadSpec',
     'ITTAGEMissBubble': 'MergeBadSpec',
     'RASMissBubble': 'MergeBadSpec',
+    'UBTBMissBubble': 'MergeBadSpec',
+    'ABTBMissBubble': 'MergeBadSpec',
+    'UTAGEMissBubble': 'MergeBadSpec',
+    'URASMissBubble': 'MergeBadSpec',
+    'UncacheFetchBubble': 'MergeFrontend',
+    'IbufferStructure': 'MergeFrontend',
     'ICacheMissBubble': 'MergeFrontend',
     'ITLBMissBubble': 'MergeFrontend',
     'BTBMissBubble': 'MergeBadSpec',
-    'UncacheFetchBubble': 'MergeFrontend',
-    'IbufferStructure': 'MergeFrontend',
     'FetchFragBubble': 'MergeFrontend',
     'FrontendOtherCoreStall': "MergeCoreOther",
 
@@ -279,19 +284,22 @@ xs_coarse_rename_map = {
 }
 
 xs_fine_grain_rename_map = {
-    'OverrideBubble': 'MergeOtherFrontend',
-    'IfuFlushBubble': 'IfuFlushBubble',
     'FtqFullStall': 'MergeOtherFrontend',
-    'FtqUpdateBubble': 'MergeBadSpecBubble',
+    'FtqUpdateBubble': 'MergeOtherFrontend',
     'TAGEMissBubble': 'MergeBadSpecBubble',
     'SCMissBubble': 'MergeBadSpecBubble',
     'ITTAGEMissBubble': 'MergeBadSpecBubble',
     'RASMissBubble': 'MergeBadSpecBubble',
+    'UBTBMissBubble': 'MergeBadSpecBubble',
+    'ABTBMissBubble': 'MergeBadSpecBubble',
+    'UTAGEMissBubble': 'MergeBadSpecBubble',
+    'URASMissBubble': 'MergeBadSpecBubble',
+    'UncacheFetchBubble': 'UncacheFetchBubble',
+    'IbufferStructure': 'IbufferStructure',
+    'FrontendOtherCoreStall': 'MergeMisc',
     'ICacheMissBubble': 'ICacheBubble',
     'ITLBMissBubble': 'ITlbBubble',
     'BTBMissBubble': 'MergeBadSpecBubble',
-    'UncacheFetchBubble': 'FragmentBubble',
-    'IbufferStructure': 'FragmentBubble',
     'FetchFragBubble': 'FragmentBubble',
 
     'DivStall': 'LongExecute',
@@ -339,13 +347,17 @@ targets = {
 
     'NoStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: NoStall,\s+(\d+)',
 
-    'OverrideBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: OverrideBubble,\s+(\d+)',
-    'IfuFlushBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IfuFlushBubble,\s+(\d+)',
     'FtqUpdateBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FtqUpdateBubble,\s+(\d+)',
     'TAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: TAGEMissBubble,\s+(\d+)',
     'SCMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: SCMissBubble,\s+(\d+)',
     'ITTAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ITTAGEMissBubble,\s+(\d+)',
     'RASMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: RASMissBubble,\s+(\d+)',
+    'UBTBMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: UBTBMissBubble,\s+(\d+)',
+    'ABTBMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ABTBMissBubble,\s+(\d+)',
+    'UTAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: UTAGEMissBubble,\s+(\d+)',
+    'URASMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: URASMissBubble,\s+(\d+)',
+    'UncacheFetchBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: UncacheFetchBubble,\s+(\d+)',
+    'IbufferStructure': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IbufferStructure,\s+(\d+)',
     'MemVioRedirectBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: MemVioRedirectBubble,\s+(\d+)',
     'OtherRedirectBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: OtherRedirectBubble,\s+(\d+)',
     'FtqFullStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FtqFullStall,\s+(\d+)',
@@ -353,8 +365,6 @@ targets = {
     'ICacheMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ICacheMissBubble,\s+(\d+)',
     'ITLBMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ITLBMissBubble,\s+(\d+)',
     'BTBMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BTBMissBubble,\s+(\d+)',
-    'UncacheFetchBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: UncacheFetchBubble,\s+(\d+)',
-    'IbufferStructure': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IbufferStructure,\s+(\d+)',
     'FetchFragBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FetchFragBubble,\s+(\d+)',
     'FrontendOtherCoreStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FrontendOtherCoreStall,\s+(\d+)',
 

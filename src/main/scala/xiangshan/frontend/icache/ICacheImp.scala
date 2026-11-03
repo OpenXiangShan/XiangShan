@@ -225,6 +225,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   // topdown perf
   // when mainPipe is handling a miss, it will create a bubble in Ifu pipe
+  io.toIfu.topdown.bpuFlushS0       := mainPipe.io.perf.bpuFlushS0
+  io.toIfu.topdown.bpuFlushS1       := mainPipe.io.perf.bpuFlushS1
   io.toIfu.topdown.iCacheMissBubble := mainPipe.io.perf.pendingMiss
   // when prefetcher is handling an Itlb miss, and wayLookup is empty, it will create a bubble in MainPipe
   io.toIfu.topdown.itlbMissBubble := prefetcher.io.perf.pendingItlbMiss && wayLookup.io.perf.empty

@@ -26,13 +26,14 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
-import xiangshan.TopDownCounters
+import xiangshan.frontend.BlameBpuSource
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
+import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
 import xiangshan.frontend.bpu.history.phr.Phr
@@ -656,6 +657,61 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_s1PredictionSource = RegEnable(s1_predictionSource, s1_fire)
   private val s3_s1PredictionSource = RegEnable(s2_s1PredictionSource, s2_fire)
 
+  // Override attribution uses existing local training metadata. Only the two
+  // URAS-use bits need to be retained; no per-stage provenance is stored in FTQ.
+  private val s2_s1UsedUras = RegEnable(s1_taken && s1_prediction.attribute.isReturn &&
+    uras.io.specOut.isCanUse, s1_fire)
+  private val s3_s1UsedUras = RegEnable(s2_s1UsedUras, s2_fire)
+
+  private def blameS1(
+      previous: Prediction,
+      corrected: Prediction,
+      abtbMeta: AheadBtbMeta,
+      utageMeta: MicroTageMeta,
+      usedUras: Bool,
+      correctedEntries: Seq[Valid[Prediction]]
+  ): UInt = {
+    import BpuPredictionOrigin._
+    val earlier = BlameBpuSource.earlierPrediction(previous, corrected.taken, corrected.cfiPosition)
+    val position = Mux(earlier, previous.cfiPosition, corrected.cfiPosition)
+    val attribute = Mux(earlier, previous.attribute, corrected.attribute)
+    val useAbtb = abtbMeta.valid && abtbMeta.entries.map(_.hit).reduce(_ || _)
+    val knownConditional = useAbtb && attribute.isConditional && abtbMeta.entries.map(e =>
+      e.hit && e.position === position && e.attribute === attribute
+    ).reduce(_ || _)
+    val useUtage = utageMeta.abtbResult.map(e => e.hit && e.cfiPosition === position).reduce(_ || _)
+    val btb = Mux(useAbtb, ABTB, UBTB)
+    val direction = Mux(useUtage, UTAGE, btb)
+    val target = Mux(usedUras, URAS, btb)
+    val predictedBranchExists = correctedEntries.map(e => e.valid &&
+      e.bits.cfiPosition === previous.cfiPosition && e.bits.attribute === previous.attribute
+    ).reduce(_ || _)
+    val structuralFault = earlier && !predictedBranchExists
+    BlameBpuSource.fields(previous, corrected.taken, corrected.cfiPosition, corrected.attribute,
+      knownConditional, direction, target, btb, structuralFault)
+  }
+
+  private val s2_blame = blameS1(s2_s1Prediction, s2_prediction, s2_abtbMeta,
+    s2_utageMeta, s2_s1UsedUras, mbtb.io.result.toSeq)
+  private val s3_s1Blame = blameS1(s3_s1Prediction, s3_prediction, s3_abtbMeta,
+    s3_utageMeta, s3_s1UsedUras, s3_mbtbResult.toSeq)
+  private val s3_s2Earlier = BlameBpuSource.earlierPrediction(s3_s2Prediction, s3_taken, s3_prediction.cfiPosition)
+  private val s3_s2Position = Mux(s3_s2Earlier, s3_s2Prediction.cfiPosition, s3_prediction.cfiPosition)
+  private val s3_s2Attribute = Mux(s3_s2Earlier, s3_s2Prediction.attribute, s3_prediction.attribute)
+  private val s3_s2Matches = s3_mbtbResult.map(e => e.valid &&
+    e.bits.cfiPosition === s3_s2Position && e.bits.attribute === s3_s2Attribute)
+  private val s3_s2UsedTage = (VecInit(s3_s2Matches).asUInt &
+    VecInit(s3_tagePrediction.fastTakenVec.map(_.valid)).asUInt).orR
+  private val s3_s2Blame = BlameBpuSource.fields(s3_s2Prediction, s3_taken,
+    s3_prediction.cfiPosition, s3_prediction.attribute,
+    s3_s2Matches.reduce(_ || _) && s3_s2Attribute.isConditional,
+    Mux(s3_s2UsedTage, BpuPredictionOrigin.TAGE, BpuPredictionOrigin.BTB),
+    BpuPredictionOrigin.BTB, BpuPredictionOrigin.BTB)
+  private val overrideReason = Wire(new FrontendTopDownBundle)
+  overrideReason.setPredictionReason(Mux(s3_override,
+    Mux(s3_s2Override, s3_s2Blame, s3_s1Blame), s2_blame))
+  io.toFtq.overrideReasons := overrideReason
+
   private val s3_perfMeta = Wire(new BpuPerfMeta)
   s3_perfMeta.startPc             := s3_startPc.head.unGuard
   s3_perfMeta.bpId                := debug_bpId
@@ -668,32 +724,19 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_perfMeta.bpSource.s3Override := s3_override
   s3_perfMeta.mbtbMeta            := RegEnable(mbtb.io.meta, s2_fire)
   s3_perfMeta.scUsed              := s3_scUsed.asUInt
+  s3_perfMeta.tageUsed            := VecInit(s3_tagePrediction.takenVec.map(_.valid)).asUInt
 
   io.toFtq.perfMeta := s3_perfMeta
 
-  // Track lost prediction slots through S1/S2/S3, independently of valid-ready.
-  // This tracks prediction bubbles; IFU separately tags fetches flushed by BPU.
+  // Lost prediction slots advance every cycle, independently of prediction backpressure.
   private val topdownStages = RegInit(VecInit.fill(3)(0.U.asTypeOf(new FrontendTopDownBundle)))
   topdownStages(0) := 0.U.asTypeOf(new FrontendTopDownBundle)
-  for (i <- 1 until 3) {
-    topdownStages(i) := topdownStages(i - 1)
+  for (i <- 1 until 3) { topdownStages(i) := topdownStages(i - 1) }
+  when(!redirect.valid) {
+    when(s2_override || s3_override)(topdownStages(1) := overrideReason)
+    when(s3_override)(topdownStages(2)                := overrideReason)
   }
-
-  // S0 already uses the corrected PC in the override cycle. The discarded S1
-  // slot becomes a bubble in S2 on the next edge; S3 override also discards S2.
-  // Set bits after shifting so overlapping overrides merge with existing bubbles.
-  // Redirect wins PC selection and makes concurrent overrides irrelevant.
-  when(redirect.valid) {
-    // Discard pending override tags from the old path as well as new overrides.
-    topdownStages.foreach(_ := 0.U.asTypeOf(new FrontendTopDownBundle))
-  }.otherwise {
-    when(s2_override || s3_override) {
-      topdownStages(1).reasons(TopDownCounters.OverrideBubble.id) := true.B
-    }
-    when(s3_override) {
-      topdownStages(2).reasons(TopDownCounters.OverrideBubble.id) := true.B
-    }
-  }
+  topdownStages.foreach(_.redirectOverride(io.fromFtq.redirectTopdown))
   io.toFtq.topdownReasons := topdownStages.last
 
   /* *** BpTrace *** */

@@ -146,6 +146,18 @@ object BranchAttribute {
   def OtherIndirect: BranchAttribute = apply(BranchType.Indirect, RasAction.None)
 }
 
+object BpuPredictionOrigin extends EnumUInt(9) {
+  def BTB:    UInt = 0.U(width.W)
+  def TAGE:   UInt = 1.U(width.W)
+  def RAS:    UInt = 2.U(width.W)
+  def ITTAGE: UInt = 3.U(width.W)
+  def SC:     UInt = 4.U(width.W)
+  def UBTB:   UInt = 5.U(width.W)
+  def ABTB:   UInt = 6.U(width.W)
+  def UTAGE:  UInt = 7.U(width.W)
+  def URAS:   UInt = 8.U(width.W)
+}
+
 class BpuPredictionSource extends Bundle {
   val s1Source:   UInt = BpuPredictionSource.Stage1()
   val s3Source:   UInt = BpuPredictionSource.Stage3()
@@ -339,14 +351,16 @@ class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
 }
 
 class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
-  val bpId:         UInt                = UInt(XLEN.W)
-  val scUsed:       UInt                = UInt(NumBtbResultEntries.W)
-  val startPc:      Pc                  = new Pc
-  val s1Prediction: Prediction          = new Prediction
-  val s2Prediction: Prediction          = new Prediction
-  val s3Prediction: Prediction          = new Prediction
-  val mbtbMeta:     MainBtbMeta         = new MainBtbMeta
-  val bpSource:     BpuPredictionSource = new BpuPredictionSource
+  val bpId:         UInt                 = UInt(XLEN.W)
+  val scUsed:       UInt                 = UInt(NumBtbResultEntries.W)
+  val startPc:      Pc                   = new Pc
+  val s1Prediction: Prediction           = new Prediction
+  val s2Prediction: Prediction           = new Prediction
+  val s3Prediction: Prediction           = new Prediction
+  val mbtbMeta:     MainBtbMeta          = new MainBtbMeta
+  val bpSource:     BpuPredictionSource  = new BpuPredictionSource
+  // S3 direction participation, including branches predicted not taken.
+  val tageUsed: UInt = UInt(NumBtbResultEntries.W)
 
   def bpPred: Prediction = MuxCase(
     s1Prediction,

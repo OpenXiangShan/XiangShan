@@ -34,8 +34,8 @@ import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
 import xiangshan.backend.BackendToIBufBundle
 import xiangshan.backend.decode.VTypeGen
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FetchToIBuffer
+import xiangshan.frontend.FrontendRedirectTopdown
 import xiangshan.frontend.FrontendTopDownBundle
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
@@ -51,8 +51,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     val fromBackend: BackendToIBufBundle = Input(new BackendToIBufBundle)
 
     // top-down
-    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
-    val stallReason:            StallReasonIO          = new StallReasonIO(DecodeWidth)
+    val redirectTopdown: FrontendRedirectTopdown = Input(new FrontendRedirectTopdown)
+    val stallReason:     StallReasonIO           = new StallReasonIO(DecodeWidth)
   }
 
   val io: IBufferIO = IO(new IBufferIO)
@@ -519,41 +519,30 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  // deqEntries is combinational. Classify the next output beside its real register.
-  private val outputTopdown = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
+  // One reason register accompanies the real output register. Missing lanes
+  // can acquire a new supply cause while valid held instructions remain intact.
+  private val initialTopdown = Wire(new FrontendTopDownBundle)
+  initialTopdown.setReason(TopDownCounters.NoStall)
+  private val outputTopdown = RegInit(initialTopdown)
   private val nextTopdown = WireInit(io.in.bits.topdownInfo)
-  private def setMissingReason(reason: TopDownCounters.Value): Unit = {
-    nextTopdown.reasons.foreach(_ := false.B)
-    nextTopdown.reasons(reason.id) := true.B
-  }
   private val nextHasUncache = outputEntriesNext.map(e => e.valid && e.bits.uncacheFetch).reduce(_ || _)
   when(nextHasUncache) {
-    setMissingReason(TopDownCounters.UncacheFetchBubble)
+    nextTopdown.setReason(TopDownCounters.UncacheFetchBubble)
   }.elsewhen(useBypass && io.in.fire) {
-    setMissingReason(TopDownCounters.FetchFragBubble)
+    // A valid block containing zero complete instructions is also a fragment.
+    nextTopdown.setReason(TopDownCounters.FetchFragBubble)
   }.elsewhen(io.in.valid && numFromFetch =/= 0.U && !useBypass) {
-    setMissingReason(TopDownCounters.IbufferStructure)
+    nextTopdown.setReason(TopDownCounters.IbufferStructure)
   }
-  when(vtypeGen.in.canUpdateVType)(outputTopdown := nextTopdown)
-  outputTopdown.backendRedirectOverride(io.backendRedirectTopdown)
+  when(vtypeGen.in.canUpdateVType) {
+    outputTopdown := nextTopdown
+  }
+  // Functional flush may follow the broadcast by one cycle. Retain its cause
+  // instead of clearing it with the data; the next empty cycle updates supply.
+  outputTopdown.redirectOverride(io.redirectTopdown)
 
-  private val deqValidCount = PopCount(io.out.map(_.valid))
-  private val deqWasteCount = DecodeWidth.U - deqValidCount
-  // Other must lose to every specific cause, even if its bit is injected upstream.
-  // Keep it out of the encoder and select it only as the final fallback below.
-  private val bubbleReasons = WireInit(outputTopdown.reasons)
-  bubbleReasons(TopDownCounters.FrontendOtherCoreStall.id) := false.B
-  private val hasBubbleReason = bubbleReasons.asUInt.orR
-  private val encodedBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
-    bubbleReasons.reverse
-  )
-  // Never use the encoder's zero-input result. Fetch fragmentation also outranks Other.
-  private val matchBubble = Mux(
-    hasBubbleReason,
-    encodedBubble,
-    Mux(deqValidCount === 0.U, TopDownCounters.FrontendOtherCoreStall.id.U, TopDownCounters.FetchFragBubble.id.U)
-  )
-
+  private val matchBubble = Mux(outputTopdown.reason === TopDownCounters.NoStall.id.U,
+    TopDownCounters.FrontendOtherCoreStall.id.U, outputTopdown.reason)
   for (i <- 0 until DecodeWidth) {
     io.stallReason.reason(i) := Mux(io.out(i).valid, TopDownCounters.NoStall.id.U, matchBubble)
   }
