@@ -522,7 +522,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // One reason register accompanies the real output register. Missing lanes
   // can acquire a new supply cause while valid held instructions remain intact.
   private val initialTopdown = Wire(new FrontendTopDownBundle)
-  initialTopdown.setReason(TopDownCounters.NoStall)
+  initialTopdown.setReason(TopDownCounters.FtqEmptyBubble)
   private val outputTopdown = RegInit(initialTopdown)
   private val nextTopdown = WireInit(io.in.bits.topdownInfo)
   private val nextHasUncache = outputEntriesNext.map(e => e.valid && e.bits.uncacheFetch).reduce(_ || _)

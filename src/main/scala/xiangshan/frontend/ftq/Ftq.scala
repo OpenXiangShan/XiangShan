@@ -553,15 +553,36 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirectTopdown := io.redirectTopdown
   io.toIfu.overrideReasons := io.fromBpu.overrideReasons
 
+  // Backpressure is a loss only after it interrupts fetch target supply.
+  private val normalPrediction = prediction.valid && !bpuS2Redirect && !bpuS3Redirect
+  private val cancelSupply = redirect.valid || bpuS2Redirect || bpuS3Redirect
+  private val blockedByTraining = trainingYieldsPrediction && hasPredictionCapacity &&
+    withinPrefetchDepth && normalPrediction && !cancelSupply
+  private val trainingPending = RegInit(false.B)
+  when(blockedByTraining)(trainingPending := true.B)
+  when((bpuEnqueue && normalPrediction) || cancelSupply)(trainingPending := false.B)
+  private val trainingSupplyLoss = bpuPtr(0) === fetchPtr(0) &&
+    (blockedByTraining || trainingPending) && !cancelSupply
+  private val fullSupplyLoss = ((bpuPtr(0) > fetchPtr(0) &&
+    distanceBetween(fetchPtr(0), commitPtr(0)) >= (FtqSize - 1).U) ||
+    (bpuPtr(0) === fetchPtr(0) && !hasPredictionCapacity && normalPrediction)) && !cancelSupply
+
   private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
   topdownStage := io.fromBpu.topdownReasons
-  when(!hasPredictionCapacity) {
-    topdownStage.setReason(TopDownCounters.FtqFullStall)
-  }.elsewhen(!withinPrefetchDepth || trainingYieldsPrediction) {
+  when(bpuPtr(0) === fetchPtr(0) && io.fromBpu.topdownReasons.reason === TopDownCounters.NoStall.id.U) {
+    topdownStage.setReason(TopDownCounters.FtqEmptyBubble)
+  }
+  when(trainingSupplyLoss && !bpuS2Redirect && !bpuS3Redirect) {
     topdownStage.setReason(TopDownCounters.FtqUpdateBubble)
+  }
+  when(fullSupplyLoss && !bpuS2Redirect && !bpuS3Redirect) {
+    topdownStage.setReason(TopDownCounters.FtqFullStall)
   }
   topdownStage.redirectOverride(io.redirectTopdown)
   io.toIfu.topdownInfo := topdownStage
+
+  XSPerfAccumulate("topdown_training_supply_loss", trainingSupplyLoss && !redirect.valid)
+  XSPerfAccumulate("topdown_full_supply_loss", fullSupplyLoss && !redirect.valid)
 
   // Hardware performance monitors
   val perfEvents: Seq[(String, UInt)] = Seq()

@@ -828,6 +828,7 @@ package object xiangshan {
     val MemVioRedirectBubble = Value("MemVioRedirectBubble")
     val OtherRedirectBubble = Value("OtherRedirectBubble")
     val FtqFullStall = Value("FtqFullStall")
+    val FtqEmptyBubble = Value("FtqEmptyBubble") // no fetch target, excluding training/capacity/redirect
 
     val ICacheMissBubble = Value("ICacheMissBubble")
     val ITLBMissBubble = Value("ITLBMissBubble")
