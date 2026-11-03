@@ -17,6 +17,7 @@ if [[ "$operation" == compile ]]; then
         printf 'cfg=%s\n' "$cfg"
         printf 'cfg_sha256=%s\n' "$(sha256sum "${arg[plus_file]}/$cfg.cfg" | awk '{print $1}')"
         printf 'pl=%s\nwave=%s\nccov=%s\n' "${arg[pl]}" "${arg[wave]}" "${arg[ccov]}"
+        printf 'fcov=%s\n' "${arg[fcov]:-off}"
     } >"$exec_dir/mock_capabilities"
     exit 0
 fi

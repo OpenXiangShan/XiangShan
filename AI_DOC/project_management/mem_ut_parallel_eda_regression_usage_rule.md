@@ -148,6 +148,15 @@ cd mem_ut/ver/ut/memblock/sim
 波形和 coverage 能力属于编译能力。`--no-compile --wave` 或
 `--no-compile --coverage` 要求已有 fingerprint 中的 `simv` 具备对应能力，否则脚本会在仿真前失败。
 
+功能覆盖率使用独立选项 `--fcov`，默认关闭。先在 ignored 的 `cfg/user_compile_cfg.local.svh` 定义所需模块宏，再重新编译：
+
+```bash
+../scripts/run_eda_regression.sh --tc basicTest --cfg default \
+  --mode base_fun_fcov --seed 666675 --compile --fcov
+```
+
+四个模块开关及示例见 `mem_ut/ver/ut/memblock/env/fcov/README.md`。`--coverage` 不会自动开启功能覆盖率。`--no-compile` 要求功能覆盖率总开关与编译指纹完全一致；功能覆盖率开启时还要求个人编译头内容摘要一致，否则必须重编。旧指纹缺少 `fcov` 字段时仅按关闭兼容，没有指纹的旧程序不能用于 `--fcov`；这类旧程序的实际编译配置无法追溯，需要确定配置时应使用 `--compile`。
+
 ### 2.6 只检查参数和配置
 
 ```bash
@@ -189,6 +198,7 @@ seed 范围为 `1..2147483646`。脚本会先将十进制 seed 规范化再去�
 | `--no-compile` | 开启 | 不编译，直接复用当前 mode 的 `simv`。 |
 | `--wave` / `--no-wave` | 关闭 | 开启或关闭 FSDB 波形。 |
 | `--coverage` / `--no-coverage` | 关闭 | 开启或关闭 VCS 代码覆盖率。 |
+| `--fcov` / `--no-fcov` | 关闭 | 开启或关闭 SV 功能覆盖率总开关，模块由个人编译头选择。 |
 | `--verbosity <level>` | `UVM_LOW` | 支持 `UVM_NONE/LOW/MEDIUM/HIGH/FULL/DEBUG`。 |
 | `--debug` | 关闭 | 默认派生 wave on 和 `UVM_DEBUG`。 |
 | `--timeout-ns <n>` | `100000000` | UVM timeout，单位 ns。 |
@@ -262,7 +272,7 @@ compile 作为 managed job 执行，只运行一次。编译成功后脚本记�
 <mode>/exec/.eda_compile_fingerprint
 ```
 
-fingerprint 包含 wave、coverage、`simv` hash 和文件身份。
+fingerprint 包含 wave、代码覆盖率、`fcov` 总开关、`user_compile_cfg_sha256` 本地编译配置摘要、`simv` hash 和文件身份。个人编译头缺少时按公共模板计算摘要，正常编译会先复制模板；功能覆盖率开启且配置在编译期间发生变化时拒绝登记指纹。
 
 ### 5.2 后续复用
 
@@ -277,7 +287,7 @@ fingerprint 包含 wave、coverage、`simv` hash 和文件身份。
   --no-compile
 ```
 
-脚本在启动 seed 前验证 `simv` 是否存在，以及 fingerprint 是否满足本次 wave/coverage 请求。运行期间如果同一 mode 的 `simv` 身份变化，批次结果为 `FAIL`。
+脚本在启动 seed 前验证 `simv` 是否存在，以及 fingerprint 是否满足本次 wave/coverage/fcov 请求及本地模块配置。运行期间如果同一 mode 的 `simv` 身份变化，批次结果为 `FAIL`。
 
 ## 6. UVM 错误监控与全部联停
 
@@ -431,6 +441,8 @@ mem_ut/ver/ut/memblock/sim/.eda_regression/<run_id>/
 | `seeds.txt` | 本批次计划 seed。 | 是 |
 | `user_plusargs.txt` | 用户传入的 plusargs。 | 是 |
 | `effective_plusargs.txt` | cfg 合并后实际生效的 plusargs。 | 是 |
+
+`config.txt` 的 `fcov=on/off` 和 `user_compile_cfg_sha256` 记录功能覆盖率请求及个人编译配置摘要。
 
 `config.txt` 中的 `source_plus_file`、`source_cfg`、`frozen_cfg` 和 `cfg_sha256` 共同记录 cfg 的规范化源目录、
 规范化源文件、冻结副本和内容 hash，便于确认一次回归实际使用的 cfg 来源。
@@ -605,7 +617,7 @@ ls -l .eda_regression/locks/<mode>.*
 
 ### 12.2 `simv` 缺失或 fingerprint 不匹配
 
-使用 `--compile` 重新建立该 mode，或改用与已有 `simv` wave/coverage 能力一致的参数。不要在不同 wave/coverage 配置之间无条件复用同一个 mode。
+使用 `--compile` 重新建立该 mode，或改用与已有 `simv` wave/coverage/fcov 能力及本地模块配置一致的参数。不要在不同编译配置之间无条件复用同一个 mode。
 
 ### 12.3 cfg 不存在
 

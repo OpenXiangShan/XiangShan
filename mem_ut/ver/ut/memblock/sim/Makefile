@@ -22,6 +22,9 @@ endif
 USER_CFG_LOCAL ?= ../cfg/user_cfg.local.sv
 USER_CFG_LOCAL_TEMPLATE ?= ../cfg/user_cfg.local.default.sv
 
+USER_COMPILE_CFG_LOCAL := ../cfg/user_compile_cfg.local.svh
+USER_COMPILE_CFG_LOCAL_TEMPLATE := ../cfg/user_compile_cfg.local.default.svh
+
 REMOTE_HOST ?= eda01
 REMOTE_WORKDIR ?= $(CURR_DIR)
 MEMBLOCK_SCRIPT_DIR ?= $(abspath $(CURDIR)/../scripts)
@@ -33,14 +36,21 @@ REMOTE_BOOTSTRAP ?= source /usr/share/Modules/init/bash >/dev/null 2>&1 || true;
 REMOTE_WRAPPER := $(MEMBLOCK_SCRIPT_DIR)/remote_eda_make.sh
 REMOTE_SIM_TOOLS ?= vcs
 
-.PHONY: eda_compile eda_batch_run eda_run eda_run_bg eda_status eda_tail eda_kill eda_print_bootstrap eda_print_effective_plusargs ensure_user_cfg_local
+.PHONY: eda_compile eda_batch_run eda_run eda_run_bg eda_status eda_tail eda_kill eda_print_bootstrap eda_print_effective_plusargs ensure_user_cfg_local ensure_user_compile_cfg_local
 
-compile batch_run rtl: ensure_user_cfg_local
+compile batch_run rtl: ensure_user_cfg_local ensure_user_compile_cfg_local
 
 ensure_user_cfg_local:
 	@if [ ! -f "$(USER_CFG_LOCAL)" ]; then \
 		cp "$(USER_CFG_LOCAL_TEMPLATE)" "$(USER_CFG_LOCAL)"; \
 		echo "Created $(USER_CFG_LOCAL) from $(USER_CFG_LOCAL_TEMPLATE)"; \
+	fi
+
+# 编译宏与运行期 user_cfg 分开：缺少本地编译配置时生成全关闭模板。
+ensure_user_compile_cfg_local:
+	@if [ ! -f "$(USER_COMPILE_CFG_LOCAL)" ]; then \
+		cp "$(USER_COMPILE_CFG_LOCAL_TEMPLATE)" "$(USER_COMPILE_CFG_LOCAL)"; \
+		echo "Created $(USER_COMPILE_CFG_LOCAL) from $(USER_COMPILE_CFG_LOCAL_TEMPLATE)"; \
 	fi
 
 eda_print_bootstrap:

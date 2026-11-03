@@ -35,10 +35,10 @@ module top_tb;
     `RST_GEN(tc_if.rst_n,100)
 
     `include "../tb/dut_inst.sv"
-    `include "../env/fcov/memblock_rtl_fcov_bind.sv"
-    `include "../env/fcov/memblock_ldu_scalar_fcov_bind.sv"
-    `include "../env/fcov/memblock_storeunit_scalar_fcov_bind.sv"
-    `include "../env/fcov/dtlb_hierarchical_20261012/memblock_dtlb_fcov_bind.sv"
+    `include "../env/fcov/vector_unit_stride/memblock_rtl_fcov_bind.sv"
+    `include "../env/fcov/load_unit/memblock_ldu_scalar_fcov_bind.sv"
+    `include "../env/fcov/store_unit/memblock_storeunit_scalar_fcov_bind.sv"
+    `include "../env/fcov/dtlb/memblock_dtlb_fcov_bind.sv"
     `include "../tb/tc_if_connect.sv"
     `include "../../../ut/memblock/tb/memblock_connect.sv"
     `MEMBLOCK_CONNECT(env,top_tb.U_MEMBLOCK)

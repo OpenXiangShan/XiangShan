@@ -27,7 +27,10 @@
 `ifndef MEMBLOCK_DTLB_FCOV_BIND__SV
 `define MEMBLOCK_DTLB_FCOV_BIND__SV
 
+`include "memblock_compile_params.svh"
+
 `ifdef MEMBLOCK_UT_FCOV
+`ifdef MEMBLOCK_FCOV_DTLB_EN
 
 // u_dtlb_ld_port0_fcov
 // 观测入口：TLBNonBlock -> u_dtlb_ld_port0_fcov；下方左侧为模型端口，右侧为真实RTL信号。
@@ -5364,6 +5367,7 @@ bind MemBlock memblock_dtlb_integration_fcov u_dtlb_integration_fcov (
         }
     )
 );
+`endif // MEMBLOCK_FCOV_DTLB_EN
 `endif
 
 `endif

@@ -227,10 +227,25 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
 约束规则：
 
 - 需要指定宏参数时，应优先通过统一宏文件设置。
-- 宏文件中每个宏参数都必须提供默认值，保证未显式覆盖时编译行为确定。
+- 宏文件中每个宏参数都必须提供明确默认行为，保证未显式覆盖时编译行为确定；数值宏提供默认值，功能覆盖率存在性宏以未定义表示默认关闭。
 - interface/connect-time 静态参数统一归入宏参数控制，不再单独散落为 plus、testcase 或 env cfg 临时入口。
 - 不应把编译期宏散落在 sequence、agent、driver、monitor 或 testcase 内部。
 - 宏文件只管理编译期参数，不承担 runtime 配置职责。
+
+### 2.4.1 功能覆盖率模块开关
+
+功能覆盖率模型和 bind 属于编译期结构，由 `memblock_compile_params.svh` 统一引入本地编译配置；不增加 `memblock_env_cfg`、`user_ctrl` 或 runtime plus 镜像。
+
+| 宏 | 默认行为 | 控制范围 |
+|---|---|---|
+| `MEMBLOCK_FCOV_VECTOR_US_EN` | 未定义，关闭 | `env/fcov/vector_unit_stride` 模型及 bind |
+| `MEMBLOCK_FCOV_LOAD_UNIT_EN` | 未定义，关闭 | `env/fcov/load_unit` 模型、bind、SVA 空壳 |
+| `MEMBLOCK_FCOV_STORE_UNIT_EN` | 未定义，关闭 | `env/fcov/store_unit` 模型、bind、SVA 空壳 |
+| `MEMBLOCK_FCOV_DTLB_EN` | 未定义，关闭 | `env/fcov/dtlb` 全部五类模型及 18 条 bind |
+
+本地个人编译配置使用 ignored 的 `cfg/user_compile_cfg.local.svh`，公共模板使用 `cfg/user_compile_cfg.local.default.svh`。Makefile 的 `ensure_user_compile_cfg_local` 仅在个人文件缺少时复制模板；模板不定义任何模块宏。模块宏必须与 `fcov=on` 产生的全局宏 `MEMBLOCK_UT_FCOV` 同时开启才生效，定义为 0 仍表示开启。
+
+本地开启示例：在个人编译头加入 `` `define MEMBLOCK_FCOV_DTLB_EN ``，然后运行 `make eda_run tc=tc_sanity mode=fcov_local fcov=on`。回归脚本对应 `--compile --fcov`；`--coverage` 仍只控制代码覆盖率。本地宏变化必须重编，不能只改配置后直接运行旧 `simv`。详细目录和操作见 `mem_ut/ver/ut/memblock/env/fcov/README.md`。
 
 ### 2.5 L2TLB 参数当前分层
 

@@ -8,7 +8,10 @@
 `ifndef MEMBLOCK_RTL_FCOV__SV
 `define MEMBLOCK_RTL_FCOV__SV
 
+`include "memblock_compile_params.svh"
+
 `ifdef MEMBLOCK_UT_FCOV
+`ifdef MEMBLOCK_FCOV_VECTOR_US_EN
 module memblock_rtl_fcov (
     input wire clock,
     input wire reset,
@@ -699,5 +702,6 @@ module memblock_rtl_fcov (
         issue_ready_cg_1 = new();
     end
 endmodule: memblock_rtl_fcov
+`endif // MEMBLOCK_FCOV_VECTOR_US_EN
 `endif
 `endif

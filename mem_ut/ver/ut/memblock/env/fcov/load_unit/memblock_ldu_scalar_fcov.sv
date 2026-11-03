@@ -10,7 +10,10 @@
 `ifndef MEMBLOCK_LDU_SCALAR_FCOV__SV
 `define MEMBLOCK_LDU_SCALAR_FCOV__SV
 
+`include "memblock_compile_params.svh"
+
 `ifdef MEMBLOCK_UT_FCOV
+`ifdef MEMBLOCK_FCOV_LOAD_UNIT_EN
 module memblock_ldu_scalar_fcov (
     input wire clock,
     input wire reset,
@@ -1144,6 +1147,7 @@ module memblock_ldu_scalar_fcov (
         output_route_cg = new();
     end
 endmodule: memblock_ldu_scalar_fcov
+`endif // MEMBLOCK_FCOV_LOAD_UNIT_EN
 `endif
 
 `endif

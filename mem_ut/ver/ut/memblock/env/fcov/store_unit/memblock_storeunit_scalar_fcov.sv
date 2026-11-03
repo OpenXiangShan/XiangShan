@@ -7,7 +7,10 @@
 `ifndef MEMBLOCK_STOREUNIT_SCALAR_FCOV__SV
 `define MEMBLOCK_STOREUNIT_SCALAR_FCOV__SV
 
+`include "memblock_compile_params.svh"
+
 `ifdef MEMBLOCK_UT_FCOV
+`ifdef MEMBLOCK_FCOV_STORE_UNIT_EN
 module memblock_storeunit_scalar_fcov (
     input wire clock,
     input wire reset,
@@ -722,6 +725,7 @@ module memblock_storeunit_scalar_fcov (
     end
 
 endmodule: memblock_storeunit_scalar_fcov
+`endif // MEMBLOCK_FCOV_STORE_UNIT_EN
 `endif
 
 `endif

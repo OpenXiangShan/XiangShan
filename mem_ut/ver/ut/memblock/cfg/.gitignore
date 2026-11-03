@@ -2,3 +2,5 @@ user_cfg.local.sv
 user_cfg.local.*.sv
 !user_cfg.local.default.sv
 user_ctrl.local.*
+
+user_compile_cfg.local.svh

@@ -1,7 +1,10 @@
 `ifndef MEMBLOCK_RTL_FCOV_BIND__SV
 `define MEMBLOCK_RTL_FCOV_BIND__SV
 
+`include "memblock_compile_params.svh"
+
 `ifdef MEMBLOCK_UT_FCOV
+`ifdef MEMBLOCK_FCOV_VECTOR_US_EN
 bind MemBlock memblock_rtl_fcov u_memblock_rtl_fcov (
     .clock              (clock),
     .reset              (reset),
@@ -130,5 +133,6 @@ bind MemBlock memblock_rtl_fcov u_memblock_rtl_fcov (
     .io_redirect_bits_isVlsException    (io_redirect_bits_isVlsException),
     .io_redirect_bits_robIdx_value      (io_redirect_bits_robIdx_value)
 );
+`endif // MEMBLOCK_FCOV_VECTOR_US_EN
 `endif
 `endif

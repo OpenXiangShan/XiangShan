@@ -5,7 +5,10 @@
 `ifndef MEMBLOCK_STOREUNIT_SCALAR_FCOV_BIND__SV
 `define MEMBLOCK_STOREUNIT_SCALAR_FCOV_BIND__SV
 
+`include "memblock_compile_params.svh"
+
 `ifdef MEMBLOCK_UT_FCOV
+`ifdef MEMBLOCK_FCOV_STORE_UNIT_EN
 bind StoreUnit memblock_storeunit_scalar_fcov u_memblock_storeunit_scalar_fcov (
     .clock(clock),
     .reset(reset),
@@ -171,6 +174,7 @@ bind StoreUnit memblock_storeunit_scalar_sva u_memblock_storeunit_scalar_sva (
     .reset(reset),
     .reset_backend_done(memblock_sync_pkg::reset_backend_done)
 );
+`endif // MEMBLOCK_FCOV_STORE_UNIT_EN
 `endif
 
 `endif

@@ -131,10 +131,19 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
 
 要求：
 
-- 每个宏必须有默认值。
+- 每个宏必须有明确默认行为；数值宏提供默认值，功能覆盖率存在性宏以未定义表示默认关闭。
 - connect 文件只消费宏，不解析 runtime plusarg 或 testcase 名称。
 - runtime plusarg 只控制 runtime sequence/helper 行为，不能假装改变编译期连接结构。
 - 修改宏默认值必须同步说明默认行为和覆盖方式。
+
+功能覆盖率编译开关：
+
+- 目录统一使用 `env/fcov/vector_unit_stride`、`load_unit`、`store_unit`、`dtlb`，模型与对应 bind/SVA 同目录维护。
+- 四个模块分别由 `MEMBLOCK_FCOV_VECTOR_US_EN`、`MEMBLOCK_FCOV_LOAD_UNIT_EN`、`MEMBLOCK_FCOV_STORE_UNIT_EN`、`MEMBLOCK_FCOV_DTLB_EN` 控制；DTLB 内部不细分。
+- 四个宏默认未定义，只有模块宏与 `fcov=on` 产生的 `MEMBLOCK_UT_FCOV` 同时存在才编译模型及 bind；不要用定义为 0 表示关闭。
+- 本地编译覆盖只写入 ignored 的 `cfg/user_compile_cfg.local.svh`，由统一宏头引入；公共模板为 `cfg/user_compile_cfg.local.default.svh`，默认不定义模块宏。
+- `compile`、`rtl`、`batch_run` 通过 `ensure_user_compile_cfg_local` 在文件缺少时复制模板，禁止覆盖已有个人设置。绕过 Makefile 时必须先创建本地头。
+- 不建立 env cfg、`user_ctrl` 或 runtime plus 镜像；模块配置变化后必须重编。回归脚本使用 `--fcov`，并校验已有编译指纹中的总开关和本地配置摘要。
 
 当前 L2TLB 特例：
 

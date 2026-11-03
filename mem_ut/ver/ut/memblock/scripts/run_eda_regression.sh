@@ -209,13 +209,13 @@ validate_remote_plusarg() {
 remote_worker() {
     local ack_file="" rc_file="" token="" job_id="" operation=""
     local entry="$SCRIPT_DIR/eda01_entry.sh" seed="" tc="" ts="" cfg="" cfg_hash="" mode=""
-    local pl="" wave="" ccov="" note="" timeout_ns="" plus_file="../seq/plus_cfg"
+    local pl="" wave="" ccov="" fcov="off" note="" timeout_ns="" plus_file="../seq/plus_cfg"
     local bootstrap="" worker_rc=125 rc_written=0 arg plus_string="" plusarg_count=0 i
     local -a plusargs=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --ack|--rc|--token|--job-id|--operation|--entry|--seed|--tc|--ts|--cfg|--cfg-hash|--mode|--verbosity|--wave|--coverage|--note|--timeout-ns|--plus-file|--plusarg|--bootstrap)
+            --ack|--rc|--token|--job-id|--operation|--entry|--seed|--tc|--ts|--cfg|--cfg-hash|--mode|--verbosity|--wave|--coverage|--fcov|--note|--timeout-ns|--plus-file|--plusarg|--bootstrap)
                 require_option_value "$1" "$#" "${2-}" || exit 2
                 ;;
         esac
@@ -235,6 +235,7 @@ remote_worker() {
             --verbosity) pl="${2:-}"; shift 2 ;;
             --wave) wave="${2:-}"; shift 2 ;;
             --coverage) ccov="${2:-}"; shift 2 ;;
+            --fcov) fcov="${2:-}"; shift 2 ;;
             --note) note="${2:-}"; shift 2 ;;
             --timeout-ns) timeout_ns="${2:-}"; shift 2 ;;
             --plus-file) plus_file="${2:-}"; shift 2 ;;
@@ -317,7 +318,7 @@ remote_worker() {
     local -a entry_args=(
         "$effective_entry" "$operation"
         "seed=$seed" "tc=$tc" "ts=$ts" "cfg=$cfg" "mode=$mode"
-        "pl=$pl" "wave=$wave" "ccov=$ccov" "fcov=off"
+        "pl=$pl" "wave=$wave" "ccov=$ccov" "fcov=$fcov"
         "note=$note" "timeout_ns=$timeout_ns" "plus_file=$plus_file"
     )
     if [[ "$operation" == "batch_run" ]]; then
@@ -363,6 +364,8 @@ Execution:
   --compile / --no-compile    Compile once before simulation (default: no).
   --wave / --no-wave          Enable FSDB waveform (default: no).
   --coverage / --no-coverage  Enable VCS code coverage (default: no).
+  --fcov / --no-fcov          Enable SV functional coverage (default: no).
+                              Select modules in cfg/user_compile_cfg.local.svh.
   --verbosity <level>         UVM_NONE/LOW/MEDIUM/HIGH/FULL/DEBUG
                               (default: UVM_LOW).
   --debug                     Defaults wave=on and verbosity=UVM_DEBUG unless
@@ -520,6 +523,8 @@ TC=""; CFG="default"; TS="virtual_base_sequence"; MODE="base_fun"
 COUNT="1"; JOBS="20"; ERROR_LIMIT="1"; TIMEOUT_NS="100000000"
 POLL_INTERVAL="1"; LAUNCH_TIMEOUT="30"; PROBE_INTERVAL="5"; SSH_RETRIES="3"
 DO_COMPILE=0; WAVE_ON=0; COVERAGE_ON=0; MONITOR_ON=1; RECORD_ON=1
+# 功能覆盖率编译总开关默认关闭，具体模块由本地编译头选择。
+FCOV_ON=0
 DEBUG_ON=0; DRY_RUN=0; VERBOSITY="UVM_LOW"; REMOTE_HOST="$DEFAULT_REMOTE_HOST"
 OUTPUT_DIR=""; WAVE_EXPLICIT=0; VERBOSITY_EXPLICIT=0; COUNT_EXPLICIT=0
 PLUS_FILE_INPUT="$SIM_DIR/../seq/plus_cfg"
@@ -566,6 +571,8 @@ while [[ $# -gt 0 ]]; do
         --no-wave) WAVE_ON=0; WAVE_EXPLICIT=1; shift ;;
         --coverage) COVERAGE_ON=1; shift ;;
         --no-coverage) COVERAGE_ON=0; shift ;;
+        --fcov) FCOV_ON=1; shift ;;
+        --no-fcov) FCOV_ON=0; shift ;;
         --monitor) MONITOR_ON=1; shift ;;
         --no-monitor) MONITOR_ON=0; shift ;;
         --record) RECORD_ON=1; shift ;;
@@ -674,9 +681,18 @@ printf '%s\n' "${SEEDS[@]}" >"$OUTPUT_DIR/seeds.txt"
 printf '%s\n' "${USER_PLUSARGS[@]}" >"$OUTPUT_DIR/user_plusargs.txt"
 printf '%s\n' "$EFFECTIVE_PLUSARGS" >"$OUTPUT_DIR/effective_plusargs.txt"
 
-WAVE_VALUE="off"; CCOV_VALUE="off"
+WAVE_VALUE="off"; CCOV_VALUE="off"; FCOV_VALUE="off"
 [[ "$WAVE_ON" -eq 0 ]] || WAVE_VALUE="on"
 [[ "$COVERAGE_ON" -eq 0 ]] || CCOV_VALUE="on"
+[[ "$FCOV_ON" -eq 0 ]] || FCOV_VALUE="on"
+# 固定本轮功能覆盖率选择；缺少 local 时按 Makefile 将复制的默认模板计算。
+USER_COMPILE_CFG="$SIM_DIR/../cfg/user_compile_cfg.local.svh"
+user_compile_cfg_hash() {
+    local source="$USER_COMPILE_CFG"
+    [[ -f "$source" ]] || source="$SIM_DIR/../cfg/user_compile_cfg.local.default.svh"
+    sha256sum "$source" | awk '{print $1}'
+}
+USER_COMPILE_CFG_HASH="$(user_compile_cfg_hash)" || exit 2
 SHARED_PATH_VALIDATION="DEFERRED"
 
 write_config() {
@@ -691,6 +707,8 @@ write_config() {
         printf 'compile=%s\n' "$DO_COMPILE"
         printf 'wave=%s\n' "$WAVE_ON"
         printf 'coverage=%s\n' "$COVERAGE_ON"
+        printf 'fcov=%s\n' "$FCOV_VALUE"
+        printf 'user_compile_cfg_sha256=%s\n' "$USER_COMPILE_CFG_HASH"
         printf 'verbosity=%s\n' "$VERBOSITY"
         printf 'monitor=%s\n' "$MONITOR_ON"
         printf 'error_limit=%s\n' "$ERROR_LIMIT"
@@ -1355,7 +1373,7 @@ create_managed_job() {
         "$SCRIPT_PATH" --remote-worker --ack "$ack" --rc "$rc_file" --token "$token"
         --job-id "$job" --operation "$operation" --entry "$SCRIPT_DIR/eda01_entry.sh"
         --seed "$seed" --tc "$TC" --ts "$TS" --cfg "$CFG" --cfg-hash "$CFG_HASH" --mode "$MODE"
-        --verbosity "$VERBOSITY" --wave "$WAVE_VALUE" --coverage "$CCOV_VALUE"
+        --verbosity "$VERBOSITY" --wave "$WAVE_VALUE" --coverage "$CCOV_VALUE" --fcov "$FCOV_VALUE"
         --note "$NOTE" --timeout-ns "$TIMEOUT_NS" --plus-file "$FROZEN_PLUS_FILE"
         --bootstrap "$REMOTE_BOOTSTRAP"
     )
@@ -1575,7 +1593,11 @@ simv_hash() {
     ssh_retry "$(quote_cmd sha256sum "$SIMV_PATH")" 2>/dev/null | awk '{print $1}'
 }
 write_fingerprint() {
-    local hash identity mock_meta
+    local hash identity mock_meta mock_fcov
+    # 开启功能覆盖率时，本地配置在编译期间变化必须重编，不能登记失真的指纹。
+    if [[ "$FCOV_ON" -eq 1 ]]; then
+        [[ "$(user_compile_cfg_hash)" == "$USER_COMPILE_CFG_HASH" ]] || return 1
+    fi
     mkdir -p "$(dirname "$FINGERPRINT_PATH")" || return 1
     if [[ -n "${EDA_REGRESSION_REMOTE_ENTRY:-}" ]]; then
         mock_meta="$SIM_DIR/$MODE/exec/mock_capabilities"
@@ -1585,26 +1607,35 @@ write_fingerprint() {
         [[ "$(read_key "$mock_meta" pl)" == "$VERBOSITY" ]] || return 1
         [[ "$(read_key "$mock_meta" wave)" == "$WAVE_VALUE" ]] || return 1
         [[ "$(read_key "$mock_meta" ccov)" == "$CCOV_VALUE" ]] || return 1
+        mock_fcov="$(read_key "$mock_meta" fcov)"
+        [[ "${mock_fcov:-off}" == "$FCOV_VALUE" ]] || return 1
     fi
     hash="$(simv_hash)" || return 1
     identity="$(simv_identity)" || return 1
     {
         printf 'mode=%s\ntiming=rtl\nwave=%s\nccov=%s\n' "$MODE" "$WAVE_VALUE" "$CCOV_VALUE"
+        printf 'fcov=%s\nuser_compile_cfg_sha256=%s\n' "$FCOV_VALUE" "$USER_COMPILE_CFG_HASH"
         printf 'simv=%s\nsha256=%s\nidentity=%s\n' "$SIMV_PATH" "$hash" "$identity"
         printf 'git_commit=%s\ncreated_at=%s\n' "$(git -C "$SIM_DIR" rev-parse HEAD 2>/dev/null || echo unknown)" "$(date '+%F %T %Z')"
     } | atomic_write "$FINGERPRINT_PATH"
 }
 verify_fingerprint() {
-    local fp_wave fp_ccov fp_hash fp_identity current_hash current_identity
+    local fp_wave fp_ccov fp_fcov fp_hash fp_identity current_hash current_identity
     if [[ ! -f "$FINGERPRINT_PATH" ]]; then
-        [[ "$WAVE_ON" -eq 0 && "$COVERAGE_ON" -eq 0 ]] || return 1
-        log_warn "using legacy simv without fingerprint; wave and coverage are disabled"
+        [[ "$WAVE_ON" -eq 0 && "$COVERAGE_ON" -eq 0 && "$FCOV_ON" -eq 0 ]] || return 1
+        log_warn "using legacy simv without fingerprint; wave, code coverage and functional coverage are disabled"
         return 0
     fi
     fp_wave="$(read_key "$FINGERPRINT_PATH" wave)"; fp_ccov="$(read_key "$FINGERPRINT_PATH" ccov)"
     fp_hash="$(read_key "$FINGERPRINT_PATH" sha256)"; fp_identity="$(read_key "$FINGERPRINT_PATH" identity)"
     [[ "$WAVE_ON" -eq 0 || "$fp_wave" == on ]] || return 1
     [[ "$COVERAGE_ON" -eq 0 || "$fp_ccov" == on ]] || return 1
+    fp_fcov="$(read_key "$FINGERPRINT_PATH" fcov)"
+    [[ "${fp_fcov:-off}" == "$FCOV_VALUE" ]] || return 1
+    if [[ "$FCOV_ON" -eq 1 ]]; then
+        [[ "$(read_key "$FINGERPRINT_PATH" user_compile_cfg_sha256)" == "$USER_COMPILE_CFG_HASH" ]] || return 1
+        [[ "$(user_compile_cfg_hash)" == "$USER_COMPILE_CFG_HASH" ]] || return 1
+    fi
     current_identity="$(simv_identity)"; current_hash="$(simv_hash)"
     [[ "$current_identity" == "$fp_identity" && "$current_hash" == "$fp_hash" ]]
 }
@@ -1732,7 +1763,7 @@ PHASE="COMPILE"
 if [[ "$DO_COMPILE" -eq 1 ]]; then
     rm -f "$FINGERPRINT_PATH"
     compile_job="compile"; register_job "$compile_job"; RESULT_STATE[$compile_job]="PENDING"
-    log_info "compile once on $FINAL_REMOTE_HOST (mode=$MODE wave=$WAVE_VALUE ccov=$CCOV_VALUE)"
+    log_info "compile once on $FINAL_REMOTE_HOST (mode=$MODE wave=$WAVE_VALUE ccov=$CCOV_VALUE fcov=$FCOV_VALUE)"
     if create_managed_job "$compile_job" compile "${SEEDS[0]}" "$LAUNCHER_DIR/compile.log"; then
         while [[ "${REMOTE_PHASE[$compile_job]}" != EXIT_CONFIRMED \
             && "${REMOTE_PHASE[$compile_job]}" != REMOTE_UNKNOWN && "$STOP_REQUESTED" -eq 0 ]]; do
@@ -1775,7 +1806,7 @@ if [[ "$DO_COMPILE" -eq 1 ]]; then
     fi
 else
     simv_exists || { log_error "simv is missing on $FINAL_REMOTE_HOST; use --compile: $SIMV_PATH"; STOP_REASON="simv missing"; cleanup_controller; trap - EXIT INT TERM; exit 5; }
-    verify_fingerprint || { log_error "simv fingerprint does not satisfy requested wave/coverage"; STOP_REASON="fingerprint mismatch"; cleanup_controller; trap - EXIT INT TERM; exit 5; }
+    verify_fingerprint || { log_error "simv fingerprint does not satisfy requested wave/coverage/fcov or local compile configuration; use --compile"; STOP_REASON="fingerprint mismatch"; cleanup_controller; trap - EXIT INT TERM; exit 5; }
 fi
 SIMV_BASELINE="$(simv_identity)"
 

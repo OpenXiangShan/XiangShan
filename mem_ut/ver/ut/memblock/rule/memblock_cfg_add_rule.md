@@ -209,3 +209,9 @@ make eda_run tc=tc_sanity mode=base_fun
 ```
 
 远端仿真流程按项目远端编译仿真规则执行。
+
+## 功能覆盖率编译配置入口
+
+功能覆盖率模型和 bind 需要在预处理阶段选择，不属于 `user_ctrl` 运行期组件控制字段。此类配置使用独立的 ignored 文件 `cfg/user_compile_cfg.local.svh`，由 `memblock_compile_params.svh` 引入；公共模板为 `cfg/user_compile_cfg.local.default.svh`。四个模块宏及默认关闭规则以 `memblock_parameter_management_rule.md` 为准，使用示例见 `env/fcov/README.md`。
+
+Makefile 维护 `ensure_user_compile_cfg_local`，与现有运行期配置的创建规则共同作为 `compile`、`rtl`、`batch_run` 的依赖；个人文件缺少才复制模板，已有文件不得覆盖。此类存在性宏不增加 `<field>_valid` 或 env cfg 字段；模板与自动生成文件默认均不定义任何模块宏，修改后必须重新编译。

@@ -5,7 +5,10 @@
 `ifndef MEMBLOCK_LDU_SCALAR_FCOV_BIND__SV
 `define MEMBLOCK_LDU_SCALAR_FCOV_BIND__SV
 
+`include "memblock_compile_params.svh"
+
 `ifdef MEMBLOCK_UT_FCOV
+`ifdef MEMBLOCK_FCOV_LOAD_UNIT_EN
 bind LoadUnit memblock_ldu_scalar_fcov u_memblock_ldu_scalar_fcov (
     .clock(clock), .reset(reset), .reset_backend_done(memblock_sync_pkg::reset_backend_done),
     .io_ldin_valid(io_ldin_valid), .io_ldin_ready(io_ldin_ready),
@@ -101,6 +104,7 @@ bind LoadUnit memblock_ldu_scalar_sva u_memblock_ldu_scalar_sva (
     .reset              (reset),
     .reset_backend_done (memblock_sync_pkg::reset_backend_done)
 );
+`endif // MEMBLOCK_FCOV_LOAD_UNIT_EN
 `endif
 
 `endif

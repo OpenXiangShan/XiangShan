@@ -8,6 +8,15 @@
 `ifndef MEMBLOCK_COMPILE_PARAMS__SVH
 `define MEMBLOCK_COMPILE_PARAMS__SVH
 
+// 功能覆盖率编译配置：四个模块宏均以“未定义”表示默认关闭。
+// 本地文件只允许定义所需开关；fcov=on 仍是全局编译前提。
+// MEMBLOCK_FCOV_VECTOR_US_EN：向量 unit-stride 模型及 bind。
+// MEMBLOCK_FCOV_LOAD_UNIT_EN：标量 LoadUnit 模型及 bind（含现有 SVA 空壳）。
+// MEMBLOCK_FCOV_STORE_UNIT_EN：标量 StoreUnit 模型及 bind（含现有 SVA 空壳）。
+// MEMBLOCK_FCOV_DTLB_EN：DTLB 全部模型及 bind，内部不再细分开关。
+// Makefile 在编译前从空模板补齐本地文件；修改后必须重新编译。
+`include "user_compile_cfg.local.svh"
+
 // V2默认参数：当前worktree生成的MemBlock顶层ROB value为8 bit，
 // XSCoreParameters.RobSize为160；LQ/SQ value分别为7/6 bit。
 // 这些宏描述DUT接口与公共状态表宽度，V3环境如需复用可在编译期覆盖。

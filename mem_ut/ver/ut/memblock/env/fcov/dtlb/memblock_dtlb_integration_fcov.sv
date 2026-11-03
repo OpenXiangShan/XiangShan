@@ -9,7 +9,10 @@
 `ifndef MEMBLOCK_DTLB_INTEGRATION_FCOV__SV
 `define MEMBLOCK_DTLB_INTEGRATION_FCOV__SV
 
+`include "memblock_compile_params.svh"
+
 `ifdef MEMBLOCK_UT_FCOV
+`ifdef MEMBLOCK_FCOV_DTLB_EN
 module memblock_dtlb_integration_fcov (
     input wire clock,
     input wire reset,
@@ -1014,6 +1017,7 @@ module memblock_dtlb_integration_fcov (
     end
 
 endmodule: memblock_dtlb_integration_fcov
+`endif // MEMBLOCK_FCOV_DTLB_EN
 `endif
 
 `endif

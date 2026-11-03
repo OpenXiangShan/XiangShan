@@ -86,6 +86,10 @@ cd mem_ut/ver/ut/memblock/sim
 - [memblock_parameter_management_rule.md](mem_ut/ver/ut/memblock/rule/memblock_parameter_management_rule.md)
 - [mem_ut_parameter_management.md](AI_DOC/project_management/mem_ut_parameter_management.md)
 
+当前 `mem_ut` 功能覆盖率模型文件管理规则文档为：
+
+- [mem_ut_fcov_file_management_rule.md](AI_DOC/project_management/mem_ut_fcov_file_management_rule.md)
+
 当前 `AI_DOC` 文件分类管理规则文档为：
 
 - [ai_doc_file_management_rule.md](AI_DOC/project_management/ai_doc_file_management_rule.md)
@@ -176,11 +180,16 @@ testcase preset 的 Makefile `cfg=` 入口、编译期宏参数或 connect-time 
 `mem_ut/ver/ut/memblock/rule/memblock_parameter_management_rule.md` 和
 `AI_DOC/project_management/mem_ut_parameter_management.md`。
 
+后续新增、修改、迁移、整理或复查 `mem_ut` 功能覆盖率模型、bind 及配套文件时，必须优先阅读
+`AI_DOC/project_management/mem_ut_fcov_file_management_rule.md`。每个模块使用独立目录；首次添加时必须
+新建该模块目录并添加对应的编译期宏进行隔离，默认关闭，模型与 bind 使用一致的门控条件。
+
 后续新增、移动、整理、归档或 review `AI_DOC` 下的设计文档、plan、review、flow、
 网页文档、分析文档或项目管理规则时，必须先阅读
 `AI_DOC/project_management/ai_doc_file_management_rule.md`。
 
 后续使用、修改或 review `mem_ut/ver/ut/memblock/scripts/run_eda_regression.sh`，包括远端编译一次、
+功能覆盖率 `--fcov` 和本地编译配置摘要校验、
 多 seed 并发仿真、runtime plusargs、UVM 错误联停、结果文件判读或脚本参数调整时，必须先阅读
 `AI_DOC/project_management/mem_ut_parallel_eda_regression_usage_rule.md`。
 
@@ -520,6 +529,7 @@ V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
 - 公共测试框架参数走 `env/plus.sv -> seq_csr_common.sv -> getter`
 - testcase preset 使用 `seq/plus_cfg/<cfg>.cfg`，通过 Makefile `cfg=<cfg>` 指定，testcase 源码不散落写 `plus::MEMBLOCK_*`
 - connect-time 静态参数归 `cfg/memblock_compile_params.svh`
+- 功能覆盖率模块宏属于编译期参数，个人配置使用 ignored 的 `cfg/user_compile_cfg.local.svh`；新增或调整时必须优先阅读上述参数管理规则和 cfg 添加规则，并同步默认模板。四个模块宏默认未定义，DTLB 只用一个宏，需与 `fcov=on` 同时开启；目录和用法见 [功能覆盖率配置](mem_ut/ver/ut/memblock/env/fcov/README.md)。
 - interface宽度、物理slot/pipe/port数量和connect-time capability不得建立runtime plus镜像；物理consumer直接读取compile宏/localparam
 - runtime只保留testcase行为使用量，受物理资源约束的参数统一由`seq_csr_common::apply_runtime_resource_limits()`收敛
 - 如后续模拟真实后端Dispatch admission，公共modeled `lsqCanAccept`必须作为LSQ/non-LSQ统一运行期gate实现；不能把6/4 registered credit写成物理宽度参数、allocator永久保留项或AMO/CBO专属特判

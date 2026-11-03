@@ -12,6 +12,8 @@ mem_ut/ver/ut/memblock/cfg/user_cfg.local.sv
 
 该文件被 git 忽略，用于个人固定配置；公共仓库只维护字段定义和默认模板。
 
+功能覆盖率的模型和 bind 使用独立编译期配置 `cfg/user_compile_cfg.local.svh`，不通过本文的 `user_ctrl` 字段控制。四个模块宏默认关闭，操作示例见 `env/fcov/README.md`；修改编译配置后必须重新编译。
+
 ## 设计目标
 
 - 公共仓库中能看到所有可配置字段
