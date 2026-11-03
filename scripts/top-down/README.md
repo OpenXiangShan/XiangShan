@@ -249,3 +249,31 @@ Example commands:
 ```
 
 `draw.py` generates the enabled figures according to `TOTAL_ANALYSE`, `BACKEND_ANALYSE`, `FRONTEND_ANALYSE`, `MEM_ANALYSE`, `CUSTOM_ANALYSE`, `INTEL_TOPDOWN_ANALYSE`, and `ROBHEAD_ANALYSE` in `configs.py`. When running `top_down.py` directly, the issue width used by the plotting stage is inferred from `--base-issue` and `--ref-issue`. When rerunning `draw.py` standalone, use `--issue-width` to specify the issue width for Intel Top-down analysis. The default value is 8.
+
+### 前端计数器口径 / Frontend counter semantics
+
+前端 bubble 在 IBuffer 展开为缺失的指令槽，并在 Dispatch 累计，因此数值表示损失槽数，不能直接当作周期数。
+Dispatch 每个槽接收一个原因编号，按 `PopCount(reason == counterId)` 累加。前端也传单个原因编号，
+无需 one-hot 位向量或依赖枚举顺序的优先级编码器。后端重定向覆盖 IFU 重定向，重定向整体替换旧原因；
+BPU override 仅标记实际冲掉的阶段，等待原因在相应供给阶段产生。
+
+`UBTBMissBubble`、`ABTBMissBubble`、`UTAGEMissBubble`、`URASMissBubble` **仅统计 override 损失**，
+归责于被纠正的早级预测中提供错误字段的组件。预测通过 S3 校验后，无论 S3 是否发出 override，
+IFU/precheck/后端纠错都归责 S3 的主 BTB、TAGE、SC、ITTAGE 或 RAS。
+主 BTB 负责分支存在性、位置、类型与自身提供的目标；方向错误按该分支实际使用的 SC/TAGE/BTB 计数，
+包含 not-taken；目标错误按实际使用的 RAS/ITTAGE/BTB 计数。预测错误归 BadSpec。
+
+`FtqUpdateBubble` 仅在训练让行造成待取指目标供应中断时统计，包含必要恢复空拍，归前端供给损失。
+预取超前距离限制、仍有目标可消费的 FTQ 满/训练背压不直接记损失。
+`FtqFullStall` 表示容量门槛实际阻止 fetch；`FtqEmptyBubble` 表示排除训练/容量/重定向后的目标队列空缺，
+包括复位初始化和正常预测入队流水延迟。`ICacheSupplyBubble` 表示有 FTQ 请求却等待 WayLookup 元数据或数据阵列端口；
+cacheable miss/refill 使用 `ICacheMissBubble`，翻译缺失使用 `ITLBMissBubble`。
+
+`UncacheFetchBubble` 包含 uncache/MMIO 等待、单指令交付余槽及重定向恢复；
+`IbufferStructure` 表示有效 enqueue 无法与不足宽度的 dequeue 合并；`FetchFragBubble` 表示有效短块 bypass 的余槽，
+包括还未组成一条完整指令的有效块。无 enqueue 时沿用上游原因；有效指令槽为 `NoStall`。
+`FrontendOtherCoreStall` 保留为未覆盖原因的诊断计数，验收要求为零，不作为正常分类。
+
+Frontend counters count **lost instruction slots**, not wait cycles. Early predictors own override penalties only;
+IFU/backend corrections always blame the S3 field provider. Training and ordinary target/cache supply losses belong to
+Frontend; prediction errors belong to BadSpec. New logs are required by these mappings.
