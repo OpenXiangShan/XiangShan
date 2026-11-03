@@ -49,6 +49,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     // prediction bundles
     val s1_foldedPhr:   PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val trainFoldedPhr: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    // Performance-only inputs; neither participates in functional training control.
+    val debug_trainValid:      Bool = Input(Bool())
+    val debug_trainOtherReady: Bool = Input(Bool())
 
     val prediction: IttagePrediction = Output(new IttagePrediction)
     val meta:       IttageMeta       = Output(new IttageMeta)
@@ -377,7 +380,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   private val t2_provider    = t2_providerInfo.tableIdx
   private val t2_altProvider = t2_altProviderInfo.tableIdx
-  private val t2_useAltPred = t2_hasAltProvider && t2_providerInfo.cnt.isSaturateNegative
+  private val t2_useAltPred  = t2_hasAltProvider && t2_providerInfo.cnt.isSaturateNegative
   when(t2_updateValid) {
     when(t2_hasProvider) {
       when(t2_useAltPred && t2_updateMisPred) { // Train the freshly selected alternate.
@@ -511,6 +514,85 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     Seq(
       ("total", true.B),
       ("need_read", t0_needRead)
+    )
+  )
+
+  // Compare against the training-read snapshot, not a prediction-time counter
+  // or the current WriteBuffer/SRAM contents. These reasons may overlap.
+  private val perf_providerCntChange = t2_hasProvider && !t2_providerInfo.cnt.shouldHold(providerCorrect)
+  private val perf_providerUsefulChange = t2_hasProvider && t2_altDiffers &&
+    t2_providerInfo.usefulCnt.value =/= providerCorrect.asUInt
+  private val perf_providerTargetChange = t2_hasProvider && t2_providerInfo.cnt.isSaturateNegative &&
+    t2_providerInfo.targetOffset.asUInt =/= t2_updateRealTargetOffset.asUInt
+  private val perf_updateAlt    = t2_hasProvider && t2_useAltPred && t2_updateMisPred
+  private val perf_altCorrect   = t2_altProviderTarget === t2_updateRealTarget
+  private val perf_altCntChange = perf_updateAlt && !t2_altProviderInfo.cnt.shouldHold(perf_altCorrect)
+  private val perf_altTargetChange = perf_updateAlt && t2_altProviderInfo.cnt.isSaturateNegative &&
+    t2_altProviderInfo.targetOffset.asUInt =/= t2_updateRealTargetOffset.asUInt
+  private val perf_entryChange =
+    (needAllocate && t2_allocateValid) || perf_providerCntChange || perf_providerUsefulChange ||
+      perf_providerTargetChange || perf_altCntChange || perf_altTargetChange
+  // A failed allocation still trains tickCnt; a region write is also useful work.
+  // Independent background useful resets are excluded from this transaction.
+  private val perf_readNoop = !perf_entryChange && !needAllocate && !rTable.io.writeValid
+  private val perf_providerNoChange = providerCorrect && t2_providerInfo.cnt.isSaturatePositive &&
+    !perf_providerUsefulChange
+
+  // FTQ keeps a pending payload stable until acceptance, or withdraws valid
+  // when flushing it. Reset on either event so waits cannot leak across requests.
+  private val perf_t0ReadStall            = io.enable && io.debug_trainValid && t0_readBankConflict
+  private val perf_t0ExclusiveReadStall   = perf_t0ReadStall && io.debug_trainOtherReady
+  private val perf_t0StallCycles          = RegInit(0.U(XLEN.W))
+  private val perf_t0ExclusiveStallCycles = RegInit(0.U(XLEN.W))
+  when(!io.debug_trainValid || io.stageCtrl.t0_fire) {
+    perf_t0StallCycles          := 0.U
+    perf_t0ExclusiveStallCycles := 0.U
+  }.otherwise {
+    when(perf_t0ReadStall)(perf_t0StallCycles                   := perf_t0StallCycles + 1.U)
+    when(perf_t0ExclusiveReadStall)(perf_t0ExclusiveStallCycles := perf_t0ExclusiveStallCycles + 1.U)
+  }
+  private val perf_t1StallCycles          = RegEnable(perf_t0StallCycles, t0_fire)
+  private val perf_t2StallCycles          = RegEnable(perf_t1StallCycles, t1_fire)
+  private val perf_t1ExclusiveStallCycles = RegEnable(perf_t0ExclusiveStallCycles, t0_fire)
+  private val perf_t2ExclusiveStallCycles = RegEnable(perf_t1ExclusiveStallCycles, t1_fire)
+  XSPerfAccumulate("ittage_train_read_stall_cycles", perf_t0ReadStall)
+  XSPerfAccumulate("ittage_train_read_stall_cycles_exclusive", perf_t0ExclusiveReadStall)
+
+  XSPerfSeqAccumulate(
+    "ittage_train_read",
+    t2_updateValid && t2_needRead,
+    Seq(
+      ("provider_cnt_change", perf_providerCntChange),
+      ("provider_useful_change", perf_providerUsefulChange),
+      ("provider_target_change", perf_providerTargetChange),
+      ("altprovider_cnt_change", perf_altCntChange),
+      ("altprovider_target_change", perf_altTargetChange),
+      ("entry_change", perf_entryChange),
+      ("no_entry_change", !perf_entryChange),
+      ("noop", perf_readNoop),
+      ("noop_correct", perf_readNoop && !t2_updateMisPred),
+      ("noop_mispredict", perf_readNoop && t2_updateMisPred),
+      ("accepted_stall_cycles", true.B, perf_t2StallCycles),
+      ("noop_stall_cycles", perf_readNoop, perf_t2StallCycles),
+      ("noop_correct_stall_cycles", perf_readNoop && !t2_updateMisPred, perf_t2StallCycles),
+      ("accepted_stall_cycles_exclusive", true.B, perf_t2ExclusiveStallCycles),
+      ("noop_stall_cycles_exclusive", perf_readNoop, perf_t2ExclusiveStallCycles),
+      ("noop_correct_stall_cycles_exclusive", perf_readNoop && !t2_updateMisPred, perf_t2ExclusiveStallCycles)
+    )
+  )
+
+  // Mutually exclusive reasons for rereading a non-mispredicted branch.
+  // Saturated/correct providers can still need a useful-counter update to 1.
+  XSPerfSeqAccumulate(
+    "ittage_train_read_correct",
+    t2_updateValid && t2_needRead && !t2_updateMisPred,
+    Seq(
+      ("total", true.B),
+      ("no_provider", !t2_hasProvider),
+      ("provider_wrong", t2_hasProvider && !providerCorrect),
+      ("provider_correct_unsaturated", providerCorrect && !t2_providerInfo.cnt.isSaturatePositive),
+      ("provider_useful_only", providerCorrect && t2_providerInfo.cnt.isSaturatePositive && perf_providerUsefulChange),
+      ("provider_no_change", perf_providerNoChange)
     )
   )
 
