@@ -1,6 +1,8 @@
 import ast
 import csv
+import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -131,6 +133,25 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
     assert summary == {"rows": 778, "bin_ids": 778, "mapping_keys": 778, "legacy_ids": 4}
 
 
+def _canonical_ifu_blocks(rows):
+    scope = json.loads(Path(__file__).with_name("ifu343_scope.json").read_text())
+    assert scope["scope_count"] == 343
+    assert tuple(scope["section_counts"]) == IFU_V3_CANONICAL_BLOCK_LEAF_COUNTS
+    expected = [bid for block in scope["blocks"] for bid in block]
+    assert len(expected) == len(set(expected)) == 343
+    by_id = {}
+    for row in rows[1:]:
+        ids = set(re.findall(r"BIN-\d+", row[8]))
+        for bid in ids & set(expected):
+            assert ids == {bid}, ("ambiguous canonical mapping", bid)
+            assert bid not in by_id, ("duplicate canonical mapping", bid)
+            by_id[bid] = row
+    assert set(by_id) == set(expected), ("missing canonical bins", set(expected) - set(by_id))
+    blocks = [[by_id[bid] for bid in block] for block in scope["blocks"]]
+    assert tuple(map(len, blocks)) == IFU_V3_CANONICAL_BLOCK_LEAF_COUNTS
+    return blocks
+
+
 def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
     repo_root = Path(__file__).resolve().parents[7]
     testpoint_path = (
@@ -141,7 +162,8 @@ def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
         rows = list(csv.reader(handle))
 
     marker_indices = [
-        index for index, row in enumerate(rows) if "@加柏文" in "".join(row)
+        index for index, row in enumerate(rows)
+        if row[1].strip() == "IFU" and any(value.strip().startswith("V3 ") for value in row[2:4])
     ]
     assert len(marker_indices) == 4
 
@@ -182,9 +204,7 @@ def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
             }
             assert row[9].strip() != "UNMAPPED"
 
-    canonical_blocks = [
-        rows[start - 1 : end] for start, end in IFU_V3_CANONICAL_BLOCK_RANGES
-    ]
+    canonical_blocks = _canonical_ifu_blocks(rows)
     assert (
         tuple(sum(bool(row[4].strip()) for row in block) for block in canonical_blocks)
         == IFU_V3_CANONICAL_BLOCK_LEAF_COUNTS
@@ -212,8 +232,8 @@ def test_current_ifu_contract_rows_reject_obsolete_6220_signal_semantics():
     fields = physical_rows[0]
     canonical_rows = [
         dict(zip(fields, row, strict=True))
-        for start, end in IFU_V3_CANONICAL_BLOCK_RANGES
-        for row in physical_rows[start - 1 : end]
+        for block in _canonical_ifu_blocks(physical_rows)
+        for row in block
         if row[4].strip()
     ]
     assert len(canonical_rows) == 343
@@ -452,11 +472,12 @@ def test_modeled_jiabowen_runtime_producer_gap_inventory_is_current():
     instr_indices = _resolve_instr_uncache_mark_indices(instr_tree)
     direct_keys = _literal_recorder_mark_keys(repo_root)
     missing = []
+    canonical_ids = {bid for block in json.loads(
+        Path(__file__).with_name("ifu343_scope.json").read_text()
+    )["blocks"] for bid in block}
     for physical_line, row in enumerate(rows, start=2):
-        if not any(
-            start <= physical_line <= end
-            for start, end in IFU_V3_CANONICAL_BLOCK_RANGES
-        ):
+        ids = set(re.findall(r"BIN-\d+", row["coverage"]))
+        if not (ids & canonical_ids):
             continue
         if not row["Checkpoint"].strip() or row["status"] != "MODELED":
             continue
@@ -1004,6 +1025,31 @@ def test_icache_hitmiss_leaves_are_single_bin_and_match_registry():
 def test_instr_uncache_model_emits_atomic_current_v3_half_contract():
     snapshot = instr_uncache_model.current_v3_contract_snapshot()
 
-    assert snapshot["design_baseline"].startswith("3448f4ad4")
+    # Follow the current kunminghu-v3 merge parent instead of a frozen SHA.
+    root = Path(__file__).resolve().parents[7]
+    merges = subprocess.check_output(
+        ["git", "log", "--first-parent", "--merges", "--format=%P%x00%s", "HEAD"],
+        cwd=root, text=True,
+    )
+    expected = next(
+        parents.split()[1] for parents, subject in
+        (line.split("\0", 1) for line in merges.splitlines())
+        if "kunminghu-v3" in subject and len(parents.split()) >= 2
+    )
+    assert snapshot["design_baseline"] == expected
     assert snapshot["half_state_contract"] == "Valid EndHalfRviInfo / halfRviInfo"
     assert snapshot["legacy_aliases_input_only"] is True
+
+
+def test_canonical_scope_survives_row_movement_and_rejects_missing_or_duplicate():
+    root = Path(__file__).resolve().parents[7]
+    path = root / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv"
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+    blocks = _canonical_ifu_blocks(rows)
+    assert _canonical_ifu_blocks([rows[0], *reversed(rows[1:])]) == blocks
+    target = blocks[0][0]
+    with pytest.raises(AssertionError, match="duplicate canonical mapping"):
+        _canonical_ifu_blocks([*rows, target])
+    with pytest.raises(AssertionError, match="missing canonical bins"):
+        _canonical_ifu_blocks([row for row in rows if row is not target])

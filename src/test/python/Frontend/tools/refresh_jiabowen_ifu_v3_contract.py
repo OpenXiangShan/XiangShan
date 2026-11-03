@@ -42,7 +42,35 @@ class ContractUpdate:
 
 _CACHEABLE = "PMA可缓存且可执行地址"
 _REVIEW = "RTL_REVIEW:c0ca46459"
-_CURRENT_REVIEW = "RTL_REVIEW:3448f4ad4"
+
+
+def _current_v3_design_baseline() -> str:
+    """Resolve the current V3 design baseline from repository merge history."""
+    result = subprocess.run(
+        [
+            "git",
+            "log",
+            "--first-parent",
+            "--merges",
+            "--format=%H%x00%P%x00%s",
+            "HEAD",
+        ],
+        cwd=_REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    for line in result.stdout.splitlines():
+        fields = line.split("\0", 2)
+        if len(fields) != 3 or "kunminghu-v3" not in fields[2]:
+            continue
+        parents = fields[1].split()
+        if len(parents) >= 2:
+            return parents[1]
+    raise RuntimeError("cannot resolve the current kunminghu-v3 design baseline")
+
+
+_CURRENT_REVIEW = f"RTL_REVIEW:{_current_v3_design_baseline()[:9]}"
 _SUPERSEDED_EVIDENCE = {
     "BIN-1067": (
         f"{_REVIEW}:PredChecker is a cacheable writeback path; this leaf covers "
