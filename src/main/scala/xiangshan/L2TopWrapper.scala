@@ -356,7 +356,12 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
           "demand_hit" -> L2BOPPerf.Useful, "redundant" -> L2BOPPerf.Redundant)
         metrics.foreach { case (metric, event) =>
           val observed = oceanusL2.slices.flatMap(_.tshrs).map { t =>
-            (tapAndRead(t.io.bopPerf(event)), tapAndRead(t.io.bopPerfSource(event)))
+            // GSIM accepts probe reads on connection RHSs, not inside expressions.
+            val valid = Wire(Bool())
+            val origin = Wire(chiselTypeOf(t.io.bopPerfSource(event)))
+            valid := tapAndRead(t.io.bopPerf(event))
+            origin := tapAndRead(t.io.bopPerfSource(event))
+            (valid, origin)
           }
           sources.foreach { case (name, source) =>
             XSPerfAccumulate(s"pfB_${name}_$metric",
@@ -366,7 +371,9 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
         sources.foreach { case (name, source) =>
           val slot = oceanusL2.pfSourceSlots.indexOf(source)
           val overwritten = l2cfg.slices.indices.map { slice =>
-            tapAndRead(oceanusL2.pfQueueOverwriteBySource(slice)(slot))
+            val overwrite = Wire(Bool())
+            overwrite := tapAndRead(oceanusL2.pfQueueOverwriteBySource(slice)(slot))
+            overwrite
           }
           XSPerfAccumulate(s"pfB_${name}_queue_overwrite", PopCount(overwritten))
         }
