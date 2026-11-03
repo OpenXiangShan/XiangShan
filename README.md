@@ -94,63 +94,84 @@ Some of the key directories are shown below.
 └── ready-to-run           # pre-built simulation images
 ```
 
-## IDE Support
+## Development
 
-### bsp
-```
-make bsp
-```
+### Pre-requisites
 
-### IDEA
-```
-make idea
-```
+Refer to [OpenXiangShan/xs-env](https://github.com/OpenXiangShan/xs-env) for bare-metal, Nix devshell, and Docker environment setup, including dependencies and environment variable settings. From an xs-env checkout, `source ./env.sh` configures the project paths; `nix develop` also loads this script automatically.
 
-## Generate Verilog
+TL;DR: install java, mill, clang, and a simulator (Verilator or GSIM), clone xs-env or directly clone this repo, then run `make init` to initialize submodules.
 
-* Run `make verilog` to generate verilog code. This generates multiple `.sv` files in the `build/rtl/` folder (e.g., `build/rtl/XSTop.sv`).
-* Refer to `Makefile` for more information.
+#### Computational resources
 
-## Run Programs by Simulation
+Building XiangShan needs significant computational resources. i.e. `kunminghu-v3` `DefaultConfig` requires **128 GB RAM**; **64 GB RAM + 64 GB swap with zswap** also works, slightly slower. `-j` controls parallel Clang compilation, but single-threaded Verilator/GSIM model generation still needs **~100 GB memory**, a hard minimum unaffected by `-j`.
+
+### IDE Support
+
+BSP: `make bsp`
+
+IntelliJ IDEA:
+
+- 2026.1 or newer: `make bsp`, then refer to [official doc](https://www.jetbrains.com/help/idea/bsp-support.html)
+- Older versions: `make idea`
 
 ### Prepare environment
 
-* Set environment variable `NEMU_HOME` to the **absolute path** of the [NEMU project](https://github.com/OpenXiangShan/NEMU).
-* Set environment variable `NOOP_HOME` to the **absolute path** of the XiangShan project.
-* Set environment variable `AM_HOME` to the **absolute path** of the [AM project](https://github.com/OpenXiangShan/nexus-am).
-* Install `mill`. Refer to [the Manual section in this guide](https://mill-build.org/mill/cli/installation-ide.html#_bootstrap_scripts).
-* Clone this project and run `make init` to initialize submodules.
+- Set environment variable `NOOP_HOME` to the **absolute path** of the XiangShan project, for example `export NOOP_HOME=/path/to/XiangShan`. This is the only project home variable required by XiangShan itself.
+- Optional: set `NEMU_HOME` to the **absolute path** of [OpenXiangShan/NEMU](https://github.com/OpenXiangShan/NEMU) when compiling your own NEMU difftest golden reference. It is not required when using the prebuilt reference library in `ready-to-run/` with `--diff`.
+- Optional: set `AM_HOME` to the **absolute path** of [OpenXiangShan/nexus-am](https://github.com/OpenXiangShan/nexus-am) when compiling your own test cases. It is not required when running prebuilt workloads.
 
-### Run with simulator
+### Generate Verilog
 
-* Install [Verilator](https://verilator.org/guide/latest/), the open-source Verilog simulator.
-* Run `make emu` to build the C++ simulator `./build/emu` with Verilator.
-* Refer to `./build/emu --help` for run-time arguments of the simulator.
-* Refer to `Makefile` and `verilator.mk` for more information.
+- Install java and mill.
+- Run `make verilog` to generate verilog code. This generates multiple `.sv` files in the `build/rtl/` folder (e.g., `build/rtl/XSTop.sv`).
+- Refer to `Makefile` for more information.
 
-Example:
+### Build & Run with simulator
+
+- Install either [Verilator](https://verilator.org/guide/latest/), or [OpenXiangShan/GSIM](https://github.com/OpenXiangShan/GSIM). Follow the respective repository's installation instructions and ensure the tool is on `PATH`.
+- With Verilator, run `make emu` to build the C++ simulator `./build/emu`.
+- With GSIM, run `make gsim GSIM=1 -j10` to build `./build/emu`. Keep `GSIM=1` to select the GSIM difftest configuration during elaboration. Note that GSIM requires `clang++` 19 or newer.
+- Prefer `numactl` to bind simulation to physical cores and memory on the same NUMA node; see [`scripts/xiangshan.py`](scripts/xiangshan.py) (`--numa`, `--threads`).
+- Refer to `./build/emu --help` for run-time arguments of the simulator.
+- Refer to `Makefile`, `difftest/verilator.mk`, and `difftest/gsim.mk` for more information.
+
+Choose one build command, then run a workload:
 
 ```bash
-make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
+make emu CONFIG=DefaultConfig EMU_THREADS=2 -j10  # Verilator
+# Alternatively: make gsim GSIM=1 CONFIG=DefaultConfig -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
+
+### Testing
+
+We encourage testing with workloads on a simulator: write focused regression cases using [nexus-am](https://github.com/OpenXiangShan/nexus-am), or run the CoreMark or Linux etc. binaries provided by `ready-to-run/`. To build your own workloads, set `AM_HOME` and follow the nexus-am instructions (for example, `make ARCH=riscv64-xs` in a test or application directory).
+
+After building `emu` with either simulator, a Linux smoke test uses the same prebuilt difftest reference:
+
+```bash
+./build/emu -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
+```
+
+ScalaTest/Chisel unit tests in `src/test/scala/` are another option. Run them with `mill -i xiangshan.test.test`, or select a suite with `mill -i xiangshan.test.testOnly xiangshan.frontend.bpu.SaturateCounterTest`.
+
 ### Run with xspdb
 
 There are two ways to use xspdb:
 
 1. Quick Start with Prebuilt Binaries
-    * **Why choose this?** It is lightweight and requires no compilation. A standard Python environment is enough to run the full XiangShan experience with low memory usage.
-    * **Step 1: Download** Get the latest XSPdb from the run summary of the repository's [Actions](https://github.com/OpenXiangShan/XiangShan/actions/workflows/release.yml?query=is%3Asuccess+event%3Apush) workflow.
-    * **Step 2: Extract & Run**
+    1. Get the latest XSPdb from the run summary of the repository's [Actions](https://github.com/OpenXiangShan/XiangShan/actions/workflows/release.yml?query=is%3Asuccess+event%3Apush) workflow.
+    2. Extract & Run
 
 2. Build from source code
-    * Install [picker](https://github.com/XS-MLVP/picker), a verification tool that supports high-level languages.
-    * Run `make pdb` to build XiangShan Python binaries.
-    * Run `make pdb-run` to run XiangShan binaries.
+    1. Install [picker](https://github.com/XS-MLVP/picker), a verification tool that supports high-level languages.
+    2. Run `make pdb` to build XiangShan Python binaries.
+    3. Run `make pdb-run` to run XiangShan binaries.
 
 Example output and interaction:
 
-```bash 
+```bash
 $ make pdb-run
 [Info] Set PMEM_BASE to 0x80000000 (Current: 0x80000000)
 [Info] Set FIRST_INST_ADDRESS to 0x80000000 (Current: 0x80000000)
@@ -179,6 +200,10 @@ HIT GOOD LOOP at pc = 0xf0001cb0
 ## Troubleshooting Guide
 
 [Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
+
+## Contributing
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting issues/PRs, especially the [Known issues](CONTRIBUTING.md#known-issues), and use the correct issue template.
 
 ## Acknowledgement
 
