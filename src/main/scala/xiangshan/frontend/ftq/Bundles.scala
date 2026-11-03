@@ -23,8 +23,8 @@ import utils.EnumUInt
 import xiangshan.Redirect
 import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.GuardedPc
-import xiangshan.frontend.Pc
 import xiangshan.frontend.GuardedPcInit
+import xiangshan.frontend.Pc
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
