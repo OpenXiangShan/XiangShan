@@ -7,9 +7,10 @@
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
 | 核验 commit | `1567628320ef77e1de1a3ae7a7c7057423e842b4` |
+| 本轮 CMO 专项复核 commit | `153977460cfb46108da0ad186c9b13f561b39f9c`；已包含 `7aa145db8fda27275cefe8fa03b2389e28b78fb4` 的 CMO error 修复。 |
 | 行为权威 | `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala`；相关行为还核对 `StoreQueueData.scala`、`StoreMisalignBuffer.scala`、`LSQWrapper.scala`、`MemBlock.scala`、DCache `CMOUnit`、CoupledL2 `MainPipe/MSHR/GrantBuffer`、`DatamoduleResultBuffer.scala` 与 `Bundles.scala`。 |
 | RTL 接口核验 | `build/rtl/StoreQueue.sv`。本文件用它核对当前工作区可见端口、方向和位宽；功能时序结论以 Scala/Chisel 源码为准。 |
-| 最后核验日期 | `2026-09-15` |
+| 最后核验日期 | `2026-10-28`（本轮只专项复核 CBO/CMO 段） |
 
 ## 术语与抽象功能说明
 
@@ -827,9 +828,9 @@ SQ sqDeq
 源码位置：`StoreQueue.scala:823-1119`。
 
 抽象功能描述：非 cacheable 和 MMIO store 不能走普通 SBuffer 规则。SQ 分别维护 NC 与 MMIO 状态机，
-对 CBO 再覆盖普通 Uncache 选择，确保请求只在正确的 ROB 顺序点发出。这里必须区分当前源码中已实现的
-Uncache error 注入，与 CMO/NC error 尚未收敛为同一异常 writeback 的边界，不能笼统地称为“所有总线错误
-都会转换回精确 exception”。
+对 CBO 再覆盖普通 Uncache 选择，确保请求只在正确的 ROB 顺序点发出。当前 HEAD 已分别在所属
+`uncache.resp.fire` 和 `cmoOpResp.fire` 中捕获 MMIO/CBO response error；NC final response 仍主要走
+Uncache/BEU 边界，三者不能笼统合并成同一类精确 exception。
 
 #### 8.1 MMIO 状态机
 
@@ -852,10 +853,9 @@ when (io.mmioStout.fire) { completed(deqPtr) := true.B }
    并且没有已经存在的异常时，s_idle 才进入 s_req。
 3. 非 CBO MMIO 从 s_req 发 `mmioReq`。当且仅当非 NC `io.uncache.resp.fire` 到达时，denied 映射为
    store access fault；仅在同一条 response 内 `!denied && corrupt` 时映射为 hardware error；两者同时为
-   1 时 denied 优先。这是普通 MMIO 与 I/O-backed `cbo.zero` 的真实 error 注入路径。注意这里还直接读取
-   `io.cmoOpResp.bits`：若此前 CMO 的 error 寄存仍残留，残留的 denied/corrupt 也可能污染当前无关的
-   non-NC response；例如当前 response 的 denied 与残留 CMO corrupt 可同时令 SAF/HWE 置位，不能把
-   “denied 优先”错误推广为跨来源的全局优先级。
+   1 时 denied 优先。这是普通 MMIO 与 I/O-backed `cbo.zero` 的真实 error 注入路径。当前 HEAD 的该分支
+   只读取本次 `uncache.resp.bits`，不再读取 CMO sideband，因此旧基线中的 stale CMO error 污染风险已由
+   `7aa145db8f` 一并消除。
    对普通 MMIO **store**，这条 response error 处理与 Uncache 的 bus-error 处理是并行关系：StoreQueue
    通过 `mmioStout` 向后端给出 `storeAccessFault/hardwareError`，同时 Uncache 在对应 TileLink store
    grant fire 时可产生 `busError.ecc_error`；因此“走 BEU”不代表“不写回后端”。对 MMIO **load**，
@@ -951,20 +951,12 @@ when (ncDeqTrigger) { completed(ncPtr) := true.B }
      映射为 `storeAccessFault`，把独立 corrupt 映射为 `hardwareError`，随当前 CBO 的 `mmioStout`
      写回给 ROB。BEU 是硬件故障诊断/中断 sideband，不能替代这条带当前 uop owner 的精确完成状态。
 
-   当前核验 commit 的 **CMO error bug** 是：`cmoOpResp.fire` 只令状态机进入 `s_wb`，没有在该分支写
-   `uncacheUop.exceptionVec`；`StoreQueue.scala:872-880` 对 CMO bits 的读取反而位于不相关的非 NC
-   `uncache.resp.fire` 分支中。因此 CMO `denied/corrupt` 不会绑定到本条 CBO 的异常 writeback，CBO 会以
-   空异常向量完成。这里不能再笼统写成“所有 CMO error 都没有任何 BEU”：由 L1/L2 本地 ECC 产生的错误
-   可能已经由对应 cache 独立上报；准确缺失的是 **CMO/SQ 对本条指令的 error 传播**，而来自下游 CHI
-   的 transaction error 也没有被证明存在另一条本核 BEU 补偿路径。
-
-   后续 V2 上游提交 `7aa145db8fda27275cefe8fa03b2389e28b78fb4`（`fix(StoreQueue): propagate CMO
-   response errors (#6554)`）正是把两项映射移到 `cmoOpResp.fire` 下；同一修复的前序开发提交
-   `42152f6baec7f3e7dee66f9c0c9932d2d54f348d` 还记录了修复前失败、修复后通过的动态 CBO error
-   reproducer。它们是当前缺陷定性的旁证，但不属于本文件核验的 `156762...` DUT。当前版本还存在
-   stale sideband 风险：CMOUnit error 寄存器在下一条 CMO request 前
-   保持，后续普通 MMIO 或 I/O-backed `cbo.zero` 的非 NC response 可能把旧 CMO error 注入无关
-   `uncacheUop.exceptionVec`。
+   当前 HEAD 已包含 `7aa145db8fda27275cefe8fa03b2389e28b78fb4`（`fix(StoreQueue): propagate CMO
+   response errors (#6554)`）：在 `cmoOpResp.fire` 内将 `denied` 映射为 `storeAccessFault`，将
+   `corrupt && !denied` 映射为 `hardwareError`，再随当前 CBO 的 `mmioStout` 写回。该 owner 归属使
+   CBOAck 的事务结果成为本条指令的精确完成状态；L1/L2 本地 ECC 仍可同时通过各自 BEU sideband 报告，
+   但不能替代这条 uop exception。旧基线曾在无关 Uncache response 分支读取 CMO sideband，当前 HEAD
+   已删除该读取，因此不再存在旧文档所述的 stale CMO error 污染路径。
 4. `cbo.zero` 可先作为带 wline 的 DataBuffer/SBuffer 项进入后级；普通 SBuffer fire 不会为 wline 置
    completed。SQ 记录 cboZeroUop/SqIdx，等 SBuffer 空，再通过 cboZeroStout writeback，最后置 completed。
 ```
@@ -1132,12 +1124,11 @@ when (lastlastCycleRedirect) {
   同样的 no-write drain。NC exception 直接 `completed`。这些都不是普通 store 数据写入。
 - 请求前已存在的 MMIO exception 不应进入实际 MMIO request 条件，因为该条件要求 `!hasException`；它按异常
   drain 收敛。MMIO request 后才返回的 denied/corrupt 则经 `mmioStout` 形成带异常的 writeback。
-- non-zero CBO 的 `cmoOpResp` error 与普通 MMIO uncache error 不能混写：当前前者没有在其 own fire 时
-  注入当前指令的 exception。L1/L2 本地 ECC 可能同时走对应 cache 的 BEU，但这不替代 CBO 的精确
-  response；下游 CHI transaction error 也不进入 CoupledL2 的本地 ECC BEU 输出。更细的 source 风险是
-  DCache `CMOUnit` 的 denied/corrupt 寄存器在下一次 CMO request 前保持，SQ 又在后续非 NC uncache
-  response 分支无 `cmoOpResp.fire` gate 地读取它，可能让上一条 CMO error 污染无关 MMIO。该组合在
-  测试点文档中作为 defect signature，而非本 flow 的正常异常处理。
+- non-zero CBO 的 `cmoOpResp` error 与普通 MMIO uncache error 不能混写：当前 HEAD 分别在所属 response
+  fire 下捕获错误。CBO denied 映射为当前 uop 的 `storeAccessFault`，独立 corrupt 映射为
+  `hardwareError`；普通 MMIO/I/O-backed `cbo.zero` 则只读取自身 Uncache response。L1/L2 本地 ECC
+  可能同时走对应 cache 的 BEU，但这不替代 CBO 的精确 response；下游 CHI transaction error 也不等同于
+  CoupledL2 本地 ECC BEU。
 - 正常 MAB 跨页双 lane/高页 PAddr 协议只属于两个 child 都正常完成的 `s_block` 路径。child StoreUnit 的
   请求/响应链是 `MAB.splitStoreReq -> StoreUnit.misalign_stin -> StoreUnit.misalign_stout -> MAB`；它可能独立
   产生 SQ 的 S1/S2 地址侧影响。**MAB parent 的标量 writeback 不是这条 child 链的下一跳**：它直接走
@@ -1200,7 +1191,7 @@ NC 跨16B 边界不得直接外推到 V3。
 - `build/rtl/StoreQueue.sv:59266-59279`：当前生成 RTL 中 S2 ExceptionBuffer source 的 `af -> exceptionVec[7]` 连接。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:644-821`：forwarding 窗口、CAM、data/addr/match invalid。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:823-1119`：MMIO、NC、CBO/CMO、WFI、writeback 状态机及 CMO/NC error 边界。
-- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:840-881`：`noPending`、I/O-backed `CBO.zero` response 分支及 stale CMO error 读取边界。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:840-881,1015-1038`：`noPending`、I/O-backed `CBO.zero` response error 与 CMO response error 的独立 owner 捕获。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1121-1405`：ROB commit 转换、DataBuffer/SBuffer、非对齐与 vector exception flag。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1450-1570`：vector feedback、redirect cancel、指针恢复、空满与 perf。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueueData.scala:33-83,220-269,278-350`：地址 CAM 和逐 byte forwarding 数据路径。
@@ -1216,7 +1207,7 @@ NC 跨16B 边界不得直接外推到 V3。
 - `src/main/scala/xiangshan/cache/dcache/mainpipe/MainPipe.scala:442-452,586-604,997-1004,1057-1067`：DCache Probe/回写本地 tag/data error 同时形成 C response corrupt 与 DCache BEU，L2-origin error 不重复上报。
 - `coupledL2/src/main/scala/coupledL2/SinkC.scala:67-83,150-160`、`coupledL2/src/main/scala/coupledL2/tl2chi/MSHR.scala:1101-1120,1145-1211,1248-1254`：L1 C response、CHI `NDERR/DERR` 和 L2 DS error 向 MSHR `denied/corrupt` 的累积。
 - `coupledL2/src/main/scala/coupledL2/tl2chi/MainPipe.scala:221-223,751-852,1032-1036`、`coupledL2/src/main/scala/coupledL2/CoupledL2.scala:502-516`、`src/main/scala/xiangshan/L2Top.scala:377-378`：L2 BEU 只由本地 directory/data ECC `l2Error` 输出，不覆盖 CHI transaction error。
-- 后续 V2 上游提交 `7aa145db8fda27275cefe8fa03b2389e28b78fb4`：将 CMO error 捕获移动到 `cmoOpResp.fire`；同一修复的前序开发提交 `42152f6baec7f3e7dee66f9c0c9932d2d54f348d` 保存了修复前失败、修复后通过的动态 reproducer，二者共同作为当前 commit 缺陷的修复与验证旁证。
+- 当前 HEAD 已包含 V2 提交 `7aa145db8fda27275cefe8fa03b2389e28b78fb4`：将 CMO error 捕获移动到 `cmoOpResp.fire` 并删除无关 Uncache response 对 CMO sideband 的读取；前序开发提交 `42152f6baec7f3e7dee66f9c0c9932d2d54f348d` 保存了修复前失败、修复后通过的动态 reproducer。
 - `src/main/scala/xiangshan/mem/MemBlock.scala:414-418`：uncache store error 经两拍延迟和 `cache_error_enable` gate 后导出 BEU/`uncacheError`。
 - `src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala:186-258`：SQ 连线、forward 顺序与对外 `issuePtrExt` 的实际来源。
 - `src/main/scala/xiangshan/mem/MemBlock.scala:1197-1208`：MAB 与 LSQ 的 `maControl` 顶层连接。
@@ -1243,6 +1234,7 @@ NC 跨16B 边界不得直接外推到 V3。
 | 2026-09-15 | `1567628320ef77e1de1a3ae7a7c7057423e842b4` | “vector MMIO/NC 未实现”容易被理解为 vector 访问这些属性时没有行为。 | 明确 cacheable vector store 走 `VSSplit -> StoreUnit -> StoreQueue -> DataBuffer/SBuffer -> DCache`；vector 访问实际 MMIO/NC 地址时由 StoreUnit S2 置 `storeAccessFault`，不进入正常 vector Uncache request/response/writeback。`vecmmioStout.valid` 固定 0，`ncState` 要求 `!isVec`；SQ 侧通过 vector exception/feedback、no-write drain 或 NC direct-complete 清理 bookkeeping。 | 用户要求将 vector MMIO/NC 支持范围和异常收敛语义整合到 feature flow。 | vector store、StoreUnit S2 属性判定、StoreQueue、VSMergeBuffer、Uncache 排除边界。 |
 | 2026-09-15 | `1567628320ef77e1de1a3ae7a7c7057423e842b4` | CMO error 段把 SQ 没有专用 `Uncache.busError` 误写成所有 CMO denied/corrupt 都不会形成任何 BEU，未区分本地 cache ECC 与事务 response。 | 明确 L1/L2 本地 ECC 可由故障 cache 独立上报 BEU，但 `CBOAck` 还承载本条 CBO 的精确事务结果；CHI `NDERR` 不进入 L2 本地 ECC BEU。当前 SQ 漏在 `cmoOpResp.fire` 捕获错误仍是功能 bug，并由后续 V2 上游 `#6554` 的源码修复和动态 reproducer 进一步确认。 | 用户提出“各 cache 已报 BEU，所以 SQ 无需处理 CMO response error”的反向判断，要求复核完整 Probe/L2/CHI/BEU 路径。 | DCache CMOUnit、CoupledL2 CBO MSHR、L1/L2 BEU、StoreQueue 精确异常和 stale sideband watcher。 |
 | 2026-09-20 | `d9f0f5757f6f95d6c8a8810109a16aff9eb7fa86` | 原 flow 只描述普通分支以 `allvalid || hasException` 支持 scalar exception drain，未单列 cross-16B priority branch 的差异。 | 明确跨 16B priority branch 仍硬要求 scalar `allvalid`，会使已 `committed && hasException && datavalid=0` 的 cacheable cross-16B store 无法进入 DataBuffer，造成 `completed/sqDeq` 永久停滞；该问题不同于 NC cross16 读指针双计数跳项。 | UID517 波形和两轮独立 Scala/FSDB review 确认 cross16、exception、committed、DataBuffer valid 和 SQ pointer 的闭环。 | StoreQueue cross16 exception drain、ROB fault redirect、DataBuffer/SBuffer、SQ resource release。 |
+| 2026-10-28 | `153977460cfb46108da0ad186c9b13f561b39f9c` | CMO 段仍把 `156762...` 基线上的 missing propagation 与 stale sideband 作为当前有效缺陷。 | 明确当前 HEAD 已包含 `7aa145db8f`：CBOAck error 在 `cmoOpResp.fire` 下绑定当前 uop，Uncache response 不再读取 CMO sideband；旧行为降级为历史回归背景。 | 用户要求基于当前 Scala 源码分析 CMO/CBO 端到端 flow，专项复核发现旧知识与当前源码冲突。 | StoreQueue CMO error、MMIO error、测试 responder 错误注入与 CBO 精确异常。 |
 
 ## 待确认项
 

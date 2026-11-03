@@ -1,61 +1,16 @@
-# MemBlock V2 测试框架整体 Flow 导览
+# Memblock访存策略和计划
 
-本文面向第一次接触 `mem_ut` 的读者，用“准备一批请求、送入 DUT、观察结果、确认收尾”的视角说明当前 V2 测试框架。它描述测试框架如何组织和追踪工作，不展开 SystemVerilog 函数内部判断，也不解释 DUT 内部流水线或内部 `ISSQueue` 的实现。
-
-适用范围：当前 `mem_ut_uvm_v2` 分支中的 real-dispatch 主流程，以及与该主流程相连的写回、提交、重发、redirect、L2TLB 和外部 memory responder 流程。
-
-## 1. 术语与抽象功能说明
-
-| 术语 | 通俗含义 | 在框架中的落点 | 例子 |
-| --- | --- | --- | --- |
-| `UID` | 一笔测试请求的全程编号，相当于快递单号 | `main_table_by_uid` 和 `status_by_uid` 的下标 | `uid=7` 从建表到结束都用同一个编号关联 |
-| 主表（main table） | “这次要测什么”的静态清单 | `main_table_by_uid` | 一笔 load/store 的操作类型、地址、优先级等 |
-| 状态表（status table） | “这笔请求现在走到哪里”的运行记录 | `status_by_uid` | 已入队、已发射、已写回、等待重发等 |
-| LSQ admission | 把主表请求真正送到 LSQ 输入并确认 DUT 已看到它的过程 | `lsqenq` flow、LQ/SQ map | load 获得 LQ 归属，store 获得 SQ 归属 |
-| issue queue | 测试框架自己的待发射候选队列 | `load_issue_q`、`sta_issue_q`、`std_issue_q` | 已可发射的 load 等待调度器选中 |
-| `fire` | valid/ready 握手成功，DUT 已接受当前接口请求 | `*_dispatched` 和 issue generation 记录 | 某个 LOAD port 被 DUT 接收 |
-| 写回（writeback） | DUT 报告执行结果或异常的输出事实 | raw monitor queue、`memblock_wb_event_t` | load 写回、STA/STD 完成、异常结果 |
-| IQ feedback | IssueQueue 的接受/命中反馈，不等同于真实写回 | IQ feedback raw event | STA feedback miss 会触发重发，但不是“执行完成” |
-| 重发（replay） | 某个目标本次执行无效，需要按新版本再发一次 | `replay_pending`、`replay_seq`、`ptw_wait_replay_q` | STA miss 后只把 STA 放回待发队列 |
-| redirect / flush | 取消一段较新的在途工作，并恢复资源和队列的过程 | `active_redirect`、cancel record、flush epoch | memory violation 覆盖年轻 load/store |
-| 提交（commit） | 框架向 DUT 推进 ROB 提交，并等待 LSQ 真正释放资源 | `rob_commit`、`lsq_deq` | store 已提交，但仍要等真实 `sqDeq` |
-| `terminal_done` | 该 UID 已不再需要任何框架处理 | `status.terminal_done` | 正常成功或已收敛的 fault 都可进入终态 |
-| `global stop` | 所有 UID 和辅助恢复工作都收尾后的统一停机信号 | `global_stop_requested` | 不能只因最后一笔 UID 完成就立刻停掉 responder |
-
-### 1.1 两个容易混淆的“入队”
-
-当前框架中“入队”至少有两层含义，必须分开看：
-
-1. **LSQ admission**：测试框架通过 `lsqenq` 接口把请求交给 DUT 的 LSQ 入口。握手和采样确认后，框架才认为该 UID 是 active，并建立 LQ/SQ 的运行时归属。
-2. **软件 issue queue**：框架把已经满足发射条件的 UID 放入 `load_issue_q`、`sta_issue_q` 或 `std_issue_q`，等待发射调度器选择。
-
-随后，`lintsissue` driver 将候选送到 DUT 接口并等待 `fire`。这只能说明 **DUT 已从接口接受请求**；测试框架不会把 DUT 内部每一个 `ISSQueue` 表项复制成另一张软件表。因此本文把这一段称为“DUT 接收发射请求”，不把软件 issue queue 误称为 DUT 内部 `ISSQueue`。
-
-## 2. 谁负责什么
-
-| 角色 | 抽象职责 | 不负责什么 |
-| --- | --- | --- |
-| testcase / `basicTest` | 选择测试场景、创建环境、启动顶层 virtual sequence、维持 UVM objection | 不直接管理每笔 UID 的运行状态 |
-| virtual sequence | 并发启动主表、LSQ 入队、发射、提交、L2TLB、DCache/SBuffer、redirect 等 sequence | 不逐拍解释 DUT 输出 |
-| 各 agent 的 driver | 把框架决定好的输入驱动到 DUT，并报告握手是否成功 | 不自行决定一笔请求已经 pass 或 replay |
-| 各 agent 的 monitor | 从 DUT 接口采集客观事实 | 不直接修改主表或状态表 |
-| `memblock_sync_pkg` | 提供 raw event 暂存、统一 service cycle、flush 版本和跨 agent 同步标志 | 不模拟 DUT 的功能行为 |
-| adapter / handler | 将 raw 接口事实关联到 UID，区分正常、fault、replay、redirect，并更新公共状态 | 不重新随机主表内容 |
-| `common_data_transaction` | 主表、状态表、索引、队列和恢复记录的统一 owner | 不驱动任何 DUT pin |
-| RM / scoreboard | 接收各 agent 的观测 transaction，提供并行的参考/比对通道 | 不抢占主表和状态表的生命周期 owner |
-| DCache、SBuffer、L2TLB responder | 在需要时响应 DUT 的外部请求，使主流程能继续前进 | 不决定 ROB 提交顺序 |
-
-可以把框架想成一个物流系统：主表是发货计划，状态表是包裹轨迹，driver 是发车口，monitor 是签收扫描枪，adapter/handler 是分拣中心，提交和 deq 才是最终完成签收。
-
-## 3. 一张图看完整主线
+## 1. 策略
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Microsoft YaHei, Noto Sans CJK SC, PingFang SC, Arial, sans-serif", "fontSize": "20px", "textColor": "#0F172A", "primaryTextColor": "#0F172A", "lineColor": "#475569", "edgeLabelBackground": "#FFFFFF"}, "flowchart": {"htmlLabels": true, "useMaxWidth": false, "padding": 20}}}%%
 flowchart LR
     A[测试用例选择场景] --> B[建立主表与初始状态表]
     B --> C[LSQ admission\nDUT 采样后激活 UID]
     C --> D[放入 LOAD / STA / STD\n软件 issue queue]
     D --> E[lintsissue 接口 fire\nDUT 接受发射请求]
-    E --> F[monitor 采集 IQ feedback / 写回 / 控制事件]
+    E --> DUT["<br/>MemBlock DUT<br/>被测存储模块<br/><br/>"]
+    DUT --> F[monitor 采集 IQ feedback / 写回 / 控制事件]
     F --> G{事件分类}
     G -->|正常写回| H[更新 pass / writeback]
     G -->|replay| I[仅重置需要重发的 target]
@@ -69,290 +24,122 @@ flowchart LR
     M --> N[terminal_done]
     N --> O[所有 UID 与辅助队列收敛]
     O --> P[global stop 和自然退出]
+
+    subgraph RC["抽象 RM + Check"]
+        direction TB
+        RM["RM 参考模型<br/>计算预期数据与异常"]
+        CHECK["Check 检查器<br/>对比预期与实际结果"]
+        RM -->|预期结果| CHECK
+    end
+    B -.->|主表与运行上下文| RM
+    F -->|实际观测与响应上下文| RM
+    F -->|DUT 实际结果| CHECK
+
+    classDef default fill:#EFF6FF,stroke:#2563EB,color:#0F172A,font-size:20px
+    classDef dut fill:#1E3A8A,stroke:#172554,color:#FFFFFF,stroke-width:4px,font-size:28px,font-weight:bold
+    classDef check fill:#F5F3FF,stroke:#7C3AED,color:#0F172A,font-size:20px
+    class DUT dut
+    class RM,CHECK check
+    style RC fill:#FAF5FF,stroke:#7C3AED,color:#0F172A,stroke-width:2px,font-size:20px,font-weight:bold
+    linkStyle default stroke:#475569,stroke-width:2px,color:#0F172A
 ```
 
-图中的回环不是“重新随机一笔新请求”。无论 replay 还是 redirect，框架首先确认旧动态实例已经失效，再让原主表中的同一个 UID 以新的运行时版本重新进入合适阶段。
-
-## 4. 共享数据中心：表、索引和队列
-
-`common_data_transaction` 是主流程的共享数据中心。对初学者而言，可以按“长期事实、短期状态、快速查找、待办事项、恢复记录”五类理解。
-
-### 4.1 主表：`main_table_by_uid`
-
-主表以一笔 transaction 的静态测试意图为主。建表后，发射、写回、重发和提交不会把生命周期结果写进主表；但 LSQ admission 会把实际分配到的 LQ/SQ key 回填到同一条主表记录，供后续接口关联使用。
-
-| 内容类别 | 主表保存的内容 | 为什么需要 |
-| --- | --- | --- |
-| 身份与操作类别 | `uid`、load/store/prefetch 等操作类别、`lsq_flow`、`fuType`、`fuOpType` | 决定这笔请求应该走 LOAD、STA、STD 还是其他合法路径 |
-| 地址与操作数 | 基址、立即数、计算出的虚拟地址 | 形成可重复的访存激励，也支持地址复用场景 |
-| 顺序线索 | ROB 相关 key，以及 LQ/SQ 分配字段 | 让框架可以按年龄和资源归属关联事件；建表时 LQ/SQ 字段是初始值，admission 成功后会回填实际 key 并建立 active map |
-| 测试属性 | 地址边界 profile、LSQ 元素数、延迟、发射优先级 | 控制本次要覆盖的行为，而非记录运行结果 |
-| 异常/访存属性 | TLB、PMA、corrupt、denied 等激励属性 | 让正常、异常和翻译相关场景都有明确输入来源 |
-
-主表可以来自两条路径：默认的随机构建，或 testcase 提供的手工主表。两者最终都要形成连续 UID，并在 `main_table_ready` 后才允许后续 sequence 消费。
-
-### 4.2 状态表：`status_by_uid`
-
-每个 UID 有一条状态表记录。它不是简单的“已完成/未完成”位图，而是整笔请求的运行时病历。为了方便阅读，可按下面六组字段理解。
-
-| 状态组 | 典型内容 | 它回答的问题 |
-| --- | --- | --- |
-| 激活与资源归属 | `active`、`enq`、ROB/LQ/SQ key、active LQ/SQ map、LSQ reservation | 这笔请求是否已被 DUT 接受，当前占用了哪些运行时资源 |
-| 可发射与排队 | `issue_ready`、`queued_load/sta/std` | 是否已经具备进入某条软件 issue queue 的条件，是否正在等待发射 |
-| 发射代际 | `load/sta/std_dispatched`、各 target 的 issue epoch | 哪个 target 已经真正 fire；晚到反馈属于哪一轮发射 |
-| 结果 | target 级和 UID 级的 `writeback`、`pass`、`fault`、IQ feedback success | 哪个执行分支已经返回结果；这些结果是否足以让整笔 UID 进入正常收敛 |
-| 恢复与版本 | `exception_pending`、`replay_pending`、replay target mask、`redirect_pending`、`flushed`、`issue_killed`、`dynamic_epoch`、`replay_seq` | 当前事件是否需要恢复；旧实例和新实例如何隔离 |
-| 提交与终态 | `rob_commit`、`lsq_deq`、`success`、`terminal_done` | ROB 是否提交、LSQ 资源是否实际归还、这笔 UID 是否彻底结束 |
-
-最重要的理解是：**主表描述“要跑什么”，状态表描述“已经跑到哪里”。** 发生 replay 或 redirect 时，通常保留主表意图，但清除或更新状态表中属于旧动态实例的内容。
-
-### 4.3 反查索引和总体进度
-
-| 对象 | 保存什么 | 用途 |
-| --- | --- | --- |
-| `uid_by_active_rob` | ROB key 到 UID 的映射 | writeback、commit、redirect 看到 ROB 信息时快速找到对应 UID |
-| `uid_by_lq` | LQ key 到 UID 的映射 | LQ deq、load 相关事件快速定位 owner |
-| `uid_by_sq` | SQ key 到 UID 的映射 | STA feedback、SQ deq、store 相关事件快速定位 owner |
-| `dispatch_progress` | 已连续进入终态的前缀、已成功 admission 的高水位 | 判断整体进度，不必每拍扫描完整主表 |
-| 全局 redirect 状态 | 当前 active redirect、phase、flush epoch、冻结确认 | 让 admission、issue、driver 和 handler 对“旧工作能否继续”使用同一口径 |
-
-这些索引相当于物流系统的“按运单号、货架号、车位号查包裹”功能。外部事件到来时，框架优先反查 owner，而不是重新遍历所有 UID 猜测它属于谁。
-
-### 4.4 待办队列
-
-| 队列/记录 | 队列元素的抽象内容 | 写入者与消费者 | 何时离开 |
-| --- | --- | --- | --- |
-| `load_issue_q` | 待发的 LOAD UID、ROB 年龄、优先级、延迟、LQ/SQ 归属、replay 版本 | route 写入，issue scheduler 消费 | 对应端口真实 fire；或被 replay/redirect 清理 |
-| `sta_issue_q` | 待发的 STORE address target | route 写入，issue scheduler 消费 | STA fire、replay 或 redirect |
-| `std_issue_q` | 待发的 STORE data target | route 写入，issue scheduler 消费 | STD fire 或 redirect |
-| raw monitor queues | monitor 刚采到的接口事实和采样上下文 | monitor 写入，adapter drain | 转换为语义事件后消费 |
-| `exception_event_q` | 已经关联 UID、但需要按 recovery 规则处理的 fault/replay/redirect 事件 | handler 写入，recovery handler 消费 | 被处理、被 redirect 覆盖丢弃，或重新入队 |
-| `pending_redirect_drive_q` | 需要由 redirect agent 真正驱动到 DUT 的 redirect payload | redirect owner 写入，redirect sequence 消费 | redirect 驱动完成并进入后续 flush 阶段 |
-| `ptw_wait_replay_q` | 需要等待翻译条件满足后才能重新发射的 replay 项 | replay handler 写入，TLB 条件满足后消费 | TLB 可用后回到 issue route，或被 flush 清除 |
-| `flushsb_req_q` | 等待 LSQ commit flow 服务的 flush store buffer 请求 | producer 写入，commit sequence 消费 | 已驱动并完成等待条件 |
-| cancel record | 一个 redirect epoch 的软件取消量、DUT 观察量和对账进度 | redirect flow 建立并收敛 | 软件回退和 DUT 观测都完成 |
-
-### 4.5 翻译和 CSR 辅助状态
-
-TLB 相关状态不替代主表或状态表，而是为“这笔请求的地址翻译是否准备好”提供额外上下文。
-
-| 对象 | 包含什么 | 在主流程中的作用 |
-| --- | --- | --- |
-| `tlb_entry_by_key` | 以 VPN、ASID、VMID、`s2xlate` 等组成的查找身份，以及冻结的翻译结果、PTE 属性、有效 fault 和生命周期信息 | 复用或建立 L2TLB responder 要返回的翻译结果 |
-| `uid_tlb_record_by_uid` | UID 当前需要的翻译上下文、等待/请求已发送/已完成或已取消等状态 | 防止翻译响应归属到错误 UID；为等待翻译的 replay 提供依据 |
-| `mmu_csr_state` | monitor 发布的最新 CSR 运行时快照 | 让 TLB 请求和响应使用与 DUT 同步的 ASID/VMID/翻译上下文 |
-
-对小白而言，只要记住：翻译表负责“地址怎么翻”，UID 状态表仍负责“这笔指令走到哪里”。
-
-## 5. 正常主流程，逐站说明
-
-### 5.1 建表：先写好测试剧本
-
-1. testcase 选择 virtual sequence，顶层 vseq 启动主 sequence 和配套 responder。
-2. 主 sequence 根据配置随机生成，或导入手工 transaction。
-3. 每一笔 transaction 分配连续 UID，写入主表；同 UID 的状态表先只保存基础身份和顺序快照，尚未 active。
-4. 所有 UID 建完后置 `main_table_ready`。LSQ admission 和 issue sequence 以此作为启动门槛。
-
-这一步的产物不是“已发送的请求”，而是一份可重复使用的测试计划。即使后面发生 replay，通常也不重建主表。
-
-### 5.2 LSQ admission：从计划变成 DUT 已看见的在途请求
-
-LSQ admission 是进入运行期的第一道真实边界。
-
-1. admission sequence 按 UID 顺序挑选可进入 LSQ 的 load/store，形成一个 `lsqenq` 输入批次。
-2. driver 在时钟边界把批次送到 DUT；框架先记录“已 launch、等待 DUT sample”的 reservation。
-3. 到下一采样边界，若期间没有 redirect/flush 取消该批次，框架才确认该 UID 被 DUT 看见。
-4. 框架为该 UID 建立 active ROB/LQ/SQ 映射，置 `active`、`enq`，并使其获得 `issue_ready` 资格。
-
-这里的“下一采样边界”非常重要。它避免框架在 driver 刚把信号摆上接口时，就过早假定 DUT 已经接收了请求。
-
-### 5.3 进入软件 issue queue：把一笔请求拆成可发射目标
-
-当 UID 已经 `active + enq + issue_ready`，route 逻辑根据主表操作类型决定要生成哪些发射目标：
-
-| 主表中的典型操作 | 进入的软件队列 | 含义 |
-| --- | --- | --- |
-| scalar load | `load_issue_q` | 等待 LOAD 发射 |
-| scalar store | `sta_issue_q` 和 `std_issue_q` | 地址部分和数据部分分别等待发射 |
-| 非普通标量路径 | 由当前 capability 和场景决定 | 不应硬套进这三条标量队列 |
-
-每个 queue item 保留 UID、ROB 年龄、target、优先级、延迟、LQ/SQ 归属和 replay 版本。这些不是新的 transaction，而是同一主表 UID 的一张“待发射任务卡”。
-
-### 5.4 发射与“进入 ISSQueue”：DUT 接受才算 fire
-
-issue scheduler 从三条软件队列挑选当前可用候选。选择时会尊重以下大方向：
-
-- 全局 flush/redirect 期间不发新工作。
-- 未到延迟、已经失效、版本不匹配或已经完成的候选不能再发。
-- 满足条件的候选按优先级和 ROB 年龄仲裁。
-
-被选中的候选由 `lintsissue` sequence 和 driver 映射到实际 issue port。只有 valid/ready 握手成功的 port 才记为 `fire`：
-
-1. 从对应软件 issue queue 删除已 fire 的任务卡。
-2. 清掉该 target 的 `queued_*`，置 `*_dispatched`。
-3. 为需要关联后续反馈的 LOAD/STA 创建本轮发射的 generation 记录。
-
-未 fire 的候选仍留在软件 issue queue，等待后续周期，而不是误标为已发。DUT 内部是否再进入何种 pipeline 或内部 `ISSQueue`，属于 DUT 行为；框架从接口角度只确认“已被 DUT 接受”。
-
-### 5.5 monitor、反馈与真实写回：先记录事实，再决定结果
-
-monitor 不会直接说“UID 成功”。它只采集接口事实，例如 IQ feedback、整数写回、控制异常、LQ/SQ deq、redirect anchor。随后发生以下两层转换：
-
-1. raw event 进入共享 raw queue，并带上采样时刻等上下文。
-2. adapter 用 active ROB/LQ/SQ map 和发射代际记录把事实关联到正确 UID；handler 再决定它是正常写回、fault、replay 还是 redirect。
-
-这里要区分两类反馈：
-
-| 观察到的事实 | 框架含义 | 是否可直接置 `writeback/pass` |
-| --- | --- | --- |
-| IQ feedback hit | 当前 issue 请求被 IssueQueue 接受成功 | 不可以；它不是执行结果 |
-| IQ feedback miss | 当前 target 未能正常接受，需要 replay | 不可以；它进入重发处理 |
-| real writeback 且无异常 | 对应 target 的真实执行结果到达 | 可以更新 target 级 writeback/pass |
-| real writeback 带异常 | 对应 target 出现 fault | 记录 fault，并交给 fault 收敛路径 |
-
-对于常规 scalar store，STA 和 STD 是两个独立 target。某一侧先写回时，只说明这一侧完成；两侧都达到各自完成条件后，UID 级 `writeback/pass` 才可能成立。
-
-### 5.6 提交、deq 与终态：成功不是“刚写回”
-
-写回完成不等于整笔 transaction 已结束。正常路径还要经过两个独立关口：
-
-1. **ROB commit**：commit sequence 按可提交顺序将完成的 UID 推给 DUT，状态表置 `rob_commit`。
-2. **LSQ deq**：monitor 观察 DUT 真正释放 LQ/SQ entry，框架删除 `uid_by_lq`/`uid_by_sq` 映射，状态表才具备 `lsq_deq` 条件。
-
-典型差异如下：
-
-| 类型 | 写回后 | 提交后 | 真正终态前还要等什么 |
-| --- | --- | --- | --- |
-| normal load | LOAD target pass | ROB commit | DUT 的 LQ deq 与 LQ 映射释放 |
-| normal store | STA/STD 都完成 | ROB store commit | DUT 后续的 SQ deq 与 SQ 映射释放 |
-| fault | fault 已落表 | fault 收敛的 commit | 相关 LQ/SQ 映射实际释放 |
-
-只有该 UID 不再 active、没有待处理 recovery、所需 target 已处理、ROB 已提交且 LQ/SQ 资源已释放后，框架才把它推进到 `terminal_done`。正常完成还会置 `success=1`；fault 也可以进入 `terminal_done`，但不代表成功。
-
-## 6. 异常分支：重发、redirect 和 fault
-
-### 6.1 replay：只重发需要重发的部分
-
-replay 的目标不是“把整张主表从头再跑一遍”，而是撤销当前 UID 的某个失效 target，再让该 target 回到 route/issue 阶段。
-
-1. monitor 发现 IQ feedback miss 或某类 backend replay。
-2. handler 先确认事件没有被同批 redirect 覆盖，也确实属于当前 UID 的当前发射代际。
-3. 状态表置 `replay_pending` 和对应 target mask，递增 `replay_seq`，清理旧 target 的已发射/已完成痕迹。
-4. 若需要等待翻译或 PTW 条件，任务进入 `ptw_wait_replay_q`；否则直接重新 route。
-5. route 只将请求 replay 的 target 放回相应软件 issue queue。新一次 `fire` 会形成新的发射代际。
-
-版本号的目的很朴素：上一轮发射的迟到反馈不能误算到新一轮。旧事件会被过滤或按已关闭记录丢弃，而不是污染新状态。
-
-### 6.2 redirect / flush：先停止旧世界，再恢复资源
-
-redirect 是范围更大的恢复事件，常用于 memory violation 等场景。它的抽象步骤为：
-
-1. 检测到 redirect 后，框架建立唯一 active redirect，并递增 flush 版本。
-2. admission、issue 和 driver 看见全局冻结后停止继续发送旧工作。
-3. redirect agent 从 `pending_redirect_drive_q` 取出 payload，真正驱动 DUT 的 redirect 输入。
-4. 框架按 redirect 覆盖范围找出受影响的 active UID，清掉它们的软件 issue 项、发射代际、active map 和需要回退的 reservation。
-5. cancel record 记录“软件认为需要取消多少 LQ/SQ 资源”以及“DUT 实际观察到多少取消”，两边完成对账后才能删除。
-6. 未被覆盖且仍合法的事件可以继续；被覆盖的旧写回/replay/fault 事件直接丢弃，不能抢先修改状态。
-7. 被取消但仍需测试的 UID 以后可重新 admission/reissue，形成新的动态实例。
-
-redirect 的核心原则是：**先以版本和覆盖范围确认旧事件是否还有效，再改变表和队列。** 这能避免迟到 writeback 被错误记到重发后的新 UID 实例上。
-
-### 6.3 fault：把失败变成可收敛的结果
-
-fault 并非立即结束仿真。框架先把 fault 关联到对应 target/UID，记录异常信息和 fault 状态，再走可提交、可释放资源的收敛路径。这样测试结束时能区分：
-
-- 正常成功：`success=1` 且 `terminal_done=1`。
-- 已处理的预期或被观察到的 fault：`success=0`，但仍可以 `terminal_done=1`。
-- 尚未收敛的异常：仍有 pending event、资源映射或恢复记录，不能作为测试正常结束。
-
-## 7. 旁路和支撑 Flow
-
-主表到提交是主干，但下面几类 flow 为主干提供必要条件。
-
-| Flow | 对主干的帮助 | 初学者应记住的边界 |
-| --- | --- | --- |
-| L2TLB / CSR | 根据当前翻译上下文响应 DTLB 请求，令需要翻译的 UID 能继续 | 请求来自 DTLB 到 L2TLB 的上游交互，不是 L2Cache/PTW 下游 memory 模型 |
-| DCache / SBuffer responder | 对 DUT 的外部 memory/SBuffer 请求给出受控响应 | responder 会等自身无 inflight 后自然退出，不能因主 UID 完成被强制截断 |
-| `flushSb` | 将 flush store buffer 请求交给 LSQ commit flow 服务 | 它有独立待办队列和完成等待条件 |
-| RM / scoreboard | 把各 agent 的观测 transaction 转成参考/比对流 | 它是并行观测通道，不替代 UID 生命周期状态 |
-| global sync | 统一 raw 事件、软件 service cycle、capture 窗口和 flush epoch | 它协调 testbench 组件，不等同于 DUT 时钟或功能模型 |
-
-## 8. 用一笔 load 和一笔 store 串起来
-
-### 8.1 普通 load
-
-```text
-主表产生 uid=0 的 load
-  -> LSQ admission 成功，uid=0 active/enq，并获得 LQ 归属
-  -> 进入 load_issue_q
-  -> lintsissue valid/ready fire，标记 LOAD 已发射
-  -> monitor 观察到 real writeback
-  -> 该 target 变为 writeback/pass
-  -> ROB commit
-  -> monitor 观察到 LQ deq，释放 LQ 映射
-  -> uid=0 success + terminal_done
-```
-
-### 8.2 普通 store
-
-```text
-主表产生 uid=1 的 store
-  -> LSQ admission 成功，uid=1 active/enq，并获得 SQ 归属
-  -> 分别进入 sta_issue_q 和 std_issue_q
-  -> STA 与 STD 分别 fire
-  -> 两个 target 分别得到需要的完成结果
-  -> UID 级 writeback/pass 成立
-  -> ROB store commit
-  -> 稍后观察到 SQ deq，释放 SQ 映射
-  -> uid=1 success + terminal_done
-```
-
-两条路径的差别说明了为什么状态表需要 target 级字段：store 的地址与数据不是一次状态跳变就能完整描述的。
-
-## 9. 测试何时真正结束
-
-框架不会只看“最后一个 UID 写回了”。正常退出至少要同时满足：
-
-1. 所有 UID 已推进到连续的 `terminal_done` 前缀。
-2. 三条软件 issue queue、replay 等待队列、redirect drive queue 等没有遗留工作。
-3. redirect 的 cancel record、anchor 和相关 raw sideband 已完成对账。
-4. DCache、SBuffer、redirect 等 background responder 在无 inflight 的安全 idle 边界自然返回。
-5. 最终检查确认 active ROB/LQ/SQ map、全局 flush 状态和关键队列均已清空。
-
-这套收尾条件的价值在于：即使某笔 transaction 已经显示完成，也不会让迟到的取消、deq 或外部响应静默丢失。
-
-## 10. 给初学者的阅读顺序
-
-遇到一条 log 或一个失败 UID 时，建议始终按下面顺序提问：
-
-1. 这笔 UID 在主表中原本是什么操作，应该走 LOAD、STA 还是 STD？
-2. 它是否已经完成 LSQ admission，并建立 active ROB/LQ/SQ map？
-3. 它当前是留在软件 issue queue，还是已经 `fire`？
-4. monitor 最近观察到的是 IQ feedback、real writeback、fault，还是 redirect？
-5. 状态表是否进入 replay/redirect/fault，当前事件的版本是否仍匹配？
-6. 它是否已 ROB commit，且真实 LQ/SQ deq 是否已经释放资源？
-
-只要沿着“主表意图 → 状态表阶段 → 队列位置 → 接口事实 → 提交/释放”这条线查，绝大多数问题都能定位到正确的 flow 类别，而不需要一开始钻进 driver 或 monitor 的逐行实现。
-
-## 11. 相关资料与源码落点
-
-需要继续深入某一段时，优先阅读以下专项文档：
-
-- `AI_DOC/mem_ut_flow_doc/virtual_sequence_unified_dispatch_flow.md`
-- `AI_DOC/mem_ut_flow_doc/main_table_build_and_stimulus_flow.md`
-- `AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md`
-- `AI_DOC/mem_ut_flow_doc/load_sta_std_issue_flow.md`
-- `AI_DOC/mem_ut_flow_doc/writeback_function_call_flow.md`
-- `AI_DOC/mem_ut_flow_doc/rob_commit_lq_sq_deq_flow.md`
-- `AI_DOC/mem_ut_flow_doc/replay_flow.md`
-- `AI_DOC/mem_ut_flow_doc/redirect_flow.md`
-
-本总览对应的主要代码对象为：
-
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/main_control_transaction.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/status_transaction.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/issue_queue_scheduler.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/writeback_status_handler.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/exception_redirect_replay_handler.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`
+### 1.1 随机激励支持场景与参数汇总
+
+| 序号 | 场景 | 支持参数（省略公共前缀 `MEMBLOCK_`） | 生成 / 控制逻辑与支持边界 | 参数数量 |
+| ---: | --- | --- | --- | ---: |
+| 1 | 主表规模与构建模式 | `MAIN_TRANS_NUM`、`USE_MANUAL_MAIN_TABLE`、`CONTROL_WORKER_TOPOLOGY_MODE` | 随机主表按配置生成 N 个条目；控制拓扑为 AUTO 时支持插入 CSR/SFence marker，并额外保留末尾 check_store；手工模式不计作随机场景。 | 3 |
+| 2 | 虚拟地址窗口 | `MAIN_VADDR_{BASE,RANGE}` | 普通随机路径在窗口内选择 64B 对齐起始地址；边界路径在同一窗口内选合法访问跨度。 | 2 |
+| 3 | 物理地址映射与访问窗口 | `PADDR_{BASE,RANGE}`、`MAIN_MEM_RANGES_EN` | TLB entry 随机选择物理 PPN；范围开关控制 shared memory 的严格访问窗口或按需稀疏分配。 | 3 |
+| 4 | 整数 Load / FP_LOAD 分类 / Store / Prefetch 混合 | `OP_CLASS_{INT_LOAD,FP_LOAD,STORE,PREFETCH}_WT` | 4 类按权重抽样；FP_LOAD 是现有发射与写回分类，操作码与整数 Load 共用下面 7 项配置。 | 4 |
+| 5 | Load 操作码与宽度 | `LOAD_FUOP_{LB,LH,LW,LD,LBU,LHU,LWU}_WT` | 7 种操作码；1/2/4/8B 及符号扩展、零扩展；INT_LOAD 和 FP_LOAD 共用权重，不重复计数。 | 7 |
+| 6 | Store 操作码与宽度 | `STORE_FUOP_{SB,SH,SW,SD}_WT` | 4 种操作码、1/2/4/8B；同一 UID 拆成 STA 与 STD 分别发射。 | 4 |
+| 7 | 软件 Prefetch 类型 | `PREFETCH_FUOP_{I,R,W}_WT` | 3 种 Prefetch 操作码按权重选择。 | 3 |
+| 8 | 地址对齐、非对齐与跨界 | `BOUNDARY_PROFILE_GEN_EN`；`BOUNDARY_{ALIGNED,MISALIGN_WITHIN_8B,CROSS_8B_WITHIN_16B,CROSS_16B_SAME_LINE,CROSS_CACHELINE_SAME_4K,CROSS_4K}_WT`；`STORE_CROSS_8B_WITHIN_16B_EN` | 6 类：自然对齐、8B 内非对齐、跨 8B 不跨 16B、跨 16B 不跨行、跨行不跨 4KB、跨 4KB；按合法的操作类型 × 宽度 × profile 组合采样，Store 跨 8B 子类有独立门控。 | 8 |
+| 9 | 地址复用与访存相关性 | `ADDR_REUSE_EN_{0,1}_WT`；`ADDR_REUSE_{LOAD_AFTER_STORE,LOAD_AFTER_LOAD,STORE_AFTER_LOAD,STORE_AFTER_STORE}_WT`；`ADDR_REUSE_KEEP_REF_SIZE_EN_{0,1}_WT`；`ADDR_REF_WINDOW_FIXED`、`ADDR_REF_WINDOW_{SMALL,MEDIUM,LARGE}_WEIGHT` | 4 种前后继组合；随机命中复用、选择近期 UID、选择保留参考宽度；历史窗口支持固定值或 3 档权重。 | 12 |
+| 10 | 每拍 LSQ 入队压力 | `ENQ_PER_CYCLE`、`ENQ_PER_CYCLE_RAND_EN`、`ENQ_PER_CYCLE_{ZERO,MIDDLE,MAX}_WEIGHT` | 固定每拍数量，或按零/中间/最大 3 档在 V2 的 0..6 路 slot 内抽样；中间档 -1 表示 AUTO 权重，实际接纳仍受资源约束。 | 5 |
+| 11 | LOAD / STA / STD 发射并行度 | `{LOAD,STA,STD}_PIP_NUM_{LIMIT,RANDOM_EN}` | 3 类端口分别固定使用上限或逐拍从 1..上限抽样；V2 物理上限为 3/2/2，不改变 DUT 容量。 | 6 |
+| 12 | 发射优先级与乱序 | `SEND_PRI_MODE_EN`、`GLOBAL_SEND_PRI_EN_WT`；`SEND_PRI_{DEFAULT,LOW_WT,MID_WT,HIGH_WT}`；`SEND_PRI_STD_{DEFAULT,LOW_WT,MID_WT,HIGH_WT}` | 普通 target 与 STD 两套优先级，分别从 0..33、34..66、67..100 三档采样；全局优先级过滤按权重命中，并结合 ROB 年龄仲裁。 | 10 |
+| 13 | 请求发射延迟 | `DELAY_{0,1_20,21_50}_WT` | 3 档：0、1..20、21..50；先选档，再抽样档内延迟。 | 3 |
+| 14 | ROB 起点与回绕 | `ROB_START_{FIXED_EN,FIXED_VALUE,ZERO_WT,MID_WT,NEAR_WRAP_WT}` | 固定起点或从零/中段/近回绕 3 档抽样；后续 ROB key 按序推进并翻转 flag。 | 5 |
+| 15 | 访存依赖与 StoreSet | `MDP_LOAD_WAIT_WT`、`MDP_STORESET_HIT_WT`、`LOAD_WAIT_STRICT_WT` | 按 UID 的确定性百分比命中构造 Load 等待较老 Store、StoreSet 命中及严格等待；不是独立随机化 DUT 反馈。 | 3 |
+| 16 | PC / FTQ / 目的寄存器 / RVC 元数据 | `RVC_WT`、`PC_BASE`、`PC_STRIDE`、`FTQ_IDX_BASE`、`PDEST_{BASE,RANGE}` | RVC 按 UID 确定性百分比命中；PC、FTQ、PDEST 按 UID 和配置派生，保持 replay 时一致。 | 6 |
+| 17 | L2TLB 多级页表 / 大页 | `L2TLB_LEVEL_WEIGHT_EN`、`L2TLB_S{1,2}_LEVEL_{0,1,2,3}_WT` | 两阶段各 4 档 level 权重；按实际激活阶段、Sv39/Sv48 模式和合法映射条件选择，不能视为所有 level 无条件可用。 | 9 |
+| 18 | L2TLB 翻译故障注入 | `L2TLB_S1_{PF,AF}_1_WT`、`L2TLB_S2_{GPF,GAF}_1_WT` | 4 类故障候选按百分比权重采样；仅对激活阶段生效，并按翻译 profile 收敛；不是主表中直接随机置 fault 位。 | 4 |
+| 19 | L2TLB PTE 权限与非法属性 | `L2TLB_S{1,2}_PTE_MODE`；`L2TLB_S1_PTE_{R,W,X,U,G,A,D,N,V}_1_WT`；`L2TLB_S2_PTE_{R,W,X,U,G,A,D,N}_1_WT` | 两阶段各选 LEGAL/MIXED/EXCEPTION_BIASED profile；S1 9 个属性、S2 8 个属性；V2 S2 没有 entry_v，因此无 S2 V 参数。 | 19 |
+| 20 | PBMT 与静态 PBMTE 门控 | `L2TLB_S{1,2}_PBMT_{0,1,2}_WT`、`MMU_SV39_{M,H}_PBMTE_EN` | 每阶段 3 类 PBMT 候选；两个 PBMTE 开关仅供 topology=0 的静态 Sv39 CSR producer 使用，实际翻译遵循运行期 CSR 上下文。 | 8 |
+| 21 | L2TLB 返回延迟、并发与乱序 | `L2TLB_SEQ_EN`、`L2TLB_MAX_OUTSTANDING`、`L2TLB_RESP_REORDER_EN`、`L2TLB_RESP_{MID,LONG}_LATENCY`、`L2TLB_RESP_{1C,MID,LONG}_WT`、`L2TLB_IDLE_STOP_CYCLE` | 3 档响应延迟；多笔 outstanding；可从到期响应中乱序选择；无在途请求后按 idle 条件退出。 | 9 |
+| 22 | L2TLB 物理页复用 / 别名 | `L2TLB_PPN_REUSE_{EN,HISTORY_SIZE,WT}` | 开启后收集已完成响应历史；新 4KB miss 按命中权重复用有效 PPN；历史长度 1..256，权重 0..100。 | 3 |
+| 23 | CSR 初始翻译 / 权限 / 特权上下文 | `CSR_INIT_*`：3 个 ATP mode 各 3 权重、3 个 ID 各 MIN/MAX、MXR/SUM/VMXR/VSUM 各 2 权重、VIRT 2 权重、IMODE/DMODE 各 3 权重 | 31 项约束初始 Bare/Sv39/Sv48、ASID/VMID、权限与 U/S/M 上下文；当前专项 cfg 将 PRIV_VIRT 固定为 0，不能据候选字段宣称动态 stage-2 已闭环。 | 31 |
+| 24 | CSR 静态功能开关组合 | `CSR_ENABLE_*_{0,1}_WT`：L1D_PF/AGT/PHT/STRIDE、L2_PF_MASTER/RECV/PBOP/VBOP、LDLD_VIO、CACHE_ERROR、UNCACHE_OUTSTANDING、MISALIGN_LD/ST | 13 个允许随机的功能开关，各有 0/1 两个权重；初始配置采样后，动态 profile 保持其当前值。 | 26 |
+| 25 | CSR 动态状态切换 | `CSR_CHANGE_{SATP,VSATP,HGATP,PERMISSION,PRIV_CONTEXT,PMP_PMA}_ENABLE`；`CSR_CHANGE_*` 的 31 项 mode/ID/权限/特权候选参数 | 6 组动态使能控制变化范围；开启组重新采样，关闭组复制已提交状态；PRIV_VIRT 专项限制同初始上下文。 | 37 |
+| 26 | CSR marker 随机插入 | `CSR_CONTROL_{ENABLE,MIN_INTERVAL,MAX_INTERVAL}` | AUTO 主表按 MIN..MAX 随机间隔预约 CSR marker；通过控制屏障执行，需配套 AUTO 控制拓扑。 | 3 |
+| 27 | PMP/PMA 保护区与访问属性 | `CSR_PMP_PMA_EXCEPTION_{ENABLE,BASE,RANGE}`；`CSR_PMP_EXCEPTION_{R,W,X}_{0,1}_WT`；`CSR_PMA_EXCEPTION_{C,ATOMIC}_{0,1}_WT` | 5 个属性各 0/1 权重，加保护区域 3 参数；PMP 满足 W→R 联合约束，异常区需满足地址合法性；配套 PMA/PMP 模型和 CSR 控制流程。 | 13 |
+| 28 | SFence marker 与 payload | `SFENCE_CONTROL_{ENABLE,MIN_INTERVAL,MAX_INTERVAL}` | 随机间隔插入 SFence；addr/id 和 {hv,hg}=00/10/01 三类每笔随机，valid/flushPipe/rs1/rs2 固定为 1；payload 没有独立权重参数。 | 3 |
+| 29 | L2/DCache 返回时序 | `L2_RSP_DELAY_{ZERO,SMALL,MEDIUM,LARGE}_WT`、`L2_RSP_REORDER_EN` | 4 档延迟：0、1..10、10..100、101..1000；可从已到期响应中乱序选择。 | 5 |
+| 30 | Uncache 返回时序 | `UNCACHE_RSP_DELAY_{ZERO,SMALL,MEDIUM,LARGE}_WT`、`UNCACHE_RSP_REORDER_EN` | 独立配置 4 档返回延迟与到期响应乱序；通过真实 Uncache 请求触发。 | 5 |
+| 31 | L2 / Uncache denied、corrupt 注入 | `L2_D_ERROR_STICKY_EN`、`L2_GRANTDATA_{DENIED,CORRUPT}_WT`、`L2_CBO_ACK_{DENIED,CORRUPT}_WT`、`UNCACHE_{DENIED,CORRUPT}_WT` | 6 个百分比权重在建立响应时采样；sticky 模式按物理 64B line 保留 L2 错误；CBO ACK 两项仅是 responder 配置，不表示主动 CBO 已支持。 | 7 |
+| 32 | L2 Hint 插入 | `L2_HINT_VALID_WT` | 对符合条件的响应按百分比权重生成 Hint；0 关闭。 | 1 |
+| 33 | L2 Probe 压力与降权 | `L2_PROBE_{EN,PRE_START_WT,COUNT_ONE_WT,COUNT_MID_WT,COUNT_LARGE_WT,TO_B_WT}` | 总开关、启动概率、3 档批量（1、2..6、7..15）、toB/toN 比例；物理容量和协议约束仍由 responder 检查。 | 6 |
+| 34 | 入队 / 发射 / 提交流程与握手 | `LSQENQ_SEQ_EN`、`LSQENQ_READY_TIMEOUT`、`DISPATCH_ISSUE_SEQ_EN`、`DISPATCH_ISSUE_NONBLOCKING_EN`、`DISPATCH_READY_TIMEOUT`、`LSQCOMMIT_SEQ_EN` | 控制主流程开关、阻塞/非阻塞 issue 与等待超时；仅对真实 fire 更新已发状态，未 fire 请求保留重试；不新增随机反馈。 | 6 |
+| 35 | Redirect / Flush 恢复 | `REDIRECT_{SEQ_EN,DRIVE_TIMEOUT,FREEZE_TIMEOUT}` | 依据实际控制事件冻结、驱动 redirect、取消并恢复资源；3 项为流程控制，不是 redirect 随机概率。 | 3 |
+| 36 | Replay 等待翻译 | `REPLAY_WAIT_PTW_{EN,TIMEOUT}` | 实际 replay 事件触发；可等待翻译条件后重新发射对应 target，保持同一 UID。 | 2 |
+| 37 | StoreBuffer flush 协同 | `FLUSHSB_{SEQ_EN,REQUEST_CYCLE,TIMEOUT}` | 按指定 cycle 请求 flushSb 并等待收尾；是可配置控制场景，不是随机间隔。 | 3 |
+| 38 | PMA/PMP 参考模型与检查 | `PMA_PMP_{MODEL_EN,RAW_COMPARE_EN,XMR_CHECK_EN,UNDEFINED_AFTER_TLB_FAULT}` | 4 项控制参考模型、raw 比对、内部观测与翻译故障后未定义属性处理；不作为新增随机场景。 | 4 |
+| 39 | 诊断与完成判定 | `HARD_XZ_CHECK_EN`、`CHECK_TRIGGER_EN`、`LSQ_RESYNC_ON_MISMATCH`、`STA_REAL_WB_PASS_EN`、`ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES` | X/Z、trigger、LSQ 对账、STA 真实写回和无进展诊断；均为检查/兼容控制，不计作新的随机行为。 | 5 |
+| 40 | AMO / LRSC（当前禁用） | `OP_CLASS_AMO_WT`、`AMO_FUOP_{LR,SC,AMOSWAP,AMOADD,AMOXOR,AMOAND,AMOOR,AMOMIN,AMOMAX,AMOMINU,AMOMAXU}_{W,D}_WT` | 已定义 1 个类别权重与 22 个操作码权重；V2 校验强制类别权重为 0，随机/手工/边界主表均在 admission 前拒绝 AMO，不能作为已支持场景。 | 23 |
+| 41 | CBO（当前禁用） | `OP_CLASS_CBO_WT`、`CBO_FUOP_{ZERO,CLEAN,FLUSH,INVAL}_WT` | 已定义 1 个类别权重与 4 个操作码权重；V2 校验强制类别权重为 0，主动 CBO 主流程尚未开放。 | 5 |
+| — | 向量访存（当前不支持） | 无可用随机主表入口 | 当前 V2 主表校验拒绝 vector LS；不把已有接口或结构字段计为已支持随机场景。 | 0 |
+| **合计** | **配置项统计，非覆盖率或组合数量** | **当前源码 296 项场景/流程/检查配置 + 28 项 AMO/CBO 保留配置** | **按独立参数名去重；花括号按所列成员展开，星号只匹配当前已定义项；默认或专项 cfg 是否启用不改变定义数量。** | **324** |
+| — | 源码依据 | [参数定义](../../../mem_ut/ver/ut/memblock/env/plus.sv)、[配置读取与能力门控](../../../mem_ut/ver/ut/memblock/seq/base_seq_help/seq_csr_common.sv) | [主表与边界生成](../../../mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv)、[翻译随机模型](../../../mem_ut/ver/ut/memblock/seq/base_seq_help/tlb_map_builder.sv)、[CSR 随机模型](../../../mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_csr_randomizer.sv)、[SFence 激励](../../../mem_ut/ver/ut/memblock/seq/base_seq/memblock_sfence_control_base_sequence.sv)、[L2/Uncache responder](../../../mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv) | — |
+
+## 2. 计划
+
+| 计划口径 | 内容 |
+| --- | --- |
+| 范围 | 当前 V2 测试框架、RM（参考模型）及功能覆盖率；本表是待办汇总，不表示已实现或已完成验证。 |
+| 优先级 | P0：当前标量主流程的检查可信度与覆盖基础；P1：扩展特殊指令及控制语义；P2：向量及依赖前序能力的复杂组合。优先级为建议，不含人员、工期或覆盖率达标承诺。 |
+| 现有能力 | 已有普通标量 Load/Store、6 类地址边界、replay/redirect、CSR/SFence、翻译/PMP/PMA、L2/Uncache 错误注入及部分结果检查；不按旧 TODO 文件直接认定这些能力缺失。 |
+| 覆盖率边界 | 当前 `memblock_fcov.sv` 仅有注释模板；下表覆盖项均为待建模候选。模块名已核对当前生成 RTL，具体事件、时序、bin 和 cross 尚需逐项分析与信号映射。 |
+| 统计原则 | 激励生成、DUT 实际事件命中、RM 正确性检查分别统计；未开放功能标为阻塞，不能通过不采样或忽略 bin 计成已覆盖；不虚构当前覆盖率百分比。 |
+
+| 编号 | 分类 | 大特性 / MemBlock 内部模块 | 当前状态与主要缺口 | 计划内容 | 完成标准 | 建议优先级 / 前置依赖 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F01 | 测试框架 | 原子访存与多 uop | AMO/LRSC/CAS 只有编码、分类或局部基础；AMO/MOU 在 admission 前拒绝。 | 分阶段建立 LR/SC、普通 AMO W/D、AMOCAS 多 uop 的激励与资源生命周期，补齐地址/数据协同、真实写回、异常及取消。 | 每类操作完成从建表、发射到真实完成、提交、资源释放；LR/SC 成败、多 uop 和中断恢复均有专项用例。 | P1；与 R01、C12 协同，闭环前保持禁用。 |
+| F02 | 测试框架 | 缓存块操作 CBO/CMO | 主动 CBO 路径禁用；分类和 ACK 错误参数不代表完整支持。 | 区分 ZERO/CLEAN/FLUSH/INVAL 的数据需求、完成来源、SQ/StoreBuffer 协同和异常取消。 | 不使用普通 STA/STD pass 代替 CBO 完成；真实 ACK、提交/释放和异常恢复均完成。 | P1；与 R02、C04/C06/C07 协同。 |
+| F03 | 测试框架 | 向量访存与多元素管理 | vector LS 被拒绝；缺少元素范围 owner、子 uop 与 vector 写回的完整生命周期。 | 分阶段支持 unit-stride、stride/index、segment、mask 和 FOF；建立 UID→LQ/SQ 范围→子 uop 的归属与回滚。 | 元素/字段写回、异常、replay、redirect、提交和范围释放均可追溯且无残留。 | P2；先完成范围映射、多 uop 基础，再与 R03、C13 协同。 |
+| F04 | 测试框架 | 虚拟化与 Hypervisor 访存 | HLV/HLVX/HSV 未纳入普通操作解码；CSR 候选含虚拟化字段，但专项 cfg 固定 PRIV_VIRT=0。 | 补齐操作类型、hyperinst/HLVX 上下文、G-stage 翻译、异常标签及动态上下文映射的自洽激励。 | HLV/HLVX/HSV 和合法虚拟化组合进入真实主流程；上下文切换前后归属和收尾正确。 | P1；与 R04、C08/C09 协同，不将候选字段视为已支持。 |
+| F05 | 测试框架 | 软件 / 硬件预取 | 软件 Prefetch 沿用 load-like 主流程，专用完成语义仍需完善；硬件预取无普通 UID 生命周期。 | 分开定义软件预取 accepted/完成/异常边界和硬件预取的请求、过滤、合并、丢弃事件。 | 不强制所有预取等待普通 Load 写回；两种预取的完成、取消和无副作用检查各有用例。 | P1；与 R05、C14 协同。 |
+| F06 | 测试框架 | 访存压力与恢复组合 | 已有随机入队宽度、发射并行度、延迟、边界、replay/redirect 和 fault 收尾；待按大场景系统化组织组合矩阵与验收。 | 组合队列逼满、issue hold、资源回绕、STA/STD 先后、跨页故障、迟到反馈、MMIO/flushSb 和多轮恢复；先审计已有入口，再补缺失模式。 | 每类压力场景具有入口、发生证据、owner 对账和无进展诊断；fault 依真实完成/取消释放，不伪造 deq。 | P0；复用现有标量流程，联动 C01–C11/C15。 |
+| F07 | 测试框架 | CSR / SFence 与翻译上下文 | 已有控制 marker、屏障与翻译 responder；SFence 当前 rs1/rs2 固定，完整定向失效与虚拟化切换组合尚待扩展。 | 扩展按地址/ASID 的失效组合、CSR 与在途翻译并发、同 VPN 多上下文、旧响应隔离；动态 stage-2 先补映射生命周期。 | 各失效范围、切换前后响应和重发均有可追溯证据；保持真实 filter 延迟及 outstanding 账本。 | P1；与 R04、C08/C15 协同。 |
+| F08 | 测试框架 | Debug / Trigger 专项激励 | 已有 debug 快照、PMP/PMA 部分 debug 消费及 trigger metadata 诊断；主动 CSR 基线 debug=0，完整调试行为专项未建立。 | 规划合法 debug 地址/权限上下文及 trigger 条件、action、访存恢复组合，先确认当前 DUT 暴露能力。 | 具有可重复的主动用例和实际触发证据；metadata 诊断与功能正确性检查分别验收。 | P1；与 R06、C09/C15 协同。 |
+| R01 | RM 未支持 / 待完善 | 原子运算与保留语义 | `rm_ls_core` 仅有 OTHER/LOAD/STORE 类型，未建立原子事务的独立计算与比较。 | 建立 AMO 读改写、LR 保留、SC 成败和 CAS 比较交换、多 uop 数据组装及异常无副作用检查。 | 从独立预期状态得出返回值和内存新值；成功、失败、异常、取消各有可检出反例。 | P1；依赖 F01。 |
+| R02 | RM 未支持 / 待完善 | CBO 数据与完成语义 | CBO 未作为独立参考操作；现有普通 Store byte overlay 不能直接替代。 | ZERO 检查清零范围；CLEAN/FLUSH/INVAL 定义可观测效果、完成和不应发生的数据副作用，关联 ACK/错误。 | 各类 CBO 有独立预期和实际事件来源，不以普通 Store 完成充当证明。 | P1；依赖 F02 及相应可观测点。 |
+| R03 | RM 未支持 / 待完善 | 向量数据与精确异常 | 当前核心是最多 8 字节的标量访问；未建向量元素、字段与部分完成参考状态。 | 建立元素/segment 索引、mask/tail、VL/VSTART、FOF、异常定位及部分 Store 更新模型。 | 逐元素数据、有效掩码、异常位置和可见内存副作用可比对，且支持 flush/replay。 | P2；依赖 F03。 |
+| R04 | RM 未支持 / 待完善 | 虚拟化、Hypervisor 与请求级翻译检查 | 已有 UID 上下文的翻译路径/PTE/PBMT 检查；HLV/HSV 尚未闭环，DTLB→L2TLB 请求缺稳定 UID 追溯字段。 | 补齐 hyperinst/HLVX 与权限、G-stage 异常；区分已存在的 UID 翻译检查和待补的逐请求 opcode/CSR→s2xlate 检查。 | 有唯一 owner 才进行严格逐请求检查；同 VPN 多 UID 不按地址猜归属；新增指令数据与异常独立比对。 | P1；依赖 F04/F07；请求级检查需先建立稳定关联。 |
+| R05 | RM 未支持 / 待完善 | 预取专用检查 | Prefetch 未进入普通 LOAD/STORE 参考计算；transaction 转发不等于功能检查。 | 定义软件/硬件预取各自允许的完成、过滤、合并、取消、异常及无架构副作用条件。 | 预取错误可被专用检查检出，且不会因缺少 demand-load 写回产生误报。 | P1；依赖 F05。 |
+| R06 | RM 未支持 / 待完善 | Debug / Trigger 与异常附加信息 | 已有标量数据、异常向量/原因及 PMP/PMA 等检查；完整 trigger action、debug 场景和异常地址附加信息尚未形成统一结果比较。 | 先列出现有检查清单，再补 debug/trigger 结果及 vaddr/gpaddr 等当前可观测异常信息的独立预期。 | 区分“接口字段合法”与“行为结果正确”；有匹配/不匹配反例，缺观测点时明确阻塞。 | P1；依赖 F08 与对应 monitor 观测能力。 |
+| R07 | RM 未支持 / 待完善 | 内存顺序、转发来源与协议一致性 | 程序序标量值模型和最终 Store 对比已有；不能据此证明 SQ/SBuffer 转发选择、内部 replay 或一致性协议全部正确。 | 在保留值模型基础上增加事件/顺序检查：最新较老 Store 来源、部分字节合并、取消后副作用、C/D/E 完成与错误归属；多核 RVWMO 另列范围。 | 数据结果与关键事件关系都可检出违规；不要求复制完整缓存实现，也不宣称单核模型覆盖多核一致性。 | P0；先覆盖 F06 的现有标量范围，其他功能随前置解锁。 |
+| C00 | 功能覆盖率基础 | 公共覆盖采样与归属 | `memblock_fcov.sv` 的 covergroup/coverpoint 均为注释模板，当前没有模块级功能覆盖实现。 | 建立独立 coverage collector、真实事件快照、实例标识及必要 owner/epoch；定义采样条件、合法交叉、不可达项和报告口径。 | 实际事件有有效采样；reset/flush/重复回放不误计；模型能合并报告，未触达和未开放项清晰可见。 | P0；所有 C01–C15 的共同基础。 |
+| C01 | 功能覆盖率建模 | LoadUnit | 当前有 3 路实例；待建立 Load 流水与反馈的模块级场景模型。 | 候选覆盖：操作/宽度、端口、对齐、翻译与缓存返回类别、转发来源、replay 原因、异常、写回和 redirect 相对时序。 | 映射当前 RTL 的请求、反馈和完成事件；按同一动态请求关联，避免跨请求伪交叉。 | P0；C00，先对现有标量功能建模。 |
+| C02 | 功能覆盖率建模 | StoreUnit + STD 执行单元 | 当前有 2 路 StoreUnit 和 2 路 MemExeUnit 数据侧实例。 | 候选覆盖：STA/STD 先后、端口、宽度、地址/数据到达、翻译 miss、STA replay、写回及 flush。 | 区分地址与数据 target；不为标量 STD 虚构不存在的 backend replay 通道。 | P0；C00、F06。 |
+| C03 | 功能覆盖率建模 | LSQ / LoadQueue | 已确认 `LsqWrapper` 下含 `LoadQueue`，后者含 VirtualLoadQueue、RAW/RAR、Replay、Uncache 和异常子模块。 | 候选覆盖：占用空/中/满、入队/出队组合、指针回绕、RAW/RAR 相关事件、replay 原因/重入、取消范围和异常。 | 分子队列采样真实分配/反馈/释放；主表候选或软件队列标签不替代 DUT 命中。 | P0；C00、F06；向量范围等待 F03。 |
+| C04 | 功能覆盖率建模 | StoreQueue | 存在地址/数据子模块与异常缓冲；普通 Store 已有激励。 | 候选覆盖：STA/STD 分离就绪、占用与回绕、提交/排空、转发与 byte mask、异常/取消、后续 CBO。 | 以真实 SQ 事件验证有效命中；普通 Store 与未开放 CBO 分开统计。 | P0；C00、F06；CBO 依赖 F02。 |
+| C05 | 功能覆盖率建模 | LoadMisalignBuffer / StoreMisalignBuffer | 当前生成 RTL 有两个独立非对齐缓冲；6 类输入地址标签已有。 | 候选覆盖：跨 8B/16B/行/页的适用组合、拆分阶段、数据拼接、跨页异属性、第一/后半访问异常及 flush。 | 输入 profile 命中与内部实际进入/拆分/完成分别计数，不能只统计激励标签。 | P0；C00、现有边界与 fault 路径。 |
+| C06 | 功能覆盖率建模 | Sbuffer | 当前存在 `inner_sbuffer`；已有 Store 与 flushSb 支撑。 | 候选覆盖：同/异行合并、字节覆盖、转发、占用压力、替换/排空、flushSb 和 Cache 侧阻塞。 | 建立入队→合并/发出→完成的可观测事件链；队列满和排空均有实测命中。 | P0；C00、F06。 |
+| C07 | 功能覆盖率建模 | DCache | `DCacheWrapper/DCache` 下已核对 LoadPipe、MainPipe、MissQueue、ProbeQueue、WritebackQueue。 | 候选覆盖：hit/miss、miss 分配/合并/资源满、refill、Probe/Release、权限变化、同线竞争、Hint、denied/corrupt；后续接入原子/CBO。 | 协议事务和关键内部事件均有采样证据；只将实际生成配置可达的组合纳入目标。 | P0；C00、现有 responder；特殊指令依赖 F01/F02。 |
+| C08 | 功能覆盖率建模 | DTLB / PTWNewFilter / L2TLB 边界 | 当前有 load/store/prefetch TLB；L2TLB agent 接管 DTLB filter 与内部 PTW 的交接点。 | 候选覆盖：TLB 请求/命中未命中、页级、权限/故障、并发重复 key、返回次序、PPN 复用、CSR/SFence 失效与旧响应。 | 区分 DTLB/filter 的实际事件与 responder 生成值；接管模式下不得把响应注入计成真实 L2TLB 内部 walker/cache 覆盖，后者需另备直通模式。 | P0；C00；虚拟化扩展依赖 F04/F07。 |
+| C09 | 功能覆盖率建模 | PMP / PMA 与权限检查 | 当前有 PMP 及多路 PMPChecker，且有属性参考模型。 | 候选覆盖：权限 R/W/X、区域边界/重叠优先级、访问跨度、特权、PBMT/PMA 路由、debug 与 fault 组合。 | DUT 实际判定与模型配置分别记录；逐项核验内部信号，不把模型自算结果计成 RTL 命中。 | P0；C00；debug 专项依赖 F08。 |
+| C10 | 功能覆盖率建模 | Uncache / MMIO | 存在 `Uncache` 与 LQ Uncache 子路径；已有 MMIO sideband 和响应模型。 | 候选覆盖：读/写、宽度、顺序/并发、延迟/乱序、错误、ROB pending/提交前后、flush 与请求生命周期。 | 以真实请求/响应和 sideband 事件关联；区分架构允许的 MMIO 行为与普通 cacheable 行为。 | P0；C00、F06、R07。 |
+| C11 | 功能覆盖率建模 | MemBlock 端口与资源仲裁 | 多路 Load/STA/STD、异常写回和各缓冲共享资源；输入并行度随机已有。 | 候选覆盖：同时发射、部分 fire、端口冲突、资源反压、多源写回及进度恢复。 | 覆盖实际仲裁/接受/完成组合；声明 valid 不等于 fire，配置上限不等于物理并行命中。 | P0；C00、F06。 |
+| C12 | 功能覆盖率建模 | AtomicsUnit | RTL 实例存在，主动 AMO 当前禁用。 | 候选覆盖：LR/SC 成败、AMO 算子/宽度、CAS 多 uop、权限/对齐异常、缓存路径、flushSb 协同和完成。 | F01/R01 就绪后采样真实原子事件；前置未完成时标为阻塞，不用禁用配置宣称覆盖完成。 | P1；依赖 F01、R01、C00。 |
+| C13 | 功能覆盖率建模 | 向量 Split / Merge / Segment / FOF | 已核对 VLSplitImp、VSSplitImp、VL/VSMergeBufferImp、VSegmentUnit、VfofBuffer；主动向量流未开放。 | 候选覆盖：访存模式、元素宽度、mask/tail、split/merge、segment、FOF、异常位置、部分完成与取消。 | 按元素/字段和动态 owner 关联真实拆分/合并事件；不可达配置单列。 | P2；依赖 F03、R03、C00。 |
+| C14 | 功能覆盖率建模 | SMSPrefetcher / L1Prefetcher | 当前两个预取模块存在；软件预取路径已有但专用检查待完善。 | 候选覆盖：训练来源、预测/过滤、请求发出与丢弃、翻译、miss 合并、late prefetch 及需求访问竞争。 | 训练输入、预取输出、Cache 实际消费分别统计；不以 enable 配置作为功能命中。 | P1；C00；结合 F05、R05。 |
+| C15 | 功能覆盖率建模 | MemBlock 控制、异常与跨模块交互 | 已有 redirect/replay、CSR/SFence 与异常恢复；模块间交叉覆盖未建立。 | 候选覆盖：异常原因/来源、replay→重发、redirect→取消对账、CSR/SFence→翻译失效、flushSb→排空、回绕与迟到事件交叉。 | 每个跨周期场景有起止事件、owner/epoch 和真实收尾；不拼接不同 UID 或不同代际事件。 | P0；C00、F06；新控制语义随 F07/F08 解锁。 |
+
+| 资料与核对入口 | 链接 |
+| --- | --- |
+| 框架能力与当前门控 | [框架待办](../../plan/test_framework/plan/undo/mem_ut_test_framework_todo_20260614.md)、[参数校验](../../../mem_ut/ver/ut/memblock/seq/base_seq_help/seq_csr_common.sv)、[主表校验](../../../mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv)、[操作解码](../../../mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_op_behavior_util.sv)；旧待办只作为线索，以当前实现复核为准。 |
+| RM 当前实现与逐请求检查边界 | [RM 入口](../../../mem_ut/ver/ut/memblock/env/src/memblock_rm/memblock_rm.sv)、[标量值核心](../../../mem_ut/ver/ut/memblock/env/src/memblock_rm/rm_ls_core.sv)、[请求级翻译检查待办](../../plan/rm_plan/undo/rm_todo_20260614.md) |
+| 覆盖率现状与建模准则 | [当前覆盖类模板](../../../mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_fcov.sv)、[V2 建模准则](../rtl/v2/memblock_functional_coverage_scenario_analysis_modeling_guideline_20261013.md)；覆盖点落地时需完成语义分析、生成 RTL 信号映射及采样时序核验。 |
+| 当前模块与接管边界 | [MemBlock 生成 RTL](../../../build/rtl/MemBlock.sv)、[LSQ](../../../build/rtl/LsqWrapper.sv)、[LoadQueue](../../../build/rtl/LoadQueue.sv)、[DCache](../../../build/rtl/DCache.sv)、[V2 L2TLB 接管点](../../../mem_ut/ver/ut/memblock/rule/version/v2/l2tlb_interface_profile.md) |

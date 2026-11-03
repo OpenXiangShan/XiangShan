@@ -11,6 +11,11 @@
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/issue_queue_scheduler.sv`
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
 
+真实后端 Dispatch credit 对照源码：
+
+- `src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala`
+- `src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala`
+
 ## 1. Flow 边界
 
 ### 1.1 术语与抽象功能说明
@@ -24,6 +29,7 @@
 | `pending sample` | 已 launch、已分配软件 LQ/SQ，但尚未由下一边界记录 DUT 可见性的单深度 batch | `pending_sample_valid`、`pending_sample_tokens` | C0 launch batch A，C1 才完成 A 的 sample |
 | `cancel record` | 单个 redirect epoch 的软件回退量和 DUT cancel 观察值对账记录 | `common_data_transaction::cancel_record_q` | software count 只回退一次，observed count 只核对一次 |
 | `owner` | 对某类状态拥有唯一修改权的对象 | allocation owner 为 `lsq_ctrl_model::commit_allocate()`；cancel owner 为逐 epoch record 的软件应用路径 | DUT observed cancel 不拥有 pointer/free count 回退权 |
+| modeled `lsqCanAccept` | 可选的真实后端 Dispatch 公共 credit 门控模型，不是当前 LSQ enqueue driver 暴露的 DUT ready | 后续统一 admission gate；当前 `collect_lsq_candidates()` 尚未实现 | 单条 CBO 申请 1 个 SQ 时，V2 近似要求 LQ>=6、SQ>=5 |
 
 LSQ admission 只负责以下行为：
 
@@ -295,8 +301,30 @@ derive_op_behavior推导LQ/SQ占用；当前scalar路径要求num_ls_elem=1，�
 合法candidate保存预测key并只推进局部pointer；真实状态等driver launch后由commit_allocate更新。
 ```
 
-该实现不要求 `base_lq_free>=6` 或 `base_sq_free>=4`，也不执行 `tentative+6/4 reserve`。6/4只表示
-本拍端口上限，不能让软件模型永久保留队尾空项。
+当前 `collect_lsq_candidates()` 实现不要求 `base_lq_free>=6` 或 `base_sq_free>=4`，也不执行
+`tentative+6/4 reserve`。在本函数内部，6/4只表示本拍物理 enqueue 端口上限，不能通过修改
+`MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH/MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH` 让软件 LSQ allocator 永久保留队尾空项。
+
+### 6.2 与真实 Dispatch `lsqCanAccept` 的边界
+
+真实 `NewDispatch` 在 `fromRename.ready/fire` 上还施加公共 `lsqCanAccept`。`LsqEnqCtrl` 根据整个
+dispatch batch 的累计申请量计算 registered credit：
+
+```text
+LQ free >= batch load allocation + 6
+SQ free >= batch store allocation + 4
+并且当前不处于 redirect cancel-counter 更新阻塞窗口
+```
+
+该条件适用于 AMO、普通 load/store 和 CBO，而不是 AMO 专属检查。V2 单条候选的近似阈值为：AMO
+`LQ>=6 && SQ>=4`、load `LQ>=7 && SQ>=4`、store/CBO `LQ>=6 && SQ>=5`。混合 batch 先累计实际
+load/store allocation，再统一加 6/4；不能为每条指令重复预留。
+
+当前 mem_ut LSQ admission flow 直接模拟 MemBlock 的 `enqLsq` 输入，顶层接口没有真实后端
+`canAccept` 返回，因此尚未实现上述 Dispatch credit gate。后续如果测试框架声明模拟真实 backend
+admission，应在 LSQ/non-LSQ 分流之前增加一个独立、统一、带明确 sample/epoch 边界的 modeled
+`lsqCanAccept`；不能只在 AMO 或 CBO 分支特判，也不能把它混入物理端口宽度或 allocator free-count
+更新。CBO 已 admission 后由 StoreQueue 发出的内部 `cmoOpReq` 不经过 Dispatch，不重复执行该检查。
 
 ## 7. Request 字段构造
 

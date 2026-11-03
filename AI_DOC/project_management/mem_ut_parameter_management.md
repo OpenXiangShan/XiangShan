@@ -127,7 +127,7 @@ runtime资源收敛：
   `ZERO/MIDDLE/MAX=1/0/0`表示idle-only；只有三类全0非法。总权重使用`longint unsigned`逐项累加，
   避免32-bit表达式先溢出。zero-only不会消费uid或产生terminal，只能用于存在外部结束条件的场景；
   非空主表的主动flow若没有外部结束条件，将按既有no-progress/UVM timeout策略保持等待。
-- `collect_lsq_candidates()`每拍只采样一次总slot目标，再分别按编译期load/store 6/4和实际LQ/SQ free count截断；不得新增同义per-type runtime limit，也不得复制RTL registered credit公式要求额外预留6/4空项。
+- `collect_lsq_candidates()`每拍只采样一次总slot目标，再分别按编译期load/store 6/4和实际LQ/SQ free count截断；不得新增同义per-type runtime limit，也不得把RTL registered-credit公式塞进物理宽度参数或allocator中形成永久保留空项。若后续模拟真实Dispatch admission，`lsqCanAccept`必须作为LSQ/non-LSQ共用的独立运行期gate实现，按整个batch累计申请量统一检查`LQ free >= load allocation + 6`和`SQ free >= store allocation + 4`，不能只对AMO/CBO特判，也不能对StoreQueue内部CMO request重复检查。
 - `MEMBLOCK_L2_RSP_DELAY_*_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_*_WT` 与两个 `*_RSP_REORDER_EN`
   只表示 responder 的运行期延迟分布和返回选择策略，统一通过 `plus.sv -> seq_csr_common -> getter` 读取；
   DCache/Uncache 各自四档权重不得全零。它们不改变 A-channel 准入、D.ready backpressure 或 DUT 实际请求数。

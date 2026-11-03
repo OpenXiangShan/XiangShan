@@ -522,6 +522,7 @@ V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
 - connect-time 静态参数归 `cfg/memblock_compile_params.svh`
 - interface宽度、物理slot/pipe/port数量和connect-time capability不得建立runtime plus镜像；物理consumer直接读取compile宏/localparam
 - runtime只保留testcase行为使用量，受物理资源约束的参数统一由`seq_csr_common::apply_runtime_resource_limits()`收敛
+- 如后续模拟真实后端Dispatch admission，公共modeled `lsqCanAccept`必须作为LSQ/non-LSQ统一运行期gate实现；不能把6/4 registered credit写成物理宽度参数、allocator永久保留项或AMO/CBO专属特判
 - 运行期状态、表项、monitor raw queue、CSR runtime snapshot 不归入参数配置系统
 - 新增 cfg key 后必须保持 `env/plus.sv`、`seq_csr_common.sv`、`default.cfg` 和 testcase preset cfg 同步
 
