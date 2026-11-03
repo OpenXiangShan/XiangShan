@@ -526,12 +526,16 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val outputTopdown = RegInit(initialTopdown)
   private val nextTopdown = WireInit(io.in.bits.topdownInfo)
   private val nextHasUncache = outputEntriesNext.map(e => e.valid && e.bits.uncacheFetch).reduce(_ || _)
+  private val upstreamOverride = Seq(
+    TopDownCounters.UBTBMissBubble, TopDownCounters.ABTBMissBubble,
+    TopDownCounters.UTAGEMissBubble, TopDownCounters.URASMissBubble
+  ).map(reason => io.in.bits.topdownInfo.reason === reason.id.U).reduce(_ || _)
   when(nextHasUncache) {
     nextTopdown.setReason(TopDownCounters.UncacheFetchBubble)
-  }.elsewhen(useBypass && io.in.fire) {
+  }.elsewhen(!upstreamOverride && useBypass && io.in.fire) {
     // A valid block containing zero complete instructions is also a fragment.
     nextTopdown.setReason(TopDownCounters.FetchFragBubble)
-  }.elsewhen(io.in.valid && numFromFetch =/= 0.U && !useBypass) {
+  }.elsewhen(!upstreamOverride && io.in.valid && numFromFetch =/= 0.U && !useBypass) {
     nextTopdown.setReason(TopDownCounters.IbufferStructure)
   }
   when(vtypeGen.in.canUpdateVType) {
