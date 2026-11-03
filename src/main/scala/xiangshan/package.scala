@@ -830,6 +830,7 @@ package object xiangshan {
     val ICacheMissBubble = Value("ICacheMissBubble")
     val ITLBMissBubble = Value("ITLBMissBubble")
     val BTBMissBubble = Value("BTBMissBubble")
+    val UncacheFetchBubble = Value("UncacheFetchBubble")
     val IbufferStructure = Value("IbufferStructure")
     val FetchFragBubble = Value("FetchFragBubble")
     val FrontendOtherCoreStall = Value("FrontendOtherCoreStall")

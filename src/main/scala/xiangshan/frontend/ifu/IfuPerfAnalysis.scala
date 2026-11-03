@@ -68,6 +68,7 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     }
 
     class IfuPerfCtrl(implicit p: Parameters) extends IfuBundle {
+      val uncacheActive: Bool = Bool()
       val fromFtqBubble:    Bool = Bool()
       val backendRedirect:  Bool = Bool()
       val ifuWbRedirect:    Bool = Bool()
@@ -121,6 +122,11 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     }
   }
   io.topdownOut.topdown := topdownStages(numOfStage - 1)
+  when(io.ifuPerfCtrl.uncacheActive) {
+    io.topdownOut.topdown.reasons.foreach(_ := false.B)
+    io.topdownOut.topdown.reasons(TopDownCounters.UncacheFetchBubble.id) := true.B
+  }
+  io.topdownOut.topdown.backendRedirectOverride(io.topdownIn.backendRedirectTopdown)
 
   /** <PERF> f0 fetch bubble */
   XSPerfAccumulate("fetch_bubble_ftq_not_valid", io.ifuPerfCtrl.fromFtqBubble)

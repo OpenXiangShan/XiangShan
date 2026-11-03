@@ -58,9 +58,14 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:        UInt   = TriggerAction()
   val isLastInFtqEntry: Bool   = Bool()
 
+  val uncacheFetch: Bool       = Bool()
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
+    // A retried uncache low half may be completed by a cacheable block. Only
+    // its first delivered instruction carries that provenance.
+    val firstInstruction = if (i == 0) true.B else !(fetch.valid & fetch.enqEnable)(i - 1, 0).orR
+    uncacheFetch     := fetch.uncacheFetch && firstInstruction
     inst             := fetch.instrs(i)
     pc               := fetch.pc(i)
     foldpc           := fetch.foldpc(i)
@@ -78,6 +83,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
       exception: IBufExceptionEntry
   ): IBufOutEntry = {
     val result = Wire(new IBufOutEntry)
+    result.uncacheFetch       := uncacheFetch
     result.inst               := inst
     result.pc                 := pc
     result.foldpc             := foldpc
@@ -133,6 +139,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val vtype:              VType         = VType()
   val specvtype:          VType         = VType()
 
+  val uncacheFetch: Bool       = Bool()
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
   def toCtrlFlow: CtrlFlow = {

@@ -29,10 +29,10 @@ import utility.XSPerfAccumulate
 import utils.DuplicateInit
 import xiangshan.FrontendTdataDistributeIO
 import xiangshan.cache.mmu.HasTlbConst
-import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
+import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.ICacheToIfuIO
@@ -294,9 +294,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s1_firstEndPos     = s1_fetchBlock(0).takenCfiOffset.bits
   private val s1_firstEndHalfRvi = Wire(Valid(new EndHalfRviInfo))
-  s1_firstEndHalfRvi.valid     := s1_firstEndIsHalfRvi
-  s1_firstEndHalfRvi.bits.pc   := s1_fetchBlock(0).startVAddr + (s1_firstEndPos << 1).asUInt
-  s1_firstEndHalfRvi.bits.data := s1_rawFirstData(s1_firstEndIndex)(15, 0)
+  s1_firstEndHalfRvi.valid             := s1_firstEndIsHalfRvi
+  s1_firstEndHalfRvi.bits.pc           := s1_fetchBlock(0).startVAddr + (s1_firstEndPos << 1).asUInt
+  s1_firstEndHalfRvi.bits.data         := s1_rawFirstData(s1_firstEndIndex)(15, 0)
+  s1_firstEndHalfRvi.bits.uncacheFetch := false.B
 
   private val s1_secondEndHalfRviData = s1_rawSecondData(s1_secondEndIndex)(15, 0)
   private val s1_totalEndHalfRvi      = Wire(Valid(new EndHalfRviInfo))
@@ -307,6 +308,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s1_firstEndHalfRvi.bits.pc
   )
   s1_totalEndHalfRvi.bits.data := Mux(s1_fetchBlock(1).valid, s1_secondEndHalfRviData, s1_firstEndHalfRvi.bits.data)
+  s1_totalEndHalfRvi.bits.uncacheFetch := false.B
   private val s1_secondStartRviData = s1_rawSecondData(s1_secondStartIndex)(15, 0)
 
   private val s1_baseInstrData = genBaseInstrData(
@@ -661,6 +663,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheFlushWb.valid :=
     s2_valid && io.toIBuffer.ready && s2_useUncacheFetch && !backendRedirect && (s2_uncacheCanGo || uncacheNeedResend)
   uncacheFlushWb.bits.canTrain  := false.B
+  uncacheFlushWb.bits.isUncache := true.B
   uncacheFlushWb.bits.ftqIdx    := s2_fetchBlock(0).ftqIdx
   uncacheFlushWb.bits.pc        := s2_fetchBlock(0).startVAddr.toUInt(VAddrBits - 1, 0)
   uncacheFlushWb.bits.taken     := false.B
@@ -708,11 +711,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // This fixes the edge case where instructions spanning both cache and uncache channels fell through
   // the cracks of the existing S1 (cache) and S2 (uncache) cross-page handling logic.
   uncacheRedirect.valid := s2_valid && io.toIBuffer.ready && s2_useUncacheFetch && (s2_uncacheCanGo || uncacheNeedResend)
-  uncacheRedirect.instrCount            := Mux(uncacheNeedResend, 0.U, 1.U)
-  uncacheRedirect.prevIBufEnqPtr        := s2_prevIBufEnqPtr
-  uncacheRedirect.halfRviInfo.valid     := uncacheNeedResend
-  uncacheRedirect.halfRviInfo.bits.pc   := uncachePc
-  uncacheRedirect.halfRviInfo.bits.data := uncacheData(15, 0)
+  uncacheRedirect.instrCount                    := Mux(uncacheNeedResend, 0.U, 1.U)
+  uncacheRedirect.prevIBufEnqPtr                := s2_prevIBufEnqPtr
+  uncacheRedirect.halfRviInfo.valid             := uncacheNeedResend
+  uncacheRedirect.halfRviInfo.bits.pc           := uncachePc
+  uncacheRedirect.halfRviInfo.bits.data         := uncacheData(15, 0)
+  uncacheRedirect.halfRviInfo.bits.uncacheFetch := true.B
   /* *****************************************************************************
    * IFU Write-back Stage
    * - write back preDecode information to Ftq to update
@@ -743,6 +747,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
       checkerRedirect.bits.invalidTaken || checkerRedirect.bits.notCfiTaken
     b.valid          := wbValid && checkerRedirect.valid
     b.bits.canTrain  := canTrain
+    b.bits.isUncache := false.B
     b.bits.ftqIdx    := Mux(select, ftqIdx(1), ftqIdx(0))
     b.bits.pc        := Mux(select, startAddr(1), startAddr(0))
     b.bits.taken     := checkerRedirect.bits.taken
@@ -792,8 +797,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.ifuPerfCtrl.fromBpuFlush     := s0_flushFromBpu
   perfAnalyzer.io.ifuPerfCtrl.fromICacheBubble := false.B
 
-  perfAnalyzer.io.topdownIn.icacheTopdown          := io.fromICache.topdown
-  perfAnalyzer.io.topdownIn.ftqTopdown             := io.fromFtq.topdownInfo
+  perfAnalyzer.io.topdownIn.icacheTopdown   := io.fromICache.topdown
+  perfAnalyzer.io.topdownIn.ftqTopdown      := io.fromFtq.topdownInfo
   perfAnalyzer.io.topdownIn.backendRedirectTopdown := io.backendRedirectTopdown
 
   perfAnalyzer.io.perfInfo.icachePerfInfo                 := s2_icachePerfInfo
@@ -815,6 +820,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s2_fetchBlock(0).startVAddr.toUInt
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s2_fetchBlock(1).startVAddr.toUInt
   io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
+  private val s2_deliversUncacheInstruction = s2_valid && (s2_useUncacheFetch ||
+    (s2_prevEndIsHalfRviInfo.valid && s2_prevEndIsHalfRviInfo.bits.uncacheFetch))
+  io.toIBuffer.bits.uncacheFetch            := s2_deliversUncacheInstruction
+  perfAnalyzer.io.ifuPerfCtrl.uncacheActive := s2_deliversUncacheInstruction && !s2_flush
 
   XSPerfAccumulate("2fetch_to_ibuffer", io.toIBuffer.fire && s2_secondValid)
 }

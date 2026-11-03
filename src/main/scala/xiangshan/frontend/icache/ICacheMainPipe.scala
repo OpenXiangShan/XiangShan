@@ -576,7 +576,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // NOTE: we cannot use s2_hits, it will be reset when refilled from L2
   io.perf.rawHits := s1_sramHits(0) // FIXME
   // tell ICache top when handling miss
-  io.perf.pendingMiss := s1_valid && !s1_fetchFinish
+  io.perf.pendingMiss := s1_valid && !s1_fetchFinish && !s1_isMmio && !s1_flush
 
   XSPerfAccumulate("stallCycles_fetch_icacheMain", !s1_fire)
   XSPerfAccumulate("stallCycles_fetch_icacheMain_prefetch", s0_valid && !io.fromWayLookup.valid)

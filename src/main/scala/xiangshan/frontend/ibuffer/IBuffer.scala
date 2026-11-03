@@ -526,7 +526,10 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     nextTopdown.reasons.foreach(_ := false.B)
     nextTopdown.reasons(reason.id) := true.B
   }
-  when(useBypass && io.in.fire) {
+  private val nextHasUncache = outputEntriesNext.map(e => e.valid && e.bits.uncacheFetch).reduce(_ || _)
+  when(nextHasUncache) {
+    setMissingReason(TopDownCounters.UncacheFetchBubble)
+  }.elsewhen(useBypass && io.in.fire) {
     setMissingReason(TopDownCounters.FetchFragBubble)
   }.elsewhen(io.in.valid && numFromFetch =/= 0.U && !useBypass) {
     setMissingReason(TopDownCounters.IbufferStructure)

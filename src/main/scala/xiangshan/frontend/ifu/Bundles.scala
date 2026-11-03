@@ -60,8 +60,9 @@ class LastHalfEntry(implicit p: Parameters) extends IfuBundle {
 }
 
 class EndHalfRviInfo(implicit p: Parameters) extends IfuBundle {
-  val pc:   GuardedPc = GuardedPc()
-  val data: UInt      = UInt(16.W)
+  val pc:           GuardedPc = GuardedPc()
+  val data:         UInt      = UInt(16.W)
+  val uncacheFetch: Bool      = Bool() // Performance provenance of the saved low half.
 }
 
 class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {

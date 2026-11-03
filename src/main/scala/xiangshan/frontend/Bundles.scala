@@ -136,6 +136,7 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val ftqIdx: FtqPtr = new FtqPtr
   //
   val canTrain: Bool = Bool()
+  val isUncache: Bool = Bool() // Explicit redirect origin, independent of training eligibility.
   val pc:       UInt = UInt(VAddrBits.W)
   val taken:    Bool = Bool()
   // The early end position may not always be a branch instruction.
@@ -305,6 +306,7 @@ class InstrEndOffset(implicit p: Parameters) extends FrontendBundle {
 
 class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val instrs:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(32.W))
+  val uncacheFetch: Bool = Bool()
   val valid:          UInt                = UInt(IBufferEnqueueWidth.W)
   val enqEnable:      UInt                = UInt(IBufferEnqueueWidth.W)
   val isRvc:          Vec[Bool]           = Vec(IBufferEnqueueWidth, Bool())
