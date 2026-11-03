@@ -235,8 +235,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
   tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
 
-  ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
-  ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
+  ittage.io.s1_foldedPhr          := phr.io.s1_foldedPhr
+  ittage.io.trainFoldedPhr        := phr.io.trainFoldedPhr
+  ittage.io.debug_trainValid      := io.fromFtq.train.valid
+  ittage.io.debug_trainOtherReady := predictors.filterNot(_ eq ittage).map(_.io.trainReady).reduce(_ && _)
 
   sc.io.mbtbResult          := mbtb.io.result
   sc.io.providerTakenCtrs   := tage.io.toSc.providerTakenCtrVec

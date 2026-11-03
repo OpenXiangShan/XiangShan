@@ -269,6 +269,8 @@ class IttageTable(
     writeBuffer.io.invalidate.get.valid := usefulResetFire
     writeBuffer.io.invalidate.get.bits  := usefulResetSet
 
+    // Ordinary writes after WriteBuffer filtering/merging, separate from clears.
+    XSPerfAccumulate(s"ittage_table_bank${bankIdx}_update_write", bank.io.w.req.fire && readPort.valid)
     XSPerfAccumulate(s"ittage_table_bank${bankIdx}_useful_reset_write", usefulResetFire)
     XSPerfAccumulate(s"ittage_table_bank${bankIdx}_useful_reset_finish", usefulResetFinish)
   }
