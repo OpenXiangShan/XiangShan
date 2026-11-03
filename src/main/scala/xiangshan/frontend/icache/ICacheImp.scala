@@ -25,12 +25,12 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
+import device.reri.RERIErrorInfo
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import org.chipsalliance.cde.config.Parameters
 import utility.HasPerfEvents
 import utility.RegNextWithEnable
 import utils.AddrField
-import xiangshan.L1CacheErrorInfo
 import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.FtqToICacheIO
@@ -49,8 +49,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     // iTLB
     val itlb:          TlbRequestIO = new TlbRequestIO
     val itlbFlushPipe: Bool         = Bool()
-    // backend/BEU
-    val error: Valid[L1CacheErrorInfo] = ValidIO(new L1CacheErrorInfo)
+    // RERI error reporting
+    val error: Valid[RERIErrorInfo] = Output(Valid(new RERIErrorInfo))
     // backend/CSR
     val csrPfEnable: Bool = Input(Bool())
     // flush
@@ -209,7 +209,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   bus.a <> missUnit.io.memAcquire
 
-  // send parity error to BEU
+  // Send parity errors to RERI.
   io.error <> RegNextWithEnable(mainPipe.io.error)
 
   val perfEvents: Seq[(String, Bool)] = Seq(

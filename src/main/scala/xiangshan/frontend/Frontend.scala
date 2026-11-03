@@ -28,6 +28,7 @@
 package xiangshan.frontend
 import chisel3._
 import chisel3.util._
+import device.reri.RERIErrorInfo
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import org.chipsalliance.cde.config.Parameters
@@ -49,7 +50,6 @@ import utility.sram.SramHelper
 import xiangshan.CustomCSRCtrlIO
 import xiangshan.DebugOptionsKey
 import xiangshan.FrontendToCtrlIO
-import xiangshan.L1BusErrorUnitInfo
 import xiangshan.SfenceBundle
 import xiangshan.SoftIPrefetchBundle
 import xiangshan.TlbCsrBundle
@@ -78,7 +78,7 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val backend:      FrontendToCtrlIO = new FrontendToCtrlIO
   val softPrefetch: Vec[Valid[SoftIPrefetchBundle]] =
     Vec(backendParams.LduCnt, Flipped(Valid(new SoftIPrefetchBundle)))
-  val error: L1BusErrorUnitInfo = Output(new L1BusErrorUnitInfo)
+  val error = Output(Valid(new RERIErrorInfo))
 
   // ctrl
   val tlbCsr:  TlbCsrBundle    = Input(new TlbCsrBundle)
@@ -268,7 +268,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   instrUncache.io.flush := false.B
 
   private val errorReg = RegNext(icache.io.error)
-  io.error <> RegNext(errorReg.bits.toL1BusErrorUnitInfo(errorReg.valid))
+  io.error <> RegNext(errorReg)
 
   icache.io.hartId := io.hartId
 
