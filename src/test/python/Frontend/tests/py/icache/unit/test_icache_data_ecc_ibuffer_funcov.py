@@ -220,7 +220,7 @@ def test_native_groups_registry_mapping_and_parameter_targets_use_the_same_47_bi
         params = next(m.args[1] for m in fn.pytestmark if m.name == "parametrize")
         targets.extend(p.marks[0].args[0] for p in params)
     assert set(targets) == {d.bin_id for d in definitions}
-    tp = Path(__file__).resolve().parents[4] / "docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    tp = Path(__file__).resolve().parents[4] / "docs/02_testpoint/Frontend_testpoint_v1.0.csv"
     with tp.open(encoding="utf-8-sig", newline="") as handle:
         mapped = [r[8] for r in csv.reader(handle) if len(r) > 8 and GROUP in r[8]]
     assert set(mapped) == {f"covergroup {GROUP}, coverpoint {p}" for p in points}
