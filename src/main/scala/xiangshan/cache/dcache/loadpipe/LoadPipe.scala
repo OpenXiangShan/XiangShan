@@ -37,7 +37,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val lsu = Flipped(new DCacheLoadIO)
     val dwpu = Flipped(new DwpuBaseIO(nWays = nWays, nPorts = 1))
     val mtrack = Output(new MissTrackLoadIO)
-    val specmiss = Input(new MissTrackSpec)
+    val specmiss = Input(Bool())
     val mshr_full = Input(Bool())
     val spec_query = new DCacheSpecMissQueryIOBundle
     val load128Req = Input(Bool())
@@ -192,7 +192,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   io.mtrack.s1_valid := s1_fire && !s1_nack && !io.lsu.s1_kill
-  val s1_spec_candidate = io.specmiss.valid && io.specmiss.candidate && !io.mshr_full &&
+  val s1_spec_candidate = io.specmiss && !io.mshr_full &&
     s1_fire && !s1_nack && !io.lsu.s1_kill
   io.spec_query.req.valid := s1_spec_candidate
   io.spec_query.req.bits.vaddr := s1_vaddr
@@ -519,11 +519,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // change residency; tag/permission truth must not depend on the WPU guess.
   io.mtrack.s2.valid := s2_valid && !s2_nack_hit && !io.lsu.s2_kill &&
     !s2_tag_error && !s2_tl_error.asUInt.orR && !s2_load128Req &&
-    s2_req.cmd === MemoryOpConstants.M_XRD && s2_req.instrtype === LOAD_SOURCE.U
+    s2_req.cmd === MemoryOpConstants.M_XRD && s2_req.instrtype === LOAD_SOURCE.U &&
+    s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
   io.mtrack.s2.bits.vaddr := s2_vaddr
   io.mtrack.s2.bits.paddr := s2_paddr
   io.mtrack.s2.bits.way := s2_real_way_en
-  io.mtrack.s2.bits.hit := s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit

@@ -39,16 +39,13 @@ class MissTrackInvalidate(implicit p: Parameters) extends DCacheBundle {
   val way = UInt(nWays.W)
 }
 
-class MissTrackLoadResult(implicit p: Parameters) extends MissTrackResident {
-  val hit = Bool() // Accurate tag/permission result, independent of WPU prediction.
-}
-
 class MissTrackLoadIO(implicit p: Parameters) extends DCacheBundle {
   val s0_valid = Bool()
   val s0_vaddr = UInt(VAddrBits.W)
   val s1_valid = Bool()
   val s1_paddr = UInt(PAddrBits.W)
-  val s2 = Valid(new MissTrackLoadResult)
+  // Accurate resident-hit training, independent of WPU prediction.
+  val s2 = Valid(new MissTrackResident)
 }
 
 class MissTrackEntry(implicit p: Parameters) extends DCacheBundle {
@@ -71,6 +68,8 @@ class MissTrackLookupEntry(implicit p: Parameters) extends DCacheBundle {
 }
 
 /** Small, lossy history table for speculative-miss eligibility.
+  * Each (idx, src_hash) retains at most one physical line. A colliding line may
+  * replace that hint; the full physical-block check still qualifies suppression.
   * Existing records are maintained in parallel. One new record per cycle is sampled
   * by a round-robin arbiter; losing insertion opportunities affects coverage only.
   */
@@ -96,10 +95,13 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   private def hash(va: UInt): UInt = XORFold(va(VAddrBits - 1, untagBits), cfg.missTrackHashBits)
   private def sameLine(a: MissTrackEntry, b: MissTrackEntry): Bool =
     a.idx === b.idx && a.block_paddr === b.block_paddr
+  private def sameKey(a: MissTrackEntry, b: MissTrackEntry): Bool =
+    a.idx === b.idx && a.src_hash === b.src_hash
+  private val ownerIndices = VecInit(io.owners.map(o => get_dcache_idx(o.bits.vaddr)))
   private def ownerMatches(e: MissTrackEntry): Bool = {
     val owner = io.owners(e.mshr_id)
     owner.valid && block(owner.bits.paddr) === e.block_paddr &&
-      get_dcache_idx(owner.bits.vaddr) === e.idx
+      ownerIndices(e.mshr_id) === e.idx
   }
   private def overlaps(idx: UInt, way: UInt, inv: Valid[MissTrackInvalidate]): Bool =
     inv.valid && inv.bits.idx === idx && (inv.bits.way & way).orR
@@ -123,19 +125,6 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     lookupTable(i).block_paddr := entries(i).block_paddr
   }
   val lookupSnapshot = RegNext(lookupTable)
-
-  // A matched entry has a second match iff another valid entry has its key.
-  // Share each unordered comparison and capture collisions with the old table,
-  // removing PopCount from the arriving query's path on all lanes.
-  val sameKeys = (for (i <- entries.indices; j <- 0 until i) yield {
-    (i, j) -> (entries(i).idx === entries(j).idx && entries(i).src_hash === entries(j).src_hash)
-  }).toMap
-  val keyCollisions = VecInit(entries.indices.map { i =>
-    ParallelORR(entries.indices.filter(_ != i).map { j =>
-      entries(j).valid && sameKeys((i max j, i min j))
-    })
-  })
-  val collisionSnapshot = RegNext(keyCollisions)
 
   def makeEntry(va: UInt, pa: UInt, way: UInt, pending: Bool, id: UInt): MissTrackEntry = {
     val e = WireDefault(0.U.asTypeOf(new MissTrackEntry))
@@ -173,7 +162,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     val training = events(1 + allocPorts + w)
     training.bits := makeEntry(truth.vaddr, truth.paddr, truth.way, false.B, 0.U)
     val truthIdx = get_dcache_idx(truth.vaddr)
-    training.valid := q.s2.valid && truth.hit && PopCount(truth.way) === 1.U && !previousClear &&
+    training.valid := q.s2.valid && PopCount(truth.way) === 1.U && !previousClear &&
       !overlaps(truthIdx, truth.way, io.invalidate) &&
       !overlaps(truthIdx, truth.way, previousInvalidate)
 
@@ -181,42 +170,54 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     val queryHash = RegNext(hash(q.s0_vaddr))
     val sampled = RegNext(q.s0_valid, false.B)
     val matches = VecInit(lookupSnapshot.map(e => e.valid && e.idx === queryIdx && e.src_hash === queryHash))
-    val multi = ParallelORR(matches.zip(collisionSnapshot).map { case (hit, collision) => hit && collision })
-    val unique = ParallelORR(matches) && !multi
-    // Four-entry local muxes preserve masked-OR selection of the physical block.
+    val hit = ParallelORR(matches)
+    // Unique query keys make the masked-OR selection one-hot.
     val blockGroups = matches.zip(lookupSnapshot.map(_.block_paddr)).grouped(4).map(ParallelMux(_)).toSeq
     val selectedBlock = ParallelOR(blockGroups)
-    val paMatch = unique && !previousClear && selectedBlock === block(q.s1_paddr)
+    val paMatch = hit && !previousClear && selectedBlock === block(q.s1_paddr)
     // UNKNOWN after PA validation is the only state eligible for a new
     // speculative miss.  A live resident/pending line suppresses duplication.
-    io.spec(w) := q.s1_valid && sampled && !io.clear && !multi && !paMatch
+    io.spec(w) := q.s1_valid && sampled && !io.clear && !paMatch
   }
 
-  // Select one event per line for both maintenance and insertion. The events
-  // are ordered by semantic priority: installation, allocation, then hit.
+  // Events must agree on one winner for both physical-line and query-key ties.
+  // Priority is installation, allocation, then hit. Losing observations only
+  // reduce history coverage; they never change the actual cache or MSHR state.
   val canonicalEvents = Wire(Vec(events.length, Valid(new MissTrackEntry)))
   for (i <- events.indices) {
     canonicalEvents(i).bits := events(i).bits
     val shadowed = if (i == 0) false.B else VecInit((0 until i).map { j =>
-      events(j).valid && sameLine(events(j).bits, events(i).bits)
+      events(j).valid && (sameLine(events(j).bits, events(i).bits) ||
+        sameKey(events(j).bits, events(i).bits))
     }).asUInt.orR
     canonicalEvents(i).valid := events(i).valid && !shadowed
   }
 
-  // Priority is local to a matching line: installation > allocation > hit.
+  // Physical-line matches maintain state in place, including alias/hash updates.
+  // Key matches are separate: they may refer to a different physical line.
   val eventMatches = canonicalEvents.map(u => entries.map(e => e.valid && sameLine(e, u.bits)))
+  val eventKeyMatches = canonicalEvents.map(u => entries.map(e => e.valid && sameKey(e, u.bits)))
+  val eventPresent = eventMatches.map(ParallelORR(_))
+  val refreshing = canonicalEvents.indices.map(j => canonicalEvents(j).valid && eventPresent(j))
   val maintained = WireDefault(entries)
   val retired = Wire(Vec(cfg.missTrackEntries, Bool()))
   val invalidated = Wire(Vec(cfg.missTrackEntries, Bool()))
+  val updated = Wire(Vec(cfg.missTrackEntries, Bool()))
   for (i <- 0 until cfg.missTrackEntries) {
     val e = entries(i)
     retired(i) := e.valid && e.is_pending && !ownerMatches(e)
     invalidated(i) := e.valid && !e.is_pending && overlaps(e.idx, e.way, io.invalidate)
-    when (e.valid && e.age =/= 7.U) { maintained(i).age := e.age + 1.U }
-    when (retired(i) || invalidated(i)) { maintained(i).valid := false.B }
     // Canonical events matching this entry are already mutually exclusive.
     val updates = canonicalEvents.indices.map(j => canonicalEvents(j).valid && eventMatches(j)(i))
-    when (ParallelORR(updates)) {
+    updated(i) := ParallelORR(updates)
+    // A physical-line refresh may move to another hash through a VA alias.
+    // Drop the old holder of that destination key unless it is also moving.
+    val keyDisplaced = !updated(i) && ParallelORR(canonicalEvents.indices.map(j =>
+      refreshing(j) && eventKeyMatches(j)(i)
+    ))
+    when (e.valid && e.age =/= 7.U) { maintained(i).age := e.age + 1.U }
+    when (retired(i) || invalidated(i) || keyDisplaced) { maintained(i).valid := false.B }
+    when (updated(i)) {
       maintained(i) := ParallelMux(updates.zip(canonicalEvents.map(_.bits)))
       // These fields already equal the winning event; do not put the event
       // priority network in front of another wide line-address comparison.
@@ -246,7 +247,15 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
       else maintained(i).age >= maintained(j).age
     })
   }).asUInt
-  val victimOH = Mux(hasInvalid, invalidVictimOH, oldestVictimOH)
+  // A selected new physical line replaces the old holder of its query key.
+  // An entry refreshed to another key is no longer a conflict. Reuse the
+  // pre-maintenance key comparisons instead of comparing the arbiter payload.
+  val keyVictimOH = VecInit(entries.indices.map { i =>
+    !updated(i) && ParallelORR(canonicalEvents.indices.map(j =>
+      insert.io.in(j).fire && eventKeyMatches(j)(i)
+    ))
+  }).asUInt
+  val victimOH = Mux(keyVictimOH.orR, keyVictimOH, Mux(hasInvalid, invalidVictimOH, oldestVictimOH))
   val nextEntries = WireDefault(maintained)
   for (i <- entries.indices) {
     when (insert.io.out.fire && victimOH(i)) {
@@ -257,13 +266,14 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   // Table maintenance becomes visible to following S0 queries after this edge.
   entries := nextEntries
 
-  // Hash collisions are allowed; duplicate (physical block, cache set) records aren't.
+  // Both query selection and physical-line maintenance must stay one-hot.
   for (i <- entries.indices; j <- 0 until i) {
     assert(!(entries(i).valid && entries(j).valid && sameLine(entries(i), entries(j))))
+    assert(!(entries(i).valid && entries(j).valid && sameKey(entries(i), entries(j))))
   }
 
   XSPerfAccumulate("mtrack_queries", PopCount(io.loads.map(_.s0_valid)))
-  XSPerfAccumulate("mtrack_update_hit_seen", PopCount(io.loads.map(q => q.s2.valid && q.s2.bits.hit)))
+  XSPerfAccumulate("mtrack_update_hit_seen", PopCount(io.loads.map(_.s2.valid)))
   XSPerfAccumulate("mtrack_update_alloc_seen", PopCount(io.alloc.map(_.valid)))
   XSPerfAccumulate("mtrack_update_install", io.install.valid)
   XSPerfAccumulate("mtrack_pending_retired", PopCount(retired))

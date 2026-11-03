@@ -72,7 +72,7 @@ case class DCacheParameters
 
   // ========== MissTrack / SpecMiss ==========
   enMissTrack: Boolean = true,
-  missTrackEntries: Int = 16,
+  missTrackEntries: Int = 32,
   missTrackHashBits: Int = 5
 ) extends L1CacheParameters {
   require(missTrackEntries >= 2, "MissTrack needs at least two entries")
@@ -1505,7 +1505,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     misstrack.io.clear := delayedClear
   } else {
     for (w <- 0 until LoadPipelineWidth) {
-      ldu(w).io.specmiss := 0.U.asTypeOf(new MissTrackSpec)
+      ldu(w).io.specmiss := false.B
       ldu(w).io.mshr_full := missQueue.io.full
     }
   }
