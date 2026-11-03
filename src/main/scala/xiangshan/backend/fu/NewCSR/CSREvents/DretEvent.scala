@@ -14,7 +14,6 @@ class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV, _.MDT, _.SDT))
   val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SDT))
   val debugMode = ValidIO(Bool())
-  val debugIntrEnable = ValidIO(Bool())
   val targetPc = ValidIO(new TargetPCBundle)
 }
 
@@ -56,7 +55,6 @@ class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.dcsr.valid            := valid
   out.mstatus.valid         := valid
   out.vsstatus.valid        := valid
-  out.debugIntrEnable.valid := valid
   out.targetPc.valid        := valid
 
   out.privState.bits.PRVM     := in.dcsr.PRV.asUInt
@@ -66,7 +64,6 @@ class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.mstatus.bits.SDT        := Mux(out.privState.bits.isVirtual || out.privState.bits.isModeHU, 0.U, in.mstatus.SDT.asBool)
   out.vsstatus.bits.SDT       := Mux(out.privState.bits.isModeVU, 0.U, in.vsstatus.SDT.asBool)
   out.debugMode.bits          := false.B
-  out.debugIntrEnable.bits    := true.B
   out.targetPc.bits.pc        := in.dpc.asUInt
   out.targetPc.bits.raiseIPF  := instrAddrTransType.checkPageFault(in.dpc.asUInt)
   out.targetPc.bits.raiseIAF  := instrAddrTransType.checkAccessFault(in.dpc.asUInt)

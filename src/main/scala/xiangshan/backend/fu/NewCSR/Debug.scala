@@ -16,9 +16,7 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   private val trapInfo        = io.in.trapInfo
   private val hasTrap         = trapInfo.valid
   private val trapIsInterrupt = trapInfo.bits.isInterrupt
-  private val isDebugIntr     = trapInfo.bits.isDebugIntr
   private val trapVec         = trapInfo.bits.trapVec
-  private val singleStep      = trapInfo.bits.singleStep
   private val trigger         = io.in.trapInfo.bits.trigger
 
   private val privState = io.in.privState
@@ -49,14 +47,11 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
    *    4. single step(debug module set dcsr.step before hart resume)
    *    5. critical error state(when dcsr.cetrig assert)
    */
-  // debug_intr
-  val hasIntr = hasTrap && trapIsInterrupt
-  val hasDebugIntr = hasIntr && isDebugIntr
+  val breakPoint = hasTrap && !trapIsInterrupt && trapVec(ExceptionNO.breakPoint)
+  val hasDebugIntr = breakPoint && trigger === TriggerAction.DebugIntr
 
   // debug_exception_ebreak
-  val hasExp = hasTrap && !trapIsInterrupt
-  val breakPoint = trapVec(ExceptionNO.breakPoint).asBool
-  val isEbreak = hasExp && breakPoint && !TriggerAction.isExp(trigger)
+  val isEbreak = breakPoint && trigger === TriggerAction.Ebreak
   val ebreakEnterDebugMode =
     (privState.isModeM && dcsr.EBREAKM.asBool) ||
       (privState.isModeHS && dcsr.EBREAKS.asBool) ||
@@ -82,10 +77,10 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   )
 
   val triggerCanRaiseBpExp = io.in.triggerCanRaiseBpExp
-  val triggerEnterDebugMode = hasExp && TriggerAction.isDmode(trigger)
+  val triggerEnterDebugMode = breakPoint && TriggerAction.isDmode(trigger)
 
   // debug_exception_single
-  val hasSingleStep = hasExp && singleStep
+  val hasSingleStep = breakPoint && trigger === TriggerAction.SingleStep
 
 
   // critical error state
@@ -162,9 +157,7 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val in = Input(new Bundle {
     val trapInfo = ValidIO(new Bundle {
       val trapVec = UInt(64.W)
-      val isDebugIntr = Bool()
       val isInterrupt = Bool()
-      val singleStep = Bool()
       val trigger = TriggerAction()
       val criticalErrorState = Bool()
     })
@@ -277,12 +270,12 @@ abstract class BaseTrigger()(implicit val p: Parameters) extends Module with Has
   val actionVec = VecInit(tdataVec.map(_.action))
   val triggerAction = Wire(TriggerAction())
   val fireDebugModeVec = TriggerUtil.triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.DebugMode)
-  val fireBreakpointExpVec = TriggerUtil.triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.BreakpointExp)
+  val fireBreakpointExpVec = TriggerUtil.triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.FetchTrigger)
   val fireDebugMode = fireDebugModeVec.asUInt.orR
   val breakPointExp = fireBreakpointExpVec.asUInt.orR && triggerCanRaiseBpExp
   triggerAction := MuxCase(TriggerAction.None, Seq(
     fireDebugMode -> TriggerAction.DebugMode,
-    breakPointExp -> TriggerAction.BreakpointExp,
+    breakPointExp -> TriggerAction.MemTrigger,
   ))
   val triggerFireVec = MuxCase(VecInit(Seq.fill(TriggerNum)(false.B)), Seq(
     fireDebugMode -> fireDebugModeVec,

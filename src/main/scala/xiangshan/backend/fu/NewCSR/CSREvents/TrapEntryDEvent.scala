@@ -16,7 +16,6 @@ class TrapEntryDEventOutput extends Bundle with EventUpdatePrivStateOutput with 
   val dpc             = ValidIO((new Epc       ).addInEvent(_.epc))
   val targetPc        = ValidIO(new TargetPCBundle)
   val debugMode       = ValidIO(Bool())
-  val debugIntrEnable = ValidIO(Bool())
 }
 
 class TrapEntryDEventInput(implicit override val p: Parameters) extends TrapEntryEventInput{
@@ -86,7 +85,6 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.targetPc.valid          := RegNext(valid || hasExceptionInDmode)
   out.debugMode.valid         := valid
   out.privState.valid         := valid
-  out.debugIntrEnable.valid   := valid
 
   out.dcsr.bits.V             := current.privState.V.asUInt
   out.dcsr.bits.PRV           := current.privState.PRVM.asUInt
@@ -101,7 +99,6 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.targetPc.bits.raiseIGPF := false.B
   out.debugMode.bits          := true.B
   out.privState.bits          := PrivState.ModeM
-  out.debugIntrEnable.bits    := false.B
 
 }
 

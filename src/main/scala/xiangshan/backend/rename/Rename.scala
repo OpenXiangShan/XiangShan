@@ -461,7 +461,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).loadWaitStrict := io.ssit(i).strict && io.ssit(i).valid
     uops(i).ssid := io.ssit(i).ssid
 
-    uops(i).singleStep := false.B
 
 
     // update cf according to waittable result
@@ -547,7 +546,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     uops(i).formerNumWB := entryFormerNumWB
     uops(i).latterNumWB := entryLatterNumWB
-    val hasExceptionExceptFlushPipe = uops(i).exceptionVec.orR || TriggerAction.isDmode(uops(i).trigger)
+    val hasExceptionExceptFlushPipe = uops(i).exceptionVec.orR
     when(hasExceptionExceptFlushPipe) {
       uops(i).formerNumWB := 0.U
       uops(i).latterNumWB := 0.U
@@ -844,7 +843,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
   uops.zip(io.in).foreach{ case (uop, in) => uop.snapshot := allowSnpt && FuType.isJump(in.bits.fuType) && in.fire }
   uops.map{ x =>
-    x.hasException := x.exceptionVec.orR || TriggerAction.isDmode(x.trigger)
+    x.hasException := x.exceptionVec.orR
   }
   if(backendParams.debugEn){
     dontTouch(robIdxHeadNext)

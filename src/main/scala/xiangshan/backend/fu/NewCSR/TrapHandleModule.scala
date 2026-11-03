@@ -75,7 +75,7 @@ class TrapHandleModule extends Module {
   // Todo: support more interrupt and exception
   private val exceptionRegular = OHToUInt(highestPrioEX)
   private val interruptNO = highestPrioIR
-  private val exceptionNO = Mux(trapInfo.bits.singleStep, ExceptionNO.breakPoint.U, exceptionRegular)
+  private val exceptionNO = exceptionRegular
 
   private val causeNO = Mux(hasIR, interruptNO, exceptionNO)
 
@@ -120,7 +120,6 @@ class TrapHandleIO extends Bundle {
       val trapVec = UInt(64.W)
       val intrVec = UInt(8.W)
       val isInterrupt = Bool()
-      val singleStep = Bool()
       // trap to x mode
       val irToHS = Bool()
       val irToVS = Bool()
