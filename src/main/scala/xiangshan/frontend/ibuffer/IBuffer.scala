@@ -519,21 +519,26 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private def numStages     = 2
-  private val topdownStages = RegInit(VecInit.fill(numStages)(0.U.asTypeOf(new FrontendTopDownBundle)))
-
-  topdownStages(0) := io.in.bits.topdownInfo
-  for (i <- 1 until numStages) {
-    topdownStages(i) := topdownStages(i - 1)
+  // deqEntries is combinational. Classify the next output beside its real register.
+  private val outputTopdown = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
+  private val nextTopdown = WireInit(io.in.bits.topdownInfo)
+  private def setMissingReason(reason: TopDownCounters.Value): Unit = {
+    nextTopdown.reasons.foreach(_ := false.B)
+    nextTopdown.reasons(reason.id) := true.B
   }
-
-  topdownStages.foreach(_.backendRedirectOverride(io.backendRedirectTopdown))
+  when(useBypass && io.in.fire) {
+    setMissingReason(TopDownCounters.FetchFragBubble)
+  }.elsewhen(io.in.valid && numFromFetch =/= 0.U && !useBypass) {
+    setMissingReason(TopDownCounters.IbufferStructure)
+  }
+  when(vtypeGen.in.canUpdateVType)(outputTopdown := nextTopdown)
+  outputTopdown.backendRedirectOverride(io.backendRedirectTopdown)
 
   private val deqValidCount = PopCount(io.out.map(_.valid))
   private val deqWasteCount = DecodeWidth.U - deqValidCount
   // Other must lose to every specific cause, even if its bit is injected upstream.
   // Keep it out of the encoder and select it only as the final fallback below.
-  private val bubbleReasons = WireInit(topdownStages.last.reasons)
+  private val bubbleReasons = WireInit(outputTopdown.reasons)
   bubbleReasons(TopDownCounters.FrontendOtherCoreStall.id) := false.B
   private val hasBubbleReason = bubbleReasons.asUInt.orR
   private val encodedBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
@@ -546,11 +551,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     Mux(deqValidCount === 0.U, TopDownCounters.FrontendOtherCoreStall.id.U, TopDownCounters.FetchFragBubble.id.U)
   )
 
-  io.stallReason.reason.foreach(_ := TopDownCounters.NoStall.id.U)
   for (i <- 0 until DecodeWidth) {
-    when(i.U < deqWasteCount) {
-      io.stallReason.reason(DecodeWidth - i - 1) := matchBubble
-    }
+    io.stallReason.reason(i) := Mux(io.out(i).valid, TopDownCounters.NoStall.id.U, matchBubble)
   }
 
   // Debug info
