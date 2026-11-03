@@ -422,6 +422,7 @@ class TlbStorageReadIO(ports: Int, nDups: Int)(implicit p: Parameters) extends T
 }
 
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
+  val multiHit = Output(Bool())
   val r = new TlbStorageReadIO(ports, nDups)
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
@@ -454,6 +455,7 @@ class MptPermBundle(isTlbPort: Boolean = true) (implicit p: Parameters) extends 
   }
 }
 class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
+  val multiHit = Output(Bool())
   val r = new TlbStorageReadIO(ports, nDups)
   val w = Flipped(ValidIO(new Bundle {
     val data = Output(new PtwRespS2withMemIdx)

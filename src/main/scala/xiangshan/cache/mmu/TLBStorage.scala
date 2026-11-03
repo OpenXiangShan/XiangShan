@@ -40,6 +40,9 @@ class TLBFA(
   val v = RegInit(VecInit(Seq.fill(nWays)(false.B)))
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
+  val multiHits = Wire(Vec(ports, Valid(UInt(nWays.W))))
+  val multiHitMask = ParallelMux(multiHits.map(hit => hit.valid -> hit.bits))
+  io.multiHit := ParallelOR(multiHits.map(_.valid))
 
   val pfClearEnable = io.csr.pfRefresh.enable
   val pfHitClearMasks = WireInit(VecInit(Seq.fill(ports)(0.U(nWays.W))))
@@ -74,15 +77,27 @@ class TLBFA(
 
     hitVec.suggestName("hitVec")
 
-    // Capture PF rejection separately to keep it out of the lookup and PPN selection paths
+    // Capture rejection separately to keep it out of the lookup and PPN selection paths
     val hitVecReg = RegEnable(hitVec, req.fire)
     val pfRejectVecReg = RegEnable(redirectPfClearVec.asUInt | hwPfRejectVec, req.fire)
-    val rejectedHit = (hitVecReg.asUInt & pfRejectVecReg).orR
+    val multiHitMaskReg = RegEnable(multiHitMask, req.fire)
+    val rejectedHit = (hitVecReg.asUInt & (pfRejectVecReg | multiHitMaskReg)).orR
+    // Exclude cleared ways from conflict detection while keeping data selection unchanged
+    val multiHitVec = hitVecReg.asUInt & ~multiHitMaskReg
+    // Each node carries (hasOne, hasTwo) for its group of ways
+    // A merged node has two hits if either child has two hits or both children have one hit
+    val (anyHit, multiHit) = ParallelOperation(
+      multiHitVec.asBools.map(hit => (hit, false.B)),
+      (a: (Bool, Bool), b: (Bool, Bool)) =>
+        (a._1 || b._1, a._2 || b._2 || (a._1 && b._1))
+    )
     // Sector tlb may trigger multi-hit, see def "wbhit"
-    XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
+    XSPerfAccumulate(s"port${i}_multi_hit", resp.valid && multiHit)
+    multiHits(i).valid := resp.valid && multiHit
+    multiHits(i).bits := multiHitVec
 
     resp.valid := RegNext(req.valid)
-    resp.bits.hit := Cat(hitVecReg).orR && !rejectedHit
+    resp.bits.hit := anyHit && !multiHit && !rejectedHit
     val reqVpn   = RegNext(vpn)
     def selectHit[T <: Data](values: Seq[T]): T = {
       if (nWays == 1) values.head else Mux1H(hitVecReg zip values)
@@ -127,7 +142,7 @@ class TLBFA(
   val w_hit_vec = VecInit(entries.zip(v).zipWithIndex.map{case ((e, vi), i) =>
     e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi && !clearMask(i)
   })
-  XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
+  XSError(io.w.valid && (w_hit_vec.asUInt & ~multiHitMask).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
   val refill_wayIdx_reg = RegEnable(io.w.bits.wayIdx, io.w.valid)
@@ -241,7 +256,7 @@ class TLBFA(
   }
 
   for (i <- 0 until nWays) {
-    when (clearMask(i) && !(io.w.valid && io.w.bits.wayIdx === i.U)) {
+    when ((clearMask(i) && !(io.w.valid && io.w.bits.wayIdx === i.U)) || multiHitMask(i)) {
       v(i) := false.B
     }
   }
@@ -277,6 +292,7 @@ class TLBFakeFA(
 )(implicit p: Parameters) extends TlbModule with HasCSRConst {
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
+  io.multiHit := false.B
   io.r.req.map(_.ready := true.B)
 
   val mode = if (useDmode) io.csr.priv.dmode else io.csr.priv.imode
@@ -376,6 +392,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     useDmode = q.useDmode,
     SoftTLB = coreParams.softTLB
   )
+  io.multiHit := page.multiHit
 
   page.r.req <> io.r.req
   io.r.resp := page.r.resp
