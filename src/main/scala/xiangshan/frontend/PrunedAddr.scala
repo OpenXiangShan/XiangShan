@@ -35,7 +35,10 @@ class PrunedAddr(
     catch { case _: java.util.NoSuchElementException => "<unbound PrunedAddr>" }
 
   def signExt(targetWidth: Int): PrunedAddr = {
-    require(targetWidth >= length)
+    require(
+      targetWidth >= length,
+      s"Target width ($targetWidth) must be greater than or equal to the current length ($length)"
+    )
     if (targetWidth == length) {
       println(s"PrunedAddr: unnecessary ${this.name}.signExt call")
     }
@@ -43,7 +46,10 @@ class PrunedAddr(
   }
 
   def zeroExt(targetWidth: Int): PrunedAddr = {
-    require(targetWidth >= length)
+    require(
+      targetWidth >= length,
+      s"Target width ($targetWidth) must be greater than or equal to the current length ($length)"
+    )
     if (targetWidth == length) {
       println(s"PrunedAddr: unnecessary ${this.name}.zeroExt call")
     }
@@ -51,7 +57,10 @@ class PrunedAddr(
   }
 
   def truncate(targetWidth: Int): PrunedAddr = {
-    require(targetWidth <= length)
+    require(
+      targetWidth <= length,
+      s"Target width ($targetWidth) must be less than or equal to the current length ($length)"
+    )
     if (targetWidth == length) {
       println(s"PrunedAddr: unnecessary ${this.name}.truncate call")
     }
@@ -153,7 +162,7 @@ object PrunedAddrInit {
  *   - https://github.com/OpenXiangShan/XiangShan/pull/6272
  */
 class Pc(_l: Int)(implicit p: Parameters) extends PrunedAddr(_l, strictAssign = true) {
-  require(_l == VAddrBits)
+  require(_l == VAddrBits, s"class Pc is designed to be used with VAddrBits, but got ${_l}")
   // Hack: we cannot do this(VAddrBits):
   //       methods are not accessible before parent class construction (thus in auxiliary constructor),
   //       here we use an empty XSBundle object to access VAddrBits
@@ -197,7 +206,7 @@ object PcInit {
 /** Added 1 extra guard/overflow bit to class Pc() for canonical check, see notes for class Pc
  */
 class GuardedPc(_l: Int)(implicit p: Parameters) extends PrunedAddr(_l, strictAssign = true) {
-  require(_l == GuardedVAddrBits)
+  require(_l == GuardedVAddrBits, s"class GuardedPc is designed to be used with GuardedVAddrBits, but got ${_l}")
   // Hack: we cannot do this(VAddrBits):
   //       methods are not accessible before parent class construction (thus in auxiliary constructor),
   //       here we use an empty XSBundle object to access VAddrBits
