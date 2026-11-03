@@ -6,6 +6,7 @@ from .dut_support import read_dut_signal
 
 
 _TO_IFU_VALID = (
+    "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_valid",
     "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
     "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_valid",
     "TOP.Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",

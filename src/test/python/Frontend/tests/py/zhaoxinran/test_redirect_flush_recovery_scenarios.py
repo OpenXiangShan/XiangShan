@@ -16,9 +16,9 @@ import pytest
 from env.core.transactions import BackendRedirectClass, RedirectTxn, ProgramImage
 from env.sequences import InjectRedirectSequence, LoadProgramSequence
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
+from env.funcov.py.ifu.mmio_nc_owner_funcov import read_instr_uncache_response_valid
 from env.support import record_scenario, scenario_rng
 from tests.py.jiabowen import test_ifu_predchecker_v3_dut as predchecker
-from tests.py.icache.directed_dut import test_icache_lowrisk_gap_closure_dut as lowrisk
 from tests.py.icache.directed_dut import test_icache_mainpipe_s1_flush_closure_dut as s1_flush
 from tests.py.zhaoxinran.translation import test_instruction_fetch_permission_boundary as faults
 from tests.py.support import uncache_scenarios as uncache
@@ -47,20 +47,20 @@ def _wait_for_pc(env, pc: int, *, max_cycles: int = 8000) -> None:
 
 
 _MAIN_FETCH_VALID_SIGNALS = (
+    "Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_valid",
     "Frontend_top.Frontend._inner_ftq_io_toICache_toMainPipe_valid",
     "Frontend_top.Frontend.inner_ftq.io_toICache_toMainPipe_valid",
 )
 _MAIN_FETCH_READY_SIGNALS = (
+    "Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_ready",
     "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
     "Frontend_top.Frontend.inner_icache.io_fromFtq_toMainPipe_ready",
 )
 _UNCACHE_RESPONSE_VALID_SIGNALS = (
     "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheFinish",
 )
-_UNCACHE_RAW_RESPONSE_VALID_SIGNALS = (
-    "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_valid",
-)
 _UNCACHE_NEED_RESEND_SIGNALS = (
+    "Frontend_top.Frontend.inner_instrUncache.respArbiter.io_in_0_bits_needResend",
     "Frontend_top.Frontend._inner_instrUncache_io_toIfu_resp_bits_needResend",
     "Frontend_top.Frontend.inner_instrUncache.io_toIfu_resp_bits_needResend",
 )
@@ -180,6 +180,8 @@ def _register_uncache_redirect_observer(
 
     def capture(cycle, current_env) -> None:
         target_seen = 0
+        raw_response = read_instr_uncache_response_valid(None, current_env.dut)
+        assert raw_response is not None, {"missing_internal_signal": "instr_uncache_response_valid"}
         if target_pc is not None:
             target_seen = int(
                 any(
@@ -191,9 +193,7 @@ def _register_uncache_redirect_observer(
         samples.append(
             {
                 "cycle": int(cycle),
-                "raw_response": uncache._require_first_dut_signal(
-                    current_env, _UNCACHE_RAW_RESPONSE_VALID_SIGNALS
-                ),
+                "raw_response": raw_response,
                 "response": uncache._require_first_dut_signal(
                     current_env, _UNCACHE_RESPONSE_VALID_SIGNALS
                 ),
@@ -577,7 +577,55 @@ def test_rfr_s05_bpu_s3_override_flushes_old_window(env) -> None:
 def test_rfr_s06_fencei_with_cache_state_restarts_fetch(env, flush: str) -> None:
     """Exercise both architectural frontend flush inputs on live DUT state."""
     if flush == "fencei":
-        lowrisk._run_icache_lowrisk_missunit_merge_and_fencei(env)
+        base = 0x8004_0000
+        target = base + 0x400
+        env.load_program((0x0000_0013).to_bytes(4, "little") * 8192, base)
+        env.icache_agent.configure(hit_latency=96, miss_latency=96, miss_rate=1.0, seed=11)
+        initialize_frontend(
+            env, FrontendInitConfig(reset_vector=base, bare_mode=True, reset_cycles=20)
+        )
+        for _ in range(6000):
+            if any(int(record["address"]) == base for record in env.icache_agent.request_records):
+                break
+            env.step(1)
+        else:
+            raise AssertionError({"reason": "initial cacheable miss was not requested", "base": hex(base)})
+
+        env.clock_reset.io_fencei.value = 1
+        env.step(1)
+        env.clock_reset.io_fencei.value = 0
+        env.step(2)
+        fence_cycle = env.current_cycle
+        env.monitor.clear()
+        env.monitor.set_expected_pc(target)
+        request_cursor = len(env.icache_agent.request_records)
+        env.backend_model.inject_redirect(target, "rfr-s06-fencei", delay_cycles=0)
+        for _ in range(6000):
+            target_request = next(
+                (
+                    record
+                    for record in env.icache_agent.request_records[request_cursor:]
+                    if int(record["address"]) == target
+                    and int(record["cycle"]) > fence_cycle
+                ),
+                None,
+            )
+            if target_request is not None and any(
+                int(item.pc) == target and int(item.cycle) > int(target_request["cycle"])
+                for item in env.monitor.observations
+            ):
+                break
+            env.step(1)
+        else:
+            raise AssertionError({
+                "reason": "fence.i did not restart fetch and deliver the target",
+                "target_pc": hex(target),
+                "fence_cycle": fence_cycle,
+                "requests": env.icache_agent.request_records[-16:],
+                "responses": env.icache_agent.response_records[-16:],
+                "observed": [(item.cycle, hex(item.pc)) for item in env.monitor.observations[-16:]],
+                "monitor_errors": env.monitor.get_errors(),
+            })
     else:
         context_switch._run_sfence_scope_after_refill(
             env,

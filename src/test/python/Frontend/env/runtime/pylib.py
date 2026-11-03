@@ -10,7 +10,7 @@ def frontend_build_root_path() -> Path:
 
 
 def frontend_itlb_ptw_req_get_gpa_path() -> str:
-    return "Frontend_top.Frontend._inner_itlb_io_ptw_req_0_bits_getGpa"
+    return "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
 
 
 def frontend_pylib_path() -> Path:

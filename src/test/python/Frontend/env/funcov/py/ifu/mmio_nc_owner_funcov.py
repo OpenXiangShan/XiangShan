@@ -37,6 +37,7 @@ _WAIT_LAST_COMMIT = 1
 _SEND_REQ = 2
 _WAIT_RESP = 3
 _ENTRY_REFILL_RESP = 2
+_ENTRY_SEND_RESP = 3
 _PBMT_NC = 1
 _PBMT_IO = 2
 
@@ -104,6 +105,16 @@ def _read_instr_uncache(recorder, dut, stem: str) -> Optional[int]:
     return _read(
         recorder, dut, *(prefix + str(stem) for prefix in _INSTR_UNCACHE_PREFIXES)
     )
+
+
+def read_instr_uncache_response_valid(recorder, dut) -> Optional[int]:
+    value = _read_instr_uncache(recorder, dut, "io_toIfu_resp_valid")
+    if value is not None:
+        return value
+    entry_state = _read(
+        recorder, dut, "Frontend_top.Frontend.inner_instrUncache.entries_0.state"
+    )
+    return None if entry_state is None else int(entry_state == _ENTRY_SEND_RESP)
 
 
 def _read_req_uncache(
@@ -359,7 +370,7 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "tl_d_denied": _read(
             recorder, dut, "auto_inner_instrUncache_client_out_d_bits_denied"
         ),
-        "instr_resp_valid": _read_instr_uncache(recorder, dut, "io_toIfu_resp_valid"),
+        "instr_resp_valid": read_instr_uncache_response_valid(recorder, dut),
         "instr_resp_data": _read_instr_uncache(
             recorder, dut, "io_toIfu_resp_bits_data"
         ),
@@ -510,9 +521,7 @@ def read_nc_timing_runtime_snapshot(recorder, dut) -> dict[str, Optional[int]]:
         ),
         "ifu_flush": _read_ifu(recorder, dut, "s2_flush"),
         "resp_valid": _read_uncache(recorder, dut, "io_resp_valid"),
-        "instr_resp_valid": _read_instr_uncache(
-            recorder, dut, "io_toIfu_resp_valid"
-        ),
+        "instr_resp_valid": read_instr_uncache_response_valid(recorder, dut),
         "to_valid": _read_ifu(recorder, dut, "io_toIBuffer_valid"),
         "to_ready": _read_ifu(recorder, dut, "io_toIBuffer_ready"),
         "to_enq": _read_ifu(recorder, dut, "io_toIBuffer_bits_enqEnable"),
