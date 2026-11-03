@@ -817,6 +817,10 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
 
   when (io.mem_grant.fire) {
+    when (isWriteIntent(req.cmd) && !io.mem_grant.bits.denied && !io.mem_grant.bits.corrupt) {
+      assert(io.mem_grant.bits.param === TLPermissions.toT,
+        "write-intent miss must receive trunk permissions")
+    }
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
     when (edge.hasData(io.mem_grant.bits)) {
@@ -1449,15 +1453,20 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     for (j <- (0 until reqNum).reverse) {
       val signals_j = computeMatchSignals(active_pipe_regs(j).req, io.queryMQ(i).req.bits)
 
-      // merge from pipe_reg
-      when (active_pipe_regs(j).merge_req(signals_j) && !active_pipe_regs(j).cancel) {
+      // A fabric-owned Acquire has already committed its permissions. Keep the
+      // block match below so a later store replays instead of allocating or
+      // merging into a load whose Acquire can no longer request write access.
+      val can_merge_to_pipe = active_pipe_regs(j).merge_req(signals_j) &&
+        !active_pipe_regs(j).cancel &&
+        !(acquire_owned_by_fabric(j) && io.queryMQ(i).req.bits.isFromStore)
+      when (can_merge_to_pipe) {
         can_merge_from_pipe(i) := true.B
         can_merge_from_pipe_mshr(i) := active_pipe_regs(j).mshr_id
       }
 
       // A store merging into an allocating pipe reg must be included before
       // sending Acquire, otherwise the entry cmd and Grant param can diverge.
-      when(active_pipe_regs(j).alloc && !active_pipe_regs(j).cancel && active_pipe_regs(j).merge_req(signals_j) && io.queryMQ(i).req.bits.isFromStore && query_valid(i)) {
+      when(active_pipe_regs(j).alloc && can_merge_to_pipe && io.queryMQ(i).req.bits.isFromStore && query_valid(i)) {
         can_merge_store_from_pipe(j) := true.B
       }
 
