@@ -59,6 +59,61 @@ def test_translate_applies_stage2_after_stage1_leaf() -> None:
 
 
 @pytest.mark.parametrize(
+    "stage1_pbmt,stage2_pbmt,expected_path",
+    [
+        (0, 0, "pma"),
+        (0, 1, "uncache"),
+        (0, 2, "mmio"),
+        (1, 0, "uncache"),
+        (1, 1, "uncache"),
+        (1, 2, "uncache"),
+        (2, 0, "mmio"),
+        (2, 1, "mmio"),
+        (2, 2, "mmio"),
+    ],
+)
+@pytest.mark.parametrize("s2xlate", [None, 3], ids=["inferred", "all-stage"])
+def test_translate_all_stage_uses_nonzero_stage1_pbmt_before_stage2(
+    stage1_pbmt: int, stage2_pbmt: int, expected_path: str, s2xlate: int | None
+) -> None:
+    pt = PageTableModel(mode="sv39")
+    va = 0x80200004
+    gpa = 0x80400004
+    host_pa = 0x80600004
+    pt.map_page(va >> 12, gpa >> 12, pbmt=stage1_pbmt)
+    pt.map_stage2_page(gpa >> 12, host_pa >> 12, pbmt=stage2_pbmt)
+
+    pa, ok, metadata = pt.translate(va, s2xlate=s2xlate)
+
+    assert ok is True
+    assert pa == host_pa
+    assert metadata["s2xlate"] == 3
+    assert metadata["stage1_pbmt"] == stage1_pbmt
+    assert metadata["stage2_pbmt"] == stage2_pbmt
+    assert metadata["fetch_path"] == expected_path
+
+
+@pytest.mark.parametrize("s2xlate", [1, 2], ids=["only-stage1", "only-stage2"])
+@pytest.mark.parametrize("pbmt,expected_path", [(0, "pma"), (1, "uncache"), (2, "mmio")])
+def test_translate_single_stage_uses_only_active_stage_pbmt(
+    s2xlate: int, pbmt: int, expected_path: str
+) -> None:
+    pt = PageTableModel(mode="sv39" if s2xlate == 1 else "bare")
+    va = 0x80200004
+    host_pa = 0x80400004
+    inactive_pbmt = (pbmt + 1) % 3
+    pt.map_page(va >> 12, host_pa >> 12, pbmt=pbmt if s2xlate == 1 else inactive_pbmt)
+    stage2_vpn = host_pa >> 12 if s2xlate == 1 else va >> 12
+    pt.map_stage2_page(stage2_vpn, host_pa >> 12, pbmt=pbmt if s2xlate == 2 else inactive_pbmt)
+
+    pa, ok, metadata = pt.translate(va, s2xlate=s2xlate)
+
+    assert ok is True
+    assert pa == host_pa
+    assert metadata["fetch_path"] == expected_path
+
+
+@pytest.mark.parametrize(
     "pte_kwargs,priv_imode,reason,expected_ptw_pf",
     [
         ({"x": 0}, 1, "stage1_execute_denied", 0),

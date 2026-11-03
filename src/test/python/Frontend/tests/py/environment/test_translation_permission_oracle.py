@@ -122,7 +122,16 @@ def test_oracle_aligns_uncache_requests_to_the_eight_byte_beat() -> None:
     assert env.assert_translation_scenario()["error_count"] == 0
 
 
-def test_oracle_detects_all_stage_nc_vs_mmio_request_mismatch() -> None:
+@pytest.mark.parametrize(
+    "s1_pbmt,s2_pbmt,expected_path,expected_nc",
+    [(1, 2, "uncache", 1), (2, 1, "mmio", 0),
+     (0, 1, "uncache", 1), (0, 2, "mmio", 0)],
+    ids=["vs-nc-over-g-io", "vs-io-over-g-nc", "g-nc-fallback", "g-io-fallback"],
+)
+@pytest.mark.parametrize("matching_request", [True, False], ids=["correct", "wrong-type"])
+def test_oracle_detects_all_stage_nc_vs_mmio_request_mismatch(
+    s1_pbmt: int, s2_pbmt: int, expected_path: str, expected_nc: int, matching_request: bool
+) -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     state = TranslationScenarioBuilder(env).build(
         TranslationScenario(
@@ -133,20 +142,27 @@ def test_oracle_detects_all_stage_nc_vs_mmio_request_mismatch() -> None:
             payload=bytes.fromhex("13000000"),
             mode="sv39",
             s2xlate=3,
-            s1_pte=TranslationPte(pbmt=2),
-            s2_pte=TranslationPte(pbmt=1),
+            s1_pte=TranslationPte(pbmt=s1_pbmt),
+            s2_pte=TranslationPte(pbmt=s2_pbmt),
             expected_path="uncache",
         )
     )
+    # Explicit expected NC/IO labels are independent of both model and checker.
+    assert state.expected_outcome["fetch_path"] == expected_path
     env.arm_translation_scenario(state)
     _observe_matching_ptw(env, state)
+    actual_nc = expected_nc if matching_request else 1 - expected_nc
     env.translation_oracle.observe_fetch_request(
-        12, path="uncache", pa=state.expected_outcome["pa"] & ~0x7, mem_page_type_nc=0
+        12, path="uncache", pa=state.expected_outcome["pa"] & ~0x7, mem_page_type_nc=actual_nc
     )
-
-    error = env.translation_oracle.errors[0]
-    assert error["reason"] == "translated_pbmt_mismatch"
-    assert (error["expected_mem_page_type_nc"], error["actual_mem_page_type_nc"]) == (1, 0)
+    if matching_request:
+        assert env.translation_oracle.errors == []
+        assert env.translation_oracle.active["fetch_seen"] is True
+    else:
+        error, = env.translation_oracle.errors
+        assert error["reason"] == "translated_pbmt_mismatch"
+        assert (error["expected_mem_page_type_nc"], error["actual_mem_page_type_nc"]) == (expected_nc, actual_nc)
+        assert env.translation_oracle.active["fetch_seen"] is False
 
 
 def test_oracle_requires_each_cacheable_fetch_block_covered_by_the_payload() -> None:

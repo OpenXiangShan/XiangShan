@@ -392,7 +392,9 @@ class PageTableModel:
             return 0, False, metadata
         host_ppn = self._compose_ppn(stage1_ppn, stage2_pte)
         pa = (host_ppn << 12) | (va & 0xFFF)
-        pbmt = int(stage2_pte.pbmt) if int(stage2_pte.pbmt) else int(stage1_pte.pbmt) if stage1_pte is not None else 0
+        # Svpbmt: nonzero VS-stage PBMT overrides the G-stage memory type.
+        stage1_pbmt = 0 if stage1_pte is None else int(stage1_pte.pbmt)
+        pbmt = stage1_pbmt or int(stage2_pte.pbmt)
         metadata.update({"stage2_pa": host_ppn << 12, "translated_pa": pa, "fetch_path": self._fetch_path(pbmt)})
         metadata.update(self._outcome_metadata(None, "ok"))
         return pa, True, metadata
