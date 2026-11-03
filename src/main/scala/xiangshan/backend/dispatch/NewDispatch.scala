@@ -163,6 +163,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val issueBlockParams = backendParams.allIssueParams
   val renameIn = io.renameIn
   val fromRename = io.fromRename
+  val boundaryInterruptPending = io.enqRob.boundaryInterruptPending
   io.toRenameAllFire := io.fromRename.map(x => !x.valid || x.fire).reduce(_ && _)
   val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DynInst))))
   fromRenameUpdate := fromRename
@@ -447,8 +448,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   for (i <- 0 until RenameWidth){
     // update valid logic
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
-      lsqCanAccept && !fromRename(i).bits.eliminatedMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
-    fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept
+      lsqCanAccept && !fromRename(i).bits.eliminatedMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep &&
+      !boundaryInterruptPending
+    val normalResourcesReady = allowDispatch(i) && !uopBlockByIQ(i) && lsqCanAccept
+    fromRename(i).ready := thisCanActualOut(i) && (boundaryInterruptPending || normalResourcesReady)
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(ignoreOldVdVec(i), SrcType.no, fromRename(i).bits.srcType(numRegSrcVf - 1))
   }
@@ -688,7 +691,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   // enqLsq io
   require(enqLsqIO.req.size == enqLsqIO.resp.size)
   for (i <- enqLsqIO.req.indices) {
-    when(!io.fromRename(i).fire) {
+    when(!io.fromRename(i).fire || boundaryInterruptPending) {
       enqLsqIO.needAlloc(i) := 0.U
     }.elsewhen(isStoreVec(i) || isVStoreVec(i)) {
       enqLsqIO.needAlloc(i) := 2.U // store | vstore
@@ -697,7 +700,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     }.otherwise {
       enqLsqIO.needAlloc(i) := 0.U
     }
-    enqLsqIO.req(i).valid := io.fromRename(i).fire && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i)
+    enqLsqIO.req(i).valid := io.fromRename(i).fire && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i) && !boundaryInterruptPending
     enqLsqIO.req(i).bits := io.fromRename(i).bits
 
     // This is to make it easier to calculate in LSQ.
@@ -705,6 +708,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     // But, the 'numLsElem' that is not a vector is set to 0 when passed to IQ
     enqLsqIO.req(i).bits.numLsElem := Mux(isVlsType(i), numLsElem(i), 1.U)
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
+  }
+  when (boundaryInterruptPending) {
+    assert(!VecInit(io.toIssueQueues.map(_.valid)).asUInt.orR,
+      "Post-CSR interrupt anchor must not enter an issue queue")
+    assert(!VecInit(enqLsqIO.req.map(_.valid)).asUInt.orR,
+      "Post-CSR interrupt anchor must not allocate an LSQ entry")
   }
 
   val isFp = VecInit(fromRename.map(req => FuType.isFArith(req.bits.fuType)))
@@ -736,7 +745,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       updatedUop(i).psrc(0) := 0.U
     }
     //TODO: vec ls mdp
-    io.lfst.req(i).valid := fromRename(i).fire && updatedUop(i).storeSetHit
+    io.lfst.req(i).valid := fromRename(i).fire && updatedUop(i).storeSetHit && !boundaryInterruptPending
     io.lfst.req(i).bits.isstore := isStore(i)
     io.lfst.req(i).bits.ssid := updatedUop(i).ssid
     io.lfst.req(i).bits.robIdx := updatedUop(i).robIdx // speculatively assigned in rename
