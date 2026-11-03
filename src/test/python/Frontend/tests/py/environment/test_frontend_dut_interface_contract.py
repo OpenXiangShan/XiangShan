@@ -167,7 +167,7 @@ def _required_public_signals() -> dict[str, tuple[str, int]]:
         "io_backend_toIBuf_decodeCanAccept": ("input", 1),
         "io_backend_toFtq_commit_valid": ("input", 1),
         "io_backend_toFtq_redirect_valid": ("input", 1),
-        "io_backend_toFtq_redirect_bits_pc": ("input", 50),
+        "io_backend_toFtq_redirect_bits_pc": ("input", 51),
         "io_backend_toFtq_resolve_0_valid": ("input", 1),
         "io_backend_fromFtq_wen": ("output", 1),
         "io_backend_fromFtq_ftqIdx": ("output", 6),
