@@ -19,6 +19,7 @@ package xiangshan
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
+import device.RERI.{ErrorSource, RERIErrorInfo, SeverityLevel}
 import utility._
 import utils._
 import _root_.utils.{OptionWrapper, NamedUInt}
@@ -748,15 +749,17 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   })
   val paddr = Output(UInt(PAddrBits.W))
 
-  // report error and paddr to beu
-  // bus error unit will receive error info iff ecc_error.valid
+  // Retained for the legacy CACHE_ERROR CSR layout.
   val report_to_beu = Output(Bool())
+  val severity = Output(SeverityLevel())
 
-  def toL1BusErrorUnitInfo(valid: Bool): L1BusErrorUnitInfo = {
-    val beu_info = Wire(new L1BusErrorUnitInfo)
-    beu_info.ecc_error.valid := valid && report_to_beu
-    beu_info.ecc_error.bits := paddr
-    beu_info
+  def toRERIErrorInfo(valid: Bool): Valid[RERIErrorInfo] = {
+    val reriInfo = Wire(Valid(new RERIErrorInfo))
+    reriInfo.valid := valid
+    reriInfo.bits.errorPaddr := paddr
+    reriInfo.bits.severity := severity
+    reriInfo.bits.errorSource := Mux(source.tag, ErrorSource.addressError, ErrorSource.dataError)
+    reriInfo
   }
 }
 
