@@ -21,7 +21,6 @@ import chisel3.util._
 import device.RERI.{ErrorRecordInfoParam, ErrorRecordInterfaceParam, ErrorRecordType}
 import xscache.coupledL2._
 import xscache.chi._
-import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tile.MaxHartIdBits
 import org.chipsalliance.cde.config.{Field, Parameters}
 import system.{CVMParamsKey, SoCParamsKey}
@@ -285,8 +284,7 @@ case class XSCoreParameters
     nReleaseEntries = 18,
     nMaxPrefetchEntry = 6,
     enableTagEcc = true,
-    enableDataEcc = true,
-    cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+    enableDataEcc = true
   )),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
