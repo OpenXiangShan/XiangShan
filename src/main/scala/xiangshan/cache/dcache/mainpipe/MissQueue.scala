@@ -1059,7 +1059,7 @@ for(i <- 0 until reqNum) {
   io.main_pipe_req.bits.occupy_way := req.occupy_way
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
 
-  io.probe.block := req_valid && w_grantlast &&
+  io.probe.block := req_valid && w_grantfirst &&
     get_block_addr(req.addr) === get_block_addr(io.probe.req.bits.addr) &&
     req.vaddrAlias === get_alias(io.probe.req.bits.vaddr)
 
