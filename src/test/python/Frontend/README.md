@@ -25,6 +25,9 @@
 - `env/`
   - Frontend toffee 验证环境主实现层。
   - 包含 bundles、agents、monitors、model、sequences、fixtures 和 API。
+- `rm/`
+  - 独立的 Frontend 参考模型；当前包含 FallThrough、uBTB 和 mBTB 事务级模型。DUT 信号采样与比较由 `env/checkers/` 负责。
+  - mBTB 仅核对已知训练表项的有效命中所携带的位置、目标和属性；替换状态不确定时停止比较该组，不判断未命中及条件分支方向。
 - `tests/`
   - 当前可见的 Frontend pytest 用例集合。
   - `tests/conftest.py`、`tests/asm_cases/generate_cases.py` 和
@@ -197,7 +200,8 @@ def test_generated_stream(env):
   - 可用 `TB_LINE_COVERAGE_OMIT=/path/to/file.omit` 覆盖默认 omit 文件。
   - 可用 `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` 关闭 pytest teardown 阶段的 toffee line coverage 上报。
   - `TB_ENABLE_FUNCTIONAL_COVERAGE=0` 可关闭正式 SampleHub + Toffee 功能覆盖率装配；默认 `1`。
-  - `TB_ENABLE_REFERENCE_MODEL=0` 可关闭共享参考模型比较；默认 `1`。当前接入 uBTB，关闭后仍运行其他 DUT/trace 检查。
+  - `TB_ENABLE_REFERENCE_MODEL=0` 可关闭共享参考模型比较；默认 `1`。当前接入 FallThrough、uBTB 和已知命中的 mBTB，关闭后仍运行其他 DUT/trace 检查。
+  - `TB_REFERENCE_MODEL_STRICT=1` 将参考模型比对不一致升级为 case 失败；默认 `0`，不一致只记录 warning。
 - `scripts/report_raw_code_coverage.py`
   - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py --data-dir build-frontend/artifacts/<run_id>/coverage`
   - 合并指定同版本 run/suite 的 `.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率

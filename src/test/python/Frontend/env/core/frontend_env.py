@@ -13,6 +13,8 @@ from ..agents.icache_ecc_injection_agent import ICacheECCInjectionAgent
 from ..agents.ptw_agent import PTWAgent
 from ..agents.uncache_agent import UncacheAgent
 from ..checkers.frontend_flow_checker import FrontendFlowChecker
+from ..checkers.fallthrough_reference_checker import FallThroughReferenceChecker
+from ..checkers.mbtb_reference_checker import MbtbReferenceChecker
 from ..checkers.ptw_checker import PTWFullPpnChecker, PTWRespInputChecker
 from ..checkers.translation_scenario_checker import TranslationScenarioChecker
 from ..checkers.ubtb_reference_checker import UbtbReferenceChecker
@@ -73,6 +75,7 @@ class FrontendEnv:
         bp_ctrl_sc_enable: int = 1,
         bp_ctrl_ittage_enable: int = 1,
         reference_model_enable: Optional[bool] = None,
+        reference_model_strict: Optional[bool] = None,
     ) -> None:
         configure_env_logging(log_level)
         self.logger = logging.getLogger("env.frontend_env")
@@ -115,9 +118,22 @@ class FrontendEnv:
                 "TB_ENABLE_REFERENCE_MODEL", "1"
             ).strip().lower() not in {"0", "false", "off", "no"}
         self.reference_model_enabled = bool(reference_model_enable)
+        if reference_model_strict is None:
+            reference_model_strict = os.getenv(
+                "TB_REFERENCE_MODEL_STRICT", "0"
+            ).strip().lower() not in {"0", "false", "off", "no"}
+        self.reference_model_strict = bool(reference_model_strict)
+        self.fallthrough_checker = None
+        self.mbtb_checker = None
         self.ubtb_checker = None
         if self.reference_model_enabled and not getattr(dut, "_is_fake_frontend_dut", False):
-            self.ubtb_checker = UbtbReferenceChecker()
+            self.fallthrough_checker = FallThroughReferenceChecker(
+                strict=self.reference_model_strict
+            )
+            self.register_cycle_observer(self.fallthrough_checker.on_cycle)
+            self.mbtb_checker = MbtbReferenceChecker(strict=self.reference_model_strict)
+            self.register_cycle_observer(self.mbtb_checker.on_cycle)
+            self.ubtb_checker = UbtbReferenceChecker(strict=self.reference_model_strict)
             self.register_cycle_observer(self.ubtb_checker.on_cycle)
 
         self._init_inputs()

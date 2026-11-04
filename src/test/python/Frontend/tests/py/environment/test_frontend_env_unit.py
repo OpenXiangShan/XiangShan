@@ -85,10 +85,32 @@ def test_reference_model_enable_controls_shared_checker(monkeypatch) -> None:
     monkeypatch.setenv("TB_ENABLE_REFERENCE_MODEL", "0")
     disabled = FrontendEnv(dut, register_callbacks=False)
     assert disabled.reference_model_enabled is False
+    assert disabled.fallthrough_checker is None
+    assert disabled.mbtb_checker is None
     assert disabled.ubtb_checker is None
 
     monkeypatch.setenv("TB_ENABLE_REFERENCE_MODEL", "1")
     enabled = FrontendEnv(dut, register_callbacks=False)
     assert enabled.reference_model_enabled is True
+    assert enabled.fallthrough_checker is not None
+    assert enabled.fallthrough_checker.on_cycle in enabled._cycle_observers
+    assert enabled.mbtb_checker is not None
+    assert enabled.mbtb_checker.on_cycle in enabled._cycle_observers
     assert enabled.ubtb_checker is not None
     assert enabled.ubtb_checker.on_cycle in enabled._cycle_observers
+
+
+def test_reference_model_mismatches_are_non_fatal_by_default_and_strict_on_request(monkeypatch) -> None:
+    dut = FakeDUTFrontend()
+    dut._is_fake_frontend_dut = False
+    monkeypatch.delenv("TB_REFERENCE_MODEL_STRICT", raising=False)
+    default = FrontendEnv(dut, register_callbacks=False)
+    assert default.reference_model_strict is False
+    assert default.mbtb_checker.strict is False
+
+    monkeypatch.setenv("TB_REFERENCE_MODEL_STRICT", "1")
+    strict = FrontendEnv(dut, register_callbacks=False)
+    assert strict.reference_model_strict is True
+    assert strict.fallthrough_checker.strict is True
+    assert strict.mbtb_checker.strict is True
+    assert strict.ubtb_checker.strict is True

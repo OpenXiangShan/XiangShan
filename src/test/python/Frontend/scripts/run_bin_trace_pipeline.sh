@@ -86,6 +86,8 @@ Environment variables:
   TB_LOG_LEVEL         Default env and pytest CLI log level (default: INFO)
   TB_ENABLE_REFERENCE_MODEL
                        Enable shared reference model comparisons (default: 1)
+  TB_REFERENCE_MODEL_STRICT
+                       Make reference model mismatches fail the case (default: 0)
   TB_LOG_CLI_LEVEL     Pytest CLI log level; overrides TB_LOG_LEVEL for pytest only
   TB_ENV_LOG_LEVEL     Environment logger level; overrides TB_LOG_LEVEL for env only
   PYTEST_ADDOPTS       Extra pytest args

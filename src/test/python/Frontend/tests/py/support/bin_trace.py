@@ -69,8 +69,18 @@ def run_bin_trace(env) -> None:
     trace_entries = api_Frontend_load_golden_trace(env, str(trace_path), max_cycles=0, start_index=trace_start_index)
     run_ok = api_Frontend_run_until_golden_complete(env, max_cycles=_trace_cycle_limit())
     result = getattr(env, "_last_run_until_golden_result", None)
+    fallthrough_checked = "disabled" if env.fallthrough_checker is None else str(env.fallthrough_checker.checked_count)
+    print(f"[frontend] FallThrough reference comparisons: {fallthrough_checked}", flush=True)
+    fallthrough_mismatches = "disabled" if env.fallthrough_checker is None else str(env.fallthrough_checker.mismatch_count)
+    print(f"[frontend] FallThrough reference mismatches: {fallthrough_mismatches}", flush=True)
+    mbtb_checked = "disabled" if env.mbtb_checker is None else str(env.mbtb_checker.checked_count)
+    print(f"[frontend] mBTB reference comparisons: {mbtb_checked}", flush=True)
+    mbtb_mismatches = "disabled" if env.mbtb_checker is None else str(env.mbtb_checker.mismatch_count)
+    print(f"[frontend] mBTB reference mismatches: {mbtb_mismatches}", flush=True)
     checked = "disabled" if env.ubtb_checker is None else str(env.ubtb_checker.checked_count)
     print(f"[frontend] uBTB reference comparisons: {checked}", flush=True)
+    ubtb_mismatches = "disabled" if env.ubtb_checker is None else str(env.ubtb_checker.mismatch_count)
+    print(f"[frontend] uBTB reference mismatches: {ubtb_mismatches}", flush=True)
     if result is not None:
         logger.info(
             "bin trace stop reason: status=%s completed=%s ok=%s cycles=%d cursor=%d/%d target_cursor=%d pending_work=%d monitor_errors=%d",

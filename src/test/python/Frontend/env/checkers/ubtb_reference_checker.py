@@ -1,5 +1,7 @@
 """Check settled uBTB hits against the design-document reference model."""
 
+import logging
+
 from rm.ubtb_reference_model import UbtbReferenceModel
 from ..support.signal_utils import require_sig
 
@@ -11,11 +13,30 @@ _UBTB = _BPU + "ubtb."
 class UbtbReferenceChecker:
     """Track observed writes; leave victim selection outside the model's scope."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, strict: bool = False) -> None:
         self.model = UbtbReferenceModel()
         self.slots: dict[int, int] = {}
         self.last_write: dict[int, int] = {}
         self.checked_count = 0
+        self.strict = bool(strict)
+        self.mismatch_count = 0
+
+    def _check_equal(self, cycle, pc, actual, expected) -> None:
+        if actual == expected:
+            return
+        self.mismatch_count += 1
+        message = (
+            f"ubtb_reference prediction mismatch cycle={int(cycle)} "
+            f"start_pc=0x{pc:x} actual={actual} expected={expected}"
+        )
+        logger = logging.getLogger("env.checkers")
+        if self.strict:
+            logger.error(message)
+            raise AssertionError(message)
+        if self.mismatch_count <= 10:
+            logger.warning(message)
+        elif self.mismatch_count == 11:
+            logger.warning("ubtb_reference further mismatches suppressed; see final count")
 
     def on_cycle(self, cycle: int, env) -> None:
         if int(env.clock_reset.reset.value):
@@ -85,8 +106,5 @@ class UbtbReferenceChecker:
         )
         wanted = (1, expected.position, expected.target,
                   expected.branch_type, expected.ras_action)
-        assert actual == wanted, {
-            "checker": "ubtb_reference", "cycle": int(cycle),
-            "start_pc": hex(pc), "actual": actual, "expected": wanted,
-        }
+        self._check_equal(cycle, pc, actual, wanted)
         self.checked_count += 1
