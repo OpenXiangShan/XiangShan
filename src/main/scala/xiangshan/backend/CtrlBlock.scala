@@ -119,7 +119,7 @@ class CtrlBlockImp(
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
   private def hasRen: Boolean = true
   // Ftq writes one entry per prediction block, and it can enqueue several blocks in one cycle
-  private val numPcMemWrite = io.frontend.fromFtq.MaxPredictionNum
+  private val numPcMemWrite = MaxPredictionNum
   // TODO: implement banking to support consecutive write painlessly
   private val pcMem = Module(new SyncDataModuleTemplate(GuardedPc(), FtqSize, numPcMemRead, numPcMemWrite, "BackendPC", hasRen = hasRen))
   private val rob = wrapper.rob.module
