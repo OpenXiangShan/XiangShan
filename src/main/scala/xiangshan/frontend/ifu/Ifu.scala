@@ -779,7 +779,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     Seq(
       io.fromICache.topdown.itlbMissBubble   -> TopDownCounters.ITLBMissBubble,
       io.fromICache.topdown.iCacheMissBubble -> TopDownCounters.ICacheMissBubble,
-      s0_flushFromBpu                        -> TopDownCounters.IfuFlushBubble
+      s0_flushFromBpu                        -> TopDownCounters.OverrideBubble
     )
   )
   topdownPipe.setReason(Seq(

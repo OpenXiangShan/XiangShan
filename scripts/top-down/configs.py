@@ -54,7 +54,6 @@ xs_custom_rename_map = {
 
 xs_frontend_rename_map = {
     'OverrideBubble': 'MergeOverrideBubble',
-    'IfuFlushBubble': 'MergeIfuFlushBubble',
     'FtqFullStall': 'MergeFtqFullStall',
     'FtqUpdateBubble': 'MergeFtqUpdateBubble',
     'TAGEMissBubble': 'MergeTAGEMissBubble',
@@ -177,7 +176,6 @@ xs_mem_rename_map = {
 
 xs_coarse_rename_map = {
     'OverrideBubble': 'MergeFrontend',
-    'IfuFlushBubble': 'MergeFrontend',
     'FtqFullStall': 'MergeFrontend',
     'FtqUpdateBubble': 'MergeBadSpec',
     'TAGEMissBubble': 'MergeBadSpec',
@@ -280,7 +278,6 @@ xs_coarse_rename_map = {
 
 xs_fine_grain_rename_map = {
     'OverrideBubble': 'MergeOtherFrontend',
-    'IfuFlushBubble': 'IfuFlushBubble',
     'FtqFullStall': 'MergeOtherFrontend',
     'FtqUpdateBubble': 'MergeBadSpecBubble',
     'TAGEMissBubble': 'MergeBadSpecBubble',
@@ -340,7 +337,6 @@ targets = {
     'NoStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: NoStall,\s+(\d+)',
 
     'OverrideBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: OverrideBubble,\s+(\d+)',
-    'IfuFlushBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IfuFlushBubble,\s+(\d+)',
     'FtqUpdateBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FtqUpdateBubble,\s+(\d+)',
     'TAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: TAGEMissBubble,\s+(\d+)',
     'SCMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: SCMissBubble,\s+(\d+)',
