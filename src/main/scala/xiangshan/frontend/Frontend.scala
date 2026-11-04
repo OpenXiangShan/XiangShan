@@ -99,6 +99,8 @@ class Frontend()(implicit p: Parameters) extends LazyModule with HasFrontendPara
 
   val inner:       FrontendInlined = LazyModule(new FrontendInlined)
   lazy val module: FrontendImp     = new FrontendImp(this)
+
+  require(VAddrBits >= PAddrBits, s"VAddrBits ($VAddrBits) must be greater than or equal to PAddrBits ($PAddrBits)")
 }
 
 class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
