@@ -79,6 +79,19 @@ def test_pre_drive_observer_samples_before_agents_and_regular_observer(monkeypat
     ]
 
 
+def test_walk_vtype_requires_resuming_vtype_at_clock_edge() -> None:
+    dut = FakeDUTFrontend()
+    env = FrontendEnv(dut, register_callbacks=False)
+    dut.reset.value = 0
+    env.backend_to_ibuf_if.walk_vtype_valid.value = 1
+
+    with pytest.raises(AssertionError, match="walkVType.valid requires resumingVType"):
+        env._on_clock_edge(1)
+
+    env.backend_to_ibuf_if.resuming_vtype.value = 1
+    env._on_clock_edge(2)
+
+
 def test_reference_model_enable_controls_shared_checker(monkeypatch) -> None:
     dut = FakeDUTFrontend()
     dut._is_fake_frontend_dut = False

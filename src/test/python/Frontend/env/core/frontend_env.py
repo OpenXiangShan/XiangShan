@@ -570,6 +570,11 @@ class FrontendEnv:
         for observer in list(self._pre_drive_cycle_observers):
             observer(int(cycle), self)
         in_reset = bool(self._read(self.clock_reset.reset, 0))
+        if not in_reset and self._read(self.backend_to_ibuf_if.walk_vtype_valid):
+            if not self._read(self.backend_to_ibuf_if.resuming_vtype):
+                raise AssertionError(
+                    "walkVType.valid requires resumingVType in the same cycle"
+                )
         if in_reset:
             self.icache_agent.reset()
             self.icache_control_agent.reset()
