@@ -1421,7 +1421,11 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
       cmoInvalEvent.coreid := io.hartId
       cmoInvalEvent.valid  := io.writeBack.fire && deqCanDoCbo && isCboInval(deqDataEntries.head.cboType)
-      cmoInvalEvent.addr   := deqDataEntries.head.paddr
+      // Use the cache-block base address as the refill checker lookup key.
+      cmoInvalEvent.addr   := Cat(
+        deqDataEntries.head.paddr(PAddrBits - 1, DCacheLineOffset),
+        0.U(DCacheLineOffset.W)
+      )
 
       // DiffStoreEvent happens when rdataPtr moves.
       // That is, pmsStore enter dataBuffer or ncStore enter Ubuffer
