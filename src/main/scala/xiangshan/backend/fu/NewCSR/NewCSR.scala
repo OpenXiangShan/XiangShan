@@ -1254,10 +1254,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   val sstatusWriteSIE = mstatus.wAliasSstatus.wdataFields.SIE && !sstatusWriteSDT
   val vsstatusWriteSDT = menvcfg.regOut.DTE && henvcfg.regOut.DTE && vsstatus.w.wdataFields.SDT
   val vsstatusWriteSIE = vsstatus.w.wdataFields.SIE && !vsstatusWriteSDT
+  // Only the current mode's delegated breakpoint gate is affected by its interrupt enable.
   triggerBpGateChange := debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR && (
-    mstatus.w.wen && mstatusWriteMIE =/= mstatus.regOut.MIE.asBool ||
-    mstatus.wAliasSstatus.wen && sstatusWriteSIE =/= mstatus.regOut.SIE.asBool ||
-    vsstatus.w.wen && vsstatusWriteSIE =/= vsstatus.regOut.SIE.asBool
+    privState.isModeM && mstatus.w.wen && mstatusWriteMIE =/= mstatus.regOut.MIE.asBool ||
+    privState.isModeHS && medeleg.regOut.EX_BP &&
+      mstatus.wAliasSstatus.wen && sstatusWriteSIE =/= mstatus.regOut.SIE.asBool ||
+    privState.isModeVS && medeleg.regOut.EX_BP && hedeleg.regOut.EX_BP &&
+      vsstatus.w.wen && vsstatusWriteSIE =/= vsstatus.regOut.SIE.asBool
   )
 
   io.status.frontendTrigger := debugMod.io.out.frontendTrigger
