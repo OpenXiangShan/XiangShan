@@ -85,7 +85,7 @@ object ScalarNumWbField extends DecodeField[InstPattern, UInt] {
   override def chiselType: UInt = NumWB()
 
   override def genTable(inst: InstPattern): BitPat = inst match {
-    case _: SspushInstPattern => 5.U(NumWB.width.W).toBitPat // Six writebacks, encoded as count - 1.
+    case _: SspushInstPattern => 4.U(NumWB.width.W).toBitPat // Five writebacks, encoded as count - 1.
     case _: SspopchkInstPattern => 2.U(NumWB.width.W).toBitPat
     case _ => NumWbField.genTable(inst)
   }
