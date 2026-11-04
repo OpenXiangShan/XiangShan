@@ -26,6 +26,7 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
 
 import utility._
+import utility.ListLookup
 
 
 object Bundles {

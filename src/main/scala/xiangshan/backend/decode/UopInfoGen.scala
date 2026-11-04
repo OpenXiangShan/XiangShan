@@ -31,7 +31,8 @@ import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.fu.vector.Bundles.{VType, VLmul, VSew}
 import yunsuan.VpermType
-import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
+import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable}
+import utility.decoder
 
 class strdiedLSNumOfUopTable() extends Module {
   val src = IO(Input(UInt(5.W)))

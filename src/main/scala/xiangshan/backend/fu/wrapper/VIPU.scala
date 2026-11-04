@@ -22,7 +22,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.DecodeLogic
+import utility.DecodeLogic
 import utility._
 import xiangshan.{SelImm, SrcType, UopSplitType, XSCoreParamsKey, XSModule}
 import xiangshan.backend.fu.FuConfig

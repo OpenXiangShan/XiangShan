@@ -366,7 +366,7 @@ class PrivilegePermitModule extends Module {
     BitPat("b0__11___11") -> BitPat.Y(), // M  access M
   ), BitPat.N())
 
-  private val regularPrivilegeLegal = chisel3.util.experimental.decode.decoder(
+  private val regularPrivilegeLegal = utility.decoder(
     privState.V.asUInt ## privState.PRVM.asUInt ## addr(9, 8),
     accessTable
   ).asBool

@@ -541,7 +541,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // iretire
     val nonRVCNum = Wire(UInt((log2Ceil(RenameWidth + 1).W)))
     nonRVCNum := nonRVCNumVec(i).reduce(_ +& _)
-    uops(i).traceBlockInPipe.iretire := chisel3.util.experimental.decode.decoder(
+    uops(i).traceBlockInPipe.iretire := utility.decoder(
       (instrSize(i) ## nonRVCNum),
       TruthTable(
         instrSizeTable.zipWithIndex.map { case (table, encode) =>

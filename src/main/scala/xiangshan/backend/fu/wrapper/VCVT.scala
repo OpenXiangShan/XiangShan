@@ -45,7 +45,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   // output width 8， 16， 32， 64
   val output1H = Wire(UInt(4.W))
-  output1H := chisel3.util.experimental.decode.decoder(
+  output1H := utility.decoder(
     widen ## sew,
     TruthTable(
       Seq(
@@ -104,7 +104,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   /** fflags:
    */
-  val eNum1H = chisel3.util.experimental.decode.decoder(sew ## (isWidenCvt || isNarrowCvt),
+  val eNum1H = utility.decoder(sew ## (isWidenCvt || isNarrowCvt),
     TruthTable(
       Seq(                     // 8, 4, 2, 1
         BitPat("b001") -> BitPat("b1000"), //8

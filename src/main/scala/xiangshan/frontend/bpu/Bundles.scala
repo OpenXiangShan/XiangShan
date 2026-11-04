@@ -32,6 +32,7 @@ import xiangshan.frontend.bpu.ras.RasRedirectMeta
 import xiangshan.frontend.bpu.sc.ScMeta
 import xiangshan.frontend.bpu.tage.TageMeta
 import xiangshan.frontend.bpu.utage.MicroTageMeta
+import utility.ListLookup
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {

@@ -284,13 +284,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   ).flatten
 
   rawInfo.zip(instrSizeCommit).zip(iretireCommit).map { case((raw, instr), iretire) =>
-    iretire := chisel3.util.experimental.decode.decoder(
+    iretire := utility.decoder(
       raw.traceBlockInPipe.iretire,
       TruthTable(
         instrSizeTable.zipWithIndex.map{case(table, encode) => (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._2.U(IretireWidthCommited.W)))},
         BitPat.N(IretireWidthCommited))
     )
-    instr := chisel3.util.experimental.decode.decoder(
+    instr := utility.decoder(
       raw.traceBlockInPipe.iretire,
       TruthTable(
         instrSizeTable.zipWithIndex.map{case(table, encode) => (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._1.U((log2Ceil(RenameWidth + 1)).W)))},

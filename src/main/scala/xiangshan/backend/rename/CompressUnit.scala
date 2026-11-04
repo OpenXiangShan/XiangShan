@@ -33,7 +33,7 @@ import xiangshan.XSModule
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.EspressoMinimizer
-import freechips.rocketchip.rocket.DecodeLogic
+import utility.DecodeLogic
 import xiangshan._
 import xiangshan.backend.fu.FuType
 

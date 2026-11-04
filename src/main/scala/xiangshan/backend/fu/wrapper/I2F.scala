@@ -28,7 +28,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
 
   // output width 8， 16， 32， 64
   val output1H = Wire(UInt(4.W))
-  output1H := chisel3.util.experimental.decode.decoder(
+  output1H := utility.decoder(
     widen ## sew,
     TruthTable(
       Seq(

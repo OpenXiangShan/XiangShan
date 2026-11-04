@@ -33,7 +33,8 @@ import xiangshan.backend.Bundles.{DecodeOutUop}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul, Vl}
 import yunsuan.VpermType
-import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
+import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable}
+import utility.decoder
 
 class indexedLSUopTable(uopIdx:Int) extends Module {
   val src = IO(Input(UInt(4.W)))
