@@ -573,7 +573,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   topdownPipe.setReason(Seq(
     io.topdownOverride.valid -> io.topdownOverride.bits.reason
   ))
-  io.toIfu.topdown := topdownPipe.io.out
+  io.toICache.toMainPipe.bits.topdown := topdownPipe.io.out
 
   // Hardware performance monitors
   val perfEvents: Seq[(String, UInt)] = Seq()

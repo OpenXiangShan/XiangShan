@@ -771,17 +771,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   wbRedirect.halfRviInfo       := wbSelectedEndHalfRvi
   wbRedirect.halfRviInfo.valid := wbSelectedEndHalfRvi.valid && checkerRedirect.bits.invalidTaken
 
-  // Topdown tracks lost slots through s0/s1/s2 on every edge, independently of valid-ready.
-  private val topdownPipe = Module(new FrontendTopDownPipeline(3))
-  topdownPipe.io.in := fromFtq.topdown
-  // A BPU flush discards s0; the lost slot reaches s1 on the next edge.
-  // Older IFU stages survive it. Redirects take precedence over local bubbles.
+  private val topdownPipe = Module(new FrontendTopDownPipeline(2))
+  topdownPipe.io.in := io.fromICache.topdown
   topdownPipe.setReason(
-    1,
+    0,
     Seq(
-      io.fromICache.topdown.itlbMissBubble   -> TopDownCounters.ITLBMissBubble,
-      io.fromICache.topdown.iCacheMissBubble -> TopDownCounters.ICacheMissBubble,
-      s0_flushFromBpu                        -> TopDownCounters.OverrideBubble
+      s0_flushFromBpu -> TopDownCounters.OverrideBubble
     )
   )
   topdownPipe.setReason(Seq(

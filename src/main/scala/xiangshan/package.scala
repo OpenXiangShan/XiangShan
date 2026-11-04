@@ -827,6 +827,7 @@ package object xiangshan {
     val FtqFullStall = Value("FtqFullStall")
 
     val ICacheMissBubble = Value("ICacheMissBubble")
+    val ICacheStructualConflict = Value("ICacheStructualConflict")
     val ITLBMissBubble = Value("ITLBMissBubble")
     val BTBMissBubble = Value("BTBMissBubble")
     val FetchFragBubble = Value("FetchFragBubble")
