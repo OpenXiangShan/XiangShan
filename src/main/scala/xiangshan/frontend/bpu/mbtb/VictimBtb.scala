@@ -201,27 +201,16 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
 
   // Training can update entry and counters independently:
   // - entryWayMask rewrites the victim BTB entry payload.
-  // - counterWayMask updates the taken counter for conditional branches.
+  // - counterWayMask trains resident conditional branches or resets counters on payload repairs.
+  // MainBtbAlignBank supplies a positive counter whenever an unconditional jump is written.
   // This allows a VBTB hit to be repaired in place without allocating MainBtb.
   for (w <- 0 until NumVictimBtbWays) {
-    // Use the updated attribute when payload and counter are trained together.
-    val trainAttribute = Mux(
-      trainEntry.req.bits.entryWayMask(w),
-      trainEntry.req.bits.entry.attribute,
-      entries(w).entry.attribute
-    )
     when(trainEntry.req.valid) {
       when(trainEntry.req.bits.counterWayMask(w)) {
         entries(w).counter := trainEntry.req.bits.counters(w)
       }
       when(trainEntry.req.bits.entryWayMask(w)) {
         entries(w).entry := trainEntry.req.bits.entry
-      }
-      // A counter-only update must not make an unconditional jump not-taken.
-      // Payload-only changes to a jump must establish the same invariant.
-      when((trainEntry.req.bits.entryWayMask(w) || trainEntry.req.bits.counterWayMask(w)) &&
-        !trainAttribute.isConditional) {
-        entries(w).counter := TakenCounter.WeakPositive
       }
     }
 
