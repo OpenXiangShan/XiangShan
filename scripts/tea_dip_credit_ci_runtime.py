@@ -1,18 +1,23 @@
-"""Observe automatically scheduled workers of CI41811820348 without reading live DBs."""
+"""Observe one of the two fixed-resource credit CIs without reading live DBs."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 import argparse
 import json
-import re
 import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--report-dir', type=Path, required=True)
-R = parser.parse_args().report_dir.resolve()
-O = R / 'evidence/ci-credit-div'
+parser.add_argument('--ci-evidence', choices=['ci-credit-div','ci-fdiv-credit'], required=True)
+args = parser.parse_args()
+R = args.report_dir.resolve()
+O = R / 'evidence' / args.ci_evidence
 identity = json.loads((O / 'archive-identity.json').read_text())
-assert identity['run_id'] == 41811820348
+run = json.loads((O / 'run.json').read_text())
+jobs = json.loads((O / 'jobs.json').read_text())
+assert identity['run_id'] == run['id'] and identity['source'] == run['head_sha']
+assert len(jobs['jobs']) == 1 and jobs['jobs'][0]['run_id'] == run['id']
+runner_host = jobs['jobs'][0]['runner_name'].removeprefix('xs-perf-').rsplit('-', 1)[0]
 head = identity['source']
 code = r'''from pathlib import Path
 import json
@@ -26,7 +31,7 @@ def remote(host, script):
                             input=script, text=True, capture_output=True, timeout=50, check=True)
     return json.loads(result.stdout)
 
-runner = remote('node030', code)
+runner = remote(runner_host, code)
 workers = runner['server_lines'][-1].split('Server list: ', 1)[1].split(', ')
 code = r'''"""Read the current CI's actual SPEC guest/controller processes on one node."""
 from pathlib import Path
@@ -36,7 +41,7 @@ import os
 import re
 import socket
 
-run=dict(id=41811820348)
+run=dict(id=RUN_ID)
 report=Path(REPORT)
 binary = str(report / 'emu-gsim')
 processes = []
@@ -67,12 +72,12 @@ for proc in Path('/proc').glob('[0-9]*'):
 print(json.dumps(dict(utc=datetime.now(timezone.utc).isoformat(), run_id=run['id'],
                       host=socket.gethostname(),
                       processes=processes, scope='Live argv and process identity; no unfinished database reads'), indent=2))
-'''.replace('REPORT', repr(identity['report']))
+'''.replace('REPORT', repr(identity['report'])).replace('RUN_ID', repr(identity['run_id']))
 code = code.replace("warmup_announced='Warmup finished' in text,", "tea_period_1000=bool(re.search(r'^teaSamplePeriod0 = 1000$', text, re.M)), dip_period_1000=bool(re.search(r'^dipSamplePeriod0 = 1000$', text, re.M)), warmup_announced='Warmup finished' in text,")
 with ThreadPoolExecutor(max_workers=len(workers) + 1) as pool:
-    observations = list(pool.map(lambda host: remote(host, code), [*workers, 'node030']))
+    observations = list(pool.map(lambda host: remote(host, code), [*workers, runner_host]))
 stamp = datetime.now(timezone.utc).isoformat()
-result = dict(utc=stamp, run_id=41811820348, source=head, nodes=observations[:-1], controller=observations[-1],
+result = dict(utc=stamp, run_id=identity['run_id'], source=head, nodes=observations[:-1], controller=observations[-1],
               scope='Worker list observed from the original auto-scheduled runner. Original process identities and stdout flags only; no host-load sampling, unfinished DB reads or inferred guest CPI.')
 seeds = json.loads((O / 'inputs/spec06-cov03-seeds.json').read_text())
 controllers = result['controller']['processes']
@@ -92,12 +97,12 @@ for node in result['nodes']:
         assert len(guest['affinity']) == 1 and all(guest[k] for k in ['tea_enabled','dip_enabled','tea_period_1000','dip_period_1000'])
         checks.append(dict(host=node['host'], point=guest['point'], pid=guest['pid'], start_ticks=guest['start_ticks'], requested_configuration_matches=True,
                            difftest_announced=guest['difftest_announced']))
-(O / 'runtime-check.json').write_text(json.dumps(dict(utc=stamp, run_id=41811820348, checks=checks,
+(O / 'runtime-check.json').write_text(json.dumps(dict(utc=stamp, run_id=identity['run_id'], checks=checks,
     controller_single_thread_and_default_node_pool=True, completed_spec_difftest_validated=None,
     scope='Observed argv, affinity and sampler stdout only. Difftest is requested; a missing announcement in buffered live stdout is unknown, not a pass or failure. No SPEC DB read.'), indent=2) + '\n')
 (O / 'runtime-live.json').write_text(json.dumps(result, indent=2) + '\n')
 (O / 'runner-last-tail.txt').write_text(runner['tail'])
-(O / 'runner-network-retries.json').write_text(json.dumps(dict(utc=stamp, run_id=41811820348, lines=runner['retry_lines'],
+(O / 'runner-network-retries.json').write_text(json.dumps(dict(utc=stamp, run_id=identity['run_id'], lines=runner['retry_lines'],
     scope='Original platform transport failures and automatic retries; preserved as infrastructure evidence, not new user dispatches or measured RTL failures.'), indent=2) + '\n')
 with (O / 'resource-events.jsonl').open('a') as output:
     output.write(json.dumps(result) + '\n')
