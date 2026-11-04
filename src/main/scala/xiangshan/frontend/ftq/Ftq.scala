@@ -118,7 +118,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // metaQueueRedirect stores speculation information needed by BPU when redirect happens.
   private val metaQueueRedirect = Reg(Vec(FtqSize, new BpuRedirectMeta))
 
-  // metaQueueCommit stores RAS commit information needed by BPU when a fetch block commits.
+  // metaQueueCommit stores call/return information needed by RAS after the call/return is committed.
   private val metaQueueCommit = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // metaQueueResolve stores information needed to train BPU.
