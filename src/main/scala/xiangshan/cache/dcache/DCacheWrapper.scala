@@ -1769,6 +1769,38 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     XSPerfAccumulate(s"hint_without_grant$chSuffix", hint_without_grant)
     XSPerfAccumulate(s"grant_without_hint$chSuffix", grant_without_hint)
     XSPerfAccumulate(s"hint_grant_unmatch$chSuffix", hint_grant_unmatch)
+
+    // Observation at the L1 input, after the CCHI and hint registers. Count
+    // due hints separately so a delayed first beat cannot inflate accuracy.
+    XSPerfAccumulate(s"hint_sent$chSuffix", io.l2_hint(ch).valid)
+    XSPerfAccumulate(s"hint_due$chSuffix", hintPipe2.io.out.valid)
+    XSPerfAccumulate(s"hint_exact3$chSuffix", accurateHint)
+    val hintCycle = RegInit(0.U(64.W))
+    hintCycle := hintCycle + 1.U
+    val pendingHint = RegInit(VecInit(Seq.fill(cfg.nMissEntries)(false.B)))
+    val sentAt = Reg(Vec(cfg.nMissEntries, UInt(64.W)))
+    val dataId = grant_data_source
+    val hadHint = pendingHint(dataId)
+    val gap = hintCycle - sentAt(dataId)
+    when(grant_data_fire) { pendingHint(dataId) := false.B }
+    when(io.l2_hint(ch).valid) {
+      assert(!pendingHint(hint_source), "duplicate outstanding refill hint")
+      pendingHint(hint_source) := true.B
+      sentAt(hint_source) := hintCycle
+    }
+    XSPerfAccumulate(s"hint_first_matched$chSuffix", grant_data_fire && hadHint)
+    XSPerfAccumulate(s"hint_first_without_hint$chSuffix", grant_data_fire && !hadHint)
+    for (g <- 1 to 3) {
+      XSPerfAccumulate(s"hint_gap_${g}$chSuffix", grant_data_fire && hadHint && gap === g.U)
+    }
+    XSPerfAccumulate(s"hint_gap_ge4$chSuffix", grant_data_fire && hadHint && gap >= 4.U)
+    XSPerfHistogram(s"hint_to_first_gap$chSuffix", gap, grant_data_fire && hadHint,
+      0, 32, 1, right_strict = true)
+    val previousFirst = RegNext(grant_data_fire, false.B)
+    val previousTxn = RegEnable(io.cchi(ch).dnDAT.bits.TxnID, grant_data_fire)
+    val secondOnTime = io.cchi(ch).dnDAT.fire &&
+      io.cchi(ch).dnDAT.bits.DataID === 1.U && io.cchi(ch).dnDAT.bits.TxnID === previousTxn
+    XSPerfAccumulate(s"hint_two_beat_gap$chSuffix", previousFirst && !secondOnTime)
   }
 
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
