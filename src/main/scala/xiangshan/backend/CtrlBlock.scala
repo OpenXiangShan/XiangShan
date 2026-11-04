@@ -797,6 +797,7 @@ class CtrlBlockImp(
   dispatch.io.enqRob.isEmpty := enqRob.isEmpty && !enqRob.req.map(_.valid).reduce(_ || _)
   dispatch.io.enqRob.resp := enqRob.resp
   rob.io.enq.needAlloc := enqRob.needAlloc
+  rob.io.diagDispatchDemand.foreach(_ := dispatch.io.enqRob.needAlloc.asUInt.orR)
   rob.io.enq.req := enqRob.req
   rob.io.teaMembers.foreach { members =>
     members := RegEnable(teaDispatchMembers.get, dispatch.io.enqRob.req.map(_.valid).reduce(_ || _))
