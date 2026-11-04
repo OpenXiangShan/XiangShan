@@ -257,8 +257,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ibuffer.io.fromBackend := io.backend.toIBuf
 
   // Topdown analysis
-  ifu.io.redirectTopdownOverride     := ftq.io.redirectTopdownOverride
-  ibuffer.io.redirectTopdownOverride := ftq.io.redirectTopdownOverride
+  ifu.io.topdownOverride     := ftq.io.topdownOverride
+  ibuffer.io.topdownOverride := ftq.io.topdownOverride
 
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason

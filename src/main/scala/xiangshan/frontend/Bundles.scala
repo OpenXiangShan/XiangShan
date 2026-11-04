@@ -57,8 +57,8 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
 
   // perfMeta uses the same valid signal as meta
-  val perfMeta: BpuPerfMeta           = Output(new BpuPerfMeta)
-  val topdown:  FrontendTopDownBundle = Output(new FrontendTopDownBundle())
+  val perfMeta: BpuPerfMeta   = Output(new BpuPerfMeta)
+  val topdown:  TopdownBundle = Output(new TopdownBundle())
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
@@ -127,17 +127,18 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
-  val redirect:     Valid[Redirect]       = Valid(new Redirect)
-  val flushFromBpu: BpuFlushInfo          = new BpuFlushInfo
-  val topdown:      FrontendTopDownBundle = new FrontendTopDownBundle
+  val redirect:     Valid[Redirect] = Valid(new Redirect)
+  val flushFromBpu: BpuFlushInfo    = new BpuFlushInfo
+  val topdown:      TopdownBundle   = new TopdownBundle
 }
 
 class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val ftqIdx: FtqPtr = new FtqPtr
   //
-  val canTrain: Bool = Bool()
-  val pc:       UInt = UInt(GuardedVAddrBits.W)
-  val taken:    Bool = Bool()
+  val canTrain:  Bool = Bool()
+  val pc:        UInt = UInt(GuardedVAddrBits.W)
+  val taken:     Bool = Bool()
+  val isMisPred: Bool = Bool()
   // The early end position may not always be a branch instruction.
   val ftqOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W) // maybe use later
   val isRVC:     Bool            = Bool()                            // seems unused for now, keep it.
@@ -320,12 +321,12 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val triggered:        Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
   val isLastInFtqEntry: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
 
-  val pc:             Vec[Pc]               = Vec(IBufferEnqueueWidth, Pc())
-  val prevIBufEnqPtr: IBufPtr               = new IBufPtr
-  val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
-  val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
-  val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
-  val topdown:        FrontendTopDownBundle = new FrontendTopDownBundle
+  val pc:             Vec[Pc]         = Vec(IBufferEnqueueWidth, Pc())
+  val prevIBufEnqPtr: IBufPtr         = new IBufPtr
+  val prevInstrCount: UInt            = UInt(log2Ceil(IBufferEnqueueWidth).W)
+  val debug_seqNum:   Vec[InstSeqNum] = Vec(IBufferEnqueueWidth, InstSeqNum())
+  val ftqPtr:         Vec[FtqPtr]     = Vec(IBufferEnqueueWidth, new FtqPtr)
+  val topdown:        TopdownBundle   = new TopdownBundle
 }
 
 class IfuToGpAddrMem(implicit p: Parameters) extends FrontendBundle {
@@ -434,8 +435,12 @@ object BlameBpuSource {
   }
 }
 
-class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
+class TopdownBundle(implicit p: Parameters) extends FrontendBundle {
   val reason: UInt = UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)
+}
+
+class TopdownOverrideBundle(implicit p: Parameters) extends TopdownBundle {
+  val isIfuRedirect: Bool = Bool() // if true, do not affect Ibuffer attribution
 }
 
 class FrontendDebugTopDownInfo(implicit p: Parameters) extends FrontendBundle {

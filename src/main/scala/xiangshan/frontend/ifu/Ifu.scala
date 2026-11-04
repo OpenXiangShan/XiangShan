@@ -33,7 +33,6 @@ import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
-import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.GuardedPc
@@ -44,6 +43,7 @@ import xiangshan.frontend.IfuToGpAddrMem
 import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
 import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.TopdownOverrideBundle
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 
@@ -81,7 +81,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val csrFsIsOff: Bool = Input(Bool())
 
     // Topdown analysis
-    val redirectTopdownOverride: Valid[FrontendTopDownBundle] = Flipped(Valid(new FrontendTopDownBundle))
+    val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
   }
   val io: IfuIO = IO(new IfuIO)
 
@@ -666,6 +666,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheFlushWb.bits.ftqIdx    := s2_fetchBlock(0).ftqIdx
   uncacheFlushWb.bits.pc        := s2_fetchBlock(0).startVAddr.toUInt
   uncacheFlushWb.bits.taken     := false.B
+  uncacheFlushWb.bits.isMisPred := false.B
   uncacheFlushWb.bits.ftqOffset := uncacheMisEndOffset.bits
   uncacheFlushWb.bits.isRVC     := uncacheIsRvc
   uncacheFlushWb.bits.attribute := BranchAttribute.None
@@ -748,6 +749,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b.bits.ftqIdx    := Mux(select, ftqIdx(1), ftqIdx(0))
     b.bits.pc        := Mux(select, startAddr(1), startAddr(0))
     b.bits.taken     := checkerRedirect.bits.taken
+    b.bits.isMisPred := true.B
     b.bits.ftqOffset := checkerRedirect.bits.endOffset
     b.bits.isRVC     := checkerRedirect.bits.isRVC
     b.bits.attribute := checkerRedirect.bits.attribute
@@ -783,8 +785,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     )
   )
   topdownPipe.setReason(Seq(
-    io.redirectTopdownOverride.valid -> io.redirectTopdownOverride.bits.reason,
-    wbRedirect.valid                 -> TopDownCounters.BTBMissBubble
+    io.topdownOverride.valid -> io.topdownOverride.bits.reason
   ))
   io.toIBuffer.bits.topdown := topdownPipe.io.out
 

@@ -44,7 +44,7 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.pc        := pc.toUInt
     redirect.bits.target    := selectedTarget.toUInt
     redirect.bits.taken     := wbRedirect.bits.taken
-    redirect.bits.isMisPred := true.B
+    redirect.bits.isMisPred := wbRedirect.bits.isMisPred
 
     resolve.valid           := wbRedirect.valid && !backendRedirect && wbRedirect.bits.canTrain
     resolve.bits.ftqIdx     := wbRedirect.bits.ftqIdx
@@ -52,7 +52,7 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     resolve.bits.pc         := pc.unGuard
     resolve.bits.target     := selectedTarget.unGuard
     resolve.bits.taken      := wbRedirect.bits.taken
-    resolve.bits.mispredict := true.B
+    resolve.bits.mispredict := wbRedirect.bits.isMisPred
     resolve.bits.attribute  := wbRedirect.bits.attribute
     resolve.bits.debug_isRVC.foreach(_ := wbRedirect.bits.isRVC)
 
