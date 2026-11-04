@@ -44,6 +44,8 @@ object ArgParser {
       |--reset-gen
       |--enable-difftest
       |--disable-difftest        disable full and basic DiffTest hardware
+      |--difftest-relax-intermediate-wires
+      |--difftest-packed-delay-regs
       |--enable-log
       |--with-chiseldb
       |--with-rollingdb
