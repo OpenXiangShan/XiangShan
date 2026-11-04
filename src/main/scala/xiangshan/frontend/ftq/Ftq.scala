@@ -220,7 +220,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     )
   )
   // blocks of one enqueue occupy consecutive entries starting from predictionPtr
-  private val predictionPtrVec = VecInit.tabulate(MaxPredictionNum)(i => predictionPtr + i.U)
+  private val predictionPtrVec = Wire(new FtqPtrVec(MaxPredictionNum))
+  predictionPtrVec := predictionPtr
 
   when(prediction.bits.s3Override) {
     bpuPtr := io.fromBpu.s3FtqPtr + prediction.bits.numBlocks
@@ -251,7 +252,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val entryEnqueue = (prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
   when(entryEnqueue) {
-    predictionBlocks.zip(predictionPtrVec).foreach { case (block, ptr) =>
+    predictionBlocks.zip(predictionPtrVec.ptrs).foreach { case (block, ptr) =>
       when(block.valid) {
         metaQueueResolveValid(ptr.value)  := false.B
         entryQueue(ptr.value).startPc     := block.bits.startPc
@@ -316,7 +317,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
 
   resolveQueue.io.bpuEnqueue    := VecInit(predictionBlocks.map(block => bpuEnqueue && block.valid))
-  resolveQueue.io.bpuEnqueuePtr := predictionPtrVec
+  resolveQueue.io.bpuEnqueuePtr := predictionPtrVec.ptrs
 
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
@@ -431,7 +432,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
 
   io.toBackend.wen     := VecInit(predictionBlocks.map(block => entryEnqueue && block.valid))
-  io.toBackend.ftqIdx  := VecInit(predictionPtrVec.map(_.value))
+  io.toBackend.ftqIdx  := VecInit(predictionPtrVec.ptrs.map(_.value))
   io.toBackend.startPc := VecInit(predictionBlocks.map(_.bits.startPc))
 
   // --------------------------------------------------------------------------------
