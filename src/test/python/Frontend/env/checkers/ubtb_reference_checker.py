@@ -1,6 +1,6 @@
 """Check settled uBTB hits against the design-document reference model."""
 
-from ..model.ubtb_reference_model import UbtbReferenceModel
+from rm.ubtb_reference_model import UbtbReferenceModel
 from ..support.signal_utils import require_sig
 
 

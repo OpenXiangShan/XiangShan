@@ -1,4 +1,4 @@
-from env.model.ubtb_reference_model import UbtbPrediction, UbtbReferenceModel
+from rm.ubtb_reference_model import UbtbPrediction, UbtbReferenceModel
 
 
 def test_ubtb_learns_taken_branch_and_reconstructs_target_from_lookup_pc():
