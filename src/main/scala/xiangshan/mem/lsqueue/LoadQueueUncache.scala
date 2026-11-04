@@ -490,7 +490,12 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   AddPipelineReg(mmioOut, io.mmioOut(UncacheWBPort), false.B)
   io.mmioRawData(UncacheWBPort) := RegEnable(mmioRawData, mmioOut.fire)
 
-  (0 until LoadPipelineWidth).foreach { i => AddPipelineReg(ncOut(i), io.ncOut(i), false.B) }
+  (0 until LoadPipelineWidth).foreach { i =>
+    val ncOutFlush = Mux(ncOut(i).fire,
+      ncOut(i).bits.uop.robIdx.needFlush(io.redirect),
+      io.ncOut(i).bits.uop.robIdx.needFlush(io.redirect))
+    AddPipelineReg(ncOut(i), io.ncOut(i), ncOutFlush)
+  }
 
   // uncache exception
   io.exception.valid := Cat(entries.map(_.io.exception.valid)).orR
