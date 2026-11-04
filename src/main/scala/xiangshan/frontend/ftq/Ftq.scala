@@ -261,12 +261,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(io.fromBpu.meta.valid) {
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
     // Recovery state belongs to every entry of a group, not just the one the lookup started from. A redirect can name
-    // any of them, and for a return it takes its target from the return stack top recorded here, so an entry left
-    // holding whatever the index last had would send that return to a stale address. The group shares one state
-    // because a block that moves the return stack is not allowed to carry a successor, see BpuPrediction.
+    // any of them, and rebuilds its history and return stack from what that entry records, so an entry left holding
+    // whatever the index last had would recover to a state that never existed. Bpu gives each block its own: a later
+    // block starts after the blocks before it, all of them taken, so its path history differs from the group's.
     (0 until MaxPredictionNum).foreach { i =>
       when(i.U < io.fromBpu.s3NumBlocks) {
-        metaQueueRedirect((io.fromBpu.s3FtqPtr + i.U).value) := io.fromBpu.meta.bits.redirectMeta
+        metaQueueRedirect((io.fromBpu.s3FtqPtr + i.U).value) := io.fromBpu.meta.bits.redirectMeta(i)
       }
     }
     metaQueueResolve(s3BpuPtr)      := io.fromBpu.meta.bits.resolveMeta
