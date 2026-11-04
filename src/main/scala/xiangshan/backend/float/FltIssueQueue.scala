@@ -239,7 +239,17 @@ class FltIssueQueue(
     ))
   }
 
-  private val fastEntryEmptySel: Vec[ValidIO[UInt]] = EnqPolicy((~fastEntryValid).asUInt, param.numEnq)
+  // Only queues carrying FDIV/SQRT reuse successful slots; shared FALU/FMUL still use these queues.
+  private val useSuccessCredit = param.getFuCfgs.exists(_.fuType == FuType.fDivSqrt)
+  private val fastEntryAvailable =
+    if (useSuccessCredit) {
+      // Credit belongs to the successful old FDIV/SQRT entry; new entries stay shared.
+      val divSuccess = VecInit(fastEntries.zip(fastEntrySuccess).map { case (entry, success) =>
+        success && FuType.isFdiv(entry.bits.payload.fuType)
+      })
+      ~fastEntryValid | divSuccess.asUInt
+    } else ~fastEntryValid
+  private val fastEntryEmptySel: Vec[ValidIO[UInt]] = EnqPolicy(fastEntryAvailable, param.numEnq)
   private val fastEntryEmptyValid = VecInit(fastEntryEmptySel.map(_.valid))
   private val enqEntryCanTransfer = VecInit(
     enqEntries.zipWithIndex.map {
@@ -492,7 +502,8 @@ class FltIssueQueue(
     deqWen = out.deq.map(_.bits.vlWen),
     deq = out.deq,
   )
-  out.canAccept := PopCount(fastEntries.map(!_.valid)) >= 2.U
+  out.canAccept := (if (useSuccessCredit) fastEntryEmptyValid.last
+                    else PopCount(fastEntries.map(!_.valid)) >= 2.U)
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
 
