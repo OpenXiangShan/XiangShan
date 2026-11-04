@@ -11,7 +11,7 @@ from env.model.vtype import VTypeModel, VTypeState
 from env.sequences import LoadProgramSequence
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.support import record_scenario, scenario_rng
-from tests.py.zhaoxinran.test_bin_trace_dut import test_bin_trace as run_bin_trace
+from tests.py.support.bin_trace import run_bin_trace
 
 
 pytestmark = pytest.mark.parametrize(

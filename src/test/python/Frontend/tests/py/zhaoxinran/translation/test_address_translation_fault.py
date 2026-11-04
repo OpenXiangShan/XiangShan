@@ -5,18 +5,16 @@ import pytest
 
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.sequences import (
-    TranslationPmpPmaEntry,
     TranslationPte,
-    TranslationPtwResponseOverride,
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig
 from tests.py.support.translation_faults import (
     _CROSS_PAGE_FAULT_CASES,
     _assert_fault_ftq_identity,
     _capture_cfvec_deliveries,
     _capture_gpaddr_writes,
+    run_cacheable_cross_page_second_page_fault,
 )
 from tests.py.support.translation_scenarios import _randomize_ptw_response_timing
 
@@ -27,17 +25,6 @@ _PA = 0x8040_0F00
 _GPA = 0x8060_0F00
 _PAGE_SIZE = 0x1000
 _PAYLOAD = b"\x13\x00\x00\x00" * 512
-_CACHEABLE_CROSS_PAGE_VA = 0x8020_0000
-_CACHEABLE_CROSS_PAGE_PA = 0x8040_0000
-_CACHEABLE_CROSS_PAGE_GPA = 0x8060_0000
-_CACHEABLE_CROSS_PAGE_RVI_PC = _CACHEABLE_CROSS_PAGE_VA + _PAGE_SIZE - 2
-_CACHEABLE_CROSS_PAGE_PAYLOAD = (
-    b"\x01\x00" * (_PAGE_SIZE // 2 - 1)
-    + b"\x13\x00\x00\x00"
-    + b"\x01\x00" * 32
-)
-
-
 pytestmark = pytest.mark.parametrize(
     "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
 )
@@ -287,73 +274,6 @@ def test_address_translation_fault(env, scenario: TranslationScenario, expected_
     assert not env.get_errors()
 
 
-def _cacheable_cross_page_fault_scenario(
-    *,
-    s2xlate: int,
-    response_field: str,
-    expected_result: str,
-) -> TranslationScenario:
-    first_page_pa = _CACHEABLE_CROSS_PAGE_PA & ~(_PAGE_SIZE - 1)
-    translation = {
-        "mode": "bare" if s2xlate == 2 else "sv39",
-        "s2xlate": s2xlate,
-        "priv_virt": int(s2xlate != 0),
-    }
-    if s2xlate == 3:
-        translation.update(
-            {
-                "gpa": _CACHEABLE_CROSS_PAGE_GPA,
-                "s1_pte": TranslationPte(asid=5, vmid=7),
-                "s2_pte": TranslationPte(vmid=7),
-                "vsatp_asid": 5,
-                "hgatp_vmid": 7,
-            }
-        )
-    return TranslationScenario(
-        scenario_id=f"cacheable-cross-page-second-s2xlate-{s2xlate}-{response_field}",
-        va=_CACHEABLE_CROSS_PAGE_VA,
-        pa=_CACHEABLE_CROSS_PAGE_PA,
-        payload=_CACHEABLE_CROSS_PAGE_PAYLOAD,
-        page_count=2,
-        ptw_response_overrides=(
-            TranslationPtwResponseOverride(
-                vpn=(_CACHEABLE_CROSS_PAGE_VA >> 12) + 1,
-                s2xlate=s2xlate,
-                patch=((response_field, 1),),
-            ),
-        ),
-        expected_path="fault",
-        expected_result=expected_result,
-        pmp_entries=tuple(
-            TranslationPmpPmaEntry(
-                kind="pmp",
-                index=page,
-                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=first_page_pa + page * _PAGE_SIZE,
-                size=_PAGE_SIZE,
-            )
-            for page in range(2)
-        ),
-        pma_entries=tuple(
-            TranslationPmpPmaEntry(
-                kind="pma",
-                index=page,
-                config=PmpPmaConfig(
-                    match="napot",
-                    read=True,
-                    write=True,
-                    execute=True,
-                    cacheable=True,
-                ),
-                addr=first_page_pa + page * _PAGE_SIZE,
-                size=_PAGE_SIZE,
-            )
-            for page in range(2)
-        ),
-        **translation,
-    )
-
-
 @pytest.mark.parametrize(
     "s2xlate,response_field,expected_result,expected_fault",
     _CROSS_PAGE_FAULT_CASES,
@@ -366,95 +286,6 @@ def test_cacheable_cross_page_second_page_translation_fault(
     expected_result: str,
     expected_fault: str,
 ) -> None:
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            reset_vector=_CACHEABLE_CROSS_PAGE_VA,
-            bare_mode=False,
-            reset_cycles=20,
-        ),
+    run_cacheable_cross_page_second_page_fault(
+        env, s2xlate, response_field, expected_result, expected_fault
     )
-    scenario = _cacheable_cross_page_fault_scenario(
-        s2xlate=s2xlate,
-        response_field=response_field,
-        expected_result=expected_result,
-    )
-    scenario = _randomize_ptw_response_timing(
-        env,
-        scenario,
-        scenario_key=f"zhaoxinran/translation/fault/{scenario.scenario_id}",
-        parameters={
-            "page_count": scenario.page_count,
-            "expected_path": "fault",
-            "expected_fault": expected_fault,
-        },
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    gpaddr_writes = _capture_gpaddr_writes(env)
-    cfvec_deliveries = _capture_cfvec_deliveries(env)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_CACHEABLE_CROSS_PAGE_VA)
-    env.arm_translation_scenario(state)
-    env.translation_oracle.set_fetch_observation_ready(ready=False)
-    env.backend_model.inject_redirect(
-        _CACHEABLE_CROSS_PAGE_VA,
-        "ctrl_redirect",
-        delay_cycles=0,
-    )
-
-    for _ in range(12000):
-        active = env.translation_oracle.get_active()
-        if active is not None and (active["fault_seen"] or env.get_errors()):
-            break
-        env.step(1)
-
-    active = env.translation_oracle.get_active()
-    assert int(env.ptw_agent.get_stats().get("response_override_hit_count", 0)) >= 1
-    assert active is not None and active.get("fault_seen"), {
-        "s2xlate": s2xlate,
-        "response_field": response_field,
-        "active": active,
-        "ptw": env.ptw_agent.get_stats(),
-        "icache": env.icache_agent.get_stats(),
-        "uncache": env.uncache_agent.get_stats(),
-    }
-    second_page_vpn = (_CACHEABLE_CROSS_PAGE_VA >> 12) + 1
-    assert any(
-        int(request["vpn"]) == second_page_vpn
-        and int(request["s2xlate"]) == s2xlate
-        for request in active["expected_ptw_requests"]
-    ), active["expected_ptw_requests"]
-    assert active["expected_fault"] == expected_fault
-    exception_records = [
-        record
-        for record in env.translation_oracle.get_stats()["records"]
-        if record["kind"] == "cfvec_exception"
-    ]
-    assert any(
-        int(record["pc"]) == _CACHEABLE_CROSS_PAGE_RVI_PC
-        and record["fault"] == expected_fault
-        and bool(record["cross_page"])
-        for record in exception_records
-    ), exception_records
-    first_line_pa = _CACHEABLE_CROSS_PAGE_PA & ~0x3F
-    icache_records = env.icache_agent.get_stats().get("request_records", [])
-    assert any(int(record["address"]) == first_line_pa for record in icache_records), icache_records
-    assert int(env.uncache_agent.get_stats().get("req_count", 0)) == 0
-    assert env.monitor.exception_mark_count > 0
-    _, ftq_value = _assert_fault_ftq_identity(
-        cfvec_deliveries,
-        pc=_CACHEABLE_CROSS_PAGE_RVI_PC,
-        expected_fault=expected_fault,
-        cross_page=True,
-    )
-    if expected_fault == "instruction_guest_page_fault":
-        assert gpaddr_writes, {"expected_fault": expected_fault}
-        assert all(record["waddr"] == ftq_value for record in gpaddr_writes), gpaddr_writes
-    else:
-        assert not gpaddr_writes, {
-            "expected_fault": expected_fault,
-            "gpaddr_writes": gpaddr_writes,
-        }
-    assert env.assert_translation_scenario()["error_count"] == 0
-    assert not env.monitor.get_errors()
-    assert not env.get_errors()

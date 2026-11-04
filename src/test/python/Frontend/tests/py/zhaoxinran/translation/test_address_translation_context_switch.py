@@ -9,202 +9,29 @@ from env.core.transactions import RedirectTxn
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.sequences import (
     InjectRedirectSequence,
-    TranslationPmpPmaEntry,
     TranslationPte,
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig, record_scenario, scenario_rng
 from tests.py.support.dut_support import wait_until as _wait_until
+from tests.py.support.translation_context_switch import (
+    OLD_VA as _OLD_VA,
+    NEW_VA as _NEW_VA,
+    OLD_PA as _OLD_PA,
+    randomize_context_timing as _randomize_context_timing,
+    scenario as _scenario,
+    translation_complete as _translation_complete,
+    run_satp_asid_switch,
+)
 
+from tests.py.zhaoxinran.support.translation import (
+    _all_stage_scenario,
+    _sfence_stage_scenario,
+    _run_sfence_retranslation,
+    _run_sfence_scope_after_refill,
+)
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
-_OLD_VA = 0x8020_0F00
-_NEW_VA = 0x8020_2F00
-_OLD_PA = 0x8040_0F00
-_NEW_PA = 0x8040_2F00
-_OLD_GPA = 0x8060_0F00
-_PAYLOAD = b"\x13\x00\x00\x00" * 512
-
-
-def _randomize_context_timing(
-    env,
-    scenario: TranslationScenario,
-    *,
-    latency_min: int = 1,
-    latency_max: int = 8,
-    keep_latency_max: bool = False,
-) -> TranslationScenario:
-    scenario_key = f"zhaoxinran/translation/context/{scenario.scenario_id}"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    latency = rng.randint(int(latency_min), int(latency_max))
-    response_latency_max = (
-        rng.randint(latency, max(latency, int(scenario.ptw_response_latency_max)))
-        if keep_latency_max and scenario.ptw_response_latency_max is not None
-        else scenario.ptw_response_latency_max
-    )
-    randomized = replace(
-        scenario,
-        ptw_response_latency=latency,
-        ptw_response_latency_max=response_latency_max,
-        ptw_response_seed=seed,
-    )
-    record_scenario(
-        env,
-        scenario_key,
-        base_seed=base_seed,
-        seed=seed,
-        parameters={
-            "scenario_id": scenario.scenario_id,
-            "va": scenario.va,
-            "pa": scenario.pa,
-            "s2xlate": scenario.s2xlate,
-            "latency": latency,
-            "latency_max": response_latency_max,
-            "satp_asid": scenario.satp_asid,
-            "vsatp_asid": scenario.vsatp_asid,
-            "hgatp_vmid": scenario.hgatp_vmid,
-            "expected_path": "context_or_sfence_retranslation",
-        },
-    )
-    return randomized
-
-
-def _permissions() -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[TranslationPmpPmaEntry, ...]]:
-    region_base = _OLD_PA & ~0x3FFF
-    return (
-        (
-            TranslationPmpPmaEntry(
-                "pmp",
-                0,
-                PmpPmaConfig(match="napot", read=True, execute=True),
-                region_base,
-                size=0x4000,
-            ),
-        ),
-        (
-            TranslationPmpPmaEntry(
-                "pma",
-                0,
-                PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True),
-                region_base,
-                size=0x4000,
-            ),
-        ),
-    )
-
-
-def _scenario(
-    scenario_id: str,
-    *,
-    va: int,
-    pa: int,
-    asid: int,
-    payload: bytes = _PAYLOAD,
-    page_count: int = 2,
-    **kwargs,
-) -> TranslationScenario:
-    pmp_entries, pma_entries = _permissions()
-    return TranslationScenario(
-        scenario_id=scenario_id,
-        va=va,
-        pa=pa,
-        payload=payload,
-        page_count=page_count,
-        mode="sv39",
-        satp_asid=asid,
-        s1_pte=TranslationPte(asid=asid),
-        pmp_entries=pmp_entries,
-        pma_entries=pma_entries,
-        **kwargs,
-    )
-
-
-def _translation_complete(env) -> bool:
-    active = env.translation_oracle.get_active()
-    if active is None:
-        return False
-    expected_ptw = {
-        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
-        for request in active["expected_ptw_requests"]
-    }
-    responded_ptw = {tuple(map(int, request)) for request in active["responded_ptw_request_keys"]}
-    return expected_ptw.issubset(responded_ptw) and len(active["expected_fetches"]) == len(
-        active["observed_fetch_pas"]
-    )
-
-
-def _sfence_retranslation_complete(env) -> bool:
-    active = env.translation_oracle.get_active()
-    if active is None:
-        return False
-    expected_ptw = {
-        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
-        for request in active["expected_ptw_requests"]
-    }
-    responded_ptw = {tuple(map(int, request)) for request in active["responded_ptw_request_keys"]}
-    return expected_ptw.issubset(responded_ptw) and bool(active["observed_normal_cfvec_pages"])
-
-
-def _all_stage_scenario(scenario_id: str) -> TranslationScenario:
-    pmp_entries, pma_entries = _permissions()
-    return TranslationScenario(
-        scenario_id=scenario_id,
-        va=_OLD_VA,
-        gpa=_OLD_GPA,
-        pa=_OLD_PA,
-        payload=_PAYLOAD,
-        page_count=2,
-        mode="sv39",
-        stage2_mode="sv39",
-        s2xlate=3,
-        s1_pte=TranslationPte(asid=5, vmid=7),
-        s2_pte=TranslationPte(vmid=7),
-        vsatp_asid=5,
-        hgatp_vmid=7,
-        priv_virt=1,
-        pmp_entries=pmp_entries,
-        pma_entries=pma_entries,
-    )
-
-
-def _sfence_stage_scenario(scenario_id: str, *, s2xlate: int) -> TranslationScenario:
-    if int(s2xlate) == 3:
-        return _all_stage_scenario(scenario_id)
-
-    pmp_entries, pma_entries = _permissions()
-    common = {
-        "scenario_id": scenario_id,
-        "va": _OLD_VA,
-        "pa": _OLD_PA,
-        "payload": _PAYLOAD,
-        "page_count": 2,
-        "pmp_entries": pmp_entries,
-        "pma_entries": pma_entries,
-    }
-    if int(s2xlate) == 0:
-        return TranslationScenario(mode="sv39", satp_asid=3, s1_pte=TranslationPte(asid=3), **common)
-    if int(s2xlate) == 1:
-        return TranslationScenario(
-            mode="sv39",
-            s2xlate=1,
-            s1_pte=TranslationPte(asid=5),
-            vsatp_asid=5,
-            priv_virt=1,
-            **common,
-        )
-    if int(s2xlate) == 2:
-        return TranslationScenario(
-            mode="bare",
-            stage2_mode="sv39",
-            s2xlate=2,
-            gpa=_OLD_GPA,
-            s2_pte=TranslationPte(vmid=7),
-            hgatp_vmid=7,
-            priv_virt=1,
-            **common,
-        )
-    raise ValueError(f"unsupported SFENCE stage s2xlate={s2xlate}")
 
 
 def _run_to_refill(env, scenario: TranslationScenario):
@@ -225,131 +52,9 @@ def _run_to_refill(env, scenario: TranslationScenario):
     return state
 
 
-def _run_sfence_retranslation(
-    env,
-    scenario: TranslationScenario,
-    *,
-    retranslation_page_indexes: tuple[int, ...] | None = None,
-    **sfence_fields,
-) -> dict:
-    """Invalidate a live refill before its source FTQ entry is committed."""
-
-    initialize_frontend(
-        env, FrontendInitConfig(reset_vector=scenario.va, bare_mode=False, reset_cycles=20)
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(scenario.va)
-    env.arm_translation_scenario(state)
-    _wait_until(
-        env,
-        lambda: any(int(observation.pc) == scenario.va for observation in env.monitor.observations)
-        and int(env.ptw_agent.get_stats()["resp_count"]) > 0,
-        description=f"{scenario.scenario_id} live refill",
-    )
-
-    prepared_sfence = env.prepare_sfence(**sfence_fields)
-    retranslated = replace(state, translation_epoch=env.translation_epoch)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(scenario.va)
-    env.arm_translation_scenario(retranslated, page_indexes=retranslation_page_indexes)
-    env.translation_oracle.set_fetch_observation_ready(ready=False)
-    redirect = InjectRedirectSequence(
-        RedirectTxn(
-            source_pc=scenario.va,
-            target_pc=scenario.va,
-            reason=f"{scenario.scenario_id}-retranslate",
-            satp_flush=1,
-        )
-    )
-    redirect.inject(env)
-    env.step(1)
-    env.release_sfence(prepared_sfence)
-    assert redirect.wait_for_notification(env)
-    env.translation_oracle.set_fetch_observation_ready(ready=True)
-    assert redirect.wait(env)
-    _wait_until(
-        env,
-        lambda: _sfence_retranslation_complete(env),
-        description=f"{scenario.scenario_id} retranslation",
-    )
-    assert env.translation_oracle.get_stats()["error_count"] == 0
-    env.translation_oracle.disarm()
-    return {**prepared_sfence, "cycles": 1}
-
-
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_satp_asid_switch_restarts_translation_from_live_cfvec(env) -> None:
-    old = _randomize_context_timing(
-        env,
-        _scenario("translation-context-switch-old", va=_OLD_VA, pa=_OLD_PA, asid=3),
-    )
-    new = _randomize_context_timing(
-        env,
-        _scenario("translation-context-switch-new", va=_NEW_VA, pa=_NEW_PA, asid=9),
-    )
-    builder = TranslationScenarioBuilder(env)
-
-    # Build the target oracle state before reset.  The old context is built after
-    # reset so its PMP/PMA writes remain live when the DUT starts fetching.
-    new_state = builder.build(new)
-    initialize_frontend(
-        env, FrontendInitConfig(reset_vector=_OLD_VA, bare_mode=False, reset_cycles=20)
-    )
-    old_state = builder.build(old)
-    for page in range(new.page_count):
-        env.page_table.map_page(
-            (_NEW_VA >> 12) + page,
-            (_NEW_PA >> 12) + page,
-            **new.s1_pte.as_mapping_kwargs(),
-        )
-
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_OLD_VA)
-    env.arm_translation_scenario(old_state)
-
-    _wait_until(
-        env,
-        lambda: any(int(observation.pc) == _OLD_VA for observation in env.monitor.observations),
-        description="old-context cfVec source",
-    )
-
-    prepared_context = env.prepare_translation_context_change(satp_asid=new.satp_asid)
-    prepared_sfence = env.prepare_sfence(addr=_OLD_VA, rs1=1, rs2=1, ident=old.satp_asid)
-    new_state = replace(new_state, translation_epoch=env.translation_epoch)
-    env.monitor.set_expected_pc(_NEW_VA)
-    env.arm_translation_scenario(new_state)
-    env.translation_oracle.set_fetch_observation_ready(ready=False)
-
-    redirect = InjectRedirectSequence(
-        RedirectTxn(
-            source_pc=_OLD_VA,
-            target_pc=_NEW_VA,
-            reason="satp-asid-switch",
-            satp_flush=1,
-        )
-    )
-    redirect.inject(env)
-    env.step(1)
-    env.release_translation_context_change(prepared_context)
-    env.release_sfence(prepared_sfence)
-    redirected = redirect.wait(env)
-
-    assert redirected
-    env.translation_oracle.set_fetch_observation_ready(ready=True)
-    _wait_until(
-        env,
-        lambda: _translation_complete(env),
-        description="complete new-context translation",
-    )
-    env.assert_translation_scenario()
-
-    active = env.translation_oracle.get_active()
-    assert active is not None
-    assert active["translation_epoch"] == env.translation_epoch
-    assert active["expected_ptw_requests"][0]["vpn"] == _NEW_VA >> 12
-    assert any(int(observation.pc) == _NEW_VA for observation in env.monitor.observations)
-    assert not env.get_errors()
+    run_satp_asid_switch(env)
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -422,85 +127,6 @@ def test_tlb_csr_change_retranslates_same_vpn_with_new_pte_signature(env) -> Non
     assert not env.get_errors()
 
 
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_satp_switch_records_late_old_epoch_ptw_response(env) -> None:
-    old = _randomize_context_timing(
-        env,
-        _scenario(
-        "translation-context-stale-old-response",
-        va=_OLD_VA,
-        pa=_OLD_PA,
-        asid=3,
-        payload=b"\x13\x00\x00\x00" * 1088,
-        page_count=2,
-        ptw_response_latency=2,
-        ptw_response_latency_max=80,
-        ptw_response_seed=0x1F,
-        ptw_flush_pending_on_sfence=False,
-        ),
-        latency_min=2,
-        latency_max=8,
-        keep_latency_max=True,
-    )
-    new = _randomize_context_timing(
-        env,
-        _scenario("translation-context-stale-new-response", va=_NEW_VA, pa=_NEW_PA, asid=9),
-    )
-    builder = TranslationScenarioBuilder(env)
-
-    new_state = builder.build(new)
-    initialize_frontend(
-        env, FrontendInitConfig(reset_vector=_OLD_VA, bare_mode=False, reset_cycles=20)
-    )
-    old_state = builder.build(old)
-    for page in range(new.page_count):
-        env.page_table.map_page(
-            (_NEW_VA >> 12) + page,
-            (_NEW_PA >> 12) + page,
-            **new.s1_pte.as_mapping_kwargs(),
-        )
-
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_OLD_VA)
-    env.arm_translation_scenario(old_state)
-    _wait_until(
-        env,
-        lambda: any(int(observation.pc) == _OLD_VA for observation in env.monitor.observations)
-        and int(env.ptw_agent.get_stats()["pending"]) + int(env.ptw_agent.get_stats()["active_resp"]) > 0,
-        description="old-context live cfVec with late PTW response",
-    )
-
-    prepared_context = env.prepare_translation_context_change(satp_asid=new.satp_asid)
-    prepared_sfence = env.prepare_sfence(addr=_OLD_VA, rs1=1, rs2=1, ident=old.satp_asid)
-    new_state = replace(new_state, translation_epoch=env.translation_epoch)
-    env.monitor.set_expected_pc(_NEW_VA)
-    env.arm_translation_scenario(new_state)
-    env.translation_oracle.set_fetch_observation_ready(ready=False)
-
-    redirect = InjectRedirectSequence(
-        RedirectTxn(
-            source_pc=_OLD_VA,
-            target_pc=_NEW_VA,
-            reason="satp-asid-switch-stale-response",
-            satp_flush=1,
-        )
-    )
-    redirect.inject(env)
-    env.step(1)
-    env.release_translation_context_change(prepared_context)
-    env.release_sfence(prepared_sfence)
-    assert redirect.wait(env)
-    env.translation_oracle.set_fetch_observation_ready(ready=True)
-    _wait_until(
-        env,
-        lambda: any(record["kind"] == "stale_ptw_response" for record in env.translation_oracle.get_stats()["records"]),
-        description="stale old-epoch PTW response record",
-    )
-    _wait_until(env, lambda: _translation_complete(env), description="complete new-context translation")
-    env.assert_translation_scenario()
-    assert not env.get_errors()
-
-
 @pytest.mark.parametrize(
     "scenario_id,context_update,changed_name",
     (
@@ -560,31 +186,6 @@ def test_sfence_scope_after_refill(
         ident=ident,
         retranslation_page_indexes=retranslation_page_indexes,
     )
-
-
-def _run_sfence_scope_after_refill(
-    env,
-    scenario_id,
-    rs1,
-    rs2,
-    ident,
-    retranslation_page_indexes,
-) -> None:
-    scenario = _randomize_context_timing(
-        env,
-        _sfence_stage_scenario(scenario_id, s2xlate=0),
-    )
-    _run_sfence_retranslation(
-        env,
-        scenario,
-        retranslation_page_indexes=retranslation_page_indexes,
-        addr=scenario.va,
-        rs1=rs1,
-        rs2=rs2,
-        ident=ident,
-    )
-
-    assert not env.get_errors()
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,7 @@ from env.sequences import LoadProgramSequence
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from tests.py.support.dut_support import _wait_for_req_delta, _wait_for_resp_delta
 from tests.py.support import uncache_scenarios as uncache
-from tests.py.zhaoxinran.uncache import test_nc_fetch_paths as nc_paths
+from tests.py.support.instructions import encode_jal_x0
 from env.support import PmpPmaConfig, record_scenario, scenario_rng
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -169,7 +169,7 @@ def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(
         * (uncache._SV39_PAGE_SIZE // 2)
     )
     source_payload[-4:] = int(
-        nc_paths._encode_jal_x0(recovery_page - branch_pc)
+        encode_jal_x0(recovery_page - branch_pc)
     ).to_bytes(4, "little")
     mmio_payload = bytes(
         int(uncache._CNOP).to_bytes(2, "little")

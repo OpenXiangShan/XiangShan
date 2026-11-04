@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import os
 from dataclasses import replace
-from typing import Sequence
 
 import pytest
 
@@ -31,6 +30,7 @@ from tests.py.support.dut_support import (
     _wait_for_resp_delta,
     _wait_for_req_delta,
     _wait_for_req_count,
+    wait_until,
 )
 from tests.py.support.translation_scenarios import _randomize_translation_timing
 from tests.py.support.uncache_scenarios import (
@@ -86,6 +86,12 @@ from tests.py.support.uncache_scenarios import (
     _wait_for_uncache_a_valid_addr,
 )
 
+from tests.py.zhaoxinran.support.uncache import (
+    _half_rvi_state_is_quiescent,
+    _wait_for_first_active_s1_after,
+    _run_uncache_pbmt_nc_non_mmio_uses_uncache_path,
+    _run_uncache_page_tail_rvi_need_resend_rechecks_next_page,
+)
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _INSTR_UNCACHE_INVALID = 0
@@ -185,39 +191,6 @@ def test_uncache_prev_half_signal_contract_matches_dut_inventory():
     ]
     missing = [list(names) for names in required if not any(name in registered for name in names)]
     assert not missing, {"missing_internal_signals": missing}
-
-
-def _half_rvi_state_is_quiescent(sample: dict) -> bool:
-    return (
-        int(sample["s0"]) == 0
-        and int(sample["s1_data"]) == 0
-        and int(sample["s1_pc"]) == 0
-        and (int(sample["s1"]) == 0 or int(sample["s1_pipeline_valid"]) == 0)
-        and (int(sample["s2"]) == 0 or int(sample["s2_valid"]) == 0)
-    )
-
-
-def _wait_for_first_active_s1_after(
-    env,
-    samples: Sequence[dict],
-    cycle: int,
-    *,
-    max_cycles: int = 64,
-) -> dict | None:
-    for _ in range(int(max_cycles)):
-        active = next(
-            (
-                sample
-                for sample in samples
-                if int(sample["cycle"]) > int(cycle)
-                and int(sample["s1_pipeline_valid"]) == 1
-            ),
-            None,
-        )
-        if active is not None:
-            return active
-        env.step(1)
-    return None
 
 
 def _assert_ifu_uncache_state(env, expected: int) -> None:
@@ -728,55 +701,6 @@ def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
         parameters={"expected_path": "pbmt_nc_uses_uncache"},
     )
     return _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env)
-
-
-def _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
-    expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=_NORMAL_BASE,
-        paddr=_NORMAL_PHYS_BASE,
-    )
-    expected_block_pcs = [pc for pc, _, _ in expected_block]
-    cfi_pc = mapping.vaddr + 0x10
-    _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
-    _configure_exec_pmp_4k(env, base_addr=mapping.paddr)
-    _configure_exec_cacheable_pma_4k(env, base_addr=mapping.paddr)
-    env.backend_model.set_can_accept(0)
-    env.uncache_agent.set_a_ready(0)
-    _force_redirect_to(env, mapping.vaddr)
-
-    assert _wait_for_resp_delta(env, env.ptw_agent, max_cycles=6000), env.ptw_agent.get_stats()
-    assert _wait_for_uncache_a_valid_addr(env, mapping.paddr, max_cycles=6000), {
-        "ptw": env.ptw_agent.get_stats(),
-        "icache": env.icache_agent.get_stats(),
-        "uncache": env.uncache_agent.get_stats(),
-        "mapping": mapping,
-        "a_valid": int(env.uncache_if.a_valid.value),
-        "a_addr": hex(int(env.uncache_if.a_bits_address.value)),
-    }
-    assert _require_first_dut_signal(env, _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS) == 1
-    env.uncache_agent.set_a_ready(None)
-    assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
-    assert _wait_for_resp_count(env, 1, max_cycles=6000), env.uncache_agent.get_stats()
-    env.backend_model.set_can_accept(1)
-    assert _wait_for_observed_pc_sequence(env, expected_block_pcs, max_cycles=12000), {
-        "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
-        "ptw": env.ptw_agent.get_stats(),
-        "uncache": env.uncache_agent.get_stats(),
-        "mapping": mapping,
-    }
-    stats = env.uncache_agent.get_stats()
-    expected_beat_addrs = [mapping.paddr + _UNCACHE_BEAT_BYTES * idx for idx in range(_FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES)]
-
-    assert not env.memory.is_mmio(mapping.paddr)
-    assert mapping.paddr in stats.get("request_addrs", [])
-    assert all(addr in stats.get("request_addrs", []) for addr in expected_beat_addrs), stats
-    _assert_observed_instrs(env, expected_block)
-    observed_by_pc = {int(obs.pc): obs for obs in env.monitor.observations if int(obs.pc) in expected_block_pcs}
-    assert int(observed_by_pc[cfi_pc].instr) == _JAL_X0_PLUS_4
-    assert not bool(observed_by_pc[cfi_pc].is_rvc)
-    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
-    assert not env.monitor.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-422")
@@ -2070,79 +1994,64 @@ def _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
 
 
 @pytest.mark.funcov_tps("ATP-035")
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "latest DUT requires a live cfVec source for context re-entry; the current "
-        "single-page stimulus cannot retain an old PTW response while producing that source"
-    ),
-)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env):
     scenario_key = "zhaoxinran/uncache/csr-change-discards-stale-translation"
-    base_seed, seed, rng = scenario_rng(scenario_key)
-    old_latency = rng.randint(48, 80)
-    new_latency = rng.randint(48, 80)
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    base_seed, seed, _ = scenario_rng(scenario_key)
+    old_va = _NORMAL_BASE + 0xF00
+    old_pa = _NORMAL_PHYS_BASE + 0xF00
+    reentry_va = _NORMAL_BASE + _SV39_PAGE_SIZE
+    old_reentry_pa = _NORMAL_PHYS_BASE + _SV39_PAGE_SIZE
+    reentry_pa = _NORMAL_ALT_PHYS_BASE + _SV39_PAGE_SIZE
+    remote_va = _NORMAL_BASE + 2 * _SV39_PAGE_SIZE
+    remote_pa = _NORMAL_ALT_PHYS_BASE + 2 * _SV39_PAGE_SIZE
+    permissions = (
+        TranslationPmpPmaEntry(
+            kind="pmp", index=0,
+            config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+            addr=_NORMAL_BASE, size=0x8000,
+        ),
+    )
+    attributes = (
+        TranslationPmpPmaEntry(
+            kind="pma", index=0,
+            config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+            addr=_NORMAL_BASE, size=0x8000,
+        ),
+    )
     old_scenario = TranslationScenario(
         scenario_id="atp-035-old-context",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_PHYS_BASE,
-        payload=int(_CNOP).to_bytes(2, "little") * 32,
-        ptw_response_latency=old_latency,
-        ptw_response_seed=seed,
+        va=old_va,
+        pa=old_pa,
+        payload=int(0x18009073).to_bytes(4, "little") + int(_CNOP).to_bytes(2, "little") * 2174,
+        page_count=2,
+        ptw_response_latency=24,
         satp_asid=1,
         s1_pte=TranslationPte(asid=1),
         expected_path="cacheable",
         expected_result="miss_refill",
-        pmp_entries=(
-            TranslationPmpPmaEntry(
-                kind="pmp",
-                index=0,
-                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_PHYS_BASE,
-                size=0x1000,
-            ),
-        ),
-        pma_entries=(
-            TranslationPmpPmaEntry(
-                kind="pma",
-                index=0,
-                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_PHYS_BASE,
-                size=0x1000,
-            ),
-        ),
+        pmp_entries=permissions,
+        pma_entries=attributes,
     )
     new_scenario = TranslationScenario(
         scenario_id="atp-035-new-context",
-        va=_NORMAL_BASE,
-        pa=_NORMAL_ALT_PHYS_BASE,
+        va=reentry_va,
+        pa=reentry_pa,
         payload=int(_CNOP).to_bytes(2, "little") * 32,
-        ptw_response_latency=new_latency,
-        ptw_response_seed=seed,
+        ptw_response_latency=24,
         satp_asid=2,
         s1_pte=TranslationPte(asid=2),
         expected_path="cacheable",
         expected_result="miss_refill",
-        pmp_entries=(
-            TranslationPmpPmaEntry(
-                kind="pmp",
-                index=0,
-                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-                addr=_NORMAL_ALT_PHYS_BASE,
-                size=0x1000,
-            ),
-        ),
-        pma_entries=(
-            TranslationPmpPmaEntry(
-                kind="pma",
-                index=0,
-                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
-                addr=_NORMAL_ALT_PHYS_BASE,
-                size=0x1000,
-            ),
-        ),
+        pmp_entries=permissions,
+        pma_entries=attributes,
+    )
+    remote_scenario = replace(
+        new_scenario,
+        scenario_id="atp-035-remote-source",
+        va=remote_va,
+        pa=remote_pa,
+        payload=int(0x800FF06F).to_bytes(4, "little") + int(_CNOP).to_bytes(2, "little") * 30,
     )
     record_scenario(
         env,
@@ -2150,35 +2059,180 @@ def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env)
         base_seed=base_seed,
         seed=seed,
         parameters={
-            "va": _NORMAL_BASE,
-            "old_pa": _NORMAL_PHYS_BASE,
-            "new_pa": _NORMAL_ALT_PHYS_BASE,
-            "old_latency": old_latency,
-            "new_latency": new_latency,
+            "source_va": old_va,
+            "reentry_va": reentry_va,
+            "old_pa": old_pa,
+            "old_reentry_pa": old_reentry_pa,
+            "reentry_pa": reentry_pa,
+            "remote_va": remote_va,
+            "remote_pa": remote_pa,
+            "ptw_latency": 24,
             "expected_path": "stale_ptw_response_discarded",
         },
     )
-    steps = TranslationScenarioSequence(
-        actions=(
-            TranslationScenarioPhase(
-                scenario=old_scenario,
-                wait_for_ptw_requests=1,
-                wait_for_completion=False,
-            ),
-            TranslationScenarioPhase(
-                scenario=new_scenario,
-                wait_for_stale_responses=1,
-            ),
-        )
-    ).run(env)
+    builder = TranslationScenarioBuilder(env)
+    new_state = builder.build(new_scenario)
+    remote_state = builder.build(remote_scenario)
+    _initialize_sv39_fetch(env, reset_vector=old_va)
+    old_state = builder.build(old_scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(old_va)
+    env.arm_translation_scenario(old_state)
 
-    stats = env.translation_oracle.get_stats()
-    assert [step["scenario_id"] for step in steps if step["kind"] == "phase"] == [
-        old_scenario.scenario_id,
-        new_scenario.scenario_id,
+    def old_response_outstanding() -> bool:
+        active = env.translation_oracle.get_active()
+        if active is None:
+            return False
+        old_vpn = reentry_va >> 12
+        return bool(
+            any(int(obs.pc) == old_va for obs in env.monitor.observations)
+            and old_vpn in active["requested_ptw_vpns"]
+            and old_vpn not in active["responded_ptw_vpns"]
+            and int(env.ptw_agent.get_stats()["pending"])
+            + int(env.ptw_agent.get_stats()["active_resp"]) > 0
+        )
+
+    wait_until(env, old_response_outstanding, description="live cfVec with old-page PTW pending")
+    env.page_table.map_page(
+        reentry_va >> 12,
+        reentry_pa >> 12,
+        **new_scenario.s1_pte.as_mapping_kwargs(),
+    )
+    env.page_table.map_page(
+        remote_va >> 12,
+        remote_pa >> 12,
+        **new_scenario.s1_pte.as_mapping_kwargs(),
+    )
+    redirect = InjectRedirectSequence(
+        RedirectTxn(
+            source_pc=old_va,
+            target_pc=remote_va,
+            reason="atp-035-csr-change-with-old-ptw-pending",
+            satp_flush=1,
+        )
+    )
+    redirect.inject(env)
+    first_redirect_count = int(env.monitor.redirect_count)
+    wait_until(
+        env,
+        lambda: int(env.monitor.redirect_count) > first_redirect_count,
+        description="redirect away from old VPN while its PTW response is pending",
+    )
+    context_change_cycle = int(env.current_cycle)
+    context = env.prepare_translation_context_change(satp_asid=new_scenario.satp_asid)
+    assert context["changed"]["satp"]
+    new_state = replace(new_state, translation_epoch=env.translation_epoch)
+    remote_state = replace(remote_state, translation_epoch=env.translation_epoch)
+    env.monitor.set_expected_pc(remote_va)
+    env.arm_translation_scenario(remote_state)
+    env.translation_oracle.set_fetch_observation_ready(ready=True)
+    env.step(1)
+    env.release_translation_context_change(context)
+    wait_until(
+        env,
+        lambda: any(
+            record["kind"] == "stale_ptw_response"
+            for record in env.translation_oracle.get_stats()["records"]
+        ),
+        description="old-context PTW response after CSR change",
+    )
+    old_response = env.ptw_agent.get_last_drive_expectation()
+    assert old_response is not None
+    assert int(old_response["vpn"]) == reentry_va >> 12
+    assert int(old_response["resp"]["s1_entry_asid"]) == old_scenario.satp_asid
+    stale_cycle = max(
+        record["cycle"]
+        for record in env.translation_oracle.get_stats()["records"]
+        if record["kind"] == "stale_ptw_response"
+    )
+    assert stale_cycle > context_change_cycle
+    assert redirect.wait(env)
+    wait_until(
+        env,
+        lambda: any(int(obs.pc) == remote_va for obs in env.monitor.observations),
+        description="remote JAL cfVec after old response",
+    )
+    assert any(int(obs.pc) == remote_va and int(obs.cycle) > stale_cycle for obs in env.monitor.observations)
+    early_reentry_requests = [
+        record for record in env.translation_oracle.get_stats()["records"]
+        if record["kind"] in {"ptw_request", "pre_redirect_ptw_request", "pre_target_ptw_request"}
+        and int(record["actual"]["vpn"]) == reentry_va >> 12
+        and int(record["cycle"]) > context_change_cycle
     ]
-    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 2
+    assert not early_reentry_requests, early_reentry_requests
+    env.monitor.set_expected_pc(reentry_va)
+    env.arm_translation_scenario(new_state)
+    env.translation_oracle.set_fetch_observation_ready(ready=True)
+    itlb_prefix = "Frontend_top.Frontend.inner_icache.prefetcher."
+    itlb_valid = env.dut.GetInternalSignal(itlb_prefix + "io_itlb_req_valid")
+    itlb_fullva = env.dut.GetInternalSignal(itlb_prefix + "io_itlb_req_bits_fullva")
+    itlb_miss = env.dut.GetInternalSignal(itlb_prefix + "io_itlb_resp_bits_miss")
+    assert all(signal is not None for signal in (itlb_valid, itlb_fullva, itlb_miss))
+    itlb_miss_cycles = []
+
+    def observe_reentry_miss(cycle, _env):
+        if int(itlb_valid.value) and int(itlb_fullva.value) == reentry_va and int(itlb_miss.value):
+            itlb_miss_cycles.append(int(cycle))
+
+    env.register_pre_drive_cycle_observer(observe_reentry_miss)
+    reentry_redirect = InjectRedirectSequence(
+        RedirectTxn(
+            source_pc=remote_va,
+            target_pc=reentry_va,
+            reason="atp-035-revisit-after-stale-ptw-response",
+        )
+    )
+    reentry_redirect.inject(env)
+    revisit_cycle = int(env.current_cycle)
+    redirect_count = int(env.monitor.redirect_count)
+    wait_until(
+        env,
+        lambda: any(
+            record["kind"] == "ptw_request"
+            and record["scenario_id"] == new_scenario.scenario_id
+            and int(record["cycle"]) > revisit_cycle
+            for record in env.translation_oracle.get_stats()["records"]
+        ),
+        description="new-context PTW request after revisiting old VPN",
+    )
+    assert any(cycle > stale_cycle for cycle in itlb_miss_cycles), itlb_miss_cycles
+    wait_until(
+        env,
+        lambda: int(env.monitor.redirect_count) > redirect_count,
+        description="backend confirms JAL redirect to old VPN",
+    )
+    wait_until(
+        env,
+        lambda: any(int(obs.pc) == reentry_va and int(obs.cycle) > revisit_cycle for obs in env.monitor.observations),
+        description="cfVec from old VPN in new context",
+    )
+    wait_until(
+        env,
+        lambda: reentry_pa in env.translation_oracle.get_active()["observed_fetch_pas"],
+        description="new-context fetch from remapped page",
+    )
+    stats = env.assert_translation_scenario()
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 4
     assert any(record["kind"] == "stale_ptw_response" for record in stats["records"])
+    new_response_cycle = min(
+        int(record["cycle"])
+        for record in stats["records"]
+        if record["kind"] == "ptw_response"
+        and record["scenario_id"] == new_scenario.scenario_id
+        and int(record["cycle"]) > stale_cycle
+    )
+    icache_records = env.icache_agent.get_stats()["request_records"]
+    assert min(
+        int(record["cycle"])
+        for record in icache_records
+        if int(record["address"]) == reentry_pa
+    ) > new_response_cycle
+    assert any(int(obs.pc) == reentry_va and int(obs.cycle) > stale_cycle for obs in env.monitor.observations)
+    assert not any(
+        int(record["cycle"]) > context_change_cycle
+        and int(record["address"]) == old_reentry_pa
+        for record in icache_records
+    )
     assert not env.monitor.get_errors()
 
 
@@ -2438,158 +2492,6 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
         second_latency=second_latency,
         redirect_target=redirect_target,
     )
-
-
-def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
-    env,
-    *,
-    second_latency: int = 16,
-    redirect_target: int = _MMIO_BASE + 0x40,
-):
-    _prepare_cross_page_rvi_stream(env)
-    # Keep the second-page response outstanding long enough to observe the
-    # retimed half-RVI state, rather than proving only the final cfVec result.
-    env.uncache_agent.configure(latency=2, mmio_latency=second_latency)
-    prev_half_samples = _register_prev_half_rvi_observer(env)
-    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
-
-    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
-    next_page = _MMIO_BASE + _SV39_PAGE_SIZE
-    assert _wait_for_request_addr(env, first_beat, max_cycles=5000), env.uncache_agent.get_stats()
-    assert _wait_for_request_addr(env, next_page, max_cycles=5000), env.uncache_agent.get_stats()
-    assert _wait_for_observed_pc(env, _CROSS_PAGE_PC, max_cycles=8000), {
-        "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
-        "uncache": env.uncache_agent.get_stats(),
-    }
-    stats = env.uncache_agent.get_stats()
-    observed = next(obs for obs in env.monitor.observations if int(obs.pc) == _CROSS_PAGE_PC)
-
-    assert stats.get("request_addrs", []).count(first_beat) == 1
-    assert stats.get("request_addrs", []).count(next_page) == 1
-    assert int(observed.instr) == _ADDI_X0_X0_0
-    assert not bool(observed.is_rvc)
-
-    recovery_samples = list(prev_half_samples)
-    expected_half_data = _ADDI_X0_X0_0 & 0xFFFF
-    expected_half_pc = _CROSS_PAGE_PC >> 1
-    pending_samples = _pending_uncache_samples(recovery_samples, next_page)
-    assert len(pending_samples) >= 2, {
-        "reason": "no multi-cycle next-page response stall was observed",
-        "pending_samples": pending_samples,
-        "uncache": stats,
-    }
-    pending_cycles = [int(sample["cycle"]) for sample in pending_samples]
-    assert any(
-        current == previous + 1
-        for previous, current in zip(pending_cycles, pending_cycles[1:])
-    ), {"pending_cycles": pending_cycles}
-
-    need_resend_samples = [
-        sample
-        for sample in recovery_samples
-        if sample["last_request_addr"] == first_beat and int(sample["need_resend"]) == 1
-    ]
-    assert need_resend_samples, {
-        "reason": "first-page RVI response did not expose needResend",
-        "samples": recovery_samples[-16:],
-    }
-
-    transaction_samples = [
-        sample
-        for sample in recovery_samples
-        if sample["last_request_addr"] in {first_beat, next_page}
-    ]
-    assert any(sample["s0"] == 1 for sample in transaction_samples), {
-        "reason": "s0 never recorded the first-page RVI half",
-        "samples": transaction_samples[-16:],
-    }
-    first_need_resend_cycle = min(int(sample["cycle"]) for sample in need_resend_samples)
-    s1_recovery = [
-        sample
-        for sample in recovery_samples
-        if int(sample["cycle"]) >= first_need_resend_cycle
-        and sample["s1"] == 1
-        and int(sample["s1_data"]) == expected_half_data
-        and int(sample["s1_pc"]) == expected_half_pc
-    ]
-    assert s1_recovery, {
-        "reason": "s1 did not capture the first-page half-RVI payload",
-        "samples": recovery_samples[-16:],
-        "expected_half_data": expected_half_data,
-        "expected_half_pc": expected_half_pc,
-    }
-    s2_recovery = [sample for sample in pending_samples if sample["s2"] == 1]
-    assert s2_recovery, {
-        "reason": "s2 never carried prevHalfRvi during the next-page response",
-        "pending_samples": pending_samples,
-    }
-
-    # The delayed next-page response must hold the assembled instruction's
-    # source half and PC on every cycle until the response is consumed.
-    for sample in pending_samples:
-        assert int(sample["s2"]) == 1, {"sample": sample, "reason": "s2 half-RVI flag dropped while stalled"}
-        assert int(sample["s2_data"]) == expected_half_data, {
-            "sample": sample,
-            "expected_half_data": expected_half_data,
-        }
-        assert int(sample["s2_pc"]) == expected_half_pc, {
-            "sample": sample,
-            "expected_half_pc": expected_half_pc,
-        }
-
-    # Exercise backend redirect after recovery and make sure the old saved
-    # half cannot leak into the redirected path.
-    observations_before_redirect = len(env.monitor.observations)
-    redirect_queued_cycle = int(env.current_cycle)
-    _force_redirect_to(env, redirect_target)
-    assert _wait_for_observed_pc(env, redirect_target, max_cycles=5000)
-    redirect_samples = [
-        sample for sample in prev_half_samples if int(sample["cycle"]) >= redirect_queued_cycle
-    ]
-    redirect_cycles = [
-        int(sample["cycle"])
-        for sample in redirect_samples
-        if int(sample["backend_redirect"]) == 1
-    ]
-    assert redirect_cycles, {
-        "reason": "backend redirect was not observable",
-        "samples": redirect_samples[-16:],
-    }
-    first_redirect_cycle = min(redirect_cycles)
-    target_delivery_cycle = min(
-        int(obs.cycle)
-        for obs in env.monitor.observations[observations_before_redirect:]
-        if int(obs.pc) == redirect_target
-    )
-    redirect_clear_window = [
-        sample
-        for sample in redirect_samples
-        if first_redirect_cycle <= int(sample["cycle"]) <= target_delivery_cycle
-    ]
-    # S2 payload registers are RegEnable state; redirect invalidates them via
-    # s2_valid rather than requiring the physically stale bits to be zero.
-    assert any(_half_rvi_state_is_quiescent(sample) for sample in redirect_clear_window), {
-        "reason": "backend redirect did not clear saved half-RVI payload",
-        "redirect_clear_window": redirect_clear_window,
-    }
-    first_recovery_s1 = _wait_for_first_active_s1_after(
-        env,
-        prev_half_samples,
-        first_redirect_cycle,
-    )
-    assert first_recovery_s1 is not None, {
-        "reason": "redirect target never reached an active S1 transaction",
-        "samples": prev_half_samples[-16:],
-    }
-    assert int(first_recovery_s1["s1"]) == 0, {
-        "reason": "redirect target inherited the old half-RVI valid state",
-        "sample": first_recovery_s1,
-    }
-    assert not any(
-        int(obs.pc) == _CROSS_PAGE_PC
-        for obs in env.monitor.observations[observations_before_redirect:]
-    )
-    assert not env.monitor.get_errors()
 
 
 @pytest.mark.parametrize("denied", [0, 1], ids=["corrupt-only", "denied-and-corrupt"])

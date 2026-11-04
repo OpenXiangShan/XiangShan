@@ -23,6 +23,7 @@ from env.runtime.frontend_init import (
 )
 from env.support import PmpPmaConfig, record_scenario, scenario_rng
 from tests.py.support import translation_faults
+from tests.py.support.instructions import encode_jal_x0 as _encode_jal_x0
 from tests.py.support.dut_support import (
     _wait_for_req_count,
     _wait_for_req_delta,
@@ -150,19 +151,6 @@ def _reset_nc_backend_runtime(env) -> None:
     backend._clear_cfvec_queue_state()
     backend._backend_state = backend._backend_state.__class__(ftq_size=backend.ftq_size)
     backend._ftq_scoreboard = backend._ftq_scoreboard.__class__(backend._backend_state)
-
-
-def _encode_jal_x0(offset: int) -> int:
-    assert int(offset) % 2 == 0
-    assert -(1 << 20) <= int(offset) < (1 << 20)
-    imm = int(offset) & 0x1FFFFF
-    return (
-        (((imm >> 20) & 0x1) << 31)
-        | (((imm >> 1) & 0x3FF) << 21)
-        | (((imm >> 11) & 0x1) << 20)
-        | (((imm >> 12) & 0xFF) << 12)
-        | 0x6F
-    )
 
 
 def _s2_has_taken_prediction_at(env, target_pc: int) -> bool:

@@ -1,9 +1,7 @@
 """DUT scenarios for the redirect/flush/recovery functional group.
 
-The tests in this file are the RFR closure entry points.  Existing focused DUT
-tests provide the stimulus and low-level checkpoints; this file keeps the
-coverage plan's eight scenarios discoverable in one place and adds the
-source-bound FTQ-ahead/boundary stream that was previously missing.
+The tests in this file are RFR closure entry points for implemented scenarios,
+including the source-bound FTQ-ahead/boundary stream.
 """
 
 from __future__ import annotations
@@ -18,13 +16,16 @@ from env.sequences import InjectRedirectSequence, LoadProgramSequence
 from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
 from env.funcov.py.ifu.mmio_nc_owner_funcov import read_instr_uncache_response_valid
 from env.support import record_scenario, scenario_rng
-from tests.py.jiabowen import test_ifu_predchecker_v3_dut as predchecker
-from tests.py.icache.directed_dut import test_icache_mainpipe_s1_flush_closure_dut as s1_flush
-from tests.py.zhaoxinran.translation import test_instruction_fetch_permission_boundary as faults
+from tests.py.support.main_fetch import (
+    register_main_fetch_observer as _register_main_fetch_observer,
+    wait_for_three_main_fetches_after_redirect as _wait_for_three_main_fetches_after_redirect,
+)
+from tests.py.support import predchecker
+from tests.py.support import backend_fault_recovery as faults
 from tests.py.support import uncache_scenarios as uncache
-from tests.py.zhaoxinran.uncache import test_instr_uncache_port_boundaries as uncache_tests
-from tests.py.zhaoxinran.mmio import test_mmio_fetch_boundary as mmio
-from tests.py.zhaoxinran.translation import test_address_translation_context_switch as context_switch
+from tests.py.zhaoxinran.support import uncache as uncache_tests
+from tests.py.zhaoxinran.support import mmio
+from tests.py.zhaoxinran.support import translation as context_switch
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -46,16 +47,6 @@ def _wait_for_pc(env, pc: int, *, max_cycles: int = 8000) -> None:
     )
 
 
-_MAIN_FETCH_VALID_SIGNALS = (
-    "Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_valid",
-    "Frontend_top.Frontend._inner_ftq_io_toICache_toMainPipe_valid",
-    "Frontend_top.Frontend.inner_ftq.io_toICache_toMainPipe_valid",
-)
-_MAIN_FETCH_READY_SIGNALS = (
-    "Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_ready",
-    "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
-    "Frontend_top.Frontend.inner_icache.io_fromFtq_toMainPipe_ready",
-)
 _UNCACHE_RESPONSE_VALID_SIGNALS = (
     "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheFinish",
 )
@@ -152,27 +143,6 @@ def _find_live_cfi(env, *, is_rvc: bool, ftq_offset: int):
     )
 
 
-def _register_main_fetch_observer(env) -> list[dict[str, int]]:
-    samples: list[dict[str, int]] = []
-
-    def capture(cycle, current_env) -> None:
-        samples.append(
-            {
-                "cycle": int(cycle),
-                "redirect": int(current_env.backend_to_ftq_if.redirect_valid.value),
-                "valid": uncache._require_first_dut_signal(
-                    current_env, _MAIN_FETCH_VALID_SIGNALS
-                ),
-                "ready": uncache._require_first_dut_signal(
-                    current_env, _MAIN_FETCH_READY_SIGNALS
-                ),
-            }
-        )
-
-    env.register_cycle_observer(capture)
-    return samples
-
-
 def _register_uncache_redirect_observer(
     env, *, target_pc: int | None = None
 ) -> list[dict[str, int]]:
@@ -218,33 +188,6 @@ def _register_uncache_redirect_observer(
 
     env.register_cycle_observer(capture)
     return samples
-
-
-def _wait_for_three_main_fetches_after_redirect(
-    env, samples: list[dict[str, int]], *, max_cycles: int = 1024
-) -> None:
-    redirect_cycles = [sample["cycle"] for sample in samples if sample["redirect"] == 1]
-    assert redirect_cycles, {"reason": "backend fault redirect was not observed"}
-    redirect_cycle = max(redirect_cycles)
-    for _ in range(int(max_cycles)):
-        fires = [
-            sample
-            for sample in samples
-            if sample["cycle"] > redirect_cycle
-            and sample["valid"] == 1
-            and sample["ready"] == 1
-        ]
-        if len(fires) >= 3:
-            env.step(2)
-            return
-        env.step(1)
-    raise AssertionError(
-        {
-            "reason": "fewer than three main-fetch handshakes followed backend fault redirect",
-            "redirect_cycle": redirect_cycle,
-            "samples_tail": samples[-64:],
-        }
-    )
 
 
 def _wait_for_monitor_taken_prediction(env, pc: int, *, max_cycles: int = 6000) -> None:
@@ -563,13 +506,6 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
         assert matches, {"path": path, "samples_tail": samples[-128:]}
     assert not env.monitor.get_errors()
     assert not env.get_errors()
-
-
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_rfr_s05_bpu_s3_override_flushes_old_window(env) -> None:
-    """Keep the existing BPU s3 miss stimulus under the RFR entry point."""
-    s1_flush._run_tc_icache_mainpipe_s1_bpu_miss(env)
-    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
