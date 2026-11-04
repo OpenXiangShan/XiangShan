@@ -235,8 +235,8 @@ class BpuPredictionBlock(implicit p: Parameters) extends BpuBundle {
 // Blocks of one enqueue are written to consecutive Ftq entries, and blocks(i+1) starts at blocks(i)'s target,
 // so Ftq keeps deriving a block's target from its successor's startPc.
 // The blocks are enqueued atomically: either all valid blocks are accepted, or none of them is.
-// Ftq records one redirect meta per enqueue and gives it to every block, so a block whose cfi pushes or pops the
-// return stack must be the last valid block.
+// Every block carries the return stack state of the group's start, so a block whose cfi pushes or pops the return
+// stack must be the last valid block.
 class BpuPrediction(implicit p: Parameters) extends BpuBundle {
   val blocks: Vec[Valid[BpuPredictionBlock]] = Vec(MaxPredictionNum, Valid(new BpuPredictionBlock))
   // override valid
@@ -385,9 +385,10 @@ class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
 }
 
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
-  val redirectMeta: BpuRedirectMeta = new BpuRedirectMeta
-  val resolveMeta:  BpuResolveMeta  = new BpuResolveMeta
-  val commitMeta:   BpuCommitMeta   = new BpuCommitMeta
+  // one per prediction block, as a redirect inside a later block recovers to the state that block started from
+  val redirectMeta: Vec[BpuRedirectMeta] = Vec(MaxPredictionNum, new BpuRedirectMeta)
+  val resolveMeta:  BpuResolveMeta       = new BpuResolveMeta
+  val commitMeta:   BpuCommitMeta        = new BpuCommitMeta
 }
 
 /* *** internal const & type *** */

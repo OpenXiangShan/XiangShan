@@ -512,8 +512,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
   }
 
-  private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
-  private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
+  private val s2_phrMeta      = RegEnable(phr.io.phrMeta, s1_fire)
+  private val s3_phrMeta      = RegEnable(s2_phrMeta, s2_fire)
+  private val s2_laterPhrMeta = RegEnable(phr.io.s1_laterPhrMeta, s1_fire)
+  private val s3_laterPhrMeta = RegEnable(s2_laterPhrMeta, s2_fire)
 
   private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
   s3_commonHRMeta.ghr       := commonHR.io.s3ResolveMeta.ghr
@@ -574,10 +576,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // An override replaces the group with a single corrected block, so only a group that survives s3 keeps its width.
   io.toFtq.s3NumBlocks := 1.U
 
-  io.toFtq.meta.valid             := s3_valid
-  io.toFtq.meta.bits.redirectMeta := s3_redirectMeta
-  io.toFtq.meta.bits.resolveMeta  := s3_resolveMeta
-  io.toFtq.meta.bits.commitMeta   := s3_commitMeta
+  io.toFtq.meta.valid := s3_valid
+  // A later block starts after the blocks before it, so only its path history differs from the group's. The rest is
+  // the group's start state: the return stack by the rule on BpuPrediction, and CommonHR as it is not yet advanced by
+  // a group.
+  io.toFtq.meta.bits.redirectMeta.zipWithIndex.foreach { case (meta, i) =>
+    meta                := s3_redirectMeta
+    if (i > 0) meta.phr := s3_laterPhrMeta(i - 1)
+  }
+  io.toFtq.meta.bits.resolveMeta := s3_resolveMeta
+  io.toFtq.meta.bits.commitMeta  := s3_commitMeta
 
   /* *** s0_startPc selection *** */
   s0_startPc := MuxCase(
