@@ -496,8 +496,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_resolveMeta.tage     := RegEnable(tage.io.meta, s2_fire)
   s3_resolveMeta.sc       := sc.io.meta
   s3_resolveMeta.commonHR := commonHR.io.s3ResolveMeta
-  s3_resolveMeta.ittage   := ittage.io.meta
-  s3_resolveMeta.phr      := s3_phrMeta
+  s3_resolveMeta.ittage.fromPrediction(ittage.io.meta, s3_taken && s3_useIttage && !s3_useRas)
+  s3_resolveMeta.phr := s3_phrMeta
   // s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
   s3_resolveMeta.utage := s3_utageMeta
 

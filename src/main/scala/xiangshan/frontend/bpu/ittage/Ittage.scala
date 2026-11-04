@@ -199,8 +199,13 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   XSDebug(s2_fire, p"hit_taken_jalr:")
 
-  ittageMeta.provider.valid := s3_provided
-  ittageMeta.provider.bits  := s3_provider
+  // With a correct provider target, confidence and useful stay unchanged in
+  // this prediction-time state.
+  private val s2_skipReadOnCorrect = provided && providerInfo.cnt.isSaturatePositive &&
+    providerInfo.usefulCnt.value === 1.U
+  ittageMeta.skipReadOnCorrect := RegEnable(s2_skipReadOnCorrect, false.B, s2_fire)
+  ittageMeta.provider.valid    := s3_provided
+  ittageMeta.provider.bits     := s3_provider
   ittageMeta.debug_predCycle.foreach(_ := GTimer())
 
   /* *** train/update pipeline *** */
@@ -225,9 +230,11 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     )
   }
 
-  // Re-read for every provider update and for allocation after a misprediction.
-  // Training selects providers and allocation candidates from the current entries.
-  private val t0_needRead = (t0_hasTrainBranch && t0_meta.provider.valid) || t0_updateMisPred
+  // Skip correct training of a saturated provider using its saved
+  // hint. This is a training policy: intervening updates may have changed the
+  // entry. Mispredictions always re-read, even when the saved hint is set.
+  private val t0_needRead =
+    (t0_hasTrainBranch && t0_meta.provider.valid && !t0_meta.skipReadOnCorrect) || t0_updateMisPred
 
   // ITTAGE prediction reads occur in s1, rather than TAGE's s0.  A bank
   // conflict blocks the FTQ training handshake; prediction keeps priority.
@@ -476,6 +483,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // Debug and perf info
   // Count accepted training transactions, not cycles spent waiting for a bank.
   // The three read reasons are mutually exclusive and sum to need_read.
+  private val perf_skipCorrect = t0_hasTrainBranch && t0_meta.provider.valid &&
+    t0_meta.skipReadOnCorrect && !t0_updateMisPred
+  private val perf_bankConflict = s1_fire && s1_isIndirect && t0_bankIdx === s1_bankIdx
   XSPerfSeqAccumulate(
     "ittage_train",
     t0_fire,
@@ -483,9 +493,24 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       ("total", true.B),
       ("need_read", t0_needRead),
       ("no_read", !t0_needRead),
-      ("need_read_provider_only", t0_meta.provider.valid && !t0_updateMisPred),
+      ("need_read_provider_only", t0_needRead && t0_meta.provider.valid && !t0_updateMisPred),
       ("need_read_mispredict_only", !t0_meta.provider.valid && t0_updateMisPred),
-      ("need_read_provider_and_mispredict", t0_meta.provider.valid && t0_updateMisPred)
+      ("need_read_provider_and_mispredict", t0_meta.provider.valid && t0_updateMisPred),
+      ("no_read_no_provider", !t0_meta.provider.valid && !t0_updateMisPred),
+      ("skip_correct", perf_skipCorrect),
+      ("skip_correct_bank_conflict", perf_skipCorrect && perf_bankConflict),
+      ("skip_hint_mispredict_read", t0_meta.provider.valid && t0_meta.skipReadOnCorrect && t0_updateMisPred)
+    )
+  )
+
+  // Cycles where the old read policy would block this pending request.
+  // These are local conflict opportunities, not saved CPU cycles.
+  XSPerfSeqAccumulate(
+    "ittage_train",
+    io.enable && io.debug_trainValid && perf_skipCorrect && perf_bankConflict,
+    Seq(
+      ("skip_correct_bank_conflict_cycles", true.B),
+      ("skip_correct_bank_conflict_cycles_exclusive", io.debug_trainOtherReady)
     )
   )
 

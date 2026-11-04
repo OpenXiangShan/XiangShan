@@ -64,11 +64,19 @@ class IttageMeta(implicit p: Parameters) extends IttageBundle {
   // The hit flag controls training reads; the index tracks provider changes.
   // Counters, targets and allocation candidates are re-read during training.
   val provider: Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
+  // Prediction-time hint, not a guarantee about the state at training time.
+  val skipReadOnCorrect: Bool = Bool()
+
+  // Qualify the hint at the BPU's final prediction selection.
+  def fromPrediction(that: IttageMeta, used: Bool): Unit = {
+    this              := that
+    skipReadOnCorrect := that.skipReadOnCorrect && used
+  }
 
   // Associate training logs with the original prediction.
   val debug_predCycle: Option[UInt] = if (!env.FPGAPlatform) Some(UInt(XLEN.W)) else None
 
-  override def toPrintable = p"pvdr(v:${provider.valid} num:${provider.bits})"
+  override def toPrintable = p"pvdr(v:${provider.valid} num:${provider.bits}) skipReadOnCorrect:$skipReadOnCorrect"
 }
 
 class IttageWriteReq(tagLen: Int, nRows: Int, ittageEntrySz: Int)(implicit p: Parameters) extends WriteReqBundle
