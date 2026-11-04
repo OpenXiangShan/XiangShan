@@ -258,6 +258,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // topdown: broadcast reason override
   bpu.io.topdownOverride     := ftq.io.topdownOverride
+  icache.io.topdownOverride  := ftq.io.topdownOverride
   ifu.io.topdownOverride     := ftq.io.topdownOverride
   ibuffer.io.topdownOverride := ftq.io.topdownOverride
 

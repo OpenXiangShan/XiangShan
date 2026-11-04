@@ -43,10 +43,7 @@ import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
-import xiangshan.frontend.icache.ICacheTopdownInfo
 import xiangshan.frontend.icache.MainPipeToIfuReq
-import xiangshan.frontend.icache.WayLookupBundle
-import xiangshan.frontend.icache.WayLookupWriteBundle
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
 
@@ -113,7 +110,7 @@ class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
 class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
   val req:        DecoupledIO[MainPipeToIfuReq] = DecoupledIO(new MainPipeToIfuReq)
   val corrupt:    Vec[Vec[Bool]]                = Vec(FetchPorts, Vec(PortNumber, Bool()))
-  val topdown:    ICacheTopdownInfo             = Output(new ICacheTopdownInfo)
+  val topdown:    TopdownBundle                 = Output(new TopdownBundle)
   val perf:       ICachePerfInfo                = Output(new ICachePerfInfo)
   val fetchReady: Bool                          = Output(Bool())
 }
@@ -129,7 +126,6 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
 class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
   val redirect:     Valid[Redirect] = Valid(new Redirect)
   val flushFromBpu: BpuFlushInfo    = new BpuFlushInfo
-  val topdown:      TopdownBundle   = new TopdownBundle
 }
 
 class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
