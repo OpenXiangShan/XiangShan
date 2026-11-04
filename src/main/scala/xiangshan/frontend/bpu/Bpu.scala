@@ -723,17 +723,17 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   io.toFtq.perfMeta := s3_perfMeta
 
-  // Track lost prediction slots through S1/S2/S3, independently of valid-ready.
-  // This tracks prediction bubbles; IFU separately tags fetches flushed by BPU.
+  /* *** top-down *** */
   private val topdownPipe = Module(new FrontendTopDownPipeline(3))
-  topdownPipe.io.in.reason := TopDownCounters.NoStall.id.U
+  // BPU is the starting point of the top-down pipeline, starts with FrontendOtherCoreStall.
+  // The later part of the pipeline might override to other reason (i.e. ICacheMiss).
+  // At last, IBuffer will expand reason from per-fetch-block to per-instruction,
+  // all valid instructions will be marked as NoStall, the reason from topdown pipeline is used only on empty slots.
+  topdownPipe.io.in.reason := TopDownCounters.FrontendOtherCoreStall.id.U
 
-  // S0 already uses the corrected PC in the override cycle. The discarded S1
-  // slot becomes a bubble in S2 on the next edge; S3 override also discards S2.
-  // Redirect wins PC selection and makes concurrent overrides irrelevant.
   topdownPipe.setReason(1, Seq((s2_override || s3_override) -> TopDownCounters.OverrideBubble))
   topdownPipe.setReason(2, Seq(s3_override -> TopDownCounters.OverrideBubble))
-  topdownPipe.setReason(Seq(redirect.valid -> TopDownCounters.NoStall))
+  topdownPipe.setReason(Seq(redirect.valid -> TopDownCounters.FrontendOtherCoreStall)) // FIXME: should use broadcast
   io.toFtq.topdown := topdownPipe.io.out
 
   /* *** BpTrace *** */

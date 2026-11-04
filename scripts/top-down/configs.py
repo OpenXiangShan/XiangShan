@@ -65,6 +65,8 @@ xs_frontend_rename_map = {
     'ITLBMissBubble': 'MergeITLBMissBubble',
     'BTBMissBubble': 'MergeBTBMissBubble',
     'FetchFragBubble': 'MergeFetchFragBubble',
+    'IBufStructualConflict': 'MergeIBufStructualConflict',
+    'VTypeResumeStall': 'MergeVTypeResumeStall',
     'FrontendOtherCoreStall': "MergeCoreOther",
 
     'FlushedInsts': 'MergeBadSpecInst',
@@ -186,6 +188,8 @@ xs_coarse_rename_map = {
     'ITLBMissBubble': 'MergeFrontend',
     'BTBMissBubble': 'MergeBadSpec',
     'FetchFragBubble': 'MergeFrontend',
+    'IBufStructualConflict': 'MergeFrontend',
+    'VTypeResumeStall': 'MergeCore',
     'FrontendOtherCoreStall': "MergeCoreOther",
 
     'IssueCancelStallOg0': 'MergeCore',
@@ -287,6 +291,8 @@ xs_fine_grain_rename_map = {
     'ITLBMissBubble': 'ITlbBubble',
     'BTBMissBubble': 'MergeBadSpecBubble',
     'FetchFragBubble': 'FragmentBubble',
+    'IBufStructualConflict': 'FragmentBubble',
+    'VTypeResumeStall': 'VTypeResumeStall',
 
     'DivStall': 'LongExecute',
     'IntNotReadyStall': 'MergeInstNotReady',
@@ -348,6 +354,8 @@ targets = {
     'ITLBMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ITLBMissBubble,\s+(\d+)',
     'BTBMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BTBMissBubble,\s+(\d+)',
     'FetchFragBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FetchFragBubble,\s+(\d+)',
+    'IBufStructualConflict': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IBufStructualConflict,\s+(\d+)',
+    'VTypeResumeStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VTypeResumeStall,\s+(\d+)',
     'FrontendOtherCoreStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FrontendOtherCoreStall,\s+(\d+)',
 
     'IssueCancelStallOg0': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IssueCancelStallOg0,\s+(\d+)',

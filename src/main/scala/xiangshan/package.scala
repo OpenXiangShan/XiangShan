@@ -831,6 +831,8 @@ package object xiangshan {
     val ITLBMissBubble = Value("ITLBMissBubble")
     val BTBMissBubble = Value("BTBMissBubble")
     val FetchFragBubble = Value("FetchFragBubble")
+    val IBufStructualConflict = Value("IBufStructualConflict")
+    val VTypeResumeStall = Value("VTypeResumeStall")
     val FrontendOtherCoreStall = Value("FrontendOtherCoreStall")
 
     // backend

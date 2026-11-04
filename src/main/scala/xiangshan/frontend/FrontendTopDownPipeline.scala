@@ -32,7 +32,11 @@ class FrontendTopDownPipeline(numStage: Int)(implicit p: Parameters) extends Fro
   val io: PipelineIO = IO(new PipelineIO)
 
   // Track lost slots on every clock edge, independently of valid-ready.
-  private val stages = RegInit(VecInit.fill(numStage)(0.U.asTypeOf(new FrontendTopDownBundle)))
+  private val stages = RegInit(VecInit.fill(numStage) {
+    val init = Wire(new FrontendTopDownBundle)
+    init.reason := TopDownCounters.FrontendOtherCoreStall.id.U
+    init
+  })
   stages.head := io.in
   for (i <- 1 until numStage) {
     stages(i) := stages(i - 1)
@@ -58,7 +62,7 @@ class FrontendTopDownPipeline(numStage: Int)(implicit p: Parameters) extends Fro
     } ++ reasonsByStage(stage)
     reasonsByStage(stage) = accumulatedReasons
     io.over(stage).valid       := accumulatedReasons.map(_._1).foldLeft(false.B)(_ || _)
-    io.over(stage).bits.reason := MuxCase(TopDownCounters.NoStall.id.U, accumulatedReasons)
+    io.over(stage).bits.reason := MuxCase(TopDownCounters.FrontendOtherCoreStall.id.U, accumulatedReasons)
   }
 
   // setReason for all stages
