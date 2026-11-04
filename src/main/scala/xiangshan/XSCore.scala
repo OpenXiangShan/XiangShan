@@ -219,7 +219,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.isVlsException         := backend.io.mem.isVlsException
 
   memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
-  memBlock.io.l2_hint <> io.l2_hint
+  // CustomHint (L2-to-L1 hint) path between L2 and LSU/L1 caches disconnected
+  memBlock.io.l2_hint := 0.U.asTypeOf(memBlock.io.l2_hint)
   memBlock.io.l2_tlb_req <> io.l2_tlb_req
   memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
   memBlock.io.l2_fdbk_pf_ctrl <> io.l2_fdbk_pf_ctrl
