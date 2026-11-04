@@ -9,7 +9,7 @@ import re
 from native_perf import read_blocks, unique_counters
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--variant', choices=['fp-credit', 'fp-credit-guard', 'fp-credit-div'], default='fp-credit')
+parser.add_argument('--variant', choices=['fp-credit', 'fp-credit-guard', 'fp-credit-div', 'fp-credit-fex123'], default='fp-credit')
 parser.add_argument('--report-dir', type=Path, help='Experiment report containing closed raw/analysis inputs')
 args = parser.parse_args()
 variant = args.variant
