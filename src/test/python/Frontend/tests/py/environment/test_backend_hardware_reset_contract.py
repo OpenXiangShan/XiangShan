@@ -10,7 +10,12 @@ from env.model.backend_runtime import BackendObservationSnapshot
 from env.model.backend_state import BackendEvent, FtqEntry
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.runtime.dut_factory import FakeDUTFrontend
-from tests.py.environment.test_backend_model_unit import _ObserveIf, _capture_cfvec, _queue_instr
+from tests.py.support.backend_reset import assert_no_old_actions
+from tests.py.support.backend_model_observation import (
+    ObserveIf as _ObserveIf,
+    capture_cfvec as _capture_cfvec,
+    queue_instr as _queue_instr,
+)
 
 
 def _dirty_model():
@@ -242,11 +247,10 @@ def test_environment_reset_does_not_observe_or_plan_backend_or_clear_errors(monk
     {"commit_start_pc": 0x80000000}, {"commit_start_pc": None},
 ])
 def test_reset_dut_checker_rejects_old_or_unidentified_actions(patch):
-    from tests.py.jiabowen.test_backend_reset_epoch_v3_dut import _assert_no_old_actions
 
     record = {"redirect": 0, "resolves": [0, 0, 0], "commit": 1,
               "commit_start_pc": 0x80010000,
               "call_ret_payloads": [{"ras_action": 0, "ftq_start_pc": 0x80010000}]}
-    _assert_no_old_actions(record, 0x80010000)
+    assert_no_old_actions(record, 0x80010000)
     with pytest.raises(AssertionError):
-        _assert_no_old_actions({**record, **patch}, 0x80010000)
+        assert_no_old_actions({**record, **patch}, 0x80010000)

@@ -4001,10 +4001,13 @@ class BackendModel:
             ftq_flag = int(cfvec.ftq_flag)
             ftq_value = int(cfvec.ftq_value)
             ftq_offset = int(cfvec.ftq_offset)
-            # The current RTL does not export an FTQ-entry boundary bit. The
-            # uncache path still has one instruction per FTQ entry; cacheable
-            # entries are closed when the observed FTQ pointer changes.
-            is_last = self._cfvec_uses_uncache_fetch(int(pc))
+            # Uncache entries hold one instruction. Cacheable entries can end
+            # at the fetch-block or page boundary before the next pointer appears.
+            is_last = (
+                self._cfvec_uses_uncache_fetch(int(pc))
+                or int(ftq_offset) == 31
+                or ((int(pc) + (2 if is_rvc else 4)) & 0xFFF) == 0
+            )
             exception_bits = int(cfvec.exception_bits)
 
             recovery_target_pc = self._current_recovery_target_pc()

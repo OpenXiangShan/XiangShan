@@ -20,50 +20,18 @@ from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
 from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
 from env.model.backend_state import RESOLVE_STATE_PENDING
 from env.model.backend_runtime import BackendObservationSnapshot
-from env.monitors.frontend_monitor import FrontendCycleSnapshot, FrontendMonitor
+from env.monitors.frontend_monitor import FrontendCycleSnapshot
 from env.model import GoldenTrace
 from env.model import PageTableModel
 from env.model import TraceEntry
 from env.checkers.frontend_flow_checker import FrontendFlowChecker
 from env.support import fold_pc
-
-
-class _Signal:
-    def __init__(self, value: int = 0) -> None:
-        self._value = int(value)
-        self.read_count = 0
-        self.write_count = 0
-
-    @property
-    def value(self) -> int:
-        self.read_count += 1
-        return self._value
-
-    @value.setter
-    def value(self, value: int) -> None:
-        self._value = int(value)
-        self.write_count += 1
-
-
-class _ObserveIf:
-    def __init__(self) -> None:
-        self.redirect_valid = _Signal()
-        self.redirect_bits_pc = _Signal()
-        self.redirect_bits_target = _Signal()
-        self.redirect_bits_taken = _Signal()
-        self.cfvec_valid = [_Signal() for _ in range(8)]
-        self.cfvec_foldpc = [_Signal() for _ in range(8)]
-        self.cfvec_instr = [_Signal(0x13) for _ in range(8)]
-        self.cfvec_is_rvc = [_Signal() for _ in range(8)]
-        self.cfvec_pred_taken = [_Signal() for _ in range(8)]
-        self.cfvec_ftq_ptr_flag = [_Signal() for _ in range(8)]
-        self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
-        self.cfvec_ftq_offset = [_Signal() for _ in range(8)]
-        self.cfvec_exception_vec_1 = [_Signal() for _ in range(8)]
-        self.cfvec_exception_vec_2 = [_Signal() for _ in range(8)]
-        self.cfvec_exception_vec_12 = [_Signal() for _ in range(8)]
-        self.cfvec_exception_vec_19 = [_Signal() for _ in range(8)]
-        self.cfvec_exception_vec_20 = [_Signal() for _ in range(8)]
+from tests.py.support.backend_model_observation import (
+    Signal as _Signal,
+    ObserveIf as _ObserveIf,
+    capture_cfvec as _capture_cfvec,
+    queue_instr as _queue_instr,
+)
 
 
 class _EmptyTrace:
@@ -86,14 +54,6 @@ def _set_first_cfvec(
     model._ftq_start_pc_by_value[int(ftq_value)] = int(pc) + (0 if is_rvc else 2)
 
 
-def _capture_cfvec(model: BackendModel, interface: _ObserveIf):
-    monitor = FrontendMonitor()
-    monitor.cfvec_if = interface
-    snapshot = monitor.capture_cfvec_snapshot(model.current_cycle)
-    model.accept_cfvec_snapshot(snapshot)
-    return snapshot
-
-
 def _sample_cfvec(model: BackendModel, interface: _ObserveIf) -> None:
     _capture_cfvec(model, interface)
     model._sample_cfvec()
@@ -114,21 +74,6 @@ def test_backend_model_requires_current_monitor_snapshot_for_cfvec() -> None:
         model._sample_cfvec()
     with pytest.raises(AssertionError, match="active cfVec snapshot"):
         model.observed_cfvec_pc(0)
-
-
-def _queue_instr(pc: int, ftq_flag: int, ftq_value: int) -> QueueInstr:
-    return QueueInstr(
-        cycle=0,
-        slot=0,
-        pc=pc,
-        instr=0,
-        is_rvc=False,
-        pred_taken=False,
-        ftq_flag=ftq_flag,
-        ftq_value=ftq_value,
-        ftq_offset=0,
-        is_last_in_entry=False,
-    )
 
 
 def _source_bound_cfi_model() -> tuple[BackendModel, QueueInstr]:
@@ -622,6 +567,36 @@ def test_cfvec_boundary_inference_uses_programmed_pma_over_memory_range() -> Non
     model.env.page_table.map_page(0x80000000 >> 12, 0x80001000 >> 12, pbmt=0)
 
     assert model._cfvec_uses_uncache_fetch(0x80000000) is True
+
+
+@pytest.mark.parametrize(
+    ("pc", "ftq_offset", "is_rvc", "expected_last"),
+    (
+        (0x8020003C, 31, False, True),
+        (0x80200FFC, 31, False, True),
+        (0x80200FFC, 15, False, True),
+        (0x80200FFE, 15, True, True),
+        (0x80200FF8, 29, False, False),
+    ),
+)
+def test_cfvec_boundary_inference_closes_cacheable_fetch_end(
+    pc: int, ftq_offset: int, is_rvc: bool, expected_last: bool
+) -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.cfvec_if = interface
+    model.current_cycle = 1
+    _set_first_cfvec(model, interface, pc, ftq_value=3, is_rvc=is_rvc)
+    interface.cfvec_ftq_offset[0].value = ftq_offset
+    model._ftq_start_pc_by_value[3] = pc - ftq_offset * 2 + (0 if is_rvc else 2)
+
+    _sample_cfvec(model, interface)
+
+    assert model._cfvec_queue[0].is_last_in_entry is expected_last
+    assert (model._current_ftq_entry is None) is expected_last
+    assert len(model.ftq_entries) == int(expected_last)
+    if expected_last:
+        assert model.ftq_entries[0].dispatch_complete is True
 
 
 def test_cfvec_boundary_inference_closes_cacheable_entry_on_next_ftq_pointer() -> None:
