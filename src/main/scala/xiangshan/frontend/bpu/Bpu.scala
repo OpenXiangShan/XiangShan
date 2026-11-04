@@ -795,17 +795,20 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate("s2Override_revertedToS1", perf_s2OverrideRevertedToS1)
   XSPerfAccumulate("s2Override_revertedToS1_by_fastTaken", perf_s2OverrideRevertedToS1 && perf_s2FastTakenWrong)
 
-  XSPerfHistogram(
-    "fetchBlockSize",
-    Mux(
-      firstBlock.bits.taken,
-      getFtqOffset(firstBlock.bits.startPc, firstBlock.bits.endPosition),
-      FetchBlockInstNum.U
-    ),
-    toFtqFire,
-    0,
-    FetchBlockInstNum + 1
-  )
+  // one histogram per prediction block, as a histogram takes a single sample per cycle
+  io.toFtq.prediction.bits.blocks.zipWithIndex.foreach { case (block, i) =>
+    XSPerfHistogram(
+      if (i == 0) "fetchBlockSize" else s"fetchBlockSize_$i",
+      Mux(
+        block.bits.taken,
+        getFtqOffset(block.bits.startPc, block.bits.endPosition),
+        FetchBlockInstNum.U
+      ),
+      toFtqFire && block.valid,
+      0,
+      FetchBlockInstNum + 1
+    )
+  }
   XSPerfSeqAccumulate(
     "s1_use",
     s1PredictionFire,

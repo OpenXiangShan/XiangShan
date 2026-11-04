@@ -97,8 +97,6 @@ trait HasFrontendParameters extends HasXSParameter {
 
   def ResolveEntryBranchNumber: Int = frontendParameters.ResolveEntryBranchNumber
 
-  def MaxPredictionNum: Int = frontendParameters.MaxPredictionNum
-
   def MaxPrefetchReqNum: Int = 2
   def MaxFetchReqNum:    Int = 2
   def MaxAccessLineNum:  Int = 2
