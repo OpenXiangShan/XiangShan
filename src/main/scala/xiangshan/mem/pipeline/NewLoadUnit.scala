@@ -410,10 +410,20 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.vaddr := tlbVAddr
   io.tlbReq.bits.fullva := tlbFullva
   io.tlbReq.bits.checkfullva := tlbCheckFullva
-  io.tlbReq.bits.cmd := TlbCmd.read
+  // PUSH must check D at both translation stages, just like the real store.
+  // POP remains a read: it must not acquire a dirty-bit requirement.
+  io.tlbReq.bits.cmd := (if (HasShadowStack) {
+    Mux(LSUOpType.isSspushCheck(tlbFuOpType), TlbCmd.write, TlbCmd.read)
+  } else TlbCmd.read)
   io.tlbReq.bits.hyperinst := tlbHlv
   io.tlbReq.bits.hlvx := tlbHlvx
   io.tlbReq.bits.size := DontCare
+  if (HasShadowStack) {
+    when (LSUOpType.isShadowStackLoad(tlbFuOpType)) {
+      // Match the real XLEN-wide store's PMP range, including boundary checks.
+      io.tlbReq.bits.size := LSUOpType.size(tlbFuOpType)
+    }
+  }
   io.tlbReq.bits.kill := noQuery
   io.tlbReq.bits.memidx.is_ld := true.B
   io.tlbReq.bits.memidx.is_st := false.B
@@ -659,6 +669,17 @@ class LoadUnitS1(param: ExeUnitParams)(
     */
   val loadTrigger = Module(new MemTrigger(MemType.LOAD))
   loadTrigger.io.fromCsrTrigger.tdataVec := io.csrTrigger.tdataVec
+  if (HasShadowStack) {
+    // The internal PUSH load observes SSPUSH's STORE address triggers. All
+    // other loads (including POP) continue to observe LOAD address triggers.
+    for (i <- 0 until TriggerNum) {
+      loadTrigger.io.fromCsrTrigger.tdataVec(i).load := Mux(
+        LSUOpType.isSspushCheck(fuOpType),
+        io.csrTrigger.tdataVec(i).store,
+        io.csrTrigger.tdataVec(i).load
+      )
+    }
+  }
   loadTrigger.io.fromCsrTrigger.tEnableVec := io.csrTrigger.tEnableVec
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.csrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode := io.csrTrigger.debugMode
@@ -1249,7 +1270,11 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.sqSbufferFullForwarded.get := sqSbufferFullForwarded
   stageInfo.specialModeRequest := specialRequest
   stageInfo.sspNextValue.foreach { nextValue =>
-    nextValue := in.sspValue.get + (XLEN / 8).U
+    nextValue := Mux(
+      LSUOpType.isSspushCheck(uop.fuOpType),
+      in.sspValue.get - (XLEN / 8).U,
+      in.sspValue.get + (XLEN / 8).U
+    )
   }
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
@@ -1372,9 +1397,8 @@ class LoadUnitS3(param: ExeUnitParams)(
     val rrBankConflictFastReplayDenied = Output(Bool())
 
     val sspopchkData = Option.when(HasShadowStack)(Input(UInt(XLEN.W)))
-    // Internal result for the split SSPOPCHK uop. The value is consumed by
-    // the dependent CSR uop through the existing integer writeback path.
-    val sspopchkWb = Option.when(HasShadowStack)(Output(ValidIO(UInt(XLEN.W))))
+    // PUSH and POP return the checked pointer to their dependent CSR uop.
+    val shadowStackWb = Option.when(HasShadowStack)(Output(ValidIO(UInt(XLEN.W))))
     // RAR / RAW revoke and RAR response
     val rarNukeQueryResp = Flipped(ValidIO(new LoadNukeQueryResp))
     val revokeLastCycle, revokeLastLastCycle = Output(Bool())
@@ -1519,7 +1543,7 @@ class LoadUnitS3(param: ExeUnitParams)(
         TriggerAction.isDmode(uop.trigger)
 
     sspMismatch.get := pipeIn.valid && !priorFault && !kill && endPipe && s3ShouldWakeup &&
-      !in.matchInvalid.get && LSUOpType.isShadowStackLoad(uop.fuOpType) &&
+      !in.matchInvalid.get && LSUOpType.isSspopchk(uop.fuOpType) &&
       (io.sspopchkData.get =/= in.sspCheckValue.get)
 
     s3ExceptionVec(ExceptionNO.zicfissSoftwareCheck) := sspMismatch.get
@@ -1571,24 +1595,23 @@ class LoadUnitS3(param: ExeUnitParams)(
   val rollbackValid = pipeIn.valid && (rarViolation || matchInvalid) && endPipe
   val rollbackLevel = Mux(matchInvalid, RedirectLevel.flush, RedirectLevel.flushAfter)
 
-  // SSPOPCHK has a dependent CSR uop. Return the post-increment SSP only
-  // after a successful check; on a terminal fault return the old SSP so the
-  // dependent uop consumes an unchanged value while ROB keeps the fault.
-  val isSspopchk = if (HasShadowStack) LSUOpType.isShadowStackLoad(uop.fuOpType) else false.B
-  val sspopchkSuccess = isSspopchk && pipeIn.valid && !kill && endPipe &&
-    !exception && shouldWakeup && !matchInvalid
-  val sspopchkTerminalFault = isSspopchk && pipeIn.valid && !kill && endPipe &&
-    exception
-  val sspopchkWbValid = sspopchkSuccess || sspopchkTerminalFault
+  // Both split SS instructions have a dependent CSR uop. Only a successful
+  // check returns the adjusted pointer. A terminal fault returns the old SSP;
+  // a replay or killed request must not wake the CSR writer.
+  val isShadowStack = if (HasShadowStack) LSUOpType.isShadowStackLoad(uop.fuOpType) else false.B
+  val shadowStackSuccess = isShadowStack && pipeIn.valid && !kill && endPipe &&
+    !exception && shouldWakeup && !matchInvalid && !shouldReplay
+  val shadowStackTerminalFault = isShadowStack && pipeIn.valid && !kill && endPipe && exception
+  val shadowStackWbValid = shadowStackSuccess || shadowStackTerminalFault
   if (HasShadowStack) {
-    io.sspopchkWb.get.valid := sspopchkWbValid
-    io.sspopchkWb.get.bits := Mux(
-      sspopchkSuccess,
+    io.shadowStackWb.get.valid := shadowStackWbValid
+    io.shadowStackWb.get.bits := Mux(
+      shadowStackSuccess,
       in.sspNextValue.get,
       in.sspValue.get
     )
   }
-  val effectiveWakeup = Mux(isSspopchk, sspopchkWbValid, shouldWakeup)
+  val effectiveWakeup = Mux(isShadowStack, shadowStackWbValid, shouldWakeup)
 
   /**
     * Load cancel
@@ -2295,7 +2318,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.ldout.toIntRf.foreach { port =>
     val normalLoadData = dataPath.io.s3ShiftAndExtData(port.bits.data.getWidth - 1, 0)
     port.bits.data := (if (HasShadowStack) {
-      Mux(s3.io.sspopchkWb.get.valid, s3.io.sspopchkWb.get.bits, normalLoadData)
+      Mux(s3.io.shadowStackWb.get.valid, s3.io.shadowStackWb.get.bits, normalLoadData)
     } else {
       normalLoadData
     })
@@ -2400,7 +2423,7 @@ trait HasNewLoadHelper { this: XSModule =>
   )
   val LD = RdataType(
     selFu = (fuOpType, fpWen) => fuOpType === LSUOpType.ld || fuOpType === LSUOpType.hlvd ||
-      fuOpType === LSUOpType.sspopchk,
+      LSUOpType.isShadowStackLoad(fuOpType),
     dataFu = data => data(63, 0)
   )
   val LB = RdataType(

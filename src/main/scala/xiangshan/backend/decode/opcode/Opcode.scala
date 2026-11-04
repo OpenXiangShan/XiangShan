@@ -215,8 +215,6 @@ object Opcode {
     val xorzexth   = Value(bb"110_0101")
     val orcblsb    = Value(bb"110_0110")
     val orcbzexth  = Value(bb"110_0111")
-    val sspdec = IntRType(bb"111_1110")
-    def isSspDec(func: UInt): Bool = func === sspdec.encode
 
     // for xstrap
     val xstrap     = IntIType(bb"111_1111") + BlockBack // CustomTrapPattern
@@ -446,7 +444,11 @@ object Opcode {
   trait LduOpcodes extends Opcodes with LsuTrait with DataType {
     protected val uopPrefetch = bb"1"
     val sspopchk = IntRType(SCALAR1, nonH, nonX, sign, D, bb"0")
-    def isShadowStackLoad(op: UInt): Bool = op === sspopchk.encode
+    // Internal SSPUSH check: executes in LDU with shadow-stack store permissions.
+    val sspushchk = IntIType(SCALAR3, nonH, nonX, sign, D, bb"0")
+    def isSspushCheck(op: UInt): Bool = op === sspushchk.encode
+    def isSspopchk(op: UInt): Bool = op === sspopchk.encode
+    def isShadowStackLoad(op: UInt): Bool = isSspopchk(op) || isSspushCheck(op)
 
     protected val uopLoad = bb"0"
 

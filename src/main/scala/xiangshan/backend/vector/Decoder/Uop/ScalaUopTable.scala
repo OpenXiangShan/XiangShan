@@ -753,12 +753,10 @@ object ScalaUopTable {
         /** Describe one split uop; omitted operands use the instruction's rs1/rs2/rs3/rd fields. */
 
     val sspTmp = Const(32)
-    val sspOrder = Const(33)
     val readImm = UopImmSpec(DecodeSelImm.Z, _ => BigInt((1 << 17) | CSRs.ssp))
     val writeImm = UopImmSpec(DecodeSelImm.Z, _ => BigInt((1 << 12) | CSRs.ssp))
     val stepImm = UopImmSpec(DecodeSelImm.I, xlen => BigInt(-xlen / 8) & 0xfff)
     val zeroImm = UopImmSpec(DecodeSelImm.I, _ => BigInt(0))
-    val noImm = UopImmSpec(DecodeSelImm.NO, _ => BigInt(0))
 
     val readSsp = set.copy()
     readSsp.setTraits((set.getTraits -- Seq(BlockBack) + GpWen).toSeq: _*)
@@ -769,8 +767,6 @@ object ScalaUopTable {
       src1 = sspTmp, src2 = Zero, src3 = Zero, dest = Zero,
       imm = Some(writeImm), commitType = Some(CommitType.NORMAL))
 
-    val sspDecOp = sspdec.copy()
-    sspDecOp.setTraits((sspdec.getTraits + GpWen).toSeq: _*)
     val sspopchkOp = sspopchk.copy()
     sspopchkOp.setTraits((sspopchk.getTraits + GpWen).toSeq: _*)
     val setGpWen = set.copy()
@@ -781,10 +777,10 @@ object ScalaUopTable {
         imm = Some(readImm), commitType = Some(CommitType.STORE)),
       split(sspush, src1 = sspTmp, src2 = Rs2(), src3 = Zero, dest = Zero,
         imm = Some(stepImm.copy(sel = DecodeSelImm.S)), commitType = Some(CommitType.STORE)),
-      split(ld, src1 = sspTmp, src2 = Zero, src3 = Zero, dest = sspOrder,
+      // LDU returns ssp-XLEN/8 only after SSPUSH's permission checks succeed;
+      // a terminal fault returns the old ssp to the dependent CSR write.
+      split(sspushchk, src1 = sspTmp, src2 = Zero, src3 = Zero, dest = sspTmp,
         imm = Some(stepImm), commitType = Some(CommitType.LOAD)),
-      split(sspDecOp, src1 = sspTmp, src2 = sspOrder, src3 = Zero, dest = sspTmp,
-        imm = Some(noImm), commitType = Some(CommitType.NORMAL)),
       writeSsp,
     )
     val pop = Seq(
