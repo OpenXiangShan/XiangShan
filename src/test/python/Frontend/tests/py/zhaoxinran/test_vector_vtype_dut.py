@@ -374,6 +374,8 @@ def test_vector_vtype_instruction_order(env, sequence: str, spacing: int) -> Non
     assert set(observed) == set(expected), f"missing cfVec PCs: {set(expected) - set(observed)}"
     if spacing:
         assert len({observed[pc] for pc in focus_pcs}) > 1
+        if sequence == "multiple_imm":
+            assert observed[focus_pcs[0]] != observed[focus_pcs[-1]]
     else:
         assert len({observed[pc] for pc in focus_pcs}) == 1
     finish_stress()

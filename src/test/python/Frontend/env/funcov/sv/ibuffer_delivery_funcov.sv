@@ -201,7 +201,7 @@ module frontend_ibuffer_funcov (
   frontend_ibuffer_funcov_cg cg = new();
 endmodule
 
-// VCS-side coverage for the 33 VType leaves in Frontend_testpoint_v1.0.csv.
+// VCS-side coverage for the 34 VType leaves in Frontend_testpoint_v1.0.csv.
 // Checkpoints are verified separately; these points observe scenario conditions.
 module frontend_vtype_funcov (
   input logic clock, reset,
@@ -286,20 +286,20 @@ module frontend_vtype_funcov (
   logic [7:0] before_multiple_vsets, cfg_diff_prev;
   logic [7:0] vlmax_changed, vlmax_nonzero;
   logic [7:0] vlmax_matches_prev, vlmax_matches_first;
+  logic same_cycle_vset_update;
   logic quiet;
   logic seen_a, prior_plain, middle_vset, middle_vl;
   logic imm_before_vl, vl_before_imm;
   logic illegal_before, keep_base, vl_seen;
   logic [5:0] first_cfg, prev_cfg;
   logic have_a, have_prior_plain, have_vset_middle, have_vl_middle;
+  logic have_prior_vset_update;
   logic have_imm_before_vl, have_vl_before_imm;
   logic have_illegal, have_keep_base, have_vl;
   logic [5:0] cfg_a, cfg_prev;
   logic [8:0] arch_type;
   logic [8:0] last_output_type;
   logic [8:0] last_output_type_next;
-  logic [1:0] vset_count;
-  logic [1:0] vset_count_next;
   logic [1:0] reserved_followup, reserved_followup_next;
   logic unsupported_followup, unsupported_followup_next;
   logic legal_after_illegal, legal_after_illegal_next;
@@ -363,7 +363,7 @@ module frontend_vtype_funcov (
     vl_seen = have_vl;
     first_cfg = cfg_a;
     prev_cfg = cfg_prev;
-    vset_count_next = vset_count;
+    same_cycle_vset_update = 0;
     reserved_followup_next = reserved_followup;
     unsupported_followup_next = unsupported_followup;
     legal_after_illegal_next = legal_after_illegal;
@@ -396,7 +396,7 @@ module frontend_vtype_funcov (
       before_unsupported[i] = unsupported_followup_next;
       before_legal_after_illegal[i] = legal_after_illegal_next;
       before_bp_vset[i] = bp_vset;
-      before_multiple_vsets[i] = vset_count_next >= 1;
+      before_multiple_vsets[i] = same_cycle_vset_update;
       cfg_diff_prev[i] = x[25:20] != prev_cfg;
       vlmax_changed[i] = vlmax(prev_cfg) != vlmax(first_cfg);
       vlmax_nonzero[i] = vlmax(x[25:20]) != 0;
@@ -421,11 +421,11 @@ module frontend_vtype_funcov (
             legal_after_illegal_next = 1;
           if (cf_ordinary[i]) begin
             if (backpressure_released) bp_vset = 1;
-            if (vset_count_next != 3) vset_count_next = vset_count_next + 1'b1;
             if (!seen_a) begin
               first_cfg = x[25:20];
               seen_a = 1;
             end else if (cfg_diff_prev[i]) begin
+              same_cycle_vset_update = 1;
               middle_vset = prior_plain;
               imm_before_vl = 1;
               keep_base = 1;
@@ -457,6 +457,7 @@ module frontend_vtype_funcov (
   always_ff @(posedge clock) begin
     if (reset) begin
       have_a <= 0; have_prior_plain <= 0; have_vset_middle <= 0;
+      have_prior_vset_update <= 0;
       have_vl_middle <= 0;
       have_imm_before_vl <= 0; have_vl_before_imm <= 0;
       have_illegal <= 0; have_keep_base <= 0; have_vl <= 0;
@@ -464,7 +465,7 @@ module frontend_vtype_funcov (
       arch_type <= 9'b100000000;
       last_output_type <= 9'b100000000;
       last_vset_kind <= 0; pair_pending_kind <= 0;
-      vset_count <= 0; reserved_followup <= 0;
+      reserved_followup <= 0;
       unsupported_followup <= 0; legal_after_illegal <= 0;
       resume_prev <= 0;
       quiet_resume_count <= 0; resume_rise_with_queue <= 0;
@@ -631,6 +632,7 @@ module frontend_vtype_funcov (
       end
       if (quiet && decode_can_accept && |cf_valid) begin
         have_a <= seen_a;
+        have_prior_vset_update <= have_prior_vset_update || same_cycle_vset_update;
         have_prior_plain <= prior_plain;
         have_vset_middle <= middle_vset;
         have_vl_middle <= middle_vl;
@@ -643,7 +645,6 @@ module frontend_vtype_funcov (
         cfg_prev <= prev_cfg;
         last_output_type <= last_output_type_next;
         last_vset_kind <= last_vset_kind_next;
-        vset_count <= vset_count_next;
         reserved_followup <= reserved_followup_next;
         unsupported_followup <= unsupported_followup_next;
         legal_after_illegal <= legal_after_illegal_next;
@@ -662,10 +663,13 @@ module frontend_vtype_funcov (
         have_vl_middle <= 0;
         have_imm_before_vl <= 0; have_vl_before_imm <= 0;
         have_illegal <= 0; have_keep_base <= 0;
-        vset_count <= 0; reserved_followup <= 0;
+        reserved_followup <= 0;
         unsupported_followup <= 0; legal_after_illegal <= 0;
         if (commit_vsetvl) have_vl <= 0;
       end
+      if (redirect || commit_vsetvl || walk_valid || walk_to_arch ||
+          commit_valid || resuming_vtype)
+        have_prior_vset_update <= 0;
     end
   end
 
@@ -688,6 +692,10 @@ module frontend_vtype_funcov (
         iff (!reset) { bins observed = {1'b1}; }
     VTYPE_multiple_imm_vsets_cp:
       coverpoint (|(cf_active & cf_ordinary & before_multiple_vsets & cfg_diff_prev))
+        iff (!reset) { bins observed = {1'b1}; }
+    VTYPE_multiple_imm_vsets_cross_cycle_cp:
+      coverpoint (|(cf_active & cf_ordinary & ~before_multiple_vsets &
+        {8{have_prior_vset_update}} & cfg_diff_prev))
         iff (!reset) { bins observed = {1'b1}; }
     VTYPE_imm_then_vsetvl_cp:
       coverpoint (|(cf_active & cf_vl & before_a & before_imm_vl))
