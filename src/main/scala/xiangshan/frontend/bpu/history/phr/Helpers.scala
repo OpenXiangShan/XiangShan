@@ -94,6 +94,50 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
     updateResult
   }
 
+  // How much of a group's token n taken blocks reach: one whole path hash, plus one Shamt per block past the first.
+  def groupToken(token: UInt, n: Int): UInt =
+    if (n == 0) 0.U else token(PathHashWidth + (n - 1) * Shamt - 1, 0)
+
+  // Shift a window by one Shamt per taken block and XOR the group's token over its newest bits, with the number of
+  // taken blocks one-hot in insOH so that every shift is a fixed one.
+  def advanceWindow(base: UInt, token: UInt, insOH: Seq[Bool], width: Int): UInt =
+    Mux1H(
+      insOH,
+      Seq.tabulate(insOH.length)(n => ((base << (n * Shamt)).asUInt ^ groupToken(token, n))(width - 1, 0))
+    )
+
+  /** Advance every folded history by a whole group, as advanceWindow advances the window it folds.
+    *
+    * Folding is linear over XOR, so the window's shift and the group's token fold apart and combine at the end. That
+    * separation is what lets one step carry several blocks: the blocks' path hashes sit at different offsets within
+    * the token, which a single hash-high argument could not express. oldestBits(i) holds the bits that leave
+    * baseFoldedPhr.hist(i)'s span.
+    */
+  def foldGroup(
+      baseFoldedPhr: PhrAllFoldedHistories,
+      oldestBits:    Seq[Vec[Bool]],
+      token:         UInt,
+      insOH:         Seq[Bool]
+  ): PhrAllFoldedHistories = {
+    val res = WireInit(baseFoldedPhr)
+    for (i <- baseFoldedPhr.hist.indices) {
+      val h = baseFoldedPhr.hist(i)
+      res.hist(i).foldedHist := Mux1H(
+        insOH,
+        Seq.tabulate(insOH.length) { n =>
+          if (n == 0) h.foldedHist
+          else {
+            val shifted = h.update(oldestBits(i), n * Shamt, 0.U((n * Shamt).W), 0.U(PathHashHighWidth.W)).foldedHist
+            // bits past the span are dropped: they leave the window as they arrive
+            val bits = groupToken(token, n)
+            shifted ^ computeFoldedHist(bits, h.info.FoldedLength)(min(bits.getWidth, h.info.HistoryLength))
+          }
+        }
+      )
+    }
+    res
+  }
+
   def computeAllFoldedPhr(hist: UInt): PhrAllFoldedHistories = {
     val foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
     AllFoldedHistoryInfo.foreach { info =>
