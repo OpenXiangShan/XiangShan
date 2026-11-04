@@ -212,45 +212,10 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     Mux1H(UIntToOH(shamt), Seq(s0, s1, s2, s3))
   }
 
-  /**
-    * Based on the ICache's 8-byte chunking, extracts the raw 16-byte data
-    * containing the 8-byte fast-fetch width.
-    */
-  def genFastFetchData(cacheline: UInt, startIndex: UInt): UInt = {
-    val fastFetchBitsWidth = FastFetchBytes * 8
-    val windowWidth = fastFetchBitsWidth * 2
-    val dataVec     = cacheline.asTypeOf(Vec(ICacheLineBytes / FastFetchBytes, UInt(fastFetchBitsWidth.W)))
-    val result      = MuxLookup(startIndex(5, 3), 0.U(windowWidth.W))(Seq(
-      "b000".U -> Cat(dataVec(1), dataVec(0)),
-      "b001".U -> Cat(dataVec(2), dataVec(1)),
-      "b010".U -> Cat(dataVec(3), dataVec(2)),
-      "b011".U -> Cat(dataVec(4), dataVec(3)),
-      "b100".U -> Cat(dataVec(5), dataVec(4)),
-      "b101".U -> Cat(dataVec(6), dataVec(5)),
-      "b110".U -> Cat(dataVec(7), dataVec(6)),
-      "b111".U -> Cat(dataVec(0), dataVec(7))
-    ))
-    result
-  }
-
-  /**
-    * Extracts the effective 8-byte data based on the 2-byte instruction alignment.
-    */
-  def cutFastData(fastFetch: UInt, startIndex: UInt): Vec[UInt] = {
-    val width = FastFetchBytes * 8
-    val useData = MuxLookup(startIndex(2, 1), 0.U(width.W))(Seq(
-      "b00".U -> fastFetch(width - 1, 0),
-      "b01".U -> (fastFetch >> 16)(width - 1, 0),
-      "b10".U -> (fastFetch >> 32)(width - 1, 0),
-      "b11".U -> (fastFetch >> 48)(width - 1, 0)
-    ))
-    val dataVec = useData.asTypeOf(Vec(FastFetchWidth, UInt(16.W)))
-    val result  = Wire(Vec(FastFetchWidth, UInt(32.W)))
-    for (i <- 0 until FastFetchWidth - 1) {
-      result(i) := Cat(dataVec(i + 1), dataVec(i))
-    }
-    result(FastFetchWidth - 1) := Cat(0.U(16.W), dataVec(FastFetchWidth - 1))
-    result
+  def genFastInst(firstData: Vec[UInt], info: FastFetchInfo): Vec[UInt] = {
+    VecInit((0 until FastFetchMaxNum).map { i =>
+      firstData(info.index(i))
+    })
   }
 
   def genFastInfo(req: MainPipeToIfuReq): FastFetchInfo = {
@@ -292,6 +257,9 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     val fixedRange  = firstRange(FastFetchWidth, 0) & ~(fixedMask.asUInt(FastFetchWidth, 0))
     val blockEndsInFastFetch = !fixedRange(FastFetchWidth)
     val lastSlotOH           = fixedRange & ~(fixedRange >> 1)
+    val rawIndex             = VecInit((0 until FastFetchWidth).map { i =>
+      startVAddr(log2Ceil(ICacheLineBytes) - 1, 1) + i.U
+    })
 
     // Based on the instruction layout, compute the MaskOH for the corresponding valid instructions
     validMaskOH(0) := "b0001".U
@@ -301,6 +269,9 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
       Mux(rawIsRvI(2), "b0000".U, "b1000".U),
       Mux(rawIsRvI(1), "b1000".U, "b0100".U)
     )
+    val index = VecInit((0 until FastFetchMaxNum).map { i =>
+      Mux1H(validMaskOH(i), rawIndex)
+    })
 
     val info = Wire(new FastFetchInfo)
     // Compute the maximum number of valid instructions within the fastFetch window
@@ -314,7 +285,8 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     info.instrNum       := Mux(instrCount > FastFetchMaxNum.U, FastFetchMaxNum.U, instrCount)
     info.validMaskOH    := validMaskOH
     info.ftqPtr         := ftqPtr
-    info.startIndex     := startVAddr(log2Ceil(ICacheLineBytes) - 1, 0)
+    info.hasUnexcepted  := fixedMask.reduce(_ || _)
+    info.index          := index
     // An instruction is the last one in its FTQ entry iff the FTQ entry ends
     // inside the fast window and this is its final slot. For RVC the final slot
     // is the instruction slot itself; for RVI it is the next (upper) slot.

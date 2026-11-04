@@ -208,7 +208,8 @@ class FastFetchInfo(implicit p: Parameters) extends IfuBundle {
   val validMaskOH:         Vec[UInt]      = Vec(FastFetchMaxNum, UInt(FastFetchWidth.W))
   val rawIsLastInFtqEntry: Vec[Bool]      = Vec(FastFetchWidth, Bool())
   val ftqPtr:              FtqPtr         = new FtqPtr
-  val startIndex:          UInt           = UInt(log2Ceil(ICacheLineBytes).W)
+  val hasUnexcepted:       Bool           = Bool()
+  val index:               Vec[UInt]      = Vec(FastFetchMaxNum, UInt((log2Ceil(ICacheLineBytes) - 1).W))
 }
 
 class FastFetchEntry(implicit p: Parameters) extends IfuBundle {
