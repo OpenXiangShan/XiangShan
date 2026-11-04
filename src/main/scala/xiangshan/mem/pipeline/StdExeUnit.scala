@@ -84,5 +84,5 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.sqData.bits.sqIdx := Mux(io.vstdIn.valid, io.vstdIn.bits.sqIdx, io.in.bits.sqIdx.get)
   io.sqData.bits.vecDebug.foreach(_ := io.vstdIn.bits.vecDebug.get) // DontCare for scalar stds
 
-  XSPerfAccumulate("STD_out_of_range_issue", !(io.in.valid && s0IllegalIssue))
+  XSPerfAccumulate("STD_out_of_range_issue", io.in.valid && s0IllegalIssue)
 }
