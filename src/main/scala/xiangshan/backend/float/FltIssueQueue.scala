@@ -500,6 +500,10 @@ class FltIssueQueue(
     val diagPostCount = (enqEntryCanIssueVec ++ fastEntryCanIssueVec).map(x => PopCount(x)).reduce(_ +& _)
     val diagPreCount = PopCount(diagPre)
     val diagLive = entries.map(e => e.valid && !e.bits.status.robIdx.needFlush(in.flush))
+    // Potential admission credit only; no pending Dispatch request is observed here.
+    val diagSuccessCredit = ~fastEntryValid | fastEntrySuccess.asUInt
+    XSPerfAccumulate("diag_fp_success_credit_potential_cycles",
+      !in.flush.valid && !out.canAccept && PopCount(diagSuccessCredit) >= param.numEnq.U)
     XSPerfHistogram("diag_fp_enq_occupancy", PopCount(enqEntries.map(_.valid)), true.B, 0, param.numEnq + 1)
     XSPerfHistogram("diag_fp_fast_occupancy", PopCount(fastEntries.map(_.valid)), true.B, 0, param.numFastEntry + 1)
     XSPerfAccumulate("diag_fp_live_entry_cycles", PopCount(diagLive))

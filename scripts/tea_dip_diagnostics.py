@@ -122,7 +122,15 @@ def analyze(directory, source_root=None):
     if source_root is not None:
         path = Path(source_root) / 'src/main/scala/xiangshan/backend/Backend.scala'
         zero_fed = 'ctrlBlock.io.robio.topdownIQInfoVec.foreach(x => x := 0.U.asTypeOf(x))' in path.read_text()
+        ctrl = Path(source_root) / 'src/main/scala/xiangshan/backend/CtrlBlock.scala'
+        rob = Path(source_root) / 'src/main/scala/xiangshan/backend/rob/Rob.scala'
+        aligned = ('rob.io.diagDispatchDemand.foreach(_ := dispatch.io.enqRob.needAlloc.asUInt.orR)' in ctrl.read_text()
+                   and 'val diagDemand = io.diagDispatchDemand.get' in rob.read_text())
+        lagged = ('enqRob.needAlloc := RegNext(dispatch.io.enqRob.needAlloc)' in ctrl.read_text()
+                  and 'val diagDemand = io.enq.needAlloc.asUInt.orR' in rob.read_text())
         contract = dict(path=str(path), sha256=digest(path), head_issue_observation_available=False if zero_fed else None,
+                        rob_same_cycle_request_gate_available=True if aligned else False if lagged else None,
+                        ctrl_block_sha256=digest(ctrl), rob_sha256=digest(rob),
                         scope='Provided source only; bind to the executed binary with its build/launch manifest.')
     return dict(directory=str(directory), cycles=cycles, instructions=instructions, cpi=cycles / instructions,
                 sample_period=periods[0], samples=len(grids['Tea_0']), missing_endpoint_samples=sorted(missing),

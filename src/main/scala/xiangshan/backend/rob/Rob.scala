@@ -68,6 +68,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val hartId = Input(UInt(hartIdLen.W))
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
+    val diagDispatchDemand = Option.when(backendParams.teaEn)(Input(Bool()))
     val dip = Option.when(backendParams.teaEn)(Output(new DipRob))
     val teaMembers = Option.when(backendParams.teaEn)(Input(Vec(RenameWidth, Valid(new TeaRenameMember))))
     val flushOut = ValidIO(new Redirect)
@@ -207,8 +208,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
   io.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.io.canEnqForDispatch && vtypeBuffer.io.canEnqForDispatch && !io.fromVecExcpMod.busy
   if (backendParams.teaEn) {
-    // needAlloc is request validity before the acceptance gate, unlike req.valid (fire).
-    val diagDemand = io.enq.needAlloc.asUInt.orR
+    // Observe the current Dispatch request, before CtrlBlock delays needAlloc.
+    val diagDemand = io.diagDispatchDemand.get
     val diagGates = VecInit(Seq(!allowEnqueueForDispatch, !rab.io.canEnqForDispatch,
       !vtypeBuffer.io.canEnqForDispatch, hasBlockBackward, io.fromVecExcpMod.busy)).asUInt
     XSPerfHistogram("diag_rob_dispatch_gate_mask", diagGates, diagDemand, 0, 32)
