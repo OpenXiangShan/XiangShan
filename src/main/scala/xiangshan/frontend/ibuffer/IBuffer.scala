@@ -519,27 +519,24 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private val topdownPipe = Module(new FrontendTopDownPipeline(2))
+  private val topdownPipe = Module(new FrontendTopDownPipeline(1))
   topdownPipe.io.in := io.in.bits.topdown
-  topdownPipe.setReason(Seq(io.redirectTopdownOverride.valid -> io.redirectTopdownOverride.bits.reason))
-
-  private val deqValidCount = PopCount(io.out.map(_.valid))
-  private val deqWasteCount = DecodeWidth.U - deqValidCount
-  private val bubbleReason  = topdownPipe.io.out.reason
-  private val hasBubbleReason = bubbleReason =/= TopDownCounters.NoStall.id.U &&
-    bubbleReason =/= TopDownCounters.FrontendOtherCoreStall.id.U
-  // Fetch fragmentation and specific causes take precedence over Other.
-  private val matchBubble = Mux(
-    hasBubbleReason,
-    bubbleReason,
-    Mux(deqValidCount === 0.U, TopDownCounters.FrontendOtherCoreStall.id.U, TopDownCounters.FetchFragBubble.id.U)
+  topdownPipe.setReason(
+    0,
+    Seq(
+      io.redirectTopdownOverride.valid -> io.redirectTopdownOverride.bits.reason,
+      // waiting for vtype update
+      resumingVType -> TopDownCounters.VTypeResumeStall,
+      // using bypass entry (buf empty), but incoming is not full
+      (useBypass && io.in.fire) -> TopDownCounters.FetchFragBubble,
+      // using dequeue entry, and has available incoming, but Ibuf can use either deq or bypass (structural conflict)
+      (!useBypass && io.in.valid && numFromFetch =/= 0.U) -> TopDownCounters.IBufStructualConflict
+    )
   )
 
-  io.stallReason.reason.foreach(_ := TopDownCounters.NoStall.id.U)
+  // Expand the registered cause to absent lanes; valid instructions contribute NoStall.
   for (i <- 0 until DecodeWidth) {
-    when(i.U < deqWasteCount) {
-      io.stallReason.reason(DecodeWidth - i - 1) := matchBubble
-    }
+    io.stallReason.reason(i) := Mux(io.out(i).valid, TopDownCounters.NoStall.id.U, topdownPipe.io.out.reason)
   }
 
   // Debug info
