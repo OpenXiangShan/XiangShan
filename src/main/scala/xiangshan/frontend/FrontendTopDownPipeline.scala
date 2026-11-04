@@ -26,7 +26,8 @@ class FrontendTopDownPipeline(numStage: Int)(implicit p: Parameters) extends Fro
     val in:  TopdownBundle = Input(new TopdownBundle)
     val out: TopdownBundle = Output(new TopdownBundle)
 
-    val over: Vec[Valid[TopdownBundle]] = Vec(numStage, Flipped(Valid(new TopdownBundle)))
+    // override any stage, use .setReason for easier
+    val over: Vec[Valid[TopdownBundle]] = Vec(numStage + 1, Flipped(Valid(new TopdownBundle)))
   }
 
   val io: PipelineIO = IO(new PipelineIO)
@@ -37,23 +38,17 @@ class FrontendTopDownPipeline(numStage: Int)(implicit p: Parameters) extends Fro
     init.reason := TopDownCounters.FrontendOtherCoreStall.id.U
     init
   })
-  stages.head := io.in
-  for (i <- 1 until numStage) {
-    stages(i) := stages(i - 1)
-  }
-  (stages zip io.over).foreach { case (curr, over) =>
-    when(over.valid) {
-      curr := over.bits
-    }
-  }
-  io.out := stages.last
 
-  private val reasonsByStage = Array.fill(numStage)(Seq.empty[(Bool, UInt)])
+  ((io.in +: stages :+ io.out).sliding(2, 1) zip io.over).foreach { case (Seq(prev, curr), over) =>
+    curr := Mux(over.valid, over.bits, prev)
+  }
+
+  private val reasonsByStage = Array.fill(numStage + 1)(Seq.empty[(Bool, UInt)])
 
   // Call during elaboration with (Bool, UInt) or (Bool, TopDownCounters.Value) entries.
   // Later calls take priority; within each call, the first matching event wins.
   def setReason(stage: Int, reasons: Seq[Product]): Unit = {
-    require(stage >= 0 && stage < numStage, s"Invalid topdown stage $stage")
+    require(stage >= 0 && stage <= numStage, s"Invalid topdown stage $stage")
     val accumulatedReasons = reasons.map {
       case (en: Bool, value: UInt)                  => (en, value)
       case (en: Bool, value: TopDownCounters.Value) => (en, value.id.U)
@@ -62,7 +57,7 @@ class FrontendTopDownPipeline(numStage: Int)(implicit p: Parameters) extends Fro
     } ++ reasonsByStage(stage)
     reasonsByStage(stage) = accumulatedReasons
     io.over(stage).valid       := accumulatedReasons.map(_._1).foldLeft(false.B)(_ || _)
-    io.over(stage).bits.reason := MuxCase(TopDownCounters.FrontendOtherCoreStall.id.U, accumulatedReasons)
+    io.over(stage).bits.reason := PriorityMux(accumulatedReasons)
   }
 
   // setReason for all stages
