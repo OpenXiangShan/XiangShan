@@ -23,17 +23,17 @@ class FrontendTopDownPipeline(numStage: Int)(implicit p: Parameters) extends Fro
   require(numStage > 0, "Topdown pipeline must have at least one stage")
 
   class PipelineIO extends Bundle {
-    val in:  FrontendTopDownBundle = Input(new FrontendTopDownBundle)
-    val out: FrontendTopDownBundle = Output(new FrontendTopDownBundle)
+    val in:  TopdownBundle = Input(new TopdownBundle)
+    val out: TopdownBundle = Output(new TopdownBundle)
 
-    val over: Vec[Valid[FrontendTopDownBundle]] = Vec(numStage, Flipped(Valid(new FrontendTopDownBundle)))
+    val over: Vec[Valid[TopdownBundle]] = Vec(numStage, Flipped(Valid(new TopdownBundle)))
   }
 
   val io: PipelineIO = IO(new PipelineIO)
 
   // Track lost slots on every clock edge, independently of valid-ready.
   private val stages = RegInit(VecInit.fill(numStage) {
-    val init = Wire(new FrontendTopDownBundle)
+    val init = Wire(new TopdownBundle)
     init.reason := TopDownCounters.FrontendOtherCoreStall.id.U
     init
   })

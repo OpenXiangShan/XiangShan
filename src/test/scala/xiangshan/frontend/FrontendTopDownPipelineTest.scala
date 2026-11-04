@@ -43,10 +43,10 @@ class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
     it should s"accept mixed reason types with $numStages stages and broadcast=$broadcast" in {
       class TestModule extends Module {
         class TestIO extends Bundle {
-          val in:         FrontendTopDownBundle         = Input(new FrontendTopDownBundle)
+          val in:         TopdownBundle         = Input(new TopdownBundle)
           val enumerated: Bool                         = Input(Bool())
-          val encoded:    Valid[FrontendTopDownBundle]  = Flipped(Valid(new FrontendTopDownBundle))
-          val out:        FrontendTopDownBundle         = Output(new FrontendTopDownBundle)
+          val encoded:    Valid[TopdownBundle]  = Flipped(Valid(new TopdownBundle))
+          val out:        TopdownBundle         = Output(new TopdownBundle)
         }
         val io: TestIO = IO(new TestIO)
         private val pipe = Module(new FrontendTopDownPipeline(numStages))
@@ -191,10 +191,10 @@ class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
   it should "broadcast the first matching reason and ignore inactive events" in {
     class TestModule extends Module {
       class TestIO extends Bundle {
-        val in:   FrontendTopDownBundle        = Input(new FrontendTopDownBundle)
-        val high: Valid[FrontendTopDownBundle]  = Flipped(Valid(new FrontendTopDownBundle))
-        val low:  Valid[FrontendTopDownBundle]  = Flipped(Valid(new FrontendTopDownBundle))
-        val out:  FrontendTopDownBundle        = Output(new FrontendTopDownBundle)
+        val in:   TopdownBundle        = Input(new TopdownBundle)
+        val high: Valid[TopdownBundle]  = Flipped(Valid(new TopdownBundle))
+        val low:  Valid[TopdownBundle]  = Flipped(Valid(new TopdownBundle))
+        val out:  TopdownBundle        = Output(new TopdownBundle)
       }
       val io: TestIO = IO(new TestIO)
       private val pipe = Module(new FrontendTopDownPipeline(3))
@@ -234,11 +234,11 @@ class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
   it should "prioritize later calls and fall back to earlier matching events" in {
     class TestModule extends Module {
       class TestIO extends Bundle {
-        val in:    FrontendTopDownBundle        = Input(new FrontendTopDownBundle)
-        val low:   Valid[FrontendTopDownBundle]  = Flipped(Valid(new FrontendTopDownBundle))
-        val local: Valid[FrontendTopDownBundle]  = Flipped(Valid(new FrontendTopDownBundle))
-        val high:  Valid[FrontendTopDownBundle]  = Flipped(Valid(new FrontendTopDownBundle))
-        val out:   FrontendTopDownBundle        = Output(new FrontendTopDownBundle)
+        val in:    TopdownBundle        = Input(new TopdownBundle)
+        val low:   Valid[TopdownBundle]  = Flipped(Valid(new TopdownBundle))
+        val local: Valid[TopdownBundle]  = Flipped(Valid(new TopdownBundle))
+        val high:  Valid[TopdownBundle]  = Flipped(Valid(new TopdownBundle))
+        val out:   TopdownBundle        = Output(new TopdownBundle)
       }
       val io: TestIO = IO(new TestIO)
       private val pipe = Module(new FrontendTopDownPipeline(3))

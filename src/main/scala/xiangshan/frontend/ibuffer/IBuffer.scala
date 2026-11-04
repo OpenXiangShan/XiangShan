@@ -35,8 +35,8 @@ import xiangshan.TopDownCounters
 import xiangshan.backend.BackendToIBufBundle
 import xiangshan.backend.decode.VTypeGen
 import xiangshan.frontend.FetchToIBuffer
-import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FrontendTopDownPipeline
+import xiangshan.frontend.TopdownOverrideBundle
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
@@ -51,8 +51,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     val fromBackend: BackendToIBufBundle = Input(new BackendToIBufBundle)
 
     // top-down
-    val redirectTopdownOverride: Valid[FrontendTopDownBundle] = Flipped(Valid(new FrontendTopDownBundle))
-    val stallReason:             StallReasonIO                = new StallReasonIO(DecodeWidth)
+    val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
+    val stallReason:     StallReasonIO                = new StallReasonIO(DecodeWidth)
   }
 
   val io: IBufferIO = IO(new IBufferIO)
@@ -524,7 +524,6 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   topdownPipe.setReason(
     0,
     Seq(
-      io.redirectTopdownOverride.valid -> io.redirectTopdownOverride.bits.reason,
       // waiting for vtype update
       resumingVType -> TopDownCounters.VTypeResumeStall,
       // using bypass entry (buf empty), but incoming is not full
@@ -533,6 +532,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       (!useBypass && io.in.valid && numFromFetch =/= 0.U) -> TopDownCounters.IBufStructualConflict
     )
   )
+  topdownPipe.setReason(Seq(
+    (io.topdownOverride.valid && !io.topdownOverride.bits.isIfuRedirect) -> io.topdownOverride.bits.reason
+  ))
 
   // Expand the registered cause to absent lanes; valid instructions contribute NoStall.
   for (i <- 0 until DecodeWidth) {
