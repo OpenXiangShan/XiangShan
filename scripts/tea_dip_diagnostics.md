@@ -1,0 +1,11 @@
+# TEA/DIP supplementary probes
+
+Run `python3 scripts/tea_dip_diagnostics.py CLOSED_RUN --source-root . --output probe.json` on an exited GSIM run with Difftest, warmup/ROI dumps and TEA/DIP enabled. Keep the source/binary launch manifest; a source path alone does not bind the source to the executed binary.
+
+`diag_rename_blocked_gate_mask` is sampled only for a valid blocked rename head. Bits 0..6 are Int/FP/Vec/VL freelists, dispatch readiness, RAB-or-VL walk, LSQ. Bin 0 remains unexplained. The ROB histogram uses pre-accept `needAlloc` demand; bits 0..4 are ROB reservation, RAB, vtype buffer, block-backward, vector exception. Exact masks are exclusive; per-bit marginals overlap. Histogram snapshots omit the current dump cycle while accumulators include it; retain their own denominators.
+
+Per FP IQ, live entry-cycles partition into issued, blocked, source-wait and eligible, after filtering flush-killed entries. These are entry-cycles, not a CPI decomposition. Pre-writeback candidate counts include operand wakeups; the difference against port and WB-conflict eligibility counts WB conflicts. Selected uops, success responses and cancellations describe different pipeline stages and cannot be equated with retired instructions. Occupancy histograms split enqueue and fast entries.
+
+The old issue-head debug bus is zero-fed in the baseline. This tool marks its availability false for that source; it does not reconnect the bus or invent producer edges. Missing diagnostics stay null. Source-wait exposure does not identify a dynamic producer. Memory-request segments and branch recovery timelines still require further probes.
+
+This branch changes instrumentation and analysis only. Parameters, arbitration, queue storage, registers, FU/ports, widths and latency stay at baseline 841. Diagnostics add simulation counters and overhead; validate same-hardware neutrality before interpreting them.
