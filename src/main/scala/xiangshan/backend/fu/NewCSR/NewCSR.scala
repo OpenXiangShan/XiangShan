@@ -1337,10 +1337,17 @@ class NewCSR(implicit val p: Parameters) extends Module
   triggerFrontendChange := debugMod.io.out.triggerFrontendChange
   // The frontend applies triggerCanRaiseBpExp when instructions are fetched.
   // Refetch when CSR writes change the MIE/SIE gate of the current mode while fetch triggers are enabled.
+  // Compare the effective write values: MDT/SDT can clear MIE/SIE even if their wdata bits do not change.
+  val mstatusWriteMIE = mstatus.w.wdataFields.MIE && !mstatus.w.wdataFields.MDT
+  // Match MstatusModule's alias write: with DTE=0, the stored SDT is retained and still clears SIE.
+  val sstatusWriteSDT = Mux(menvcfg.regOut.DTE.asBool, mstatus.wAliasSstatus.wdataFields.SDT.asBool, mstatus.regOut.SDT.asBool)
+  val sstatusWriteSIE = mstatus.wAliasSstatus.wdataFields.SIE && !sstatusWriteSDT
+  val vsstatusWriteSDT = menvcfg.regOut.DTE && henvcfg.regOut.DTE && vsstatus.w.wdataFields.SDT
+  val vsstatusWriteSIE = vsstatus.w.wdataFields.SIE && !vsstatusWriteSDT
   triggerBpGateChange := debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR && (
-    mstatus.w.wen && mstatus.w.wdataFields.MIE =/= mstatus.regOut.MIE ||
-    mstatus.wAliasSstatus.wen && mstatus.wAliasSstatus.wdataFields.SIE =/= mstatus.regOut.SIE ||
-    vsstatus.w.wen && vsstatus.w.wdataFields.SIE =/= vsstatus.regOut.SIE
+    mstatus.w.wen && mstatusWriteMIE =/= mstatus.regOut.MIE.asBool ||
+    mstatus.wAliasSstatus.wen && sstatusWriteSIE =/= mstatus.regOut.SIE.asBool ||
+    vsstatus.w.wen && vsstatusWriteSIE =/= vsstatus.regOut.SIE.asBool
   )
 
   io.status.frontendTrigger := debugMod.io.out.frontendTrigger
