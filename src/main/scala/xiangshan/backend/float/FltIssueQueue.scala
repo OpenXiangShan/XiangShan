@@ -5,7 +5,7 @@ import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility.{PerfCCT, SelectOne, XSPerfAccumulate}
+import utility.{PerfCCT, SelectOne, XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.fu.FuType
@@ -495,6 +495,24 @@ class FltIssueQueue(
   out.canAccept := PopCount(fastEntries.map(!_.valid)) >= 2.U
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
+  if (backendParams.teaEn) {
+    val diagPre = enqEntryCanIssue ++ fastEntryCanIssue
+    val diagPostCount = (enqEntryCanIssueVec ++ fastEntryCanIssueVec).map(x => PopCount(x)).reduce(_ +& _)
+    val diagPreCount = PopCount(diagPre)
+    val diagLive = entries.map(e => e.valid && !e.bits.status.robIdx.needFlush(in.flush))
+    XSPerfHistogram("diag_fp_enq_occupancy", PopCount(enqEntries.map(_.valid)), true.B, 0, param.numEnq + 1)
+    XSPerfHistogram("diag_fp_fast_occupancy", PopCount(fastEntries.map(_.valid)), true.B, 0, param.numFastEntry + 1)
+    XSPerfAccumulate("diag_fp_live_entry_cycles", PopCount(diagLive))
+    XSPerfAccumulate("diag_fp_issued_entry_cycles", PopCount(entries.zip(diagLive).map { case (e, live) => live && e.bits.status.issued }))
+    XSPerfAccumulate("diag_fp_blocked_entry_cycles", PopCount(entries.zip(diagLive).map { case (e, live) => live && !e.bits.status.issued && e.bits.status.blocked }))
+    XSPerfAccumulate("diag_fp_src_wait_entry_cycles", PopCount((entries zip diagLive zip diagPre).map { case ((e, live), canIssue) => live && !e.bits.status.issued && !e.bits.status.blocked && !canIssue }))
+    XSPerfAccumulate("diag_fp_eligible_entry_cycles", PopCount(diagPre.zip(diagLive).map { case (ready, live) => ready && live }))
+    XSPerfAccumulate("diag_fp_wb_conflict_entry_cycles", diagPreCount - diagPostCount)
+    XSPerfAccumulate("diag_fp_only_wb_conflict_cycles", diagPreCount.orR && !diagPostCount.orR && !in.flush.valid)
+    XSPerfAccumulate("diag_fp_selected_uops", PopCount(out.deq.map(_.valid)))
+    XSPerfAccumulate("diag_fp_success_responses", PopCount(entrySuccess.zip(entries).map { case (success, e) => success && e.valid }))
+    XSPerfAccumulate("diag_fp_cancelled_entries", PopCount(entryCancel.zip(entries).map { case (cancel, e) => cancel && e.valid }))
+  }
 
   private def handleSrcWakeUp(
     entryIdx              : Int,

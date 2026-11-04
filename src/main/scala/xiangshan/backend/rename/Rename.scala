@@ -1108,6 +1108,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // These stall reasons could overlap each other, but we configure the priority as fellows.
   // walk stall > dispatch stall > int freelist stall > fp freelist stall
   private val inHeadStall = io.in.head match { case x => x.valid && !x.ready }
+  if (backendParams.teaEn) {
+    // Joint active gates on a valid blocked head; bin 0 retains unexplained backpressure.
+    val diagGates = VecInit(Seq(!intFreeList.io.canAllocate, !fpFreeList.io.canAllocate,
+      !vecFreeList.io.canAllocate, !vlFreeList.io.canAllocate, !dispatchCanAcc,
+      io.rabCommits.isWalk || io.vlCommits.isWalk, !io.toLsqEnqCtrl.canAccept)).asUInt
+    XSPerfHistogram("diag_rename_blocked_gate_mask", diagGates, inHeadStall, 0, 128)
+    XSPerfAccumulate("diag_rename_head_valid_cycles", io.in.head.valid)
+    XSPerfAccumulate("diag_rename_head_blocked_cycles", inHeadStall)
+    XSPerfAccumulate("diag_rename_fp_gate_without_head_cycles", fpFlStall && !io.in.head.valid)
+  }
   private val stallForWalk      = inHeadValid &&  io.rabCommits.isWalk
   private val stallForDispatch  = inHeadValid && !io.rabCommits.isWalk && !dispatchCanAcc
   private val stallForIntFL     = inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && !intFreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept

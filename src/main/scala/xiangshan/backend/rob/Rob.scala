@@ -206,6 +206,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
   io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
   io.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.io.canEnqForDispatch && vtypeBuffer.io.canEnqForDispatch && !io.fromVecExcpMod.busy
+  if (backendParams.teaEn) {
+    // needAlloc is request validity before the acceptance gate, unlike req.valid (fire).
+    val diagDemand = io.enq.needAlloc.asUInt.orR
+    val diagGates = VecInit(Seq(!allowEnqueueForDispatch, !rab.io.canEnqForDispatch,
+      !vtypeBuffer.io.canEnqForDispatch, hasBlockBackward, io.fromVecExcpMod.busy)).asUInt
+    XSPerfHistogram("diag_rob_dispatch_gate_mask", diagGates, diagDemand, 0, 32)
+    XSPerfAccumulate("diag_rob_dispatch_demand_cycles", diagDemand)
+    XSPerfAccumulate("diag_rob_dispatch_blocked_demand_cycles", diagDemand && !io.enq.canAcceptForDispatch)
+    XSPerfAccumulate("diag_rob_dispatch_blocked_without_demand_cycles", !diagDemand && !io.enq.canAcceptForDispatch)
+  }
   io.enq.resp := allocatePtrVec
   val uopCanEnqueue = VecInit(io.enq.req.map(req => req.valid && io.enq.canAccept))
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))

@@ -969,6 +969,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       Mux(blockedByWaitForward(idx) || !notBlockedByPrevious(idx) || hasSpecialInst, DipCause.bit(DipCause.serial), 0.U) |
       Mux(lsqRecoverStall, DipCause.bit(DipCause.lsqRecovery), 0.U), 0.U)
     dip.stallCause := Mux(blocked.asUInt.orR && !causes.orR, DipCause.bit(DipCause.policy), causes)
+    // Separate the synthetic policy fallback from observed IQ enqueue-bandwidth limits.
+    XSPerfAccumulate("diag_dispatch_blocked_cycles", blocked.asUInt.orR)
+    XSPerfAccumulate("diag_dispatch_policy_fallback_cycles", blocked.asUInt.orR && !causes.orR)
+    XSPerfAccumulate("diag_dispatch_iq_capacity_gate_cycles", blocked.asUInt.orR && iqFull)
+    XSPerfAccumulate("diag_dispatch_iq_bandwidth_gate_cycles", blocked.asUInt.orR && iqPolicy)
+    for ((issue, iq) <- allIssueParams.zipWithIndex if issue.exuBlockParams.exists(_.name.startsWith("FEX"))) {
+      XSPerfAccumulate(s"diag_dispatch_fp_${iq}_blocked_head_cycles",
+        blocked.asUInt.orR && uopBlockMatrix(idx)(iq))
+    }
   }
 
   // Topdown collect start
