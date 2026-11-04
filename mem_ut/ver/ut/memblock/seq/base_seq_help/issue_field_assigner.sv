@@ -76,10 +76,14 @@ class issue_field_assigner extends uvm_object;
                        $sformatf("uid=%0d vector LS FuType=0x%0h is outside scalar split issue scope",
                                  main_tr.uid, main_tr.fuType))
         end
-        if (main_tr.fuType == MEMBLOCK_FUTYPE_MOU || behavior.is_atomic) begin
-            `uvm_fatal("ISSUE_FIELD",
-                       $sformatf("uid=%0d atomic/MOU issue target=%0d is outside scalar split issue scope",
-                                 main_tr.uid, target))
+        if (behavior.is_atomic) begin
+            if (main_tr.fuType != MEMBLOCK_FUTYPE_MOU ||
+                !lsq_ctrl_model::is_amo_fuoptype(main_tr.fuOpType) ||
+                !(target inside {MEMBLOCK_ISSUE_TARGET_STA, MEMBLOCK_ISSUE_TARGET_STD}) ||
+                !behavior.route_sta || !behavior.route_std) begin
+                `uvm_fatal("ISSUE_FIELD", "atomic MOU route/target contract mismatch")
+            end
+            return;
         end
 
         case (main_tr.fuType)
@@ -198,6 +202,65 @@ class issue_field_assigner extends uvm_object;
         pdest = seq_csr_common::get_pdest_base() + (uid % range);
         return pdest[7:0];
     endfunction:compute_pdest
+
+    function bit [7:0] compute_atomic_sta_pdest(input memblock_uid_t uid,
+                                               input int unsigned slot,
+                                               input bit has_wb);
+        int unsigned range;
+        int unsigned base_offset;
+
+        if (!has_wb) begin
+            return '0;
+        end
+        if (!(slot inside {0, 2})) begin
+            `uvm_fatal("ISSUE_FIELD",
+                       $sformatf("atomic STA pdest got unsupported slot=%0d", slot))
+        end
+        range = seq_csr_common::get_pdest_range();
+        if (slot == 2 && range < 2) begin
+            `uvm_fatal("ISSUE_FIELD",
+                       "CAS.Q STA2 requires MEMBLOCK_PDEST_RANGE >= 2")
+        end
+        base_offset = uid % range;
+        if (slot == 2) begin
+            base_offset = (base_offset + 1) % range;
+        end
+        return 8'(seq_csr_common::get_pdest_base() + base_offset);
+    endfunction:compute_atomic_sta_pdest
+
+    function bit [63:0] derive_atomic_std_data(input main_control_transaction main_tr,
+                                               input int unsigned slot);
+        bit [63:0] seed;
+
+        if (main_tr == null) begin
+            `uvm_fatal("ISSUE_FIELD", "derive_atomic_std_data got null main transaction")
+        end
+        if (slot >= 4) begin
+            `uvm_fatal("ISSUE_FIELD",
+                       $sformatf("derive_atomic_std_data got invalid slot=%0d", slot))
+        end
+        if (!lsq_ctrl_model::is_amocas_wd_fuoptype(main_tr.fuOpType) &&
+            !lsq_ctrl_model::is_amocas_q_fuoptype(main_tr.fuOpType)) begin
+            if (slot != 0) begin
+                `uvm_fatal("ISSUE_FIELD",
+                           $sformatf("non-CAS atomic uid=%0d has STD slot=%0d",
+                                     main_tr.uid, slot))
+            end
+            return main_tr.src_0;
+        end
+
+        // The transaction has no architectural rd/rs2 value fields.  Derive
+        // four stable, distinct data halves from the owner and slot while
+        // preserving the RTL CAS role ordering: compare/new low/high.
+        seed = main_tr.src_0 ^ (64'(main_tr.uid) << 17);
+        case (slot)
+            0: return seed ^ 64'h4341_535F_434D_504C; // compare low
+            1: return seed ^ 64'h4341_535F_4E45_574C; // new low
+            2: return seed ^ 64'h4341_535F_434D_5048; // compare high
+            3: return seed ^ 64'h4341_535F_4E45_5748; // new high
+            default: return '0;
+        endcase
+    endfunction:derive_atomic_std_data
 
     function void derive_wen(input main_control_transaction main_tr,
                              output bit rfWen,
@@ -395,14 +458,16 @@ class issue_field_assigner extends uvm_object;
                                          input memblock_issue_q_item_t item,
                                          input int unsigned pipe_idx);
         bit [MEMBLOCK_DUT_FUTYPE_W-1:0] dut_futype;
+        bit [8:0] slot_fuop;
         dut_futype = encode_and_fit_dut_futype(
             main_tr.fuType,
             $sformatf("issue_field_assigner::assign_sta_main_fields(pipe=%0d)", pipe_idx));
+        slot_fuop = (main_tr.fuOpType & 9'h03f) | (9'(item.uop_index) << 6);
         case (pipe_idx)
             0: begin
                 tr.io_ooo_to_mem_issueSta_0_valid = 1'b1;
                 tr.io_ooo_to_mem_issueSta_0_bits_uop_fuType = dut_futype;
-                tr.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType = slot_fuop;
                 tr.io_ooo_to_mem_issueSta_0_bits_src_0 = main_tr.src_0;
                 tr.io_ooo_to_mem_issueSta_0_bits_uop_imm = main_tr.imm;
                 tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag = main_tr.robIdx_flag;
@@ -413,7 +478,7 @@ class issue_field_assigner extends uvm_object;
             1: begin
                 tr.io_ooo_to_mem_issueSta_1_valid = 1'b1;
                 tr.io_ooo_to_mem_issueSta_1_bits_uop_fuType = dut_futype;
-                tr.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType = slot_fuop;
                 tr.io_ooo_to_mem_issueSta_1_bits_src_0 = main_tr.src_0;
                 tr.io_ooo_to_mem_issueSta_1_bits_uop_imm = main_tr.imm;
                 tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag = main_tr.robIdx_flag;
@@ -430,15 +495,22 @@ class issue_field_assigner extends uvm_object;
                                          input memblock_issue_q_item_t item,
                                          input int unsigned pipe_idx);
         bit [MEMBLOCK_DUT_FUTYPE_W-1:0] dut_futype;
+        bit [8:0] slot_fuop;
+        bit [63:0] std_data;
+        memblock_op_behavior_t behavior;
         dut_futype = encode_and_fit_dut_futype(
             main_tr.fuType,
             $sformatf("issue_field_assigner::assign_std_main_fields(pipe=%0d)", pipe_idx));
+        slot_fuop = (main_tr.fuOpType & 9'h03f) | (9'(item.uop_index) << 6);
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        std_data = behavior.is_atomic ?
+                   derive_atomic_std_data(main_tr, item.uop_index) : main_tr.src_0;
         case (pipe_idx)
             0: begin
                 tr.io_ooo_to_mem_issueStd_0_valid = 1'b1;
                 tr.io_ooo_to_mem_issueStd_0_bits_uop_fuType = dut_futype;
-                tr.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_issueStd_0_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType = slot_fuop;
+                tr.io_ooo_to_mem_issueStd_0_bits_src_0 = std_data;
                 tr.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value = main_tr.robIdx_value;
                 tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_flag = item.sq_key.flag;
                 tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value = item.sq_key.value;
@@ -446,8 +518,8 @@ class issue_field_assigner extends uvm_object;
             1: begin
                 tr.io_ooo_to_mem_issueStd_1_valid = 1'b1;
                 tr.io_ooo_to_mem_issueStd_1_bits_uop_fuType = dut_futype;
-                tr.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_issueStd_1_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType = slot_fuop;
+                tr.io_ooo_to_mem_issueStd_1_bits_src_0 = std_data;
                 tr.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value = main_tr.robIdx_value;
                 tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_flag = item.sq_key.flag;
                 tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_value = item.sq_key.value;
@@ -554,6 +626,7 @@ class issue_field_assigner extends uvm_object;
         bit ftq_flag;
         bit [MEMBLOCK_FTQ_PTR_VALUE_W-1:0] ftq_value;
         bit [MEMBLOCK_FTQ_OFFSET_W-1:0] ftq_offset;
+        memblock_op_behavior_t behavior;
 
         ensure_data();
         if (tr == null) begin
@@ -561,9 +634,14 @@ class issue_field_assigner extends uvm_object;
         end
         check_pipe_idx(item.target, pipe_idx, "assign_backend_meta_fields");
         main_tr = data.get_main_transaction(item.uid);
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
         derive_wen(main_tr, rfWen, fpWen);
         has_wb = rfWen || fpWen;
-        pdest = compute_pdest(item.uid, has_wb);
+        if (behavior.is_atomic && item.target == MEMBLOCK_ISSUE_TARGET_STA) begin
+            pdest = compute_atomic_sta_pdest(item.uid, item.uop_index, has_wb);
+        end else begin
+            pdest = compute_pdest(item.uid, has_wb);
+        end
         pc = compute_pc(item.uid);
         is_rvc = compute_is_rvc(item.uid);
         ftq_flag = compute_ftq_flag(item.uid);

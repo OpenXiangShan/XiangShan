@@ -18,6 +18,19 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
         longint unsigned  next_uid;
     } memblock_control_reservation_plan_t;
 
+    typedef struct {
+        bit               valid;
+        memblock_uid_t    lr_uid;
+        memblock_uid_t    sc_uid;
+        bit [8:0]         sc_fuOpType;
+        bit               same_addr;
+        bit [63:0]        lr_src_0;
+        bit [63:0]        lr_imm;
+        bit               lr_expect_misaligned;
+        int unsigned      lr_alignment_bytes;
+        int unsigned      selected_dist;
+    } memblock_lr_sc_reservation_t;
+
     common_data_transaction data;
     lsq_ctrl_model          lsq_ctrl;
     issue_queue_scheduler   issue_sched;
@@ -34,6 +47,7 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     // 自行保证 helper 已构造且 LSQ runtime 已复位；同一 sequence 内不得重复复位。
     bit dispatch_runtime_helpers_initialized;
     main_control_transaction manual_main_table_by_rob[int unsigned];
+    memblock_lr_sc_reservation_t sc_reservation_by_uid[memblock_uid_t];
     memblock_boundary_profile_candidate_t boundary_profile_cache[$];
     bit boundary_candidate_cache_built;
 
@@ -59,6 +73,18 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     extern virtual function void randomize_main_transaction(input main_control_transaction tr,
                                                             input memblock_uid_t uid,
                                                             input memblock_rob_key_t rob_key);
+    extern virtual function bit is_lr_fuoptype(input bit [8:0] fuOpType);
+    extern virtual function int unsigned randomize_lr_sc_distance();
+    extern virtual function void try_reserve_paired_sc(
+        input main_control_transaction lr_tr,
+        input int unsigned table_limit,
+        input bit reserved_uid0_valid,
+        input memblock_uid_t reserved_uid0,
+        input bit reserved_uid1_valid,
+        input memblock_uid_t reserved_uid1);
+    extern virtual function main_control_transaction make_paired_sc_transaction(
+        input memblock_lr_sc_reservation_t reservation,
+        input memblock_rob_key_t rob_key);
     extern virtual function void reschedule_control_reservation(
         ref memblock_control_reservation_plan_t plan,
         input longint unsigned base_uid,
@@ -81,6 +107,7 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     extern virtual function memblock_op_class_e select_op_class_by_weight();
     extern virtual function void apply_minimal_op_template(input main_control_transaction tr);
     extern virtual function void apply_legal_addr_template(input main_control_transaction tr);
+    extern virtual function void apply_amo_address_policy(input main_control_transaction tr);
     extern virtual function void build_boundary_candidate_cache();
     extern virtual function void generate_boundary_op_from_cache(input main_control_transaction tr);
     extern virtual function void apply_op_class_template(input main_control_transaction tr,
@@ -207,6 +234,7 @@ function memblock_dispatch_base_sequence::new(string name = "memblock_dispatch_b
     super.new(name);
     boundary_candidate_cache_built = 1'b0;
     dispatch_runtime_helpers_initialized = 1'b0;
+    sc_reservation_by_uid.delete();
 endfunction:new
 
 task memblock_dispatch_base_sequence::pre_body();
@@ -323,6 +351,7 @@ task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned
         data = common_data_transaction::get();
     end
     data.reset_all_tables(main_trans_num_i);
+    sc_reservation_by_uid.delete();
     rob_key = choose_rob_start_key();
     addr_ref_window = choose_addr_ref_window();
     if (seq_csr_common::get_boundary_profile_gen_en()) begin
@@ -335,18 +364,29 @@ task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned
     for (int unsigned idx = 0; idx < main_trans_num_i; idx++) begin
         memblock_uid_t uid;
         main_control_transaction tr;
+        bit paired_sc;
 
         uid = data.alloc_uid();
-        tr = main_control_transaction::type_id::create($sformatf("main_uid_%0d", uid));
-        randomize_main_transaction(tr, uid, rob_key);
-        prune_recent_uid_q(recent_load_uid_q, uid, addr_ref_window);
-        prune_recent_uid_q(recent_store_uid_q, uid, addr_ref_window);
-        apply_addr_reuse_window(tr, uid, recent_load_uid_q, recent_store_uid_q);
-        if (seq_csr_common::get_boundary_profile_gen_en()) begin
-            sync_boundary_profile_after_addr_reuse(tr,
-                $sformatf("random uid=%0d boundary after addr reuse", uid));
+        paired_sc = sc_reservation_by_uid.exists(uid);
+        if (paired_sc) begin
+            tr = make_paired_sc_transaction(sc_reservation_by_uid[uid], rob_key);
+            sc_reservation_by_uid.delete(uid);
+        end else begin
+            tr = main_control_transaction::type_id::create($sformatf("main_uid_%0d", uid));
+            randomize_main_transaction(tr, uid, rob_key);
+            prune_recent_uid_q(recent_load_uid_q, uid, addr_ref_window);
+            prune_recent_uid_q(recent_store_uid_q, uid, addr_ref_window);
+            apply_addr_reuse_window(tr, uid, recent_load_uid_q, recent_store_uid_q);
+            if (seq_csr_common::get_boundary_profile_gen_en()) begin
+                sync_boundary_profile_after_addr_reuse(tr,
+                    $sformatf("random uid=%0d boundary after addr reuse", uid));
+            end
         end
         data.set_main_transaction(uid, tr);
+        if (is_lr_fuoptype(tr.fuOpType)) begin
+            try_reserve_paired_sc(tr, main_trans_num_i,
+                                  1'b0, 0, 1'b0, 0);
+        end
         push_recent_uid(tr, uid, recent_load_uid_q, recent_store_uid_q);
         rob_key = rob_order_util::rob_advance(rob_key, 1);
     end
@@ -381,6 +421,7 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
     end
 
     data.reset_all_tables(total_main_trans_num);
+    sc_reservation_by_uid.delete();
     csr_plan = '{default:'0};
     sfence_plan = '{default:'0};
     csr_plan.enabled = seq_csr_common::get_csr_control_enable();
@@ -419,6 +460,12 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
         csr_hit = csr_plan.target_valid && csr_plan.next_uid == uid;
         sfence_hit = sfence_plan.target_valid && sfence_plan.next_uid == uid;
         if (csr_hit) begin
+            if (sc_reservation_by_uid.exists(uid)) begin
+                `uvm_info("LR_SC_PAIR",
+                          $sformatf("cancel paired SC uid=%0d because CSR control owns the slot",
+                                    uid), UVM_LOW)
+                sc_reservation_by_uid.delete(uid);
+            end
             tr = make_control_main_transaction($sformatf("csr_control_uid_%0d", uid),
                                                uid,
                                                MEMBLOCK_OP_CLASS_CSR_CONTROL,
@@ -438,6 +485,12 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
                                                normal_main_trans_num);
             end
         end else if (sfence_hit) begin
+            if (sc_reservation_by_uid.exists(uid)) begin
+                `uvm_info("LR_SC_PAIR",
+                          $sformatf("cancel paired SC uid=%0d because SFence control owns the slot",
+                                    uid), UVM_LOW)
+                sc_reservation_by_uid.delete(uid);
+            end
             tr = make_control_main_transaction($sformatf("sfence_control_uid_%0d", uid),
                                                uid,
                                                MEMBLOCK_OP_CLASS_SFENCE_CONTROL,
@@ -447,6 +500,9 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
                                            seq_csr_common::get_sfence_control_min_interval(),
                                            seq_csr_common::get_sfence_control_max_interval(),
                                            normal_main_trans_num);
+        end else if (sc_reservation_by_uid.exists(uid)) begin
+            tr = make_paired_sc_transaction(sc_reservation_by_uid[uid], rob_key);
+            sc_reservation_by_uid.delete(uid);
         end else begin
             tr = main_control_transaction::type_id::create($sformatf("main_uid_%0d", uid));
             randomize_main_transaction(tr, uid, rob_key);
@@ -460,6 +516,12 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
             push_recent_uid(tr, uid, recent_load_uid_q, recent_store_uid_q);
         end
         data.set_main_transaction(uid, tr);
+        if (is_lr_fuoptype(tr.fuOpType)) begin
+            try_reserve_paired_sc(
+                tr, normal_main_trans_num,
+                csr_plan.target_valid, memblock_uid_t'(csr_plan.next_uid),
+                sfence_plan.target_valid, memblock_uid_t'(sfence_plan.next_uid));
+        end
         rob_key = rob_order_util::rob_advance(rob_key, 1);
     end
 
@@ -667,10 +729,161 @@ function void memblock_dispatch_base_sequence::randomize_main_transaction(input 
     end
     tr.send_pri     = randomize_send_pri_value(1'b0);
     tr.send_pri_std = randomize_send_pri_value(1'b1);
+    if (tr.op_class == MEMBLOCK_OP_CLASS_AMO) begin
+        apply_amo_address_policy(tr);
+        tr.send_pri = 100;
+        tr.send_pri_std = 100;
+    end
     tr.delay        = randomize_delay_value();
     tr.update_vaddr();
     validate_main_table_entry(tr, $sformatf("random uid=%0d", uid));
 endfunction:randomize_main_transaction
+
+function bit memblock_dispatch_base_sequence::is_lr_fuoptype(input bit [8:0] fuOpType);
+    return fuOpType inside {MEMBLOCK_LSUOP_LR_W, MEMBLOCK_LSUOP_LR_D};
+endfunction:is_lr_fuoptype
+
+function int unsigned memblock_dispatch_base_sequence::randomize_lr_sc_distance();
+    int unsigned weights[$];
+    int bucket;
+
+    for (int unsigned idx = 0; idx < 5; idx++) begin
+        weights.push_back(seq_csr_common::get_amo_lr_sc_dist_weight(idx));
+    end
+    bucket = weighted_pick_index(weights);
+    case (bucket)
+        0: return seq_csr_common::get_amo_lr_sc_dist_fixed_value();
+        1: return 0;
+        2: return $urandom_range(5, 1);
+        3: return $urandom_range(10, 6);
+        4: return $urandom_range(100, 11);
+        default: begin
+            `uvm_fatal(get_type_name(), $sformatf("illegal LR/SC distance bucket=%0d", bucket))
+        end
+    endcase
+    return 0;
+endfunction:randomize_lr_sc_distance
+
+function void memblock_dispatch_base_sequence::try_reserve_paired_sc(
+    input main_control_transaction lr_tr,
+    input int unsigned table_limit,
+    input bit reserved_uid0_valid,
+    input memblock_uid_t reserved_uid0,
+    input bit reserved_uid1_valid,
+    input memblock_uid_t reserved_uid1
+);
+    memblock_lr_sc_reservation_t reservation;
+    longint unsigned candidate_uid;
+    int unsigned selected_dist;
+    bit reserved;
+
+    if (lr_tr == null || !is_lr_fuoptype(lr_tr.fuOpType)) begin
+        `uvm_fatal(get_type_name(), "try_reserve_paired_sc requires an LR transaction")
+    end
+    if ($urandom_range(99, 0) >= seq_csr_common::get_amo_lr_sc_pair_en_1_wt()) begin
+        return;
+    end
+
+    reserved = 1'b0;
+    for (int unsigned attempt = 0; attempt < 16 && !reserved; attempt++) begin
+        selected_dist = randomize_lr_sc_distance();
+        candidate_uid = longint'(lr_tr.uid) + longint'(selected_dist) + 1;
+        if (candidate_uid <= longint'(lr_tr.uid) || candidate_uid >= table_limit) begin
+            continue;
+        end
+        if (sc_reservation_by_uid.exists(memblock_uid_t'(candidate_uid)) ||
+            (reserved_uid0_valid && candidate_uid == longint'(reserved_uid0)) ||
+            (reserved_uid1_valid && candidate_uid == longint'(reserved_uid1))) begin
+            continue;
+        end
+
+        reservation = '{default:'0};
+        reservation.valid = 1'b1;
+        reservation.lr_uid = lr_tr.uid;
+        reservation.sc_uid = memblock_uid_t'(candidate_uid);
+        reservation.sc_fuOpType = (lr_tr.fuOpType == MEMBLOCK_LSUOP_LR_W) ?
+                                  MEMBLOCK_LSUOP_SC_W : MEMBLOCK_LSUOP_SC_D;
+        reservation.same_addr = $urandom_range(99, 0) <
+                                seq_csr_common::get_amo_lr_sc_same_addr_1_wt();
+        reservation.lr_src_0 = lr_tr.src_0;
+        reservation.lr_imm = lr_tr.imm;
+        reservation.lr_expect_misaligned = lr_tr.amo_expect_misaligned;
+        reservation.lr_alignment_bytes = lr_tr.amo_alignment_bytes;
+        reservation.selected_dist = selected_dist;
+        sc_reservation_by_uid[reservation.sc_uid] = reservation;
+        reserved = 1'b1;
+        `uvm_info("LR_SC_PAIR",
+                  $sformatf("reserve LR uid=%0d -> SC uid=%0d dist=%0d same_addr=%0d",
+                            reservation.lr_uid, reservation.sc_uid,
+                            reservation.selected_dist, reservation.same_addr),
+                  UVM_LOW)
+    end
+    if (!reserved) begin
+        `uvm_info("LR_SC_PAIR",
+                  $sformatf("skip paired SC for LR uid=%0d: no legal future slot after 16 attempts",
+                            lr_tr.uid),
+                  UVM_LOW)
+    end
+endfunction:try_reserve_paired_sc
+
+function main_control_transaction memblock_dispatch_base_sequence::make_paired_sc_transaction(
+    input memblock_lr_sc_reservation_t reservation,
+    input memblock_rob_key_t rob_key
+);
+    main_control_transaction tr;
+
+    if (!reservation.valid ||
+        !(reservation.sc_fuOpType inside {MEMBLOCK_LSUOP_SC_W, MEMBLOCK_LSUOP_SC_D})) begin
+        `uvm_fatal(get_type_name(), "make_paired_sc_transaction got invalid reservation")
+    end
+    tr = main_control_transaction::type_id::create(
+        $sformatf("paired_sc_uid_%0d_from_lr_%0d", reservation.sc_uid, reservation.lr_uid));
+    if (tr == null || !tr.randomize()) begin
+        `uvm_fatal(get_type_name(), "paired SC transaction randomize failed")
+    end
+
+    tr.uid = reservation.sc_uid;
+    tr.op_class = MEMBLOCK_OP_CLASS_AMO;
+    tr.boundary_profile = MEMBLOCK_BOUNDARY_PROFILE_UNKNOWN;
+    tr.boundary_size_bytes = 0;
+    apply_op_class_template(tr, reservation.sc_fuOpType);
+    tr.robIdx_flag = rob_key.flag;
+    tr.robIdx_value = rob_key.value;
+    tr.lqIdx_flag = 1'b0;
+    tr.lqIdx_value = '0;
+    tr.sqIdx_flag = 1'b0;
+    tr.sqIdx_value = '0;
+    tr.tlbAF = 1'b0;
+    tr.tlbPF = 1'b0;
+    tr.tlbGPF = 1'b0;
+    tr.PBMT = '0;
+    tr.pmaAF = 1'b0;
+    tr.corrupt = 1'b0;
+    tr.denied = 1'b0;
+    tr.delay = randomize_delay_value();
+    tr.send_pri = 100;
+    tr.send_pri_std = 100;
+
+    if (reservation.same_addr) begin
+        tr.src_0 = reservation.lr_src_0;
+        tr.imm = reservation.lr_imm;
+        tr.update_vaddr();
+        tr.amo_expect_misaligned = reservation.lr_expect_misaligned;
+        tr.amo_alignment_bytes = reservation.lr_alignment_bytes;
+        if (tr.vaddr != reservation.lr_src_0 +
+                        main_control_transaction::sign_extend_imm12(reservation.lr_imm)) begin
+            `uvm_fatal(get_type_name(), "paired SC failed to preserve LR address")
+        end
+    end else begin
+        apply_legal_addr_template(tr);
+        apply_amo_address_policy(tr);
+    end
+    if (tr.amo_alignment_bytes != derive_size_bytes(tr.op_class, tr.fuOpType)) begin
+        `uvm_fatal(get_type_name(), "paired SC alignment does not match SC width")
+    end
+    validate_main_table_entry(tr, $sformatf("paired SC uid=%0d", tr.uid));
+    return tr;
+endfunction:make_paired_sc_transaction
 
 // 抽象职责：从本次命中 UID 重新采样 CSR/SFence 的下一预约目标。目标不在普通区间时
 // 立即清为无效，保证永远不会截断、扩表或落入末尾 check_store。
@@ -887,6 +1100,49 @@ function void memblock_dispatch_base_sequence::apply_legal_addr_template(input m
                              tr.uid, selected_vaddr, tr.vaddr))
     end
 endfunction:apply_legal_addr_template
+
+function void memblock_dispatch_base_sequence::apply_amo_address_policy(
+    input main_control_transaction tr
+);
+    bit [63:0] base;
+    bit [63:0] upper;
+    bit [63:0] aligned;
+    bit [63:0] address;
+    int unsigned alignment;
+    int unsigned offset;
+    bit make_misaligned;
+
+    if (tr == null || tr.op_class != MEMBLOCK_OP_CLASS_AMO) begin
+        `uvm_fatal(get_type_name(), "apply_amo_address_policy requires an AMO transaction")
+    end
+    alignment = derive_size_bytes(tr.op_class, tr.fuOpType);
+    if (!(alignment inside {4, 8, 16})) begin
+        `uvm_fatal(get_type_name(), "AMO alignment must be 4, 8, or 16 bytes")
+    end
+    base = seq_csr_common::get_main_vaddr_base();
+    upper = base + seq_csr_common::get_main_vaddr_range() - 1;
+    aligned = tr.vaddr & ~(64'(alignment - 1));
+    if (aligned < base) begin
+        aligned = (base + alignment - 1) & ~(64'(alignment - 1));
+    end
+    if (aligned + alignment - 1 > upper) begin
+        aligned = (upper - alignment + 1) & ~(64'(alignment - 1));
+    end
+    make_misaligned = $urandom_range(999, 0) <
+                      seq_csr_common::get_amo_misalign_permille();
+    offset = make_misaligned ? $urandom_range(alignment - 1, 1) : 0;
+    address = aligned + offset;
+    if (address < base || address + alignment - 1 > upper ||
+        (make_misaligned && (address % alignment) == 0) ||
+        (!make_misaligned && (address % alignment) != 0)) begin
+        `uvm_fatal(get_type_name(), "AMO aligned/misaligned address generation escaped its contract")
+    end
+    tr.src_0 = address;
+    tr.imm = '0;
+    tr.update_vaddr();
+    tr.amo_expect_misaligned = make_misaligned;
+    tr.amo_alignment_bytes = alignment;
+endfunction:apply_amo_address_policy
 
 function void memblock_dispatch_base_sequence::build_boundary_candidate_cache();
     memblock_boundary_profile_e profiles[$];
@@ -1564,6 +1820,9 @@ function void memblock_dispatch_base_sequence::enumerate_fuoptypes(input membloc
             fuops.push_back(MEMBLOCK_LSUOP_AMOMAX_D);
             fuops.push_back(MEMBLOCK_LSUOP_AMOMINU_D);
             fuops.push_back(MEMBLOCK_LSUOP_AMOMAXU_D);
+            fuops.push_back(MEMBLOCK_LSUOP_AMOCAS_W);
+            fuops.push_back(MEMBLOCK_LSUOP_AMOCAS_D);
+            fuops.push_back(MEMBLOCK_LSUOP_AMOCAS_Q);
         end
         default: begin
         end
@@ -2697,14 +2956,12 @@ function void memblock_dispatch_base_sequence::validate_main_table_entry(input m
         validate_control_main_table_entry(tr, caller);
         return;
     end
-    if (tr.op_class == MEMBLOCK_OP_CLASS_AMO ||
-        tr.fuType == MEMBLOCK_FUTYPE_MOU ||
-        tr.lsq_flow == MEMBLOCK_LSQ_FLOW_ATOMIC) begin
-        `uvm_fatal(get_type_name(), $sformatf("%s requested unsupported scalar atomic uid=%0d", caller, tr.uid))
-    end
+    // CBO 与 AMO 的低位 fuOpType 编码存在重叠，例如 SC.D 和 CBO.ZERO 都是 7。
+    // 主表分类必须结合 op_class/lsq_flow/fuType，不能只看无上下文的 fuOpType。
     if (tr.op_class == MEMBLOCK_OP_CLASS_CBO ||
         tr.lsq_flow == MEMBLOCK_LSQ_FLOW_CBO ||
-        lsq_ctrl_model::is_cbo_fuoptype(tr.fuOpType)) begin
+        tr.fuType == MEMBLOCK_FUTYPE_STU &&
+            lsq_ctrl_model::is_cbo_fuoptype(tr.fuOpType)) begin
         `uvm_fatal(get_type_name(), $sformatf("%s requested unsupported scalar CBO uid=%0d", caller, tr.uid))
     end
     if (!tr.validate_main_transaction()) begin

@@ -48,6 +48,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
             memblock_sync_pkg::get_l2tlb_current_reset_epoch() != 0) begin
             longint unsigned reset_epoch;
             reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+            data.assert_nonphysical_reset_safe_for_atomic("L2TLB/runtime reset");
             if (adapter_reset_serviced_epoch != reset_epoch) begin
                 memblock_sync_pkg::reset_l2tlb_adapter_runtime_state(reset_epoch);
                 data.clear_dispatch_l2tlb_live_entries();
@@ -114,6 +115,108 @@ class dispatch_monitor_event_adapter extends uvm_object;
         ensure_handles();
         return data.resolve_uid_for_event(wb_event, uid);
     endfunction:event_has_active_uid
+
+    function bit attach_atomic_final_wb_snapshot(
+        ref memblock_wb_event_t wb_event,
+        input memblock_rob_key_t raw_rob_key,
+        input int unsigned sample_flush_epoch
+    );
+        memblock_uid_t uid;
+        status_transaction status;
+
+        ensure_handles();
+        if (!data.lookup_active_uid_by_rob(raw_rob_key, uid) ||
+            !data.is_atomic_uid(uid)) begin
+            return 1'b0;
+        end
+        status = data.get_status(uid);
+        if (!data.active_atomic_barrier_valid ||
+            data.active_atomic_barrier_uid != uid ||
+            !status.active || status.terminal_done || status.flushed ||
+            status.issue_killed || status.redirect_pending ||
+            !status.atomic_sta_fired_mask[0] ||
+            !status.atomic_sta_issue_epoch_valid[0] ||
+            sample_flush_epoch < status.sta_instance_flush_epoch) begin
+            `uvm_fatal("ATOMIC_WB_ATTACH",
+                       $sformatf("invalid atomic LDA0 owner uid=%0d barrier=%0d/%0d active/terminal/flushed/killed/redirect=%0d/%0d/%0d/%0d/%0d sta0=%0d epoch_valid=%0d sample/instance=%0d/%0d",
+                                 uid, data.active_atomic_barrier_valid,
+                                 data.active_atomic_barrier_uid,
+                                 status.active, status.terminal_done,
+                                 status.flushed, status.issue_killed,
+                                 status.redirect_pending,
+                                 status.atomic_sta_fired_mask[0],
+                                 status.atomic_sta_issue_epoch_valid[0],
+                                 sample_flush_epoch,
+                                 status.sta_instance_flush_epoch))
+        end
+        wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_ATOMIC_WB;
+        wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
+        wb_event.uid = uid;
+        wb_event.has_uid = 1'b1;
+        wb_event.rob_key = status.get_rob_key();
+        wb_event.has_rob = 1'b1;
+        wb_event.has_lq = 1'b0;
+        wb_event.has_sq = 1'b0;
+        wb_event.issue_epoch = status.atomic_sta_issue_epoch_by_slot[0];
+        wb_event.has_issue_epoch = 1'b1;
+        wb_event.replay_seq = status.replay_seq;
+        wb_event.has_replay_seq = 1'b1;
+        wb_event.dynamic_epoch = status.dynamic_epoch;
+        wb_event.has_dynamic_epoch = 1'b1;
+        wb_event.uop_index = 0;
+        return 1'b1;
+    endfunction:attach_atomic_final_wb_snapshot
+
+    function bit attach_atomic_sta_feedback_snapshot(
+        ref memblock_wb_event_t wb_event,
+        input memblock_sync_pkg::dispatch_raw_iq_feedback_t raw
+    );
+        memblock_uid_t uid;
+        status_transaction status;
+        int unsigned slot;
+        int unsigned issue_epoch;
+
+        ensure_handles();
+        if (!data.active_atomic_barrier_valid || raw.port_id != 0) begin
+            return 1'b0;
+        end
+        uid = data.active_atomic_barrier_uid;
+        status = data.get_status(uid);
+        if (!data.is_atomic_uid(uid) || !status.active ||
+            status.terminal_done || status.flushed || status.issue_killed ||
+            status.redirect_pending ||
+            !data.peek_next_atomic_feedback(uid, slot, issue_epoch)) begin
+            return 1'b0;
+        end
+        if (!raw.hit) begin
+            `uvm_fatal("ATOMIC_FEEDBACK_ATTACH",
+                       $sformatf("atomic STA feedback must hit uid=%0d slot=%0d",
+                                 uid, slot))
+        end
+        wb_event.valid = 1'b1;
+        wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK;
+        wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
+        wb_event.port_id = raw.port_id;
+        wb_event.uid = uid;
+        wb_event.has_uid = 1'b1;
+        wb_event.rob_key = status.get_rob_key();
+        wb_event.has_rob = 1'b1;
+        wb_event.has_lq = 1'b0;
+        wb_event.has_sq = 1'b0;
+        wb_event.issue_epoch = issue_epoch;
+        wb_event.has_issue_epoch = 1'b1;
+        wb_event.replay_seq = status.replay_seq;
+        wb_event.has_replay_seq = 1'b1;
+        wb_event.dynamic_epoch = status.dynamic_epoch;
+        wb_event.has_dynamic_epoch = 1'b1;
+        wb_event.uop_index = slot;
+        wb_event.iq_feedback_valid = 1'b1;
+        wb_event.iq_feedback_hit = 1'b1;
+        wb_event.iq_feedback_failed = 1'b0;
+        wb_event.iq_feedback_flush_state = raw.flush_state;
+        wb_event.cycle = raw.cycle;
+        return 1'b1;
+    endfunction:attach_atomic_sta_feedback_snapshot
 
     // 中文注释：唯一的 current issue snapshot owner。int-WB 先使用 ROB 精确 key 和
     // STD value-only 双 flag 分支；后续 IQ 只能扩展本函数，不能另建同名 API 或第二套 map owner。
@@ -692,7 +795,6 @@ class dispatch_monitor_event_adapter extends uvm_object;
         input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
         input memblock_wb_event_t template_event
     );
-        memblock_wb_event_t                   template_event;
         memblock_wb_event_t                   candidate0;
         memblock_wb_event_t                   candidate1;
         memblock_std_late_raw_tombstone_t     tombstone0;
@@ -914,10 +1016,14 @@ class dispatch_monitor_event_adapter extends uvm_object;
         raw_rob_key.value = raw.rob_value;
         case (raw.source_kind)
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA: begin
-                if (wb_event.source != MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB ||
-                    wb_event.target != MEMBLOCK_ISSUE_TARGET_LOAD ||
+                if (!((wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB &&
+                       wb_event.target == MEMBLOCK_ISSUE_TARGET_LOAD &&
+                       wb_event.has_lq) ||
+                      (wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_ATOMIC_WB &&
+                       wb_event.target == MEMBLOCK_ISSUE_TARGET_STA &&
+                       !wb_event.has_lq && !wb_event.has_sq)) ||
                     !raw.rob_valid || raw.rob_value_only_without_flag ||
-                    !wb_event.has_uid || !wb_event.has_rob || !wb_event.has_lq ||
+                    !wb_event.has_uid || !wb_event.has_rob ||
                     !wb_event.has_issue_epoch || !wb_event.has_replay_seq ||
                     wb_event.rob_key.flag != raw_rob_key.flag ||
                     wb_event.rob_key.value != raw_rob_key.value) begin
@@ -966,10 +1072,16 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event.has_exception = raw.exception_vec != 24'b0;
         case (raw.source_kind)
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA: begin
-                wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB;
-                wb_event.target = MEMBLOCK_ISSUE_TARGET_LOAD;
                 wb_event.has_rob = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
-                attach_current_issue_snapshot(wb_event, 1'b0, 1'b1, raw.sample_flush_epoch);
+                if (raw.port_id == 0 &&
+                    attach_atomic_final_wb_snapshot(wb_event, wb_event.rob_key,
+                                                    raw.sample_flush_epoch)) begin
+                end else begin
+                    wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB;
+                    wb_event.target = MEMBLOCK_ISSUE_TARGET_LOAD;
+                    attach_current_issue_snapshot(wb_event, 1'b0, 1'b1,
+                                                  raw.sample_flush_epoch);
+                end
             end
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA: begin
                 bit sta_fault_attached;
@@ -1043,6 +1155,9 @@ class dispatch_monitor_event_adapter extends uvm_object;
             `uvm_fatal("DISP_MON_ADAPT",
                        $sformatf("STD IQ feedback cannot complete strict V2 STD real-WB target: port=%0d hit=%0d",
                                  raw.port_id, raw.hit))
+        end
+        if (raw.is_sta && attach_atomic_sta_feedback_snapshot(wb_event, raw)) begin
+            return 1'b1;
         end
         if (!raw.sq_valid || raw.rob_valid || raw.lq_valid) begin
             `uvm_fatal("DISP_MON_ADAPT",

@@ -927,11 +927,31 @@ package memblock_sync_pkg;
     // 中文伪代码：ctrl monitor 每个 post-reset sample 都记录一次 held cancel level，
     // 即使两个 count 都为 0 也入队；该队列不属于 semantic ctrl raw batch。
     typedef struct {
+        bit                                      valid;
+        bit                                      complete;
+        bit [3:0]                                lq_deq_count;
+        bit [`MEMBLOCK_SQ_DEQ_COUNT_W-1:0]       sq_deq_count;
         bit [`MEMBLOCK_LQ_CANCEL_COUNT_W-1:0] lq_cancel_count;
         bit [`MEMBLOCK_SQ_CANCEL_COUNT_W-1:0] sq_cancel_count;
+        bit                                      backend_done;
+        int unsigned                             control_reset_epoch;
         longint unsigned                       sample_seq;
         longint unsigned                       cycle;
     } dispatch_raw_cancel_snapshot_t;
+
+    // 中文注释：driver 在 E[n] 发布源端 Q fire；target=n 用于 N[n] 结算
+    // Q/信用，dut_sample=n+1 才是寄存输出被 MemBlock 采样的边沿。
+    typedef struct {
+        bit                                      valid;
+        bit [`MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM-1:0] fire_mask;
+        bit                                      need_alloc_nonzero;
+        int unsigned                             lq_alloc;
+        int unsigned                             sq_alloc;
+        int unsigned                             control_reset_epoch;
+        longint unsigned                         launch_sample_seq;
+        longint unsigned                         target_sample_seq;
+        longint unsigned                         dut_sample_seq;
+    } dispatch_lsq_source_offer_t;
 
     // 中文伪代码：redirect monitor 只记录 DUT 实际采样到的输入投影和 sample 序号，
     // 不把该 sideband 重新包装成 recovery event。
@@ -1079,6 +1099,13 @@ package memblock_sync_pkg;
     // 不能放在一次 service task 的 automatic queue 中，否则 resync warning 后会丢失。
     dispatch_raw_ctrl_t        deferred_raw_ctrl_q[$];
     dispatch_raw_cancel_snapshot_t raw_cancel_snapshot_q[$];
+    dispatch_lsq_source_offer_t    lsq_source_offer_q[$];
+    bit                            lsq_source_offer_publish_en = 1'b0;
+    // driver 首次发布后逐拍连续；即使 FIFO 已被消费为空，也不能漏拍或重拍。
+    // clear_lsq_source_offers/reset 清除本代覆盖窗口，停止发布后不再要求新拍。
+    longint unsigned               lsq_source_offer_first_sample_seq;
+    longint unsigned               lsq_source_offer_last_sample_seq;
+    int unsigned                   lsq_source_offer_reset_epoch;
     dispatch_raw_redirect_anchor_t raw_redirect_anchor_q[$];
     dispatch_raw_sfence_t      raw_sfence_q[$];
     // 中文注释：generic CSR 写只由 CSR monitor 追加、由 common_data 的
@@ -1337,8 +1364,14 @@ package memblock_sync_pkg;
 
     function dispatch_raw_cancel_snapshot_t make_empty_raw_cancel_snapshot();
         dispatch_raw_cancel_snapshot_t item;
+        item.valid = 1'b0;
+        item.complete = 1'b0;
+        item.lq_deq_count = '0;
+        item.sq_deq_count = '0;
         item.lq_cancel_count = '0;
         item.sq_cancel_count = '0;
+        item.backend_done = 1'b0;
+        item.control_reset_epoch = 0;
         item.sample_seq = 0;
         item.cycle = 0;
         return item;
@@ -3077,6 +3110,104 @@ package memblock_sync_pkg;
         return 1'b1;
     endfunction:pop_raw_cancel_snapshot
 
+    function void set_lsq_source_offer_publish_en(input bit enable);
+        // 发布暂停期间允许 DUT sample 继续前进。重新开启时从下一份 offer
+        // 建立新的连续窗口，但不能跳过仍在 FIFO 中等待结算的旧 offer。
+        if (enable && !lsq_source_offer_publish_en) begin
+            if (lsq_source_offer_q.size() != 0) begin
+                `uvm_fatal("MEMBLOCK_LSQ_SOURCE_OFFER",
+                           $sformatf("cannot resume source-offer publication with %0d queued offers",
+                                     lsq_source_offer_q.size()))
+            end
+            lsq_source_offer_first_sample_seq = 0;
+            lsq_source_offer_last_sample_seq = 0;
+            lsq_source_offer_reset_epoch = 0;
+        end
+        lsq_source_offer_publish_en = enable;
+    endfunction:set_lsq_source_offer_publish_en
+
+    function bit get_lsq_source_offer_publish_en();
+        return lsq_source_offer_publish_en;
+    endfunction:get_lsq_source_offer_publish_en
+
+    // 仅在 driver 已取得真实 launch 边沿的 sample anchor 后调用；sequence
+    // 构造 item 的时刻不参与 target 计算。soft test 复用同一绑定函数。
+    function dispatch_lsq_source_offer_t make_lsq_source_offer_at_launch(
+        input longint unsigned launch_sample_seq,
+        input int unsigned reset_epoch
+    );
+        dispatch_lsq_source_offer_t item;
+
+        item = '{default:'0};
+        item.valid = 1'b1;
+        item.launch_sample_seq = launch_sample_seq;
+        item.target_sample_seq = launch_sample_seq;
+        item.dut_sample_seq = launch_sample_seq + 1;
+        item.control_reset_epoch = reset_epoch;
+        return item;
+    endfunction:make_lsq_source_offer_at_launch
+
+    function void push_lsq_source_offer(input dispatch_lsq_source_offer_t item);
+        if (!item.valid || item.launch_sample_seq == 0 ||
+            item.target_sample_seq != item.launch_sample_seq ||
+            item.dut_sample_seq != item.launch_sample_seq + 1) begin
+            `uvm_fatal("MEMBLOCK_LSQ_SOURCE_OFFER", "invalid driver source-offer sample binding")
+        end
+        if (lsq_source_offer_q.size() >= `MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH) begin
+            `uvm_fatal("MEMBLOCK_LSQ_SOURCE_OFFER", "driver source-offer queue overflow")
+        end
+        if (lsq_source_offer_first_sample_seq != 0 &&
+            item.control_reset_epoch == lsq_source_offer_reset_epoch &&
+            item.target_sample_seq != lsq_source_offer_last_sample_seq + 1) begin
+            `uvm_fatal("MEMBLOCK_LSQ_SOURCE_OFFER",
+                       $sformatf("non-contiguous driver offers previous/current=%0d/%0d",
+                                 lsq_source_offer_last_sample_seq,
+                                 item.target_sample_seq))
+        end
+        if (lsq_source_offer_first_sample_seq == 0 ||
+            item.control_reset_epoch != lsq_source_offer_reset_epoch) begin
+            lsq_source_offer_first_sample_seq = item.target_sample_seq;
+            lsq_source_offer_reset_epoch = item.control_reset_epoch;
+        end
+        lsq_source_offer_last_sample_seq = item.target_sample_seq;
+        lsq_source_offer_q.push_back(item);
+    endfunction:push_lsq_source_offer
+
+    function bit peek_lsq_source_offer(output dispatch_lsq_source_offer_t item);
+        if (lsq_source_offer_q.size() == 0) begin
+            item = '{default:'0};
+            return 1'b0;
+        end
+        item = lsq_source_offer_q[0];
+        return 1'b1;
+    endfunction:peek_lsq_source_offer
+
+    function bit pop_lsq_source_offer(output dispatch_lsq_source_offer_t item);
+        if (!peek_lsq_source_offer(item)) begin
+            return 1'b0;
+        end
+        void'(lsq_source_offer_q.pop_front());
+        return 1'b1;
+    endfunction:pop_lsq_source_offer
+
+    function void clear_lsq_source_offers();
+        lsq_source_offer_q.delete();
+        lsq_source_offer_first_sample_seq = 0;
+        lsq_source_offer_last_sample_seq = 0;
+        lsq_source_offer_reset_epoch = 0;
+    endfunction:clear_lsq_source_offers
+
+    function bit lsq_source_offer_required(input longint unsigned sample_seq,
+                                           input int unsigned reset_epoch);
+        return lsq_source_offer_publish_en && lsq_source_offer_first_sample_seq != 0 &&
+               reset_epoch == lsq_source_offer_reset_epoch &&
+               sample_seq >= lsq_source_offer_first_sample_seq;
+    endfunction:lsq_source_offer_required
+
+    function int unsigned lsq_source_offer_queue_size();
+        return lsq_source_offer_q.size();
+    endfunction:lsq_source_offer_queue_size
+
     function void push_raw_redirect_anchor(input dispatch_raw_redirect_anchor_t item);
         if (dispatch_monitor_capture_en && item.valid) begin
             if (raw_redirect_anchor_q.size() >= `MEMBLOCK_CANCEL_RECORD_MAX_DEPTH) begin
@@ -3567,6 +3698,8 @@ package memblock_sync_pkg;
         raw_ctrl_q.delete();
         deferred_raw_ctrl_q.delete();
         raw_cancel_snapshot_q.delete();
+        clear_lsq_source_offers();
+        lsq_source_offer_publish_en = 1'b0;
         raw_redirect_anchor_q.delete();
         raw_sfence_q.delete();
         l2tlb_sfence_csr_context = make_empty_l2tlb_sfence_csr_context();

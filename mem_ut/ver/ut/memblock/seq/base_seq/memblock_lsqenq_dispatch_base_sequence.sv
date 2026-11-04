@@ -22,6 +22,23 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
     memblock_lsq_reservation_token_t pending_sample_tokens[$];
     int unsigned pending_sample_flush_epoch;
     longint unsigned pending_sample_launch_cycle;
+    longint unsigned pending_sample_target_sample_seq;
+    // pending reservation 与 launch 时的 reset/baseline 绑定；reset 只取消，
+    // 不把尚未到达 target 的 token 标记为 DUT_VISIBLE。
+    int unsigned pending_sample_control_reset_epoch;
+    int unsigned pending_sample_shadow_generation;
+    // Lifecycle only: 0=no token, 1=token lives in shared D/R/Q,
+    // 2=the shared-Q fire offer awaits its source-edge shadow settlement.
+    int unsigned             atomic_token_stage;
+    memblock_uid_t           atomic_token_uid;
+    main_control_transaction atomic_token_tr;
+    memblock_op_behavior_t   atomic_token_behavior;
+    // 中文注释：pre-fire token 绑定创建时的 control reset epoch 与 shadow
+    // baseline generation。任一代际变化都必须丢弃 token，不能把 reset 清 Q
+    // 误判成一次成功的 atomic Q fire。
+    int unsigned             atomic_token_control_reset_epoch;
+    int unsigned             atomic_token_shadow_generation;
+    longint unsigned         atomic_token_target_sample_seq;
 
     `uvm_object_utils(memblock_lsqenq_dispatch_base_sequence)
 
@@ -34,6 +51,7 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
     extern virtual task send_idle_lsqenq_boundary(input int unsigned cycle_idx,
                                                   input string reason,
                                                   inout bit has_progress);
+    extern task wait_or_cancel_pending_sample();
     extern function void configure_from_plus();
     extern function void ensure_helpers();
     extern function void drain_csr_runtime_events();
@@ -45,6 +63,7 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
                                                      output main_control_transaction main_tr,
                                                      output memblock_op_behavior_t behavior);
     extern function bit collect_lsq_candidates(output memblock_uid_t uids[$],
+                                               output int unsigned slots[$],
                                                output main_control_transaction trs[$],
                                                output memblock_op_behavior_t behaviors[$],
                                                output memblock_lq_key_t lq_keys[$],
@@ -68,6 +87,7 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
                                         input memblock_sq_key_t sq_key);
     extern function void confirm_lsq_candidates(input lsqenq_agent_agent_xaction tr,
                                                 input memblock_uid_t uids[$],
+                                                input int unsigned slots[$],
                                                 input main_control_transaction trs[$],
                                                 input memblock_op_behavior_t behaviors[$],
                                                 input memblock_lq_key_t lq_keys[$],
@@ -78,6 +98,19 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
     extern function void complete_admission(input memblock_uid_t uid);
     extern function bit admit_control_marker_if_ready(output bit has_progress);
     extern function bit admit_non_lsq_if_ready(output bit has_progress);
+    extern function bit service_atomic_admission_token(output bit has_progress);
+    extern function void configure_source_offer_metadata(
+        input lsqenq_agent_agent_xaction tr,
+        input bit [MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM-1:0] fire_mask,
+        input bit need_alloc_nonzero,
+        input int unsigned lq_alloc,
+        input int unsigned sq_alloc,
+        input string reason);
+    extern function void cancel_v2_pending_sample_on_reset(input string reason);
+    extern function bit pending_sample_reset_binding_invalid();
+    extern function void clear_pre_fire_atomic_token(input string reason);
+    extern function bit atomic_token_reset_binding_invalid();
+    extern function void publish_sequence_local_state();
 
 endclass:memblock_lsqenq_dispatch_base_sequence
 
@@ -88,6 +121,16 @@ function memblock_lsqenq_dispatch_base_sequence::new(string name = "memblock_lsq
     pending_sample_valid = 1'b0;
     pending_sample_flush_epoch = 0;
     pending_sample_launch_cycle = 0;
+    pending_sample_target_sample_seq = 0;
+    pending_sample_control_reset_epoch = 0;
+    pending_sample_shadow_generation = 0;
+    atomic_token_stage = 0;
+    atomic_token_uid = 0;
+    atomic_token_tr = null;
+    atomic_token_behavior = lsq_ctrl_model::make_default_behavior();
+    atomic_token_control_reset_epoch = 0;
+    atomic_token_shadow_generation = 0;
+    atomic_token_target_sample_seq = 0;
 endfunction:new
 
 task memblock_lsqenq_dispatch_base_sequence::pre_body();
@@ -103,6 +146,7 @@ task memblock_lsqenq_dispatch_base_sequence::body();
     end
     ensure_helpers();
     wait_for_main_table();
+    memblock_sync_pkg::set_lsq_source_offer_publish_en(1'b1);
     drive_lsqenq_loop();
 endtask:body
 
@@ -115,17 +159,43 @@ task memblock_lsqenq_dispatch_base_sequence::drive_lsqenq_loop();
     forever begin
         bit has_progress;
 
+        has_progress = 1'b0;
+        if (data.is_global_stop_prepare_requested() && !data.is_global_stop_requested()) begin
+            memblock_sync_pkg::set_lsq_source_offer_publish_en(1'b0);
+            wait_or_cancel_pending_sample();
+            if (pending_sample_valid) complete_v2_pending_sample(has_progress);
+            #1;
+            continue;
+        end
         if (data.is_global_stop_requested()) begin
             has_progress = 1'b0;
-            if (pending_sample_valid) begin
-                send_idle_lsqenq_boundary(cycle_idx, "global_stop trailing sample", has_progress);
-            end
+            memblock_sync_pkg::set_lsq_source_offer_publish_en(1'b0);
+            wait_or_cancel_pending_sample();
+            if (pending_sample_valid) complete_v2_pending_sample(has_progress);
             `uvm_info(get_type_name(),
                       $sformatf("stop LSQ enqueue loop by global_stop_requested at cycle=%0d",
                                 cycle_idx),
                       UVM_LOW)
             break;
         end
+        // terminal 后先停止生产新的 idle offer，让最后一个 target 自然结算；
+        // 否则永久新增的 idle FIFO 项会反过来阻止公共 runtime drain。
+        if (data.transaction_done() && !pending_sample_valid &&
+            atomic_token_stage == 0 && lsq_ctrl.rtl_pipe_empty() &&
+            !data.has_pending_lsq_cancel_apply()) begin
+            memblock_sync_pkg::set_lsq_source_offer_publish_en(1'b0);
+            #1;
+            continue;
+        end
+        // global-stop prepare 可能因新的 runtime work 被撤销。恢复前先让暂停前的
+        // offer 和 D/R/Q shadow 自然结算，再从下一拍建立新的连续发布窗口。
+        if (!memblock_sync_pkg::get_lsq_source_offer_publish_en() &&
+            (memblock_sync_pkg::lsq_source_offer_queue_size() != 0 ||
+             lsq_ctrl.shadow_source_offer_valid || !lsq_ctrl.rtl_pipe_empty())) begin
+            #1;
+            continue;
+        end
+        memblock_sync_pkg::set_lsq_source_offer_publish_en(1'b1);
         send_lsqenq_cycle(cycle_idx, has_progress);
         cycle_idx++;
         if (has_progress) begin
@@ -150,6 +220,7 @@ task memblock_lsqenq_dispatch_base_sequence::send_lsqenq_cycle(input int unsigne
                                                           output bit has_progress);
     lsqenq_agent_agent_xaction tr;
     memblock_uid_t            uids[$];
+    int unsigned              slots[$];
     main_control_transaction  trs[$];
     memblock_op_behavior_t    behaviors[$];
     memblock_lq_key_t         lq_keys[$];
@@ -157,27 +228,27 @@ task memblock_lsqenq_dispatch_base_sequence::send_lsqenq_cycle(input int unsigne
     bit                       admission_progress;
 
     has_progress = 1'b0;
+    wait_or_cancel_pending_sample();
+    if (pending_sample_valid) complete_v2_pending_sample(has_progress);
     apply_pending_lsq_cancels();
-    if (pending_sample_valid) begin
-        memblock_uid_t probe_uid;
-        main_control_transaction probe_tr;
-        memblock_op_behavior_t probe_behavior;
-
-        if (next_uid_needs_lsq_admission(probe_uid, probe_tr, probe_behavior) &&
-            probe_behavior.need_alloc == 2'b00) begin
-            send_idle_lsqenq_boundary(cycle_idx, "non-LSQ sample boundary", has_progress);
-        end
-    end
     admission_progress = 1'b0;
     if (admit_control_marker_if_ready(admission_progress)) begin
         has_progress |= admission_progress;
+        return;
+    end
+    if (service_atomic_admission_token(admission_progress)) begin
+        has_progress |= admission_progress;
+        if (memblock_sync_pkg::reset_backend_done === 1'b1 &&
+            lsq_ctrl.shadow_baseline_valid) begin
+            send_idle_lsqenq_boundary(cycle_idx, "atomic D/R/Q admission token", has_progress);
+        end
         return;
     end
     if (admit_non_lsq_if_ready(admission_progress)) begin
         has_progress |= admission_progress;
         return;
     end
-    if (!collect_lsq_candidates(uids, trs, behaviors, lq_keys, sq_keys)) begin
+    if (!collect_lsq_candidates(uids, slots, trs, behaviors, lq_keys, sq_keys)) begin
         send_idle_lsqenq_boundary(cycle_idx, "no LSQ candidate", has_progress);
         return;
     end
@@ -192,16 +263,37 @@ task memblock_lsqenq_dispatch_base_sequence::send_lsqenq_cycle(input int unsigne
     tr.memblock_dispatch_aborted_by_redirect = 1'b0;
     tr.memblock_dispatch_request_launched = 1'b0;
     tr.memblock_dispatch_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+    tr.memblock_source_offer_metadata_valid = 1'b0;
+    tr.memblock_source_offer_published = 1'b0;
     tr.pre_pkt_gap = 0;
     tr.post_pkt_gap = 0;
     foreach (uids[idx]) begin
-        assign_lsqenq_slot(tr, idx, trs[idx], behaviors[idx], lq_keys[idx], sq_keys[idx]);
+        assign_lsqenq_slot(tr, slots[idx], trs[idx], behaviors[idx], lq_keys[idx], sq_keys[idx]);
+    end
+    begin
+        int unsigned accepted_lq;
+        int unsigned accepted_sq;
+        bit [MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM-1:0] fire_mask;
+
+        accepted_lq = 0;
+        accepted_sq = 0;
+        fire_mask = '0;
+        foreach (behaviors[idx]) begin
+            if (slots[idx] >= MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM || fire_mask[slots[idx]]) begin
+                `uvm_fatal(get_type_name(), "LSQ fire slots are invalid or duplicated")
+            end
+            fire_mask[slots[idx]] = 1'b1;
+            if (behaviors[idx].uses_lq) accepted_lq += behaviors[idx].num_ls_elem;
+            if (behaviors[idx].uses_sq) accepted_sq += behaviors[idx].num_ls_elem;
+        end
+        configure_source_offer_metadata(tr, fire_mask, 1'b1,
+                                        accepted_lq, accepted_sq,
+                                        "active LSQ launch");
     end
 
     start_item(tr);
     finish_item(tr);
-    complete_v2_pending_sample(has_progress);
-    confirm_lsq_candidates(tr, uids, trs, behaviors, lq_keys, sq_keys, has_progress);
+    confirm_lsq_candidates(tr, uids, slots, trs, behaviors, lq_keys, sq_keys, has_progress);
 endtask:send_lsqenq_cycle
 
 task memblock_lsqenq_dispatch_base_sequence::send_idle_lsqenq_boundary(input int unsigned cycle_idx,
@@ -219,13 +311,67 @@ task memblock_lsqenq_dispatch_base_sequence::send_idle_lsqenq_boundary(input int
     tr.memblock_dispatch_aborted_by_redirect = 1'b0;
     tr.memblock_dispatch_request_launched = 1'b0;
     tr.memblock_dispatch_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+    tr.memblock_source_offer_metadata_valid = 1'b0;
+    tr.memblock_source_offer_published = 1'b0;
     tr.pre_pkt_gap = 0;
     tr.post_pkt_gap = 0;
     `uvm_info(get_type_name(), $sformatf("send LSQ idle boundary: %s", reason), UVM_DEBUG)
+    begin
+        bit [MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM-1:0] fire_mask;
+
+        fire_mask = '0;
+        if (atomic_token_stage == 2 && atomic_token_target_sample_seq == 0) begin
+            if (!lsq_ctrl.shadow_q_valid[0] ||
+                !lsq_ctrl.shadow_q_is_atomic[0] ||
+                lsq_ctrl.shadow_q_uid[0] != atomic_token_uid) begin
+                `uvm_fatal(get_type_name(), "atomic Q fire offer lost its shared lane0 token")
+            end
+            fire_mask[0] = 1'b1;
+        end
+        configure_source_offer_metadata(tr, fire_mask, 1'b0, 0, 0, reason);
+    end
     start_item(tr);
     finish_item(tr);
-    complete_v2_pending_sample(has_progress);
+    if (tr.memblock_dispatch_request_launched ||
+        tr.memblock_dispatch_aborted_by_redirect) begin
+        `uvm_fatal(get_type_name(), "idle LSQ cycle returned active launch/redirect state")
+    end
+    if (!tr.memblock_source_offer_published ||
+        tr.memblock_source_offer_target_sample_seq == 0 ||
+        tr.memblock_source_offer_dut_sample_seq != tr.memblock_source_offer_target_sample_seq + 1) begin
+        `uvm_fatal(get_type_name(), "idle LSQ cycle has no driver-bound source offer")
+    end
+    if (atomic_token_stage == 2 && atomic_token_target_sample_seq == 0) begin
+        atomic_token_target_sample_seq = tr.memblock_source_offer_target_sample_seq;
+        publish_sequence_local_state();
+    end
 endtask:send_idle_lsqenq_boundary
+
+task memblock_lsqenq_dispatch_base_sequence::wait_or_cancel_pending_sample();
+    int unsigned wait_count;
+
+    ensure_helpers();
+    wait_count = 0;
+    while (pending_sample_valid &&
+           lsq_ctrl.shadow_last_sample_seq < pending_sample_target_sample_seq) begin
+        if (pending_sample_reset_binding_invalid()) begin
+            cancel_v2_pending_sample_on_reset("backend reset before reservation sample");
+            return;
+        end
+        #1;
+        wait_count++;
+        if (no_progress_warn_cycles != 0 &&
+            (wait_count % no_progress_warn_cycles) == 0) begin
+            `uvm_warning(get_type_name(),
+                         $sformatf("waiting for pending reservation target sample=%0d current shadow sample=%0d",
+                                   pending_sample_target_sample_seq,
+                                   lsq_ctrl.shadow_last_sample_seq))
+        end
+    end
+    if (pending_sample_reset_binding_invalid()) begin
+        cancel_v2_pending_sample_on_reset("backend reset at reservation sample boundary");
+    end
+endtask:wait_or_cancel_pending_sample
 
 function void memblock_lsqenq_dispatch_base_sequence::configure_from_plus();
     enable = seq_csr_common::get_lsqenq_seq_en();
@@ -245,7 +391,15 @@ function void memblock_lsqenq_dispatch_base_sequence::ensure_helpers();
         monitor_adapter == null) begin
         `uvm_fatal(get_type_name(), "failed to initialize LSQ enqueue dispatch helpers")
     end
+    publish_sequence_local_state();
 endfunction:ensure_helpers
+
+function void memblock_lsqenq_dispatch_base_sequence::publish_sequence_local_state();
+    if (data != null) begin
+        data.publish_lsq_sequence_local_state(pending_sample_valid,
+                                              atomic_token_stage != 0);
+    end
+endfunction:publish_sequence_local_state
 
 function void memblock_lsqenq_dispatch_base_sequence::apply_pending_lsq_cancels();
     ensure_helpers();
@@ -363,6 +517,7 @@ function bit memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admissio
 endfunction:next_uid_needs_lsq_admission
 
 function bit memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates(output memblock_uid_t uids[$],
+                                                                       output int unsigned slots[$],
                                                                        output main_control_transaction trs[$],
                                                                        output memblock_op_behavior_t behaviors[$],
                                                                        output memblock_lq_key_t lq_keys[$],
@@ -370,101 +525,154 @@ function bit memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates(outp
     int unsigned max_enq;
     memblock_lq_key_t lq_tmp;
     memblock_sq_key_t sq_tmp;
-    int unsigned lq_free_tmp;
-    int unsigned sq_free_tmp;
     int unsigned load_elem_count;
     int unsigned store_elem_count;
-    memblock_uid_t uid;
-    main_control_transaction main_tr;
-    memblock_op_behavior_t behavior;
 
     uids.delete();
+    slots.delete();
     trs.delete();
     behaviors.delete();
     lq_keys.delete();
     sq_keys.delete();
-    if (admission_blocked_by_flush()) begin
+    if (admission_blocked_by_flush() || !lsq_ctrl.shadow_baseline_valid) begin
         return 1'b0;
     end
     max_enq = seq_csr_common::get_enq_per_cycle();
     if (max_enq == 0) begin
         return 1'b0;
     end
-    lq_tmp = lsq_ctrl.lq_enq_ptr;
-    sq_tmp = lsq_ctrl.sq_enq_ptr;
-    lq_free_tmp = lsq_ctrl.lq_free_count;
-    sq_free_tmp = lsq_ctrl.sq_free_count;
-    load_elem_count = 0;
-    store_elem_count = 0;
-    while (uids.size() < max_enq) begin
-        memblock_lq_key_t lq_key;
-        memblock_sq_key_t sq_key;
-        status_transaction status;
-        int unsigned tentative_load;
-        int unsigned tentative_store;
 
-        if (admission_blocked_by_flush()) begin
-            break;
+    // Existing Q state is authoritative.  Preserve physical lane numbers and
+    // holes; the first blocked valid lane stops the complete younger prefix.
+    if (lsq_ctrl.rtl_q_has_valid()) begin
+        bit prefix_blocked;
+
+        if (!lsq_ctrl.rtl_admission_ready() || lsq_ctrl.shadow_iq_recompute_hold ||
+            lsq_allocating_admission_blocked()) begin
+            return 1'b0;
         end
-        uid = data.get_next_new_admit_uid() + uids.size();
-        if (uid >= data.main_trans_num) begin
-            break;
+        lq_tmp = lsq_ctrl.shadow_lq_enq_ptr;
+        sq_tmp = lsq_ctrl.shadow_sq_enq_ptr;
+        load_elem_count = 0;
+        store_elem_count = 0;
+        prefix_blocked = 1'b0;
+        for (int unsigned lane = 0; lane < MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM; lane++) begin
+            memblock_uid_t uid;
+            main_control_transaction main_tr;
+            memblock_op_behavior_t behavior;
+            status_transaction status;
+            int unsigned tentative_load;
+            int unsigned tentative_store;
+            bit lane_allowed;
+
+            if (!lsq_ctrl.shadow_q_valid[lane]) begin
+                continue;
+            end
+            if (prefix_blocked || uids.size() >= max_enq) begin
+                break;
+            end
+            uid = lsq_ctrl.shadow_q_uid[lane];
+            main_tr = data.get_main_transaction(uid);
+            status = data.get_status(uid);
+            behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+            if (is_control_op_class(main_tr.op_class) || behavior.need_alloc == 2'b00 ||
+                behavior.num_ls_elem != memblock_num_ls_elem_t'(1) ||
+                status.terminal_done || status.active || status.enq ||
+                status.exception_pending || status.replay_pending ||
+                data.control_barrier_blocks_admission(uid) ||
+                !data.rob_admission_window_has_room(uid, "collect_lsq_candidates_q")) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("invalid retained LSQ Q lane=%0d uid=%0d needAlloc=%0b active/enq=%0b/%0b",
+                                     lane, uid, behavior.need_alloc, status.active, status.enq))
+            end
+            if (behavior.uses_lq != lsq_ctrl.shadow_q_is_load[lane] ||
+                behavior.uses_sq != lsq_ctrl.shadow_q_is_store[lane]) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("Q lane category drift lane=%0d uid=%0d", lane, uid))
+            end
+            tentative_load = load_elem_count + (behavior.uses_lq ? 1 : 0);
+            tentative_store = store_elem_count + (behavior.uses_sq ? 1 : 0);
+            lane_allowed = tentative_load <= MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH &&
+                           tentative_store <= MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH;
+            if (behavior.uses_lq) begin
+                lane_allowed &= lsq_ctrl.shadow_lq_credit >
+                                lsq_ctrl.shadow_conserve_flow_total[lane];
+            end
+            if (behavior.uses_sq) begin
+                lane_allowed &= lsq_ctrl.shadow_sq_credit >
+                                lsq_ctrl.shadow_conserve_flow_total[lane];
+            end
+            if (!lane_allowed) begin
+                prefix_blocked = 1'b1;
+                break;
+            end
+
+            uids.push_back(uid);
+            slots.push_back(lane);
+            trs.push_back(main_tr);
+            behaviors.push_back(behavior);
+            lq_keys.push_back(lq_tmp);
+            sq_keys.push_back(sq_tmp);
+            load_elem_count = tentative_load;
+            store_elem_count = tentative_store;
+            if (behavior.uses_lq) begin
+                lq_tmp = lsq_ctrl_model::advance_lq_key(lq_tmp, 1);
+            end
+            if (behavior.uses_sq) begin
+                sq_tmp = lsq_ctrl_model::advance_sq_key(sq_tmp, 1);
+            end
         end
-        if (data.control_barrier_blocks_admission(uid)) begin
-            break;
+        return uids.size() != 0;
+    end
+
+    // No Q offer is ready.  Only an entirely empty D/R/Q pipe may capture the
+    // next ordered source bundle.  Capture does not allocate software LSQ state.
+    if (!lsq_ctrl.rtl_pipe_empty() || lsq_allocating_admission_blocked()) begin
+        return 1'b0;
+    end
+    begin
+        memblock_uid_t staged_uids[$];
+        memblock_op_behavior_t staged_behaviors[$];
+        memblock_uid_t base_uid;
+
+        base_uid = data.get_next_new_admit_uid();
+        for (int unsigned lane = 0; lane < MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM; lane++) begin
+            memblock_uid_t uid;
+            main_control_transaction main_tr;
+            memblock_op_behavior_t behavior;
+            status_transaction status;
+
+            uid = base_uid + lane;
+            if (uid >= data.main_trans_num || data.control_barrier_blocks_admission(uid) ||
+                !data.rob_admission_window_has_room(uid, "collect_lsq_candidates_d")) begin
+                break;
+            end
+            main_tr = data.get_main_transaction(uid);
+            if (is_control_op_class(main_tr.op_class)) begin
+                break;
+            end
+            status = data.get_status(uid);
+            behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+            if (behavior.need_alloc == 2'b00) begin
+                break;
+            end
+            if (behavior.num_ls_elem != memblock_num_ls_elem_t'(1)) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("uid=%0d scalar D bundle requires numLsElem=1", uid))
+            end
+            if (status.terminal_done || status.active || status.enq ||
+                status.exception_pending || status.replay_pending) begin
+                break;
+            end
+            staged_uids.push_back(uid);
+            staged_behaviors.push_back(behavior);
         end
-        if (!data.rob_admission_window_has_room(uid, "collect_lsq_candidates")) begin
-            break;
-        end
-        main_tr = data.get_main_transaction(uid);
-        // 中文注释：控制标记占用 admission 前缀但绝不进入本次 LSQ batch；在
-        // derive_op_behavior() 前停止，避免中性 fuType 被普通路径误判。
-        if (is_control_op_class(main_tr.op_class)) begin
-            break;
-        end
-        status = data.get_status(uid);
-        if (status.terminal_done || status.active || status.enq ||
-            status.exception_pending || status.replay_pending) begin
-            break;
-        end
-        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
-        if (behavior.need_alloc == 2'b00) begin
-            break;
-        end
-        if (lsq_allocating_admission_blocked()) begin
-            break;
-        end
-        if (behavior.num_ls_elem != memblock_num_ls_elem_t'(1)) begin
-            `uvm_fatal(get_type_name(),
-                       $sformatf("uid=%0d scalar-only LSQ enqueue requires num_ls_elem=1, got %0d",
-                                 uid,
-                                 behavior.num_ls_elem))
-        end
-        tentative_load = load_elem_count + (behavior.uses_lq ? behavior.num_ls_elem : 0);
-        tentative_store = store_elem_count + (behavior.uses_sq ? behavior.num_ls_elem : 0);
-        if (tentative_load > MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH ||
-            tentative_store > MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH ||
-            tentative_load > lq_free_tmp ||
-            tentative_store > sq_free_tmp) begin
-            break;
-        end
-        lq_key = lq_tmp;
-        sq_key = sq_tmp;
-        uids.push_back(uid);
-        trs.push_back(main_tr);
-        behaviors.push_back(behavior);
-        lq_keys.push_back(lq_key);
-        sq_keys.push_back(sq_key);
-        load_elem_count = tentative_load;
-        store_elem_count = tentative_store;
-        if (behavior.uses_lq) begin
-            lq_tmp = lsq_ctrl_model::advance_lq_key(lq_tmp, behavior.num_ls_elem);
-        end
-        if (behavior.uses_sq) begin
-            sq_tmp = lsq_ctrl_model::advance_sq_key(sq_tmp, behavior.num_ls_elem);
+        if (staged_uids.size() != 0 &&
+            !lsq_ctrl.stage_dispatch_bundle(staged_uids, staged_behaviors)) begin
+            `uvm_fatal(get_type_name(), "failed to capture an otherwise legal LSQ D bundle")
         end
     end
-    return uids.size() != 0;
+    return 1'b0;
 endfunction:collect_lsq_candidates
 
 function void memblock_lsqenq_dispatch_base_sequence::clear_lsqenq_xaction(input lsqenq_agent_agent_xaction tr);
@@ -698,6 +906,7 @@ endfunction:set_req_fields
 
 function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(input lsqenq_agent_agent_xaction tr,
                                                                         input memblock_uid_t uids[$],
+                                                                        input int unsigned slots[$],
                                                                         input main_control_transaction trs[$],
                                                                         input memblock_op_behavior_t behaviors[$],
                                                                         input memblock_lq_key_t lq_keys[$],
@@ -714,10 +923,15 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
     if (tr.memblock_dispatch_aborted_by_redirect) begin
         `uvm_fatal(get_type_name(), "LSQ transaction cannot be both launched and aborted before launch")
     end
+    if (!tr.memblock_source_offer_published ||
+        tr.memblock_source_offer_target_sample_seq == 0 ||
+        tr.memblock_source_offer_dut_sample_seq != tr.memblock_source_offer_target_sample_seq + 1) begin
+        `uvm_fatal(get_type_name(), "active LSQ launch has no driver-bound source offer")
+    end
     if (pending_sample_valid) begin
         `uvm_fatal(get_type_name(), "cannot reserve current LSQ batch before completing previous sample")
     end
-    if (uids.size() == 0 || uids.size() != trs.size() ||
+    if (uids.size() == 0 || uids.size() != slots.size() || uids.size() != trs.size() ||
         uids.size() != behaviors.size() || uids.size() != lq_keys.size() ||
         uids.size() != sq_keys.size()) begin
         `uvm_fatal(get_type_name(), "LSQ candidate queues are empty or have inconsistent sizes")
@@ -755,7 +969,11 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
     end
     pending_sample_flush_epoch = tr.memblock_dispatch_flush_epoch;
     pending_sample_launch_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    pending_sample_target_sample_seq = tr.memblock_source_offer_dut_sample_seq;
+    pending_sample_control_reset_epoch = memblock_sync_pkg::control_reset_epoch;
+    pending_sample_shadow_generation = lsq_ctrl.shadow_baseline_generation;
     pending_sample_valid = 1'b1;
+    publish_sequence_local_state();
 endfunction:confirm_lsq_candidates
 
 function void memblock_lsqenq_dispatch_base_sequence::complete_v2_pending_sample(inout bit has_progress);
@@ -764,8 +982,18 @@ function void memblock_lsqenq_dispatch_base_sequence::complete_v2_pending_sample
     if (!pending_sample_valid) begin
         return;
     end
+    if (pending_sample_reset_binding_invalid()) begin
+        cancel_v2_pending_sample_on_reset("reset invalidated pending reservation before complete");
+        return;
+    end
     // LSQ enqueue service is a consumer; CSR monitor owns sample advancement.
-    sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
+    sample_seq = pending_sample_target_sample_seq;
+    if (sample_seq == 0 || lsq_ctrl.shadow_last_sample_seq < sample_seq) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("pending reservation target sample is not complete target/shadow=%0d/%0d",
+                             sample_seq,
+                             lsq_ctrl.shadow_last_sample_seq))
+    end
     foreach (pending_sample_tokens[idx]) begin
         if (!pending_sample_tokens[idx].valid) begin
             `uvm_fatal(get_type_name(), "pending LSQ reservation token is invalid")
@@ -796,6 +1024,10 @@ function void memblock_lsqenq_dispatch_base_sequence::clear_v2_pending_sample();
     pending_sample_valid = 1'b0;
     pending_sample_flush_epoch = 0;
     pending_sample_launch_cycle = 0;
+    pending_sample_target_sample_seq = 0;
+    pending_sample_control_reset_epoch = 0;
+    pending_sample_shadow_generation = 0;
+    publish_sequence_local_state();
 endfunction:clear_v2_pending_sample
 
 function void memblock_lsqenq_dispatch_base_sequence::complete_admission(input memblock_uid_t uid);
@@ -853,10 +1085,257 @@ function bit memblock_lsqenq_dispatch_base_sequence::admit_non_lsq_if_ready(outp
     if (behavior.need_alloc != 2'b00) begin
         return 1'b0;
     end
+    if (behavior.is_atomic) begin
+        // Atomic admission owns a sampled D/R/Q token path.  When reset
+        // baseline or isolation is not ready, leave it for that path and let
+        // the caller send an idle boundary so the shadow model can advance.
+        return 1'b0;
+    end
+    if (!lsq_ctrl.rtl_admission_ready()) begin
+        return 1'b0;
+    end
     lsq_ctrl.commit_non_lsq_admission(uid, behavior, main_tr);
     complete_admission(uid);
     has_progress = 1'b1;
     return 1'b1;
 endfunction:admit_non_lsq_if_ready
+
+function void memblock_lsqenq_dispatch_base_sequence::configure_source_offer_metadata(
+    input lsqenq_agent_agent_xaction tr,
+    input bit [MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM-1:0] fire_mask,
+    input bit need_alloc_nonzero,
+    input int unsigned lq_alloc,
+    input int unsigned sq_alloc,
+    input string reason
+);
+    if (tr == null || tr.memblock_source_offer_metadata_valid) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s attempted invalid/duplicate source-offer metadata", reason))
+    end
+    tr.memblock_source_offer_metadata_valid = 1'b1;
+    tr.memblock_source_offer_fire_mask = fire_mask;
+    tr.memblock_source_offer_need_alloc_nonzero = need_alloc_nonzero;
+    tr.memblock_source_offer_lq_alloc = lq_alloc;
+    tr.memblock_source_offer_sq_alloc = sq_alloc;
+endfunction:configure_source_offer_metadata
+
+function bit memblock_lsqenq_dispatch_base_sequence::pending_sample_reset_binding_invalid();
+    return pending_sample_valid &&
+           (memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+            memblock_sync_pkg::l2tlb_reset_active() ||
+            pending_sample_control_reset_epoch != memblock_sync_pkg::control_reset_epoch ||
+            pending_sample_shadow_generation != lsq_ctrl.shadow_baseline_generation);
+endfunction:pending_sample_reset_binding_invalid
+
+function void memblock_lsqenq_dispatch_base_sequence::cancel_v2_pending_sample_on_reset(
+    input string reason
+);
+    int unsigned rollback_lq_count;
+    int unsigned rollback_sq_count;
+
+    if (!pending_sample_valid) begin
+        return;
+    end
+    rollback_lq_count = 0;
+    rollback_sq_count = 0;
+    for (int idx = pending_sample_tokens.size(); idx > 0; idx--) begin
+        memblock_uid_t uid;
+        memblock_op_behavior_t behavior;
+
+        if (!pending_sample_tokens[idx - 1].valid) begin
+            `uvm_fatal(get_type_name(), "reset cancel found invalid pending reservation token")
+        end
+        uid = pending_sample_tokens[idx - 1].uid;
+        behavior = lsq_ctrl_model::derive_op_behavior(
+            data.get_main_transaction(uid));
+        data.cancel_pending_lsq_reservation_on_reset(
+            uid,
+            pending_sample_tokens[idx - 1].launch_epoch);
+        if (behavior.uses_lq) rollback_lq_count += behavior.num_ls_elem;
+        if (behavior.uses_sq) rollback_sq_count += behavior.num_ls_elem;
+        data.retire_active_uid(uid);
+        void'(data.init_status_for_uid(uid));
+    end
+    if (rollback_lq_count != 0) lsq_ctrl.cancel_lq(rollback_lq_count);
+    if (rollback_sq_count != 0) lsq_ctrl.cancel_sq(rollback_sq_count);
+    `uvm_info(get_type_name(),
+              $sformatf("cancel pending LSQ reservation on reset: %s rollback_lq/sq=%0d/%0d",
+                        reason, rollback_lq_count, rollback_sq_count),
+              UVM_LOW)
+    clear_v2_pending_sample();
+endfunction:cancel_v2_pending_sample_on_reset
+
+function void memblock_lsqenq_dispatch_base_sequence::clear_pre_fire_atomic_token(
+    input string reason
+);
+    if (atomic_token_stage == 0) begin
+        return;
+    end
+    `uvm_info(get_type_name(),
+              $sformatf("clear atomic admission token uid=%0d stage=%0d reason=%s",
+                        atomic_token_uid, atomic_token_stage, reason),
+              UVM_LOW)
+    atomic_token_stage = 0;
+    atomic_token_uid = 0;
+    atomic_token_tr = null;
+    atomic_token_behavior = lsq_ctrl_model::make_default_behavior();
+    atomic_token_control_reset_epoch = 0;
+    atomic_token_shadow_generation = 0;
+    atomic_token_target_sample_seq = 0;
+    publish_sequence_local_state();
+endfunction:clear_pre_fire_atomic_token
+
+function bit memblock_lsqenq_dispatch_base_sequence::atomic_token_reset_binding_invalid();
+    if (atomic_token_stage == 0) begin
+        return 1'b0;
+    end
+    return memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+           !lsq_ctrl.shadow_baseline_valid ||
+           atomic_token_shadow_generation != lsq_ctrl.shadow_baseline_generation ||
+           atomic_token_control_reset_epoch != lsq_ctrl.shadow_control_reset_epoch;
+endfunction:atomic_token_reset_binding_invalid
+
+function bit memblock_lsqenq_dispatch_base_sequence::service_atomic_admission_token(
+    output bit has_progress
+);
+    memblock_uid_t uid;
+    main_control_transaction main_tr;
+    memblock_op_behavior_t behavior;
+    status_transaction status;
+
+    has_progress = 1'b0;
+    ensure_helpers();
+
+    if (atomic_token_stage == 0 &&
+        data.release_unfired_atomic_barrier_after_redirect_recovery()) begin
+        has_progress = 1'b1;
+    end
+
+    if (atomic_token_reset_binding_invalid()) begin
+        // Token 与当前 generation 相同但 reset epoch/backend/baseline 已变化时，
+        // 尚未 fire 的 atomic 仍可能停在 D/R/Q。整体失效 shadow，禁止该旧 token
+        // 漂移到 Q 后被普通 LSQ 路径接管，也禁止把 reset 清 Q 当成 atomic fire。
+        if (atomic_token_shadow_generation == lsq_ctrl.shadow_baseline_generation) begin
+            lsq_ctrl.reset_rtl_shadow();
+        end
+        clear_pre_fire_atomic_token("control reset epoch/backend/shadow baseline changed");
+        has_progress = 1'b1;
+        return 1'b1;
+    end
+
+    if (atomic_token_stage != 0 && admission_blocked_by_flush()) begin
+        // A pre-fire token owns no ROB/LSQ/barrier state and is discarded by
+        // an effective redirect.  Fired atomic owners are handled elsewhere.
+        clear_pre_fire_atomic_token("effective redirect before atomic Q fire");
+        has_progress = 1'b1;
+        return 1'b1;
+    end
+
+    if (atomic_token_stage == 2) begin
+        if (atomic_token_target_sample_seq == 0 ||
+            lsq_ctrl.shadow_last_sample_seq < atomic_token_target_sample_seq) begin
+            return 1'b1;
+        end
+        if (lsq_ctrl.rtl_q_has_valid()) begin
+            `uvm_fatal(get_type_name(), "sampled atomic Q fire did not consume the shared lane")
+        end
+        if (data.dispatch_progress.terminal_done_uid != atomic_token_uid) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("atomic Q owner uid=%0d lost older-terminal isolation frontier=%0d",
+                                 atomic_token_uid,
+                                 data.dispatch_progress.terminal_done_uid))
+        end
+        lsq_ctrl.commit_atomic_non_lsq_admission(
+            atomic_token_uid,
+            atomic_token_behavior,
+            atomic_token_tr,
+            lsq_ctrl.shadow_lq_enq_ptr,
+            lsq_ctrl.shadow_sq_enq_ptr);
+        data.establish_atomic_barrier(atomic_token_uid);
+        complete_admission(atomic_token_uid);
+        clear_pre_fire_atomic_token("atomic Q fire committed");
+        has_progress = 1'b1;
+        return 1'b1;
+    end
+
+    if (atomic_token_stage == 1) begin
+        if (lsq_ctrl.shadow_q_valid[0]) begin
+            if (!lsq_ctrl.shadow_q_is_atomic[0] ||
+                lsq_ctrl.shadow_q_uid[0] != atomic_token_uid) begin
+                `uvm_fatal(get_type_name(), "shared Q lane0 atomic identity mismatch")
+            end
+            for (int unsigned lane = 1; lane < MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM; lane++) begin
+                if (lsq_ctrl.shadow_q_valid[lane]) begin
+                    `uvm_fatal(get_type_name(), "atomic token must occupy the shared Q bundle alone")
+                end
+            end
+            if (lsq_ctrl.rtl_admission_ready() &&
+                !lsq_ctrl.shadow_iq_recompute_hold &&
+                !lsq_ctrl.shadow_source_offer_valid &&
+                !pending_sample_valid &&
+                data.dispatch_progress.terminal_done_uid == atomic_token_uid &&
+                !data.active_atomic_barrier_valid &&
+                !data.active_control_barrier_valid) begin
+                atomic_token_stage = 2;
+                atomic_token_target_sample_seq = 0;
+                publish_sequence_local_state();
+                has_progress = 1'b1;
+            end
+        end
+        return 1'b1;
+    end
+
+    if (admission_blocked_by_flush()) begin
+        return 1'b0;
+    end
+    uid = data.get_next_new_admit_uid();
+    if (uid >= data.main_trans_num || data.control_barrier_blocks_admission(uid) ||
+        is_control_op_class(data.get_main_transaction(uid).op_class)) begin
+        return 1'b0;
+    end
+    main_tr = data.get_main_transaction(uid);
+    behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+    if (!behavior.is_atomic) begin
+        return 1'b0;
+    end
+    status = data.get_status(uid);
+    if (status.terminal_done || status.active || status.enq ||
+        status.exception_pending || status.replay_pending) begin
+        return 1'b0;
+    end
+    if (!data.rob_admission_window_has_room(uid, "service_atomic_admission_token")) begin
+        return 1'b0;
+    end
+    // Strict AtomicsUnit isolation: capture only when every older UID is
+    // terminal and no prior atomic/control barrier is active.
+    if (data.dispatch_progress.terminal_done_uid != uid ||
+        data.active_atomic_barrier_valid || data.active_control_barrier_valid) begin
+        return 1'b0;
+    end
+    if (!lsq_ctrl.shadow_baseline_valid ||
+        !lsq_ctrl.rtl_pipe_empty() || lsq_ctrl.shadow_source_offer_valid ||
+        pending_sample_valid) begin
+        return 1'b0;
+    end
+    begin
+        memblock_uid_t atomic_uids[$];
+        memblock_op_behavior_t atomic_behaviors[$];
+
+        atomic_uids.push_back(uid);
+        atomic_behaviors.push_back(behavior);
+        if (!lsq_ctrl.stage_dispatch_bundle(atomic_uids, atomic_behaviors, 1'b1)) begin
+            `uvm_fatal(get_type_name(), "failed to stage isolated atomic token in shared D/R/Q")
+        end
+    end
+    atomic_token_stage = 1;
+    atomic_token_uid = uid;
+    atomic_token_tr = main_tr;
+    atomic_token_behavior = behavior;
+    atomic_token_control_reset_epoch = lsq_ctrl.shadow_control_reset_epoch;
+    atomic_token_shadow_generation = lsq_ctrl.shadow_baseline_generation;
+    publish_sequence_local_state();
+    has_progress = 1'b1;
+    return 1'b1;
+endfunction:service_atomic_admission_token
 
 `endif

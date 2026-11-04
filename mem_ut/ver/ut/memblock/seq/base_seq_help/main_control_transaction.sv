@@ -21,6 +21,8 @@ class main_control_transaction extends uvm_object;
     rand bit [63:0]          src_0;
     rand bit [63:0]          imm;
     bit [63:0]               vaddr;
+    bit                      amo_expect_misaligned;
+    int unsigned             amo_alignment_bytes;
 
     rand bit                 robIdx_flag;
     rand bit [MEMBLOCK_ROB_VALUE_W-1:0] robIdx_value;
@@ -65,6 +67,8 @@ class main_control_transaction extends uvm_object;
         src_0        = '0;
         imm          = '0;
         vaddr        = '0;
+        amo_expect_misaligned = 1'b0;
+        amo_alignment_bytes = 0;
         robIdx_flag  = 1'b0;
         robIdx_value = '0;
         lqIdx_flag   = 1'b0;

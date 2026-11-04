@@ -96,6 +96,20 @@ class seq_csr_common;
     static int unsigned amo_fuop_amomax_d_wt = 1;
     static int unsigned amo_fuop_amominu_d_wt = 1;
     static int unsigned amo_fuop_amomaxu_d_wt = 1;
+    static int unsigned amo_fuop_amocas_w_wt = 0;
+    static int unsigned amo_fuop_amocas_d_wt = 0;
+    static int unsigned amo_fuop_amocas_q_wt = 0;
+    static int unsigned amo_issue_order_mode = 0;
+    static int unsigned amo_std_shuffle_en = 0;
+    static int unsigned amo_misalign_permille = 1;
+    static int unsigned amo_lr_sc_pair_en_1_wt = 80;
+    static int unsigned amo_lr_sc_same_addr_1_wt = 90;
+    static int unsigned amo_lr_sc_dist_fixed_wt = 0;
+    static int unsigned amo_lr_sc_dist_fixed_value = 0;
+    static int unsigned amo_lr_sc_dist_0_wt = 1;
+    static int unsigned amo_lr_sc_dist_1_5_wt = 1;
+    static int unsigned amo_lr_sc_dist_6_10_wt = 1;
+    static int unsigned amo_lr_sc_dist_11_100_wt = 1;
     // boundary_profile生成默认关闭；关闭时主表继续使用原地址模板。
     static bit          boundary_profile_gen_en = 1'b0;
     static int unsigned boundary_aligned_wt = 1;
@@ -486,6 +500,20 @@ class seq_csr_common;
         amo_fuop_amomax_d_wt        = get_non_negative_int("MEMBLOCK_AMO_FUOP_AMOMAX_D_WT", plus::MEMBLOCK_AMO_FUOP_AMOMAX_D_WT);
         amo_fuop_amominu_d_wt       = get_non_negative_int("MEMBLOCK_AMO_FUOP_AMOMINU_D_WT", plus::MEMBLOCK_AMO_FUOP_AMOMINU_D_WT);
         amo_fuop_amomaxu_d_wt       = get_non_negative_int("MEMBLOCK_AMO_FUOP_AMOMAXU_D_WT", plus::MEMBLOCK_AMO_FUOP_AMOMAXU_D_WT);
+        amo_fuop_amocas_w_wt        = get_non_negative_int("MEMBLOCK_AMO_FUOP_AMOCAS_W_WT", plus::MEMBLOCK_AMO_FUOP_AMOCAS_W_WT);
+        amo_fuop_amocas_d_wt        = get_non_negative_int("MEMBLOCK_AMO_FUOP_AMOCAS_D_WT", plus::MEMBLOCK_AMO_FUOP_AMOCAS_D_WT);
+        amo_fuop_amocas_q_wt        = get_non_negative_int("MEMBLOCK_AMO_FUOP_AMOCAS_Q_WT", plus::MEMBLOCK_AMO_FUOP_AMOCAS_Q_WT);
+        amo_issue_order_mode        = get_non_negative_int("MEMBLOCK_AMO_ISSUE_ORDER_MODE", plus::MEMBLOCK_AMO_ISSUE_ORDER_MODE);
+        amo_std_shuffle_en          = get_non_negative_int("MEMBLOCK_AMO_STD_SHUFFLE_EN", plus::MEMBLOCK_AMO_STD_SHUFFLE_EN);
+        amo_misalign_permille       = get_non_negative_int("MEMBLOCK_AMO_MISALIGN_PERMILLE", plus::MEMBLOCK_AMO_MISALIGN_PERMILLE);
+        amo_lr_sc_pair_en_1_wt      = get_non_negative_int("MEMBLOCK_AMO_LR_SC_PAIR_EN_1_WT", plus::MEMBLOCK_AMO_LR_SC_PAIR_EN_1_WT);
+        amo_lr_sc_same_addr_1_wt    = get_non_negative_int("MEMBLOCK_AMO_LR_SC_SAME_ADDR_1_WT", plus::MEMBLOCK_AMO_LR_SC_SAME_ADDR_1_WT);
+        amo_lr_sc_dist_fixed_wt     = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_FIXED_WT", plus::MEMBLOCK_AMO_LR_SC_DIST_FIXED_WT);
+        amo_lr_sc_dist_fixed_value  = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_FIXED_VALUE", plus::MEMBLOCK_AMO_LR_SC_DIST_FIXED_VALUE);
+        amo_lr_sc_dist_0_wt         = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_0_WT", plus::MEMBLOCK_AMO_LR_SC_DIST_0_WT);
+        amo_lr_sc_dist_1_5_wt       = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_1_5_WT", plus::MEMBLOCK_AMO_LR_SC_DIST_1_5_WT);
+        amo_lr_sc_dist_6_10_wt      = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_6_10_WT", plus::MEMBLOCK_AMO_LR_SC_DIST_6_10_WT);
+        amo_lr_sc_dist_11_100_wt    = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_11_100_WT", plus::MEMBLOCK_AMO_LR_SC_DIST_11_100_WT);
         boundary_profile_gen_en     = plus::MEMBLOCK_BOUNDARY_PROFILE_GEN_EN;
         boundary_aligned_wt         = get_non_negative_int("MEMBLOCK_BOUNDARY_ALIGNED_WT", plus::MEMBLOCK_BOUNDARY_ALIGNED_WT);
         boundary_misalign_within_8b_wt = get_non_negative_int("MEMBLOCK_BOUNDARY_MISALIGN_WITHIN_8B_WT", plus::MEMBLOCK_BOUNDARY_MISALIGN_WITHIN_8B_WT);
@@ -756,8 +784,20 @@ class seq_csr_common;
         fatal_if_zero("l2tlb_max_outstanding", l2tlb_max_outstanding);
         apply_runtime_resource_limits();
 
-        if (op_class_amo_wt != 0) begin
-            `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_OP_CLASS_AMO_WT must be 0 until the V2 scalar atomic flow is complete")
+        if (amo_issue_order_mode > 2 || amo_std_shuffle_en > 1 ||
+            amo_misalign_permille > 1000 || amo_lr_sc_pair_en_1_wt > 100 ||
+            amo_lr_sc_same_addr_1_wt > 100 || amo_lr_sc_dist_fixed_value > 100) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       "AMO order/shuffle/misalignment/LR-SC parameters are outside their legal ranges")
+        end
+        if ((amo_lr_sc_dist_fixed_wt + amo_lr_sc_dist_0_wt +
+             amo_lr_sc_dist_1_5_wt + amo_lr_sc_dist_6_10_wt +
+             amo_lr_sc_dist_11_100_wt) == 0) begin
+            `uvm_fatal("SEQ_CSR_CFG", "AMO LR/SC distance weights must not all be zero")
+        end
+        if (op_class_amo_wt != 0 &&
+            (sta_pip_num_limit == 0 || std_pip_num_limit == 0)) begin
+            `uvm_fatal("SEQ_CSR_CFG", "AMO requires at least STA pipe0 and STD pipe0")
         end
         if (op_class_cbo_wt != 0) begin
             `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_OP_CLASS_CBO_WT must be 0 until the V2 scalar CBO flow is complete")
@@ -929,7 +969,8 @@ class seq_csr_common;
                  amo_fuop_amomaxu_w_wt + amo_fuop_lr_d_wt + amo_fuop_sc_d_wt +
                  amo_fuop_amoswap_d_wt + amo_fuop_amoadd_d_wt + amo_fuop_amoxor_d_wt +
                  amo_fuop_amoand_d_wt + amo_fuop_amoor_d_wt + amo_fuop_amomin_d_wt +
-                 amo_fuop_amomax_d_wt + amo_fuop_amominu_d_wt + amo_fuop_amomaxu_d_wt) == 0) begin
+                 amo_fuop_amomax_d_wt + amo_fuop_amominu_d_wt + amo_fuop_amomaxu_d_wt +
+                 amo_fuop_amocas_w_wt + amo_fuop_amocas_d_wt + amo_fuop_amocas_q_wt) == 0) begin
                 `uvm_fatal("SEQ_CSR_CFG", "AMO fuOpType weights must not be all zero when AMO op_class weight is non-zero")
             end
         end
@@ -1511,6 +1552,49 @@ class seq_csr_common;
         return op_class_amo_wt;
     endfunction:get_op_class_amo_wt
 
+    static function int unsigned get_amo_issue_order_mode();
+        check_initialized("get_amo_issue_order_mode");
+        return amo_issue_order_mode;
+    endfunction:get_amo_issue_order_mode
+
+    static function bit get_amo_std_shuffle_en();
+        check_initialized("get_amo_std_shuffle_en");
+        return amo_std_shuffle_en != 0;
+    endfunction:get_amo_std_shuffle_en
+
+    static function int unsigned get_amo_misalign_permille();
+        check_initialized("get_amo_misalign_permille");
+        return amo_misalign_permille;
+    endfunction:get_amo_misalign_permille
+
+    static function int unsigned get_amo_lr_sc_pair_en_1_wt();
+        check_initialized("get_amo_lr_sc_pair_en_1_wt");
+        return amo_lr_sc_pair_en_1_wt;
+    endfunction:get_amo_lr_sc_pair_en_1_wt
+
+    static function int unsigned get_amo_lr_sc_same_addr_1_wt();
+        check_initialized("get_amo_lr_sc_same_addr_1_wt");
+        return amo_lr_sc_same_addr_1_wt;
+    endfunction:get_amo_lr_sc_same_addr_1_wt
+
+    static function int unsigned get_amo_lr_sc_dist_weight(input int unsigned bucket);
+        check_initialized("get_amo_lr_sc_dist_weight");
+        case (bucket)
+            0: return amo_lr_sc_dist_fixed_wt;
+            1: return amo_lr_sc_dist_0_wt;
+            2: return amo_lr_sc_dist_1_5_wt;
+            3: return amo_lr_sc_dist_6_10_wt;
+            4: return amo_lr_sc_dist_11_100_wt;
+            default: `uvm_fatal("SEQ_CSR_CFG", "invalid AMO LR/SC distance bucket")
+        endcase
+        return 0;
+    endfunction:get_amo_lr_sc_dist_weight
+
+    static function int unsigned get_amo_lr_sc_dist_fixed_value();
+        check_initialized("get_amo_lr_sc_dist_fixed_value");
+        return amo_lr_sc_dist_fixed_value;
+    endfunction:get_amo_lr_sc_dist_fixed_value
+
     static function int unsigned get_op_class_cbo_wt();
         check_initialized("get_op_class_cbo_wt");
         return op_class_cbo_wt;
@@ -1583,6 +1667,9 @@ class seq_csr_common;
                     MEMBLOCK_LSUOP_AMOMAX_D:   return amo_fuop_amomax_d_wt;
                     MEMBLOCK_LSUOP_AMOMINU_D:  return amo_fuop_amominu_d_wt;
                     MEMBLOCK_LSUOP_AMOMAXU_D:  return amo_fuop_amomaxu_d_wt;
+                    MEMBLOCK_LSUOP_AMOCAS_W:   return amo_fuop_amocas_w_wt;
+                    MEMBLOCK_LSUOP_AMOCAS_D:   return amo_fuop_amocas_d_wt;
+                    MEMBLOCK_LSUOP_AMOCAS_Q:   return amo_fuop_amocas_q_wt;
                     default:                   return 0;
                 endcase
             end

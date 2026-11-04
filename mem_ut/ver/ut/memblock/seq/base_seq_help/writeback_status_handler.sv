@@ -144,6 +144,90 @@ class writeback_status_handler extends uvm_object;
         return 1'b0;
     endfunction:handle_real_writeback_event
 
+    function bit handle_atomic_final_writeback_event(input memblock_wb_event_t wb_event);
+        status_transaction status;
+
+        if (wb_event.source != MEMBLOCK_WB_EVENT_SOURCE_ATOMIC_WB ||
+            !event_is_real_writeback(wb_event)) begin
+            return 1'b0;
+        end
+        if (!data.is_atomic_uid(wb_event.uid) || wb_event.has_lq || wb_event.has_sq ||
+            wb_event.target != MEMBLOCK_ISSUE_TARGET_STA) begin
+            `uvm_fatal("ATOMIC_WB",
+                       $sformatf("invalid atomic final WB uid=%0d target=%0d lq/sq=%0d/%0d",
+                                 wb_event.uid, wb_event.target,
+                                 wb_event.has_lq, wb_event.has_sq))
+        end
+        status = data.get_status(wb_event.uid);
+        if (wb_event.has_dynamic_epoch &&
+            wb_event.dynamic_epoch != status.dynamic_epoch) begin
+            `uvm_info("ATOMIC_WB",
+                      $sformatf("drop stale atomic final WB uid=%0d event/status epoch=%0d/%0d",
+                                wb_event.uid, wb_event.dynamic_epoch,
+                                status.dynamic_epoch), UVM_LOW)
+            return 1'b0;
+        end
+        if (!data.record_atomic_final_wb(wb_event.uid,
+                                         wb_event.issue_epoch,
+                                         wb_event.exception_vec,
+                                         wb_event.cycle)) begin
+            `uvm_info("ATOMIC_WB",
+                      $sformatf("drop stale atomic final WB uid=%0d issue_epoch=%0d",
+                                wb_event.uid, wb_event.issue_epoch), UVM_LOW)
+            return 1'b0;
+        end
+        status = data.get_status(wb_event.uid);
+        `uvm_info("ATOMIC_WB",
+                  $sformatf("atomic final WB uid=%0d count=%0d/%0d fault_pending=%0d finalized=%0d pieces=%0h/%0h:%0h/%0h",
+                            wb_event.uid,
+                            status.atomic_final_wb_seen_count,
+                            status.atomic_final_wb_expected_count,
+                            status.atomic_pending_fault,
+                            status.atomic_finalized,
+                            status.atomic_sta_fired_mask,
+                            status.atomic_required_sta_mask,
+                            status.atomic_std_fired_mask,
+                            status.atomic_required_std_mask), UVM_LOW)
+        return 1'b1;
+    endfunction:handle_atomic_final_writeback_event
+
+    function bit handle_atomic_feedback_event(input memblock_wb_event_t wb_event);
+        status_transaction status;
+
+        if (!event_is_issue_feedback(wb_event) ||
+            !data.is_atomic_uid(wb_event.uid)) begin
+            return 1'b0;
+        end
+        if (wb_event.source != MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK ||
+            wb_event.target != MEMBLOCK_ISSUE_TARGET_STA ||
+            wb_event.has_lq || wb_event.has_sq || !wb_event.iq_feedback_hit ||
+            wb_event.iq_feedback_failed) begin
+            `uvm_fatal("ATOMIC_FEEDBACK",
+                       $sformatf("invalid atomic STA feedback uid=%0d source=%0d target=%0d lq/sq=%0d/%0d hit/failed=%0d/%0d",
+                                 wb_event.uid, wb_event.source, wb_event.target,
+                                 wb_event.has_lq, wb_event.has_sq,
+                                 wb_event.iq_feedback_hit,
+                                 wb_event.iq_feedback_failed))
+        end
+        status = data.get_status(wb_event.uid);
+        if (wb_event.has_dynamic_epoch &&
+            wb_event.dynamic_epoch != status.dynamic_epoch) begin
+            return 1'b0;
+        end
+        if (!data.record_atomic_feedback(wb_event.uid,
+                                         wb_event.uop_index,
+                                         wb_event.issue_epoch,
+                                         wb_event.cycle)) begin
+            return 1'b0;
+        end
+        `uvm_info("ATOMIC_FEEDBACK",
+                  $sformatf("consume atomic STA feedback uid=%0d slot=%0d count=%0d/%0d",
+                            wb_event.uid, wb_event.uop_index,
+                            status.atomic_feedback_seen_count,
+                            status.atomic_feedback_expected_count), UVM_LOW)
+        return 1'b1;
+    endfunction:handle_atomic_feedback_event
+
     function bit handle_issue_feedback_event(input memblock_wb_event_t wb_event);
         memblock_uid_t   uid;
         int unsigned     issue_epoch;
@@ -152,6 +236,9 @@ class writeback_status_handler extends uvm_object;
 
         if (!event_is_issue_feedback(wb_event)) begin
             return 1'b0;
+        end
+        if (data.is_atomic_uid(wb_event.uid)) begin
+            return handle_atomic_feedback_event(wb_event);
         end
         if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STD ||
             wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK) begin
@@ -255,6 +342,9 @@ class writeback_status_handler extends uvm_object;
             MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB,
             MEMBLOCK_WB_EVENT_SOURCE_STORE_WB: begin
                 return handle_real_writeback_event(wb_event);
+            end
+            MEMBLOCK_WB_EVENT_SOURCE_ATOMIC_WB: begin
+                return handle_atomic_final_writeback_event(wb_event);
             end
             MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK: begin
                 return handle_issue_feedback_event(wb_event);

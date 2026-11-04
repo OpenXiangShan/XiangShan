@@ -219,6 +219,9 @@ class common_data_transaction extends uvm_object;
     // 时清除，正式 fault 状态只能由 finalize_pending_store_fault() 写入。
     memblock_pending_store_fault_t pending_store_fault_by_uid[memblock_uid_t];
     memblock_wb_event_t      exception_event_q[$];
+    int unsigned             next_redirect_intent_id;
+    bit                      accepted_redirect_intent_by_id[int unsigned];
+    bit                      canceled_redirect_intent_by_id[int unsigned];
     memblock_redirect_payload_t pending_redirect_drive_q[$];
     memblock_ptw_wait_replay_t  ptw_wait_replay_q[$];
     int unsigned               last_applied_raw_csr_seq;
@@ -242,6 +245,8 @@ class common_data_transaction extends uvm_object;
     memblock_lsq_cancel_record_t cancel_record_q[$];
     memblock_sync_pkg::dispatch_raw_cancel_snapshot_t cancel_snapshot_history_q[$];
     memblock_sync_pkg::dispatch_raw_redirect_anchor_t redirect_anchor_history_q[$];
+    memblock_sync_pkg::dispatch_raw_cancel_snapshot_t latest_ctrl_sample_snapshot;
+    bit                                               latest_ctrl_sample_valid;
     bit            rob_admission_blocked_log_valid;
     memblock_uid_t rob_admission_blocked_candidate_uid;
     memblock_uid_t rob_admission_blocked_frontier_uid;
@@ -271,6 +276,17 @@ class common_data_transaction extends uvm_object;
     // 在该 UID terminal_done 后由 control service 解除；普通 LSQ admission 不得越过它。
     bit            active_control_barrier_valid;
     memblock_uid_t active_control_barrier_uid;
+    bit            active_atomic_barrier_valid;
+    memblock_uid_t active_atomic_barrier_uid;
+    // 中文注释：原子 valid/ready 在 backpressure 期间只能冻结一片。该状态由
+    // issue scheduler 选择时写入，真实 fire、合法 pre-fire 清理或物理 reset 清除。
+    bit                     atomic_held_piece_valid;
+    memblock_issue_q_item_t atomic_held_piece;
+    bit            lsq_shadow_redirect_pipeline_idle;
+    bit            lsq_shadow_pipe_empty;
+    bit            lsq_shadow_source_offer_pending;
+    bit            lsq_sequence_pending_sample;
+    bit            lsq_sequence_atomic_token_pending;
     bit                         control_barrier_prefix_external_provenance_valid;
     memblock_uid_t              control_barrier_prefix_external_provenance_uid;
     memblock_redirect_payload_t control_barrier_prefix_external_origin_redirect;
@@ -353,6 +369,9 @@ class common_data_transaction extends uvm_object;
         redirect_deleted_sq_owner_by_key.delete();
         std_late_raw_tombstone_by_rob.delete();
         pending_store_fault_by_uid.delete();
+        next_redirect_intent_id = 0;
+        accepted_redirect_intent_by_id.delete();
+        canceled_redirect_intent_by_id.delete();
         redirect_deleted_owner_window_active = 1'b0;
         redirect_deleted_owner_epoch = 0;
         redirect_deleted_owner_record_id = 0;
@@ -382,9 +401,13 @@ class common_data_transaction extends uvm_object;
         cancel_reconcile_lq_nonzero_match_count = 0;
         cancel_reconcile_sq_nonzero_match_count = 0;
         cancel_record_q.delete();
+        accepted_redirect_intent_by_id.delete();
+        canceled_redirect_intent_by_id.delete();
         fault_redirect_resource = '{default:'0};
         cancel_snapshot_history_q.delete();
         redirect_anchor_history_q.delete();
+        latest_ctrl_sample_snapshot = memblock_sync_pkg::make_empty_raw_cancel_snapshot();
+        latest_ctrl_sample_valid = 1'b0;
         rob_admission_blocked_log_valid = 1'b0;
         rob_admission_blocked_candidate_uid = 0;
         rob_admission_blocked_frontier_uid = 0;
@@ -425,6 +448,15 @@ class common_data_transaction extends uvm_object;
         uid_waiting_by_vpn_s2xlate.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        active_atomic_barrier_valid = 1'b0;
+        active_atomic_barrier_uid = 0;
+        atomic_held_piece_valid = 1'b0;
+        atomic_held_piece = '{default:'0};
+        lsq_shadow_redirect_pipeline_idle = 1'b1;
+        lsq_shadow_pipe_empty = 1'b1;
+        lsq_shadow_source_offer_pending = 1'b0;
+        lsq_sequence_pending_sample = 1'b0;
+        lsq_sequence_atomic_token_pending = 1'b0;
         clear_control_barrier_prefix_external_provenance();
         control_sfence_c0_observation = '{default:'0};
         control_sfence_effective_observation = '{default:'0};
@@ -540,9 +572,14 @@ class common_data_transaction extends uvm_object;
         cancel_reconcile_lq_nonzero_match_count = 0;
         cancel_reconcile_sq_nonzero_match_count = 0;
         cancel_record_q.delete();
+        next_redirect_intent_id = 0;
+        accepted_redirect_intent_by_id.delete();
+        canceled_redirect_intent_by_id.delete();
         fault_redirect_resource = '{default:'0};
         cancel_snapshot_history_q.delete();
         redirect_anchor_history_q.delete();
+        latest_ctrl_sample_snapshot = memblock_sync_pkg::make_empty_raw_cancel_snapshot();
+        latest_ctrl_sample_valid = 1'b0;
         rob_admission_blocked_log_valid = 1'b0;
         rob_admission_blocked_candidate_uid = 0;
         rob_admission_blocked_frontier_uid = 0;
@@ -580,6 +617,15 @@ class common_data_transaction extends uvm_object;
         uid_by_sq.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        active_atomic_barrier_valid = 1'b0;
+        active_atomic_barrier_uid = 0;
+        atomic_held_piece_valid = 1'b0;
+        atomic_held_piece = '{default:'0};
+        lsq_shadow_redirect_pipeline_idle = 1'b1;
+        lsq_shadow_pipe_empty = 1'b1;
+        lsq_shadow_source_offer_pending = 1'b0;
+        lsq_sequence_pending_sample = 1'b0;
+        lsq_sequence_atomic_token_pending = 1'b0;
         clear_control_barrier_prefix_external_provenance();
         control_sfence_c0_observation = '{default:'0};
         control_sfence_effective_observation = '{default:'0};
@@ -2169,6 +2215,10 @@ class common_data_transaction extends uvm_object;
                redirect_deleted_lq_owner_by_key.num() == 0 &&
                redirect_deleted_sq_owner_by_key.num() == 0 &&
                !active_control_barrier_valid &&
+               !active_atomic_barrier_valid &&
+               !atomic_held_piece_valid &&
+               accepted_redirect_intent_by_id.num() == 0 &&
+               canceled_redirect_intent_by_id.num() == 0 &&
                !control_barrier_prefix_external_provenance_valid &&
                !has_pending_redirect_drive() &&
                !flush_in_progress &&
@@ -2184,11 +2234,48 @@ class common_data_transaction extends uvm_object;
                pending_sq_cancel_count == 0 &&
                !redirect_sample_anchor_pending() &&
                !cancel_snapshot_buffer_pending() &&
+               lsq_shadow_pipe_empty &&
+               !lsq_shadow_source_offer_pending &&
+               !lsq_sequence_pending_sample &&
+               !lsq_sequence_atomic_token_pending &&
+               memblock_sync_pkg::lsq_source_offer_queue_size() == 0 &&
                memblock_sync_pkg::lsq_timing_sideband_queue_size() == 0 &&
                (!memblock_sync_pkg::uses_control_barrier_topology() ||
                 (control_action_drain_complete() &&
                  control_workers_shutdown_complete()));
     endfunction:runtime_drain_complete
+
+    function void publish_lsq_shadow_redirect_pipeline_idle(input bit idle);
+        lsq_shadow_redirect_pipeline_idle = idle;
+    endfunction:publish_lsq_shadow_redirect_pipeline_idle
+
+    function void publish_lsq_shadow_source_state(input bit pipe_empty,
+                                                  input bit source_offer_pending);
+        lsq_shadow_pipe_empty = pipe_empty;
+        lsq_shadow_source_offer_pending = source_offer_pending;
+    endfunction:publish_lsq_shadow_source_state
+
+    function void publish_lsq_sequence_local_state(input bit pending_sample,
+                                                   input bit atomic_token_pending);
+        lsq_sequence_pending_sample = pending_sample;
+        lsq_sequence_atomic_token_pending = atomic_token_pending;
+    endfunction:publish_lsq_sequence_local_state
+
+    function bit redirect_recovery_complete();
+        return !active_redirect.valid &&
+               !flush_in_progress &&
+               !issue_freeze_ack &&
+               !has_pending_redirect_drive() &&
+               redirect_phase == MEMBLOCK_REDIRECT_PHASE_IDLE &&
+               !memblock_sync_pkg::dispatch_flush_in_progress &&
+               cancel_record_q.size() == 0 &&
+               !active_cancel_record_id_valid &&
+               !redirect_deleted_owner_window_active &&
+               redirect_deleted_lq_owner_by_key.num() == 0 &&
+               redirect_deleted_sq_owner_by_key.num() == 0 &&
+               accepted_redirect_intent_by_id.num() == 0 &&
+               lsq_shadow_redirect_pipeline_idle;
+    endfunction:redirect_recovery_complete
 
     // 抽象职责：撤销尚未提交的 global-stop prepare。调用者只在公共框架 work 再次出现
     // 或 testcase reset 时使用；它不清任何 responder 本地 queue，也不改 UID terminal 状态。
@@ -2245,6 +2332,8 @@ class common_data_transaction extends uvm_object;
     // 第二阶段确认 UID/公共队列仍收敛且 DCache/SBuffer 未报告新 activity 后才提交 stop。
     // 这样 responder 可以在 prepare 期间继续接收 DUT 内部尾请求，不能在此函数中等待或清队列。
     function void request_global_stop_if_done();
+        longint unsigned current_service_cycle;
+
         if (global_stop_requested) begin
             return;
         end
@@ -2259,6 +2348,45 @@ class common_data_transaction extends uvm_object;
         end
 
         if (!transaction_done() || !runtime_drain_complete()) begin
+            current_service_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            if (transaction_done() && current_service_cycle != 0 &&
+                (current_service_cycle % 10000) == 0) begin
+                `uvm_info("RUNTIME_DRAIN_DIAG",
+                          $sformatf("cycle=%0d raw=%0d event=%0d issue_l/s/d=%0d/%0d/%0d rob/lq/sq=%0d/%0d/%0d deleted=%0d/%0d/%0d barrier_ctrl/atomic/held=%0d/%0d/%0d accepted_intent=%0d pending_drive=%0d flush/active/phase/freeze/sync=%0d/%0d/%0d/%0d/%0d ptw=%0d flushsb=%0d cancel=%0d/%0d/%0d/%0d anchor/snapshot=%0d/%0d lsq_pipe/offer/sample/token/source/timing=%0d/%0d/%0d/%0d/%0d/%0d workers=%0d/%0d",
+                                    current_service_cycle,
+                                    memblock_sync_pkg::raw_monitor_queue_size(),
+                                    exception_event_q.size(),
+                                    load_issue_q.size(), sta_issue_q.size(), std_issue_q.size(),
+                                    uid_by_active_rob.num(), uid_by_lq.num(), uid_by_sq.num(),
+                                    redirect_deleted_owner_window_active,
+                                    redirect_deleted_lq_owner_by_key.num(),
+                                    redirect_deleted_sq_owner_by_key.num(),
+                                    active_control_barrier_valid,
+                                    active_atomic_barrier_valid,
+                                    atomic_held_piece_valid,
+                                    accepted_redirect_intent_by_id.num(),
+                                    has_pending_redirect_drive(),
+                                    flush_in_progress, active_redirect.valid, redirect_phase,
+                                    issue_freeze_ack,
+                                    memblock_sync_pkg::dispatch_flush_in_progress,
+                                    ptw_wait_replay_q.size(),
+                                    flushsb_request_pending(),
+                                    cancel_record_q.size(),
+                                    has_pending_lsq_cancel_apply(),
+                                    pending_lq_cancel_count,
+                                    pending_sq_cancel_count,
+                                    redirect_anchor_history_q.size(),
+                                    cancel_snapshot_history_q.size(),
+                                    !lsq_shadow_pipe_empty,
+                                    lsq_shadow_source_offer_pending,
+                                    lsq_sequence_pending_sample,
+                                    lsq_sequence_atomic_token_pending,
+                                    memblock_sync_pkg::lsq_source_offer_queue_size(),
+                                    memblock_sync_pkg::lsq_timing_sideband_queue_size(),
+                                    control_action_drain_complete(),
+                                    control_workers_shutdown_complete()),
+                          UVM_LOW)
+            end
             reset_global_stop_prepare();
             return;
         end
@@ -2326,11 +2454,370 @@ class common_data_transaction extends uvm_object;
     // 抽象职责：控制静态屏障阻止其后的 UID admission；屏障自身用于 redirect 后
     // 恢复连续 admission 前缀时仍可被重新经过一次。
     function bit control_barrier_blocks_admission(input memblock_uid_t uid);
-        if (!active_control_barrier_valid) begin
+        if (active_control_barrier_valid && uid > active_control_barrier_uid) begin
+            return 1'b1;
+        end
+        return active_atomic_barrier_valid && uid > active_atomic_barrier_uid;
+    endfunction:control_barrier_blocks_admission
+
+    function void clear_atomic_owner_runtime(input status_transaction status);
+        if (atomic_held_piece_valid && atomic_held_piece.uid == status.uid) begin
+            atomic_held_piece_valid = 1'b0;
+            atomic_held_piece = '{default:'0};
+        end
+        status.atomic_required_sta_mask = '0;
+        status.atomic_required_std_mask = '0;
+        status.atomic_sta_fired_mask = '0;
+        status.atomic_std_fired_mask = '0;
+        status.atomic_sta_issue_epoch_valid = '0;
+        status.atomic_std_issue_epoch_valid = '0;
+        foreach (status.atomic_sta_issue_epoch_by_slot[idx]) begin
+            status.atomic_sta_issue_epoch_by_slot[idx] = 0;
+            status.atomic_std_issue_epoch_by_slot[idx] = 0;
+            status.atomic_sta_fire_order[idx] = 0;
+        end
+        status.atomic_sta_fire_count = 0;
+        status.atomic_piece_fire_count = 0;
+        status.atomic_feedback_expected_count = 0;
+        status.atomic_feedback_seen_count = 0;
+        status.atomic_final_wb_expected_count = 0;
+        status.atomic_final_wb_seen_count = 0;
+        status.atomic_pending_fault = 1'b0;
+        status.atomic_pending_exception_vec = '0;
+        status.atomic_finalized = 1'b0;
+    endfunction:clear_atomic_owner_runtime
+
+    function bit atomic_held_piece_matches(input memblock_issue_q_item_t item);
+        return atomic_held_piece_valid &&
+               atomic_held_piece.uid == item.uid &&
+               atomic_held_piece.target == item.target &&
+               atomic_held_piece.rob_key == item.rob_key &&
+               atomic_held_piece.replay_seq == item.replay_seq &&
+               atomic_held_piece.dynamic_epoch == item.dynamic_epoch &&
+               atomic_held_piece.uop_index == item.uop_index &&
+               atomic_held_piece.issue_pipe_index == item.issue_pipe_index;
+    endfunction:atomic_held_piece_matches
+
+    function void hold_atomic_issue_piece(input memblock_issue_q_item_t item);
+        if (atomic_held_piece_valid) begin
+            `uvm_fatal("ATOMIC_HELD_PIECE", "cannot overwrite an unconsumed atomic held piece")
+        end
+        if (!is_atomic_uid(item.uid) ||
+            !(item.target inside {MEMBLOCK_ISSUE_TARGET_STA, MEMBLOCK_ISSUE_TARGET_STD})) begin
+            `uvm_fatal("ATOMIC_HELD_PIECE", "only an atomic STA/STD piece may be held")
+        end
+        atomic_held_piece = item;
+        atomic_held_piece_valid = 1'b1;
+    endfunction:hold_atomic_issue_piece
+
+    function void consume_atomic_held_piece(input memblock_issue_q_item_t item);
+        if (!atomic_held_piece_matches(item)) begin
+            `uvm_fatal("ATOMIC_HELD_PIECE",
+                       $sformatf("atomic fire does not match held piece uid/target/slot=%0d/%0d/%0d",
+                                 item.uid, item.target, item.uop_index))
+        end
+        atomic_held_piece_valid = 1'b0;
+        atomic_held_piece = '{default:'0};
+    endfunction:consume_atomic_held_piece
+
+    function void clear_unfired_atomic_held_piece(input string reason);
+        status_transaction status;
+
+        if (!atomic_held_piece_valid) begin
+            return;
+        end
+        status = get_status(atomic_held_piece.uid);
+        if (status.atomic_piece_fire_count != 0) begin
+            `uvm_fatal("ATOMIC_HELD_PIECE",
+                       $sformatf("%s cannot clear held piece after atomic fire uid=%0d count=%0d",
+                                 reason, atomic_held_piece.uid,
+                                 status.atomic_piece_fire_count))
+        end
+        atomic_held_piece_valid = 1'b0;
+        atomic_held_piece = '{default:'0};
+    endfunction:clear_unfired_atomic_held_piece
+
+    function void establish_atomic_barrier(input memblock_uid_t uid);
+        status_transaction status;
+        memblock_op_behavior_t behavior;
+
+        check_uid(uid, "establish_atomic_barrier");
+        status = get_status(uid);
+        behavior = memblock_op_behavior_util::derive_op_behavior(
+            get_main_transaction(uid));
+        if (active_atomic_barrier_valid || active_control_barrier_valid ||
+            !status.active || !status.enq || status.active_lq_mapped ||
+            status.active_sq_mapped || !status.lsq_deq || !behavior.is_atomic ||
+            behavior.atomic_sta_uop_count == 0 ||
+            behavior.atomic_data_uop_count == 0) begin
+            `uvm_fatal("ATOMIC_BARRIER",
+                       $sformatf("invalid establish uid=%0d atomic=%0d/%0d control=%0d/%0d active/enq/lq/sq/deq=%0d/%0d/%0d/%0d/%0d",
+                                 uid, active_atomic_barrier_valid,
+                                 active_atomic_barrier_uid,
+                                 active_control_barrier_valid,
+                                 active_control_barrier_uid,
+                                 status.active, status.enq,
+                                 status.active_lq_mapped,
+                                 status.active_sq_mapped, status.lsq_deq))
+        end
+        status.atomic_required_sta_mask = behavior.atomic_sta_uop_count == 2 ?
+                                          4'b0101 : 4'b0001;
+        status.atomic_required_std_mask =
+            4'((1 << behavior.atomic_data_uop_count) - 1);
+        status.atomic_feedback_expected_count = behavior.atomic_sta_uop_count;
+        status.atomic_final_wb_expected_count =
+            memblock_op_behavior_util::is_amocas_q_fuoptype(
+                get_main_transaction(uid).fuOpType) ? 2 : 1;
+        active_atomic_barrier_valid = 1'b1;
+        active_atomic_barrier_uid = uid;
+    endfunction:establish_atomic_barrier
+
+    function bit is_atomic_uid(input memblock_uid_t uid);
+        memblock_op_behavior_t behavior;
+
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null) begin
             return 1'b0;
         end
-        return uid > active_control_barrier_uid;
-    endfunction:control_barrier_blocks_admission
+        behavior = memblock_op_behavior_util::derive_op_behavior(
+            get_main_transaction(uid));
+        return behavior.is_atomic;
+    endfunction:is_atomic_uid
+
+    function bit atomic_all_required_pieces_fired(input memblock_uid_t uid);
+        status_transaction status;
+
+        if (!is_atomic_uid(uid)) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        return status.atomic_sta_fired_mask == status.atomic_required_sta_mask &&
+               status.atomic_std_fired_mask == status.atomic_required_std_mask;
+    endfunction:atomic_all_required_pieces_fired
+
+    function bit peek_next_atomic_feedback(input memblock_uid_t uid,
+                                           output int unsigned slot,
+                                           output int unsigned issue_epoch);
+        status_transaction status;
+
+        slot = 0;
+        issue_epoch = 0;
+        if (!is_atomic_uid(uid)) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        if (!status.active || status.terminal_done ||
+            status.atomic_feedback_seen_count >=
+                status.atomic_feedback_expected_count ||
+            status.atomic_feedback_seen_count >= status.atomic_sta_fire_count) begin
+            return 1'b0;
+        end
+        slot = status.atomic_sta_fire_order[status.atomic_feedback_seen_count];
+        if (slot >= 4 || !status.atomic_sta_issue_epoch_valid[slot]) begin
+            `uvm_fatal("ATOMIC_FEEDBACK",
+                       $sformatf("uid=%0d has invalid next STA feedback slot=%0d seen=%0d fired=%0d",
+                                 uid, slot, status.atomic_feedback_seen_count,
+                                 status.atomic_sta_fire_count))
+        end
+        issue_epoch = status.atomic_sta_issue_epoch_by_slot[slot];
+        return 1'b1;
+    endfunction:peek_next_atomic_feedback
+
+    function bit record_atomic_feedback(input memblock_uid_t uid,
+                                        input int unsigned slot,
+                                        input int unsigned issue_epoch,
+                                        input longint unsigned cycle);
+        status_transaction status;
+        int unsigned expected_slot;
+        int unsigned expected_epoch;
+
+        if (!peek_next_atomic_feedback(uid, expected_slot, expected_epoch)) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        if (slot != expected_slot || issue_epoch != expected_epoch) begin
+            `uvm_fatal("ATOMIC_FEEDBACK",
+                       $sformatf("uid=%0d feedback identity mismatch got slot/epoch=%0d/%0d expected=%0d/%0d",
+                                 uid, slot, issue_epoch,
+                                 expected_slot, expected_epoch))
+        end
+        status.atomic_feedback_seen_count++;
+        status.last_event_cycle = cycle;
+        void'(try_finalize_atomic_owner(uid, cycle));
+        return 1'b1;
+    endfunction:record_atomic_feedback
+
+    function bit atomic_feedback_complete(input memblock_uid_t uid);
+        status_transaction status;
+
+        if (!is_atomic_uid(uid)) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        return status.atomic_feedback_expected_count != 0 &&
+               status.atomic_feedback_seen_count ==
+                   status.atomic_feedback_expected_count;
+    endfunction:atomic_feedback_complete
+
+    function bit try_finalize_atomic_owner(input memblock_uid_t uid,
+                                           input longint unsigned cycle);
+        status_transaction status;
+
+        if (!is_atomic_uid(uid)) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        if (status.atomic_finalized) begin
+            return 1'b1;
+        end
+        if (!status.active || status.issue_killed || status.flushed ||
+            status.redirect_pending ||
+            status.atomic_final_wb_seen_count !=
+                status.atomic_final_wb_expected_count ||
+            !atomic_feedback_complete(uid) ||
+            !atomic_all_required_pieces_fired(uid)) begin
+            return 1'b0;
+        end
+        status.atomic_finalized = 1'b1;
+        status.writeback = 1'b1;
+        status.last_event_cycle = cycle;
+        if (status.atomic_pending_fault) begin
+            status.pass = 1'b0;
+            status.fault = 1'b1;
+            status.exception_pending = 1'b1;
+            status.exception_vec = status.atomic_pending_exception_vec;
+            status.success = 1'b0;
+            status.terminal_done = 1'b0;
+            quiesce_fault_uid_pending_work(uid, 1'b0);
+        end else begin
+            status.pass = 1'b1;
+            status.fault = 1'b0;
+            status.exception_pending = 1'b0;
+        end
+        return 1'b1;
+    endfunction:try_finalize_atomic_owner
+
+    function bit record_atomic_final_wb(input memblock_uid_t uid,
+                                        input int unsigned primary_issue_epoch,
+                                        input bit [23:0] exception_vec,
+                                        input longint unsigned cycle);
+        status_transaction status;
+
+        if (!is_atomic_uid(uid)) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        if (!status.active || status.issue_killed || status.flushed ||
+            status.redirect_pending || !status.atomic_sta_fired_mask[0] ||
+            !status.atomic_sta_issue_epoch_valid[0] ||
+            status.atomic_sta_issue_epoch_by_slot[0] != primary_issue_epoch) begin
+            return 1'b0;
+        end
+        if (status.atomic_final_wb_seen_count >=
+            status.atomic_final_wb_expected_count) begin
+            `uvm_fatal("ATOMIC_WB",
+                       $sformatf("uid=%0d received excess final WB count=%0d expected=%0d",
+                                 uid, status.atomic_final_wb_seen_count,
+                                 status.atomic_final_wb_expected_count))
+        end
+        status.atomic_final_wb_seen_count++;
+        if (exception_vec != '0) begin
+            status.atomic_pending_fault = 1'b1;
+            status.atomic_pending_exception_vec |= exception_vec;
+        end
+        status.last_event_cycle = cycle;
+        void'(try_finalize_atomic_owner(uid, cycle));
+        return 1'b1;
+    endfunction:record_atomic_final_wb
+
+    function bit atomic_barrier_allows_issue(input memblock_uid_t uid);
+        return !active_atomic_barrier_valid || uid == active_atomic_barrier_uid;
+    endfunction:atomic_barrier_allows_issue
+
+    function void release_atomic_barrier_after_terminal(input memblock_uid_t uid);
+        status_transaction status;
+
+        check_uid(uid, "release_atomic_barrier_after_terminal");
+        status = get_status(uid);
+        if (!active_atomic_barrier_valid || active_atomic_barrier_uid != uid ||
+            !status.terminal_done || status.active ||
+            !atomic_feedback_complete(uid) ||
+            (status.fault && !redirect_recovery_complete())) begin
+            `uvm_fatal("ATOMIC_BARRIER",
+                       $sformatf("invalid release uid=%0d barrier=%0d/%0d terminal/active=%0d/%0d feedback=%0d/%0d fault/recovery=%0d/%0d",
+                                 uid, active_atomic_barrier_valid,
+                                 active_atomic_barrier_uid,
+                                 status.terminal_done, status.active,
+                                 status.atomic_feedback_seen_count,
+                                 status.atomic_feedback_expected_count,
+                                 status.fault, redirect_recovery_complete()))
+        end
+        active_atomic_barrier_valid = 1'b0;
+        active_atomic_barrier_uid = 0;
+        clear_atomic_owner_runtime(status);
+    endfunction:release_atomic_barrier_after_terminal
+
+    function bit release_unfired_atomic_barrier_after_redirect_recovery();
+        status_transaction status;
+
+        if (!active_atomic_barrier_valid) begin
+            return 1'b0;
+        end
+        status = get_status(active_atomic_barrier_uid);
+        if (status.active || !status.flushed || !status.redirect_pending ||
+            status.atomic_piece_fire_count != 0 || !redirect_recovery_complete()) begin
+            return 1'b0;
+        end
+        clear_atomic_owner_runtime(status);
+        active_atomic_barrier_valid = 1'b0;
+        active_atomic_barrier_uid = 0;
+        return 1'b1;
+    endfunction:release_unfired_atomic_barrier_after_redirect_recovery
+
+    function void assert_nonphysical_reset_safe_for_atomic(input string reason);
+        status_transaction status;
+
+        if (!active_atomic_barrier_valid) begin
+            return;
+        end
+        status = get_status(active_atomic_barrier_uid);
+        if (status.atomic_piece_fire_count != 0) begin
+            `uvm_fatal("ATOMIC_RESET",
+                       $sformatf("%s cannot reset fired atomic uid=%0d pieces=%0d sta/std=%0h/%0h",
+                                 reason, active_atomic_barrier_uid,
+                                 status.atomic_piece_fire_count,
+                                 status.atomic_sta_fired_mask,
+                                 status.atomic_std_fired_mask))
+        end
+    endfunction:assert_nonphysical_reset_safe_for_atomic
+
+    function void reset_active_atomic_after_physical_reset(input string reason);
+        memblock_uid_t uid;
+        status_transaction status;
+
+        if (!active_atomic_barrier_valid) begin
+            atomic_held_piece_valid = 1'b0;
+            atomic_held_piece = '{default:'0};
+            return;
+        end
+        uid = active_atomic_barrier_uid;
+        status = get_status(uid);
+        if (status.active) begin
+            retire_active_uid(uid);
+        end else begin
+            remove_uid_from_issue_queues(uid);
+            clear_atomic_owner_runtime(status);
+        end
+        void'(init_status_for_uid(uid));
+        void'(rollback_max_enqueued_uid(uid));
+        active_atomic_barrier_valid = 1'b0;
+        active_atomic_barrier_uid = 0;
+        atomic_held_piece_valid = 1'b0;
+        atomic_held_piece = '{default:'0};
+        `uvm_info("ATOMIC_RESET",
+                  $sformatf("physical reset cleared atomic uid=%0d and reopened admission at the same uid: %s",
+                            uid, reason),
+                  UVM_LOW)
+    endfunction:reset_active_atomic_after_physical_reset
 
     // 抽象职责：为 CSR/SFence/check_store 建立不占 LSQ 的 active ROB 实例与静态屏障。
     // 它只复用公共 ROB map/admission prefix；不分配 LQ/SQ、不产生 issue work。
@@ -3077,6 +3564,77 @@ class common_data_transaction extends uvm_object;
         return 1'b1;
     endfunction:mark_issue_snapshot
 
+    function bit mark_atomic_issue_snapshot(input memblock_uid_t uid,
+                                             input memblock_issue_target_e issue_target,
+                                             input int unsigned slot,
+                                             output int unsigned issue_epoch);
+        status_transaction status;
+        memblock_op_behavior_t behavior;
+
+        issue_epoch = 0;
+        if (!is_valid_uid(uid) || status_by_uid[uid] == null || slot >= 4 ||
+            !(issue_target inside {MEMBLOCK_ISSUE_TARGET_STA,
+                                   MEMBLOCK_ISSUE_TARGET_STD}) ||
+            global_issue_epoch == '1) begin
+            `uvm_fatal("ATOMIC_ISSUE",
+                       $sformatf("invalid atomic issue snapshot uid=%0d target=%0d slot=%0d epoch=%0d",
+                                 uid, issue_target, slot, global_issue_epoch))
+            return 1'b0;
+        end
+        status = status_by_uid[uid];
+        behavior = memblock_op_behavior_util::derive_op_behavior(
+            get_main_transaction(uid));
+        if (!behavior.is_atomic ||
+            (issue_target == MEMBLOCK_ISSUE_TARGET_STA &&
+             (!status.atomic_required_sta_mask[slot] ||
+              status.atomic_sta_issue_epoch_valid[slot])) ||
+            (issue_target == MEMBLOCK_ISSUE_TARGET_STD &&
+             (!status.atomic_required_std_mask[slot] ||
+              status.atomic_std_issue_epoch_valid[slot]))) begin
+            `uvm_fatal("ATOMIC_ISSUE",
+                       $sformatf("unexpected or duplicate atomic slot uid=%0d target=%0d slot=%0d required_sta=0x%0h required_std=0x%0h",
+                                 uid, issue_target, slot,
+                                 status.atomic_required_sta_mask,
+                                 status.atomic_required_std_mask))
+            return 1'b0;
+        end
+        // The ordinary TLB/target lifecycle belongs to the architectural AMO,
+        // not to each CAS piece.  Freeze it once on the first piece; later
+        // pieces only receive their independent per-slot issue epoch.
+        if (status.atomic_piece_fire_count == 0) begin
+            if (!register_uid_tlb_record_on_issue(uid)) begin
+                return 1'b0;
+            end
+        end
+        global_issue_epoch++;
+        issue_epoch = global_issue_epoch;
+        if (issue_target == MEMBLOCK_ISSUE_TARGET_STA) begin
+            status.atomic_sta_issue_epoch_valid[slot] = 1'b1;
+            status.atomic_sta_issue_epoch_by_slot[slot] = issue_epoch;
+            status.atomic_sta_fire_order[status.atomic_sta_fire_count] = slot;
+            status.atomic_sta_fire_count++;
+            if (status.sta_issue_epoch == 0) begin
+                status.sta_issue_epoch = issue_epoch;
+                status.set_target_instance_flush_epoch(
+                    MEMBLOCK_ISSUE_TARGET_STA,
+                    memblock_sync_pkg::dispatch_flush_epoch
+                );
+            end
+        end else begin
+            status.atomic_std_issue_epoch_valid[slot] = 1'b1;
+            status.atomic_std_issue_epoch_by_slot[slot] = issue_epoch;
+            if (status.std_issue_epoch == 0) begin
+                status.std_issue_epoch = issue_epoch;
+                status.set_target_instance_flush_epoch(
+                    MEMBLOCK_ISSUE_TARGET_STD,
+                    memblock_sync_pkg::dispatch_flush_epoch
+                );
+            end
+        end
+        status.issue_killed = 1'b0;
+        return 1'b1;
+    endfunction:mark_atomic_issue_snapshot
+
     function memblock_status_field_e target_writeback_field(input memblock_issue_target_e target);
         case (target)
             MEMBLOCK_ISSUE_TARGET_LOAD: return MEMBLOCK_STATUS_LOAD_WRITEBACK;
@@ -3166,8 +3724,7 @@ class common_data_transaction extends uvm_object;
         main_control_transaction main_tr;
 
         main_tr = get_main_transaction(uid);
-        return main_tr.fuType == MEMBLOCK_FUTYPE_STU ||
-               main_tr.fuType == MEMBLOCK_FUTYPE_MOU;
+        return main_tr.fuType == MEMBLOCK_FUTYPE_STU;
     endfunction:is_scalar_store_uid
 
     function bit store_real_writebacks_done(input memblock_uid_t uid);
@@ -3357,6 +3914,9 @@ class common_data_transaction extends uvm_object;
             return target_entry_done(status, MEMBLOCK_ISSUE_TARGET_LOAD);
         end
         if (main_tr.fuType == MEMBLOCK_FUTYPE_STU || main_tr.fuType == MEMBLOCK_FUTYPE_MOU) begin
+            if (main_tr.fuType == MEMBLOCK_FUTYPE_MOU) begin
+                return atomic_all_required_pieces_fired(uid);
+            end
             return target_entry_done(status, MEMBLOCK_ISSUE_TARGET_STA) &&
                    target_entry_done(status, MEMBLOCK_ISSUE_TARGET_STD);
         end
@@ -3915,6 +4475,30 @@ class common_data_transaction extends uvm_object;
         status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     endfunction:mark_lsq_reservation_sampled
 
+    function void cancel_pending_lsq_reservation_on_reset(
+        input memblock_uid_t uid,
+        input int unsigned launch_epoch
+    );
+        status_transaction status;
+
+        check_uid(uid, "cancel_pending_lsq_reservation_on_reset");
+        status = get_status(uid);
+        if (launch_epoch == 0 ||
+            status.lsq_reservation_launch_epoch != launch_epoch ||
+            status.lsq_reservation_state != MEMBLOCK_LSQ_RESERVATION_LAUNCHED_PENDING_SAMPLE) begin
+            `uvm_fatal("LSQ_RESERVATION",
+                       $sformatf("reset cancel token mismatch uid=%0d token/status_epoch=%0d/%0d state=%0d",
+                                 uid, launch_epoch,
+                                 status.lsq_reservation_launch_epoch,
+                                 status.lsq_reservation_state))
+        end
+        status.clear_lsq_reservation_visibility();
+        // pending reservation 尚未到达 DUT 可见采样点；reset 取消该次 admission
+        // 时必须重开同一 UID，不能让全局顺序 admission 前缀残留在下一项。
+        void'(rollback_max_enqueued_uid(uid));
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    endfunction:cancel_pending_lsq_reservation_on_reset
+
     function bit uid_lsq_reservation_visible(input memblock_uid_t uid);
         status_transaction status;
 
@@ -3941,6 +4525,7 @@ class common_data_transaction extends uvm_object;
         status.load_dispatched = 1'b0;
         status.sta_dispatched  = 1'b0;
         status.std_dispatched  = 1'b0;
+        clear_atomic_owner_runtime(status);
         status.load_writeback  = 1'b0;
         status.sta_writeback   = 1'b0;
         status.std_writeback   = 1'b0;
@@ -4187,6 +4772,62 @@ class common_data_transaction extends uvm_object;
         end
         return -1;
     endfunction:find_oldest_observation_pending_record_index
+
+    function bit bind_cancel_record_for_shadow_restore(
+        input longint unsigned cancel_update_sample_seq,
+        output int unsigned cancel_record_id,
+        output int unsigned redirect_epoch);
+        int match_idx;
+
+        match_idx = -1;
+        cancel_record_id = 0;
+        redirect_epoch = 0;
+        foreach (cancel_record_q[idx]) begin
+            if (!cancel_record_q[idx].valid ||
+                !cancel_record_q[idx].redirect_anchor_valid ||
+                cancel_record_q[idx].shadow_restore_consumed ||
+                cancel_record_q[idx].dut_cancel_update_sample_seq !=
+                    cancel_update_sample_seq) begin
+                continue;
+            end
+            if (match_idx >= 0) begin
+                `uvm_fatal("LSQ_CANCEL",
+                           $sformatf("shadow restore sample=%0d matches multiple records id=%0d/%0d",
+                                     cancel_update_sample_seq,
+                                     cancel_record_q[match_idx].cancel_record_id,
+                                     cancel_record_q[idx].cancel_record_id))
+            end
+            match_idx = idx;
+        end
+        if (match_idx < 0) begin
+            return 1'b0;
+        end
+        cancel_record_id = cancel_record_q[match_idx].cancel_record_id;
+        redirect_epoch = cancel_record_q[match_idx].redirect_epoch;
+        return 1'b1;
+    endfunction:bind_cancel_record_for_shadow_restore
+
+    function void mark_cancel_shadow_restore_consumed(
+        input int unsigned cancel_record_id,
+        input int unsigned redirect_epoch,
+        input longint unsigned restore_sample_seq);
+        int record_idx;
+
+        record_idx = find_cancel_record_index_by_id(cancel_record_id);
+        if (record_idx < 0 || !cancel_record_q[record_idx].valid ||
+            cancel_record_q[record_idx].redirect_epoch != redirect_epoch ||
+            !cancel_record_q[record_idx].redirect_anchor_valid ||
+            restore_sample_seq !=
+                cancel_record_q[record_idx].dut_cancel_update_sample_seq + 1 ||
+            cancel_record_q[record_idx].shadow_restore_consumed) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("invalid shadow restore consume id=%0d epoch=%0d sample=%0d record_idx=%0d",
+                                 cancel_record_id, redirect_epoch,
+                                 restore_sample_seq, record_idx))
+        end
+        cancel_record_q[record_idx].shadow_restore_consumed = 1'b1;
+        cancel_record_q[record_idx].shadow_restore_sample_seq = restore_sample_seq;
+    endfunction:mark_cancel_shadow_restore_consumed
 
     function void check_cancel_record_capacity();
         if (cancel_record_q.size() > MEMBLOCK_CANCEL_RECORD_MAX_DEPTH) begin
@@ -4473,7 +5114,7 @@ class common_data_transaction extends uvm_object;
     endfunction:note_lsq_cancel_for_uid
 
     function void add_cancel_snapshot(input memblock_sync_pkg::dispatch_raw_cancel_snapshot_t snapshot);
-        if (snapshot.sample_seq == 0) begin
+        if (!snapshot.valid || !snapshot.complete || snapshot.sample_seq == 0) begin
             `uvm_fatal("LSQ_CANCEL", "cancel snapshot has zero sample sequence")
         end
         if (snapshot.lq_cancel_count > MEMBLOCK_LQ_SIZE ||
@@ -4491,6 +5132,8 @@ class common_data_transaction extends uvm_object;
                                  latest_drained_cancel_sample_seq, snapshot.sample_seq))
         end
         latest_drained_cancel_sample_seq = snapshot.sample_seq;
+        latest_ctrl_sample_snapshot = snapshot;
+        latest_ctrl_sample_valid = 1'b1;
         cancel_snapshot_history_q.push_back(snapshot);
         if (cancel_snapshot_history_q.size() > MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH) begin
             `uvm_fatal("LSQ_CANCEL",
@@ -4499,6 +5142,23 @@ class common_data_transaction extends uvm_object;
                                  MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH))
         end
     endfunction:add_cancel_snapshot
+
+    function bit get_latest_ctrl_sample_snapshot(
+        output memblock_sync_pkg::dispatch_raw_cancel_snapshot_t snapshot
+    );
+        snapshot = latest_ctrl_sample_snapshot;
+        return latest_ctrl_sample_valid;
+    endfunction:get_latest_ctrl_sample_snapshot
+
+    function bit redirect_sampled_at(input longint unsigned sample_seq);
+        foreach (redirect_anchor_history_q[idx]) begin
+            if (redirect_anchor_history_q[idx].valid &&
+                redirect_anchor_history_q[idx].sample_seq == sample_seq) begin
+                return 1'b1;
+            end
+        end
+        return 1'b0;
+    endfunction:redirect_sampled_at
 
     function void add_redirect_anchor(input memblock_sync_pkg::dispatch_raw_redirect_anchor_t anchor);
         if (!anchor.valid || anchor.sample_seq == 0) begin
@@ -4594,7 +5254,8 @@ class common_data_transaction extends uvm_object;
         while (cancel_record_q.size() != 0 &&
                cancel_record_q[0].valid &&
                cancel_record_q[0].software_applied &&
-               cancel_record_q[0].observed_valid) begin
+               cancel_record_q[0].observed_valid &&
+               cancel_record_q[0].shadow_restore_consumed) begin
             if (fault_redirect_resource.valid &&
                 fault_redirect_resource.cancel_record_id == cancel_record_q[0].cancel_record_id) begin
                 break;
@@ -4624,6 +5285,17 @@ class common_data_transaction extends uvm_object;
                                      cancel_record_q[idx].cancel_record_id,
                                      cancel_record_q[idx].anchor_deadline_service_cycle,
                                      memblock_sync_pkg::get_dispatch_service_cycle()))
+            end
+            if (cancel_record_q[idx].valid &&
+                cancel_record_q[idx].redirect_anchor_valid &&
+                !cancel_record_q[idx].shadow_restore_consumed &&
+                latest_drained_cancel_sample_seq >
+                    cancel_record_q[idx].dut_cancel_update_sample_seq + 1) begin
+                `uvm_fatal("LSQ_CANCEL_RECONCILE",
+                           $sformatf("cancel record=%0d missed shadow restore sample=%0d watermark=%0d",
+                                     cancel_record_q[idx].cancel_record_id,
+                                     cancel_record_q[idx].dut_cancel_update_sample_seq + 1,
+                                     latest_drained_cancel_sample_seq))
             end
         end
 
@@ -4737,7 +5409,9 @@ class common_data_transaction extends uvm_object;
 
     function bit has_pending_cancel_reconcile();
         foreach (cancel_record_q[idx]) begin
-            if (cancel_record_q[idx].valid && !cancel_record_q[idx].observed_valid) begin
+            if (cancel_record_q[idx].valid &&
+                (!cancel_record_q[idx].observed_valid ||
+                 !cancel_record_q[idx].shadow_restore_consumed)) begin
                 return 1'b1;
             end
         end
@@ -5568,6 +6242,10 @@ class common_data_transaction extends uvm_object;
         wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_NONE;
         wb_event.has_dynamic_epoch = 1'b0;
         wb_event.dynamic_epoch = 0;
+        wb_event.has_control_seq = 1'b0;
+        wb_event.control_eligible_seq = 0;
+        wb_event.control_reset_epoch = 0;
+        wb_event.redirect_intent_id = 0;
         wb_event.ptw_back_replay   = 1'b0;
         wb_event.vector_ls         = 1'b0;
         wb_event.uop_index         = 0;
@@ -5619,7 +6297,16 @@ class common_data_transaction extends uvm_object;
             normalized_event.rob_key = normalized_event.redirect.rob_key;
             normalized_event.has_rob = 1'b1;
         end
-        if (!resolve_uid_for_event(normalized_event, uid)) begin
+        if (feedback_event_is_redirect(normalized_event) &&
+            normalized_event.has_uid &&
+            is_valid_uid(normalized_event.uid) &&
+            status_by_uid[normalized_event.uid] != null &&
+            status_by_uid[normalized_event.uid].terminal_done &&
+            normalized_event.has_rob &&
+            status_by_uid[normalized_event.uid].get_rob_key() ==
+                normalized_event.rob_key) begin
+            uid = normalized_event.uid;
+        end else if (!resolve_uid_for_event(normalized_event, uid)) begin
             normalized_event = make_empty_wb_event();
             return 1'b0;
         end
@@ -5670,8 +6357,147 @@ class common_data_transaction extends uvm_object;
         if (!normalize_feedback_event(wb_event, normalized_event)) begin
             return;
         end
+        if (feedback_event_is_redirect(normalized_event) &&
+            !normalized_event.has_control_seq) begin
+            next_redirect_intent_id++;
+            if (next_redirect_intent_id == 0) begin
+                `uvm_fatal("REDIRECT_INTENT", "redirect intent id wrapped")
+            end
+            normalized_event.has_control_seq = 1'b1;
+            normalized_event.control_eligible_seq =
+                memblock_sync_pkg::get_dispatch_service_cycle() + 1;
+            normalized_event.control_reset_epoch =
+                memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+            normalized_event.redirect_intent_id = next_redirect_intent_id;
+        end
         exception_event_q.push_back(normalized_event);
     endfunction:push_feedback_event
+
+    function bit submit_redirect_intent(input memblock_uid_t uid,
+                                        input memblock_redirect_payload_t redirect,
+                                        output int unsigned intent_id);
+        status_transaction status;
+        memblock_wb_event_t intent_event;
+
+        intent_id = 0;
+        check_uid(uid, "submit_redirect_intent");
+        status = get_status(uid);
+        if (!redirect.valid || !status.active && !status.terminal_done ||
+            status.get_rob_key() != redirect.rob_key) begin
+            `uvm_fatal("REDIRECT_INTENT",
+                       $sformatf("invalid redirect intent uid=%0d valid=%0d active/terminal=%0d/%0d rob=%0d/%0d expected=%0d/%0d",
+                                 uid, redirect.valid, status.active,
+                                 status.terminal_done,
+                                 redirect.rob_key.flag, redirect.rob_key.value,
+                                 status.robIdx_flag, status.robIdx_value))
+            return 1'b0;
+        end
+        foreach (exception_event_q[idx]) begin
+            if (feedback_event_is_redirect(exception_event_q[idx]) &&
+                exception_event_q[idx].has_uid &&
+                exception_event_q[idx].uid == uid &&
+                exception_event_q[idx].has_dynamic_epoch &&
+                exception_event_q[idx].dynamic_epoch == status.dynamic_epoch &&
+                redirect_payload_equal(exception_event_q[idx].redirect, redirect)) begin
+                intent_id = exception_event_q[idx].redirect_intent_id;
+                return 1'b1;
+            end
+        end
+        intent_event = make_empty_wb_event();
+        intent_event.valid = 1'b1;
+        intent_event.source = MEMBLOCK_WB_EVENT_SOURCE_REDIRECT;
+        intent_event.target = MEMBLOCK_ISSUE_TARGET_NONE;
+        intent_event.uid = uid;
+        intent_event.has_uid = 1'b1;
+        intent_event.rob_key = status.get_rob_key();
+        intent_event.has_rob = 1'b1;
+        intent_event.has_dynamic_epoch = 1'b1;
+        intent_event.dynamic_epoch = status.dynamic_epoch;
+        intent_event.redirect_valid = 1'b1;
+        intent_event.redirect = redirect;
+        intent_event.replay_seq = status.replay_seq;
+        intent_event.has_replay_seq = 1'b1;
+        intent_event.cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        push_feedback_event(intent_event);
+        foreach (exception_event_q[idx]) begin
+            if (feedback_event_is_redirect(exception_event_q[idx]) &&
+                exception_event_q[idx].has_uid &&
+                exception_event_q[idx].uid == uid &&
+                exception_event_q[idx].has_dynamic_epoch &&
+                exception_event_q[idx].dynamic_epoch == status.dynamic_epoch &&
+                redirect_payload_equal(exception_event_q[idx].redirect, redirect)) begin
+                intent_id = exception_event_q[idx].redirect_intent_id;
+            end
+        end
+        return intent_id != 0;
+    endfunction:submit_redirect_intent
+
+    function void mark_redirect_intent_accepted(input int unsigned intent_id);
+        if (intent_id == 0 || accepted_redirect_intent_by_id.exists(intent_id) ||
+            canceled_redirect_intent_by_id.exists(intent_id)) begin
+            `uvm_fatal("REDIRECT_INTENT",
+                       $sformatf("invalid or duplicate accepted redirect intent id=%0d",
+                                 intent_id))
+        end
+        accepted_redirect_intent_by_id[intent_id] = 1'b1;
+    endfunction:mark_redirect_intent_accepted
+
+    function bit consume_redirect_intent_accepted(input int unsigned intent_id);
+        if (intent_id == 0 || !accepted_redirect_intent_by_id.exists(intent_id)) begin
+            return 1'b0;
+        end
+        accepted_redirect_intent_by_id.delete(intent_id);
+        return 1'b1;
+    endfunction:consume_redirect_intent_accepted
+
+    function void mark_redirect_intent_canceled(input int unsigned intent_id);
+        if (intent_id == 0 || accepted_redirect_intent_by_id.exists(intent_id) ||
+            canceled_redirect_intent_by_id.exists(intent_id)) begin
+            `uvm_fatal("REDIRECT_INTENT",
+                       $sformatf("invalid or duplicate canceled redirect intent id=%0d",
+                                 intent_id))
+        end
+        canceled_redirect_intent_by_id[intent_id] = 1'b1;
+    endfunction:mark_redirect_intent_canceled
+
+    function bit consume_redirect_intent_canceled(input int unsigned intent_id);
+        if (intent_id == 0 || !canceled_redirect_intent_by_id.exists(intent_id)) begin
+            return 1'b0;
+        end
+        canceled_redirect_intent_by_id.delete(intent_id);
+        return 1'b1;
+    endfunction:consume_redirect_intent_canceled
+
+    // fault token 可能在自己的 intent 已被 recovery 接受后，或被更老 redirect
+    // 覆盖并从事件队列删除后收口。这里统一回收尚存的 queue/ack 状态，避免 token
+    // 私有字段清零后公共 runtime drain 永久保留孤儿 intent。
+    function void retire_redirect_intent(input int unsigned intent_id);
+        int unsigned live_state_count;
+
+        if (intent_id == 0) begin
+            `uvm_fatal("REDIRECT_INTENT", "retire redirect intent requires non-zero id")
+        end
+        live_state_count = 0;
+        if (accepted_redirect_intent_by_id.exists(intent_id)) begin
+            accepted_redirect_intent_by_id.delete(intent_id);
+            live_state_count++;
+        end
+        if (canceled_redirect_intent_by_id.exists(intent_id)) begin
+            canceled_redirect_intent_by_id.delete(intent_id);
+            live_state_count++;
+        end
+        for (int idx = exception_event_q.size(); idx > 0; idx--) begin
+            if (exception_event_q[idx - 1].redirect_intent_id == intent_id) begin
+                exception_event_q.delete(idx - 1);
+                live_state_count++;
+            end
+        end
+        if (live_state_count > 1) begin
+            `uvm_fatal("REDIRECT_INTENT",
+                       $sformatf("redirect intent id=%0d existed in multiple lifecycle states",
+                                 intent_id))
+        end
+    endfunction:retire_redirect_intent
 
     function bit pop_feedback_event(output memblock_wb_event_t wb_event);
         if (exception_event_q.size() == 0) begin
@@ -10702,6 +11528,55 @@ class common_data_transaction extends uvm_object;
         return 1'b0;
     endfunction:issue_queue_contains
 
+    function bit issue_queue_contains_exact(input memblock_issue_q_item_t item);
+        case (item.target)
+            MEMBLOCK_ISSUE_TARGET_LOAD: foreach (load_issue_q[idx]) begin
+                if (load_issue_q[idx].uid == item.uid &&
+                    load_issue_q[idx].replay_seq == item.replay_seq &&
+                    load_issue_q[idx].dynamic_epoch == item.dynamic_epoch &&
+                    load_issue_q[idx].uop_index == item.uop_index) return 1'b1;
+            end
+            MEMBLOCK_ISSUE_TARGET_STA: foreach (sta_issue_q[idx]) begin
+                if (sta_issue_q[idx].uid == item.uid &&
+                    sta_issue_q[idx].replay_seq == item.replay_seq &&
+                    sta_issue_q[idx].dynamic_epoch == item.dynamic_epoch &&
+                    sta_issue_q[idx].uop_index == item.uop_index) return 1'b1;
+            end
+            MEMBLOCK_ISSUE_TARGET_STD: foreach (std_issue_q[idx]) begin
+                if (std_issue_q[idx].uid == item.uid &&
+                    std_issue_q[idx].replay_seq == item.replay_seq &&
+                    std_issue_q[idx].dynamic_epoch == item.dynamic_epoch &&
+                    std_issue_q[idx].uop_index == item.uop_index) return 1'b1;
+            end
+            default: `uvm_fatal("COMMON_DATA", "issue_queue_contains_exact got unsupported target")
+        endcase
+        return 1'b0;
+    endfunction:issue_queue_contains_exact
+
+    function void delete_issue_queue_entry_exact(input memblock_issue_q_item_t item);
+        case (item.target)
+            MEMBLOCK_ISSUE_TARGET_LOAD: for (int idx = load_issue_q.size(); idx > 0; idx--) begin
+                if (load_issue_q[idx-1].uid == item.uid &&
+                    load_issue_q[idx-1].replay_seq == item.replay_seq &&
+                    load_issue_q[idx-1].dynamic_epoch == item.dynamic_epoch &&
+                    load_issue_q[idx-1].uop_index == item.uop_index) load_issue_q.delete(idx-1);
+            end
+            MEMBLOCK_ISSUE_TARGET_STA: for (int idx = sta_issue_q.size(); idx > 0; idx--) begin
+                if (sta_issue_q[idx-1].uid == item.uid &&
+                    sta_issue_q[idx-1].replay_seq == item.replay_seq &&
+                    sta_issue_q[idx-1].dynamic_epoch == item.dynamic_epoch &&
+                    sta_issue_q[idx-1].uop_index == item.uop_index) sta_issue_q.delete(idx-1);
+            end
+            MEMBLOCK_ISSUE_TARGET_STD: for (int idx = std_issue_q.size(); idx > 0; idx--) begin
+                if (std_issue_q[idx-1].uid == item.uid &&
+                    std_issue_q[idx-1].replay_seq == item.replay_seq &&
+                    std_issue_q[idx-1].dynamic_epoch == item.dynamic_epoch &&
+                    std_issue_q[idx-1].uop_index == item.uop_index) std_issue_q.delete(idx-1);
+            end
+            default: `uvm_fatal("COMMON_DATA", "delete_issue_queue_entry_exact got unsupported target")
+        endcase
+    endfunction:delete_issue_queue_entry_exact
+
     function void delete_issue_queue_entry(input memblock_issue_target_e target,
                                            input memblock_uid_t uid,
                                            input int unsigned replay_seq,
@@ -11163,7 +12038,7 @@ class common_data_transaction extends uvm_object;
         if (item.target == MEMBLOCK_ISSUE_TARGET_NONE) begin
             `uvm_fatal("COMMON_DATA", $sformatf("push_issue_queue_item uid=%0d got target NONE", item.uid))
         end
-        if (issue_queue_contains(item.target, item.uid, item.replay_seq)) begin
+        if (issue_queue_contains_exact(item)) begin
             return;
         end
         case (item.target)
@@ -11626,11 +12501,21 @@ class common_data_transaction extends uvm_object;
         input memblock_uid_t uid,
         input memblock_redirect_payload_t redirect);
         status_transaction status;
+        memblock_op_behavior_t behavior;
         int record_idx;
 
         status = status_by_uid[uid];
+        behavior = memblock_op_behavior_util::derive_op_behavior(main_table_by_uid[uid]);
         record_idx = find_cancel_record_index_by_id(active_cancel_record_id);
         commit_quiesce_fault_uid_for_redirect_range(uid);
+        // Fired atomic architectural faults keep the live ROB owner and atomic
+        // barrier.  Only their remaining queued pieces are quiesced here; the
+        // AMO terminal/recovery path releases the owner after common recovery.
+        if (behavior.is_atomic) begin
+            status.redirect_pending = 1'b0;
+            status.flushed = 1'b0;
+            status.issue_killed = 1'b0;
+        end
         if (status.active_lq_mapped) begin
             commit_capture_redirect_deleted_owner_for_redirect_range(uid, record_idx);
             commit_note_lsq_cancel_for_redirect_range(uid, record_idx);
@@ -11761,6 +12646,7 @@ class common_data_transaction extends uvm_object;
         input memblock_uid_t uid
     );
         status_transaction status;
+        memblock_op_behavior_t behavior;
         memblock_rob_key_t old_rob_key;
         int unsigned old_dynamic_epoch;
         bit inherit_retry_boost;
@@ -11786,6 +12672,16 @@ class common_data_transaction extends uvm_object;
         status.load_dispatched = 1'b0;
         status.sta_dispatched = 1'b0;
         status.std_dispatched = 1'b0;
+        behavior = memblock_op_behavior_util::derive_op_behavior(
+            main_table_by_uid[uid]);
+        if (behavior.is_atomic) begin
+            if (status.atomic_piece_fire_count != 0) begin
+                `uvm_fatal("ATOMIC_REDIRECT",
+                           $sformatf("redirect reset reached fired atomic uid=%0d pieces=%0d",
+                                     uid, status.atomic_piece_fire_count))
+            end
+            clear_atomic_owner_runtime(status);
+        end
         status.load_writeback = 1'b0;
         status.sta_writeback = 1'b0;
         status.std_writeback = 1'b0;
@@ -12587,6 +13483,21 @@ class common_data_transaction extends uvm_object;
 
 
 
+    function bit fired_atomic_redirect_is_self_fault(
+        input status_transaction status,
+        input memblock_op_behavior_t behavior,
+        input memblock_redirect_payload_t redirect,
+        input bit require_fault_head);
+        if (status == null) begin
+            return 1'b0;
+        end
+        return behavior.is_atomic && status.atomic_piece_fire_count != 0 &&
+               require_fault_head && redirect.valid && redirect.flush_itself &&
+               status.active && status.rob_commit &&
+               status.get_rob_key() == redirect.rob_key &&
+               status.atomic_finalized && status.fault;
+    endfunction:fired_atomic_redirect_is_self_fault
+
     function bit precheck_uid_redirect_mutation(
         input memblock_uid_t uid,
         input memblock_redirect_payload_t redirect,
@@ -12595,8 +13506,10 @@ class common_data_transaction extends uvm_object;
     );
         status_transaction status;
         main_control_transaction main_tr;
+        memblock_op_behavior_t behavior;
         memblock_rob_map_key_t rob_map_key;
         int record_idx;
+        bit allow_fired_atomic_fault_redirect;
 
         if (!redirect.valid || !is_valid_uid(uid) || status_by_uid[uid] == null ||
             main_table_by_uid[uid] == null) begin
@@ -12607,11 +13520,35 @@ class common_data_transaction extends uvm_object;
         end
         status = status_by_uid[uid];
         main_tr = main_table_by_uid[uid];
+        behavior = memblock_op_behavior_util::derive_op_behavior(main_tr);
+        allow_fired_atomic_fault_redirect = fired_atomic_redirect_is_self_fault(
+            status, behavior, redirect, require_fault_head);
         if (is_control_op_class(main_tr.op_class) || status.terminal_done || !status.active) begin
             `uvm_fatal("CONTROL_REDIRECT",
                        $sformatf("%s rejects control/terminal/inactive uid=%0d op=%0d terminal/active=%0d/%0d",
                                  caller, uid, main_tr.op_class, status.terminal_done,
                                  status.active))
+            return 1'b0;
+        end
+        if (behavior.is_atomic &&
+            status.atomic_piece_fire_count != 0 &&
+            !allow_fired_atomic_fault_redirect) begin
+            `uvm_fatal("ATOMIC_REDIRECT",
+                       $sformatf("%s cannot redirect fired atomic uid=%0d pieces=%0d sta/std=%0h/%0h",
+                                 caller, uid, status.atomic_piece_fire_count,
+                                 status.atomic_sta_fired_mask,
+                                 status.atomic_std_fired_mask))
+            return 1'b0;
+        end
+        if (allow_fired_atomic_fault_redirect &&
+            (!active_atomic_barrier_valid || active_atomic_barrier_uid != uid ||
+             status.active_lq_mapped || status.active_sq_mapped)) begin
+            `uvm_fatal("ATOMIC_REDIRECT",
+                       $sformatf("%s atomic fault-head uid=%0d lost owner/barrier isolation barrier=%0d/%0d lq/sq=%0d/%0d",
+                                 caller, uid, active_atomic_barrier_valid,
+                                 active_atomic_barrier_uid,
+                                 status.active_lq_mapped,
+                                 status.active_sq_mapped))
             return 1'b0;
         end
         if (require_fault_head &&

@@ -1,8 +1,16 @@
 # MemBlock V2 真实 RTL 等价 LSQ 准入正式方案
 
-状态：2026-11-02补充取消路径方案，本轮独立静态review通过；未coding、未编译、未仿真。原两项阻断已转成第3.4、5.5、6.4/6.5章的确定设计：按采样编号统一受理flush、service尾部发布控制结算、按真实流水回补并与软件释放分离。本轮保持既有单飞单脉冲redirect范围，不宣称框架已支持多次取消重叠；该扩展及动态验收未完成，不能标整个框架等价PASS。创建日期：2026-10-31。
+状态：`已完成 coding、基础动态验证和独立 implementation review，已归档`。2026-11-04 在独立 worktree `codex/memblock-amo-adaptation-20261103` 完成 D/R/Q、registered credit、取消回补、统一 redirect intent、control-settled 发布、共享 drain predicate 和隔离 AMO token。完整 VCS/KDB 编译及 LSQ/AMO 定向 soft test、普通 real-dispatch smoke、AMO real-dispatch smoke 均通过，`UVM_ERROR=0`、`UVM_FATAL=0`。本轮仍保持既有单飞单脉冲 redirect 范围，不宣称支持真实多次取消重叠或完成第9章全部扩展回归。创建日期：2026-10-31；完成日期：2026-11-04。
 
-基线：工作区 `.codex_mother_integration_20261028`，HEAD `e275e8819b11b2329f01f9788c47655e8711d107`。本轮只写本文档，不新增worktree、不改生产代码或已有脏文件，不git add/commit。已完成B05动态报告为`AI_DOC/analysis/framework_design/memblock_b05_rob_sq_lifecycle_recheck_20261031.md`（Mencius），第8/10章引用其证据限制；报告不能替代本方案两项门禁。
+方案复核基线：工作区分支 `mem_ut_uvm_v2`，HEAD `4acf3cc3c381671cb7bb4dc34eeaec9287825c80`（2026-11-03）。实现位于独立分支 `codex/memblock-amo-adaptation-20261103`。已完成B05动态报告为`AI_DOC/analysis/framework_design/memblock_b05_rob_sq_lifecycle_recheck_20261031.md`（Mencius），第8/10章引用其证据限制；报告不替代本轮实现后的基础验证和后续专项回归。
+
+## 实现补充/修正（IMPLEMENTATION_DELTA）
+
+2026-11-03 coding 阶段按 RTL 重新固化 AMO 隔离语义：单 atomic owner 不是测试框架主动降低吞吐的可选简化，而是当前 MemBlock 只有一个 `AtomicsUnit` FSM、并由后端 `blockBackward` 保证的严格执行合同。AMO/LR/SC 必须等待全部 older ROB 事务完成；同一条架构原子指令的全部 STA/STD 子 uop 属于同一 owner；owner 建立后禁止 younger load/store/control/另一条独立 AMO admission 和 issue。AtomicsUnit busy 时额外可接受的 STA 只允许是同一 `AMOCAS.Q` 的 STA slot2。只有该 owner terminal/commit、反馈及必要 recovery 全部收口后，才允许 younger 或下一条独立 AMO 继续。
+
+因此本文原“隔离单 owner 只是满足测试所需的最小吞吐投影”措辞按上述合同修正：实现可以固定 pipe0、每拍一片来简化驱动，但不得把 owner 隔离本身做成可关闭策略，也不得在 atomic barrier 期间让普通访存或第二个 AMO 穿越。CAS 的多条 STA/STD 始终是一个架构 owner，不得分配成多个独立 admission token。
+
+2026-11-04 实现收口补充：source offer 只在真实 driver launch 后发布；reset 会回滚尚未 DUT-visible 的 pending reservation 及 admission 前缀；AMO token 在真实 Q fire 后才建立 non-LSQ owner。独立 implementation review 未发现 Blocker、Major 或 Minor，实现可进入扩展回归阶段。
 
 ## 1. 定位、术语与抽象功能职责
 
@@ -36,7 +44,7 @@
 | renameIn / renameOut | 前级解码类别投影 / rename后送PipeGroupConnect的输入 | 本受限标量轨迹选择无fusion/move、资源可用，使有效槽与类别逐lane对应 |
 | R / Q / D | 前级decodePipeRename寄存投影 / PipeGroupConnect固定lane状态 / 本边沿前级decode输入 | R的valid清零时bits保持，D无效槽明确给非Store |
 | phase / settled | 输出有效性阶段 / 同sample全部字段已冻结完成 | 不是TLB barrier的新增参与者 |
-| VLS / AMO / STD | 向量访存 / 原子操作 / store数据发射目标 | 本文不扩VLS；STD屏障保持原语义 |
+| VLS / AMO / STD | 向量访存 / 原子操作 / store数据发射目标 | 不扩VLS；增加单 owner、隔离标量AMO admission token；STD屏障保持原语义 |
 | cancel sample / level | 指定边沿采到的取消量 / DUT持续保持数值 | 是否回补由t3_update决定，不要求计数数值变化或软件新事件 |
 | intent / cutoff | 尚未生效的redirect意图 / 按采样编号确定的本轮受理截止 | 复用exception_event_q；sample n期间提交的意图最早N[n+1]受理 |
 | shadow settled / control settled | 硬件状态递推已完成 / 本轮业务与flush仲裁也已完成 | 前者不能唤醒下一offer；后者由service尾部发布 |
@@ -110,6 +118,15 @@ NewDispatch 518 行将它接到的 redirect 再寄存一拍；MemBlock 405 行�
 
 `PipeGroupConnect.scala:32–49`规定canAcc=allFire||empty；partial只清对应lane valid，bits原地保持。637行rename分类是`(valid && isLoad(bits)) || isStore(bits)`，故invalid Store仍贡献1。外部空D输入明确给非Store的FuType.alu；R清valid后保留的旧Store bits不能改成alu，必须照式计入RenamePrefix；Q侧DispatchPrefix则按其有效lane计数。
 
+AMO 是需要单独说明的 non-LSQ 特例：
+
+1. `NewDispatch.scala:447-451` 的全局 `lsqCanAccept` 无条件参与所有 `fromRename.ready/fire`，因此 AMO 不能因为 `needAlloc=0` 而绕过 registered-canAccept。
+2. `680-681` 对 AMO 只继承前槽 `allowDispatchPrevious`，不检查 LQ/SQ 分项 `free > flowTotal`；`conserveFlows` 中 AMO 贡献 0。
+3. `538-555` 将 AMO 与 store 共用结构计数，单批最多 4 个；AMO 适配方案采用隔离单 owner，所以该限制天然满足。
+4. `688-706` 对 AMO 产生 `needAlloc=0`、`enqLsq.req.valid=0`，不会分配 LQ/SQ、不会等待 LSQ response，但其 ROB/IQ dispatch fire 仍必须经过 D/R/Q 和旧 registered-canAccept。
+
+因此本文只增加满足 AMO 方案所需的“隔离单个标量 AMO token”投影，不实现 AMO 与 load/store 混合批、多 AMO 同批或完整后端吞吐投影。
+
 ## 3. 唯一逐拍入口与复用边界
 
 ### 3.1 时钟所有权
@@ -160,7 +177,7 @@ driver在E[n+1]只读取此前冻结且target_seq匹配的offer；
 
 中文文字伪代码：先读持久序号再决定是否等待，通知早到或晚到都以条件为准。冻结输入只使用上一negedge的硬件及控制结算结果；driver不能追溯改源端输入。sample_settled表示本轮控制决策已关闭，不表示所有业务资源已经释放；旧owner未释放仍可形成合法停顿。
 
-control/non-LSQ可维持原零时间处理，但只修改未冻结的下一offer草稿；每目标边沿一次冻结，冻结后不覆盖，不递推C、不把多个control当多个周期。无fire时在边沿前冻结req.valid=0、needAlloc=0；Q空才允许iqAccept全1，Q非空IQ停顿时必须iqAccept=!Q.valid（有效槽0）；一般情况为!Q.valid||fire。缺失offer不能事后默认为空；idle、control、flush、deferred等待期间仍每sample推进一次。
+control marker 可维持原零时间处理，但普通 non-LSQ 不能一概零时间：MOU/AMO 必须按2.4和5.6进入隔离 D/R/Q token 路径。control 只修改未冻结的下一offer草稿；每目标边沿一次冻结，冻结后不覆盖，不递推C、不把多个control当多个周期。无fire时在边沿前冻结req.valid=0、needAlloc=0；Q空才允许iqAccept全1，Q非空IQ停顿时必须iqAccept=!Q.valid（有效槽0）；一般情况为!Q.valid||fire。缺失offer不能事后默认为空；idle、control、AMO等待、flush、deferred等待期间仍每sample推进一次。
 
 ### 3.3 仅两组不同语义状态
 
@@ -176,6 +193,23 @@ shadow 字段限于 credit、源端 enq ptr、can_accept/有效位、t1/t2/t3_up
 分开有必要：handler 1213–1218 行可因 STD real-WB 未齐而延迟 SQ deq，raw 反馈早已产生。shadow 在原物理边沿增加信用一次；业务 handler 日后只更新 reservation，禁止 release_sq/release_lq 再修改 shadow。取消同理，软件取消只回 reservation；shadow 只在旧 t3_update 使用旧 t3_cancel 回补，held cancel 非零多个周期不能反复加。
 
 reservation未结算导致key不可用时，候选以外部IQ/框架生命周期阻塞形成源端未fire前缀，不伪造物理信用不足、不绕过既有deq/cancel owner链强行删owner；B05只解析STD写回身份。这是合法上游停顿下的精确LSQ投影，不宣称复现整核最大吞吐量。
+
+#### 3.3.1 统一 source-dispatch gate 与 drain predicate
+
+普通 load/store 和5.6的隔离 AMO 必须复用同一个 source-dispatch gate，禁止各自在 sequence 中拼接不一致的条件。候选进入 D/R/Q 或从 Q fire 前，统一核对：
+
+```text
+control settled
+shadow baseline valid
+no active redirect/recovery block
+no older-terminal block
+no conflicting atomic barrier
+ROB admission room
+```
+
+Q fire 还必须读取旧 `shadow_can_accept` 并满足对应 IQ 条件；普通 load/store继续执行严格前缀与分项资源检查，隔离 AMO flow贡献为0且不执行LQ/SQ分项free检查。该 gate 只决定 source admission，不得在 AMO 已进入真实 IQ 后再次门控其 STA/STD issue。隔离 AMO 单独占一个 source bundle，不与年轻 load/store、control或另一条AMO同拍fire。
+
+`runtime_drain_complete()` 同样只能有一个共享定义，至少同时检查：shadow D/R/Q为空、无 frozen offer、无 pending LSQ sample、无未受理redirect intent或未完成recovery、无atomic owner/barrier/held piece，且atomic bitmap/counter已清空。任何一侧不得仅检查自己的局部状态就宣布global-stop或runtime reset drain完成。
 
 ### 3.4 Flush意图、截止点与唯一控制写者
 
@@ -290,7 +324,7 @@ advance_rtl_admission_sample(sample, offer, launch):
 
 ### 5.2 `collect_lsq_candidates()`（修改既有函数）
 
-抽象功能描述：从已结算pipe的固定lane构造标量fire前缀、响应key及下一组前级捕获输入；只读shadow，不改pipe，不建立reservation。
+抽象功能描述：从已结算pipe的固定lane构造标量load/store fire前缀、响应key及下一组前级捕获输入；只读shadow，不改pipe，不建立reservation。遇到主表下一项为 AMO 时不把它当 LSQ candidate，而是转交5.6的隔离 token 路径。
 
 目的/输入/输出：替换仅本类需求<=软件 free 的判断；输入为旧许可、混合前缀寄存快照及现有生命周期约束，输出为冻结 offer，仍复用原队列、behavior 推导与 key 算术。
 
@@ -345,7 +379,7 @@ driver main_phase：
   不调用shadow递推，不通过wait_lsq_can_accept等待不存在的ready。
 send_lsqenq_cycle：
   新offer前按3.2持久seq/epoch条件等待唯一service结算，匹配后在下个posedge前冻结；
-  control/nonLSQ早返回只推进原业务游标，不推进shadow或伪造sample；
+  control marker早返回只推进原业务游标；AMO不得走原zero-time nonLSQ早返回，必须由5.6冻结token；
   start_item/finish_item返回后，先结算旧pending_sample，再确认本次launch。
 ```
 
@@ -412,6 +446,69 @@ service完成所有控制写操作后关闭权限，再发布control settled。
 中文文字伪代码：未来请求保持队列等待，本轮只从到期且动态身份仍有效的候选中选最老者。当前恢复未完或选中fault Store尚未提交时，保留原意图和其它事件，继续处理原fault提交依据，不增加epoch、不改选年轻者；下一轮仍以同一eligible重新核对。真正通过屏障的受理者才统一建record及驱动payload，并通知fault-head/vseq更新pending状态。最后service一次性发布稳定控制结果，之后只能追加未来意图。
 
 相关实现范围包括`memblock_dispatch_types.sv`及事件默认初始化/拷贝、公共入队、recovery handler、fault-head token、定向vseq及停止条件；这些都是后续获授权后的代码修改点，本轮不修改。soft_test路径只做调用清单审计，不启动用户已排除的soft_test修复；若共享API迁移会影响其可编译性，必须在coding前列为显式范围，不静默绕过owner约束。
+
+### 5.6 隔离标量 AMO admission token（与 AMO 方案的接口）
+
+抽象功能描述：为 `memblock_amo_stimulus_only_adaptation_plan_20261022.md` 提供 AMO 所需的最小 NewDispatch 投影。它只支持一条已满足 older-terminal 条件的标量 MOU token，不与 load/store/control 或另一条 AMO 同批；token 经过 D→R→Q，在旧 registered-canAccept、ROB/IQ 资格和无 redirect 条件下产生一次 dispatch fire。
+
+候选与流水规则：
+
+```text
+主表cursor命中AMO：
+  require 通过3.3.1统一source-dispatch gate；
+  require 所有更老UID terminal，当前无atomic owner、无active control barrier；
+  require D/R/Q没有其它token、无frozen offer且pending LSQ sample已结算；否则等待，不插队；
+  冻结单lane D={valid=1, uid, fuType=MOU}，其余lane无效且给非Store payload；
+  AMO在RenamePrefix/DispatchPrefix中flow贡献0，storeAMO结构计数为1；
+  AMO独占本source bundle，不带年轻load/store、control或另一条AMO；
+  D按第7章进入R再进入Q，不允许zero-time commit_non_lsq_admission；
+Q中AMO本拍fire条件：
+  Q.valid && old.shadow_can_accept && ROB/IQ允许 && !source_redirect；
+  old.shadow_can_accept=0时保持原lane，当前拍deq只能影响后续next_can；
+本拍LSQ输出：
+  所有needAlloc=0，所有enqLsq.req.valid=0，不产生LSQ response key；
+  A_L=A_S=0，AMO本身不推进shadow或reservation LQ/SQ ptr/count；
+service结算dispatch fire：
+  从本拍shadow response冻结non-owning lqIdx/sqIdx snapshot；
+  调用commit_atomic_non_lsq_admission(uid, behavior, tr, shadow_lq_snapshot, shadow_sq_snapshot)；
+  wrapper建立ROB/status owner但不建立LQ/SQ map或reservation，并立即置status.lsq_deq=1；
+  在complete_admission和route可见前建立atomic barrier/owner；
+  再调用complete_admission(uid)，发布一次可route的AMO owner；
+  不建立lsq reservation token，不写pending_sample，不等待下一拍MemBlock LSQ sample；
+```
+
+唯一发布顺序必须是：
+
+```text
+shadow确认AMO fire
+-> commit_atomic_non_lsq_admission(shadow index snapshot, lsq_deq=1)
+-> establish_atomic_barrier
+-> complete_admission
+-> issue scheduler允许route STA/STD
+```
+
+不得直接复用当前普通 `commit_non_lsq_admission()` 内部调用 `commit_allocate()` 的索引赋值路径，因为软件 reservation pointer 与 shadow response pointer 在取消/回补期间允许暂时不同。计划新增的 `commit_atomic_non_lsq_admission()` 必须显式接收本次 dispatch shadow response 的 LQ/SQ pointer snapshot，把它们写入 uop/status 的 index 字段，但这些字段不表示 ownership，不能用于 LQ/SQ map、deq或cancel查询。wrapper完成后必须满足：
+
+```text
+active_lq_mapped == 0
+active_sq_mapped == 0
+lsq_reservation_state == NONE
+lsq_deq == 1
+```
+
+`admit_non_lsq_if_ready()` 不得再直接处理 MOU；否则 AMO 会绕过 registered-canAccept 和 D/R/Q。原 helper只保留明确允许的 control/其它非MOU类型，MOU命中时fatal或返回本路径。
+
+redirect/reset边界：
+
+- token 尚在 D/R/Q、未 fire 时，普通已生效 redirect 按第7章清 valid；它没有 owner、barrier、LSQ reservation 或取消量。
+- token fire并建立owner后，如果尚无任何STA/STD piece fire，覆盖该owner的普通redirect可以删除软件owner和未发item；任意piece已fire后普通redirect必须fail-fast。
+- atomic自身fault redirect必须使用5.5的intent入口，并等待6.4公共recovery完成；atomic无LSQ owner，不进入redirect deleted LQ/SQ owner等待。
+- reset在token fire前只撤销shadow token；任意piece已fire后，只有真正断言MemBlock/AtomicsUnit reset的物理reset可同步清DUT和软件owner。L2TLB/control runtime reset或软件epoch变化不复位AtomicsUnit，必须fail-fast。
+- AMO admission 完成后，后续 registered-canAccept 降低不参与 STA/STD issue gate。
+
+公共 `redirect_recovery_complete` 不得等待 atomic barrier 释放；否则会与“AMO等公共recovery后释放barrier”形成环。公共recovery只等待redirect drive/anchor、t1/t2/t3、cancel record和普通LSQ owner收口；fault atomic owner/barrier/terminal token由AMO侧继续持有，观察公共recovery完成后再释放。
+
+该接口是两份方案的 coding 依赖边界：先实现并验证 LSQ shadow、D/R/Q 和 control-settled，再实现本节 AMO token 发布，最后接 AMO 子uop和 fault/reset 生命周期。
 
 ## 6. 逐拍边界、回补与输出保持
 
@@ -486,6 +583,8 @@ service统一计算下一offer的恢复阻塞：
 
 `apply_redirect_flush()`可以完成原业务状态扫描，但其清除公共flush标志不能单独放行LSQ。`lsq_allocating_admission_blocked()`还须包含本代恢复未完成；新record受理和global-stop也用同一完成条件。service先应用已就绪的reservation取消再核对record回收，不能依赖正在被阻塞的LSQ active发送来完成取消，避免等待形成环。
 
+对5.6的fault AMO，公共恢复完成条件明确排除 atomic barrier、atomic terminal token及不存在的atomic LQ/SQ owner。atomic barrier仍会阻止下一条source admission，但不阻止本代redirect drive/anchor、t1/t2/t3和普通LSQ owner完成；AMO侧只做单向等待：公共recovery完成后，再结合fault terminal和feedback释放barrier。共享`runtime_drain_complete()`则在最终退出时同时等待公共recovery与atomic状态清空，两者用途不能混淆。
+
 ### 6.5 单飞范围、连续请求及扩展边界
 
 本轮保持既有单代owner窗口：同一时刻最多一个已受理redirect，外部valid为一个真实采样拍；producer可连续提交意图，但下一意图等待6.4完成后才受理。未受理者没有cancel record和生效epoch，不把排队时间冒充硬件取消时间。后续到期请求沿用oldest/覆盖规则；已被前一redirect取消的旧动态意图失效时明确通知producer，不为它发第二次硬件redirect。
@@ -500,7 +599,7 @@ service统一计算下一offer的恢复阻塞：
 
 ## 7. 精确投影范围与性能边界
 
-当前只支持既有标量load/prefetch/store且numLsElem=1。VLS、向量unit-stride/segment/FOF、AMO的完整NewDispatch投影不新增，不把向量flow简化为标量1；遇到超出当前生产者合同的请求明确报错。合法page/access/misaligned异常仍可构造，不能因可能异常禁发。
+当前支持标量load/prefetch/store且numLsElem=1，以及5.6定义的隔离单个标量 AMO admission token。VLS、向量unit-stride/segment/FOF、AMO与load/store混合批、多AMO同批和完整NewDispatch吞吐投影不新增，不把向量flow或AMO简化为标量LSQ分配1；遇到超出当前生产者合同的请求明确报错。合法page/access/misaligned异常仍可构造，不能因可能异常禁发。
 
 受限连续轨迹固定无fusion/move、rename资源可用且不walk，故CtrlBlock:582–585的renameIn=旧R，Rename:420的renameOut.valid=旧R.valid，288/421保持访存类别对应。只在Q/R均空时提交新D；Q非空期间D.valid=0，外部D.bits.fuType=FuType.alu，冻结后不改。全fire边沿不并发替换新组，允许合法前级停顿；不声称整核最大吞吐复现。
 
@@ -548,6 +647,8 @@ reset只清R/Q.valid，不将data bits假定为alu，不新增dummy指令或先�
 | redirect | 6.4绑定anchor/restore消费凭证，硬件回补与软件reservation分开；6.5保持单飞单脉冲 | 不以软件epoch/数值变化代替硬件使能；超范围保留事实并拒绝，不宣称完整后端等价 |
 | launch合同 | 6.4区分未接受、已launch、已sampled；旧driver epoch检查只核对冻结合同 | 普通flush不走临时abort；reset独立收口；违反合同不得事后改alloc |
 | 软件资源 | raw先加shadow、业务稍后只回reservation，取消同样分别单owner | 发现双加/双取消立即报错，不修改B05 resolver自救 |
+| 隔离AMO | MOU经过统一source gate和D/R/Q并读取旧registered-canAccept；atomic专用wrapper使用shadow index snapshot、预置`lsq_deq=1`，fire时LSQ VIF全无效，按non-LSQ/barrier/complete顺序发布 | 禁止zero-time MOU admission、软件free组合gate、普通reservation pointer代替shadow snapshot、AMO LSQ reservation或admission后重复gate issue |
+| AMO redirect/reset | 任意piece fire前后边界明确；公共recovery不等待atomic barrier，runtime drain使用共享predicate | piece已fire后普通redirect或非物理runtime reset必须fail-fast；禁止barrier/recovery互等或局部drain提前退出 |
 
 主审重点：原两项问题已落实为3.4、5.5和6.4/6.5的设计约束，需独立review以下执行合同，不以方案已补充冒充实现通过。B05报告第5章的132个请求边沿及365.700ns首例保持原证据含义，不能用运行PASS追认激励合法。
 
@@ -556,12 +657,14 @@ reset只清R/Q.valid，不将data bits假定为alu，不新增dummy指令或先�
 | 冻结后flush与driver abort分歧 | producer只入意图，统一eligible=n+1；owner控制阶段更新flush/epoch，尾部settled；已launch不追溯撤销 | 全部运行期直接写者均迁移；vseq同negedge先后顺序不影响本轮决定；fault pending不冒充covered；停止条件包含队列 |
 | 回补与软件恢复归属不清 | shadow严格消费旧T3/旧K，原record增加消费seq；软件只回reservation；恢复条件取两路交集 | 零K也有凭证，record不提前pop，不重复回补/释放，软件取消不依赖新active发送；两代相同K可闭环 |
 | 重叠redirect支持范围混淆 | 保留单飞单脉冲，连续意图串行；真实多周期/重叠不是本轮扩展目标 | 明确本轮受限轨迹，不用合成样本PASS冒充真实DUT支持；需要扩展者先补独立方案 |
+| AMO non-LSQ与fault终态不闭环 | atomic专用wrapper预置`lsq_deq=1`且不建LQ/SQ map；索引只取shadow response snapshot | fault AMO不等待不存在的物理deq；shadow/reservation pointer不一致时索引仍正确且不能解析owner |
+| recovery与atomic barrier形成环 | 公共recovery排除atomic barrier/terminal及atomic LSQ owner；AMO侧单向等待公共recovery | barrier仍有效时公共recovery可完成，随后AMO结合terminal/feedback释放barrier；runtime drain最后等待两侧均空 |
 
 这些是后续实现及验证门禁，不再把“统一写者如何做”“哪个cancel样本生效”留给coding猜测。独立review有必须修改项时继续完善本文件；无review结论或无当前coding授权时不得改生产文件。真实多周期扩展未完成不等于本轮单飞设计已经实现；两种范围分别给结论。
 
 ## 9. 专项矩阵与验收
 
-以下为后续获coding授权后的验收要求，本轮均未执行。复用现有vseq/monitor/handler；新增directed场景用继承virtual_base_sequence的专项vseq，由basicTest的ts入口选择，uvm_do_on启动必要子sequence，不新增独立testcase或随机default流。
+以下保留原方案的完整验收矩阵。2026-11-04 已完成第11章列出的编译、定向 soft test 和两项 real-dispatch smoke；未被这些基础用例实际覆盖的场景仍是后续回归要求。复用现有vseq/monitor/handler；新增directed场景用继承virtual_base_sequence的专项vseq，由basicTest的ts入口选择，uvm_do_on启动必要子sequence，不新增独立testcase或随机default流。
 
 | 场景 | 构造与必须观察的结果 |
 |---|---|
@@ -573,6 +676,11 @@ reset只清R/Q.valid，不将data bits假定为alu，不新增dummy指令或先�
 | fault Store提交屏障 | 已到期的最老fault Store意图在rob_commit=0时保留队列、eligible及其它事件，不提前redirect、不越过发年轻意图；提交后再受理 |
 | 发送三阶段 | 未接受可停、已launch仍须记sample、已sampled按实际redirect取消；普通epoch abort不能吞请求 |
 | control/nonLSQ | 多个零时间return之间不增加shadow拍数；每个真实边沿只递推一次 |
+| 隔离AMO admission | 统一source gate通过后单token独占bundle并经D/R/Q；旧can=0保持，当前deq不旁路；fire时needAlloc/req.valid全0，LQ/SQ两套ptr/count均不变，barrier先于route可见 |
+| AMO non-LSQ owner | wrapper写shadow response的non-owning lqIdx/sqIdx snapshot并立即置`lsq_deq=1`；active LQ/SQ map、LSQ reservation和pending sample均不存在 |
+| AMO admission后 | 后续registered-canAccept降低不阻塞STA/STD issue；无piece fire的owner可被普通redirect清理，任意piece fire后普通redirect及L2TLB/control runtime reset fail-fast，只有MemBlock物理reset同步清理 |
+| AMO fault recovery | fault redirect只提交intent；atomic不进入deleted LQ/SQ owner等待，公共recovery在barrier仍有效时完成，AMO再结合terminal/feedback释放barrier并推进UID+1 |
+| 统一drain | shadow D/R/Q、frozen offer、pending LSQ sample、redirect intent/recovery、atomic owner/barrier/held piece/counter任一未清都不得global-stop |
 | 混合严格前缀 | LQ=2、SQ=20，store/load只收store；保留阻塞load且不越项 |
 | pipe连续捕获 | D进R再Q；partial lane不变，item保留洞；新组仅空pipe后捕获；禁止单拍凭空换组 |
 | invalid Store/寄存前缀 | R.valid=0而bits=Store仍计1；外部D空输入给非Store；partial当拍用旧Q，下一停顿拍重算 |
@@ -608,24 +716,26 @@ deferred：raw原拍信用递推 -> 原STD屏障留FIFO -> 较晚业务成功 ->
 
 端到端文字伪代码：正常路径先经真实前级及pipe捕获建立lane状态，partial后保留洞并停IQ重算；按旧寄存前缀接受后建立软件预留，下一sample才开放issue。空拍推进时钟，旧Store bits照源式影响前缀但不产生分配；redirect和deferred仍各按原拍硬件反馈与原业务owner分开结算。
 
-2026-11-02本轮补充：保留固定lane及R/Q连续捕获；取消路径改为带明确截止的统一意图入口、尾部control settled、按发送阶段保留事实、硬件回补与软件释放分账及联合恢复。本轮实际改动仅本文档，不改此前review/状态表的历史结论；旧文档中“两项待补齐”描述对应本次补充前版本。
+2026-11-02补充：保留固定lane及R/Q连续捕获；取消路径改为带明确截止的统一意图入口、尾部control settled、按发送阶段保留事实、硬件回补与软件释放分账及联合恢复。
 
-已只读复核文首引用的Mencius报告：seed1545815340为1/1 PASS，但共132个有request边沿不满足pre-edge联合准入，首例365.700ns；旧已提交SQ驻留与背压有动态证据。本次补充不改变这些事实，不追认历史激励合法，也不表示新方案已仿真通过。
+2026-11-03交叉review补充：原文将 AMO 排除在投影外，同时 AMO 方案又用软件free组合判断 admission，二者不能共同coding。现已增加5.6隔离 AMO token，明确 AMO 受统一source gate和旧 registered-canAccept 门控，但 `needAlloc=0/enqLsq.req.valid=0` 且不改变任何 LQ/SQ资源。atomic专用wrapper显式接收shadow index snapshot、预置`lsq_deq=1`；公共recovery不等待atomic barrier，统一drain覆盖LSQ和atomic全部在途状态。AMO fault/reset 与本文统一 control/recovery 合同对接，未扩展混合AMO批或完整后端吞吐。
 
-最终交付为取消路径设计已补充、本轮独立静态review通过的方案。Mencius（01a1910d-2d84-75e2-acc6-8b16275386fd）首轮指出受理前必须显式保留store_redirect_waits_fault_commit屏障，已在5.5及9章补齐；末轮复核确认无必须修改项，主agent最终检查发布顺序、截止点及分账规则一致。未coding、未仿真、未更新AI_DOC/analysis/**/v2知识库；不把文档或静态review通过写成实现/动态等价验收PASS，后续仍需当前方案的明确coding授权及专项验证。
+已只读复核文首引用的Mencius报告：seed1545815340为1/1 PASS，但共132个有request边沿不满足pre-edge联合准入，首例365.700ns；旧已提交SQ驻留与背压有动态证据。本次实现不追认历史激励合法；新路径的基础仿真结果单独记录在第11章。
 
-只读核查遵循AGENTS及指定六份管理规则，并补读code_review函数/伪代码约束；未启用brainstorming、planning-with-files或writing-plans。后续coding须同步lsq_admission_flow等受影响现有flow；本轮不提前将计划函数写成已实现。
+最终交付已完成取消路径和隔离 AMO admission 接口的 coding 与基础动态验证。此前 Mencius review 指出的 fault Store 提交屏障已在5.5及9章保留；2026-11-03交叉review清除了 AMO registered-canAccept、non-LSQ fault terminal、reset边界及recovery/barrier互等风险；2026-11-04 implementation review 未发现 Blocker、Major 或 Minor。第9章仍是完整专项矩阵，未执行项继续作为后续回归范围，不能由三项基础 PASS 推导为全部场景已覆盖。
+
+方案核查和 implementation review 遵循AGENTS及指定管理规则；未启用brainstorming、planning-with-files或writing-plans。受影响的 AMO 流程文档已同步，LSQ/AMO 后续专项回归按第9章继续扩展。
 
 ## 与初步 plan 差异说明
 
-本章只供review，不作独立coding依据；未指定独立初步plan，基线取当前源码行为。新增函数完整抽象职责与详细伪代码见5.1、5.5；service控制阶段复用既有handler，不另建通用调度架构。
+本章只供review，不作独立coding依据；未指定独立初步plan，基线取当前源码行为。新增函数完整抽象职责与详细伪代码见5.1、5.5、5.6；service控制阶段复用既有handler，不另建通用调度架构。
 
 ```text
 修改目的：恢复当前缺失的真实上游寄存准入时序，保留既有资源/实例生命周期。
 修改前逻辑行为：
   collect_lsq_candidates按分类需求<=软件free截前缀；can_allocate只检查单请求需求；
   driver clock-first写请求，confirm用commit_allocate立即扣软件free；
-  complete在下一driver边界开放issue；control/nonLSQ可零时间return；
+  complete在下一driver边界开放issue；control及MOU/nonLSQ均可零时间return；
   raw deq业务预检成功才release，取消由apply_pending_lsq_cancels回软件资源。
 修改后逻辑行为：
   原service每真实sample唯一调用新增advance_rtl_admission_sample结算旧状态；
@@ -634,6 +744,7 @@ deferred：raw原拍信用递推 -> 原STD屏障留FIFO -> 较晚业务成功 ->
   collect经D到R再Q捕获，只从原lane按旧寄存混合前缀、严格大于及旧can构造offer；
   partial清对应valid留bits，次拍IQ停顿重算；新组不得填洞或绕过canAcc捕获；
   driver保持clock-first并精确输出本边沿接受的寄存请求，confirm/complete仍管reservation；
+  control marker仍可零时间处理；MOU改为隔离D/R/Q token，旧registered-canAccept允许后才non-LSQ admission；
   can_allocate保留本请求资源合法性，不承担源端许可；raw原拍只回shadow；
   deferred业务release及软件cancel只回reservation，t3按上一拍原线路cancel样本回shadow；
   record保留硬件restore凭证，硬件流水和软件owner共同收口后才恢复及受理下一代；
@@ -644,3 +755,30 @@ deferred：raw原拍信用递推 -> 原STD屏障留FIFO -> 较晚业务成功 ->
   保留lane位置及R无效Store旧bits的真实前缀效应，增加捕获/partial后停顿，不修改RM、B05、VLS范围；
   只读分析不证明当前root cause；任何源端/采样映射硬门禁失败都不得宣称等价或吞错。
 ```
+
+## 11. 实现与基础验证记录
+
+实现完成项：
+
+- D/R/Q 固定 lane 投影、partial 原位保持和 registered `canAccept`/credit 逐拍更新。
+- source offer、driver launch、DUT sample 和 pending reservation 的分阶段身份；reset 可撤销尚未 DUT-visible 的 pending reservation。
+- raw deq/cancel 对 shadow 的硬件时序回补与软件 reservation 释放分账。
+- redirect intent、control-settled 发布、单飞 recovery 和共享 runtime drain。
+- 隔离 AMO non-LSQ token：经过同一 D/R/Q 和旧 registered `canAccept`，但不分配 LQ/SQ、不改变两套 pointer/count。
+- atomic fault 不进入不存在的 deleted LQ/SQ owner 等待；公共 recovery 不等待 atomic barrier。
+
+最终验证目录：
+
+```text
+mem_ut/ver/ut/memblock/sim/amo_plan_verify13_20261104/log/
+```
+
+| 验证项 | 结果 |
+|---|---|
+| 完整 VCS/KDB 编译 | 0 error；Verdi KDB 成功生成 |
+| `tc_lsq_amo_admission_soft` | PASS；`UVM_ERROR=0`、`UVM_FATAL=0` |
+| 普通 `memblock_dispatch_real_smoke_vseq` | TEST_PASS；`UVM_ERROR=0`、`UVM_FATAL=0` |
+| AMO `memblock_dispatch_real_smoke_vseq` | TEST_PASS；`UVM_ERROR=0`、`UVM_FATAL=0` |
+| `git diff --check` | PASS |
+
+基础验证证明实现可以编译、普通标量路径未回归、LSQ/AMO admission 定向合同可闭环、AMO real-dispatch 可完成 owner/feedback/final-WB/global-stop 生命周期。真实多次取消重叠、全部边界矩阵和长回归仍按第9章保留，不计入本轮已完成范围。
