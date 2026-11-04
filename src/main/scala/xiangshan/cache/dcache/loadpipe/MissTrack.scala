@@ -126,6 +126,9 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   }
   val lookupSnapshot = RegNext(lookupTable)
 
+  // Observational counters follow the entry index in the query snapshot.
+  val suppressByLoad = Wire(Vec(LoadPipelineWidth, Vec(cfg.missTrackEntries, Bool())))
+
   def makeEntry(va: UInt, pa: UInt, way: UInt, pending: Bool, id: UInt): MissTrackEntry = {
     val e = WireDefault(0.U.asTypeOf(new MissTrackEntry))
     e.valid := true.B
@@ -178,6 +181,9 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     // UNKNOWN after PA validation is the only state eligible for a new
     // speculative miss.  A live resident/pending line suppresses duplication.
     io.spec(w) := q.s1_valid && sampled && !io.clear && !paMatch
+    for (i <- entries.indices) {
+      suppressByLoad(w)(i) := q.s1_valid && sampled && !io.clear && paMatch && matches(i)
+    }
   }
 
   // Events must agree on one winner for both physical-line and query-key ties.
@@ -233,20 +239,24 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     insert.io.in(i).bits := canonicalEvents(i).bits
   }
   insert.io.out.ready := true.B
-  // Preserve invalid-first, then oldest, with lowest entry index breaking ties.
-  // Generate one-hot choices directly instead of max -> equality -> priority
-  // encoder -> decoder. Parallel 3-bit comparisons trade area for fewer levels.
+  // Preserve key-conflict/invalid-first priority. Capacity victims use maximum
+  // age, with round-robin selection only among equal-oldest candidates.
+  val replaceStart = RegInit(0.U(log2Ceil(cfg.missTrackEntries).W))
   val invalids = maintained.map(e => !e.valid)
   val hasInvalid = ParallelORR(invalids)
   val invalidVictimOH = VecInit(invalids.indices.map { i =>
     invalids(i) && (if (i == 0) true.B else !ParallelORR(invalids.take(i)))
   }).asUInt
-  val oldestVictimOH = VecInit(maintained.indices.map { i =>
+  val oldestCandidates = VecInit(maintained.indices.map { i =>
     ParallelANDR(maintained.indices.filter(_ != i).map { j =>
-      if (j < i) maintained(i).age > maintained(j).age
-      else maintained(i).age >= maintained(j).age
+      maintained(i).age >= maintained(j).age
     })
   }).asUInt
+  val oldestFromStart = oldestCandidates & VecInit(maintained.indices.map(i =>
+    i.U >= replaceStart
+  )).asUInt
+  val oldestChoice = Mux(oldestFromStart.orR, oldestFromStart, oldestCandidates)
+  val oldestVictimOH = PriorityEncoderOH(oldestChoice)
   // A selected new physical line replaces the old holder of its query key.
   // An entry refreshed to another key is no longer a conflict. Reuse the
   // pre-maintenance key comparisons instead of comparing the arbiter payload.
@@ -256,6 +266,18 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     ))
   }).asUInt
   val victimOH = Mux(keyVictimOH.orR, keyVictimOH, Mux(hasInvalid, invalidVictimOH, oldestVictimOH))
+  val capacityReplace = insert.io.out.fire && !keyVictimOH.orR && !hasInvalid
+  val victimIndex = OHToUInt(oldestVictimOH)
+  when (capacityReplace) {
+    replaceStart := Mux(victimIndex === (cfg.missTrackEntries - 1).U, 0.U, victimIndex + 1.U)
+    assert(PopCount(oldestVictimOH) === 1.U && (oldestVictimOH & ~oldestCandidates) === 0.U,
+      "MissTrack RR must select exactly one maximum-age capacity victim")
+  }
+  when (io.clear) { replaceStart := 0.U }
+  assert(replaceStart < cfg.missTrackEntries.U)
+  when (insert.io.out.fire) {
+    assert(PopCount(victimOH) === 1.U, "MissTrack insertion must have exactly one victim")
+  }
   val nextEntries = WireDefault(maintained)
   for (i <- entries.indices) {
     when (insert.io.out.fire && victimOH(i)) {
@@ -282,5 +304,19 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("mtrack_insert_not_selected", PopCount(insert.io.in.map(_.valid)) - insert.io.out.fire.asUInt)
   XSPerfAccumulate("mtrack_event_coalesced", PopCount(events.map(_.valid)) - PopCount(canonicalEvents.map(_.valid)))
   XSPerfAccumulate("mtrack_clear", io.clear)
+
+  XSPerfAccumulate("mtrack_capacity_replace", capacityReplace)
+  XSPerfAccumulate("mtrack_capacity_tie", capacityReplace && PopCount(oldestCandidates) > 1.U)
+  XSPerfAccumulate("mtrack_key_replace", insert.io.out.fire && keyVictimOH.orR)
+  XSPerfAccumulate("mtrack_invalid_insert", insert.io.out.fire && !keyVictimOH.orR && hasInvalid)
+  XSPerfAccumulate("mtrack_valid_sum", PopCount(entries.map(_.valid)))
+  XSPerfAccumulate("mtrack_pending_sum", PopCount(entries.map(e => e.valid && e.is_pending)))
+  XSPerfAccumulate("mtrack_age7_sum", PopCount(entries.map(e => e.valid && e.age === 7.U)))
+  for (i <- entries.indices) {
+    XSPerfAccumulate(s"mtrack_slot_insert_$i", insert.io.out.fire && victimOH(i))
+    XSPerfAccumulate(s"mtrack_slot_capacity_$i", capacityReplace && oldestVictimOH(i))
+    XSPerfAccumulate(s"mtrack_slot_refresh_$i", updated(i))
+    XSPerfAccumulate(s"mtrack_slot_suppress_$i", PopCount(suppressByLoad.map(_(i))))
+  }
 
 }
