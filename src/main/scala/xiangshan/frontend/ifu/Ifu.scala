@@ -779,6 +779,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
       s0_flushFromBpu -> TopDownCounters.OverrideBubble
     )
   )
+  topdownPipe.setReason(
+    2,
+    Seq(
+      (s2_valid && s2_useUncacheFetch && !s2_uncacheCanGo) -> TopDownCounters.UncacheFetchBubble
+    )
+  )
   topdownPipe.setReason(Seq(
     io.topdownOverride.valid -> io.topdownOverride.bits.reason
   ))

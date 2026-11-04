@@ -113,6 +113,7 @@ object TopDownCounters extends TopDownEnumeration {
   val ITLBMissBubble = Value("ITLBMissBubble", Frontend.FetchLatency)
   val BTBMissBubble = Value("BTBMissBubble", BadSpec.BpuMissBubble)
   val FetchFragBubble = Value("FetchFragBubble", Frontend.FetchBandwidth)
+  val UncacheFetchBubble = Value("UncacheFetchBubble", Frontend.FetchLatency)
   val IBufStructualConflict = Value("IBufStructualConflict", Frontend.FetchBandwidth)
   val VTypeResumeStall = Value("VTypeResumeStall", Core.Other)
   val FrontendOtherCoreStall = Value("FrontendOtherCoreStall", Core.Other)
