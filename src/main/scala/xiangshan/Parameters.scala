@@ -303,9 +303,8 @@ case class XSCoreParameters
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
 ){
-  // Zicfiss split uops use one hidden logical register for SSP and one for
-  // the same-address ordering load dependency.
-  val IntLogicRegs: Int = IntLogicRegsBase + (if (HasShadowStack) 2 else 0)
+  // Zicfiss split uops carry the checked SSP through one hidden logical register.
+  val IntLogicRegs: Int = IntLogicRegsBase + (if (HasShadowStack) 1 else 0)
 
   def ISABase = "rv64i"
   def ISAExtensions = {

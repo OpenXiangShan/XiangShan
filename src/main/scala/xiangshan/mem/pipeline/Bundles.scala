@@ -85,7 +85,7 @@ class LoadPipeBundle(
   // shadowstack compare
   val sspCheckValue = Option.when(HasShadowStack)(UInt(XLEN.W))
   val sspValue = Option.when(HasShadowStack)(UInt(XLEN.W))
-  // SSP value after a successful SSPOPCHK, computed before S3.
+  // SSP value after a successful SSPUSH check or SSPOPCHK, computed before S3.
   val sspNextValue = Option.when(HasShadowStack)(UInt(XLEN.W))
   // unalign handling
   val align = Option.when(param.hasUnalignHandling)(Bool())

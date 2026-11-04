@@ -26,7 +26,7 @@ import xiangshan.backend.vector.Decoder.DecodeChannelInput
 /**
  * Decodes scalar instruction families requiring per-uop operands, immediates and commit types.
  *
- * SSPUSH splits into five uops, SSPOPCHK into three and SSRDP into one. Each uop has its own
+ * SSPUSH splits into four uops, SSPOPCHK into three and SSRDP into one. Each uop has its own
  * register selector, constant immediate and commit type, taken from ScalaUopTable.tableZicfiss.
  * SSRDP and SSAMOSWAP are kept here with the rest of Zicfiss even though they need only one uop.
  *
