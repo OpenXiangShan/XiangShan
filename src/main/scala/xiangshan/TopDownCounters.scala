@@ -105,7 +105,6 @@ object TopDownCounters extends TopDownEnumeration {
   val ITTAGEMissBubble = Value("ITTAGEMissBubble", BadSpec.BpuMissBubble)
   val RASMissBubble = Value("RASMissBubble", BadSpec.BpuMissBubble)
   val MemVioRedirectBubble = Value("MemVioRedirectBubble", BadSpec.RedirectStall)
-  val IfuFlushBubble = Value("IfuFlushBubble", Misc.Other)
   val OtherRedirectBubble = Value("OtherRedirectBubble", Misc.Other)
   val FtqFullStall = Value("FtqFullStall", Frontend.Ftq)
 
