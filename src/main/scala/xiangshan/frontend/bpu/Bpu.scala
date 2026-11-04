@@ -32,6 +32,7 @@ import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.TopdownOverrideBundle
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
@@ -53,6 +54,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
     val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
     val toFtq:       BpuToFtqIO = new BpuToFtqIO
+
+    val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
   }
 
   val io: BpuIO = IO(new BpuIO)
@@ -733,7 +736,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   topdownPipe.setReason(1, Seq((s2_override || s3_override) -> TopDownCounters.OverrideBubble))
   topdownPipe.setReason(2, Seq(s3_override -> TopDownCounters.OverrideBubble))
-  topdownPipe.setReason(Seq(redirect.valid -> TopDownCounters.FrontendOtherCoreStall)) // FIXME: should use broadcast
+  topdownPipe.setReason(Seq(io.topdownOverride.valid -> io.topdownOverride.bits.reason))
   io.toFtq.topdown := topdownPipe.io.out
 
   /* *** BpTrace *** */
