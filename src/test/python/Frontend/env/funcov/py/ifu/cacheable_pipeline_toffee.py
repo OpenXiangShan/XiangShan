@@ -23,4 +23,16 @@ class IfuCacheablePipelineToffeeCoverage(NativeDomainToffeeCoverage):
         )
 
 
+    # The cfVec domain consumes these validated S0->S1 transfer receipts.
+    # Keep this bounded, resettable cross-domain proof store on the hub;
+    # pending pipeline state remains private to the native producer model.
+    @property
+    def _ifu_cacheable_verified_windows(self):
+        return self._runtime._ifu_cacheable_verified_windows
+
+    @_ifu_cacheable_verified_windows.setter
+    def _ifu_cacheable_verified_windows(self, value):
+        self._runtime._ifu_cacheable_verified_windows = value
+
+
 __all__ = ["IfuCacheablePipelineToffeeCoverage"]
