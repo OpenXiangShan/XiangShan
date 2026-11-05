@@ -1,5 +1,7 @@
 # `issue_field_assigner.sv` 源码分析
 
+2026-11-05 同步：`assign_std_main_fields()`统一调用 `derive_std_data(main_tr, slot)`；该入口先检查事务与槽范围，有效 override 直接返回冻结数据，否则 atomic 保留旧 `derive_atomic_std_data()`，普通 Store 使用 `src_0`。CAS prefill 的 compare/new 四槽由主表冻结，不再随未来 UID 重新派生。详见 CAS prefill implementation review。
+
 本文档对应源码：
 
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/issue_field_assigner.sv`

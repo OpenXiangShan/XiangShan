@@ -1,5 +1,7 @@
 # memblock_dispatch_base_sequence.sv 源码分析
 
+2026-11-05 同步：源码位于 `seq/base_seq_help`。普通/AUTO 建表先消费 CAS high/owner 和 SC 预约，随机项在地址复用与边界同步后调用 `avoid_pending_cas_prefill_write_overlap()`，再尝试整组 CAS prefill；low Store 当前写入，high/owner 精确消费，审计账本持久保留至 `check_all_cas_prefill_groups()`。普通长度 N，AUTO 长度 N+1，全部 companion 上界 N。LR/SC 与 control 重预约均只抽一次初始距离/间隔，再连续加1跳过占位；不再由 control 命中删除 SC。LR 识别同时要求 AMO 分类，避免 SW/SD 同编码误配对。完整源码与中文解释见 `AI_DOC/plan/test_framework/review_doc/undo/memblock_amocas_compare_success_prefill_implementation_review_20261105.md`。
+
 本文档对应源码：
 
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`

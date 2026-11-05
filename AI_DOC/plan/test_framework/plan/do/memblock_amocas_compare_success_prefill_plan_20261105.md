@@ -2,16 +2,37 @@
 
 ## 1. 计划定位
 
+### 1.0 专有名词与抽象功能说明
+
+| 术语 | 当前含义及源码落点 | 示例 |
+|---|---|---|
+| UID / ROB key | 软件主表编号 / DUT 环形重排序索引，分别为 `uid` 与 `robIdx_*` | 预约替换 UID 5，不移动其 ROB key |
+| CAS / compare / new | 条件原子交换、比较操作数、新值，落在 STD override 四槽 | Q 的 compare 在槽 0/2，新值在槽 1/3 |
+| prefill group / owner | 前置 Store 与未来 CAS 的完整组 / 该组最终 CAS | Q 包含两条 SD 和一个 CAS.Q |
+| pending reservation / map | 尚未生成成员的未来 UID 预约 / 关联数组 | high Store 生成后从 map 删除 |
+| audit ledger | 建表期间保留的完整组账本，消费成员时不删除 | 建表结束检查 Store 数据是否被修改 |
+| slot / override | 指令内部片编号 / 冻结的数据覆盖值 | STD slot2 使用 compare_high |
+| AUTO / control marker | 固定 N+1 主表模式 / CSR、SFence 与末尾控制条目 | UID N 固定为 check_store |
+| LR/SC reservation | 保留读后的未来条件写预约，不是 DUT 保留状态 | 同地址 SC 不得因保护逻辑被搬地址 |
+| bucket / alias | 距离权重档 / 不同虚拟页映射相同物理地址 | PPN reuse 开启时 prefill fail-fast |
+| terminal / admission / barrier | 终态 / 接纳 / 单原子所有者隔离屏障 | CAS 接纳前全部更老 UID 终态 |
+| STA / STD / WB | Store 地址片 / 数据片 / 写回 | CAS.Q 的 STA 为槽 0/2，STD 为槽 0..3 |
+| TLB / VPN / PPN | 地址转换表 / 虚拟页号 / 物理页号 | Store/CAS 使用相同地址转换键 |
+| LSQ / SQ / SBuffer | 访存队列 / Store 队列 / 已提交 Store 缓冲 | 前置 Store 走既有普通 Store 生命周期 |
+| CSR / SFence / CBO.ZERO | 控制寄存器操作 / 转换失效操作 / 整行清零操作 | CSR/SFence 同 target 保留 CSR 优先 |
+
+抽象功能职责：主表构造负责产生完整、合法且固定长度的输入；预约 helper 管理未来位置，成员构造 helper 恢复冻结数据，地址保护 helper 保持前置条件，审计 helper 在 TLB 建表前检查输入一致性。全部 helper 不承担 DUT 结果正确性检查。
+
 ### 1.1 计划信息
 
 - 创建日期：2026-11-05
-- 当前版本：v1.0
+- 当前版本：v1.1（实现收口）
 - 适用代码基线：AMO worktree `.codex_memblock_amo_20261103`，分支 `codex/memblock-amo-adaptation-20261103`
 - 适用范围：`mem_ut/ver/ut/memblock` real-dispatch 主表生成、issue 字段派生和 software-only 生成检查
 - 目标：当随机主表生成 `AMOCAS.W/D/Q` 时，按参数概率在更老 UID 生成匹配的前置 Store，并在未来 UID 生成原 CAS，使 CAS 发起比较时内存旧值具备等于 compare operand 的确定性前置条件。
 - 非目标：本计划不增加 RM、scoreboard 或 CAS 结果 checker，不检查最终内存值，也不修改 RTL。
 - Review 状态：已完成三轮独立 subagent review；第一轮4个Major和第二轮3个一致性问题均已修正，第三轮确认无剩余blocker。
-- Coding 状态：方案可直接进入coding；尚未实施、编译或仿真。
+- Coding 状态：`COMPLETE`。代码、参数链、中文文档、implementation review与静态检查完成；远端编译、focused software-only、tc_sanity、基础vseq、普通dispatch及CAS.W/D/Q真实接口smoke通过，2026-11-05归档至do。subagent按分工不提交，最终由主agent审查后提交。
 - 设计原则：保持固定主表长度，不移动既有 UID；通过“当前位置替换 + 未来 UID 预约”实现；任一配对无法完整建立时整体回滚，不能留下孤立 Store。
 - 状态约定：`[ ]` 待完成，`[x]` 已完成。
 
@@ -673,7 +694,7 @@ validate_all_cas_prefill_groups()
 | `seq/base_seq_help/issue_field_assigner.sv` | 增加统一STD data选择helper。 |
 | `seq/base_seq_help/memblock_dispatch_base_sequence.sv` | group结构、预约表、距离随机、冲突扫描、Store/CAS构造、地址保护、建表后检查。 |
 | `seq/base_seq/soft_test/soft_test_memblock_lsq_amo_admission_sequence.sv` | 增加参数、预约、冲突、slot data和尾部回滚software-only检查。 |
-| `AI_DOC/plan/test_framework/plan/undo/memblock_amo_stimulus_only_adaptation_plan_20261022.md` | 增加本计划引用及CAS成功前置扩展说明。 |
+| `AI_DOC/plan/test_framework/plan/do/memblock_amo_stimulus_only_adaptation_plan_20261022.md` | 增加本计划引用及CAS成功前置扩展说明（实际路径修正见IMPLEMENTATION_DELTA）。 |
 
 不新增独立 real-drive sequence，不修改 agent xaction，不修改 AtomicsUnit RTL。
 
@@ -681,56 +702,56 @@ validate_all_cas_prefill_groups()
 
 ### P0：参数和数据字段
 
-- [ ] 增加4个plus参数及默认cfg。
-- [ ] 增加`seq_csr_common`快照、getter和校验。
-- [ ] 增加`std_data_override_valid/data[4]`。
-- [ ] 让`issue_field_assigner`优先消费override。
-- [ ] software-only验证普通Store和CAS slot数据保持稳定。
+- [x] 增加4个plus参数及默认cfg。
+- [x] 增加`seq_csr_common`快照、getter和校验。
+- [x] 增加`std_data_override_valid/data[4]`。
+- [x] 让`issue_field_assigner`优先消费override。
+- [x] software-only验证普通Store和CAS slot数据保持稳定。
 
 ### P1：预约和transaction构造
 
-- [ ] 增加CAS group、两张未来预约表和一份group audit ledger。
-- [ ] 增加三档距离随机函数。
-- [ ] 增加统一UID占用查询和连续`+1`扫描。
-- [ ] 实现W/D前置Store构造。
-- [ ] 实现Q低/高两条`SD`构造。
-- [ ] 实现未来CAS恢复构造。
-- [ ] 实现临时规划成功后一次性提交。
-- [ ] 实现表尾失败整体回滚。
-- [ ] 当前low Store直接生成，不进入pending reservation map。
+- [x] 增加CAS group、两张未来预约表和一份group audit ledger。
+- [x] 增加三档距离随机函数。
+- [x] 增加统一UID占用查询和连续`+1`扫描。
+- [x] 实现W/D前置Store构造。
+- [x] 实现Q低/高两条`SD`构造。
+- [x] 实现未来CAS恢复构造。
+- [x] 实现临时规划成功后一次性提交。
+- [x] 实现表尾失败整体回滚。
+- [x] 当前low Store直接生成，不进入pending reservation map。
 
 ### P2：与现有预约融合
 
-- [ ] 普通随机表优先消费CAS预约。
-- [ ] AUTO控制表优先消费CAS预约。
-- [ ] CSR/SFence重预约跳过CAS/SC预约。
-- [ ] paired SC预约跳过CAS预约并改为连续`+1`。
-- [ ] 保持末尾`check_store`不可占用。
-- [ ] 建表后检查所有预约被消费且无重叠。
+- [x] 普通随机表优先消费CAS预约。
+- [x] AUTO控制表优先消费CAS预约。
+- [x] CSR/SFence重预约跳过CAS/SC预约。
+- [x] paired SC预约跳过CAS预约并改为连续`+1`。
+- [x] 保持末尾`check_store`不可占用。
+- [x] 建表后检查所有预约被消费且无重叠。
 
 ### P3：地址保护
 
-- [ ] 增加pending CAS写范围重叠判断。
-- [ ] 在地址复用和boundary同步之后执行保护修正。
-- [ ] 覆盖Store、SC、写型AMO、CAS和CBO.ZERO。
-- [ ] 新CAS group选址时避开所有尚未结束的已有group保护范围。
-- [ ] alias专项组合首版fail-fast或cfg禁用。
-- [ ] 建表后验证group区间无破坏性写入。
+- [x] 增加pending CAS写范围重叠判断。
+- [x] 在地址复用和boundary同步之后执行保护修正。
+- [x] 覆盖Store、SC、写型AMO、CAS和CBO.ZERO。
+- [x] 新CAS group选址时避开所有尚未结束的已有group保护范围。
+- [x] alias专项组合首版fail-fast或cfg禁用。
+- [x] 建表后验证group区间无破坏性写入。
 
 ### P4：测试和回归
 
-- [ ] `PREFILL_EN=0`保持旧CAS生成行为。
-- [ ] `PREFILL_EN=100`时每个有空间的CAS都形成完整group。
-- [ ] CAS.W验证`SW data == STD slot0[31:0]`。
-- [ ] CAS.D验证`SD data == STD slot0`。
-- [ ] CAS.Q验证两个`SD`分别匹配slot0/slot2。
-- [ ] 验证CAS new数据匹配slot1/slot3且发射重试不变化。
-- [ ] 验证三个距离bucket边界1、5、6、10、11、30。
-- [ ] 验证SC、CAS、CSR、SFence冲突时连续`+1`。
-- [ ] 验证扫描到表尾后整体回滚，无孤立Store和残留reservation。
-- [ ] 验证地址复用不能覆盖pending compare数据。
-- [ ] 编译AMO smoke。
-- [ ] 运行最小CAS.W/D/Q real-dispatch smoke。
+- [x] `PREFILL_EN=0`保持旧CAS生成行为。
+- [x] `PREFILL_EN=100`时每个有空间的CAS都形成完整group。
+- [x] CAS.W验证`SW data == STD slot0[31:0]`。
+- [x] CAS.D验证`SD data == STD slot0`。
+- [x] CAS.Q验证两个`SD`分别匹配slot0/slot2。
+- [x] 验证CAS new数据匹配slot1/slot3且发射重试不变化。
+- [x] 验证三个距离bucket边界1、5、6、10、11、30。
+- [x] 验证SC、CAS、CSR、SFence冲突时连续`+1`。
+- [x] 验证扫描到表尾后整体回滚，无孤立Store和残留reservation。
+- [x] 验证地址复用不能覆盖pending compare数据。
+- [x] 编译AMO smoke。
+- [x] 运行最小CAS.W/D/Q real-dispatch smoke。
 
 ## 14. 验收标准
 
@@ -807,3 +828,24 @@ Review执行方式：独立subagent只读审查AMO worktree，没有修改代码
 - [x] 第三轮结论：**可coding**。
 
 三轮review均为只读审查，subagent没有修改源码或文档；最终文档修改由主任务统一完成。
+
+## 16. 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+以下均为 2026-11-05 coding 中对当前源码的适配，不属于执行前原始方案。
+
+1. **参数入口和校验命名。** 当前源码实际入口为 `load_from_plus()` 和 `validate_and_clamp()`，没有原文所称 `init_from_plus()/validate_runtime_config()`；参数快照仍按原链路接入。按参数规则新增校验命名为 `check_amo_cas_prefill_config()` 与 `check_all_cas_prefill_groups()`。
+2. **冻结描述的比较。** group 使用 packed struct，内容与计划一致，可逐位比较全部字段；消费时按单调 origin UID 二分查找审计账本，确认 map 内容等于原冻结组，避免每次消费扫描全部历史。
+3. **LR/SC 同地址承诺。** 已经预约的同地址 SC 不能被搬地址。新组规划额外避开组区间内这些 SC 的地址；反向情形中，LR 仍可读取保护范围，但其同地址未来 SC 若会破坏已有组则放弃本次配对。由随机独立地址构造的 SC 继续使用写保护修正。该处理保留原有 same_addr 和非对齐意图。
+4. **权重求和。** 三档距离权重用 64-bit 合计和抽样，避免三个合法大整数在旧 32-bit 通用 helper 中求和溢出；不修改通用 helper。
+5. **别名边界。** 第一版在 prefill 使能且 `L2TLB_PPN_REUSE_EN=1` 或显式 `L2TLB_PPN_REGION_ID>=0` 时 fail-fast；没有修改 TLB builder、权限模型或结果 checker。主表无主动异常与自然对齐不等于保证外部故障模型永不注入异常。
+6. **文档实际路径。** 旧 AMO 总计划已归档至 `plan/do/memblock_amo_stimulus_only_adaptation_plan_20261022.md`，同步该位置；新增 software-only helper 留在既有测试文件，不增加 package/filelist。
+7. **提交分工。** subagent只负责实现、测试和文档，不自行提交；主agent完成独立审查后按通用执行规则提交最终实现。
+8. **复用编码的 LR 识别。** 首次 focused soft test 发现 SW/SD 与 LR.W/LR.D 的 `fuOpType` 同为2/3；旧建表仅按 opcode 调用 paired-SC。普通和 AUTO 入口以及 paired-SC helper 现在同时要求 `op_class==AMO`，防止前置 Store 误预约 SC。该修复属于新 Store 构造接入既有 reservation 的必要适配。
+
+## 17. 执行记录与验收结论
+
+实现审查：`AI_DOC/plan/test_framework/review_doc/undo/memblock_amocas_compare_success_prefill_implementation_review_20261105.md`。文档逐项覆盖源码、配置、参数和测试修改，并在源码块后紧跟中文伪代码；执行中差异单独识别，未混入原方案。review按规则保留在undo，未由本任务自动归档。
+
+已完成：远端VCS/KDB编译；focused software-only（包含实际STD端口、26次精确捕获的预期fatal）；tc_sanity；基础vseq；普通real-dispatch；CAS.W/D/Q one-hot真实接口smoke。通过项均为UVM_ERROR=0、UVM_FATAL=0。W/D各构造4组，Q构造2组并完成最终提交，STD shuffle启用。`git diff --check`、参数链、cfg key声明与重复项、Markdown代码块闭合、review源码块后中文伪代码、归档引用检查全部通过。日志和命令矩阵详见implementation review第10节。
+
+首次focused失败为SW/SD复用opcode导致误判LR，已修复并复测通过，失败日志保留。无RTL、agent、driver或RM变更；最终实现由主agent在独立审查后提交。CAS比较实际成功及最终内存数据不属于本计划结果检查范围。物理别名、跨动态CSR地址空间和外部故障专项仍按保证边界处理，不宣称完成该类组合的覆盖矩阵。

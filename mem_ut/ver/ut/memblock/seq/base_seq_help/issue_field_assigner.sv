@@ -262,6 +262,18 @@ class issue_field_assigner extends uvm_object;
         endcase
     endfunction:derive_atomic_std_data
 
+    // 抽象职责：普通 Store 和原子 STD 共用数据入口，冻结值优先且不受 UID/发射顺序影响。
+    function bit [63:0] derive_std_data(input main_control_transaction main_tr,
+                                      input int unsigned slot);
+        memblock_op_behavior_t behavior;
+        if (main_tr == null || slot >= 4)
+            `uvm_fatal("ISSUE_FIELD", "derive_std_data requires a transaction and slot in [0:3]")
+        if (main_tr.std_data_override_valid[slot]) return main_tr.std_data_override[slot];
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        if (behavior.is_atomic) return derive_atomic_std_data(main_tr, slot);
+        return main_tr.src_0;
+    endfunction:derive_std_data
+
     function void derive_wen(input main_control_transaction main_tr,
                              output bit rfWen,
                              output bit fpWen);
@@ -497,14 +509,11 @@ class issue_field_assigner extends uvm_object;
         bit [MEMBLOCK_DUT_FUTYPE_W-1:0] dut_futype;
         bit [8:0] slot_fuop;
         bit [63:0] std_data;
-        memblock_op_behavior_t behavior;
         dut_futype = encode_and_fit_dut_futype(
             main_tr.fuType,
             $sformatf("issue_field_assigner::assign_std_main_fields(pipe=%0d)", pipe_idx));
         slot_fuop = (main_tr.fuOpType & 9'h03f) | (9'(item.uop_index) << 6);
-        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
-        std_data = behavior.is_atomic ?
-                   derive_atomic_std_data(main_tr, item.uop_index) : main_tr.src_0;
+        std_data = derive_std_data(main_tr, item.uop_index);
         case (pipe_idx)
             0: begin
                 tr.io_ooo_to_mem_issueStd_0_valid = 1'b1;

@@ -1,5 +1,7 @@
 # main_control_transaction.sv 源码分析
 
+2026-11-05 同步：源码已位于 `seq/base_seq_help/main_control_transaction.sv`。新增 `std_data_override_valid[4]` 与 `std_data_override[4]`，构造时清零；普通 Store 仅允许槽0，CAS.W/D 成组设置0/1、CAS.Q设置四槽，非 CAS 原子和其它分类禁止继承覆盖值。`validate_main_transaction()`同时检查覆盖掩码；`issue_field_assigner::derive_std_data()`优先使用冻结值，保证配对 Store/CAS 与重发数据一致。详见 CAS prefill implementation review。
+
 本文档对应源码：
 
 - `mem_ut/ver/ut/memblock/seq/base_seq/main_control_transaction.sv`

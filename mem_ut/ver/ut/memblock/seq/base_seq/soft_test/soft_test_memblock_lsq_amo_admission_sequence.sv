@@ -8,9 +8,34 @@
 `ifndef SOFT_TEST_MEMBLOCK_LSQ_AMO_ADMISSION_SEQUENCE__SV
 `define SOFT_TEST_MEMBLOCK_LSQ_AMO_ADMISSION_SEQUENCE__SV
 
+// 中文注释：仅在单次负向软件检查期间捕获指定 ID/消息的预期 fatal，其他错误照常抛出。
+class memblock_cas_prefill_expected_fatal_catcher extends uvm_report_catcher;
+    string expected_id;
+    string expected_pattern;
+    int unsigned caught_count;
+    function new(string id, string pattern);
+        super.new("cas_prefill_expected_fatal");
+        expected_id = id;
+        expected_pattern = pattern;
+        caught_count = 0;
+    endfunction
+    virtual function action_e catch();
+        if (get_severity() == UVM_FATAL && get_id() == expected_id &&
+            uvm_is_match(expected_pattern, get_message())) begin
+            caught_count++;
+            return CAUGHT;
+        end
+        return THROW;
+    endfunction
+endclass
+
 class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_base_sequence;
 
     longint unsigned sample_seq;
+    // 中文注释：software-only 虚函数定向入口；默认旁路，只在 prefill 检查期间设置并恢复。
+    int directed_cas_distance = 0;
+    bit directed_cas_generation = 0;
+    bit [8:0] directed_cas_opcode = MEMBLOCK_LSUOP_AMOCAS_D;
 
     `uvm_object_utils(soft_test_memblock_lsq_amo_admission_sequence)
 
@@ -24,6 +49,423 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
             `uvm_fatal("LSQ_AMO_SOFT", message)
         end
     endfunction:check_expect
+
+    virtual function int unsigned randomize_cas_prefill_distance();
+        if (directed_cas_distance != 0) return directed_cas_distance;
+        return super.randomize_cas_prefill_distance();
+    endfunction
+
+    function main_control_transaction make_prefill_cas(input memblock_uid_t uid,
+                                                       input bit [8:0] opcode);
+        main_control_transaction tr;
+        tr = main_control_transaction::type_id::create("soft_prefill_cas");
+        tr.uid = uid;
+        tr.op_class = MEMBLOCK_OP_CLASS_AMO;
+        apply_op_class_template(tr, opcode);
+        tr.src_0 = seq_csr_common::get_main_vaddr_base();
+        tr.imm = 0;
+        tr.update_vaddr();
+        tr.amo_alignment_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+        tr.send_pri = 100;
+        tr.send_pri_std = 100;
+        return tr;
+    endfunction
+
+    virtual function void randomize_main_transaction(input main_control_transaction tr,
+        input memblock_uid_t uid, input memblock_rob_key_t rob_key);
+        if (!directed_cas_generation) begin
+            super.randomize_main_transaction(tr, uid, rob_key);
+            return;
+        end
+        tr.uid = uid;
+        tr.op_class = MEMBLOCK_OP_CLASS_AMO;
+        apply_op_class_template(tr, directed_cas_opcode);
+        tr.robIdx_flag = rob_key.flag;
+        tr.robIdx_value = rob_key.value;
+        apply_legal_addr_template(tr);
+        tr.amo_alignment_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+        tr.send_pri = 100;
+        tr.send_pri_std = 100;
+    endfunction
+
+    function void reset_prefill_fixture();
+        sc_reservation_by_uid.delete();
+        cas_prefill_store_high_by_uid.delete();
+        cas_prefill_owner_by_uid.delete();
+        cas_prefill_group_audit_q.delete();
+    endfunction
+
+    // 抽象职责：核验输入解析层到冻结 getter 的链路及非法配置的精确 fail-fast。
+    task check_cas_prefill_parameters();
+        int saved_en, saved_weights[3];
+        int unsigned ignored;
+        memblock_cas_prefill_expected_fatal_catcher catcher;
+        saved_en = plus::MEMBLOCK_AMO_CAS_PREFILL_EN_1_WT;
+        saved_weights = '{plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_1_5_WT,
+                          plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_6_10_WT,
+                          plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_11_30_WT};
+        plus::MEMBLOCK_AMO_CAS_PREFILL_EN_1_WT = 100;
+        plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_1_5_WT = 2;
+        plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_6_10_WT = 3;
+        plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_11_30_WT = 4;
+        seq_csr_common::load_from_plus();
+        check_expect(seq_csr_common::get_amo_cas_prefill_en_1_wt() == 100 &&
+            seq_csr_common::get_amo_cas_prefill_dist_weight(0) == 2 &&
+            seq_csr_common::get_amo_cas_prefill_dist_weight(1) == 3 &&
+            seq_csr_common::get_amo_cas_prefill_dist_weight(2) == 4, "prefill plus snapshot/getter mismatch");
+        seq_csr_common::check_amo_cas_prefill_config();
+        seq_csr_common::amo_cas_prefill_en_1_wt = 101;
+        catcher = new("SEQ_CSR_CFG", "*PREFILL_EN_1_WT*");
+        uvm_report_cb::add(null, catcher);
+        seq_csr_common::check_amo_cas_prefill_config();
+        uvm_report_cb::delete(null, catcher);
+        check_expect(catcher.caught_count == 1, "prefill percent >100 was accepted");
+        seq_csr_common::amo_cas_prefill_en_1_wt = 0;
+        seq_csr_common::amo_cas_prefill_dist_wt = '{0, 0, 0};
+        catcher = new("SEQ_CSR_CFG", "*weights must not all be zero*");
+        uvm_report_cb::add(null, catcher);
+        seq_csr_common::check_amo_cas_prefill_config();
+        uvm_report_cb::delete(null, catcher);
+        check_expect(catcher.caught_count == 1, "all-zero prefill weights were accepted");
+        catcher = new("SEQ_CSR_CFG", "*must not be negative*");
+        uvm_report_cb::add(null, catcher);
+        ignored = seq_csr_common::get_non_negative_int("MEMBLOCK_AMO_CAS_PREFILL_DIST_1_5_WT", -1);
+        uvm_report_cb::delete(null, catcher);
+        check_expect(catcher.caught_count == 1, "negative prefill weight was accepted");
+        seq_csr_common::amo_cas_prefill_dist_wt = '{1, 1, 1};
+        seq_csr_common::amo_cas_prefill_en_1_wt = 100;
+        seq_csr_common::l2tlb_ppn_reuse_en = 1;
+        catcher = new("SEQ_CSR_CFG", "*does not support PPN reuse*");
+        uvm_report_cb::add(null, catcher);
+        seq_csr_common::check_amo_cas_prefill_config();
+        seq_csr_common::l2tlb_ppn_reuse_en = 0;
+        seq_csr_common::l2tlb_ppn_region_id = 1;
+        seq_csr_common::check_amo_cas_prefill_config();
+        uvm_report_cb::delete(null, catcher);
+        check_expect(catcher.caught_count == 2, "PPN alias configurations were accepted");
+        plus::MEMBLOCK_AMO_CAS_PREFILL_EN_1_WT = saved_en;
+        plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_1_5_WT = saved_weights[0];
+        plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_6_10_WT = saved_weights[1];
+        plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_11_30_WT = saved_weights[2];
+        seq_csr_common::load_from_plus();
+    endtask
+
+    // 抽象职责：验证写范围保护和 LR/SC 同地址承诺，以及 ordinary N / AUTO N+1 的真实建表入口。
+    task check_cas_prefill_protection_and_builders();
+        main_control_transaction original, low, probe, lr;
+        memblock_cas_prefill_group_t group, older;
+        memblock_lr_sc_reservation_t reservation;
+        memblock_control_reservation_plan_t control0, control1;
+        memblock_rob_key_t rob;
+        memblock_cas_prefill_expected_fatal_catcher catcher;
+        int unsigned saved_enable, saved_sc_enable, saved_sc_same, saved_sc_fixed, saved_sc_dist;
+        int unsigned saved_sc_weights[4];
+        bit saved_csr, saved_sfence;
+        int saved_csr_min, saved_csr_max, saved_sfence_min, saved_sfence_max;
+        bit [63:0] saved_base, saved_range;
+        bit accepted;
+        bit [8:0] opcodes[3];
+        memblock_sync_pkg::memblock_control_worker_topology_mode_e saved_topology;
+        saved_enable = seq_csr_common::amo_cas_prefill_en_1_wt;
+        saved_sc_enable = seq_csr_common::amo_lr_sc_pair_en_1_wt;
+        saved_sc_same = seq_csr_common::amo_lr_sc_same_addr_1_wt;
+        saved_sc_fixed = seq_csr_common::amo_lr_sc_dist_fixed_wt;
+        saved_sc_dist = seq_csr_common::amo_lr_sc_dist_fixed_value;
+        saved_sc_weights = '{seq_csr_common::amo_lr_sc_dist_0_wt, seq_csr_common::amo_lr_sc_dist_1_5_wt,
+            seq_csr_common::amo_lr_sc_dist_6_10_wt, seq_csr_common::amo_lr_sc_dist_11_100_wt};
+        saved_csr = seq_csr_common::csr_control_enable;
+        saved_sfence = seq_csr_common::sfence_control_enable;
+        saved_csr_min = seq_csr_common::csr_control_min_interval;
+        saved_csr_max = seq_csr_common::csr_control_max_interval;
+        saved_sfence_min = seq_csr_common::sfence_control_min_interval;
+        saved_sfence_max = seq_csr_common::sfence_control_max_interval;
+        saved_base = seq_csr_common::main_vaddr_base;
+        saved_range = seq_csr_common::main_vaddr_range;
+        saved_topology = memblock_sync_pkg::control_worker_topology_mode;
+        seq_csr_common::amo_cas_prefill_en_1_wt = 100;
+        directed_cas_distance = 5;
+        reset_prefill_fixture();
+        original = make_prefill_cas(0, MEMBLOCK_LSUOP_AMOCAS_Q);
+        accepted = try_plan_cas_prefill(original, 32, 0, 0, 0, 0, low);
+        check_expect(accepted, "protection fixture could not plan Q");
+        older = cas_prefill_group_audit_q[0];
+        // 部分重叠 SW、SC、写型 AMO、CAS 和 CBO.ZERO 均必须搬地址且保留 opcode。
+        opcodes = '{MEMBLOCK_LSUOP_SC_D, MEMBLOCK_LSUOP_AMOADD_D, MEMBLOCK_LSUOP_AMOCAS_D};
+        for (int kind = 0; kind < 5; kind++) begin
+            probe = main_control_transaction::type_id::create("protected_write");
+            probe.uid = 2;
+            if (kind == 0) begin
+                probe.op_class = MEMBLOCK_OP_CLASS_STORE;
+                apply_op_class_template(probe, MEMBLOCK_LSUOP_SW);
+            end else if (kind == 4) begin
+                probe.op_class = MEMBLOCK_OP_CLASS_CBO;
+                apply_op_class_template(probe, MEMBLOCK_LSUOP_CBO_ZERO);
+            end else begin
+                probe.op_class = MEMBLOCK_OP_CLASS_AMO;
+                apply_op_class_template(probe, opcodes[kind-1]);
+                probe.amo_alignment_bytes = 8;
+            end
+            probe.src_0 = older.address + (kind == 0 ? 12 : 0);
+            probe.update_vaddr();
+            check_expect(overlaps_pending_cas_prefill(probe), "partial/atomic/CBO overlap was missed");
+            avoid_pending_cas_prefill_write_overlap(probe);
+            check_expect(!overlaps_pending_cas_prefill(probe) &&
+                (kind == 0 ? probe.fuOpType == MEMBLOCK_LSUOP_SW :
+                 kind == 4 ? probe.fuOpType == MEMBLOCK_LSUOP_CBO_ZERO : probe.fuOpType == opcodes[kind-1]),
+                "write protection changed opcode or left overlap");
+        end
+        probe = make_scalar("allowed_read", MEMBLOCK_OP_CLASS_INT_LOAD, 2);
+        probe.uid = 2; probe.src_0 = older.address; probe.update_vaddr();
+        check_expect(!overlaps_pending_cas_prefill(probe), "load was incorrectly protected as write");
+        probe.op_class = MEMBLOCK_OP_CLASS_AMO; apply_op_class_template(probe, MEMBLOCK_LSUOP_LR_D);
+        check_expect(!overlaps_pending_cas_prefill(probe), "LR was incorrectly protected as write");
+        seq_csr_common::amo_lr_sc_pair_en_1_wt = 100;
+        seq_csr_common::amo_lr_sc_same_addr_1_wt = 100;
+        seq_csr_common::amo_lr_sc_dist_fixed_wt = 1;
+        seq_csr_common::amo_lr_sc_dist_fixed_value = 0;
+        seq_csr_common::amo_lr_sc_dist_0_wt = 0;
+        seq_csr_common::amo_lr_sc_dist_1_5_wt = 0;
+        seq_csr_common::amo_lr_sc_dist_6_10_wt = 0;
+        seq_csr_common::amo_lr_sc_dist_11_100_wt = 0;
+        lr = probe;
+        try_reserve_paired_sc(lr, 32, 0, 0, 0, 0);
+        check_expect(sc_reservation_by_uid.num() == 0, "same-address SC broke a protected CAS group");
+        original = make_prefill_cas(2, MEMBLOCK_LSUOP_AMOCAS_D);
+        accepted = try_plan_cas_prefill(original, 32, 0, 0, 0, 0, low);
+        check_expect(accepted, "second overlapping-window group failed to plan");
+        group = cas_prefill_group_audit_q[1];
+        probe = make_reserved_cas_transaction(group, '{default:0});
+        check_expect(!cas_prefill_write_overlaps(probe, older), "new group overlaps older protected bytes");
+        // 让所有普通随机重试只得到被保护的 line，确定性步长必须找到 line 内空闲地址。
+        seq_csr_common::main_vaddr_base = older.address;
+        seq_csr_common::main_vaddr_range = 64;
+        probe = make_scalar("deterministic_fallback", MEMBLOCK_OP_CLASS_STORE, 2);
+        probe.uid = 2; probe.src_0 = older.address; probe.update_vaddr();
+        avoid_pending_cas_prefill_write_overlap(probe);
+        check_expect(!overlaps_pending_cas_prefill(probe), "deterministic write address fallback failed");
+        seq_csr_common::main_vaddr_base = saved_base;
+        seq_csr_common::main_vaddr_range = saved_range;
+        // 消费时核验冻结描述和审计账本，不允许错误 map 静默删除。
+        cas_prefill_store_high_by_uid[older.store_high_uid].new_low ^= 1;
+        catcher = new("CAS_PREFILL", "*frozen descriptor*");
+        uvm_report_cb::add(null, catcher);
+        probe = consume_cas_prefill_reservation(older.store_high_uid, '{default:0}, 1);
+        uvm_report_cb::delete(null, catcher);
+        check_expect(catcher.caught_count >= 1, "reservation mutation escaped consumption checks");
+        reset_prefill_fixture();
+        // 新 group 选址必须避开在先已经预约的同地址 SC，而非到发射时搬动 SC。
+        reservation = '{default:0};
+        reservation.valid = 1; reservation.sc_uid = 3; reservation.same_addr = 1;
+        reservation.sc_fuOpType = MEMBLOCK_LSUOP_SC_D; reservation.lr_src_0 = saved_base;
+        sc_reservation_by_uid[3] = reservation;
+        group = '0; group.valid = 1; group.origin_uid = 0; group.cas_uid = 5;
+        group.cas_fuOpType = MEMBLOCK_LSUOP_AMOCAS_D; group.address = saved_base;
+        check_expect(cas_prefill_address_conflicts(group), "new group ignored an earlier same-address SC reservation");
+        // SC 初始候选碰撞 CSR/SFence/high/owner 后顺延一次，距离不重新抽样。
+        reset_prefill_fixture();
+        group = '0; group.valid = 1; group.store_high_uid = 2; group.cas_uid = 3;
+        cas_prefill_store_high_by_uid[2] = group;
+        cas_prefill_owner_by_uid[3] = group;
+        lr = make_prefill_cas(0, MEMBLOCK_LSUOP_LR_D);
+        try_reserve_paired_sc(lr, 6, 1, 1, 1, 4);
+        check_expect(sc_reservation_by_uid.exists(5) && sc_reservation_by_uid[5].selected_dist == 0 &&
+            sc_reservation_by_uid[5].lr_src_0 == lr.src_0, "SC collision did not preserve distance/address commitment");
+        reset_prefill_fixture();
+        // 两个真实建表入口：定向 CAS.Q 一直生成，验证每个非末尾 CAS 都有完整组。
+        directed_cas_generation = 1;
+        directed_cas_opcode = MEMBLOCK_LSUOP_AMOCAS_Q;
+        directed_cas_distance = 1;
+        seq_csr_common::csr_control_enable = 0;
+        seq_csr_common::sfence_control_enable = 0;
+        build_random_main_table(12);
+        check_expect(data.main_trans_num == 12 && cas_prefill_group_audit_q.size() == 4,
+            "ordinary builder did not retain N/full Q groups");
+        // 软件测试临时切换已冻结拓扑的观测值，真实 driver 不运行，结束后立即恢复。
+        memblock_sync_pkg::control_worker_topology_mode = memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE;
+        build_control_auto_main_table(12);
+        check_expect(data.main_trans_num == 13 && cas_prefill_group_audit_q.size() == 4 &&
+            data.get_main_transaction(12).op_class == MEMBLOCK_OP_CLASS_CHECK_STORE,
+            "AUTO builder changed N+1 or check_store UID=N");
+        // CSR/SFence 同 UID 保持 CSR 优先，两者从相同 base 再预约。
+        seq_csr_common::csr_control_enable = 1;
+        seq_csr_common::sfence_control_enable = 1;
+        seq_csr_common::csr_control_min_interval = 3;
+        seq_csr_common::csr_control_max_interval = 3;
+        seq_csr_common::sfence_control_min_interval = 3;
+        seq_csr_common::sfence_control_max_interval = 3;
+        build_control_auto_main_table(12);
+        check_expect(data.get_main_transaction(3).op_class == MEMBLOCK_OP_CLASS_CSR_CONTROL &&
+            data.get_main_transaction(6).op_class == MEMBLOCK_OP_CLASS_CSR_CONTROL &&
+            data.get_main_transaction(9).op_class == MEMBLOCK_OP_CLASS_CSR_CONTROL &&
+            data.get_main_transaction(12).op_class == MEMBLOCK_OP_CLASS_CHECK_STORE,
+            "CSR/SFence same-target priority/rescheduling changed");
+        seq_csr_common::amo_cas_prefill_en_1_wt = 0;
+        build_random_main_table(12);
+        check_expect(cas_prefill_group_audit_q.size() == 0 && data.main_trans_num == 12,
+            "repeated build retained stale prefill ledger");
+        directed_cas_generation = 0;
+        directed_cas_distance = 0;
+        seq_csr_common::amo_cas_prefill_en_1_wt = saved_enable;
+        seq_csr_common::amo_lr_sc_pair_en_1_wt = saved_sc_enable;
+        seq_csr_common::amo_lr_sc_same_addr_1_wt = saved_sc_same;
+        seq_csr_common::amo_lr_sc_dist_fixed_wt = saved_sc_fixed;
+        seq_csr_common::amo_lr_sc_dist_fixed_value = saved_sc_dist;
+        seq_csr_common::amo_lr_sc_dist_0_wt = saved_sc_weights[0];
+        seq_csr_common::amo_lr_sc_dist_1_5_wt = saved_sc_weights[1];
+        seq_csr_common::amo_lr_sc_dist_6_10_wt = saved_sc_weights[2];
+        seq_csr_common::amo_lr_sc_dist_11_100_wt = saved_sc_weights[3];
+        seq_csr_common::csr_control_enable = saved_csr;
+        seq_csr_common::sfence_control_enable = saved_sfence;
+        seq_csr_common::csr_control_min_interval = saved_csr_min;
+        seq_csr_common::csr_control_max_interval = saved_csr_max;
+        seq_csr_common::sfence_control_min_interval = saved_sfence_min;
+        seq_csr_common::sfence_control_max_interval = saved_sfence_max;
+        memblock_sync_pkg::control_worker_topology_mode = saved_topology;
+        reset_prefill_fixture();
+        `uvm_info("CAS_PREFILL_SOFT", "address protection/LR-SC/ordinary N/AUTO N+1/control/reset checks passed", UVM_LOW)
+    endtask
+
+    // 抽象职责：逐宽度和距离验证完整组构造、冻结数据、尾部回滚、预约审计及 UID 冲突。
+    task check_cas_prefill_groups();
+        main_control_transaction original, replacement, owner, high, probe;
+        memblock_cas_prefill_group_t group;
+        memblock_lr_sc_reservation_t sc;
+        memblock_control_reservation_plan_t control;
+        memblock_rob_key_t rob;
+        bit [8:0] opcodes[3];
+        int distances[6];
+        memblock_uid_t selected;
+        bit accepted;
+        int unsigned saved_enable, saved_weights[3];
+        bit seen[31];
+        memblock_cas_prefill_expected_fatal_catcher catcher;
+        saved_enable = seq_csr_common::amo_cas_prefill_en_1_wt;
+        saved_weights = seq_csr_common::amo_cas_prefill_dist_wt;
+        opcodes = '{MEMBLOCK_LSUOP_AMOCAS_W, MEMBLOCK_LSUOP_AMOCAS_D, MEMBLOCK_LSUOP_AMOCAS_Q};
+        distances = '{1, 5, 6, 10, 11, 30};
+        rob = '{default:0};
+        reset_prefill_fixture();
+        original = make_prefill_cas(0, MEMBLOCK_LSUOP_AMOCAS_D);
+        seq_csr_common::amo_cas_prefill_en_1_wt = 0;
+        accepted = try_plan_cas_prefill(original, 64, 0, 0, 0, 0, replacement);
+        check_expect(!accepted && replacement == null && cas_prefill_owner_by_uid.num() == 0 &&
+            original.op_class == MEMBLOCK_OP_CLASS_AMO && !original.std_data_override_valid[0],
+            "prefill disabled changed the original CAS");
+        seq_csr_common::amo_cas_prefill_en_1_wt = 100;
+        foreach (opcodes[k]) begin
+            foreach (distances[d]) begin
+                reset_prefill_fixture();
+                directed_cas_distance = distances[d];
+                original = make_prefill_cas(0, opcodes[k]);
+                accepted = try_plan_cas_prefill(original, 64, 0, 0, 0, 0, replacement);
+                check_expect(accepted && cas_prefill_group_audit_q.size() == 1, "100% prefill failed with capacity");
+                group = cas_prefill_group_audit_q[0];
+                check_expect(group.cas_uid == (k == 2 ? 1 : 0) + distances[d] &&
+                    group.selected_distance == distances[d], "CAS distance is not relative to last Store");
+                data.reset_all_tables(group.cas_uid + 1);
+                for (memblock_uid_t uid = 0; uid <= group.cas_uid; uid++) begin
+                    if (uid == 0) probe = replacement;
+                    else if (cas_prefill_store_high_by_uid.exists(uid)) begin
+                        high = consume_cas_prefill_reservation(uid, rob, 1);
+                        probe = high;
+                    end else if (cas_prefill_owner_by_uid.exists(uid)) begin
+                        owner = consume_cas_prefill_reservation(uid, rob, 0);
+                        probe = owner;
+                    end else begin
+                        probe = make_scalar("prefill_gap_load", MEMBLOCK_OP_CLASS_INT_LOAD, uid);
+                        probe.uid = uid;
+                    end
+                    data.set_main_transaction(uid, probe);
+                end
+                check_all_cas_prefill_groups(group.cas_uid + 1);
+                check_expect(replacement.lsq_flow == MEMBLOCK_LSQ_FLOW_STORE && replacement.numLsElem == 1 &&
+                    owner.numLsElem == 0 && owner.send_pri == 100 && owner.send_pri_std == 100,
+                    "prefill did not preserve scalar/atomic templates");
+                check_expect(field_assigner.derive_std_data(replacement, 0) == field_assigner.derive_std_data(owner, 0),
+                    "CAS low compare differs from prefill Store");
+                if (k == 0) check_expect(owner.std_data_override[0][63:32] == 0 &&
+                    owner.std_data_override[1][63:32] == 0, "CAS.W high bits were not cleared");
+                if (k == 2) check_expect(high.vaddr == replacement.vaddr + 8 &&
+                    field_assigner.derive_std_data(high, 0) == field_assigner.derive_std_data(owner, 2),
+                    "CAS.Q high compare/address mapping mismatch");
+                // 逆序重复读取并改变 UID，证明冻结 new/compare 不依赖发射顺序或 UID 派生。
+                owner.uid = 123;
+                for (int slot = (k == 2 ? 3 : 1); slot >= 0; slot--) begin
+                    bit [63:0] expected;
+                    case (slot)
+                        0: expected = group.compare_low;
+                        1: expected = group.new_low;
+                        2: expected = group.compare_high;
+                        3: expected = group.new_high;
+                    endcase
+                    repeat (3) check_expect(field_assigner.derive_std_data(owner, slot) == expected, "STD override drifted on retry/shuffle");
+                end
+                owner.uid = group.cas_uid;
+                // 审计负向：冻结 new 数据被破坏必须在 TLB 构造前报错。
+                owner.std_data_override[1] ^= 64'd1;
+                catcher = new("CAS_PREFILL", "*frozen data mismatch*");
+                uvm_report_cb::add(null, catcher);
+                check_all_cas_prefill_groups(group.cas_uid + 1);
+                uvm_report_cb::delete(null, catcher);
+                check_expect(catcher.caught_count == 1, "ledger did not detect changed owner data");
+                owner.std_data_override[1] ^= 64'd1;
+            end
+        end
+        // 三档随机本身的边界与大权重求和（不使用定向距离覆盖）。
+        directed_cas_distance = 0;
+        foreach (seen[i]) seen[i] = 0;
+        for (int bucket = 0; bucket < 3; bucket++) begin
+            seq_csr_common::amo_cas_prefill_dist_wt = '{0, 0, 0};
+            seq_csr_common::amo_cas_prefill_dist_wt[bucket] = 1;
+            repeat (512) begin
+                int unsigned distance;
+                distance = randomize_cas_prefill_distance();
+                check_expect((bucket == 0 && distance inside {[1:5]}) ||
+                    (bucket == 1 && distance inside {[6:10]}) ||
+                    (bucket == 2 && distance inside {[11:30]}), "distance escaped selected bucket");
+                seen[distance] = 1;
+            end
+        end
+        foreach (distances[i]) check_expect(seen[distances[i]], "distance bucket endpoint was not exercised");
+        seq_csr_common::amo_cas_prefill_dist_wt = '{32'h7fff_ffff, 32'h7fff_ffff, 32'h7fff_ffff};
+        repeat (10) check_expect(randomize_cas_prefill_distance() inside {[1:30]}, "64-bit distance weight total overflow");
+        directed_cas_distance = 1;
+        foreach (opcodes[k]) begin
+            reset_prefill_fixture();
+            original = make_prefill_cas(0, opcodes[k]);
+            accepted = try_plan_cas_prefill(original, k == 2 ? 2 : 1, 0, 0, 0, 0, replacement);
+            check_expect(!accepted && replacement == null && cas_prefill_group_audit_q.size() == 0 &&
+                cas_prefill_owner_by_uid.num() == 0 && cas_prefill_store_high_by_uid.num() == 0 &&
+                original.fuOpType == opcodes[k] && !original.std_data_override_valid[0], "tail failure left a partial group");
+        end
+        reset_prefill_fixture();
+        sc = '{default:0}; sc.valid = 1; sc.sc_uid = 1;
+        sc_reservation_by_uid[1] = sc;
+        group = '0; group.valid = 1; group.cas_uid = 2;
+        cas_prefill_owner_by_uid[2] = group;
+        group.store_high_uid = 3;
+        cas_prefill_store_high_by_uid[3] = group;
+        accepted = find_next_free_companion_uid(1, 7, 1, 4, 1, 5, selected);
+        check_expect(accepted && selected == 6, "SC/CAS/high/CSR/SFence collision did not scan +1");
+        check_expect(!find_next_free_companion_uid(1, 6, 1, 4, 1, 5, selected), "scan occupied AUTO check_store UID N");
+        control = '{enabled:1, target_valid:0, next_uid:0};
+        reschedule_control_reservation(control, 0, 1, 1, 4);
+        check_expect(!control.target_valid, "control scan beyond N must expire");
+        reschedule_control_reservation(control, 0, 1, 1, 7);
+        check_expect(control.target_valid && control.next_uid == 4, "control did not skip SC/CAS reservations");
+        // 允许 CSR/SFence 彼此同 target；其它重叠必须 fatal。
+        check_expect(uid_reserved_for_companion(4, 1, 4, 1, 4, 7), "CSR/SFence same target was rejected");
+        catcher = new("CAS_PREFILL", "*overlapping companion/control*");
+        uvm_report_cb::add(null, catcher);
+        accepted = uid_reserved_for_companion(1, 1, 1, 0, 0, 7);
+        uvm_report_cb::delete(null, catcher);
+        check_expect(catcher.caught_count == 1, "SC/control collision was silently prioritized");
+        reset_prefill_fixture();
+        directed_cas_distance = 0;
+        seq_csr_common::amo_cas_prefill_en_1_wt = saved_enable;
+        seq_csr_common::amo_cas_prefill_dist_wt = saved_weights;
+        `uvm_info("CAS_PREFILL_SOFT", "parameters/override/W-D-Q/distance/collision/rollback/audit checks passed", UVM_LOW)
+    endtask
 
     function main_control_transaction make_scalar(input string name,
                                                   input memblock_op_class_e op_class,
@@ -515,6 +957,9 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
 
     task check_atomic_issue_fields();
         main_control_transaction amo;
+        main_control_transaction store;
+        lintsissue_agent_agent_xaction issue_tr;
+        memblock_issue_q_item_t item;
         bit [63:0] std_data[4];
         bit [7:0] pdest0;
         bit [7:0] pdest2;
@@ -540,6 +985,38 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
         pdest0 = field_assigner.compute_atomic_sta_pdest(amo.uid, 0, 1'b1);
         pdest2 = field_assigner.compute_atomic_sta_pdest(amo.uid, 2, 1'b1);
         check_expect(pdest0 != pdest2, "CAS.Q STA0/STA2 pdest must be distinct");
+        amo.update_vaddr();
+        issue_tr = lintsissue_agent_agent_xaction::type_id::create("soft_override_issue");
+        item = '{default:'0};
+        foreach (amo.std_data_override_valid[slot]) begin
+            amo.std_data_override_valid[slot] = 1;
+            amo.std_data_override[slot] = 64'h1122_3344_5566_0000 + slot;
+        end
+        check_expect(amo.validate_main_transaction(), "complete CAS.Q override mask rejected");
+        for (int slot = 3; slot >= 0; slot--) begin
+            item.uop_index = slot;
+            field_assigner.assign_std_main_fields(issue_tr, amo, item, 0);
+            check_expect(issue_tr.io_ooo_to_mem_issueStd_0_bits_src_0 == amo.std_data_override[slot],
+                "STD port did not consume selected frozen slot");
+        end
+        amo.std_data_override_valid[2] = 0;
+        check_expect(!amo.validate_main_transaction(), "partial CAS.Q override mask accepted");
+        amo.std_data_override_valid[3] = 0;
+        amo.fuOpType = MEMBLOCK_LSUOP_AMOCAS_D;
+        check_expect(amo.validate_main_transaction(), "CAS.D override mask rejected");
+        amo.fuOpType = MEMBLOCK_LSUOP_AMOADD_D;
+        check_expect(!amo.validate_main_transaction(), "non-CAS AMO inherited CAS override");
+        store = make_scalar("soft_store_override", MEMBLOCK_OP_CLASS_STORE, 0);
+        check_expect(field_assigner.derive_std_data(store, 0) == store.src_0, "legacy Store data fallback changed");
+        store.std_data_override_valid[0] = 1;
+        store.std_data_override[0] = 64'hfedc_ba98_7654_3210;
+        check_expect(store.validate_main_transaction(), "Store slot0 override rejected");
+        item.uop_index = 0;
+        field_assigner.assign_std_main_fields(issue_tr, store, item, 0);
+        check_expect(issue_tr.io_ooo_to_mem_issueStd_0_bits_src_0 == store.std_data_override[0],
+            "ordinary Store port ignored override");
+        store.std_data_override_valid[1] = 1;
+        check_expect(!store.validate_main_transaction(), "Store inherited a second STD override slot");
     endtask:check_atomic_issue_fields
 
     task check_amo_addr_reuse_type_guard();
@@ -648,6 +1125,9 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
         check_atomic_fault_redirect_classification();
         check_atomic_issue_fields();
         check_amo_addr_reuse_type_guard();
+        check_cas_prefill_parameters();
+        check_cas_prefill_groups();
+        check_cas_prefill_protection_and_builders();
         check_atomic_held_piece_stability();
         check_atomic_token_reset_binding();
         data.publish_lsq_sequence_local_state(1'b1, 1'b0);

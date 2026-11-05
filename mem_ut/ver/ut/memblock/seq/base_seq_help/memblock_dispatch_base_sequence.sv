@@ -31,6 +31,25 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
         int unsigned      selected_dist;
     } memblock_lr_sc_reservation_t;
 
+    // 中文注释：一个 CAS 成功前置组的冻结描述。规划时整体写入，成员构造只读；
+    // origin/low 是当拍替换的 UID，high 仅 Q 有效，owner 是未来 CAS，距离从最后
+    // Store 起算。四份数据按 compare/new low/high 排列，不依赖未来 UID 的派生。
+    typedef struct packed {
+        bit valid;
+        memblock_uid_t origin_uid;
+        memblock_uid_t store_low_uid;
+        bit store_high_valid;
+        memblock_uid_t store_high_uid;
+        memblock_uid_t cas_uid;
+        bit [8:0] cas_fuOpType;
+        bit [63:0] address;
+        bit [63:0] compare_low;
+        bit [63:0] compare_high;
+        bit [63:0] new_low;
+        bit [63:0] new_high;
+        int unsigned selected_distance;
+    } memblock_cas_prefill_group_t;
+
     common_data_transaction data;
     lsq_ctrl_model          lsq_ctrl;
     issue_queue_scheduler   issue_sched;
@@ -48,6 +67,12 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     bit dispatch_runtime_helpers_initialized;
     main_control_transaction manual_main_table_by_rob[int unsigned];
     memblock_lr_sc_reservation_t sc_reservation_by_uid[memblock_uid_t];
+    // 中文注释：只保存尚未生成的 Q 高 Store / CAS owner，消费时精确删除；low
+    // Store 直接替换当前位置。每次建表清空，地址保护只扫描仍 pending 的 owner。
+    memblock_cas_prefill_group_t cas_prefill_store_high_by_uid[memblock_uid_t];
+    memblock_cas_prefill_group_t cas_prefill_owner_by_uid[memblock_uid_t];
+    // 中文注释：正式提交后保留完整组供建表后审计，消费成员不删除；下一次建表清空。
+    memblock_cas_prefill_group_t cas_prefill_group_audit_q[$];
     memblock_boundary_profile_candidate_t boundary_profile_cache[$];
     bit boundary_candidate_cache_built;
 
@@ -74,6 +99,35 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
                                                             input memblock_uid_t uid,
                                                             input memblock_rob_key_t rob_key);
     extern virtual function bit is_lr_fuoptype(input bit [8:0] fuOpType);
+    extern virtual function bit is_cas_fuoptype(input bit [8:0] fuOpType);
+    extern virtual function int unsigned randomize_cas_prefill_distance();
+    extern virtual function bit uid_reserved_for_companion(
+        input memblock_uid_t uid, input bit control0_valid, input memblock_uid_t control0,
+        input bit control1_valid, input memblock_uid_t control1,
+        input int unsigned check_store_uid);
+    extern virtual function bit find_next_free_companion_uid(
+        input longint unsigned start_uid, input int unsigned table_limit,
+        input bit control0_valid, input memblock_uid_t control0,
+        input bit control1_valid, input memblock_uid_t control1,
+        output memblock_uid_t selected_uid);
+    extern virtual function bit try_plan_cas_prefill(
+        input main_control_transaction original_cas, input int unsigned table_limit,
+        input bit control0_valid, input memblock_uid_t control0,
+        input bit control1_valid, input memblock_uid_t control1,
+        output main_control_transaction replacement_store);
+    extern virtual function main_control_transaction make_cas_prefill_store_transaction(
+        input memblock_cas_prefill_group_t group, input bit high_half,
+        input memblock_rob_key_t rob_key);
+    extern virtual function main_control_transaction make_reserved_cas_transaction(
+        input memblock_cas_prefill_group_t group, input memblock_rob_key_t rob_key);
+    extern virtual function main_control_transaction consume_cas_prefill_reservation(
+        input memblock_uid_t uid, input memblock_rob_key_t rob_key, input bit high_half);
+    extern virtual function bit cas_prefill_write_overlaps(
+        input main_control_transaction tr, input memblock_cas_prefill_group_t group);
+    extern virtual function bit overlaps_pending_cas_prefill(input main_control_transaction tr);
+    extern virtual function bit cas_prefill_address_conflicts(input memblock_cas_prefill_group_t group);
+    extern virtual function void avoid_pending_cas_prefill_write_overlap(input main_control_transaction tr);
+    extern virtual function void check_all_cas_prefill_groups(input int unsigned table_limit);
     extern virtual function int unsigned randomize_lr_sc_distance();
     extern virtual function void try_reserve_paired_sc(
         input main_control_transaction lr_tr,
@@ -352,6 +406,9 @@ task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned
     end
     data.reset_all_tables(main_trans_num_i);
     sc_reservation_by_uid.delete();
+    cas_prefill_store_high_by_uid.delete();
+    cas_prefill_owner_by_uid.delete();
+    cas_prefill_group_audit_q.delete();
     rob_key = choose_rob_start_key();
     addr_ref_window = choose_addr_ref_window();
     if (seq_csr_common::get_boundary_profile_gen_en()) begin
@@ -364,13 +421,18 @@ task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned
     for (int unsigned idx = 0; idx < main_trans_num_i; idx++) begin
         memblock_uid_t uid;
         main_control_transaction tr;
-        bit paired_sc;
+        main_control_transaction replacement_store;
 
         uid = data.alloc_uid();
-        paired_sc = sc_reservation_by_uid.exists(uid);
-        if (paired_sc) begin
+        void'(uid_reserved_for_companion(uid, 0, 0, 0, 0, main_trans_num_i));
+        if (cas_prefill_store_high_by_uid.exists(uid)) begin
+            tr = consume_cas_prefill_reservation(uid, rob_key, 1'b1);
+        end else if (cas_prefill_owner_by_uid.exists(uid)) begin
+            tr = consume_cas_prefill_reservation(uid, rob_key, 1'b0);
+        end else if (sc_reservation_by_uid.exists(uid)) begin
             tr = make_paired_sc_transaction(sc_reservation_by_uid[uid], rob_key);
             sc_reservation_by_uid.delete(uid);
+            avoid_pending_cas_prefill_write_overlap(tr);
         end else begin
             tr = main_control_transaction::type_id::create($sformatf("main_uid_%0d", uid));
             randomize_main_transaction(tr, uid, rob_key);
@@ -381,9 +443,13 @@ task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned
                 sync_boundary_profile_after_addr_reuse(tr,
                     $sformatf("random uid=%0d boundary after addr reuse", uid));
             end
+            avoid_pending_cas_prefill_write_overlap(tr);
+            if (try_plan_cas_prefill(tr, main_trans_num_i, 0, 0, 0, 0, replacement_store))
+                tr = replacement_store;
         end
+        validate_main_table_entry(tr, $sformatf("final random uid=%0d", uid));
         data.set_main_transaction(uid, tr);
-        if (is_lr_fuoptype(tr.fuOpType)) begin
+        if (tr.op_class == MEMBLOCK_OP_CLASS_AMO && is_lr_fuoptype(tr.fuOpType)) begin
             try_reserve_paired_sc(tr, main_trans_num_i,
                                   1'b0, 0, 1'b0, 0);
         end
@@ -393,6 +459,7 @@ task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned
 
     init_status_for_main_table();
     data.check_main_table_complete();
+    check_all_cas_prefill_groups(main_trans_num_i);
 endtask:build_random_main_table
 
 // 抽象职责：AUTO 模式只构造固定 N+1 主表。UID [0,N) 保持原随机访存构造，
@@ -422,6 +489,9 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
 
     data.reset_all_tables(total_main_trans_num);
     sc_reservation_by_uid.delete();
+    cas_prefill_store_high_by_uid.delete();
+    cas_prefill_owner_by_uid.delete();
+    cas_prefill_group_audit_q.delete();
     csr_plan = '{default:'0};
     sfence_plan = '{default:'0};
     csr_plan.enabled = seq_csr_common::get_csr_control_enable();
@@ -455,17 +525,15 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
         main_control_transaction tr;
         bit csr_hit;
         bit sfence_hit;
+        main_control_transaction replacement_store;
 
         uid = data.alloc_uid();
         csr_hit = csr_plan.target_valid && csr_plan.next_uid == uid;
         sfence_hit = sfence_plan.target_valid && sfence_plan.next_uid == uid;
+        void'(uid_reserved_for_companion(uid,
+            csr_plan.target_valid, memblock_uid_t'(csr_plan.next_uid),
+            sfence_plan.target_valid, memblock_uid_t'(sfence_plan.next_uid), normal_main_trans_num));
         if (csr_hit) begin
-            if (sc_reservation_by_uid.exists(uid)) begin
-                `uvm_info("LR_SC_PAIR",
-                          $sformatf("cancel paired SC uid=%0d because CSR control owns the slot",
-                                    uid), UVM_LOW)
-                sc_reservation_by_uid.delete(uid);
-            end
             tr = make_control_main_transaction($sformatf("csr_control_uid_%0d", uid),
                                                uid,
                                                MEMBLOCK_OP_CLASS_CSR_CONTROL,
@@ -485,12 +553,6 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
                                                normal_main_trans_num);
             end
         end else if (sfence_hit) begin
-            if (sc_reservation_by_uid.exists(uid)) begin
-                `uvm_info("LR_SC_PAIR",
-                          $sformatf("cancel paired SC uid=%0d because SFence control owns the slot",
-                                    uid), UVM_LOW)
-                sc_reservation_by_uid.delete(uid);
-            end
             tr = make_control_main_transaction($sformatf("sfence_control_uid_%0d", uid),
                                                uid,
                                                MEMBLOCK_OP_CLASS_SFENCE_CONTROL,
@@ -500,9 +562,14 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
                                            seq_csr_common::get_sfence_control_min_interval(),
                                            seq_csr_common::get_sfence_control_max_interval(),
                                            normal_main_trans_num);
+        end else if (cas_prefill_store_high_by_uid.exists(uid)) begin
+            tr = consume_cas_prefill_reservation(uid, rob_key, 1'b1);
+        end else if (cas_prefill_owner_by_uid.exists(uid)) begin
+            tr = consume_cas_prefill_reservation(uid, rob_key, 1'b0);
         end else if (sc_reservation_by_uid.exists(uid)) begin
             tr = make_paired_sc_transaction(sc_reservation_by_uid[uid], rob_key);
             sc_reservation_by_uid.delete(uid);
+            avoid_pending_cas_prefill_write_overlap(tr);
         end else begin
             tr = main_control_transaction::type_id::create($sformatf("main_uid_%0d", uid));
             randomize_main_transaction(tr, uid, rob_key);
@@ -513,10 +580,17 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
                 sync_boundary_profile_after_addr_reuse(
                     tr, $sformatf("AUTO control uid=%0d boundary after addr reuse", uid));
             end
-            push_recent_uid(tr, uid, recent_load_uid_q, recent_store_uid_q);
+            avoid_pending_cas_prefill_write_overlap(tr);
+            if (try_plan_cas_prefill(tr, normal_main_trans_num,
+                    csr_plan.target_valid, memblock_uid_t'(csr_plan.next_uid),
+                    sfence_plan.target_valid, memblock_uid_t'(sfence_plan.next_uid), replacement_store))
+                tr = replacement_store;
         end
+        if (is_control_op_class(tr.op_class)) validate_control_main_table_entry(tr, "final AUTO control");
+        else validate_main_table_entry(tr, $sformatf("final AUTO uid=%0d", uid));
+        push_recent_uid(tr, uid, recent_load_uid_q, recent_store_uid_q);
         data.set_main_transaction(uid, tr);
-        if (is_lr_fuoptype(tr.fuOpType)) begin
+        if (tr.op_class == MEMBLOCK_OP_CLASS_AMO && is_lr_fuoptype(tr.fuOpType)) begin
             try_reserve_paired_sc(
                 tr, normal_main_trans_num,
                 csr_plan.target_valid, memblock_uid_t'(csr_plan.next_uid),
@@ -545,6 +619,7 @@ task memblock_dispatch_base_sequence::build_control_auto_main_table(
 
     init_status_for_main_table();
     data.check_main_table_complete();
+    check_all_cas_prefill_groups(normal_main_trans_num);
     check_main_table_control_policy("build_control_auto_main_table");
     check_control_auto_main_table_structure(normal_main_trans_num,
                                             "build_control_auto_main_table");
@@ -563,6 +638,10 @@ task memblock_dispatch_base_sequence::import_manual_main_table();
     end
 
     data.reset_all_tables(manual_num);
+    sc_reservation_by_uid.delete();
+    cas_prefill_store_high_by_uid.delete();
+    cas_prefill_owner_by_uid.delete();
+    cas_prefill_group_audit_q.delete();
     foreach (manual_main_table_by_rob[rob_key]) begin
         rob_keys.push_back(rob_key);
     end
@@ -739,6 +818,381 @@ function void memblock_dispatch_base_sequence::randomize_main_transaction(input 
     validate_main_table_entry(tr, $sformatf("random uid=%0d", uid));
 endfunction:randomize_main_transaction
 
+function bit memblock_dispatch_base_sequence::is_cas_fuoptype(input bit [8:0] fuOpType);
+    return fuOpType inside {MEMBLOCK_LSUOP_AMOCAS_W, MEMBLOCK_LSUOP_AMOCAS_D, MEMBLOCK_LSUOP_AMOCAS_Q};
+endfunction:is_cas_fuoptype
+
+// 抽象职责：统一报告未来 UID 的占用情况；CSR/SFence 彼此同 target 以外的重复预约
+// 都属于建表错误，必须在生成之前暴露，不能依靠生成分支优先级吞掉另一成员。
+function bit memblock_dispatch_base_sequence::uid_reserved_for_companion(
+    input memblock_uid_t uid, input bit control0_valid, input memblock_uid_t control0,
+    input bit control1_valid, input memblock_uid_t control1,
+    input int unsigned check_store_uid);
+    int unsigned companion_count;
+    bit control_hit;
+    companion_count = int'(sc_reservation_by_uid.exists(uid)) +
+                      int'(cas_prefill_store_high_by_uid.exists(uid)) +
+                      int'(cas_prefill_owner_by_uid.exists(uid));
+    control_hit = (control0_valid && uid == control0) || (control1_valid && uid == control1);
+    if (companion_count > 1 || (companion_count != 0 && (control_hit || uid >= check_store_uid)))
+        `uvm_fatal("CAS_PREFILL", $sformatf("overlapping companion/control reservation uid=%0d", uid))
+    return companion_count != 0 || control_hit || uid >= check_store_uid;
+endfunction:uid_reserved_for_companion
+
+// 抽象职责：从唯一初始候选向前找空位；上界在普通和 AUTO 模式都固定为 N。
+function bit memblock_dispatch_base_sequence::find_next_free_companion_uid(
+    input longint unsigned start_uid, input int unsigned table_limit,
+    input bit control0_valid, input memblock_uid_t control0,
+    input bit control1_valid, input memblock_uid_t control1,
+    output memblock_uid_t selected_uid);
+    selected_uid = 0;
+    for (longint unsigned candidate = start_uid; candidate < table_limit; candidate++) begin
+        if (!uid_reserved_for_companion(memblock_uid_t'(candidate), control0_valid, control0,
+                                         control1_valid, control1, table_limit)) begin
+            selected_uid = memblock_uid_t'(candidate);
+            return 1'b1;
+        end
+    end
+    return 1'b0;
+endfunction:find_next_free_companion_uid
+
+function int unsigned memblock_dispatch_base_sequence::randomize_cas_prefill_distance();
+    longint unsigned total, pick, acc;
+    int bucket;
+    total = 0;
+    for (int i = 0; i < 3; i++) total += 64'(seq_csr_common::get_amo_cas_prefill_dist_weight(i));
+    if (total == 0) `uvm_fatal("CAS_PREFILL", "zero CAS prefill distance weight total")
+    pick = {$urandom(), $urandom()} % total;
+    acc = 0;
+    bucket = -1;
+    for (int i = 0; i < 3; i++) begin
+        acc += 64'(seq_csr_common::get_amo_cas_prefill_dist_weight(i));
+        if (pick < acc) begin bucket = i; break; end
+    end
+    case (bucket)
+        0: return $urandom_range(5, 1);
+        1: return $urandom_range(10, 6);
+        2: return $urandom_range(30, 11);
+        default: `uvm_fatal("CAS_PREFILL", "invalid CAS prefill distance bucket")
+    endcase
+    return 1;
+endfunction:randomize_cas_prefill_distance
+
+// 抽象职责：判断一条可能写内存的激励是否覆盖组的 compare 字节范围。普通 Store、
+// SC、写型 AMO/CAS 按实际宽度，CBO.ZERO 按整条 cache line；Load/LR 不写内存。
+function bit memblock_dispatch_base_sequence::cas_prefill_write_overlaps(
+    input main_control_transaction tr, input memblock_cas_prefill_group_t group);
+    bit [63:0] first_byte, last_byte, protected_last;
+    int unsigned size_bytes;
+    if (tr == null || !group.valid) return 1'b0;
+    if (!(tr.op_class == MEMBLOCK_OP_CLASS_STORE ||
+          (tr.op_class == MEMBLOCK_OP_CLASS_AMO && !is_lr_fuoptype(tr.fuOpType)) ||
+          (tr.op_class == MEMBLOCK_OP_CLASS_CBO && tr.fuOpType == MEMBLOCK_LSUOP_CBO_ZERO))) return 1'b0;
+    size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+    first_byte = tr.vaddr;
+    if (tr.op_class == MEMBLOCK_OP_CLASS_CBO) begin
+        size_bytes = 64;
+        first_byte &= ~64'd63;
+    end
+    last_byte = first_byte + size_bytes - 1;
+    protected_last = group.address + derive_size_bytes(MEMBLOCK_OP_CLASS_AMO, group.cas_fuOpType) - 1;
+    return first_byte <= protected_last && group.address <= last_byte;
+endfunction:cas_prefill_write_overlaps
+
+function bit memblock_dispatch_base_sequence::overlaps_pending_cas_prefill(input main_control_transaction tr);
+    foreach (cas_prefill_owner_by_uid[owner_uid]) begin
+        if (tr.uid < owner_uid && cas_prefill_write_overlaps(tr, cas_prefill_owner_by_uid[owner_uid]))
+            return 1'b1;
+    end
+    return 1'b0;
+endfunction:overlaps_pending_cas_prefill
+
+// 抽象职责：规划新组时同时避开旧组和已经承诺同地址的未来 SC，保留 LR/SC 语义。
+function bit memblock_dispatch_base_sequence::cas_prefill_address_conflicts(
+    input memblock_cas_prefill_group_t group);
+    main_control_transaction probe;
+    probe = main_control_transaction::type_id::create("cas_prefill_overlap_probe");
+    probe.uid = group.origin_uid;
+    probe.op_class = MEMBLOCK_OP_CLASS_AMO;
+    probe.fuOpType = group.cas_fuOpType;
+    probe.vaddr = group.address;
+    if (overlaps_pending_cas_prefill(probe)) return 1'b1;
+    foreach (sc_reservation_by_uid[sc_uid]) begin
+        memblock_lr_sc_reservation_t reservation;
+        reservation = sc_reservation_by_uid[sc_uid];
+        if (reservation.same_addr && sc_uid > group.origin_uid && sc_uid < group.cas_uid) begin
+            probe.fuOpType = reservation.sc_fuOpType;
+            probe.vaddr = reservation.lr_src_0 + main_control_transaction::sign_extend_imm12(reservation.lr_imm);
+            if (cas_prefill_write_overlaps(probe, group)) return 1'b1;
+        end
+    end
+    return 1'b0;
+endfunction:cas_prefill_address_conflicts
+
+// 抽象职责：地址复用之后修复随机写地址，保持 opcode、数据、优先级和非对齐意图。
+// 只遍历 pending owner，不扫描已完成的审计历史；随机重试后按对齐步长确定性找空位。
+function void memblock_dispatch_base_sequence::avoid_pending_cas_prefill_write_overlap(
+    input main_control_transaction tr);
+    bit [63:0] base, upper, address;
+    int unsigned size_bytes, alignment, offset;
+    if (!overlaps_pending_cas_prefill(tr)) return;
+    size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+    alignment = (tr.op_class == MEMBLOCK_OP_CLASS_CBO) ? 64 : size_bytes;
+    offset = (tr.op_class == MEMBLOCK_OP_CLASS_AMO && tr.amo_expect_misaligned) ?
+             int'(tr.vaddr % alignment) : 0;
+    base = seq_csr_common::get_main_vaddr_base();
+    upper = base + seq_csr_common::get_main_vaddr_range() - 1;
+    for (int attempt = 0; attempt < 16; attempt++) begin
+        apply_legal_addr_template(tr);
+        tr.src_0 += offset;
+        tr.update_vaddr();
+        if (tr.vaddr + size_bytes - 1 <= upper && !overlaps_pending_cas_prefill(tr)) begin
+            if (seq_csr_common::get_boundary_profile_gen_en())
+                sync_boundary_profile_after_addr_reuse(tr, "CAS protection random relocation");
+            return;
+        end
+    end
+    address = ((base + alignment - 1) & ~(64'(alignment - 1))) + offset;
+    while (address <= upper && size_bytes - 1 <= upper - address) begin
+        tr.src_0 = address;
+        tr.imm = 0;
+        tr.update_vaddr();
+        if (!overlaps_pending_cas_prefill(tr)) begin
+            if (seq_csr_common::get_boundary_profile_gen_en())
+                sync_boundary_profile_after_addr_reuse(tr, "CAS protection deterministic relocation");
+            return;
+        end
+        address += alignment;
+    end
+    `uvm_fatal("CAS_PREFILL", $sformatf("no unprotected write address for uid=%0d", tr.uid))
+endfunction:avoid_pending_cas_prefill_write_overlap
+
+// 抽象职责：使用显式冻结值构造普通 LSQ Store，绝不复制 CAS 的 non-LSQ 行为字段。
+function main_control_transaction memblock_dispatch_base_sequence::make_cas_prefill_store_transaction(
+    input memblock_cas_prefill_group_t group, input bit high_half, input memblock_rob_key_t rob_key);
+    main_control_transaction tr;
+    if (!group.valid || (high_half && !group.store_high_valid))
+        `uvm_fatal("CAS_PREFILL", "invalid prefill Store role")
+    tr = main_control_transaction::type_id::create("cas_prefill_store");
+    tr.uid = high_half ? group.store_high_uid : group.store_low_uid;
+    tr.op_class = MEMBLOCK_OP_CLASS_STORE;
+    apply_op_class_template(tr, group.cas_fuOpType == MEMBLOCK_LSUOP_AMOCAS_W ?
+                               MEMBLOCK_LSUOP_SW : MEMBLOCK_LSUOP_SD);
+    tr.robIdx_flag = rob_key.flag;
+    tr.robIdx_value = rob_key.value;
+    tr.src_0 = group.address + (high_half ? 8 : 0);
+    tr.imm = 0;
+    tr.update_vaddr();
+    tr.std_data_override_valid[0] = 1'b1;
+    tr.std_data_override[0] = high_half ? group.compare_high : group.compare_low;
+    tr.send_pri = randomize_send_pri_value(1'b0);
+    tr.send_pri_std = randomize_send_pri_value(1'b1);
+    tr.delay = randomize_delay_value();
+    validate_main_table_entry(tr, "make_cas_prefill_store_transaction");
+    return tr;
+endfunction:make_cas_prefill_store_transaction
+
+function main_control_transaction memblock_dispatch_base_sequence::make_reserved_cas_transaction(
+    input memblock_cas_prefill_group_t group, input memblock_rob_key_t rob_key);
+    main_control_transaction tr;
+    if (!group.valid || !is_cas_fuoptype(group.cas_fuOpType))
+        `uvm_fatal("CAS_PREFILL", "invalid CAS owner descriptor")
+    tr = main_control_transaction::type_id::create("cas_prefill_owner");
+    tr.uid = group.cas_uid;
+    tr.op_class = MEMBLOCK_OP_CLASS_AMO;
+    apply_op_class_template(tr, group.cas_fuOpType);
+    tr.robIdx_flag = rob_key.flag;
+    tr.robIdx_value = rob_key.value;
+    tr.src_0 = group.address;
+    tr.imm = 0;
+    tr.update_vaddr();
+    tr.amo_alignment_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+    tr.amo_expect_misaligned = 0;
+    tr.send_pri = 100;
+    tr.send_pri_std = 100;
+    tr.delay = randomize_delay_value();
+    for (int slot = 0; slot < (group.store_high_valid ? 4 : 2); slot++)
+        tr.std_data_override_valid[slot] = 1'b1;
+    tr.std_data_override[0] = group.compare_low;
+    tr.std_data_override[1] = group.new_low;
+    tr.std_data_override[2] = group.compare_high;
+    tr.std_data_override[3] = group.new_high;
+    validate_main_table_entry(tr, "make_reserved_cas_transaction");
+    return tr;
+endfunction:make_reserved_cas_transaction
+
+// 抽象职责：CAS 被抽中时尝试完整组规划；任何容量失败都不改变原事务、预约或审计。
+function bit memblock_dispatch_base_sequence::try_plan_cas_prefill(
+    input main_control_transaction original_cas, input int unsigned table_limit,
+    input bit control0_valid, input memblock_uid_t control0,
+    input bit control1_valid, input memblock_uid_t control1,
+    output main_control_transaction replacement_store);
+    memblock_cas_prefill_group_t group;
+    main_control_transaction candidate;
+    longint unsigned initial_candidate;
+    memblock_uid_t last_store;
+    bit [63:0] address, upper;
+    int unsigned width;
+    replacement_store = null;
+    if (original_cas == null || original_cas.op_class != MEMBLOCK_OP_CLASS_AMO ||
+        !is_cas_fuoptype(original_cas.fuOpType)) return 1'b0;
+    if (seq_csr_common::get_amo_cas_prefill_en_1_wt() == 0) return 1'b0;
+    if ($urandom_range(99, 0) >= seq_csr_common::get_amo_cas_prefill_en_1_wt()) return 1'b0;
+    group = '0;
+    group.valid = 1;
+    group.origin_uid = original_cas.uid;
+    group.store_low_uid = original_cas.uid;
+    group.cas_fuOpType = original_cas.fuOpType;
+    group.store_high_valid = group.cas_fuOpType == MEMBLOCK_LSUOP_AMOCAS_Q;
+    last_store = group.store_low_uid;
+    if (group.store_high_valid) begin
+        if (!find_next_free_companion_uid(64'(last_store) + 1, table_limit,
+            control0_valid, control0, control1_valid, control1, group.store_high_uid)) return 1'b0;
+        last_store = group.store_high_uid;
+    end
+    group.selected_distance = randomize_cas_prefill_distance();
+    initial_candidate = 64'(last_store) + group.selected_distance;
+    if (!find_next_free_companion_uid(initial_candidate, table_limit,
+        control0_valid, control0, control1_valid, control1, group.cas_uid)) return 1'b0;
+    // 临时 CAS 只用于安全选址；不对原 CAS 施加任何修改，失败没有半组副作用。
+    candidate = main_control_transaction::type_id::create("cas_prefill_address_candidate");
+    candidate.uid = original_cas.uid;
+    candidate.op_class = MEMBLOCK_OP_CLASS_AMO;
+    apply_op_class_template(candidate, group.cas_fuOpType);
+    candidate.amo_alignment_bytes = derive_size_bytes(candidate.op_class, candidate.fuOpType);
+    apply_legal_addr_template(candidate);
+    avoid_pending_cas_prefill_write_overlap(candidate);
+    group.address = candidate.vaddr;
+    if (cas_prefill_address_conflicts(group)) begin
+        width = derive_size_bytes(candidate.op_class, candidate.fuOpType);
+        address = (seq_csr_common::get_main_vaddr_base() + width - 1) & ~(64'(width - 1));
+        upper = seq_csr_common::get_main_vaddr_base() + seq_csr_common::get_main_vaddr_range() - 1;
+        while (address <= upper && width - 1 <= upper - address) begin
+            group.address = address;
+            if (!cas_prefill_address_conflicts(group)) break;
+            address += width;
+        end
+        if (address > upper || width - 1 > upper - address) return 1'b0;
+    end
+    group.compare_low = {$urandom(), $urandom()};
+    group.new_low = {$urandom(), $urandom()};
+    if (group.cas_fuOpType == MEMBLOCK_LSUOP_AMOCAS_W) begin
+        group.compare_low[63:32] = 0;
+        group.new_low[63:32] = 0;
+    end
+    if (group.store_high_valid) begin
+        group.compare_high = {$urandom(), $urandom()};
+        group.new_high = {$urandom(), $urandom()};
+    end
+    replacement_store = make_cas_prefill_store_transaction(group, 0, original_cas.get_rob_key());
+    // 所有成员位置和构造成功后一次提交；high 与 owner 严格递增，不会互相覆盖。
+    if (group.store_high_valid) cas_prefill_store_high_by_uid[group.store_high_uid] = group;
+    cas_prefill_owner_by_uid[group.cas_uid] = group;
+    cas_prefill_group_audit_q.push_back(group);
+    `uvm_info("CAS_PREFILL", $sformatf("origin=%0d high=%0d/%0d distance=%0d initial=%0d final=%0d skipped=%0d address=0x%0h opcode=0x%0h",
+        group.origin_uid, group.store_high_valid, group.store_high_uid, group.selected_distance,
+        initial_candidate, group.cas_uid, 64'(group.cas_uid)-initial_candidate, group.address, group.cas_fuOpType), UVM_LOW)
+    return 1'b1;
+endfunction:try_plan_cas_prefill
+
+// 抽象职责：精确消费一个未来成员，先检查 UID、角色和冻结描述，再删除对应预约。
+function main_control_transaction memblock_dispatch_base_sequence::consume_cas_prefill_reservation(
+    input memblock_uid_t uid, input memblock_rob_key_t rob_key, input bit high_half);
+    memblock_cas_prefill_group_t group;
+    main_control_transaction tr;
+    int left, right, mid;
+    bit ledger_match;
+    ledger_match = 0;
+    if (high_half && cas_prefill_store_high_by_uid.exists(uid)) group = cas_prefill_store_high_by_uid[uid];
+    else if (!high_half && cas_prefill_owner_by_uid.exists(uid)) group = cas_prefill_owner_by_uid[uid];
+    else `uvm_fatal("CAS_PREFILL", "missing reservation at consumption")
+    // ledger 按 origin 单调追加，用二分定位，避免每次消费扫描全部历史组。
+    left = 0;
+    right = cas_prefill_group_audit_q.size() - 1;
+    while (left <= right) begin
+        mid = left + (right - left) / 2;
+        if (cas_prefill_group_audit_q[mid].origin_uid == group.origin_uid) begin
+            ledger_match = cas_prefill_group_audit_q[mid] == group;
+            break;
+        end
+        if (cas_prefill_group_audit_q[mid].origin_uid < group.origin_uid) left = mid + 1;
+        else right = mid - 1;
+    end
+    if (!ledger_match) `uvm_fatal("CAS_PREFILL", "reservation frozen descriptor differs from audit ledger")
+    if (high_half) begin
+        if (!cas_prefill_store_high_by_uid.exists(uid)) `uvm_fatal("CAS_PREFILL", "missing high Store")
+        group = cas_prefill_store_high_by_uid[uid];
+        if (!group.valid || !group.store_high_valid || group.store_high_uid != uid ||
+            !cas_prefill_owner_by_uid.exists(group.cas_uid) ||
+            cas_prefill_owner_by_uid[group.cas_uid] != group)
+            `uvm_fatal("CAS_PREFILL", "high Store UID/role/frozen descriptor mismatch")
+        tr = make_cas_prefill_store_transaction(group, 1, rob_key);
+        cas_prefill_store_high_by_uid.delete(uid);
+    end else begin
+        if (!cas_prefill_owner_by_uid.exists(uid)) `uvm_fatal("CAS_PREFILL", "missing CAS owner")
+        group = cas_prefill_owner_by_uid[uid];
+        if (!group.valid || group.cas_uid != uid ||
+            (group.store_high_valid && cas_prefill_store_high_by_uid.exists(group.store_high_uid)))
+            `uvm_fatal("CAS_PREFILL", "CAS owner UID/role/consumption mismatch")
+        tr = make_reserved_cas_transaction(group, rob_key);
+        cas_prefill_owner_by_uid.delete(uid);
+    end
+    if (tr.uid != uid) `uvm_fatal("CAS_PREFILL", "generated companion UID mismatch")
+    return tr;
+endfunction:consume_cas_prefill_reservation
+
+// 抽象职责：真实 TLB 构造前按持久 ledger 核验完整组和区间内写入；不判断 DUT 结果。
+function void memblock_dispatch_base_sequence::check_all_cas_prefill_groups(input int unsigned table_limit);
+    if (cas_prefill_store_high_by_uid.num() != 0 || cas_prefill_owner_by_uid.num() != 0 ||
+        sc_reservation_by_uid.num() != 0)
+        `uvm_fatal("CAS_PREFILL", "unconsumed companion reservations after main table build")
+    foreach (cas_prefill_group_audit_q[i]) begin
+        memblock_cas_prefill_group_t group;
+        main_control_transaction low, high, owner;
+        int unsigned width;
+        group = cas_prefill_group_audit_q[i];
+        if (i > 0 && group.origin_uid <= cas_prefill_group_audit_q[i-1].origin_uid)
+            `uvm_fatal("CAS_PREFILL", "audit ledger origins must be strictly increasing")
+        width = derive_size_bytes(MEMBLOCK_OP_CLASS_AMO, group.cas_fuOpType);
+        if (!group.valid || !is_cas_fuoptype(group.cas_fuOpType) ||
+            group.origin_uid != group.store_low_uid || group.store_low_uid >= group.cas_uid ||
+            group.cas_uid >= table_limit || group.selected_distance < 1 || group.selected_distance > 30 ||
+            group.store_high_valid != (group.cas_fuOpType == MEMBLOCK_LSUOP_AMOCAS_Q) ||
+            (group.store_high_valid && !(group.store_low_uid < group.store_high_uid && group.store_high_uid < group.cas_uid)) ||
+            group.cas_uid < 64'(group.store_high_valid ? group.store_high_uid : group.store_low_uid) + group.selected_distance ||
+            (group.address % width) != 0)
+            `uvm_fatal("CAS_PREFILL", "invalid audited group shape/order/boundary")
+        low = data.get_main_transaction(group.store_low_uid);
+        owner = data.get_main_transaction(group.cas_uid);
+        if (low.uid != group.store_low_uid || owner.uid != group.cas_uid ||
+            low.op_class != MEMBLOCK_OP_CLASS_STORE || !low.validate_main_transaction() || low.vaddr != group.address ||
+            low.fuOpType != (width == 4 ? MEMBLOCK_LSUOP_SW : MEMBLOCK_LSUOP_SD) ||
+            !low.std_data_override_valid[0] || low.std_data_override[0] != group.compare_low ||
+            owner.op_class != MEMBLOCK_OP_CLASS_AMO || owner.fuOpType != group.cas_fuOpType ||
+            owner.vaddr != group.address || !owner.validate_main_transaction() ||
+            owner.std_data_override[0] != group.compare_low || owner.std_data_override[1] != group.new_low ||
+            !owner.std_data_override_valid[0] || !owner.std_data_override_valid[1] ||
+            owner.amo_expect_misaligned || owner.amo_alignment_bytes != width ||
+            low.tlbAF || low.tlbPF || low.tlbGPF || low.PBMT != 0 || low.pmaAF || low.denied || low.corrupt ||
+            owner.tlbAF || owner.tlbPF || owner.tlbGPF || owner.PBMT != 0 || owner.pmaAF || owner.denied || owner.corrupt)
+            `uvm_fatal("CAS_PREFILL", "audited Store/CAS member or frozen data mismatch")
+        if (group.store_high_valid) begin
+            high = data.get_main_transaction(group.store_high_uid);
+            if (high.uid != group.store_high_uid || high.op_class != MEMBLOCK_OP_CLASS_STORE ||
+                high.fuOpType != MEMBLOCK_LSUOP_SD || !high.validate_main_transaction() || high.vaddr != group.address + 8 ||
+                !high.std_data_override_valid[0] || high.std_data_override[0] != group.compare_high ||
+                owner.std_data_override[2] != group.compare_high || owner.std_data_override[3] != group.new_high ||
+                high.tlbAF || high.tlbPF || high.tlbGPF || high.PBMT != 0 || high.pmaAF || high.denied || high.corrupt)
+                `uvm_fatal("CAS_PREFILL", "audited CAS.Q high member mismatch")
+        end
+        for (memblock_uid_t uid = group.store_low_uid + 1; uid < group.cas_uid; uid++) begin
+            if (group.store_high_valid && uid == group.store_high_uid) continue;
+            if (cas_prefill_write_overlaps(data.get_main_transaction(uid), group))
+                `uvm_fatal("CAS_PREFILL", $sformatf("intervening write uid=%0d destroys group origin=%0d", uid, group.origin_uid))
+        end
+    end
+endfunction:check_all_cas_prefill_groups
+
 function bit memblock_dispatch_base_sequence::is_lr_fuoptype(input bit [8:0] fuOpType);
     return fuOpType inside {MEMBLOCK_LSUOP_LR_W, MEMBLOCK_LSUOP_LR_D};
 endfunction:is_lr_fuoptype
@@ -775,32 +1229,24 @@ function void memblock_dispatch_base_sequence::try_reserve_paired_sc(
     memblock_lr_sc_reservation_t reservation;
     longint unsigned candidate_uid;
     int unsigned selected_dist;
-    bit reserved;
+    memblock_uid_t selected_uid;
+    main_control_transaction sc_probe;
 
-    if (lr_tr == null || !is_lr_fuoptype(lr_tr.fuOpType)) begin
+    if (lr_tr == null || lr_tr.op_class != MEMBLOCK_OP_CLASS_AMO || !is_lr_fuoptype(lr_tr.fuOpType)) begin
         `uvm_fatal(get_type_name(), "try_reserve_paired_sc requires an LR transaction")
     end
     if ($urandom_range(99, 0) >= seq_csr_common::get_amo_lr_sc_pair_en_1_wt()) begin
         return;
     end
 
-    reserved = 1'b0;
-    for (int unsigned attempt = 0; attempt < 16 && !reserved; attempt++) begin
-        selected_dist = randomize_lr_sc_distance();
-        candidate_uid = longint'(lr_tr.uid) + longint'(selected_dist) + 1;
-        if (candidate_uid <= longint'(lr_tr.uid) || candidate_uid >= table_limit) begin
-            continue;
-        end
-        if (sc_reservation_by_uid.exists(memblock_uid_t'(candidate_uid)) ||
-            (reserved_uid0_valid && candidate_uid == longint'(reserved_uid0)) ||
-            (reserved_uid1_valid && candidate_uid == longint'(reserved_uid1))) begin
-            continue;
-        end
-
+    selected_dist = randomize_lr_sc_distance();
+    candidate_uid = 64'(lr_tr.uid) + 64'(selected_dist) + 1;
+    if (find_next_free_companion_uid(candidate_uid, table_limit,
+        reserved_uid0_valid, reserved_uid0, reserved_uid1_valid, reserved_uid1, selected_uid)) begin
         reservation = '{default:'0};
         reservation.valid = 1'b1;
         reservation.lr_uid = lr_tr.uid;
-        reservation.sc_uid = memblock_uid_t'(candidate_uid);
+        reservation.sc_uid = selected_uid;
         reservation.sc_fuOpType = (lr_tr.fuOpType == MEMBLOCK_LSUOP_LR_W) ?
                                   MEMBLOCK_LSUOP_SC_W : MEMBLOCK_LSUOP_SC_D;
         reservation.same_addr = $urandom_range(99, 0) <
@@ -810,17 +1256,28 @@ function void memblock_dispatch_base_sequence::try_reserve_paired_sc(
         reservation.lr_expect_misaligned = lr_tr.amo_expect_misaligned;
         reservation.lr_alignment_bytes = lr_tr.amo_alignment_bytes;
         reservation.selected_dist = selected_dist;
+        if (reservation.same_addr) begin
+            sc_probe = main_control_transaction::type_id::create("paired_sc_protection_probe");
+            sc_probe.uid = reservation.sc_uid;
+            sc_probe.op_class = MEMBLOCK_OP_CLASS_AMO;
+            sc_probe.fuOpType = reservation.sc_fuOpType;
+            sc_probe.vaddr = lr_tr.vaddr;
+            // LR 可读取保护范围；若未来同地址 SC 会破坏它，放弃配对而不改变已承诺地址。
+            if (overlaps_pending_cas_prefill(sc_probe)) begin
+                `uvm_info("LR_SC_PAIR", "skip same-address SC overlapping a pending CAS group", UVM_LOW)
+                return;
+            end
+        end
         sc_reservation_by_uid[reservation.sc_uid] = reservation;
-        reserved = 1'b1;
         `uvm_info("LR_SC_PAIR",
-                  $sformatf("reserve LR uid=%0d -> SC uid=%0d dist=%0d same_addr=%0d",
+                  $sformatf("reserve LR uid=%0d -> SC uid=%0d dist=%0d same_addr=%0d initial=%0d skipped=%0d",
                             reservation.lr_uid, reservation.sc_uid,
-                            reservation.selected_dist, reservation.same_addr),
+                            reservation.selected_dist, reservation.same_addr,
+                            candidate_uid, 64'(selected_uid) - candidate_uid),
                   UVM_LOW)
-    end
-    if (!reserved) begin
+    end else begin
         `uvm_info("LR_SC_PAIR",
-                  $sformatf("skip paired SC for LR uid=%0d: no legal future slot after 16 attempts",
+                  $sformatf("skip paired SC for LR uid=%0d: no legal future slot after forward scan",
                             lr_tr.uid),
                   UVM_LOW)
     end
@@ -896,6 +1353,7 @@ function void memblock_dispatch_base_sequence::reschedule_control_reservation(
 );
     int unsigned interval;
     longint unsigned candidate_uid;
+    memblock_uid_t selected_uid;
 
     plan.target_valid = 1'b0;
     plan.next_uid = 0;
@@ -912,7 +1370,10 @@ function void memblock_dispatch_base_sequence::reschedule_control_reservation(
     if (candidate_uid < base_uid || candidate_uid >= normal_main_trans_num) begin
         return;
     end
-    plan.next_uid = candidate_uid;
+    // CSR/SFence 彼此允许同位；这里只跳过 SC/CAS companion，不能命中后删除 SC。
+    if (!find_next_free_companion_uid(candidate_uid, normal_main_trans_num,
+                                      0, 0, 0, 0, selected_uid)) return;
+    plan.next_uid = selected_uid;
     plan.target_valid = 1'b1;
 endfunction:reschedule_control_reservation
 

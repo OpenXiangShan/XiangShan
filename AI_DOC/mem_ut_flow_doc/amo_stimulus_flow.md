@@ -6,6 +6,8 @@ STA/STD 分片发射、真实反馈与最终写回、提交和异常收尾。完
 Major 或 Minor。本文不代表 RM 原子结果检查、功能覆盖率或全部异常/多 seed 专项矩阵已经完成。
 source offer 以真实 driver launch 为锚点，pending reservation 在下一 DUT sample 前可由 reset 撤销。
 
+2026-11-05 同步：新增 CAS compare 前置 Store 完整组生成；本文的建表与 STD 数据入口已更新，专项实现与验证记录见 `AI_DOC/plan/test_framework/review_doc/undo/memblock_amocas_compare_success_prefill_implementation_review_20261105.md`。
+
 ## 1. 范围与术语
 
 ### 1.1 术语与抽象功能说明
@@ -14,6 +16,8 @@ source offer 以真实 driver launch 为锚点，pending reservation 在下一 D
 |---|---|---|---|
 | `AMO opcode` | 此处统称 LR、SC、普通原子操作和 CAS 的 25 个操作编码 | `enumerate_fuoptypes()`、`MEMBLOCK_LSUOP_*` | 22 个 W/D 编码加 CAS W/D/Q |
 | `LR/SC pair reservation` | 建表期对未来 SC UID 的预约，不是 DUT 的保留地址状态 | `sc_reservation_by_uid` | 距离 0 表示 SC 紧跟 LR |
+| `CAS prefill group / audit ledger` | 前置 Store 加未来 CAS 的完整组 / 成员消费后仍保留的冻结组账本 | `cas_prefill_group_audit_q`、两张 `cas_prefill_*_by_uid` | Q 用 low SD、high SD、CAS.Q 三个 UID |
+| `STD override / compare / new` | 冻结数据覆盖 / 比较旧值 / 待写新值 | `std_data_override_valid/data[4]` | Q 槽0/2等于两条 SD 的数据，槽1/3冻结新值 |
 | `owner / barrier` | 唯一活跃原子 UID 及阻止年轻 UID admission、其他 UID issue 的屏障 | `active_atomic_barrier_valid/uid` | 原子终态后才允许年轻指令推进 |
 | `D/R/Q` | LSQ 与 AMO 共用的三级软件 dispatch bundle 暂存状态，不是三套独立 admission 通道 | `lsq_ctrl_model::shadow_{d,r,q}_*` | AMO 仅占 lane0，不能夹带 LSQ lane |
 | `registered canAccept / credit` | 按完整控制采样更新的接纳门控与 LQ/SQ 额度，不是顶层 ready 信号 | `shadow_can_accept`、`shadow_lq_credit/shadow_sq_credit` | AMO 零分配仍须等待公共 gate |
@@ -41,7 +45,12 @@ source offer 以真实 driver launch 为锚点，pending reservation 在下一 D
 flowchart TD
     A[build_random_main_table / build_control_auto_main_table] --> B[randomize_main_transaction]
     B --> C[random_amo_fuoptype / apply_amo_address_policy]
-    C --> D{LR?}
+    C --> CP[avoid_pending_cas_prefill_write_overlap: 地址复用后保护]
+    CP --> CG[try_plan_cas_prefill: 临时规划后整组提交]
+    CG --> CM[cas_prefill_store_high_by_uid / cas_prefill_owner_by_uid]
+    CM --> CC[consume_cas_prefill_reservation: 恢复冻结成员]
+    CC --> H
+    CG --> D{AMO 且 LR?}
     D -->|是| E[try_reserve_paired_sc]
     E --> F[sc_reservation_by_uid]
     F --> G[make_paired_sc_transaction]
@@ -79,8 +88,12 @@ flowchart TD
 
 ```text
 建表先按 AMO 类别和 25 个 opcode 权重选择编码，再应用对齐/非对齐地址策略；
-遇 LR 时，try_reserve_paired_sc 尝试预约未来合法 SC UID，命中该 UID 时消费预约生成同宽 SC；
-所有主表项写完后创建初始 status，active/enq/issue_ready 尚未开放。
+先消费已预约的high Store/CAS owner/SC，普通随机项在地址复用后修正与pending组重叠的写范围；
+随机到CAS时，try_plan_cas_prefill在局部描述规划全部位置、地址和四份数据，成功才发布预约和账本；
+low Store当拍写入，high与owner到UID时精确消费，不重新经过随机或地址复用；失败保留原CAS；
+只有AMO分类的LR才调用try_reserve_paired_sc预约未来同宽SC，不能仅凭与SW/SD复用的opcode识别；
+所有主表项写完后创建初始status，check_all_cas_prefill_groups检查完整成员、数据与区间无覆盖；
+此时active/enq/issue_ready尚未开放，普通表保持N条，AUTO表保持N+1且末尾check_store为UID N。
 
 admission 调用 service_atomic_admission_token：等待全部更老 UID terminal，且无控制/原子屏障；
 只向空的共享 D/R/Q 放入 lane0 原子 token，不立即创建 ROB owner；
@@ -169,12 +182,19 @@ AMO 的 send_pri/send_pri_std 固定为 100，最后生成 delay 并做主表合
 真实逻辑摘要：
 
 ```systemverilog
-for (int unsigned attempt = 0; attempt < 16 && !reserved; attempt++) begin
-    selected_dist = randomize_lr_sc_distance();
-    candidate_uid = longint'(lr_tr.uid) + longint'(selected_dist) + 1;
-    // 越界、已有 SC 预约或当前控制预约占位时继续尝试。
-    // 合法位置保存到 sc_reservation_by_uid。
+selected_dist = randomize_lr_sc_distance();
+candidate_uid = 64'(lr_tr.uid) + 64'(selected_dist) + 1;
+if (find_next_free_companion_uid(candidate_uid, table_limit,
+    reserved_uid0_valid, reserved_uid0, reserved_uid1_valid, reserved_uid1, selected_uid)) begin
+    reservation.sc_uid = selected_uid;
 end
+```
+
+中文伪代码：本段选择未来 SC 位置。先按五档抽样一次距离，再计算 LR UID 加距离加1；连续扫描 helper 跳过 SC、CAS high、CAS owner、CSR 和 SFence，返回第一个空 UID，越过 N 则不配对。返回成功后才保存 SC 描述。控制重预约同样向前跳过 companion，CSR/SFence 彼此同位仍保留 CSR 优先。
+
+抽象功能描述：`make_paired_sc_transaction()` 将已承诺的地址和宽度恢复到未来 SC；独立地址模式继续随机。
+
+```systemverilog
 if (reservation.same_addr) begin
     tr.src_0 = reservation.lr_src_0;
     tr.imm = reservation.lr_imm;
@@ -192,14 +212,48 @@ end
 ```text
 LR 先按 PAIR_EN_1_WT 决定是否尝试配对；
 randomize_lr_sc_distance 按固定/0/1..5/6..10/11..100 五档选择距离；
-目标 UID = LR UID + 距离 + 1，最多尝试 16 次，失败则跳过，不扩表；
+目标 UID = LR UID + 距离 + 1，只抽样一次，冲突后连续加1，失败则跳过，不扩表；
 预约保存同宽 SC opcode，并按 SAME_ADDR_1_WT 决定是否复制地址；
 目标 UID 到来时 make_paired_sc_transaction 保留其连续 ROB 身份、设置 MOU/ATOMIC/numLsElem=0；
 same_addr 分支复制 LR 的地址和对齐元数据，否则独立生成地址，不能把独立抽样说成保证异址；
 校验完成后删除已消费预约。
-AUTO 构建先处理 CSR，再处理 SFence，再处理 SC 预约，最后才走普通随机构建；
-后续控制预约撞到已有 SC 位置时取消 SC；SC 不能占末尾 check_store。
+AUTO 构建先检查所有预约无非法重叠，再按 CSR、SFence、CAS high、CAS owner、SC、普通随机入口处理；
+后续控制预约向前跳过已有 SC/CAS 位置；SC 不能占末尾 check_store；
+已有同地址 SC 会被新 CAS group 选址规避；新的同地址 SC 若破坏 pending CAS，则保留 LR、取消本次配对。
 ```
+
+### 4.3 CAS成功前置组
+
+源码位置：`seq/base_seq_help/memblock_dispatch_base_sequence.sv`；完整逐函数源码审查见本次implementation review第4至8节。
+
+抽象功能描述：`try_plan_cas_prefill()`在随机CAS命中使能时返回当前Store，并建立完整未来成员；它不执行发射或判断DUT比较结果。
+
+```systemverilog
+replacement_store = make_cas_prefill_store_transaction(group, 0, original_cas.get_rob_key());
+if (group.store_high_valid) cas_prefill_store_high_by_uid[group.store_high_uid] = group;
+cas_prefill_owner_by_uid[group.cas_uid] = group;
+cas_prefill_group_audit_q.push_back(group);
+```
+
+中文伪代码：本段提交已规划的完整组。此前统一空位扫描已经找齐high和owner，地址已经规避pending组及未来同地址SC，compare/new已经冻结；先以原ROB构造并校验low Store，再写入Q可选high预约和CAS预约，最后把完整组加入持久账本。位置不足时在本段前返回，不留下半组。`make_cas_prefill_store_transaction()`用SW/SD普通LSQ模板和槽0数据；`make_reserved_cas_transaction()`恢复AMO模板、A地址和W/D两槽或Q四槽，优先级100。
+
+抽象功能描述：`consume_cas_prefill_reservation()`在相应UID恢复唯一角色成员；`check_all_cas_prefill_groups()`在建表结束校验输入关系。
+
+```systemverilog
+if (cas_prefill_store_high_by_uid.num() != 0 || cas_prefill_owner_by_uid.num() != 0 ||
+    sc_reservation_by_uid.num() != 0)
+    `uvm_fatal("CAS_PREFILL", "unconsumed companion reservations after main table build")
+```
+
+中文伪代码：本段先拒绝任何未消费的未来成员。消费函数此前按UID与角色读取预约，用origin二分账本验证全部冻结内容，再构造成员并精确删map；账本始终保留。随后审计逐组检查low/high/owner顺序、宽度、地址、compare/new、对齐、无主动异常与owner小于N，再检查low到owner之间除本组high外没有破坏性写入。
+
+抽象功能描述：`avoid_pending_cas_prefill_write_overlap()`修正地址复用后的随机写范围；`cas_prefill_address_conflicts()`为新组保留LR/SC同地址承诺。
+
+```systemverilog
+if (!overlaps_pending_cas_prefill(tr)) return;
+```
+
+中文伪代码：本段只对仍pending组的破坏性写进入修正。范围判定覆盖普通Store、SC、非LR AMO、其它CAS和CBO.ZERO整行，允许Load/LR；冲突时先16次合法地址重试，再按对齐步长找空位，不改opcode，找不到才fatal。新组额外避开区间内已预约同地址SC；反向情况下新同地址SC破坏既有组则不配对，不能搬走承诺地址。owner到达后从map删除，该地址可被后续事务复用。
 
 ## 5. 共享 Admission 与单 Owner
 
@@ -301,7 +355,7 @@ end
 文字伪代码：`route_uid()` 识别 atomic 后直接进入专用分片入口，不经过要求 SQ owner 的普通
 `route_target()`；`make_issue_item()` 保存动态身份和 non-owning 指针快照，`has_lqIdx/has_sqIdx=0`；
 `push_issue_queue_item()` 按含 slot 的精确身份去重，分别写 `sta_issue_q/std_issue_q`。
-`derive_atomic_std_data()` 对非 CAS 的 STD0 使用 `src_0`，CAS 则由 UID/src_0 派生稳定数据，
+`derive_std_data()` 统一选择数据：有效 override 优先，否则 atomic 调用 `derive_atomic_std_data()`，普通 Store 使用 `src_0`。旧 atomic helper 对非 CAS 的 STD0 使用 `src_0`，无 override 的 CAS 由 UID/src_0 派生稳定数据，
 slot0/1/2/3 依次表示 compare low/new low/compare high/new high；这不是独立原子 RM。
 `compute_atomic_sta_pdest()` 为 CAS Q 的 STA0/STA2 产生不同 pdest，不能因两片走同一端口而覆盖身份。
 

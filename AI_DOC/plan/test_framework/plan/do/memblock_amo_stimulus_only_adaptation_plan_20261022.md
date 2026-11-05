@@ -1,15 +1,17 @@
 # MemBlock AMO 纯激励最小适配方案
 
+2026-11-05 扩展说明：CAS compare 成功前置 Store 的完整组生成、四槽冻结 STD 数据、未来 UID 预约、地址保护和审计已完成，见 `AI_DOC/plan/test_framework/plan/do/memblock_amocas_compare_success_prefill_plan_20261105.md`。原有 atomic admission/barrier、issue、写回与终态机制继续复用；该扩展不增加 RM 或最终内存结果 checker。
+
 ## 1. 计划定位
 
 ### 1.1 计划信息
 
 - 创建日期：2026-10-22
 - 当前版本：v2.0
-- 最后更新：2026-11-04
+- 最后更新：2026-11-05
 - 最新复核基线：分支`mem_ut_uvm_v2`，HEAD `4acf3cc3c381671cb7bb4dc34eeaec9287825c80`
-- Review 状态：九轮方案 review 和一轮独立 implementation review 已完成；implementation review 结论为 Blocker、Major、Minor 均无，残余项均为扩展测试覆盖缺口
-- Coding 状态：`已完成 coding、基础动态验证和归档`。2026-11-04 在独立 worktree `codex/memblock-amo-adaptation-20261103` 完成 P1-P3；完整 VCS/KDB 编译、LSQ/AMO 定向 soft test、普通 real-dispatch smoke 和 AMO real-dispatch smoke 均通过，`UVM_ERROR=0`、`UVM_FATAL=0`。P4 中未勾选的 one-hot、多 seed、异常和交叉场景仍作为后续专项回归，不宣称已完成全部覆盖矩阵。
+- Review 状态：九轮方案 review、原 AMO implementation review 和 CAS prefill extension implementation review 已完成；未发现剩余 Blocker/Major，残余项均为扩展测试覆盖缺口。
+- Coding 状态：`已完成 coding、基础动态验证和归档`。2026-11-04 在独立 worktree `codex/memblock-amo-adaptation-20261103` 完成 P1-P3；2026-11-05 完成 CAS compare prefill 扩展、focused software-only 及 CAS.W/D/Q one-hot real-dispatch smoke。完整 VCS/KDB 编译及上述测试均为 `UVM_ERROR=0`、`UVM_FATAL=0`。P4 中未勾选的22条基础指令one-hot、多seed、异常和交叉场景仍作为后续专项回归，不宣称已完成全部覆盖矩阵。
 - 适用范围：`mem_ut/ver/ut/memblock` real-dispatch 测试框架
 - 目标：不增加抽象模型、RM、scoreboard 和结果 checker，使框架能够生成、调度、发送并收敛当前 RTL 支持的全部标量原子指令。
 - 设计原则：功能完整是前提；在此基础上使用单 atomic owner、固定物理 pipe 0、每拍最多一片子 uop、基于 remaining mask 的参数化动态选择和既有 responder，避免通用多事务乱序状态机。
@@ -22,6 +24,8 @@
 固定物理 pipe0、每拍最多发送一片仍是驱动实现选择，但不能改变上述严格隔离。文中所有“单 owner 仅为最小吞吐路径”“未复制整核最大吞吐”的表述均以本节为准：允许简化的是端口选择和单拍发送宽度，不允许简化或参数化关闭 atomic 隔离；CAS.W/D/Q 的多个子 uop 始终属于同一 owner。
 
 2026-11-04 实现收口补充：source offer 改为只在真实 driver launch 后发布；reset 会撤销尚未 DUT-visible 的 LSQ reservation 和 pre-fire atomic token；AMO smoke 固定用户态 PTE.U 和支持 atomic 的主存物理范围，避免把环境权限/PMA fault 误判为 AMO 生命周期错误。独立 implementation review 未发现实现问题，残余缺口见 P4 和最终 review 文档。
+
+2026-11-05 CAS prefill 扩展补充：新增四槽冻结STD数据、W/D/Q前置Store组、未来UID预约、写范围保护和审计；control重预约改为跳过SC/CAS companion，不再命中后删除SC。focused software-only及CAS.W/D/Q one-hot真实接口smoke通过，详细记录见本页顶部关联计划与implementation review。
 
 ### 1.2 “纯激励功能完整”的边界
 
@@ -955,8 +959,8 @@ MEMBLOCK_AMO_RL_*
 - [x] 普通 real-dispatch smoke 通过，确认默认 AMO 权重为 0 时原标量路径未回归。
 - [x] AMO real-dispatch smoke 通过，观察到 LR/SC pair、7 个 atomic owner 完成 feedback/final WB 和 global-stop 收口。
 - [ ] 22 条基础指令 one-hot smoke。
-- [ ] CAS.W、CAS.D、CAS.Q one-hot smoke。
-- [ ] 验证 CAS.W/D 的 2 STD，Q 的 4 STD、2 STA、2 final WB。
+- [x] CAS.W、CAS.D、CAS.Q one-hot smoke。
+- [x] 验证 CAS.W/D 的 2 STD，Q 的 4 STD、2 STA、2 final WB。
 - [ ] 对 mode 0 验证固定 STD-first 顺序。
 - [ ] 对 mode 1 验证非 LR 的 STA-first 顺序，并验证 LR 自动合法化为 STD-first。
 - [ ] 对 mode 2 使用多 seed 验证合法 STA/STD 交错、slot 完整唯一和 CAS.Q/LR 偏序。

@@ -23,6 +23,11 @@ class main_control_transaction extends uvm_object;
     bit [63:0]               vaddr;
     bit                      amo_expect_misaligned;
     int unsigned             amo_alignment_bytes;
+    // 中文注释：建表时冻结的 STD 四槽数据，constructor 清零，生成器按成员角色设置。
+    // valid 为 1 时 issue_field_assigner 优先消费，重发和 shuffle 不重新派生；普通
+    // Store 只允许 slot0，CAS.W/D 必须同时设置 0/1，CAS.Q 必须同时设置四槽。
+    bit                      std_data_override_valid[4];
+    bit [63:0]               std_data_override[4];
 
     rand bit                 robIdx_flag;
     rand bit [MEMBLOCK_ROB_VALUE_W-1:0] robIdx_value;
@@ -69,6 +74,10 @@ class main_control_transaction extends uvm_object;
         vaddr        = '0;
         amo_expect_misaligned = 1'b0;
         amo_alignment_bytes = 0;
+        foreach (std_data_override_valid[i]) begin
+            std_data_override_valid[i] = 1'b0;
+            std_data_override[i] = '0;
+        end
         robIdx_flag  = 1'b0;
         robIdx_value = '0;
         lqIdx_flag   = 1'b0;
@@ -113,6 +122,21 @@ class main_control_transaction extends uvm_object;
     endfunction:update_vaddr
 
     function bit validate_main_transaction();
+        bit any_override;
+        any_override = 1'b0;
+        foreach (std_data_override_valid[i]) any_override |= std_data_override_valid[i];
+        if (any_override) begin
+            if (op_class == MEMBLOCK_OP_CLASS_STORE) begin
+                if (!std_data_override_valid[0] || std_data_override_valid[1] ||
+                    std_data_override_valid[2] || std_data_override_valid[3]) return 1'b0;
+            end else if (op_class == MEMBLOCK_OP_CLASS_AMO &&
+                         fuOpType inside {MEMBLOCK_LSUOP_AMOCAS_W, MEMBLOCK_LSUOP_AMOCAS_D,
+                                          MEMBLOCK_LSUOP_AMOCAS_Q}) begin
+                if (!std_data_override_valid[0] || !std_data_override_valid[1]) return 1'b0;
+                if (std_data_override_valid[2] != (fuOpType == MEMBLOCK_LSUOP_AMOCAS_Q) ||
+                    std_data_override_valid[3] != (fuOpType == MEMBLOCK_LSUOP_AMOCAS_Q)) return 1'b0;
+            end else return 1'b0;
+        end
         if (vaddr != (src_0 + sign_extend_imm12(imm))) begin
             return 1'b0;
         end

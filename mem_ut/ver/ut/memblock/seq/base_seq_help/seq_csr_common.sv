@@ -110,6 +110,10 @@ class seq_csr_common;
     static int unsigned amo_lr_sc_dist_1_5_wt = 1;
     static int unsigned amo_lr_sc_dist_6_10_wt = 1;
     static int unsigned amo_lr_sc_dist_11_100_wt = 1;
+    // 中文注释：公共 CAS prefill 参数快照，由 load_from_plus 更新，getter 只读；
+    // 使能为 0 时不抽样、不建预约。距离相对最后一条前置 Store，不含 LR/SC 的 +1。
+    static int unsigned amo_cas_prefill_en_1_wt = 0;
+    static int unsigned amo_cas_prefill_dist_wt[3] = '{1, 1, 1};
     // boundary_profile生成默认关闭；关闭时主表继续使用原地址模板。
     static bit          boundary_profile_gen_en = 1'b0;
     static int unsigned boundary_aligned_wt = 1;
@@ -514,6 +518,10 @@ class seq_csr_common;
         amo_lr_sc_dist_1_5_wt       = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_1_5_WT", plus::MEMBLOCK_AMO_LR_SC_DIST_1_5_WT);
         amo_lr_sc_dist_6_10_wt      = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_6_10_WT", plus::MEMBLOCK_AMO_LR_SC_DIST_6_10_WT);
         amo_lr_sc_dist_11_100_wt    = get_non_negative_int("MEMBLOCK_AMO_LR_SC_DIST_11_100_WT", plus::MEMBLOCK_AMO_LR_SC_DIST_11_100_WT);
+        amo_cas_prefill_en_1_wt = get_non_negative_int("MEMBLOCK_AMO_CAS_PREFILL_EN_1_WT", plus::MEMBLOCK_AMO_CAS_PREFILL_EN_1_WT);
+        amo_cas_prefill_dist_wt[0] = get_non_negative_int("MEMBLOCK_AMO_CAS_PREFILL_DIST_1_5_WT", plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_1_5_WT);
+        amo_cas_prefill_dist_wt[1] = get_non_negative_int("MEMBLOCK_AMO_CAS_PREFILL_DIST_6_10_WT", plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_6_10_WT);
+        amo_cas_prefill_dist_wt[2] = get_non_negative_int("MEMBLOCK_AMO_CAS_PREFILL_DIST_11_30_WT", plus::MEMBLOCK_AMO_CAS_PREFILL_DIST_11_30_WT);
         boundary_profile_gen_en     = plus::MEMBLOCK_BOUNDARY_PROFILE_GEN_EN;
         boundary_aligned_wt         = get_non_negative_int("MEMBLOCK_BOUNDARY_ALIGNED_WT", plus::MEMBLOCK_BOUNDARY_ALIGNED_WT);
         boundary_misalign_within_8b_wt = get_non_negative_int("MEMBLOCK_BOUNDARY_MISALIGN_WITHIN_8B_WT", plus::MEMBLOCK_BOUNDARY_MISALIGN_WITHIN_8B_WT);
@@ -765,10 +773,23 @@ class seq_csr_common;
         end
     endfunction:check_control_interval_config
 
+    // 抽象职责：检查 CAS 激励配置能否建立无物理别名的虚拟地址保护，不修改运行期状态。
+    static function void check_amo_cas_prefill_config();
+        if (amo_cas_prefill_en_1_wt > 100)
+            `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_AMO_CAS_PREFILL_EN_1_WT must be within [0:100]")
+        if ((64'(amo_cas_prefill_dist_wt[0]) + 64'(amo_cas_prefill_dist_wt[1]) +
+             64'(amo_cas_prefill_dist_wt[2])) == 0)
+            `uvm_fatal("SEQ_CSR_CFG", "CAS prefill distance weights must not all be zero")
+        if (amo_cas_prefill_en_1_wt != 0 &&
+            (l2tlb_ppn_reuse_en || l2tlb_ppn_region_id >= 0))
+            `uvm_fatal("SEQ_CSR_CFG", "CAS prefill does not support PPN reuse or directed routed-PPN alias scenarios")
+    endfunction:check_amo_cas_prefill_config
+
     static function void validate_and_clamp();
         bit [63:0] main_vaddr_upper;
 
         check_compile_param_consistency();
+        check_amo_cas_prefill_config();
         check_control_worker_topology_mode();
         check_control_interval_config("CSR",
                                       csr_control_enable,
@@ -1571,6 +1592,17 @@ class seq_csr_common;
         check_initialized("get_amo_lr_sc_pair_en_1_wt");
         return amo_lr_sc_pair_en_1_wt;
     endfunction:get_amo_lr_sc_pair_en_1_wt
+
+    static function int unsigned get_amo_cas_prefill_en_1_wt();
+        check_initialized("get_amo_cas_prefill_en_1_wt");
+        return amo_cas_prefill_en_1_wt;
+    endfunction:get_amo_cas_prefill_en_1_wt
+
+    static function int unsigned get_amo_cas_prefill_dist_weight(input int unsigned bucket);
+        check_initialized("get_amo_cas_prefill_dist_weight");
+        if (bucket >= 3) `uvm_fatal("SEQ_CSR_CFG", "invalid CAS prefill distance bucket")
+        return amo_cas_prefill_dist_wt[bucket];
+    endfunction:get_amo_cas_prefill_dist_weight
 
     static function int unsigned get_amo_lr_sc_same_addr_1_wt();
         check_initialized("get_amo_lr_sc_same_addr_1_wt");
