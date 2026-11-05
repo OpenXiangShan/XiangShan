@@ -27,6 +27,7 @@ def main():
         identity=json.loads((directory/'result.json').read_text());control_identity=json.loads((control/'result.json').read_text());assert identity['source']==source['head'] and identity['binary_sha256']==build['binary_sha256']==receipt['binary_sha256'] and control_identity['binary_sha256']==spec['baseline_sha256']
         assert identity['cst_sha256']==digest(evidence/'stage/tea-dip-period1000.cst')
         micro=json.loads((evidence/'micro-gate.json').read_text());assert micro['passed'] and micro['candidate_source']==source['head'] and micro['candidate_binary_sha256']==build['binary_sha256'] and identity['micro_gate_sha256']==digest(evidence/'micro-gate.json')
+        gate_audit=json.loads((evidence/'micro-gate-audit.json').read_text());assert gate_audit['passed'] and gate_audit['candidate_source']==source['head'] and gate_audit['candidate_binary_sha256']==build['binary_sha256'] and gate_audit['micro_gate_sha256']==digest(evidence/'micro-gate.json') and gate_audit['manifest_sha256']==digest(evidence/'micro-gate-manifest.json') and gate_audit['closed_receipt_sha256']==digest(evidence/'micro-gate-closure-receipt.json')
         windows=[];profiles=[];native=[]
         for folder,label in [(control,'control841'),(directory,variant)]:
             command=json.loads((folder/'command.json').read_text());stdout=(folder/'simulator_out.txt').read_text();assert '\nstreamL1Depth0 = 64\n' in stdout
