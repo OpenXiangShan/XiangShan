@@ -29,4 +29,24 @@ class MmioNcOwnerToffeeCoverage(NativeDomainToffeeCoverage):
         )
 
 
+    # These pending-protocol diagnostics are read through the hub/sink by DUT
+    # tests. Share only their explicit state fields, so hub reset replaces the
+    # same dictionaries the native evaluator uses on its next callback.
+    @property
+    def _ifu_instr_uncache_owner_state(self):
+        return self._runtime._ifu_instr_uncache_owner_state
+
+    @_ifu_instr_uncache_owner_state.setter
+    def _ifu_instr_uncache_owner_state(self, value):
+        self._runtime._ifu_instr_uncache_owner_state = value
+
+    @property
+    def _ifu_mmio_nc_owner_state(self):
+        return self._runtime._ifu_mmio_nc_owner_state
+
+    @_ifu_mmio_nc_owner_state.setter
+    def _ifu_mmio_nc_owner_state(self, value):
+        self._runtime._ifu_mmio_nc_owner_state = value
+
+
 __all__ = ["MmioNcOwnerToffeeCoverage"]
