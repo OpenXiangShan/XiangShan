@@ -156,7 +156,9 @@ def analyze(root,evidence):
         if point.startswith('bwaves_'):
             control_receipt=json.loads((stage/'closed-receipts'/(CONTROL+'-'+point+'.json')).read_text());assert not control_receipt['original_process_live'] and control_receipt['exitcode']=='0';verify_files(stage,{key:entry for key,entry in manifest.items() if key.startswith(CONTROL+'/points/'+point+'/')})
         else:verify_files(root/'raw',{key:entry for key,entry in json.loads((root/'raw/manifest.json').read_text()).items() if key.startswith('fp-credit-fdiv-only/short/'+point+'/')})
-        control_identity=json.loads((control/'result.json').read_text());known_control=json.loads((root/'raw/fp-credit-fdiv-only/short/gromacs_105_0.206090/result.json').read_text());assert control_identity['source']==source['base'] and control_identity['binary_sha256']==known_control['binary_sha256']
+        control_identity=json.loads((control/'result.json').read_text());control_build_root=root/'evidence/fp-credit-fdiv-only';control_build=json.loads((control_build_root/'build-state.json').read_text());control_build_manifest=json.loads((control_build_root/'build-coremark-manifest.json').read_text());verify_files(control_build_root,{'build-state.json':control_build_manifest['build-state.json']})
+        assert control_build['phase']=='complete' and control_build['source']==source['base'] and control_identity['binary_sha256']==control_build['binary_sha256']
+        if point.startswith('bwaves_'):assert control_identity['source']==source['base']
         windows=[];pcs=[]
         for folder,label in [(control,'controlc4d'),(directory,VARIANT)]:
             command=json.loads((folder/'command.json').read_text())
