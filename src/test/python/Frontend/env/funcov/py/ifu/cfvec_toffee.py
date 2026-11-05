@@ -88,4 +88,29 @@ class IfuCfvecToffeeCoverage(NativeDomainToffeeCoverage):
         self._runtime._ifu_exception_metadata_gaps = value
 
 
+    # Trigger diagnostics are consumed through the public hub/sink boundary.
+    @property
+    def _ifu_frontend_trigger_state(self):
+        return getattr(self._runtime, "_ifu_frontend_trigger_state", None)
+
+    @_ifu_frontend_trigger_state.setter
+    def _ifu_frontend_trigger_state(self, value):
+        self._runtime._ifu_frontend_trigger_state = value
+
+    @property
+    def _ifu_frontend_trigger_config_gap(self):
+        return getattr(self._runtime, "_ifu_frontend_trigger_config_gap", None)
+
+    @_ifu_frontend_trigger_config_gap.setter
+    def _ifu_frontend_trigger_config_gap(self, value):
+        self._runtime._ifu_frontend_trigger_config_gap = value
+
+    @property
+    def _ifu_frontend_trigger_signal_paths(self):
+        return getattr(self._runtime, "_ifu_frontend_trigger_signal_paths", {})
+
+    @_ifu_frontend_trigger_signal_paths.setter
+    def _ifu_frontend_trigger_signal_paths(self, value):
+        self._runtime._ifu_frontend_trigger_signal_paths = value
+
 __all__ = ["CFVEC_COVERPOINTS", "IfuCfvecToffeeCoverage"]
