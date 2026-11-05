@@ -35,9 +35,6 @@ case class TLBParameters
   Replacer: Option[String] = Some("plru"),
   Associative: String = "fa", // must be fa
   outReplace: Boolean = false,
-  partialStaticPMP: Boolean = false, // partial static pmp result stored in entries
-  outsideRecvFlush: Boolean = false, // if outside moudle waiting for tlb recv flush pipe
-  saveLevel: Boolean = false,
   lgMaxSize: Int = 3
 )
 
@@ -184,6 +181,16 @@ trait HasTlbConst extends HasXSParameter {
   def onlyStage1 = "b01".U
   def onlyStage2 = "b10".U
 
+  // Select translation stages from virtual mode and the VS/G-stage page-table modes
+  def getS2xlate(isVirt: Bool, vsatpMode: UInt, hgatpMode: UInt): UInt = {
+    MuxCase(noS2xlate, Seq(
+      !isVirt -> noS2xlate,
+      (vsatpMode =/= 0.U && hgatpMode =/= 0.U) -> allStage,
+      (vsatpMode === 0.U) -> onlyStage2,
+      (hgatpMode === 0.U) -> onlyStage1
+    ))
+  }
+
   def noSfence = "b00".U
   def isSfence = "b01".U
   def isVSfence = "b10".U
@@ -215,25 +222,18 @@ trait HasTlbConst extends HasXSParameter {
     addr(offLen-1, 0)
   }
 
+  def getVpnn(vpn: UInt, idx: UInt): UInt = {
+    MuxLookup(idx, 0.U)(Seq(
+      0.U -> vpn(vpnnLen - 1, 0),
+      1.U -> vpn(vpnnLen * 2 - 1, vpnnLen),
+      2.U -> vpn(vpnnLen * 3 - 1, vpnnLen * 2),
+      3.U -> vpn(vpnnLen * 4 - 1, vpnnLen * 3))
+    )
+  }
+
   def get_set_idx(vpn: UInt, nSets: Int): UInt = {
     require(nSets >= 1)
     vpn(log2Up(nSets)-1, 0)
-  }
-
-  def drop_set_idx(vpn: UInt, nSets: Int): UInt = {
-    require(nSets >= 1)
-    require(vpn.getWidth > log2Ceil(nSets))
-    vpn(vpn.getWidth-1, log2Ceil(nSets))
-  }
-
-  def drop_set_equal(vpn1: UInt, vpn2: UInt, nSets: Int): Bool = {
-    require(nSets >= 1)
-    require(vpn1.getWidth == vpn2.getWidth)
-    if (vpn1.getWidth <= log2Ceil(nSets)) {
-      true.B
-    } else {
-      drop_set_idx(vpn1, nSets) === drop_set_idx(vpn2, nSets)
-    }
   }
 
   def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {
@@ -250,35 +250,11 @@ trait HasTlbConst extends HasXSParameter {
   import scala.language.implicitConversions
 
   implicit def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
-    val tp = Wire(new TlbPermBundle)
-    val ptePerm = hptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    tp.pf := hptwResp.gpf
-    tp.af := hptwResp.gaf
-    tp.v := DontCare
-    tp.d := ptePerm.d
-    tp.a := ptePerm.a
-    tp.g := ptePerm.g
-    tp.u := ptePerm.u
-    tp.x := ptePerm.x
-    tp.w := ptePerm.w
-    tp.r := ptePerm.r
-    tp
+    Wire(new TlbPermBundle(hasV = false)).applyS2(hptwResp)
   }
 
   implicit def ptwresp_to_tlbperm(ptwResp: PtwSectorResp): TlbPermBundle = {
-    val tp = Wire(new TlbPermBundle)
-    val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    tp.pf := ptwResp.pf
-    tp.af := ptwResp.af
-    tp.v := ptwResp.entry.v
-    tp.d := ptePerm.d
-    tp.a := ptePerm.a
-    tp.g := ptePerm.g
-    tp.u := ptePerm.u
-    tp.x := ptePerm.x
-    tp.w := ptePerm.w
-    tp.r := ptePerm.r
-    tp
+    Wire(new TlbPermBundle()).apply(ptwResp)
   }
 }
 
@@ -381,15 +357,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def getVpnn(vpn: UInt, idx: Int): UInt = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
-  }
-
-  def getVpnn(vpn: UInt, idx: UInt): UInt = {
-    MuxLookup(idx, 0.U)(Seq(
-      0.U -> vpn(vpnnLen - 1, 0),
-      1.U -> vpn(vpnnLen * 2 - 1, vpnnLen),
-      2.U -> vpn(vpnnLen * 3 - 1, vpnnLen * 2),
-      3.U -> vpn(vpnnLen * 4 - 1, vpnnLen * 3))
-    )
   }
 
   def getGVpnn(vpn: UInt, idx: UInt, mode: UInt): UInt = {
