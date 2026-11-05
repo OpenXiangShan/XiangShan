@@ -25,6 +25,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.amba.axi4._
 import coupledL2.{EnableCHI, EnableL2ClockGate, L2ParamKey, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
 import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2, CHIAddrWidthKey, NonSecureKey, LCrdyIn}
@@ -78,6 +79,11 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
    // =========== Components ============
   val l1_xbar = TLXbar()
   val mmio_xbar = TLXbar()
+  // Both DMA boundary nodes live in L2Top so every external DMA channel
+  // traverses this module before entering the core's MemBlock.
+  val dma_port = Option.when(p(coupledL2.WithoutLLC))(AXI4IdentityNode())
+  val dma_to_mem = Option.when(p(coupledL2.WithoutLLC))(AXI4IdentityNode())
+  dma_to_mem.zip(dma_port).foreach { case (out, in) => out := AXI4Buffer() := in }
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = if (enableCHI && enableL2) None else Some(TLIdentityNode())
   val beu = LazyModule(new BusErrorUnit(
@@ -117,6 +123,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         hasMbist = hasMbist,
         PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None
       )
+      case coupledL2.WithoutLLC => p(coupledL2.WithoutLLC)
       case EnableCHI => p(EnableCHI)
       case EnableL2ClockGate => EnableClockGate
       case CHIIssue => p(CHIIssue)
@@ -233,7 +240,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromTile = Input(ValidIO(UInt(64.W)))
         val toCore = Output(ValidIO(UInt(64.W)))
       }
-      val chi = if (enableCHI) Some(new PortIO) else None
+      val chi = if (enableCHI && !p(coupledL2.WithoutLLC)) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val pfCtrlFromCore = Input(new PrefetchCtrlFromCore)
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
@@ -368,7 +375,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         case l2cache: TL2CHICoupledL2 =>
           val l2 = l2cache.module
           l2.io_nodeID := io.nodeID.get
-          io.chi.get <> l2.io_chi
+          io.chi.foreach(ioChi => l2.io_chi.foreach(_ <> ioChi))
           l2.io_cpu_halt.foreach { _:= io.cpu_halt.fromCore }
           io.lcrdy.foreach { in => l2.io_lcrdy.foreach(out => out := in) }
         case l2cache: TL2TLCoupledL2 =>

@@ -72,6 +72,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.inner.misc_l2_pmu := l2top.inner.ptw_logger := l2top.inner.ptw_to_l2_buffer.node := memBlock.ptw_to_l2_buffer.node
   }
 
+  memBlock.dma.foreach { dma =>
+    dma.axiNode := l2top.inner.dma_to_mem.get
+    l2top.inner.misc_l2_pmu := TLBuffer() := dma.readNode
+  }
+
   // L2 Prefetch
   l2top.inner.l2cache match {
     case Some(l2) =>
@@ -117,7 +122,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val l3Miss = Input(Bool())
-      val chi = if (enableCHI) Some(new PortIO) else None
+      val chi = if (enableCHI && !p(coupledL2.WithoutLLC)) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = Input(ValidIO(UInt(64.W)))
       val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
@@ -225,7 +230,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.l3Miss.fromTile := io.l3Miss
     core.module.io.topDownInfo.l3Miss := l2top.module.io.l3Miss.toCore
 
-    io.chi.foreach(_ <> l2top.module.io.chi.get)
+    io.chi.foreach(ioChi => l2top.module.io.chi.foreach(_ <> ioChi))
     l2top.module.io.nodeID.foreach(_ := io.nodeID.get)
 
     if (debugOpts.ResetGen && enableL2) {

@@ -266,6 +266,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
   val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty) LazyModule(new TLBuffer) else null
   val dcache_port = TLNameNode("dcache_client") // to keep dcache-L2 port name
+  val dma = Option.when(p(coupledL2.WithoutLLC))(LazyModule(new AXI4DMABridge))
   val l2_pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
   )
@@ -1783,7 +1784,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
-  sbuffer.io.dcache     <> dcache.io.lsu.store
+  outer.dma match {
+    case Some(dma) =>
+      val storeArb = Module(new DMAStoreArbiter)
+      storeArb.io.dma <> dma.module.io.write
+      storeArb.io.sbuffer <> sbuffer.io.dcache
+      dcache.io.lsu.store <> storeArb.io.dcache
+    case None =>
+      dcache.io.lsu.store <> sbuffer.io.dcache
+  }
   sbuffer.io.memSetPattenDetected := dcache.io.memSetPattenDetected
   sbuffer.io.force_write <> lsq.io.force_write
   // flush sbuffer

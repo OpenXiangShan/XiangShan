@@ -65,7 +65,6 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val backend = LazyModule(new Backend(backendParams))
 
   val memBlock = LazyModule(new MemBlock)
-
   memBlock.inner.frontendBridge.icache_node := frontend.inner.icache.clientNode
   memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
   if (p(SoCParamsKey).EnableICacheCtrl) {

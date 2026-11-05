@@ -298,7 +298,9 @@ trait HaveSlaveAXI4Port {
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
       name = "dma",
-      id = IdRange(0, 1 << idBits)
+      id = IdRange(0, 1 << idBits),
+      aligned = true,
+      maxFlight = Some(1)
     ))
   )))
 
@@ -321,6 +323,11 @@ trait HaveSlaveAXI4Port {
       AXI4Buffer() :=
       AXI4IdIndexer(1) :=
       l3FrontendAXI4Node
+  }
+
+  val dmaCacheNode = Option.when(p(coupledL2.WithoutLLC))(AXI4IdentityNode())
+  dmaCacheNode.foreach { node =>
+    node := AXI4Fragmenter() := AXI4Buffer() := AXI4IdIndexer(1) := l3FrontendAXI4Node
   }
 
   val dma = InModuleBody {
@@ -386,7 +393,7 @@ trait HaveAXI4MemPort {
       AXI4Buffer() :=
       AXI4Buffer() :=
       AXI4IdIndexer(idBits = 14) :=
-      AXI4UserYanker() :=
+      AXI4UserYanker(Some(1)) :=
       axi4memencrpty.get.node
 
     axi4memencrpty.get.node :=
@@ -398,7 +405,7 @@ trait HaveAXI4MemPort {
       AXI4Buffer() :=
       AXI4Buffer() :=
       AXI4IdIndexer(idBits = 14) :=
-      AXI4UserYanker() :=
+      AXI4UserYanker(Some(1)) :=
       AXI4Deinterleaver(L3BlockSize) :=
       axi4mem_node
   }
@@ -486,6 +493,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
 
 class MemMisc()(implicit p: Parameters) extends BaseSoC
   with HaveAXI4MemPort
+  with HaveSlaveAXI4Port
   with PMAConst
   with HaveAXI4PeripheralPort
 {
@@ -720,4 +728,3 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 }
 
 class SoCMisc()(implicit p: Parameters) extends MemMisc
-  with HaveSlaveAXI4Port

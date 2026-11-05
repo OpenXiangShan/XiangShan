@@ -108,6 +108,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     })))
   )
 
+  if (p(coupledL2.WithoutLLC)) {
+    require(NumCores == 1, "WithoutLLC supports one core")
+    val l2 = core_with_l2.head.l2top.inner.l2cache.get.asInstanceOf[coupledL2.tl2chi.TL2CHICoupledL2]
+    misc.soc_xbar.get := l2.axiNode.get
+    misc.soc_xbar.get := l2.mmioAXINode.get
+    core_with_l2.head.l2top.inner.dma_port.get := misc.dmaCacheNode.get
+  }
+
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
       case HCCacheParamsKey => l3param.copy(
@@ -120,7 +128,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     })))
   )
 
-  val chi_llcBridge_opt = Option.when(enableCHI && !useExternalLLC)(
+  val chi_llcBridge_opt = Option.when(enableCHI && !useExternalLLC && !p(coupledL2.WithoutLLC))(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
         outstandingDepth    = 64,
@@ -138,7 +146,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     LazyModule(new ExternalLLC())
   }
 
-  val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(enableCHI && !useExternalLLC)(
+  val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(enableCHI && !useExternalLLC && !p(coupledL2.WithoutLLC))(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
         outstandingDepth            = 32,
@@ -314,15 +322,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       annotate(this)(Seq(NestedPrefixModulesAnnotation(mod, prefix, true)))
     }
 
-    val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))
+    val dma = Option.when(!enableCHI || p(coupledL2.WithoutLLC))(
+      IO(Flipped(new VerilogAXI4Record(misc.dma.elts.head.params)))
+    )
     val peripheral = IO(new VerilogAXI4Record(misc.peripheral.elts.head.params))
     val memory = IO(new VerilogAXI4Record(misc.memory.elts.head.params))
 
-    socMisc match {
-      case Some(m) =>
-        m.dma.elements.head._2 <> dma.get.viewAs[AXI4Bundle]
-        dontTouch(dma.get)
-      case None =>
+    dma.foreach { port =>
+      misc.dma.elements.head._2 <> port.viewAs[AXI4Bundle]
+      dontTouch(port)
     }
 
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
@@ -369,7 +377,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
-    val chi_openllc_opt = Option.when(enableCHI && !useExternalLLC) {
+    val chi_openllc_opt = Option.when(enableCHI && !useExternalLLC && soc.OpenLLCParamsOpt.isDefined) {
       withClockAndReset(io.clock, io.reset) {
         Module(new OpenLLC()(p.alter((site, here, up) => {
           case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
@@ -511,7 +519,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
           extLLCRN <> extLLCLogger.io.down
           require(coreCHI.getWidth == extLLCRN.getWidth)
         }
-      } else if (enableCHI) {
+      } else if (enableCHI && !p(coupledL2.WithoutLLC)) {
         val llcRouteId = NumCores * 2
         for ((core, i) <- core_with_l2.zipWithIndex) {
           val coreCHI = core.module.io.chi.get

@@ -484,6 +484,17 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     ++ new WithCHI
 )
 
+/** Single-core CHI SoC with the L2 connected directly to DDR through AXI4. */
+class KunminghuV2WithoutLLCConfig(n: Int = 1) extends Config(
+  (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case coupledL2.WithoutLLC => true
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      OpenLLCParamsOpt = None,
+      L3CacheParamsOpt = None
+    )
+  })
+)
+
 class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
   (L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
     ++ WithNKBL1D(32, ways = 4)
