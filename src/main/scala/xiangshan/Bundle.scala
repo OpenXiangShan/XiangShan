@@ -525,6 +525,8 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val vsum = Bool()
     val virt = Bool()
     val virt_changed = Bool()
+    // current V for SFENCE.VMA. virt is the data-access V, which follows MPRV/MPV
+    val fenceVirt = Bool()
     val spvp = UInt(1.W)
     val imode = UInt(2.W)
     val dmode = UInt(2.W)

@@ -1136,6 +1136,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlbBundle.priv.vsum := vsstatusStruct.sum.asBool
   tlbBundle.priv.spvp := hstatusStruct.spvp
   tlbBundle.priv.virt  := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpv & (mstatusStruct.mpp =/= ModeM), virtMode)
+  tlbBundle.priv.fenceVirt := virtMode
   tlbBundle.priv.imode := privilegeMode
   tlbBundle.priv.dmode := Mux((debugMode && dcsr.asTypeOf(new DcsrStruct).mprven || !debugMode) && mstatusStruct.mprv.asBool, mstatusStruct.mpp, privilegeMode)
 
