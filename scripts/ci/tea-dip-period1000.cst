@@ -1,0 +1,4 @@
+enableDip0 1
+dipSamplePeriod0 1000
+enableTea0 1
+teaSamplePeriod0 1000
