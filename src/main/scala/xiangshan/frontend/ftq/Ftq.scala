@@ -340,14 +340,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   // bpu override fetch/pf ptr
+  private val flushFromBpu = Wire(new BpuFlushInfo)
   for (stage <- 2 to 3) {
     val redirect = if (stage == 2) prediction.bits.s2Override else prediction.bits.s3Override
     val ftqIdx   = if (stage == 2) io.fromBpu.s2FtqPtr else io.fromBpu.s3FtqPtr
 
-    io.toICache.flushFromBpu.stage(stage).valid := redirect
-    io.toICache.flushFromBpu.stage(stage).bits  := ftqIdx
-    io.toIfu.flushFromBpu.stage(stage).valid    := redirect
-    io.toIfu.flushFromBpu.stage(stage).bits     := ftqIdx
+    flushFromBpu.stage(stage).valid := redirect
+    flushFromBpu.stage(stage).bits  := ftqIdx
 
     when(redirect) {
       when(pfPtr >= ftqIdx) {
@@ -358,6 +357,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
       }
     }
   }
+  io.toICache.flushFromBpu := flushFromBpu
+  io.toIfu.flushFromBpu    := flushFromBpu
 
   // --------------------------------------------------------------------------------
   // Interaction with backend
@@ -562,12 +563,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
     0,
     Seq(
       (
-        !(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U)
-      ) -> TopDownCounters.FtqFullStall,
-      (
-        !(distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U &&
-          bpTrainStallCnt < BpTrainStallLimit.U)
-      ) -> TopDownCounters.FtqUpdateBubble
+        flushFromBpu.shouldFlushByStage2(fetchPtr(0), true.B) ||
+          flushFromBpu.shouldFlushByStage3(fetchPtr(0), true.B)
+      )                                                                    -> TopDownCounters.OverrideBubble,
+      (!(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U))            -> TopDownCounters.FtqFullStall,
+      (pfPtr(0) === fetchPtr(0) && bpTrainStallCnt >= BpTrainStallLimit.U) -> TopDownCounters.FtqUpdateBubble
     )
   )
   topdownPipe.setReason(Seq(
