@@ -565,6 +565,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2StrictMdpWait     = RegEnable(s1StrictMdpWait, s1Valid)
       val s2VaddrForward     = RegEnable(s1VaddrForward, s1Valid)
       val s2OverlapCandidateVec = RegEnable(s1OverlapCandidateVec, s1Valid)
+      val s2AgeValid         = RegEnable((s1AgeMaskLow | s1AgeMaskHigh) & addrValidVec.asUInt, s1Valid)
       val s2SelectOH         = RegEnable(s1SelectOH, s1Valid)
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CalculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
@@ -628,9 +629,34 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2CboForwardFail      = s2SelectCtrlEntry.isCbo && !isCboZero(s2SelectDataEntry.cboType)
 
       // A virtual/physical CAM disagreement must cause replay.
-      // Compare the masks only over the same older-store domain;
-      // including younger or invalid queue entries would turn unrelated physical hits into replays.
-      val s2PaddrNoMatch       = (s2PaddrMatchVec ^ s2VaddrForward).orR
+      // The physical side gets its own byte-overlap test, in the coordinates of the physical match: the overlap in
+      // s2OverlapCandidateVec is computed in virtual coordinates, so a store that reaches the load only through the
+      // second 16B block of a cross-16B store under another vaddr (a synonym) would be outside it and missed.
+      // Same-page only, as on the virtual side (the second page of a cross-page store is the UnalignQueue's).
+      // Without a synonym the physical and virtual matches agree entry by entry, so this adds no replay.
+      val s2PaddrHitVec        = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).zipWithIndex.map { case ((dataEntry, ctrlEntry), j) =>
+        val storeBlock      = dataEntry.paddr(PAddrBits - 1, VWordOffset)
+        val storeLastInPage = dataEntry.paddr(pageOffset - 1, VWordOffset).andR
+        val same16BMatch    = storeBlock === s2LoadPaddr
+        val next16BMatch    = ctrlEntry.cross16Byte && !storeLastInPage && (storeBlock + 1.U) === s2LoadPaddr
+        val sameLineMatch   = dataEntry.paddr(PAddrBits - 1, DCacheLineOffset) ===
+          s2LoadPaddr(s2LoadPaddr.getWidth - 1, DCacheLineOffset - VWordOffset)
+        val loadRangeStart  = Mux(next16BMatch,
+          s2LoadStart.pad(byteRangeWidth) + VLENB.U(byteRangeWidth.W),
+          s2LoadStart.pad(byteRangeWidth)
+        )
+        val loadRangeEnd    = Mux(next16BMatch,
+          s2LoadEnd.pad(byteRangeWidth) + VLENB.U(byteRangeWidth.W),
+          s2LoadEnd.pad(byteRangeWidth)
+        )
+        val byteOverlap     = dataEntry.byteStart.pad(byteRangeWidth) <= loadRangeEnd &&
+          dataEntry.byteEnd.pad(byteRangeWidth) >= loadRangeStart
+        val hit = Mux(ctrlEntry.isCbo,
+          sameLineMatch && s2OverlapMask(j), // CBO: as on the virtual side
+          (same16BMatch || next16BMatch) && byteOverlap)
+        hit && s2AgeValid(j)
+      }).asUInt
+      val s2PaddrNoMatch       = (s2PaddrHitVec ^ s2VaddrForward).orR
 
       val s2SelectData         = (0 until VLENB).map(j =>
         j.U -> rotateByteRight(s2SelectDataEntry.data, j * 8)
@@ -715,6 +741,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         dontTouch(s2PaddrMatchVec)
         dontTouch(s2VaddrForward)
         dontTouch(s2OverlapCandidateVec)
+        dontTouch(s2PaddrHitVec)
         dontTouch(s1HasAddrInvalidVec)
         dontTouch(s2MdpHitOutOfRange)
       }
@@ -1102,7 +1129,9 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
 
     //stout
     when(uncacheState === UncacheState.waitResp) {
-      hasHardwareError := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.corrupt
+      // the uncache buffer reports bus errors in nderr (denied) and error (corrupt && !denied), as for loads
+      // (LoadQueueUncache); its denied/corrupt fields are never driven (DontCare), so stores never faulted
+      hasHardwareError := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.error
     }.elsewhen(cboState === CboState.waitResp){
       hasHardwareError := io.toDCache.resp.fire && io.toDCache.resp.bits.corrupt
     }.elsewhen(uncacheState === UncacheState.writeback || cboState === CboState.writeback) {
@@ -1110,7 +1139,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     }
 
     when(uncacheState === UncacheState.waitResp) {
-      hasAccessFault := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.denied
+      hasAccessFault := io.toUncacheBuffer.resp.fire && io.toUncacheBuffer.resp.bits.nderr
     }.elsewhen(cboState === CboState.waitResp){
       hasAccessFault := io.toDCache.resp.fire && io.toDCache.resp.bits.denied
     }.elsewhen(uncacheState === UncacheState.writeback || cboState === CboState.writeback) {
@@ -1292,7 +1321,10 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       port.bits.addr     := writeSbufferPaddr(i)
       port.bits.vaddr    := writeSbufferVaddr(i)
 
-      port.bits.wline    := ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
+      // Only port 0 can carry a cbo.zero line write (port 1 never takes a CBO on its own: cboStall). For a cross-16B
+      // store at the head, port 1 carries the high half through the bypass, and slot rdataPtr+1 is the NEXT store or
+      // a stale slot whose last occupant was a cbo.zero: its isCbo/cboType would turn the half into a full-line write.
+      port.bits.wline    := (if (i == 0) ctrlEntry.isCbo && isCboZero(dataEntry.cboType) else false.B)
       port.bits.prefetch := dataEntry.prefetch
       port.bits.vecValid := true.B
       if (i == 0) {
@@ -1499,6 +1531,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val fromStaS1      = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
       val fromSQ = new Bundle {
         val addrReadyPtr = Input(new SqPtr)
+        val deqPtr       = Input(new SqPtr)
       }
       val toDeqModule = DecoupledIO(new Bundle {
         val paddr        = UInt(PAddrBits.W)
@@ -1545,6 +1578,20 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       }
     }
 
+    // The DeqModule takes the entry when the store enters EnterSbufferQueue, but the second page is not in the
+    // sbuffer yet, and the StoreQueue CAM only covers the first page. Until the store leaves the StoreQueue (deqPtr
+    // passes it, the same timing as its StoreQueue dequeue credit) the entry stays visible to load forwarding, so a
+    // younger load to the second page still replays instead of reading stale memory. A held slot is not reused.
+    private val fwdHold = RegInit(VecInit(Seq.fill(queueSize)(false.B)))
+    (0 until queueSize).map{i =>
+      val deqCancel = i.U === deqPtr.value && io.toDeqModule.fire
+      when(deqCancel) {
+        fwdHold(i) := true.B
+      }.elsewhen(entries(i).sqIdx.isBefore(io.fromSQ.deqPtr)) {
+        fwdHold(i) := false.B
+      }
+    }
+
     // update pointer
     needCancel.zipWithIndex.map{case (sink, i) =>
       sink := entries(i).sqIdx.needFlush(io.redirect) && allocated(i)
@@ -1573,10 +1620,14 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       sink.paddr := source.paddr
       sink.sqIdx := source.sqIdx
     }
-    io.forwardValid := allocated
+    io.forwardValid := VecInit(allocated.zip(fwdHold).map { case (a, h) => a || h })
 
     io.fromStaS1.map{case sink =>
-      sink.ready := !full && io.fromSQ.addrReadyPtr === sink.bits.sqIdx && !io.redirect.valid
+      sink.ready := !full && !fwdHold(enqPtr.value) && io.fromSQ.addrReadyPtr === sink.bits.sqIdx && !io.redirect.valid
+    }
+
+    if (debugEn) {
+      dontTouch(fwdHold)
     }
 
   }
@@ -1688,6 +1739,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
   // unalignQueue connection
   unalignQueue.io.redirect            := io.fromVirtualStoreQueue.redirectPtr
   unalignQueue.io.fromSQ.addrReadyPtr := addrReadyPtr
+  unalignQueue.io.fromSQ.deqPtr       := deqPtrExt.head
   unalignQueue.io.fromStaS1.zip(io.fromStoreUnit.unalignQueueReq).map{case (sink, source) =>
     sink <> source
   }
