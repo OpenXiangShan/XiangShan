@@ -17,7 +17,7 @@
 
 package top
 
-import utility.{SimulationPrimitives, SimulationPrimitivesKey}
+import utility.{SimulationModels, SimulationModelsKey, SimulationPrimitives, SimulationPrimitivesKey}
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -184,13 +184,19 @@ object XiangShanSim extends App {
 
   require(!envInFPGA || config(SimulationPrimitivesKey) == "none",
     "Simulation primitives require the simulation target")
-  SimulationPrimitives.withMode(config(SimulationPrimitivesKey),
-    Some(java.nio.file.Paths.get(sys.env.getOrElse("NOOP_HOME", "."), "build", "simulation_primitives.json"))) {
-    Generator.execute(
-      firrtlOpts,
-      DisableMonitors(p => DifftestModule.top(new XiangShanSim()(p)))(config),
-      firtoolOpts
-    )
+  require(!envInFPGA || config(SimulationModelsKey) == "hardware",
+    "Simulation behavior models require the simulation target")
+  val modelReport = Some(java.nio.file.Paths.get(
+    sys.env.getOrElse("NOOP_HOME", "."), "build", "simulation_models.json"))
+  SimulationModels.withMode(config(SimulationModelsKey), modelReport) {
+    SimulationPrimitives.withMode(config(SimulationPrimitivesKey),
+      Some(java.nio.file.Paths.get(sys.env.getOrElse("NOOP_HOME", "."), "build", "simulation_primitives.json"))) {
+      Generator.execute(
+        firrtlOpts,
+        DisableMonitors(p => DifftestModule.top(new XiangShanSim()(p)))(config),
+        firtoolOpts
+      )
+    }
   }
 
   // tools: write cpp files

@@ -106,6 +106,8 @@ object openLLC extends ChiselModule {
 }
 
 object difftest extends ChiselModule {
+  def moduleDeps = Seq(utility)
+
   object test extends SbtTests with TestModule.ScalaTest {
     override def sources: T[Seq[PathRef]] = Task.Sources {
       super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / "generator" / "chisel"))

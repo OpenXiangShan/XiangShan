@@ -53,6 +53,7 @@ object ArgParser {
       |--disable-alwaysdb
       |--enable-dfx
       |--wolvrix-sim-primitives <none|priority-encode|popcount|popcount-ge4|gray-decode|decode-table>
+      |--wolvrix-sim-models <hardware|commit-rat>
       |--enable-simfrontend
       |""".stripMargin
 
@@ -84,6 +85,11 @@ object ArgParser {
           require(Set("none", "priority-encode", "popcount", "popcount-ge4", "gray-decode", "decode-table").contains(mode))
           nextOption(config.alter((site, here, up) => {
             case SimulationPrimitivesKey => mode
+          }), tail)
+        case "--wolvrix-sim-models" :: mode :: tail =>
+          require(Set("hardware", "commit-rat").contains(mode))
+          nextOption(config.alter((site, here, up) => {
+            case SimulationModelsKey => mode
           }), tail)
         case "--config" :: confString :: tail =>
           nextOption(getConfigByName(confString), tail)
