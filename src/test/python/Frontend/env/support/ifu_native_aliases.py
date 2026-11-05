@@ -39,6 +39,22 @@ def _read_native(reader: _READER, paths: tuple[str, ...]):
     return None, None
 
 
+def read_icache_fetch_block_size(reader: _READER, index: int) -> NativeProjection | None:
+    """Project the full six-bit size from MainPipe's native five-bit offset.
+
+    ICacheMainPipe.sv assigns size = {1'b0, takenCfiOffset} + 6'd1.
+    In particular offset31 means size32, with no five-bit truncation.
+    """
+    if index not in (0, 1):
+        raise ValueError("ICache response has exactly two fetch blocks")
+    stem = f"s1_maybeRvcAlignInfo_takenCfiOffset_{index}"
+    offset, path = _read_native(reader, (_MAIN + stem, "inner_icache.mainPipe." + stem))
+    if offset is None or not 0 <= offset < 32:
+        return None
+    return NativeProjection(offset + 1, "size[5:0] = {1'b0, takenCfiOffset[4:0]} + 6'd1",
+                            {path: offset})
+
+
 def read_line0_tl_cause(reader: _READER) -> NativeProjection | None:
     value, path = _read_native(reader, LINE0_TL_EXCEPTION_PATHS)
     if value is None or value not in (0, 3, 5):

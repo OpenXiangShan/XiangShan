@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections import deque
 from typing import Optional
 
-from ....support.ifu_native_aliases import LINE0_TL_EXCEPTION_PATHS, read_line0_tl_cause
+from ....support.ifu_native_aliases import (
+    LINE0_TL_EXCEPTION_PATHS, read_icache_fetch_block_size, read_line0_tl_cause,
+)
 
 from ..common.dut import _dut, _read_first
 from .owner_v3_funcov import mark_owner_v3_checked
@@ -840,6 +842,13 @@ def _req_signal_names(index: int, field: str) -> tuple[str, ...]:
 
 
 def _read_req_field(recorder, index: int, field: str) -> Optional[int]:
+    if field == "size":
+        projection = read_icache_fetch_block_size(
+            lambda path: recorder._try_read_dut_signal(_dut(recorder), path), index
+        )
+        # The old short size alias is not a six-bit source. A missing or
+        # invalid native offset must remain missing, never select that alias.
+        return None if projection is None else projection.value
     value = _read_first(recorder, _req_signal_names(index, field))
     return None if value is None else int(value)
 
