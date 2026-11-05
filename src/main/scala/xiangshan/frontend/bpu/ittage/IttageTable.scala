@@ -299,12 +299,12 @@ class IttageTable(
     io.update.targetOffset,
     io.update.oldTargetOffset
   )
-  updateWdata.paddingBit := DontCare
+  updateWdata.paddingBit := 0.U
 
+  // Per-table activity identifies useful history lengths and allocation pressure.
   XSPerfAccumulate("ittage_table_updates", io.update.valid)
+  XSPerfAccumulate("ittage_table_allocate", io.update.valid && io.update.alloc)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
-  XSPerfAccumulate("ittage_table_train_read", trainReqValid)
-  XSPerfAccumulate("ittage_us_tick_reset", io.update.resetUsefulCnt)
   // read-write conflict: can provide data to sram write port, but sram read port is also requesting
   XSPerfAccumulate(
     "ittage_table_read_write_conflict",
