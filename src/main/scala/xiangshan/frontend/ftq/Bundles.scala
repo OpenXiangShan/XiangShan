@@ -23,8 +23,8 @@ import utils.EnumUInt
 import xiangshan.Redirect
 import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.Pc
-import xiangshan.frontend.PcInit
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
@@ -112,7 +112,7 @@ class NonCfiInfo(implicit p: Parameters) extends FtqBundle with HalfAlignHelper 
 
   def fromRedirect(redirect: Redirect): Unit = {
     this.hasRedirect := redirect.attribute.isNone
-    this.cfiPosition := getAlignedPosition(PcInit(redirect.pc), redirect.ftqOffset)._1
+    this.cfiPosition := getAlignedPosition(GuardedPcInit(redirect.pc), redirect.ftqOffset)._1
   }
 }
 
