@@ -48,6 +48,7 @@ private class TeaStoredMember(implicit p: Parameters) extends XSBundle {
 // A debug-only companion to the functional ROB. Callers supply accepted events.
 class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
+    val enable = Input(Bool())
     val cycle = Input(UInt(64.W))
     val addrTransType = Input(new AddrTransType)
     val alloc = Input(Vec(RenameWidth, Valid(new TeaRenameMember)))
@@ -94,7 +95,7 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
 
   for (entry <- 0 until RobSize) {
     val entryAllocs = io.alloc.map(x => x.valid && x.bits.robIdx.value === entry.U)
-    val allocating = VecInit(entryAllocs).asUInt.orR
+    val allocating = io.enable && VecInit(entryAllocs).asUInt.orR
     when(allocating) {
       flags(entry) := PriorityMux(entryAllocs, io.alloc.map(_.bits.robIdx.flag))
       allocationCycles(entry) := io.cycle
@@ -122,7 +123,7 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
           members(entry)(rank).psv := mergedPsv(allocMember.robIdx, rank.U, allocMember.psv)
           members(entry)(rank).remaining := allocMember.numWB
         }
-      }.elsewhen(live(entry)(rank)) {
+      }.elsewhen(io.enable && live(entry)(rank)) {
         members(entry)(rank).psv := visiblePsv(entry)(rank)
         members(entry)(rank).remaining := Mux(wbCount >= members(entry)(rank).remaining,
           0.U, members(entry)(rank).remaining - wbCount)
@@ -131,7 +132,7 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
           sampled(entry)(rank) := false.B
         }
       }
-      when(io.markStalled && io.stalled.valid && io.head.value === entry.U &&
+      when(io.enable && io.markStalled && io.stalled.valid && io.head.value === entry.U &&
         flags(entry) === io.head.flag && io.stalled.bits.rank === rank.U &&
         !retired(entry)(rank) && !killed(entry)(rank)) {
         sampled(entry)(rank) := true.B
@@ -160,7 +161,7 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
   })
   io.stalled.valid := unfinished.asUInt.orR
   io.stalled.bits := result(io.head.value, PriorityEncoder(unfinished)).target
-  when(io.markStalled && io.stalled.valid) {
+  when(io.enable && io.markStalled && io.stalled.valid) {
     sampledEntry := io.head
   }
 
@@ -195,5 +196,12 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
     out.bits.isDrain := false.B
     out.bits.cancelled := killed(entry)(rank) && !retired(entry)(rank)
     out.bits.member := result(entry, rank.U)
+  }
+
+  when(!io.enable) {
+    io.read := 0.U.asTypeOf(io.read)
+    io.stalled := 0.U.asTypeOf(io.stalled)
+    io.committed := 0.U.asTypeOf(io.committed)
+    io.finals := 0.U.asTypeOf(io.finals)
   }
 }

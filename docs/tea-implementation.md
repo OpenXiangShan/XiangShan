@@ -125,9 +125,9 @@ PSV_new = PSV_old OR 新增事件 mask
 
 ## 5. 采样节奏和状态分类
 
-构建时 `WITH_TEA=1` 独立控制 TEA tracker、selector 和数据库记录逻辑是否 elaboration。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 256（详细验证可设为 1），period 为 0 时当前实现也逐周期采样。重新启用时 countdown 为零，会立即开始采样。
+构建时 `WITH_TEA=1` 独立控制 TEA tracker、selector 和数据库记录逻辑是否 elaboration。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 256（详细验证可设为 1），period 为 0 时当前实现也逐周期采样。
 
-采样间隔按周期推进，不等待先前目标退休。关闭采样后，debug 成员和恢复原因仍继续跟踪，已采样目标及待处理的 Drained 后继仍可产生终结记录。
+采样间隔按周期推进，不等待先前目标退休。`enableTea || enableTeaStats` 控制成员跟踪；两者均为 0 时，tracker 输入固定为零、状态停止更新、输出清零。只开启 `enableTeaStats` 的 Summary 模式仍保留成员跟踪。
 
 状态分类优先级如下，其中“恢复原因”指当前可见的原因：
 
@@ -298,9 +298,12 @@ python3 scripts/tea_visualize.py build/tea.db \
 
 | 模式 | Constantin 配置（hart 0） | 行为 |
 | --- | --- | --- |
+| Off | `enableTeaStats0 0`、`enableTea0 0` | 停止成员跟踪和采集，保留已生成的模块 |
 | Summary | `enableTeaStats0 1`、`enableTea0 0` | 精确周期计数和区间摘要，不写 TEA 边界样本 |
 | Sample | `enableTea0 1`、`teaSamplePeriod0 256` | 自动启用周期统计，同时稀疏采样 |
 | Detail | `enableTea0 1`、`teaSamplePeriod0 1` | 逐周期采样，用于短窗口验证 |
+
+Constantin 配置在 EMU 启动时加载；Off 模式从启动起关闭跟踪，当前不支持仿真中途热切换。
 
 默认采样周期为 256；现有 Constantin 文件中的显式周期（如 1000）保持生效。
 `teaGapThreshold0` 默认 128，只控制完整无提交区间的明细输出阈值，不影响直方图。

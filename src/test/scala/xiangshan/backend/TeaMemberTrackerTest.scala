@@ -36,6 +36,7 @@ class TeaMemberTrackerTest extends XSTester {
   }
 
   private def init(dut: TeaMemberTracker): Unit = {
+    dut.io.enable.poke(true.B)
     dut.io.cycle.poke(10.U)
     dut.io.addrTransType.bare.poke(true.B)
     dut.io.addrTransType.sv39.poke(false.B)
@@ -65,6 +66,44 @@ class TeaMemberTrackerTest extends XSTester {
     port.bits.numWB.poke(numWB.U)
     port.bits.pc.poke((0x80001000L + 4 * rank).U)
     port.bits.psv.poke(psv.U)
+  }
+
+  it should "ignore incoming activity and suppress outputs while disabled" in {
+    simulate(new TeaMemberTracker(3, 2)(trackerConfig)) { dut =>
+      init(dut)
+      dut.io.enable.poke(false.B)
+      alloc(dut, 0)
+      dut.io.writeback(0).valid.poke(true.B)
+      ptr(dut.io.writeback(0).bits.robIdx)
+      dut.io.writeback(0).bits.rank.poke(0.U)
+      dut.io.events(0).valid.poke(true.B)
+      ptr(dut.io.events(0).bits.robIdx)
+      dut.io.events(0).bits.mask.poke((1 << TeaEvent.ST_TLB).U)
+      dut.io.commits(0).valid.poke(true.B)
+      dut.io.markStalled.poke(true.B)
+      dut.clock.step(3)
+      dut.io.stalled.valid.expect(false.B)
+      dut.io.committed.foreach(_.valid.expect(false.B))
+      dut.io.finals.foreach(_.valid.expect(false.B))
+      dut.io.read.foreach { out =>
+        out.pc.expect(0.U)
+        out.psv.expect(0.U)
+      }
+
+      dut.io.alloc.foreach(_.valid.poke(false.B))
+      dut.io.writeback.foreach(_.valid.poke(false.B))
+      dut.io.events.foreach(_.valid.poke(false.B))
+      dut.io.markStalled.poke(false.B)
+      dut.io.enable.poke(true.B)
+      dut.io.committed.foreach(_.valid.expect(false.B))
+      dut.io.stalled.valid.expect(false.B)
+      dut.io.commits(0).valid.poke(false.B)
+      alloc(dut, 0)
+      dut.clock.step()
+      dut.io.alloc(0).valid.poke(false.B)
+      dut.io.stalled.valid.expect(true.B)
+      dut.io.read(0).pc.expect("h80001000".U)
+    }
   }
 
   it should "attribute a long simple run to unfinished B and retire every member" in {

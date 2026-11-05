@@ -2126,6 +2126,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 256)
     val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
     val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
+    val teaActive = enableTea.asBool || enableTeaStats.asBool
     val teaRedirectPtr = io.redirect.bits.robIdx
     val teaFlushPtr = deqExceptionRobIdx
     val teaRedirectCtrlMispred = io.redirect.valid &&
@@ -2182,6 +2183,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     teaSelector.io.flushCause := teaVisibleCause
 
     val tracker = Module(new TeaMemberTracker(io.writeback.size, teaPsvSetSources.length))
+    tracker.io.enable := teaActive
     tracker.io.cycle := teaSelector.io.cycle
     tracker.io.addrTransType := io.debugInstrAddrTransType
     tracker.io.head := deqPtr
@@ -2227,11 +2229,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       tracker.io.commits(slot).bits := io.commits.robIdx(slot / 2)
       tracker.io.commits(slot).bits.isFormer := (slot % 2 == 0).B
     }
+    // Keep tracker inputs stable while disabled.
+    when(!teaActive) {
+      Seq(tracker.io.cycle, tracker.io.addrTransType, tracker.io.alloc, tracker.io.enqPsv,
+        tracker.io.writeback, tracker.io.events, tracker.io.redirect, tracker.io.slotReady,
+        tracker.io.commits, tracker.io.head, tracker.io.readPtr, tracker.io.markStalled
+      ).foreach(input => input := 0.U.asTypeOf(input))
+    }
     teaSelector.io.commitMask := VecInit(tracker.io.committed.map(_.valid)).asUInt
     teaSelector.io.commitPc := VecInit(tracker.io.committed.map(_.bits.pc))
     teaSelector.io.commitPsv := VecInit(tracker.io.committed.map(_.bits.psv))
     for (lane <- 0 until CommitWidth) {
-      when(io.commits.isCommit && io.commits.commitValid(lane)) {
+      when(teaActive && io.commits.isCommit && io.commits.commitValid(lane)) {
         assert(PopCount(tracker.io.committed.slice(lane * RenameWidth, (lane + 1) * RenameWidth).map(_.valid)) ===
           commitInstrCntByEntry(lane), "TEA members disagree with architectural retirement count")
       }
@@ -2250,7 +2259,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sample.context.headReason := Mux(sample.context.headReasonValid, io.debugRobHeadStall.get.bits, 0.U)
 
     val stats = Module(new TeaCycleStats)
-    stats.io.enable := enableTeaStats.asBool || enableTea.asBool
+    stats.io.enable := teaActive
     stats.io.cycle := teaSelector.io.cycle
     stats.io.state := teaSelector.io.sample.state
     stats.io.retired := sample.context.retired
