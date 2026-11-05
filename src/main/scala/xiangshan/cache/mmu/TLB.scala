@@ -45,11 +45,12 @@ import freechips.rocketchip.rocket.PMPConfig
   * @param p: XiangShan Paramemters, like XLEN
   */
 
-class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)(implicit p: Parameters) extends TlbModule
+class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters,
+  hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbModule
   with HasCSRConst
   with HasPerfEvents
 {
-  val io = IO(new TlbIO(Width, nRespDups, q))
+  val io = IO(new TlbIO(Width, nRespDups, q, hasCboAccess))
 
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
@@ -73,7 +74,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val redirect = io.redirect
   val EffectiveVa = Wire(Vec(Width, UInt(XLEN.W)))
   val req_in = req
-  val req_out = Reg(Vec(Width, new TlbReq))
+  val req_out = Reg(Vec(Width, new TlbReq(hasCboAccess)))
   for (i <- 0 until Width) {
     when (req(i).fire) {
       req_out(i) := req(i).bits
@@ -446,11 +447,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp(idx).valid := resp(idx).valid || noTranslate
     pmp(idx).bits.addr := addr
     pmp(idx).bits.size := size
-    // W=1, R=0 is a reserved PMP encoding, so checking W also guarantees R.
-    // SSPOPCHK is the only shadow-stack request whose original TLB command is read.
-    pmp(idx).bits.cmd := (if (HasShadowStack) {
-      Mux(isShadowStackAccess && cmd === TlbCmd.read, TlbCmd.write, cmd)
-    } else cmd)
+    pmp(idx).bits.cmd := cmd
+    pmp(idx).bits.isShadowStackAccess.foreach(_ := isShadowStackAccess)
   }
 
   def pbmt_check(idx: Int, d: Int, pbmt: UInt, g_pbmt: UInt, s2xlate: UInt):Unit = {
@@ -488,14 +486,16 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val isFakePte = !perm.v && !perm.pf && !perm.af && !onlyS2
     val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v && !perm.pf && !perm.af
     val s1_valid = portTranslateEnable(idx) && !onlyS2
+    val modeCheck = !(mode(idx) === ModeU && !perm.u || mode(idx) === ModeS && perm.u && (!sum(idx) || ifetch))
 
     val isSspEncoding = Option.when(HasShadowStack) (perm.w && !perm.r && !perm.x)
     val isSspReadOnlyEncoding = Option.when(HasShadowStack) (!perm.w && perm.r && !perm.x)
     // Only classify an S/VS-stage PTE by XWR after a valid leaf PTE has been obtained.
     // Invalid/non-resident PTEs must retain their page fault instead of being
     // reclassified as an SS access fault merely because XWR is not 010/001.
+    // U/SUM checks precede SS page-type checks; R/W/X and A/D checks follow them.
     val canCheckSspPageType = Option.when(HasShadowStack) (
-      s1_valid && perm.v && !perm.pf && !perm.af && !isFakePte && !isNonLeaf
+      s1_valid && perm.v && !perm.pf && !perm.af && !isFakePte && !isNonLeaf && modeCheck
     )
     val isSspPage = Option.when(HasShadowStack) (
       canCheckSspPageType.get && sspEn && isSspEncoding.get
@@ -518,6 +518,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val sspBareAf = Option.when(HasShadowStack) (isShadowStack && !s1_valid) // store af
     val sspPermAf = Option.when(HasShadowStack) (sspWrongPageAf.get || sspBareAf.get) // store af
     val writeSspAf = Option.when(HasShadowStack) (isSspPage.get && isSt && !isShadowStack) // store af
+    // CBOs fault on SS pages even when their permission-check command is read.
+    val cboSspAf = Option.when(HasShadowStack && hasCboAccess) (isSspPage.get && req_out(idx).isCbo.get)
     val sspPermPf = Option.when(HasShadowStack) (isShadowStack && isSspReadOnlyPage.get) // sore pf
     val instFetchSspAf = Option.when(HasShadowStack) (isInst && isSspPage.get) // inst af
 
@@ -525,7 +527,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldUpdate = !perm.a && isLd && !isShadowStack// update A/D through exception
     val stUpdate = ((!perm.a || !perm.d) && isSt) || (!perm.a && isLd && isShadowStack) // update A/D through exception
     val instrUpdate = !perm.a && isInst // update A/D through exception
-    val modeCheck = !(mode(idx) === ModeU && !perm.u || mode(idx) === ModeS && perm.u && (!sum(idx) || ifetch))
     // ssp instruction will produce update pf and mode pf as usual.
     val ldPermFail = !(modeCheck && (Mux(hlvx, perm.x, perm.r || mxr(idx) && perm.x) ||
       (if (HasShadowStack) isSspPage.get else false.B))) //ssp page can be read when SSE=1
@@ -557,7 +558,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val s2_valid = portTranslateEnable(idx) && (onlyS2 || allS2xlate)
 
     val fault_valid = s1_valid || s2_valid
-    val isSspAf = Option.when(HasShadowStack) (sspPermAf.get || writeSspAf.get)
+    val isSspAf = Option.when(HasShadowStack) (sspPermAf.get || writeSspAf.get || cboSspAf.getOrElse(false.B))
     val isMptAf = Option.when(HasMptCheck) ((mptInstf.get || mptWf.get || mptRf.get || mptAf.get) && mptValid.get)
     // when pf and gpf can't happens simultaneously
     val isAf = af || (if (HasMptCheck) isMptAf.get else false.B) || (if (HasShadowStack) (isSspAf.get || instFetchSspAf.get) else false.B)
@@ -906,8 +907,10 @@ object TLBDiffId {
   }
 }
 
-class TLBNonBlock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(false), q)
-class TLBBLock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(true), q)
+class TLBNonBlock(Width: Int, nRespDups: Int = 1, q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters)
+  extends TLB(Width, nRespDups, Seq.fill(Width)(false), q, hasCboAccess)
+class TLBBLock(Width: Int, nRespDups: Int = 1, q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters)
+  extends TLB(Width, nRespDups, Seq.fill(Width)(true), q, hasCboAccess)
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbReplaceIO(Width, q))

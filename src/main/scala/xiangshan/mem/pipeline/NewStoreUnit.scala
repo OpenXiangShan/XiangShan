@@ -49,7 +49,7 @@ class StoreUnitS0(param: ExeUnitParams)(
     val prefetchReq = Flipped(DecoupledIO(new StorePrefetchReq))
 
     // Tlb request
-    val tlbReq = DecoupledIO(new TlbReq)
+    val tlbReq = DecoupledIO(new TlbReq(hasCboAccess = HasShadowStack))
     val tlbReqKill = Output(Bool())
 
     // DCache request
@@ -214,6 +214,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.fullva := sink.bits.fullva
   io.tlbReq.bits.checkfullva := isVector || isScalar
   io.tlbReq.bits.cmd := Mux(isCboNoZero, TlbCmd.read, TlbCmd.write)
+  io.tlbReq.bits.isCbo.foreach(_ := isCbo)
   io.tlbReq.bits.hyperinst := LSUOpType.isHsv(uop.fuOpType)
   io.tlbReq.bits.hlvx := false.B
   io.tlbReq.bits.isPrefetch := isHwPrefetch
@@ -860,7 +861,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val stin = Flipped(Decoupled(new ExuInput(param)))
   val prefetchReq = Flipped(DecoupledIO(new StorePrefetchReq))
   // TLB / PMA / PMP
-  val tlb = new TlbRequestIO
+  val tlb = new TlbRequestIO(hasCboAccess = HasShadowStack)
   val pmp = Flipped(new PMPRespBundle)
   // DCache
   val dcache = new DCacheStoreIO
