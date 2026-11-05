@@ -171,7 +171,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.fromWayLookup <> wayLookup.io.toMainPipe
   io.toFtq.fromMainPipe := mainPipe.io.toFtq
 
-  mainPipe.io.perf_prefetch   := RegNext(prefetcher.io.perf) // waylookup has 1 cycle delay, model that with a RegNext
+  mainPipe.io.perf_prefetch   := prefetcher.io.perf
+  mainPipe.io.perf_waylookup  := wayLookup.io.perf
   mainPipe.io.topdownOverride := io.topdownOverride
 
   wayLookup.io.flush        := io.fromFtq.redirectFlush
