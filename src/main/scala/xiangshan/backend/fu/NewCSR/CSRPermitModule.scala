@@ -8,6 +8,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.decode.isa.CSRs
 import org.chipsalliance.cde.config.Parameters
 import system.HasSoCParameter
+import xiangshan.DebugOptionsKey
 
 class CSRPermitModule(implicit p: Parameters) extends Module {
   val io = IO(new CSRPermitIO)
@@ -101,6 +102,16 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
 
   io.out.hasLegalWriteFcsr := mLevelPermitMod.io.out.hasLegalWriteFcsr
   io.out.hasLegalWriteVcsr := mLevelPermitMod.io.out.hasLegalWriteVcsr
+
+  // TraceRTL takes exceptions from the trace only.
+  if (p(DebugOptionsKey).TraceRTLMode) {
+    io.out.EX_II         := false.B
+    io.out.EX_VI         := false.B
+    io.out.hasLegalMNret := io.in.xRet.mnret
+    io.out.hasLegalMret  := io.in.xRet.mret
+    io.out.hasLegalSret  := io.in.xRet.sret
+    io.out.hasLegalDret  := io.in.xRet.dret
+  }
 }
 
 class XRetPermitModule extends Module {

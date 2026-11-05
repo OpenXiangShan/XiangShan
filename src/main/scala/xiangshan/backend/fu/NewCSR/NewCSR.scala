@@ -21,6 +21,7 @@ import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.CSRs
+import xiangshan.frontend.tracertl.{TraceInfo, TraceRTLChoose}
 
 import scala.collection.immutable.SeqMap
 
@@ -86,6 +87,7 @@ class NewCSRInput(implicit p: Parameters) extends Bundle {
   val sret = Input(Bool())
   val dret = Input(Bool())
   val redirectFlush = Input(Bool())
+  val traceInfo = TraceInfo()
 }
 
 class NewCSROutput(implicit p: Parameters) extends Bundle {
@@ -153,6 +155,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isForVSnonLeafPTE = Bool()
         val satpFlushFirstFetchFault = Bool()
         val isFormer = Bool()
+        val traceInfo = TraceInfo()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -414,7 +417,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.hviprio2 := hviprio2.regOut
   intrMod.io.in.miprios := Cat(miregiprios.map(_.rdata).reverse)
   intrMod.io.in.hsiprios := Cat(siregiprios.map(_.rdata).reverse)
-  intrMod.io.in.mnstatusNMIE := mnstatus.regOut.NMIE.asBool
+  // TraceRTL takes interrupts from the trace only.
+  intrMod.io.in.mnstatusNMIE := TraceRTLChoose(mnstatus.regOut.NMIE.asBool, false.B)
   intrMod.io.in.nmi := nmip.asUInt.orR
   intrMod.io.in.nmiVec := nmip.asUInt
   intrMod.io.in.debugMode := debugMode
@@ -1237,6 +1241,25 @@ class NewCSR(implicit val p: Parameters) extends Module
     xretTargetUpdate
   )
 
+  // TraceRTL takes trap/xret targets from the trace instead of the modeled CSR state.
+  if (env.TraceRTLMode) {
+    def traceTargetPc(target: UInt): TargetPCBundle = {
+      val out = WireInit(0.U.asTypeOf(new TargetPCBundle))
+      out.pc := SignExt(target, XLEN)
+      out
+    }
+    val traceTrapUpdate = RegNext(io.fromRob.trap.valid, false.B)
+    io.trapTargetPc.valid := traceTrapUpdate
+    io.trapTargetPc.bits := DataHoldBypass(
+      RegEnable(traceTargetPc(io.fromRob.trap.bits.traceInfo.get.target), io.fromRob.trap.valid),
+      traceTrapUpdate
+    )
+    io.xretTargetPc.bits := DataHoldBypass(
+      Mux(ceReEntryDmode, targetCeReEntryDmode, traceTargetPc(io.in.bits.traceInfo.get.target)),
+      xretTargetUpdate
+    )
+  }
+
   /**
    * debug_begin
    */
@@ -1641,7 +1664,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.criticalErrorState := criticalErrorState && !dcsr.regOut.CETRIG.asBool
 
   val criticalErrors = Seq(
-    ("csr_dbltrp_inMN", !mnstatus.regOut.NMIE && hasTrap && !(entryDebugMode || debugMode)),
+    // mnstatus.NMIE is not traced; its reset value would latch a false double trap in TraceRTL.
+    ("csr_dbltrp_inMN", TraceRTLChoose(!mnstatus.regOut.NMIE && hasTrap && !(entryDebugMode || debugMode), false.B)),
   )
   criticalErrorStateInCSR := criticalErrors.map(criticalError => criticalError._2).reduce(_ || _).asBool
   generateCriticalErrors()

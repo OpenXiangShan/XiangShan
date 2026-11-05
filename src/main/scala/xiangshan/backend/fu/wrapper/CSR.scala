@@ -17,6 +17,7 @@ import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.tracertl.TraceFakeSatpPpn
 import CSRConst._
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
@@ -116,6 +117,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.sret := isSret
       in.bits.dret := isDret
       in.bits.redirectFlush := redirectFlush
+      in.bits.traceInfo.foreach(_ := io.in.bits.ctrl.traceInfo.get)
   }
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
   csrMod.io.fetchMalTval := trapTvalMod.io.tval
@@ -149,6 +151,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrIn.diffArchEvent.zip(csrMod.io.diffArchEvent).foreach { case (sink, source) =>
     sink := source
   }
+  csrMod.io.fromRob.trap.bits.traceInfo.foreach(_ := csrIn.exception.bits.traceInfo.get)
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
@@ -323,6 +326,16 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // pointer masking extension
   tlb.pmm := csrMod.io.tlb.pmm
 
+  // TraceRTL translates through the trace-generated page table with a fixed Sv39 root.
+  if (env.TraceRTLMode) {
+    val traceSatp = Module(new TraceFakeSatpPpn)
+    tlb.satp.changed := false.B
+    tlb.satp.mode := 8.U
+    tlb.satp.asid := 0.U
+    tlb.satp.ppn := traceSatp.io.ppn
+    tlb.vsatp := 0.U.asTypeOf(tlb.vsatp)
+  }
+
   /** Since some CSR read instructions are allowed to be pipelined, ready/valid signals should be modified */
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.outValidAhead3Cycle.get := csrModOutValid
@@ -353,6 +366,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.backendIPF := csrMod.io.xretTargetPc.bits.raiseIPF
   redirect.backendIAF := csrMod.io.xretTargetPc.bits.raiseIAF
   redirect.backendIGPF := csrMod.io.xretTargetPc.bits.raiseIGPF
+  redirect.traceInfo.foreach(_ := RegEnable(io.in.bits.ctrl.traceInfo.get, io.in.fire))
   // Only mispred will send redirect to frontend
   redirect.isMisPred := false.B
 

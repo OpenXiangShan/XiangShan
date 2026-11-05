@@ -31,6 +31,8 @@ import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.tracertl.TraceInfo
+import xiangshan.frontend.tracertl.TraceInstrBundle
 
 // FIXME: these ptrs have ambiguous names
 // FIXME: if these ptrs are never used outside ibuffer, we can move them to class IBuffer as private inner classes
@@ -58,6 +60,8 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:        UInt   = TriggerAction()
   val isLastInFtqEntry: Bool   = Bool()
 
+  val traceInfo: Option[TraceInstrBundle] = TraceInfo()
+
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
@@ -71,6 +75,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     triggered        := fetch.triggered(i)
     isLastInFtqEntry := fetch.isLastInFtqEntry(i)
     debug_seqNum     := fetch.debug_seqNum(i)
+    traceInfo.foreach(_ := fetch.traceInfo.get(i))
     this
   }
 
@@ -94,6 +99,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.specvtype          := DontCare // assign outside
     result.debug_seqNum       := debug_seqNum
     result.instrEndOffset     := instrEndOffset
+    result.traceInfo.foreach(_ := traceInfo.get)
     result
   }
 }
@@ -133,6 +139,8 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val vtype:              VType         = VType()
   val specvtype:          VType         = VType()
 
+  val traceInfo: Option[TraceInstrBundle] = TraceInfo()
+
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
   def toCtrlFlow: CtrlFlow = {
@@ -163,6 +171,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.vtype                                         := vtype
     cf.specvtype                                     := specvtype
     cf.debug_seqNum                                  := debug_seqNum
+    cf.traceInfo.foreach(_ := traceInfo.get)
     cf
   }
 }
