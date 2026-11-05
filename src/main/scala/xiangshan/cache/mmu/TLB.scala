@@ -41,11 +41,11 @@ import xiangshan.backend.fu.util.HasCSRConst
   * @param q: TLB parameters, like entry number, each TLB has its own parameters
   * @param p: XiangShan parameters, like XLEN
   */
-class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TlbModule
+class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbModule
   with HasCSRConst
   with HasPerfEvents
 {
-  val io = IO(new TlbIO(Width, nRespDups, q))
+  val io = IO(new TlbIO(Width, nRespDups, q, hasCboAccess))
 
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
@@ -68,13 +68,13 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val redirect = io.redirect
   val req_in = req
   val preCheck = (0 until Width).map { i =>
-    val prepare = Module(new TlbRequestPrepare(q))
+    val prepare = Module(new TlbRequestPrepare(q, hasCboAccess))
     prepare.io.req.bits := req_in(i).bits
     prepare.io.req.valid := req_in(i).valid
     prepare.io.csr := csr
     prepare.io.resp
   }
-  val req_out = Reg(Vec(Width, new TlbReq))
+  val req_out = Reg(Vec(Width, new TlbReq(hasCboAccess)))
   for (i <- 0 until Width) {
     when (req(i).fire) {
       req_out(i) := req(i).bits
@@ -137,6 +137,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     info.hlvx := req_out(i).hlvx
     if (HasShadowStack) {
       info.isShadowStack.get := req_out(i).shadowStackUser.get
+      info.isCbo.get := req_out(i).isCbo.getOrElse(false.B)
       info.sse.get := csr.SSEVec.menvcfgSSE && MuxLookup(info.s2xlate, false.B)(Seq(
         noS2xlate -> true.B,
         onlyStage1 -> csr.SSEVec.henvcfgSSE,
@@ -339,11 +340,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     pmp(idx).valid := resp(idx).valid || noTranslate
     pmp(idx).bits.addr := addr
     pmp(idx).bits.size := size
-    // W=1, R=0 is a reserved PMP encoding, so checking W also guarantees R.
-    // SSPOPCHK is the only shadow-stack request whose original TLB command is read.
-    pmp(idx).bits.cmd := (if (HasShadowStack) {
-      Mux(isShadowStackAccess && cmd === TlbCmd.read, TlbCmd.write, cmd)
-    } else cmd)
+    pmp(idx).bits.cmd := cmd
+    pmp(idx).bits.isShadowStackAccess.foreach(_ := isShadowStackAccess)
   }
 
   def access_check(perm: TlbPermBundle, idx: Int, nDups: Int,
@@ -578,13 +576,15 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
   val isFakePte = !perm.v.get && !perm.pf && !perm.af && !onlyS2
   val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v.get && !perm.pf && !perm.af
   val s1_valid = accessInfo.translateEnable && !onlyS2
+  val modeCheck = !(accessInfo.mode === ModeU && !perm.u || accessInfo.mode === ModeS && perm.u && (!accessInfo.sum || accessInfo.ifetch))
+
   val isSspEncoding = Option.when(HasShadowStack) (perm.w && !perm.r && !perm.x)
   val isSspReadOnlyEncoding = Option.when(HasShadowStack) (!perm.w && perm.r && !perm.x)
   // Only classify an S/VS-stage PTE by XWR after a valid leaf PTE has been obtained.
   // Invalid/non-resident PTEs must retain their page fault instead of being
   // reclassified as an SS access fault merely because XWR is not 010/001.
   val canCheckSspPageType = Option.when(HasShadowStack) (
-    s1_valid && perm.v.get && !perm.pf && !perm.af && !isFakePte && !isNonLeaf
+    s1_valid && perm.v.get && !perm.pf && !perm.af && !isFakePte && !isNonLeaf && modeCheck
   )
   val isSspPage = Option.when(HasShadowStack) (
     canCheckSspPageType.get && sspEn && isSspEncoding.get
@@ -614,7 +614,6 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
   val ldUpdate = !perm.a && isLd && !isShadowStack // update A/D through exception
   val stUpdate = ((!perm.a || !perm.d) && isSt) || (!perm.a && isLd && isShadowStack) // update A/D through exception
   val instrUpdate = !perm.a && isInst // update A/D through exception
-  val modeCheck = !(accessInfo.mode === ModeU && !perm.u || accessInfo.mode === ModeS && perm.u && (!accessInfo.sum || accessInfo.ifetch))
   val ldPermFail = !(modeCheck && (Mux(hlvx, perm.x, perm.r || accessInfo.s1Mxr && perm.x) || isSspPage.getOrElse(false.B)))
   val stPermFail = !(modeCheck && perm.w)
   val instrPermFail = !(modeCheck && perm.x)
@@ -637,7 +636,9 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
 
   val fault_valid = s1_valid || s2_valid
 
-  val isSspAf = sspPermAf.getOrElse(false.B) || writeSspAf.getOrElse(false.B)
+  // CBOs fault on shadow-stack pages even when checked as a read.
+  val cboSspAf = isSspPage.getOrElse(false.B) && accessInfo.isCbo.getOrElse(false.B)
+  val isSspAf = sspPermAf.getOrElse(false.B) || writeSspAf.getOrElse(false.B) || cboSspAf
   val isAf = af || isSspAf || instFetchSspAf.getOrElse(false.B)
 
   // when pf and gpf can't happens simultaneously
@@ -686,9 +687,9 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
 }
 
 // Prepare request addresses and check pre-faults in S0
-class TlbRequestPrepare(q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst {
+class TlbRequestPrepare(q: TLBParameters, hasCboAccess: Boolean = false)(implicit p: Parameters) extends TlbModule with HasCSRConst {
   val io = IO(new Bundle {
-    val req = Input(ValidIO(new TlbReq))
+    val req = Input(ValidIO(new TlbReq(hasCboAccess)))
     val csr = Input(new TlbCsrBundle)
     val resp = Output(new TlbPreCheckResp)
   })
