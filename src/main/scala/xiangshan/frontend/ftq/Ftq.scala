@@ -524,6 +524,25 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Performance monitoring
   // --------------------------------------------------------------------------------
+  private val redirectPerfMeta = perfQueue(backendRedirect.bits.ftqIdx.value).bpuPerf
+  private val redirectCfiOffset = getAlignedPosition(
+    GuardedPcInit(redirect.bits.pc),
+    redirect.bits.ftqOffset
+  )._1
+  private val perf_backendRedirectBranchInfo = Wire(new BranchInfo)
+  perf_backendRedirectBranchInfo.target      := GuardedPcInit(backendRedirect.bits.target).unGuard
+  perf_backendRedirectBranchInfo.taken       := backendRedirect.bits.taken
+  perf_backendRedirectBranchInfo.cfiPosition := redirectCfiOffset
+  perf_backendRedirectBranchInfo.attribute   := backendRedirect.bits.attribute
+  perf_backendRedirectBranchInfo.mispredict  := backendRedirect.bits.isMisPred
+  perf_backendRedirectBranchInfo.debug_realCfiPc.foreach(_ := DontCare)
+  private val perf_backendRedirectBlame = BlameBpuSource(
+    backendRedirect.valid,
+    redirectPerfMeta,
+    perf_backendRedirectBranchInfo
+  )
+
+  private val commitPerfMeta = perfQueue(commitPtr(0).value)
 
   // Topdown analysis
   io.topdownOverride.valid := backendRedirect.valid || ifuRedirect.valid
@@ -532,13 +551,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
     MuxCase( // backend redirect
       TopDownCounters.OtherRedirectBubble.id.U,
       Seq(
-        backendRedirect.bits.debugIsCtrl -> MuxCase(
-          TopDownCounters.BTBMissBubble.id.U,
+        backendRedirect.bits.debugIsCtrl -> Mux1H(
           Seq(
-            backendRedirect.bits.attribute.isConditional -> TopDownCounters.TAGEMissBubble.id.U, // FIXME: btb / sc?
-            backendRedirect.bits.attribute.isReturn      -> TopDownCounters.RASMissBubble.id.U,
-            backendRedirect.bits.attribute.needIttage    -> TopDownCounters.ITTAGEMissBubble.id.U
-          )
+            (BlameBpuSource.BlameType.BTB, TopDownCounters.BTBMissBubble.id.U),
+            (BlameBpuSource.BlameType.RAS, TopDownCounters.RASMissBubble.id.U),
+            (BlameBpuSource.BlameType.TAGE, TopDownCounters.TAGEMissBubble.id.U),
+            (BlameBpuSource.BlameType.ITTAGE, TopDownCounters.ITTAGEMissBubble.id.U),
+            (BlameBpuSource.BlameType.SC, TopDownCounters.SCMissBubble.id.U)
+          ).map { case (blameType, counterType) =>
+            (perf_backendRedirectBlame === blameType) -> counterType
+          }
         ),
         backendRedirect.bits.debugIsMemVio -> TopDownCounters.MemVioRedirectBubble.id.U
       )
@@ -580,13 +602,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   generatePerfEvent()
 
   // XSPerfCounters
-  private val redirectCfiOffset = getAlignedPosition(
-    GuardedPcInit(redirect.bits.pc),
-    redirect.bits.ftqOffset
-  )._1
-  private val redirectPerfMeta = perfQueue(backendRedirect.bits.ftqIdx.value).bpuPerf
-  private val commitPerfMeta   = perfQueue(commitPtr(0).value)
-
   XSPerfSeqAccumulate(
     "squash_cycles_bp_wrong_redirect",
     backendRedirect.valid && backendRedirect.bits.isMisPred,
