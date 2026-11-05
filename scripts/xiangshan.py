@@ -75,7 +75,8 @@ class XSArgs(object):
         # Makefile arguments
         self.threads = args.threads
         self.make_threads = args.make_threads
-        self.with_constantin = 1 if args.with_constantin else None
+        self.with_tea = 1 if args.with_tea else None
+        self.with_constantin = 1 if args.with_constantin or args.with_tea else None
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.is_release = 1 if args.release else None
         self.is_spike = "Spike" if args.spike else None
@@ -88,7 +89,7 @@ class XSArgs(object):
         self.xprop = 1 if args.xprop else None
         self.issue = args.issue
         self.llc = args.llc
-        self.with_chiseldb = 1 if args.enable_db or args.enable_rolling else 0
+        self.with_chiseldb = 1 if args.enable_db or args.enable_rolling or args.with_tea else 0
         self.with_rollingdb = 1 if args.enable_rolling else None
         # emu arguments
         self.max_instr = args.max_instr
@@ -143,6 +144,7 @@ class XSArgs(object):
             (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
             (self.with_constantin, "WITH_CONSTANTIN"),
+            (self.with_tea,      "WITH_TEA"),
             (self.is_release,    "RELEASE"),
             (self.is_spike,      "REF"),
             (self.trace,         "EMU_TRACE"),
@@ -836,6 +838,7 @@ if __name__ == "__main__":
     parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--spike', action='store_true', help='enable spike diff')
     parser.add_argument('--with-constantin', action='store_true', help='enable constantin')
+    parser.add_argument('--with-tea', action='store_true', help='build TEA with ChiselDB and Constantin')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--make-threads', nargs='?', type=int, help='number of make threads', default=200)

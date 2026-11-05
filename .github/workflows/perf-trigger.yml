@@ -61,6 +61,11 @@ on:
         required: false
         type: boolean
         default: false
+      enable_tea:
+        description: Enable TEA sampling and record only TEA tables (default period 1000)
+        required: false
+        type: boolean
+        default: false
       enable_db:
         description: Enable ChiselDB dump (High disk usage, 4~16G/ckpt, use with caution!)
         required: false
@@ -107,6 +112,7 @@ jobs:
         benchmarks: ${{ github.event.inputs.benchmarks }}
         cst_file: ${{ github.event.inputs.cst_file }}
         disable_diff: ${{ fromJSON(github.event.inputs.disable_diff) }}
+        enable_tea: ${{ fromJSON(github.event.inputs.enable_tea) }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
         servers: ${{ github.event.inputs.servers }}

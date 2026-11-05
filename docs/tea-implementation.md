@@ -318,6 +318,14 @@ Summary 是采集模式，现有 TEA tracker 仍然 elaboration 并跟踪成员�
 
 GSIM 使用 `make gsim GSIM=1`，其余采集开关和运行参数相同。
 
+性能 CI 的 `Performance Regression Trigger` 提供 `enable_tea` 开关。选择包含本工作流的分支运行，
+将 `test_branch` 设为 TEA 分支并勾选 `enable_tea`，即可自动构建 TEA、ChiselDB 和 Constantin，
+默认加载 `scripts/ci/tea-period1000.cst`，仅写入上述四张 TEA 表；无需另行勾选 `enable_db`。
+`enable_tea` 开启时，表筛选优先于 `enable_db` 和 `enable_rolling` 的全表导出。
+需要修改采样周期时，指定自己的 `cst_file`，并在其中设置 `enableTea0 1` 和 `teaSamplePeriod0`。
+TEA CI 使用工作流固定提交的 `env-scripts` runner，默认在共享 node NFS 的服务器运行；
+自定义 `servers` 时需保证所选服务器能读取 `cst_file`。结果目录带 `-tea` 标记，避免复用未编译 TEA 的 EMU。
+
 ### 统计口径与边界
 
 - `TeaCycleSummary` 在统计 enable 开启/关闭边界，以及每 4096 个连续启用周期写一条累计快照。
