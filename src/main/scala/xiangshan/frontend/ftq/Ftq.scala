@@ -40,7 +40,6 @@ import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BlameBpuSource
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
@@ -48,6 +47,7 @@ import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PcInit
 import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
@@ -579,7 +579,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
   io.topdownOverride.bits.isIfuRedirect := ifuRedirect.valid && !backendRedirect.valid // prevent overriding ibuf
 
-  private val topdownPipe = Module(new FrontendTopDownPipeline(1))
+  private val topdownPipe = Module(new TopDownPipeline(1))
   topdownPipe.io.in := io.fromBpu.topdown
   topdownPipe.setReason(
     0,

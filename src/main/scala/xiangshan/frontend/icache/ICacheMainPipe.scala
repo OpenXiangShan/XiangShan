@@ -30,9 +30,9 @@ import xiangshan.TopDownCounters
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.Pc
 import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.ftq.BpuFlushInfo
 import xiangshan.frontend.ftq.FtqToMainPipeBundle
@@ -596,7 +596,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   // topdown: fromFtq -> toIfu has 1 stage
-  private val topdownPipe = Module(new FrontendTopDownPipeline(1))
+  private val topdownPipe = Module(new TopDownPipeline(1))
   topdownPipe.io.in := io.fromFtq.bits.topdown
   topdownPipe.setReason(
     0,

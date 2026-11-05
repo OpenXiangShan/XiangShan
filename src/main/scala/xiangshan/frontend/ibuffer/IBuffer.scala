@@ -35,8 +35,8 @@ import xiangshan.TopDownCounters
 import xiangshan.backend.BackendToIBufBundle
 import xiangshan.backend.decode.VTypeGen
 import xiangshan.frontend.FetchToIBuffer
-import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
@@ -519,7 +519,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private val topdownPipe = Module(new FrontendTopDownPipeline(1))
+  private val topdownPipe = Module(new TopDownPipeline(1))
   topdownPipe.io.in := io.in.bits.topdown
   topdownPipe.setReason(
     0,

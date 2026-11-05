@@ -28,11 +28,11 @@ import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
 import xiangshan.TopDownCounters
 import xiangshan.frontend.BpuToFtqIO
-import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
@@ -727,7 +727,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   io.toFtq.perfMeta := s3_perfMeta
 
   /* *** top-down *** */
-  private val topdownPipe = Module(new FrontendTopDownPipeline(3))
+  private val topdownPipe = Module(new TopDownPipeline(3))
   // BPU is the starting point of the top-down pipeline, starts with FrontendOtherCoreStall.
   // The later part of the pipeline might override to other reason (i.e. ICacheMiss).
   // At last, IBuffer will expand reason from per-fetch-block to per-instruction,

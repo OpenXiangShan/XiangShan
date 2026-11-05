@@ -25,7 +25,7 @@ import xiangshan.TopDownCounters
 import xiangshan.XSCoreParamsKey
 import xiangshan.XSTileKey
 
-class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
+class TopDownPipelineTest extends AnyFlatSpec with should.Matchers {
   private val defaultConfig = new DefaultConfig
   private implicit val config: Parameters = defaultConfig.alterPartial {
     case XSCoreParamsKey => defaultConfig(XSTileKey).head
@@ -49,7 +49,7 @@ class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
           val out:        TopdownBundle         = Output(new TopdownBundle)
         }
         val io: TestIO = IO(new TestIO)
-        private val pipe = Module(new FrontendTopDownPipeline(numStages))
+        private val pipe = Module(new TopDownPipeline(numStages))
         pipe.io.in := io.in
         private val reasons = Seq(
           io.enumerated -> TopDownCounters.FetchFragBubble,
@@ -96,7 +96,7 @@ class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
   for (broadcast <- Seq(false, true)) {
     it should s"reject unknown types during elaboration with broadcast=$broadcast" in {
       class TestModule extends Module {
-        private val pipe = Module(new FrontendTopDownPipeline(1))
+        private val pipe = Module(new TopDownPipeline(1))
         pipe.io.in.reason := TopDownCounters.NoStall.id.U
         if (broadcast) {
           pipe.setReason(Seq(123 -> "456"))
@@ -111,7 +111,7 @@ class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
 
   for (numStages <- Seq(1, 2, 3)) {
     it should s"preserve cycle latency, local overrides and reset with $numStages stages" in {
-      simulate(new FrontendTopDownPipeline(numStages)) { dut =>
+      simulate(new TopDownPipeline(numStages)) { dut =>
         dut.io.in.reason.poke(TopDownCounters.NoStall.id.U)
         dut.io.over.foreach { over =>
           over.valid.poke(false.B)
@@ -197,7 +197,7 @@ class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
         val out:  TopdownBundle        = Output(new TopdownBundle)
       }
       val io: TestIO = IO(new TestIO)
-      private val pipe = Module(new FrontendTopDownPipeline(3))
+      private val pipe = Module(new TopDownPipeline(3))
       pipe.io.in := io.in
       pipe.setReason(Seq(io.high.valid -> io.high.bits.reason, io.low.valid -> io.low.bits.reason))
       io.out := pipe.io.out
@@ -241,7 +241,7 @@ class FrontendTopDownPipelineTest extends AnyFlatSpec with should.Matchers {
         val out:   TopdownBundle        = Output(new TopdownBundle)
       }
       val io: TestIO = IO(new TestIO)
-      private val pipe = Module(new FrontendTopDownPipeline(3))
+      private val pipe = Module(new TopDownPipeline(3))
       pipe.io.in := io.in
       pipe.setReason(Seq(io.low.valid -> io.low.bits.reason))
       pipe.setReason(2, Seq(io.local.valid -> io.local.bits.reason))
