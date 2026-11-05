@@ -113,7 +113,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def BLOOM_FILTER_ENTRY_NUM = 4096
 
   // each source use a id to distinguish its multiple reqs
-  def reqIdWidth = log2Up(nEntries) max log2Up(StoreBufferSize)
+  // Reserve one store response ID for DMA, beyond the Sbuffer entry IDs.
+  def reqIdWidth = log2Up(nEntries) max log2Up(StoreBufferSize + (if (p(coupledL2.WithoutLLC)) 1 else 0))
 
   require(isPow2(cfg.nMissEntries)) // TODO
   // require(isPow2(cfg.nReleaseEntries))
