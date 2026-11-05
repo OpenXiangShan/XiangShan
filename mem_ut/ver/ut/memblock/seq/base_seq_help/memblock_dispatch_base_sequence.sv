@@ -2544,6 +2544,15 @@ function void memblock_dispatch_base_sequence::apply_addr_reuse_window(input mai
     bit delete_after_pick;
     bit keep_ref_size;
 
+    case (tr.op_class)
+        MEMBLOCK_OP_CLASS_INT_LOAD,
+        MEMBLOCK_OP_CLASS_FP_LOAD,
+        MEMBLOCK_OP_CLASS_STORE,
+        MEMBLOCK_OP_CLASS_PREFETCH: begin
+        end
+        default: return;
+    endcase
+
     if (rand_weighted2(seq_csr_common::get_addr_reuse_en_1_wt(),
                        seq_csr_common::get_addr_reuse_en_0_wt()) != 0) begin
         return;

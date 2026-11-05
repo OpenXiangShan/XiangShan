@@ -542,6 +542,102 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
         check_expect(pdest0 != pdest2, "CAS.Q STA0/STA2 pdest must be distinct");
     endtask:check_atomic_issue_fields
 
+    task check_amo_addr_reuse_type_guard();
+        localparam int unsigned AMO_ENTRY_COUNT = 16;
+        int unsigned saved_op_class_int_load_wt;
+        int unsigned saved_op_class_fp_load_wt;
+        int unsigned saved_op_class_store_wt;
+        int unsigned saved_op_class_prefetch_wt;
+        int unsigned saved_op_class_amo_wt;
+        int unsigned saved_op_class_cbo_wt;
+        int unsigned saved_addr_reuse_en_1_wt;
+        int unsigned saved_addr_reuse_en_0_wt;
+        int unsigned saved_addr_reuse_load_after_store_wt;
+        int unsigned saved_addr_reuse_load_after_load_wt;
+        int unsigned saved_addr_reuse_store_after_load_wt;
+        int unsigned saved_addr_reuse_store_after_store_wt;
+        bit saved_boundary_profile_gen_en;
+        memblock_uid_t recent_load_uid_q[$];
+        memblock_uid_t recent_store_uid_q[$];
+        main_control_transaction tr;
+
+        saved_op_class_int_load_wt = seq_csr_common::op_class_int_load_wt;
+        saved_op_class_fp_load_wt = seq_csr_common::op_class_fp_load_wt;
+        saved_op_class_store_wt = seq_csr_common::op_class_store_wt;
+        saved_op_class_prefetch_wt = seq_csr_common::op_class_prefetch_wt;
+        saved_op_class_amo_wt = seq_csr_common::op_class_amo_wt;
+        saved_op_class_cbo_wt = seq_csr_common::op_class_cbo_wt;
+        saved_addr_reuse_en_1_wt = seq_csr_common::addr_reuse_en_1_wt;
+        saved_addr_reuse_en_0_wt = seq_csr_common::addr_reuse_en_0_wt;
+        saved_addr_reuse_load_after_store_wt =
+            seq_csr_common::addr_reuse_load_after_store_wt;
+        saved_addr_reuse_load_after_load_wt =
+            seq_csr_common::addr_reuse_load_after_load_wt;
+        saved_addr_reuse_store_after_load_wt =
+            seq_csr_common::addr_reuse_store_after_load_wt;
+        saved_addr_reuse_store_after_store_wt =
+            seq_csr_common::addr_reuse_store_after_store_wt;
+        saved_boundary_profile_gen_en = seq_csr_common::boundary_profile_gen_en;
+
+        seq_csr_common::op_class_int_load_wt = 0;
+        seq_csr_common::op_class_fp_load_wt = 0;
+        seq_csr_common::op_class_store_wt = 0;
+        seq_csr_common::op_class_prefetch_wt = 0;
+        seq_csr_common::op_class_amo_wt = 1;
+        seq_csr_common::op_class_cbo_wt = 0;
+        seq_csr_common::addr_reuse_en_1_wt = 1;
+        seq_csr_common::addr_reuse_en_0_wt = 0;
+        seq_csr_common::addr_reuse_load_after_store_wt = 1;
+        seq_csr_common::addr_reuse_load_after_load_wt = 0;
+        seq_csr_common::addr_reuse_store_after_load_wt = 0;
+        seq_csr_common::addr_reuse_store_after_store_wt = 0;
+        seq_csr_common::boundary_profile_gen_en = 1'b0;
+
+        build_random_main_table(AMO_ENTRY_COUNT);
+        for (memblock_uid_t uid = 0; uid < AMO_ENTRY_COUNT; uid++) begin
+            tr = data.get_main_transaction(uid);
+            check_expect(tr.op_class == MEMBLOCK_OP_CLASS_AMO,
+                   $sformatf("100%% address reuse rewrote AMO uid=%0d to op_class=%s",
+                             uid, op_class_name(tr.op_class)));
+            check_expect(is_amo_fuoptype(tr.fuOpType),
+                   $sformatf("AMO-only uid=%0d has illegal atomic fuOpType=0x%0h",
+                             uid, tr.fuOpType));
+            check_expect(tr.send_pri == 100 && tr.send_pri_std == 100,
+                   $sformatf("AMO-only uid=%0d lost fixed priority send/std=%0d/%0d",
+                             uid, tr.send_pri, tr.send_pri_std));
+        end
+
+        tr = make_scalar("soft_normal_addr_reuse", MEMBLOCK_OP_CLASS_INT_LOAD,
+                         AMO_ENTRY_COUNT);
+        tr.uid = memblock_uid_t'(AMO_ENTRY_COUNT);
+        tr.send_pri = 37;
+        tr.send_pri_std = 42;
+        apply_addr_reuse_window(tr, tr.uid, recent_load_uid_q, recent_store_uid_q);
+        check_expect(tr.op_class == MEMBLOCK_OP_CLASS_STORE &&
+               memblock_op_behavior_util::is_store_fuoptype(tr.fuOpType),
+               "ordinary no-reference address-reuse fallback no longer selects a legal store");
+        check_expect(tr.send_pri == 37 && tr.send_pri_std == 42,
+               "ordinary address reuse unexpectedly inherited AMO priority");
+
+        seq_csr_common::op_class_int_load_wt = saved_op_class_int_load_wt;
+        seq_csr_common::op_class_fp_load_wt = saved_op_class_fp_load_wt;
+        seq_csr_common::op_class_store_wt = saved_op_class_store_wt;
+        seq_csr_common::op_class_prefetch_wt = saved_op_class_prefetch_wt;
+        seq_csr_common::op_class_amo_wt = saved_op_class_amo_wt;
+        seq_csr_common::op_class_cbo_wt = saved_op_class_cbo_wt;
+        seq_csr_common::addr_reuse_en_1_wt = saved_addr_reuse_en_1_wt;
+        seq_csr_common::addr_reuse_en_0_wt = saved_addr_reuse_en_0_wt;
+        seq_csr_common::addr_reuse_load_after_store_wt =
+            saved_addr_reuse_load_after_store_wt;
+        seq_csr_common::addr_reuse_load_after_load_wt =
+            saved_addr_reuse_load_after_load_wt;
+        seq_csr_common::addr_reuse_store_after_load_wt =
+            saved_addr_reuse_store_after_load_wt;
+        seq_csr_common::addr_reuse_store_after_store_wt =
+            saved_addr_reuse_store_after_store_wt;
+        seq_csr_common::boundary_profile_gen_en = saved_boundary_profile_gen_en;
+    endtask:check_amo_addr_reuse_type_guard
+
     virtual task body();
         ensure_dispatch_runtime_helpers();
         check_fixed_lane_prefix_and_partial();
@@ -551,6 +647,7 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
         check_cancel_shadow_restore_credential();
         check_atomic_fault_redirect_classification();
         check_atomic_issue_fields();
+        check_amo_addr_reuse_type_guard();
         check_atomic_held_piece_stability();
         check_atomic_token_reset_binding();
         data.publish_lsq_sequence_local_state(1'b1, 1'b0);
