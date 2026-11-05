@@ -3,7 +3,7 @@ import argparse,hashlib,json,shlex,subprocess,tarfile
 from datetime import datetime,timezone
 from pathlib import Path
 HERE=Path(__file__).resolve().parent
-parser=argparse.ArgumentParser();parser.add_argument('--stage',choices=['short','formal','repeat','micro','micro-v2','sampling','confirm','queue-observation','ci-followup','soplex-followup','gate-observation','gate-observation-v2','fp-timestamp-observation','fp-wb-interval-observation','rob-wb-provenance-observation','rob-wb-sequence-observation','rob-retired-owner-observation','lrq-nearhead-observation','lrq-stall-observation','load-replay-wait-observation'],default='short');parser.add_argument('--report-dir',type=Path,default=HERE);args=parser.parse_args();HERE=args.report_dir.resolve()
+parser=argparse.ArgumentParser();parser.add_argument('--stage',choices=['short','formal','repeat','micro','micro-v2','sampling','confirm','queue-observation','ci-followup','soplex-followup','gate-observation','gate-observation-v2','fp-timestamp-observation','fp-wb-interval-observation','rob-wb-provenance-observation','rob-wb-sequence-observation','rob-retired-owner-observation','lrq-nearhead-observation','lrq-stall-observation','load-replay-wait-observation','stream-depth-policy'],default='short');parser.add_argument('--report-dir',type=Path,default=HERE);args=parser.parse_args();HERE=args.report_dir.resolve()
 DEST=HERE/('raw' if args.stage=='short' else args.stage)
 REMOTE='/nfs/home/wujiabin/work/xs-env/rtl-dip-experiments-20261103'
 if args.stage!='short':REMOTE+='/'+args.stage
@@ -14,7 +14,7 @@ code='''from pathlib import Path
 import hashlib,json
 E=Path(REMOTE)
 rows={}
-for v in ['control','fpiq24','fprank','fpreg288','fpiq24-fpreg288','fpiq24-fpreg320','fcvt-fp2','rebuild-control','fpiq24-div','fpiq24-fpreg288-rab384','fpiq24-fex123','fpiq24-div-observe','fpiq24-fex123-observe','gate-observe','gate-observe-v2','fp-credit','fp-credit-guard','fp-credit-div','fp-credit-fex123','fp-timestamps-observe','fp-credit-fdiv-only','fp-wb-intervals-observe','rob-wb-provenance-observe','rob-wb-sequence-observe','rob-retired-owner-observe','lrq-nearhead-order','lrq-nearhead-observe','lrq-stall-observe','load-replay-wait-observe']:
+for v in ['control','fpiq24','fprank','fpreg288','fpiq24-fpreg288','fpiq24-fpreg320','fcvt-fp2','rebuild-control','fpiq24-div','fpiq24-fpreg288-rab384','fpiq24-fex123','fpiq24-div-observe','fpiq24-fex123-observe','gate-observe','gate-observe-v2','fp-credit','fp-credit-guard','fp-credit-div','fp-credit-fex123','fp-timestamps-observe','fp-credit-fdiv-only','fp-wb-intervals-observe','rob-wb-provenance-observe','rob-wb-sequence-observe','rob-retired-owner-observe','lrq-nearhead-order','lrq-nearhead-observe','lrq-stall-observe','load-replay-wait-observe','stream-l1-depth32']:
  if OBSERVER:
   receipt=E/v/'results.json'
   ready_points={row['point'] for row in json.loads(receipt.read_text())} if receipt.exists() else set()
@@ -29,7 +29,7 @@ for v in ['control','fpiq24','fprank','fpreg288','fpiq24-fpreg288','fpiq24-fpreg
     with f.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     rows[str(f.relative_to(E))]=dict(bytes=f.stat().st_size,sha256=digest)
 print(json.dumps(rows))
-'''.replace('REMOTE',repr(REMOTE)).replace('FILES',repr(FILES)).replace('SUBDIR',repr('short' if args.stage=='short' else 'points')).replace('MICRO',repr(args.stage in ('micro','micro-v2'))).replace('OBSERVER',repr(args.stage in ('gate-observation','gate-observation-v2','fp-timestamp-observation','fp-wb-interval-observation','rob-wb-provenance-observation','rob-wb-sequence-observation','rob-retired-owner-observation','lrq-nearhead-observation','lrq-stall-observation','load-replay-wait-observation')))
+'''.replace('REMOTE',repr(REMOTE)).replace('FILES',repr(FILES)).replace('SUBDIR',repr('short' if args.stage=='short' else 'points')).replace('MICRO',repr(args.stage in ('micro','micro-v2'))).replace('OBSERVER',repr(args.stage in ('gate-observation','gate-observation-v2','fp-timestamp-observation','fp-wb-interval-observation','rob-wb-provenance-observation','rob-wb-sequence-observation','rob-retired-owner-observation','lrq-nearhead-observation','lrq-stall-observation','load-replay-wait-observation','stream-depth-policy')))
 response=subprocess.run(['proxychains','-q','ssh','-o','BatchMode=yes','node032','python3 -'],input=code,capture_output=True,text=True,check=True)
 rows=json.loads(response.stdout)
 new=[]
