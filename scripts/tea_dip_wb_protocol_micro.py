@@ -28,14 +28,15 @@ def write(path, value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', required=True, type=Path)
+    parser.add_argument('--candidate-build', required=True, type=Path)
     args = parser.parse_args(); out = args.output_dir.resolve()
     assert socket.gethostname().startswith('node') and not out.exists()
     environment = Path('/nfs/home/wujiabin/work/xs-env/rtl-dip-experiments-20261103')
     spec = json.loads((environment / 'experiment.json').read_text())
-    build = json.loads((environment / 'fdiv-wb-class/build-state.json').read_text())
-    assert build['source'] == '1f45c4ec4b47c1e35c6b57b0ed2caa3349201c40' and build['phase'] == 'complete'
+    build = json.loads(args.candidate_build.read_text())
+    assert build['phase'] == 'complete'
     binaries = {'control841': dict(binary=spec['baseline'], sha256=spec['baseline_sha256'], source=spec['base']),
-                'candidate1f45': dict(binary=build['binary'], sha256=build['binary_sha256'], source=build['source'])}
+                'candidate': dict(binary=build['binary'], sha256=build['binary_sha256'], source=build['source'])}
     assert all(digest(v['binary']) == v['sha256'] for v in binaries.values())
     assert digest(spec['reference']) == spec['reference_sha256']
     out.mkdir(parents=True); cst = out / 'tea-dip-period1000.cst'; cst.write_bytes((environment / 'tea-dip-period1000.cst').read_bytes())
