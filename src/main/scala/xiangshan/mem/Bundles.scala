@@ -33,6 +33,30 @@ import utils.OptionWrapper
 
 object Bundles {
 
+  class LrqSpecialCtrl(implicit p: Parameters) extends XSBundle {
+    val active = Bool()
+    val targetValid = Bool()
+    val lqIdx = new LqPtr
+    val robIdx = new RobPtr
+  }
+
+  class LrqCreditReturn(implicit p: Parameters) extends XSBundle {
+    val initialized = Bool()
+    val normal = UInt(log2Ceil(LoadQueueReplaySize + 1).W)
+    val guard = Bool()
+  }
+
+  class LrqAlloc(implicit p: Parameters) extends XSBundle {
+    val uop = new DynInst
+    val usesGuard = Bool()
+  }
+
+  class LrqCancel(implicit p: Parameters) extends XSBundle {
+    val index = UInt(log2Ceil(LoadQueueReplaySize).W)
+    val robIdx = new RobPtr
+    val lqIdx = new LqPtr
+  }
+
   object StLdNukeMatchType {
     def Normal      = "b00".U
     def CacheLine   = "b10".U

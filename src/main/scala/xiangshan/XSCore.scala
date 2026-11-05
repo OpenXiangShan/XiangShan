@@ -146,6 +146,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.updateLFST).foreach { case (sink, source) =>
     sink := source
   }
+  backend.io.mem.lrqCreditReturn := memBlock.io.mem_to_ooo.lrqCreditReturn
+  backend.io.mem.lrqSpecialCtrl := memBlock.io.mem_to_ooo.lrqSpecialCtrl
   backend.io.mem.memoryViolation := memBlock.io.mem_to_ooo.memoryViolation
   backend.io.mem.mdpTrain := memBlock.io.mem_to_ooo.mdpTrain
   backend.io.mem.lsqEnqIO <> memBlock.io.ooo_to_mem.enqLsq
@@ -197,6 +199,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.inner_beu_errors_icache <> frontend.io.error
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
+  memBlock.io.ooo_to_mem.lrqUsesGuard := backend.io.mem.lrqUsesGuard
   memBlock.io.ooo_to_mem.wakeupToLRQ <> backend.io.mem.wakeupToLRQ
   memBlock.io.ooo_to_mem.wakeupToLRQCancel := backend.io.mem.wakeupToLRQCancel
   memBlock.io.ooo_to_mem.vstdStoreData <> backend.io.mem.vstdStoreData

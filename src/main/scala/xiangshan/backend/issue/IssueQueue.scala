@@ -11,12 +11,14 @@ import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.mem.Bundles.LrqSpecialCtrl
 import utility.PerfCCT
 import xiangshan.backend.rob.RobPtr
 
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
   val flush = Flipped(ValidIO(new Redirect))
+  val lrqSpecialCtrl = Option.when(params.isLdAddrIQ)(Input(new LrqSpecialCtrl))
   val enq = Vec(params.numEnq, Flipped(DecoupledIO(new RegionInUop(params))))
 
   val og0Resp = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))
@@ -101,6 +103,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   // Modules
   val entries = Module(new Entries)
+  entries.io.lrqSpecialCtrl.foreach(_ := io.lrqSpecialCtrl.get)
   val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap()))) }
   val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap()))) }
   val intWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(x.intFuLatencyMap))) }

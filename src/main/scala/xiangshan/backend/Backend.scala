@@ -48,6 +48,7 @@ import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.backend.vector.{Exu, VecIssueQueue, VecRegionImp, VecRegionModule}
 import xiangshan.backend.float.{FltExu, FltIssueQueue, FltRegionImp, FltRegionModule}
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.mem.Bundles.{LrqCreditReturn, LrqSpecialCtrl}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr, StoreQueueDataWrite, ToLsqEnqCtrl}
 
 
@@ -343,6 +344,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpRegion.in.fromIntRegion.wakeupFromI2F.pdest := intRegion.io.cross.I2FWakeupOut.get.bits.pdest
   fpRegion.in.fromIntRegion.wakeupFromI2F.delay := 0.U
   intRegion.io.wakeupFromLDU.foreach(x => x := io.mem.wakeup)
+  intRegion.io.lrqCreditReturn.get := io.mem.lrqCreditReturn
+  intRegion.io.lrqSpecialCtrl.get := io.mem.lrqSpecialCtrl
+  io.mem.lrqUsesGuard := intRegion.io.lrqUsesGuard.get
   intRegion.io.wakeupToLRQ.foreach(x => io.mem.wakeupToLRQ.zip(x.flatten).foreach { case (sink, source) => sink := source })
   intRegion.io.wakeupToLRQCancel.foreach(x => io.mem.wakeupToLRQCancel.zip(x.flatten).foreach { case (sink, source) => sink := source })
   intRegion.io.staFeedback.  foreach(x => x := io.mem.staIqFeedback)
@@ -750,6 +754,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
   // Since fast load replay always use load unit 0, Backend flips two load port to avoid conflicts
   val flippedLda = true
+  val lrqCreditReturn = Input(new LrqCreditReturn)
+  val lrqSpecialCtrl = Input(new LrqSpecialCtrl)
+  val lrqUsesGuard = Output(Vec(LoadPipelineWidth, Bool()))
   // params alias
   private val LoadQueueSize = VirtualLoadQueueSize
   private val intSchdParams = params.intSchdParams.get

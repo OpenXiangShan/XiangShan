@@ -102,7 +102,7 @@ class LoadPipeBundle(
 
   // replay
   val mshrId = Option.when(param.replayFromToLRQ)(UInt(log2Up(cfg.nMissEntries).W)) // valid when `handledByMSHR` is HIGH
-  val replayQueueIdx = Option.when(param.replayFromToLRQ)(UInt(log2Up(LoadQueueReplaySize+1).W)) // valid when `entrance` is replay
+  val replayQueueIdx = Option.when(param.replayFromToLRQ)(UInt(log2Up(LoadQueueReplaySize+1).W)) // allocated in s0 and retained across replay
   val cause = Option.when(param.replayFromToLRQ)(Vec(LoadReplayCauses.allCauses, Bool()))
   val specialModeRequest = Bool()
   val fastReplayNukeFirst = Option.when(param.hasS2PreProcess)(Bool())// When stld_nuke and storeset hit occur simultaneously, stld_nuke should be handled first.

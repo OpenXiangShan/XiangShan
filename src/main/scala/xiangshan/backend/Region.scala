@@ -27,6 +27,7 @@ import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType}
 import xiangshan.backend.regfile.RfWritePortBundle
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.mem._
+import xiangshan.mem.Bundles.{LrqCreditReturn, LrqSpecialCtrl}
 import utility._
 import utils.BundleUtils.makeValid
 import xiangshan.backend.fu.vector.Bundles.{VType, Vstart}
@@ -76,6 +77,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       (x.bits.exuIdx, delayed)
     }.toMap
   // Connect bundles having the same wakeup source
+  issueQueues.foreach(_.io.lrqSpecialCtrl.foreach(_ := io.lrqSpecialCtrl.get))
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     println(s"[Region_${params.schdType}] iq.param.getIQName = ${iq.param.getIQName}")
     println(s"[Region_${params.schdType}] iq.io.wakeupFromIQ.size = ${iq.io.wakeupFromIQ.size}")
@@ -535,6 +537,36 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       Array.fill[Seq[(Bool, UInt)]](backendParams.getFpRfWriteSize)(Seq.empty)
     val firstMemExu = bypassNetwork.io.toExus.int.indexWhere(x => x.map(xx => xx.bits.params.isMemExeUnit).reduce(_ || _))
     println(s"[Regin_int] firstMemExu = $firstMemExu")
+    val loadInputs = bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.hasLoadFu)
+    val loadOutputs = toMem.flatten.filter(_.bits.params.hasLoadFu)
+    val normalCredit = RegInit(0.U(log2Ceil(LoadQueueReplaySize + 1).W))
+    val guardCredit = RegInit(false.B)
+    val creditInitialized = RegInit(false.B)
+    val normalPermit = RegInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
+    val consumeNormal = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
+    val consumeGuard = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
+    val refundNormal = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
+    val refundGuard = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
+    val special = io.lrqSpecialCtrl.get
+    val guardRequest = VecInit(loadInputs.zipWithIndex.map { case (in, i) =>
+      dataPath.io.lrqRequestValid.get(i) && !LSUOpType.isPrefetch(in.bits.ctrl.fuOpType) &&
+        special.targetValid && in.bits.lqIdx.get === special.lqIdx && in.bits.robIdx === special.robIdx &&
+        !in.bits.robIdx.needFlush(flushCopyRegVec.last) && !LoadShouldCancel(in.bits.ctrl.loadDependency, io.ldCancel) &&
+        (!loadOutputs(i).valid || loadOutputs(i).ready)
+    })
+    val guardGrant = PriorityEncoderOH(guardRequest.asUInt)
+    val nextNormalCredit = normalCredit +& io.lrqCreditReturn.get.normal + PopCount(refundNormal) - PopCount(consumeNormal)
+    val nextGuardCredit = guardCredit.asUInt +& io.lrqCreditReturn.get.guard.asUInt + PopCount(refundGuard) - PopCount(consumeGuard)
+    when (!creditInitialized && io.lrqCreditReturn.get.initialized) {
+      creditInitialized := true.B
+      normalCredit := (LoadQueueReplaySize - 1).U
+      guardCredit := true.B
+      normalPermit.zipWithIndex.foreach { case (permit, i) => permit := (LoadQueueReplaySize - 1 > i).B }
+    }.elsewhen (creditInitialized) {
+      normalCredit := nextNormalCredit
+      guardCredit := nextGuardCredit(0)
+      normalPermit.zipWithIndex.foreach { case (permit, i) => permit := nextNormalCredit > i.U }
+    }
     for (i <- toMem.indices) {
       for (j <- toMem(i).indices) {
         val toMemExuInput = bypassNetwork.io.toExus.int(firstMemExu + i)(j)
@@ -551,12 +583,31 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         toMem(i)(j).valid := RegNext(toMemValidAfterCancel)
         toMem(i)(j).bits := RegNext(toMemExuInput.bits)
         if (toMem(i)(j).bits.params.hasLoadFu){
+          val loadIdx = loadInputs.indexOf(toMemExuInput)
           val toMemValidReg = RegInit(Bool(), false.B)
-          toMemExuInput.ready := toMem(i)(j).ready || !toMemValidReg
-          toMemValidReg := toMemValidAfterCancel && (!toMemValidReg || toMem(i)(j).fire) ||
-                           toMemValidReg && !toMem(i)(j).fire && !toMem(i)(j).bits.robIdx.needFlush(flushCopyRegVec.last)
-          toMem(i)(j).valid := toMemValidReg
-          toMem(i)(j).bits := RegEnable(toMemExuInput.bits, toMemValidAfterCancel && (!toMem(i)(j).valid || toMem(i)(j).fire))
+          val usesGuard = Reg(Bool())
+          val isPrefetch = LSUOpType.isPrefetch(toMemExuInput.bits.ctrl.fuOpType)
+          val holdIsPrefetch = LSUOpType.isPrefetch(toMem(i)(j).bits.ctrl.fuOpType)
+          val holdCancel = toMemValidReg && (toMem(i)(j).bits.robIdx.needFlush(flushCopyRegVec.last) ||
+            LoadShouldCancel(toMem(i)(j).bits.ctrl.loadDependency, io.ldCancel))
+          val useGuard = special.active && guardCredit && guardGrant(loadIdx)
+          val admitted = Mux(isPrefetch, !special.active,
+            Mux(special.active, useGuard, normalPermit(loadIdx)))
+          toMemExuInput.ready := (toMem(i)(j).ready || !toMemValidReg) && admitted
+          val accepted = toMemExuInput.fire && toMemValidAfterCancel
+          toMemValidReg := accepted || toMemValidReg && !toMem(i)(j).fire && !holdCancel
+          toMem(i)(j).valid := toMemValidReg && !holdCancel
+          val holdBits = RegEnable(toMemExuInput.bits, accepted)
+          holdBits.ctrl.loadDependency.foreach(_.zipWithIndex.foreach { case (dependency, k) =>
+            dependency := Mux(accepted, toMemExuInput.bits.ctrl.loadDependency.get(k), dependency) << 1
+          })
+          toMem(i)(j).bits := holdBits
+          when (accepted) { usesGuard := useGuard }
+          io.lrqUsesGuard.get(loadIdx) := usesGuard
+          consumeNormal(loadIdx) := accepted && !isPrefetch && !useGuard
+          consumeGuard(loadIdx) := accepted && !isPrefetch && useGuard
+          refundNormal(loadIdx) := holdCancel && !holdIsPrefetch && !usesGuard
+          refundGuard(loadIdx) := holdCancel && !holdIsPrefetch && usesGuard
         }
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
         if (thisIQ.io.s0Resp.nonEmpty) {
@@ -994,6 +1045,9 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val wakeupFromI2F = Option.when(params.isFpSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
   val wakeupFromF2I = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val cross = new ExuCrossRegion(params)
+  val lrqCreditReturn = Option.when(params.isIntSchd)(Input(new LrqCreditReturn))
+  val lrqSpecialCtrl = Option.when(params.isIntSchd)(Input(new LrqSpecialCtrl))
+  val lrqUsesGuard = Option.when(params.isIntSchd)(Output(Vec(LoadPipelineWidth, Bool())))
   val toMemExu = Option.when(params.isIntSchd || params.isVecSchd)(params.genNewExuInputBundle(DecoupledIO(_), _.hasMemFu))
   // Accepted OG1 load transfers which write an FP physical register. The
   // vector is indexed by the global FP register-file write port.

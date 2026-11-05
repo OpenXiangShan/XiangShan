@@ -193,6 +193,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val physicalUpperSqIdx = Input(new SqPtr)
     }
     val bypass = Flipped(Vec(LoadPipelineWidth, new UncacheBypass))
+    val lrqAlloc = Vec(LoadPipelineWidth, Flipped(Valid(new LrqAlloc)))
+    val lrqAllocIndex = Output(Vec(LoadPipelineWidth, UInt(log2Ceil(LoadQueueReplaySize).W)))
+    val lrqCancel = Vec(LoadPipelineWidth, Flipped(Valid(new LrqCancel)))
+    val lrqCreditReturn = Output(new LrqCreditReturn)
+    val specialCtrl = Output(new LrqSpecialCtrl)
     val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
     val loadWakeup  = Flipped(Vec(cfg.numMemChannels, ValidIO(new DCacheLoadWakeup())))
     val release = Flipped(Valid(new Release))
@@ -223,7 +228,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
-    val specialMode = Output(Bool())
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -291,6 +295,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueReplay.io.redirect         <> io.redirect
   loadQueueReplay.io.robHeadPtr       := io.rob.pendingPtrNext
+  loadQueueReplay.io.alloc            <> io.lrqAlloc
+  loadQueueReplay.io.allocIndex       <> io.lrqAllocIndex
+  loadQueueReplay.io.cancel           <> io.lrqCancel
+  loadQueueReplay.io.creditReturn     <> io.lrqCreditReturn
+  loadQueueReplay.io.specialCtrl      := virtualLoadQueue.io.specialCtrl
+  io.specialCtrl                     := virtualLoadQueue.io.specialCtrl
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
   loadQueueReplay.io.replay           <> io.replay
   loadQueueReplay.io.loadWakeup       <> io.loadWakeup
@@ -323,7 +333,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
   loadQueueReplay.io.replayAllocate <> io.replayAllocate
-  io.specialMode := loadQueueReplay.io.specialMode
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)
