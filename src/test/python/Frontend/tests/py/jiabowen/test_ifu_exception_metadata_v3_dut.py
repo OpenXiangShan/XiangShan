@@ -9,7 +9,8 @@ import pytest
 from env.funcov.py.ifu.compact_funcov import _gpf_metadata_delivery_scope, _read_ifu_internal_with_path
 from tests.py.support.ifu_exception_scope import assert_no_effective_ifu_exception
 from tests.py.zhaoxinran.translation import test_address_translation_context_switch as context
-from tests.py.zhaoxinran.translation import test_address_translation_gstage_provenance as gstage
+from tests.py.support import gstage_provenance as gstage
+from tests.py.support.translation_faults import CACHEABLE_CROSS_PAGE_RVI_PC
 from tests.py.zhaoxinran.translation import test_address_translation_fault as translation_faults
 from tests.py.zhaoxinran.translation import test_instruction_fetch_permission_boundary as faults
 
@@ -143,14 +144,14 @@ def test_ifu_exception_metadata_satp_without_fault_diagnostic(env):
 @pytest.mark.funcov_bins("BIN-954")
 def test_ifu_exception_metadata_vs_nonleaf_gpf_diagnostic(env):
     records = _capture_metadata(env)
-    scenario = gstage._scenario(
+    scenario = gstage.scenario(
         "ifu-bin954-vs-nonleaf-gpf",
         s1_patch=(("s1_entry_v", 1), ("s1_entry_perm_r", 0),
                   ("s1_entry_perm_w", 0), ("s1_entry_perm_x", 0),
                   ("s1_pf", 0), ("s1_af", 0)),
         gpf=1, gaf=0,
     )
-    gstage.test_address_translation_gstage_provenance(
+    gstage.run_gstage_provenance(
         env, scenario, "instruction_guest_page_fault", True
     )
     delivered = []
@@ -174,11 +175,11 @@ def test_ifu_exception_metadata_vs_nonleaf_gpf_diagnostic(env):
     for r in delivered:
         scope = r["effective_gpf_scope"]
         source = scope["gpaddr_source_block"]
-        assert r["gpaddr"]["addr"] == gstage._GPA
-        assert r[f"s2_icacheMeta_{source}_gpAddr_addr"] << 1 == gstage._GPA
+        assert r["gpaddr"]["addr"] == gstage.GPA
+        assert r[f"s2_icacheMeta_{source}_gpAddr_addr"] << 1 == gstage.GPA
         assert r["gpaddr"]["nonleaf"] == r[f"s2_icacheMeta_{source}_isForVSnonLeafPTE"] == 1
         assert scope["ftq"] == scope["delivered_ftq"]
-        assert scope["start_pc"] == gstage._VA
+        assert scope["start_pc"] == gstage.VA
     _save_review(env, records, "vs_nonleaf_gpf")
 
 
@@ -205,10 +206,10 @@ def test_ifu_exception_metadata_cross_page_fault_diagnostic(env):
     assert delivered, {"reason": "no accepted cross-page exception metadata"}
     for r in delivered:
         assert r["s2_prevEndIsHalfRviInfo_valid"] == 1
-        assert r["s2_prevEndIsHalfRviInfo_bits_pc_addr"] << 1 == translation_faults._CACHEABLE_CROSS_PAGE_RVI_PC
+        assert r["s2_prevEndIsHalfRviInfo_bits_pc_addr"] << 1 == CACHEABLE_CROSS_PAGE_RVI_PC
         assert r["s2_prevEndIsHalfRviInfo_bits_data"] == 0x13
         assert r["io_toIBuffer_bits_exceptionType_value"] == r["s2_icacheMeta_0_exception_value"] == 1
-        assert r["s2_fetchBlock_0_startVAddr_addr"] << 1 == translation_faults._CACHEABLE_CROSS_PAGE_RVI_PC + 2
+        assert r["s2_fetchBlock_0_startVAddr_addr"] << 1 == CACHEABLE_CROSS_PAGE_RVI_PC + 2
     _save_review(env, records, "cross_page")
 
 

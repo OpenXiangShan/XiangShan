@@ -165,9 +165,9 @@ def test_gpf_diagnostic_uses_same_effective_scope(tmp_path, monkeypatch, invalid
         "io_toIBuffer_bits_ftqPtr_0_value",
     )
     record = {stem: read(stem) for stem in stems}
-    record["gpaddr"] = {"wen": 1, "waddr": 8, "addr": diagnostic.gstage._GPA, "nonleaf": 1}
-    record["s2_icacheMeta_1_gpAddr_addr"] = diagnostic.gstage._GPA >> 1
-    record["s2_fetchBlock_1_startVAddr_addr"] = diagnostic.gstage._VA >> 1
+    record["gpaddr"] = {"wen": 1, "waddr": 8, "addr": diagnostic.gstage.GPA, "nonleaf": 1}
+    record["s2_icacheMeta_1_gpAddr_addr"] = diagnostic.gstage.GPA >> 1
+    record["s2_fetchBlock_1_startVAddr_addr"] = diagnostic.gstage.VA >> 1
     if invalid == "block-valid":
         record["s2_fetchBlock_1_valid"] = 0
     elif invalid == "exception-mask":
@@ -175,8 +175,8 @@ def test_gpf_diagnostic_uses_same_effective_scope(tmp_path, monkeypatch, invalid
     elif invalid == "ftq-flag":
         record["io_toIBuffer_bits_ftqPtr_0_flag"] = 1
     monkeypatch.setattr(diagnostic, "_capture_metadata", lambda env: [record])
-    monkeypatch.setattr(diagnostic.gstage, "_scenario", lambda *args, **kwargs: object())
-    monkeypatch.setattr(diagnostic.gstage, "test_address_translation_gstage_provenance", lambda *args: None)
+    monkeypatch.setattr(diagnostic.gstage, "scenario", lambda *args, **kwargs: object())
+    monkeypatch.setattr(diagnostic.gstage, "run_gstage_provenance", lambda *args: None)
     saved = []
     monkeypatch.setattr(diagnostic, "_save_review", lambda *args: saved.append(args[-1]))
     if invalid:
