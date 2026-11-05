@@ -20,6 +20,9 @@ for v in ['control','fpiq24','fprank','fpreg288','fpiq24-fpreg288','fpiq24-fpreg
   ready_points={row['point'] for row in json.loads(receipt.read_text())} if receipt.exists() else set()
  for p in ([E/v] if MICRO else (E/v/SUBDIR).glob('*')):
   if OBSERVER and p.name not in ready_points:continue
+  if CANDIDATE and (p/'process.json').exists():
+   original=json.loads((p/'process.json').read_text());proc=Path('/proc',str(original['pid']),'stat')
+   if proc.exists() and proc.read_text().rsplit(')',1)[1].split()[19]==original['start_ticks']:continue
   closed=p/('run-state.json' if MICRO else 'result.json')
   if not closed.exists() or (MICRO and json.loads(closed.read_text())['phase']!='complete'):continue
   if (p/'exitcode').read_text().strip()!='0':continue
@@ -29,7 +32,7 @@ for v in ['control','fpiq24','fprank','fpreg288','fpiq24-fpreg288','fpiq24-fpreg
     with f.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     rows[str(f.relative_to(E))]=dict(bytes=f.stat().st_size,sha256=digest)
 print(json.dumps(rows))
-'''.replace('REMOTE',repr(REMOTE)).replace('FILES',repr(FILES)).replace('SUBDIR',repr('short' if args.stage=='short' else 'points')).replace('MICRO',repr(args.stage in ('micro','micro-v2'))).replace('OBSERVER',repr(args.stage in ('gate-observation','gate-observation-v2','fp-timestamp-observation','fp-wb-interval-observation','rob-wb-provenance-observation','rob-wb-sequence-observation','rob-retired-owner-observation','lrq-nearhead-observation','lrq-stall-observation','load-replay-wait-observation','stream-depth-policy','stream-policy-gate-observation','fp-wb-source-observation','wb-classification')))
+'''.replace('REMOTE',repr(REMOTE)).replace('FILES',repr(FILES)).replace('SUBDIR',repr('short' if args.stage=='short' else 'points')).replace('MICRO',repr(args.stage in ('micro','micro-v2'))).replace('CANDIDATE',repr(args.stage=='wb-classification')).replace('OBSERVER',repr(args.stage in ('gate-observation','gate-observation-v2','fp-timestamp-observation','fp-wb-interval-observation','rob-wb-provenance-observation','rob-wb-sequence-observation','rob-retired-owner-observation','lrq-nearhead-observation','lrq-stall-observation','load-replay-wait-observation','stream-depth-policy','stream-policy-gate-observation','fp-wb-source-observation')))
 response=subprocess.run(['proxychains','-q','ssh','-o','BatchMode=yes','node032','python3 -'],input=code,capture_output=True,text=True,check=True)
 rows=json.loads(response.stdout)
 new=[]
