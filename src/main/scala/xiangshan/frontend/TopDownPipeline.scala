@@ -19,7 +19,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.TopDownCounters
 
-class FrontendTopDownPipeline(numStage: Int)(implicit p: Parameters) extends FrontendModule {
+class TopDownPipeline(numStage: Int)(implicit p: Parameters) extends FrontendModule {
   require(numStage > 0, "Topdown pipeline must have at least one stage")
 
   class PipelineIO extends Bundle {

@@ -33,7 +33,6 @@ import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
-import xiangshan.frontend.FrontendTopDownPipeline
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.ICacheToIfuIO
@@ -44,6 +43,7 @@ import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.TopdownOverrideBundle
+import xiangshan.frontend.TopDownPipeline
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 
@@ -771,7 +771,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   wbRedirect.halfRviInfo       := wbSelectedEndHalfRvi
   wbRedirect.halfRviInfo.valid := wbSelectedEndHalfRvi.valid && checkerRedirect.bits.invalidTaken
 
-  private val topdownPipe = Module(new FrontendTopDownPipeline(2))
+  private val topdownPipe = Module(new TopDownPipeline(2))
   topdownPipe.io.in := io.fromICache.topdown
   topdownPipe.setReason(
     0,
