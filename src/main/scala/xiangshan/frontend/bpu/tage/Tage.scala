@@ -91,6 +91,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s1_fire       = io.stageCtrl.s1_fire && io.enable
   private val s1_startPc    = RegEnable(s0_startPc, s0_fire)
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
+  private val s1_setIdx     = RegEnable(s0_setIdx, s0_fire)
+  private val s1_bankMask   = RegEnable(s0_bankMask, s0_fire)
 
   private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
 
@@ -117,6 +119,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_fire     = io.stageCtrl.s2_fire && io.enable
   private val s2_readResp = RegEnable(s1_readResp, s1_fire)
   private val s2_hits     = RegEnable(s1_hits, s1_fire)
+  private val s2_setIdx   = RegEnable(s1_setIdx, s1_fire)
+  private val s2_bankMask = RegEnable(s1_bankMask, s1_fire)
   private val s2_branches = io.fromMainBtb.result
 
   s2_branches.indices.foreach { branchIdx =>
@@ -190,12 +194,27 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.meta.entries(i).altTableIdx       := OHToUInt(altTableOH)
     io.meta.entries(i).altWayIdx         := OHToUInt(alt.hitWayMaskOH)
     io.meta.entries(i).altTakenCtr       := alt.takenCtr
-
-    XSPerfAccumulate(
-      s"s2_branch_${i}_multihit_on_same_table",
-      allTableTagMatchResults.map(e => (s2_fire && PopCount(e.hitWayMask) > 1.U).asUInt).reduce(_ +& _)
-    )
   }
+
+  private val s2_multiHits = TableInfos.indices.map { tableIdx =>
+    s2_branches.zipWithIndex.map { case (branch, branchIdx) =>
+      branch.valid && branch.bits.attribute.isConditional && PopCount(s2_hits(branchIdx)(tableIdx)) > 1.U
+    }
+  }
+  // Count each valid conditional branch multi-hit on each table before merging the flush masks.
+  XSPerfAccumulate("multi_hit", Mux(s2_fire, PopCount(s2_multiHits.flatten), 0.U))
+
+  // Multi-hit flush requests are generated directly from the prediction read. Keep the flush mask at each table's native
+  // way width, and merge duplicate losers from all conditional branches in the fetch block.
+  private val flushMultiHitWayMasks = MixedVecInit(TableInfos.zipWithIndex.map { case (tableInfo, tableIdx) =>
+    val branchFlushWayMasks = s2_multiHits(tableIdx).zipWithIndex.map { case (needFlush, branchIdx) =>
+      val hitWayMask   = s2_hits(branchIdx)(tableIdx)
+      val winnerWayOH  = PriorityEncoderOH(hitWayMask)
+      val flushWayMask = Mux(needFlush, hitWayMask & ~winnerWayOH, 0.U(tableInfo.NumWays.W))
+      flushWayMask
+    }
+    branchFlushWayMasks.reduce(_ | _)
+  })
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -582,6 +601,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx)
 
+    val flushMultiHitApplied = Wire(Vec(info.NumWays, Bool()))
+
+    val perf_flushMultiHitWriteConflict = Wire(Vec(info.NumWays, Bool()))
+
     table.io.writeReq.zipWithIndex.foreach { case (writeReq, wayIdx) =>
       // These masks select training branches and may be all zero when no update is needed.
       val providerUpdateCtrBranchOH = t3_trainInfoVec.map { info =>
@@ -615,9 +638,27 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
       val allocate = t3_fire && t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
       val update   = t3_fire && (updateProviderEn || updateAltEn)
+      val train    = allocate || update
 
-      // Allocation takes priority over counter updates. Other write operations can be arbitrated here.
-      writeReq.valid := allocate || update
+      val pendingFlush         = RegInit(false.B)
+      val pendingFlushSetIdx   = RegInit(0.U.asTypeOf(writeReq.bits.setIdx))
+      val pendingFlushBankMask = RegInit(0.U.asTypeOf(writeReq.bits.bankMask))
+
+      val currentFlush = s2_fire && flushMultiHitWayMasks(tableIdx)(wayIdx)
+
+      flushMultiHitApplied(wayIdx) := pendingFlush && !train
+
+      // Capture a new request before clearing the old one, including when the old request is issued this cycle.
+      when(currentFlush) {
+        pendingFlush         := true.B
+        pendingFlushSetIdx   := s2_setIdx(tableIdx)
+        pendingFlushBankMask := s2_bankMask(tableIdx)
+      }.elsewhen(flushMultiHitApplied(wayIdx)) {
+        pendingFlush := false.B
+      }
+
+      // Training takes priority over flushing; allocation takes priority over counter updates.
+      writeReq.valid := train || pendingFlush
       writeReq.bits  := 0.U.asTypeOf(writeReq.bits)
       when(allocate) {
         writeReq.bits.op            := TageWriteOp.Allocate
@@ -637,8 +678,25 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
         writeReq.bits.writeUsefulEn := updateUsefulEn
         writeReq.bits.actualTaken   := updateInfo.actualTaken
         writeReq.bits.incUseful     := updateProviderEn && updateInfo.incProviderUsefulCtr
+      }.elsewhen(pendingFlush) {
+        writeReq.bits.op            := TageWriteOp.Invalidate
+        writeReq.bits.setIdx        := pendingFlushSetIdx
+        writeReq.bits.bankMask      := pendingFlushBankMask
+        writeReq.bits.writeEntryEn  := true.B
+        writeReq.bits.writeUsefulEn := true.B
       }
+
+      perf_flushMultiHitWriteConflict(wayIdx) := pendingFlush && train
     }
+
+    XSPerfAccumulate(
+      s"tage_table_${tableIdx}_flush_multi_hit",
+      PopCount(flushMultiHitApplied)
+    )
+    XSPerfAccumulate(
+      s"tage_table_${tableIdx}_flush_multi_hit_write_conflict",
+      PopCount(perf_flushMultiHitWriteConflict)
+    )
 
     table.io.usefulResetStart := t3_usefulResetStart
   }
