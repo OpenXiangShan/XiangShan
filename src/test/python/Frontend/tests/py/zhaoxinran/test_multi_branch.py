@@ -227,6 +227,7 @@ def test_multi_cfi_per_ftq_entry(env):
                                are on the execution path.  The last BEQ in each
                                block jumps to the start of the NEXT block, making
                                the target cross a fetch-block boundary.
+
         block N-1            : all NOPs + backward JAL to a random non-first block.
 
     This ensures:
