@@ -35,6 +35,7 @@ class _Signal:
 
 class _FakeDut:
     def set(self, name, value):
+        name = str(name).replace(".__Vtogcov__", ".")
         signal = getattr(self, str(name), None)
         if signal is None:
             signal = _Signal()
@@ -125,6 +126,16 @@ def _set_request(
                 value,
             )
         if block.get("valid"):
+            # The compiled request size is six bits and comes from this
+            # five-bit native offset plus one. Supply the actual source in
+            # fake fixtures; the legacy short size alias cannot stand in for
+            # a missing native probe.
+            size = int(block["size"])
+            assert 1 <= size <= 32
+            dut.set(
+                f"{_ICACHE_PREFIX}mainPipe.s1_maybeRvcAlignInfo_takenCfiOffset_{index}",
+                size - 1,
+            )
             data = int(block["data"])
             for local_bank in range(8):
                 bank = index * 8 + local_bank
@@ -414,7 +425,7 @@ def test_bin907_accepts_exported_ibuffer_valid_alias(tmp_path, alias):
     _set_bin907_s1(dut)
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
     _set_bin907_s2(dut)
-    delattr(dut, _BIN907_SIGNALS["to_ibuffer_valid"][0])
+    delattr(dut, _BIN907_SIGNALS["to_ibuffer_valid"][0].replace(".__Vtogcov__", "."))
     dut.set(alias, 1)
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
@@ -1013,7 +1024,7 @@ def test_backend_redirect_does_not_credit_changed_aggregate_response(tmp_path):
 
 def test_backend_redirect_missing_ifu_probe_is_contract_error(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
-    delattr(dut, _SIGNALS["ifu_backend_redirect"][0])
+    delattr(dut, _SIGNALS["ifu_backend_redirect"][0].replace(".__Vtogcov__", "."))
     _set_request(dut, ready=0, fire=0, flush=0)
     dut.set(_SIGNALS["backend_redirect"][0], 1)
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
@@ -1624,8 +1635,11 @@ def test_cacheable_predecode_matches_rtl_cebreak_priority(instruction):
 def test_cacheable_sampler_signals_match_generated_contract():
     root = Path(__file__).resolve().parents[7]
     offset = root / "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml"
+    from env.funcov.registry import decode_signal_inventory_name
+    from env.funcov.py.ifu.cacheable_pipeline_funcov import _native_signal_names
+
     names = {
-        line[len("  - name: ") :].strip()
+        decode_signal_inventory_name(line[len("  - name: ") :])
         for line in offset.read_text(encoding="utf-8").splitlines()
         if line.startswith("  - name: ")
     }
@@ -1636,15 +1650,19 @@ def test_cacheable_sampler_signals_match_generated_contract():
     }
     request_fields = (
         "ftqIdx_flag", "ftqIdx_value", "startVAddr_addr",
-        "takenCfiOffset_valid", "takenCfiOffset_bits", "size",
+        "takenCfiOffset_valid", "takenCfiOffset_bits",
     )
     missing_request_fields = [
         _req_signal_names(index, field)
         for index in range(2)
         for field in (*request_fields, *(("valid",) if index else ()))
-        if not any(name in names for name in _req_signal_names(index, field))
+        if not any(name in names for name in _native_signal_names(_req_signal_names(index, field)))
     ]
     assert not missing_request_fields, {"missing_request_fields": missing_request_fields}
+    # Size is the six-bit offset+1 projection, not a truncated output alias.
+    for index in range(2):
+        source = f"{_ICACHE_PREFIX}mainPipe.s1_maybeRvcAlignInfo_takenCfiOffset_{index}"
+        assert any(name in names for name in _native_signal_names((source,))), source
     required |= {
         _SIGNALS["wb_redirect"][0],
         f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_0_ftqIdx_flag",
@@ -1739,5 +1757,44 @@ def test_cacheable_sampler_signals_match_generated_contract():
     from env.support.ifu_native_aliases import LINE0_TL_EXCEPTION_PATHS, LINE0_PRIOR_EXCEPTION_PATHS
     required.add(LINE0_TL_EXCEPTION_PATHS[0])
     required.add(LINE0_PRIOR_EXCEPTION_PATHS[0])
-    assert required <= names
+    # Use exactly the sampler's declared alternatives for optional export
+    # spellings; each semantic dependency must still have a native source.
+    source_groups = {
+        path: candidates
+        for table in (_SIGNALS, _UPSTREAM_SIGNALS, _LATE_FAULT_SIGNALS)
+        for candidates in table.values()
+        for path in candidates
+    }
+    missing = sorted(
+        name for name in required
+        if not any(candidate in names for candidate in
+                   _native_signal_names(source_groups.get(name, (name,))))
+    )
+    assert not missing, {"missing_native_signals": missing}
     assert len(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS) == 30
+
+
+@pytest.mark.parametrize("key,value", [("req_ready", 1), ("ifu_backend_redirect", 1),
+    ("wb_redirect", 1), ("bpu_s3_flush", 1)])
+def test_cacheable_control_reads_native_alias_not_toggle_shadow(tmp_path, key, value):
+    from env.funcov.py.ifu.cacheable_pipeline_funcov import _read_signal
+    recorder, env, dut = _make_recorder(tmp_path)
+    for name in _SIGNALS[key]:
+        native = name.replace(".__Vtogcov__", ".")
+        if hasattr(dut, native): delattr(dut, native)
+        if ".__Vtogcov__" in name:
+            setattr(dut, name, _Signal(1 - value))
+    semantic = _SIGNALS[key][0].replace(".__Vtogcov__", ".").removeprefix("Frontend_top.Frontend.")
+    dut.set(semantic, value)
+    assert _read_signal(recorder, key) == value
+
+
+def test_cacheable_shadow_only_control_is_unobservable(tmp_path):
+    from env.funcov.py.ifu.cacheable_pipeline_funcov import _read_signal
+    recorder, env, dut = _make_recorder(tmp_path)
+    key = "req_ready"
+    for name in _SIGNALS[key]:
+        native = name.replace(".__Vtogcov__", ".")
+        if hasattr(dut, native): delattr(dut, native)
+        setattr(dut, name, _Signal(1))
+    assert _read_signal(recorder, key) is None

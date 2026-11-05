@@ -7,7 +7,7 @@ from ....support.ifu_native_aliases import (
     LINE0_TL_EXCEPTION_PATHS, read_icache_fetch_block_size, read_line0_tl_cause,
 )
 
-from ..common.dut import _dut, _read_first
+from ..common.dut import _dut, _read_first as _read_first_raw
 from .owner_v3_funcov import mark_owner_v3_checked
 
 
@@ -313,6 +313,25 @@ def reset_ifu_cacheable_pipeline_state(recorder) -> None:
     initialize_ifu_cacheable_pipeline_state(recorder)
 
 
+def _native_signal_names(names):
+    """Resolve semantic storage only; toggle coverage history is not a signal.
+
+    Supported exports include retained raw names and native ``inner_*`` aliases.
+    Preserve each declared source's order without selecting __Vtogcov__ memory.
+    """
+    result = []
+    for raw in names:
+        name = str(raw).replace(".__Vtogcov__", ".")
+        for candidate in (name, name.removeprefix("Frontend_top.Frontend.")):
+            if candidate not in result:
+                result.append(candidate)
+    return tuple(result)
+
+
+def _read_first(recorder, names):
+    return _read_first_raw(recorder, _native_signal_names(names))
+
+
 def _read_signal(recorder, key: str) -> Optional[int]:
     if key == "s1_req_uncache":
         valid = _read_first(recorder, _SIGNALS["s1_valid"])
@@ -359,7 +378,7 @@ def _read_late_fault_signal_with_path(
             return int(projection.value == code), f"({path} == {code})"
         # Neither missing nor invalid encoded state can use raw/merged/live flags.
         return None, None
-    for name in _LATE_FAULT_SIGNALS[key]:
+    for name in _native_signal_names(_LATE_FAULT_SIGNALS[key]):
         value = recorder._try_read_dut_signal(dut, name)
         if value is not None:
             return int(value), str(name)
@@ -372,7 +391,7 @@ def _read_bin907_signal_with_path(
     dut = _dut(recorder)
     if dut is None:
         return None, None
-    for name in _BIN907_SIGNALS[key]:
+    for name in _native_signal_names(_BIN907_SIGNALS[key]):
         value = recorder._try_read_dut_signal(dut, name)
         if value is not None:
             return int(value), str(name)
@@ -401,7 +420,7 @@ def _read_bin907_raw_candidate_count(
         value = None
         path = None
         if dut is not None:
-            for candidate in candidates:
+            for candidate in _native_signal_names(candidates):
                 observed = recorder._try_read_dut_signal(dut, candidate)
                 if observed is not None:
                     value = int(observed)
