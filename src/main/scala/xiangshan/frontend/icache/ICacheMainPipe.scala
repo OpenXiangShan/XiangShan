@@ -72,8 +72,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
     val topdownOverride: Valid[TopdownOverrideBundle] = Flipped(Valid(new TopdownOverrideBundle))
 
-    val perf:          MainPipePerfInfo     = Output(new MainPipePerfInfo)
-    val perf_prefetch: PrefetchPipePerfInfo = Input(new PrefetchPipePerfInfo)
+    val perf:           MainPipePerfInfo     = Output(new MainPipePerfInfo)
+    val perf_prefetch:  PrefetchPipePerfInfo = Input(new PrefetchPipePerfInfo)
+    val perf_waylookup: WayLookupPerfInfo    = Input(new WayLookupPerfInfo)
   }
 
   val io: ICacheMainPipeIO = IO(new ICacheMainPipeIO)
@@ -582,17 +583,28 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /* *** perf *** */
   private val perf_s1PendingMiss = s1_valid && !s1_fetchFinish
   private val perf_waitingMeta   = io.fromFtq.valid && !io.fromWayLookup.valid
+
+  private val perf_waylookupEmptyReason = RegInit(TopDownCounters.FrontendOtherCoreStall.id.U)
+  when(io.topdownOverride.valid) {
+    perf_waylookupEmptyReason := io.topdownOverride.bits.reason
+  }.elsewhen(io.perf_prefetch.bpuFlush) {
+    perf_waylookupEmptyReason := TopDownCounters.OverrideBubble.id.U
+  }.elsewhen(io.perf_prefetch.pendingItlbMiss) {
+    perf_waylookupEmptyReason := TopDownCounters.ITLBMissBubble.id.U
+  }.elsewhen(io.perf_prefetch.pendingUpdate) {
+    perf_waylookupEmptyReason := TopDownCounters.ICacheStructualConflict.id.U
+  }
+
   // topdown: fromFtq -> toIfu has 1 stage
   private val topdownPipe = Module(new FrontendTopDownPipeline(1))
   topdownPipe.io.in := io.fromFtq.bits.topdown
   topdownPipe.setReason(
     0,
     Seq(
-      s0_bpuFlush                                            -> TopDownCounters.OverrideBubble,
-      (s0_valid && !toData.ready)                            -> TopDownCounters.ICacheStructualConflict,
-      (perf_waitingMeta && io.perf_prefetch.bpuFlush)        -> TopDownCounters.OverrideBubble,
-      (perf_waitingMeta && io.perf_prefetch.pendingItlbMiss) -> TopDownCounters.ITLBMissBubble,
-      (perf_waitingMeta && io.perf_prefetch.pendingUpdate)   -> TopDownCounters.ICacheStructualConflict
+      s0_bpuFlush                                           -> TopDownCounters.OverrideBubble,
+      (s0_valid && !toData.ready)                           -> TopDownCounters.ICacheStructualConflict,
+      (perf_waitingMeta && io.perf_waylookup.pendingUpdate) -> TopDownCounters.ICacheStructualConflict,
+      (perf_waitingMeta && io.perf_waylookup.empty)         -> perf_waylookupEmptyReason
     )
   )
   topdownPipe.setReason(

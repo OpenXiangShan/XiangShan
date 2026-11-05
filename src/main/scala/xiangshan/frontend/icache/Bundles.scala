@@ -470,7 +470,8 @@ class PrefetchPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
 
 // inner WayLookup -> top
 class WayLookupPerfInfo(implicit p: Parameters) extends ICacheBundle {
-  val empty: Bool = Bool()
+  val empty:         Bool = Bool()
+  val pendingUpdate: Bool = Bool()
 }
 
 class ICacheToFtqIO(implicit p: Parameters) extends ICacheBundle {

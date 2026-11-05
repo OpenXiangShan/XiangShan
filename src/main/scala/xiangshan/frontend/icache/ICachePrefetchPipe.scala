@@ -511,8 +511,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   /* *****************************************************************************
    * perf
    * ***************************************************************************** */
-  // tell ICache top/mainPipe the reason of s1_valid && !toWayLookup.valid
-  io.perf.bpuFlush        := s1_valid && fromBpuS1Flush
+  // tell ICache top/mainPipe the reason of !toWayLookup.valid
+  io.perf.bpuFlush        := s1_valid && fromBpuS1Flush || !s1_valid && s0_valid && fromBpuS0Flush
   io.perf.pendingItlbMiss := s1_valid && !tlbFinish
   io.perf.pendingUpdate   := s1_valid && fromMiss.valid
 
