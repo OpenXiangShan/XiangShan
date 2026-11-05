@@ -22,50 +22,44 @@ import utility.HasCircularQueuePtrHelper
 import utility.XSError
 import utility.XSPerfAccumulate
 import xiangshan.CallRetCommit
+import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BranchAttribute
 
 class CommitQueue(implicit p: Parameters) extends FtqModule with HasCircularQueuePtrHelper {
 
   class CommitQueueIO extends FtqBundle {
-    val backendCommit: Vec[Valid[CallRetCommit]] = Input(Vec(CommitWidth, Valid(new CallRetCommit)))
-    val bpuTrain:      Valid[CallRetCommit]      = Output(Valid(new CallRetCommit))
+    class BpuCommitInfo extends FtqBundle {
+      val ftqPtr:     FtqPtr        = new FtqPtr
+      val commitMeta: BpuCommitMeta = new BpuCommitMeta
+    }
+    val bpuWrite: Valid[BpuCommitInfo] = Input(Valid(new BpuCommitInfo))
+    val reWrite:  Valid[CallRetCommit] = Input(Valid(new CallRetCommit))
+    val commit:   Bool                 = Input(Bool())
+    val bpuTrain: Valid[BpuCommitMeta] = Output(Valid(new BpuCommitMeta))
   }
 
   val io: CommitQueueIO = IO(new CommitQueueIO)
 
-  private val mem = RegInit(0.U.asTypeOf(Vec(CommitQueueSize, Valid(new CallRetCommit))))
+  private val mem = RegInit(0.U.asTypeOf(Vec(CommitQueueSize, Valid(new BpuCommitMeta))))
 
-  private val enqPtr = RegInit(CommitQueuePtr(false.B, 0.U))
-  private val deqPtr = RegInit(CommitQueuePtr(false.B, 0.U))
+  private val deqPtr       = RegInit(CommitQueuePtr(false.B, 0.U))
+  private val enqIndex     = io.bpuWrite.bits.ftqPtr.value
+  private val reWriteIndex = io.reWrite.bits.ftqPtr.value
 
-  private val full = distanceBetween(enqPtr, deqPtr) >= (CommitQueueSize - 8).U
-
-  private val isCallRet = io.backendCommit.map(instr =>
-    instr.valid && instr.bits.rasAction =/= BranchAttribute.RasAction.None
-  )
-
-  private val enqIndex = VecInit((0 until CommitWidth).map(i => (enqPtr + PopCount(isCallRet.take(i))).value))
-
-  when(!full)(enqPtr := enqPtr + PopCount(isCallRet))
-
-  io.backendCommit.zipWithIndex.foreach { case (branch, i) =>
-    when(isCallRet(i) && !full) {
-      mem(enqIndex(i)).valid := true.B
-      mem(enqIndex(i)).bits  := branch.bits
-    }
+  when(io.bpuWrite.valid) {
+    mem(enqIndex).valid := true.B
+    mem(enqIndex).bits  := io.bpuWrite.bits.commitMeta
+  }
+  when(io.reWrite.valid) {
+    mem(reWriteIndex).valid                    := true.B
+    mem(reWriteIndex).bits.attribute.rasAction := io.reWrite.bits.rasAction
   }
 
-  when(mem(deqPtr.value).valid) {
-    deqPtr := deqPtr + 1.U
-
+  when(io.commit) {
     mem(deqPtr.value).valid := false.B
+    deqPtr                  := deqPtr + 1.U
   }
 
-  io.bpuTrain.valid := mem(deqPtr.value).valid
+  io.bpuTrain.valid := mem(deqPtr.value).valid && io.commit
   io.bpuTrain.bits  := mem(deqPtr.value).bits
-
-  XSError(deqPtr > enqPtr, "Dequeue pointer exceeds enqueue pointer in Commit Queue")
-
-  // We do not expect the commit queue to be full often
-  XSPerfAccumulate("commitQueueFull", full)
 }

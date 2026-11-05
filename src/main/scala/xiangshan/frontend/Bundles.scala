@@ -39,6 +39,7 @@ import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.ras.RasSpecReadReq
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.ICacheCacheLineHelper
@@ -59,14 +60,17 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   // perfMeta uses the same valid signal as meta
   val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)
   val topdownReasons: FrontendTopDownBundle = Output(new FrontendTopDownBundle())
+  // return address read out of the RAS for the FTQ-stored spec read request
+  val specRead: GuardedPc = Output(GuardedPc())
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
-  val redirect:        Valid[BpuRedirect]    = Valid(new BpuRedirect)
-  val train:           DecoupledIO[BpuTrain] = Decoupled(new BpuTrain)
-  val commit:          Valid[BpuCommit]      = Valid(new BpuCommit)
-  val bpuPtr:          FtqPtr                = Output(new FtqPtr)
-  val redirectFromIFU: Bool                  = Output(Bool())
+  val redirect:         Valid[BpuRedirect]    = Valid(new BpuRedirect)
+  val train:            DecoupledIO[BpuTrain] = Decoupled(new BpuTrain)
+  val commit:           Valid[BpuCommit]      = Valid(new BpuCommit)
+  val bpuPtr:           FtqPtr                = Output(new FtqPtr)
+  val needChangeTarget: Bool                  = Output(Bool())
+  val specReadReq:      RasSpecReadReq        = Output(new RasSpecReadReq)
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
@@ -143,10 +147,12 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val isRVC:     Bool            = Bool()                            // seems unused for now, keep it.
   val attribute: BranchAttribute = new BranchAttribute
   val target:    UInt            = UInt(GuardedVAddrBits.W)
+  val blockSel:  Bool            = Bool()
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
-  val wbRedirect: Valid[FrontendRedirect] = Valid(new FrontendRedirect)
+  val advanceFtqIdx: Vec[FtqPtr]             = Vec(FetchPorts, new FtqPtr)
+  val wbRedirect:    Valid[FrontendRedirect] = Valid(new FrontendRedirect)
 }
 
 class ExceptionType extends Bundle {
@@ -399,8 +405,9 @@ object BlameBpuSource {
           // if branch type is return, prediction use ras directly
           // so blame to ras only when source is ras
           // and trigger assertion when source is mbtb
-          blame    := Mux(src.s3Ras, RAS, BTB)
-          retError := src.s3Mbtb
+          // blame    := Mux(src.s3Ras, RAS, BTB)
+          // retError := src.s3Mbtb
+          blame := RAS
         }.otherwise {
           posError := true.B
         }
@@ -429,7 +436,7 @@ object BlameBpuSource {
       }
     }
     XSError(en && posError, "resolved branch's position cannot be greater than predicted jump's position")
-    XSError(en && retError, "prediction source cannot be mbtb when resolved branch type is return")
+    // XSError(en && retError, "prediction source cannot be mbtb when resolved branch type is return")
     blame
   }
 }
