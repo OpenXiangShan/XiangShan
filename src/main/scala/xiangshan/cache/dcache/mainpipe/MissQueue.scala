@@ -1450,7 +1450,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       val signals_j = computeMatchSignals(active_pipe_regs(j).req, io.queryMQ(i).req.bits)
 
       // merge from pipe_reg
-      when (active_pipe_regs(j).merge_req(signals_j) && !active_pipe_regs(j).cancel) {
+      when (active_pipe_regs(j).merge_req(signals_j) && !active_pipe_regs(j).cancel &&
+            !(io.queryMQ(i).req.bits.isFromStore && acquire_owned_by_fabric(j))) {
         can_merge_from_pipe(i) := true.B
         can_merge_from_pipe_mshr(i) := active_pipe_regs(j).mshr_id
       }
