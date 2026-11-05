@@ -1045,6 +1045,10 @@ for(i <- 0 until reqNum) {
   io.main_pipe_req.bits.miss := true.B
   io.main_pipe_req.bits.miss_id := io.id
   io.main_pipe_req.bits.probe := false.B
+  io.main_pipe_req.bits.local_evict := false.B
+  io.main_pipe_req.bits.local_evict_tag := false.B
+  io.main_pipe_req.bits.local_evict_clean_only := false.B
+  io.main_pipe_req.bits.local_evict_way_en := 0.U
   io.main_pipe_req.bits.source := req.source
   io.main_pipe_req.bits.cmd := req.cmd
   io.main_pipe_req.bits.vaddr := req.vaddr
@@ -1949,7 +1953,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       }
 
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
-      e.io.main_pipe_replay := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_replay :=
+        io.mainpipe_info.s2_valid && io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U ||
+        io.mainpipe_info.s3_valid && io.mainpipe_info.s3_replay_to_mq && io.mainpipe_info.s3_miss_id === i.U
       e.io.main_pipe_evict_BtoT_way := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_evict_BtoT_way && io.mainpipe_info.s2_miss_id === i.U
       e.io.main_pipe_next_evict_way := io.mainpipe_info.s2_next_evict_way
       e.io.main_pipe_refill_resp := io.mainpipe_info.s3_valid && io.mainpipe_info.s3_refill_resp && io.mainpipe_info.s3_miss_id === i.U
