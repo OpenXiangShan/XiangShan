@@ -848,8 +848,21 @@ class TopDownFromL2Top(implicit p: Parameters) extends XSBundle {
 
 class UopTopDown(implicit p: Parameters) extends XSBundle {
   val uopsIssued = Output(Bool())
-  val uopsIssuedCnt = Output(UInt((log2Up(p(XSCoreParamsKey).backendParams.allIssueParams.size)).W))
+  val uopsIssuedCnt = Output(UInt(log2Ceil(p(XSCoreParamsKey).backendParams.allExuParams.size + 1).W))
   val noStoreIssued = Output(Bool())
+}
+
+object UopTopDown {
+  // All fields describe the same issue cycle, delayed by one cycle.
+  // An empty store list means this region has no store issue ports.
+  def apply(issued: Seq[Bool], storesIssued: Seq[Bool])(implicit p: Parameters): UopTopDown = {
+    val result = Wire(new UopTopDown)
+    val delayedIssued = issued.map(issue => RegNext(issue, false.B))
+    result.uopsIssued := delayedIssued.foldLeft(false.B)(_ || _)
+    result.uopsIssuedCnt := PopCount(delayedIssued)
+    result.noStoreIssued := RegNext(!storesIssued.foldLeft(false.B)(_ || _), true.B)
+    result
+  }
 }
 
 class LowPowerIO(implicit p: Parameters) extends Bundle {
