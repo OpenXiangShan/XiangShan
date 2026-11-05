@@ -247,6 +247,11 @@ ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
+# elaborate TEA tracking and sampling logic
+ifeq ($(WITH_TEA),1)
+override SIM_ARGS += --enable-tea
+endif
+
 # run with sim frontend(ideal frontend)
 ifeq ($(ENABLE_SIMFRONTEND),1)
 override SIM_ARGS += --enable-simfrontend

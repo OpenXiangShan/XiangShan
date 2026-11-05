@@ -26,6 +26,7 @@ import utility.InstSeqNum
 import utility.XSError
 import utils.EnumUInt
 import xiangshan.Redirect
+import xiangshan.TeaEvent
 import xiangshan.TopDownCounters
 import xiangshan.TriggerAction
 import xiangshan.backend.GPAMemEntry
@@ -325,6 +326,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
   val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
   val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
+  val teaPsv:         UInt                  = UInt(TeaEvent.width.W)
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 }
 

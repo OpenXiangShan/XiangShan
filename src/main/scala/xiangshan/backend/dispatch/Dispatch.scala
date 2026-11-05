@@ -702,6 +702,20 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val fuType = uop.map(_.fuType)
 
   private val numLsElem = VecInit(uop.map(_.numLsElem))
+  // Partial dispatch leaves the oldest remaining instruction in its original lane.
+  val drSqHeadIdx = PriorityEncoder(VecInit(fromRename.map(_.valid)))
+  val drSqHead = fromRename(drSqHeadIdx)
+  val sqHasRoom = drSqHead.bits.lsqIdxEnd.sqIdx > io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
+  val drSqBlock = io.enqRob.isEmpty && drSqHead.valid &&
+    FuType.isStore(drSqHead.bits.fuType) && !sqHasRoom
+  val drSqPending = RegInit(false.B)
+  when (io.redirect.valid) {
+    drSqPending := false.B
+  }.elsewhen (drSqPending && drSqHead.fire) {
+    drSqPending := false.B
+  }.elsewhen (drSqBlock) {
+    drSqPending := true.B
+  }
 
   /*
   * how to allow dispatch lsu uop:
@@ -789,6 +803,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
+    when (drSqPending && drSqHeadIdx === i.U && isStore(i)) {
+      updatedUop(i).teaPsv := TeaPsvOps.setBit(fromRename(i).bits.teaPsv, TeaEvent.DR_SQ)
+    }
     XSDebug(
       fromRename(i).fire &&
         (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)), s"Debug Mode: inst ${i} has frontend trigger exception\n")

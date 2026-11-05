@@ -68,6 +68,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val hartId = Input(UInt(hartIdLen.W))
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
+    val teaMembers = Option.when(backendParams.teaEn)(Input(Vec(RenameWidth, Valid(new TeaRenameMember))))
     val flushOut = ValidIO(new Redirect)
     val flushPcInfo = Output(new RobFlushPcInfo)
     val exception = ValidIO(new ExceptionInfo)
@@ -243,6 +244,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     Cat(halfWords, 0.U(1.W))(formerLenWidth - 1, 0)
   }
 
+  val hartId = p(XSCoreParamsKey).HartId
   // robEntries enqueue
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
@@ -1417,8 +1419,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // debug_inst update
   for (i <- 0 until (LduCnt + StaCnt)) {
-    debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
-    debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
+    debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx.value).s1SignalEnable(io.debug_ls.debugLsInfo(i))
+    debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx.value).s2SignalEnable(io.debug_ls.debugLsInfo(i))
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s3_robIdx).s3SignalEnable(io.debug_ls.debugLsInfo(i))
   }
   for (i <- 0 until LduCnt) {
@@ -2118,6 +2120,158 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val l1Miss = io.debugTopDown.fromCore.fromMem.robHeadMissInDCache
   val l2Miss = io.debugTopDown.fromCore.l2MissMatch
   val l3Miss = io.debugTopDown.fromCore.l3MissMatch
+  if (backendParams.teaEn) {
+    case class TeaPsvSetSource(valid: Bool, robIdx: RobPtr, mask: UInt)
+    val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
+    val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 256)
+    val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
+    val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
+    val teaRedirectPtr = io.redirect.bits.robIdx
+    val teaFlushPtr = deqExceptionRobIdx
+    val teaRedirectCtrlMispred = io.redirect.valid &&
+      io.redirect.bits.debugIsCtrl && io.redirect.bits.isMisPred
+    val teaRedirectMemVio = io.redirect.valid && io.redirect.bits.debugIsMemVio
+    val teaExceptionFlush = io.flushOut.valid && deqHasException && !intrEnable
+    val teaRobFlushEcho = RegNext(io.flushOut.valid, false.B)
+    val teaRefill = canEnqueue.asUInt.orR && !io.redirect.valid && state =/= s_walk
+    val teaPsvSetSources = scala.collection.mutable.ArrayBuffer(
+      TeaPsvSetSource(teaRedirectCtrlMispred, teaRedirectPtr, TeaEvent.bit(TeaEvent.FL_MB)),
+      TeaPsvSetSource(teaRedirectMemVio, teaRedirectPtr, TeaEvent.bit(TeaEvent.FL_MO)),
+      TeaPsvSetSource(teaExceptionFlush, teaFlushPtr, TeaEvent.bit(TeaEvent.FL_EX))
+    )
+    for (i <- 0 until (LduCnt + StaCnt)) {
+      val lsInfo = io.debug_ls.debugLsInfo(i)
+      teaPsvSetSources += TeaPsvSetSource(lsInfo.s1_isTlbMiss, lsInfo.s1_robIdx, TeaEvent.bit(TeaEvent.ST_TLB))
+      teaPsvSetSources += TeaPsvSetSource(lsInfo.s2_isDcacheMiss, lsInfo.s2_robIdx, TeaEvent.bit(TeaEvent.ST_L1))
+    }
+
+    val teaRedirectPc = WireDefault(0.U(XLEN.W))
+    val teaRedirectPsv = WireDefault(TeaPsvOps.empty)
+    val teaExceptionPc = WireDefault(0.U(XLEN.W))
+    val teaExceptionPsv = WireDefault(TeaPsvOps.empty)
+    val teaCurrentCause = WireInit(0.U.asTypeOf(new TeaFlushCause))
+    when (teaRedirectCtrlMispred || teaRedirectMemVio) {
+      teaCurrentCause.valid := true.B
+      teaCurrentCause.pc := teaRedirectPc
+      teaCurrentCause.psv := teaRedirectPsv
+    }.elsewhen(teaExceptionFlush) {
+      teaCurrentCause.valid := true.B
+      teaCurrentCause.pc := teaExceptionPc
+      teaCurrentCause.psv := teaExceptionPsv
+    }
+    val teaCauseInvalid = io.flushOut.valid || io.redirect.valid && !teaRobFlushEcho
+    val teaFlushCause = RegInit(0.U.asTypeOf(new TeaFlushCause))
+    when (teaCurrentCause.valid) {
+      teaFlushCause := teaCurrentCause
+    }.elsewhen(teaCauseInvalid || teaRefill) {
+      teaFlushCause.valid := false.B
+    }
+
+    val teaVisibleCause = WireInit(teaFlushCause)
+    when(teaCurrentCause.valid) {
+      teaVisibleCause := teaCurrentCause
+    }.elsewhen(teaCauseInvalid) {
+      teaVisibleCause.valid := false.B
+    }
+    val teaSelector = Module(new TeaSampleSelector)
+    val hasTeaCommit = io.commits.isCommit && io.commits.commitValid.asUInt.orR
+    teaSelector.io.enable := enableTea.asBool
+    teaSelector.io.samplePeriod := teaSamplePeriod
+    teaSelector.io.state := TeaState.classify(isEmpty, state === s_walk || io.redirect.valid,
+      hasTeaCommit, teaVisibleCause.valid)
+    teaSelector.io.flushCause := teaVisibleCause
+
+    val tracker = Module(new TeaMemberTracker(io.writeback.size, teaPsvSetSources.length))
+    tracker.io.cycle := teaSelector.io.cycle
+    tracker.io.addrTransType := io.debugInstrAddrTransType
+    tracker.io.head := deqPtr
+    tracker.io.redirect := io.redirect
+    tracker.io.readPtr(0) := teaRedirectPtr
+    tracker.io.readPtr(1) := teaFlushPtr
+    teaRedirectPc := tracker.io.read(0).pc
+    teaRedirectPsv := tracker.io.read(0).psv
+    teaExceptionPc := tracker.io.read(1).pc
+    teaExceptionPsv := tracker.io.read(1).psv
+    tracker.io.markStalled := teaSelector.io.sampleValid && teaSelector.io.sample.state === TeaState.stalled
+    teaSelector.io.stalledTarget := tracker.io.stalled
+
+    for (lane <- 0 until RenameWidth) {
+      val member = io.teaMembers.get(lane)
+      tracker.io.alloc(lane).valid := member.valid && !io.redirect.valid &&
+        VecInit(io.enq.req.zip(canEnqueue).map { case (req, accept) =>
+          accept && req.bits.robIdx.isSameEntry(member.bits.robIdx)
+        }).asUInt.orR
+      tracker.io.alloc(lane).bits := member.bits
+      val req = io.enq.req(lane)
+      tracker.io.enqPsv(lane).valid := uopCanEnqueue(lane) && !io.redirect.valid
+      tracker.io.enqPsv(lane).bits.robIdx := req.bits.robIdx
+      tracker.io.enqPsv(lane).bits.rank := req.bits.debug.get.perfDebugInfo.teaMemberRank
+      tracker.io.enqPsv(lane).bits.mask := req.bits.teaPsv
+    }
+    tracker.io.writeback.zip(io.writeback).foreach { case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits.robIdx := source.bits.robIdx
+      sink.bits.rank := source.bits.perfDebugInfo.get.teaMemberRank
+    }
+    tracker.io.events.zip(teaPsvSetSources).foreach { case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits.robIdx := source.robIdx
+      sink.bits.mask := source.mask
+    }
+    for (entry <- 0 until RobSize) {
+      tracker.io.slotReady(entry)(0) := !robEntries(entry).formerUopNum.orR
+      tracker.io.slotReady(entry)(1) := !robEntries(entry).latterUopNum.orR
+    }
+    for (slot <- 0 until 2 * CommitWidth) {
+      tracker.io.commits(slot).valid := io.commits.isCommit && commitSlotValid(slot)
+      tracker.io.commits(slot).bits := io.commits.robIdx(slot / 2)
+      tracker.io.commits(slot).bits.isFormer := (slot % 2 == 0).B
+    }
+    teaSelector.io.commitMask := VecInit(tracker.io.committed.map(_.valid)).asUInt
+    teaSelector.io.commitPc := VecInit(tracker.io.committed.map(_.bits.pc))
+    teaSelector.io.commitPsv := VecInit(tracker.io.committed.map(_.bits.psv))
+    for (lane <- 0 until CommitWidth) {
+      when(io.commits.isCommit && io.commits.commitValid(lane)) {
+        assert(PopCount(tracker.io.committed.slice(lane * RenameWidth, (lane + 1) * RenameWidth).map(_.valid)) ===
+          commitInstrCntByEntry(lane), "TEA members disagree with architectural retirement count")
+      }
+    }
+
+    val sample = WireInit(teaSelector.io.sample)
+    sample.context.retired := PopCount(tracker.io.committed.map(_.valid))
+    // Bit order is part of the trace schema; preserve overlapping raw conditions.
+    sample.context.commitBlockMask := VecInit(Seq(misPredBlock, lastCycleFlush, hasWFI,
+      io.redirect.valid, deqNeedFlush && !deqHasFlushed, deqFlushBlock,
+      criticalErrorState, traceBlock, state === s_walk)).asUInt
+    sample.context.headValid := !isEmpty
+    sample.context.headReady := !isEmpty && robEntries(deqPtr.value).isWritebacked
+    sample.context.head := deqPtr
+    sample.context.headReasonValid := !isEmpty && !hasTeaCommit && io.debugRobHeadStall.get.valid
+    sample.context.headReason := Mux(sample.context.headReasonValid, io.debugRobHeadStall.get.bits, 0.U)
+
+    val stats = Module(new TeaCycleStats)
+    stats.io.enable := enableTeaStats.asBool || enableTea.asBool
+    stats.io.cycle := teaSelector.io.cycle
+    stats.io.state := teaSelector.io.sample.state
+    stats.io.retired := sample.context.retired
+    stats.io.gapThreshold := teaGapThreshold
+    val summaryTable = ChiselDB.createTable(s"TeaCycleSummary_$hartId", new TeaCycleSummary, basicDB = true)
+    summaryTable.log(stats.io.summary, "summary", clock, reset)
+    val intervalTable = ChiselDB.createTable(s"TeaNoCommit_$hartId", new TeaNoCommit, basicDB = true)
+    intervalTable.log(stats.io.interval, "interval", clock, reset)
+
+    val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
+    teaTable.log(sample, teaSelector.io.sampleValid, "", clock, reset)
+    val finalTable = ChiselDB.createTable(s"TeaDelayedFinal_$hartId", new TeaDelayedFinal, basicDB = true)
+    tracker.io.finals.zipWithIndex.foreach { case (res, rank) =>
+      finalTable.log(res, s"member$rank", clock, reset)
+    }
+    finalTable.log(teaSelector.io.drainFinal, "drain", clock, reset)
+  } else {
+    val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
+    val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
+    assert(!enableTea.asBool && !enableTeaStats.asBool, "TEA was not elaborated; rebuild with WITH_TEA=1")
+  }
   val ldReason = Mux(l3Miss, LoadMemStall.id.U,
     Mux(l2Miss, LoadL3Stall.id.U,
       Mux(l1Miss, LoadL2Stall.id.U,
