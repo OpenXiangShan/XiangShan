@@ -451,16 +451,16 @@ object TriggerUtil {
    * @param  actionVec tdata.action
    * @param  triggerCanRaiseBpExp from csr
    */
-  def triggerActionGen(triggerAction: UInt, triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], triggerCanRaiseBpExp: Bool): Unit = {
+  def triggerActionGen(triggerAction: UInt, triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], triggerCanRaiseBpExp: Bool, isMem: Boolean = false): Unit = {
     val fireDebugModeVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.DebugMode)
-    val fireBreakpointExpVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.BreakpointExp)
+    val fireBreakpointExpVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.FetchTrigger)
     val fireDebugMode = fireDebugModeVec.asUInt.orR
     val breakPointExp = fireBreakpointExpVec.asUInt.orR && triggerCanRaiseBpExp
 
     // todo: add more for trace
     triggerAction := MuxCase(TriggerAction.None, Seq(
       fireDebugMode -> TriggerAction.DebugMode,
-      breakPointExp -> TriggerAction.BreakpointExp,
+      breakPointExp -> (if (isMem) TriggerAction.MemTrigger else TriggerAction.FetchTrigger),
     ))
   }
 

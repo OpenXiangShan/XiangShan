@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.SignExt
-import xiangshan.ExceptionNO
+import xiangshan.{ExceptionNO, TriggerAction}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR._
@@ -69,16 +69,16 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val isFetchExcp    = isException && ExceptionNO.getFetchFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isMemExcp      = isException && (ExceptionNO.getLoadFault ++ ExceptionNO.getStoreFault).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isBpExcp       = isException && ExceptionNO.EX_BP.U === highPrioTrapNO
-  private val isFetchBkpt = isBpExcp && in.isFetchBkpt
-  private val isMemBkpt = isBpExcp && !in.isFetchBkpt
+  private val isFetchBkpt = isBpExcp && (TriggerAction.isFetch(in.trigger) || in.trigger === TriggerAction.Ebreak)
+  private val isMemBkpt = isBpExcp && TriggerAction.isMem(in.trigger)
   private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
-  private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val isIllegalInst  = isException && (ExceptionNO.EX_II.U === highPrioTrapNO || ExceptionNO.EX_VI.U === highPrioTrapNO)
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
+  private val isFetchMalAddrExcp = (isFetchExcp || isFetchGuestExcp) && isFetchMalAddr
   private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here

@@ -527,13 +527,10 @@ class InterruptFilter extends Module {
   }
   val nmiVec = OHToUInt(nmiVecTmp)
 
-  // support debug interrupt
-  // support smrnmi when NMIE is 0, all interrupt disable
-  val disableDebugIntr = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
-  val enableDebugIntr = io.in.debugIntr && !disableDebugIntr
-
-  val debugIntrReg = RegNext(enableDebugIntr, false.B)
-  val disableAllIntrReg = RegNext(disableDebugIntr || !io.in.mnstatusNMIE, false.B)
+  // Disable architectural interrupts in debug mode and when stepping with stepie=0.
+  // External debug requests are handled by Dispatch.
+  val disableAllIntr = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
+  val disableAllIntrReg = RegNext(disableAllIntr || !io.in.mnstatusNMIE, false.B)
   val nmiReg = RegNext(io.in.nmi, false.B)
   val nmiVecReg = RegNext(nmiVec, 0.U.asTypeOf(nmiVec))
 
@@ -548,9 +545,8 @@ class InterruptFilter extends Module {
                          C3C5EnableReg && (!C2C5IsZero || !hvictlReg.DPR.asBool)
   val viIsHvictlInjectReg = RegNext(vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE, false.B)
 
-  io.out.interruptVec.valid := intrVecReg.orR || debugIntrReg
+  io.out.interruptVec.valid := intrVecReg.orR
   io.out.interruptVec.bits := intrVecReg
-  io.out.debug := debugIntrReg
   io.out.nmi := nmiReg
   io.out.virtualInterruptIsHvictlInject := viIsHvictlInjectReg & !nmiReg
   io.out.irToHS := irToHS & !nmiReg
@@ -586,7 +582,6 @@ class InterruptFilterIO extends Bundle {
     val vstopei = new TopEIBundle
     val hviprio1 = new Hviprio1Bundle
     val hviprio2 = new Hviprio2Bundle
-    val debugIntr = Bool()
     val debugMode = Bool()
     val dcsr = new DcsrBundle
 
@@ -610,7 +605,6 @@ class InterruptFilterIO extends Bundle {
   })
 
   val out = Output(new Bundle {
-    val debug = Bool()
     val nmi = Bool()
     val interruptVec = ValidIO(UInt(8.W))
     val mtopi  = new TopIBundle

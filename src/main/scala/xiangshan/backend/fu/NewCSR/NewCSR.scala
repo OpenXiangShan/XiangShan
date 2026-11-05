@@ -143,8 +143,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         val pcGPA = UInt(PAddrBitsMax.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
-        val isFetchBkpt = Bool()
-        val singleStep = Bool()
         val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
@@ -281,10 +279,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
   val trigger = io.fromRob.trap.bits.trigger
-  val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
-  val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
   val trapIsSatpFlushFirstFetchFault = io.fromRob.trap.bits.satpFlushFirstFetchFault
 
@@ -292,10 +288,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   val oldVsatpMode = io.oldVsatpMode
   val oldPrivState = io.oldPrivState
   val trapIsFormer = io.fromRob.trap.bits.isFormer
-
-  // debug_intrrupt
-  val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
-  val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // CSR Privilege State
   val PRVM = RegInit(PrivMode(1, 0), PrivMode.M)
@@ -418,7 +410,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.nmi := nmip.asUInt.orR
   intrMod.io.in.nmiVec := nmip.asUInt
   intrMod.io.in.debugMode := debugMode
-  intrMod.io.in.debugIntr := debugIntr
   intrMod.io.in.dcsr      := dcsr.regOut
   intrMod.io.in.platform.meip := platformIRP.MEIP
   intrMod.io.in.platform.seip := platformIRP.SEIP
@@ -429,8 +420,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.mvipSEIP := mvip.regOut.SEIP.asBool
 
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
-  val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
-  val nmi = intrMod.io.out.nmi
+  val nmi = trapIsInterrupt && intrMod.io.out.nmi
   val virtualInterruptIsHvictlInject = intrMod.io.out.virtualInterruptIsHvictlInject
   val irToHS = RegEnable(intrMod.io.out.irToHS, false.B, intrMod.io.out.interruptVec.valid)
   val irToVS = RegEnable(intrMod.io.out.irToVS, false.B, intrMod.io.out.interruptVec.valid)
@@ -457,7 +447,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.mtvec := mtvec.regOut
   trapHandleMod.io.in.stvec := stvec.regOut
   trapHandleMod.io.in.vstvec := vstvec.regOut
-  trapHandleMod.io.in.trapInfo.bits.singleStep  := hasTrap && !trapIsInterrupt && singleStep
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
   val entryDebugMode = WireInit(false.B)
@@ -862,7 +851,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
-        in.isFetchBkpt := trapIsFetchBkpt
+        in.trigger := trigger
         in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
         in.hasDTExcp := hasDTExcp
         in.satpFlushFirstFetchFault := trapIsSatpFlushFirstFetchFault
@@ -979,14 +968,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     Seq(
       dretEvent.out.debugMode.valid -> dretEvent.out.debugMode.bits,
       trapEntryDEvent.out.debugMode.valid -> trapEntryDEvent.out.debugMode.bits
-    )
-  )
-
-  debugIntrEnable := MuxCase(
-    debugIntrEnable,
-    Seq(
-      dretEvent.out.debugIntrEnable.valid -> dretEvent.out.debugIntrEnable.bits,
-      trapEntryDEvent.out.debugIntrEnable.valid -> trapEntryDEvent.out.debugIntrEnable.bits
     )
   )
 
@@ -1190,7 +1171,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.vecState.vlenb := vlenb.rdata.asUInt
   io.status.vecState.off := mstatus.regOut.VS === ContextStatus.Off
   io.status.interrupt := intrMod.io.out.interruptVec.valid
-  io.status.wfiEvent := debugIntr || nmip.asUInt.orR ||
+  io.status.wfiEvent := nmip.asUInt.orR ||
                         (mtopi.regOut.IID.asUInt =/= 0.U) ||
                         (stopi.regOut.IID.asUInt =/= 0.U) ||
                         (vstopi.regOut.IID.asUInt =/= 0.U)
@@ -1265,10 +1246,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val debugMod = Module(new Debug)
   debugMod.io.in.trapInfo.valid            := hasTrap
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
-  debugMod.io.in.trapInfo.bits.isDebugIntr := debug
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   debugMod.io.in.trapInfo.bits.trigger     := trigger
-  debugMod.io.in.trapInfo.bits.singleStep  := singleStep
   debugMod.io.in.trapInfo.bits.criticalErrorState := criticalErrorState
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode
@@ -1636,6 +1615,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
   io.toDecode.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
   io.toDecode.singlestep := io.status.singleStepFlag
+  io.toDecode.debugIntrDisable := debugMode || (dcsr.regOut.STEP.asBool && !dcsr.regOut.STEPIE.asBool)
 
   io.distributedWenLegal := wenLegalReg && !noCSRIllegalReg
   io.status.criticalErrorState := criticalErrorState && !dcsr.regOut.CETRIG.asBool

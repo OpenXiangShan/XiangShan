@@ -130,7 +130,7 @@ class DecodeStageImp(
         bits.exceptionVec extendFrom mopInfo.exceptionVec
         bits.exceptionVec(illegalInstr) := mopInfo.exceptionVec(illegalInstr) || uopInfo.exceptionII
         bits.exceptionVec(virtualInstr) := uopInfo.exceptionVI
-        bits.exceptionVec(breakPoint)   := TriggerAction.isExp(mopInfo.trigger)
+        bits.exceptionVec(breakPoint)   := TriggerAction.isException(mopInfo.trigger)
         bits.satpFlushFirstFetchFault := mopInfo.satpFlushFirstFetchFault
         bits.isFetchMalAddr := mopInfo.isFetchMalAddr
         bits.trigger := mopInfo.trigger

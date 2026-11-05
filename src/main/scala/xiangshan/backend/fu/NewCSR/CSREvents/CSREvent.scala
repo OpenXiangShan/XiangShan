@@ -125,7 +125,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val isCrossPageIPF = Input(Bool())
   val isHls = Input(Bool())
   val isFetchMalAddr = Input(Bool())
-  val isFetchBkpt = Input(Bool())
+  val trigger = Input(xiangshan.TriggerAction())
   val trapIsForVSnonLeafPTE = Input(Bool())
   val hasDTExcp = Input(Bool())
   val satpFlushFirstFetchFault = Input(Bool())

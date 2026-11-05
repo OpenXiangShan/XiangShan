@@ -88,7 +88,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   })
 
   val slotNeedsFlushVec = io.in.map { x =>
-    x.valid && (x.bits.exceptionVec.orR || TriggerAction.isDmode(x.bits.trigger) || x.bits.flushPipe)
+    x.valid && (x.bits.exceptionVec.orR || x.bits.flushPipe)
   }
 
   val allowInterruptsVec = io.in.map{ x =>

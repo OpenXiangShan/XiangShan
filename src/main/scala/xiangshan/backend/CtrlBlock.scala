@@ -171,8 +171,7 @@ class CtrlBlockImp(
   }
   val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
   delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
-    x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
-      (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
+    x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B)
   }
 
   val wbData = io.fromWB.wbData
@@ -666,7 +665,7 @@ class CtrlBlockImp(
   rename.io.ratSnpt.snptSelect := snptSelect
   rename.io.ratSnpt.flushVec := flushVec
 
-  val decodeHasException = decode.out.uop.map(x => x.bits.exceptionVec.orR || (!TriggerAction.isNone(x.bits.trigger)))
+  val decodeHasException = decode.out.uop.map(x => x.bits.exceptionVec.orR)
   // fusion decoder
   fusionDecoder.io.disableFusion := disableFusion
   for (i <- 0 until DecodeWidth) {
@@ -807,6 +806,9 @@ class CtrlBlockImp(
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
   dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
   dispatch.io.singleStep := io.fromCSR.toDecode.singlestep
+  dispatch.io.debugIntr := io.fromTop.debugIntr
+  dispatch.io.debugIntrDisable := io.fromCSR.toDecode.debugIntrDisable
+  dispatch.io.debugMode := io.fromCSR.debugMode
 
   // lsqEnqCtrl assign
   lsqEnqCtrl.io.redirect := s1_s3_redirect
@@ -863,7 +865,7 @@ class CtrlBlockImp(
   // rob to int block
   io.robio.csr <> rob.io.csr
   // When wfi is disabled, it will not block ROB commit.
-  rob.io.csr.wfiEvent := io.robio.csr.wfiEvent
+  rob.io.csr.wfiEvent := io.robio.csr.wfiEvent || dispatch.io.debugIntrPending
   rob.io.wfi_enable := decode.in.fromCSR.custom.wfi_enable
   rob.io.commit_stuck_check_enable := decode.in.fromCSR.custom.commit_stuck_check_enable
 
@@ -933,6 +935,7 @@ class CtrlBlockImp(
 class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
+    val debugIntr = Input(Bool())
   }
   val toTop = new Bundle {
     val cpuWfi = Output(Bool())
@@ -940,6 +943,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val frontend = Flipped(new FrontendToCtrlIO())
   val fromBJUResolve = Flipped(Vec(backendParams.BrhCnt, Valid(new Resolve)))
   val fromCSR = new Bundle{
+    val debugMode = Input(Bool())
     val toDecode = Input(new CSRToDecode)
     val traceCSR = Input(new TraceCSR)
     val instrAddrTransType = Input(new AddrTransType)
