@@ -207,6 +207,7 @@ class VecRegionImp(
     case (iq, i) =>
       iq.in.flush := in.flush
       iq.in.enq := in.fromIntRegion.vstdUops(i)
+      iq.in.sqDeqPtr.foreach(_ := RegNext(in.fromMem.sqDeqPtr))
   }
 
   val vpWbM3WakeUp: Seq[WakeUpBundle] =
@@ -540,6 +541,7 @@ object VecRegionModule {
     val vldS3VpWbNext: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.vpPregParams)
     val vldS3RobWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
     val v0Wb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.v0PregParams)
+    val sqDeqPtr = new xiangshan.mem.SqPtr
   }
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {
