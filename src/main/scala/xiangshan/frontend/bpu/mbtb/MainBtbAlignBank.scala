@@ -358,11 +358,15 @@ class MainBtbAlignBank(
   private val t1_vbtbCounterNeedUpdate = t1_vbtbCounterWayMask.reduce(_ || _)
 
   vbtbEntries.zipWithIndex.foreach { case (e, i) =>
+    // Train direction only when both the resident entry and resolved branch are conditional.
+    // A type mismatch must not decrement an unchanged unconditional-jump counter.
     val hitMask = t1_branches.map { branch =>
-      t1_vbtbRawHitMask(i) && branch.valid && branch.bits.attribute.isConditional &&
+      t1_vbtbRawHitMask(i) && e.entry.attribute.isConditional &&
+      branch.valid && branch.bits.attribute.isConditional &&
       Cat(t1_posHigherBits, e.entry.position) === branch.bits.cfiPosition
     }
-    val actualTaken     = Mux1H(hitMask, t1_branches.map(_.bits.taken))
+    val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
+    // Payload repairs, including type changes, always reset the counter independently of hitMask.
     val entryOverridden = t1_vbtbEntryNeedUpdate && t1_vbtbHitMask(i)
     t1_vbtbCounterWayMask(i) := hitMask.reduce(_ || _) || entryOverridden
     t1_vbtbNewCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, e.counter.getUpdate(actualTaken))
