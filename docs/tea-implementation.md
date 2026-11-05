@@ -128,6 +128,8 @@ PSV_new = PSV_old OR 新增事件 mask
 构建时 `WITH_TEA=1` 独立控制 TEA tracker、selector 和数据库记录逻辑是否 elaboration。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 256（详细验证可设为 1），period 为 0 时当前实现也逐周期采样。
 
 采样间隔按周期推进，不等待先前目标退休。`enableTea || enableTeaStats` 控制成员跟踪；两者均为 0 时，tracker 输入固定为零、状态停止更新、输出清零。只开启 `enableTeaStats` 的 Summary 模式仍保留成员跟踪。
+EMU 指定 `-W N` 时，预热期间只维护成员历史；完成预热并清零性能计数器后的首周期才开始采样和统计，四表不写预热记录。
+未指定 `-W` 或 `-W 0` 时从启动采集。TEA 周期编号在预热结束时不清零，采样相位从正式窗口首周期开始。
 
 状态分类优先级如下，其中“恢复原因”指当前可见的原因：
 
@@ -241,6 +243,7 @@ W(pc, psv) = 所有归给该静态 PC、该 PSV 组合的权重之和
 ### 7.2 ROI、PC 过滤与分母
 
 `--cycle-range START END` 筛选原始采样边界的半开区间 `[START, END)`，但延迟终结记录仍从完整数据库读取。因此，ROI 内采样、ROI 外退休的目标仍可正确关联。
+`--spec-log-dir` 分析正式窗口采集时，用首条统计快照确定 TEA 周期起点，并核对末条快照与日志中的正式窗口长度，避免顶层与 ROB 复位时机不同造成周期偏移。
 
 Computing 的 N 在 PC 排除前计算。四条指令各得 1/4，即使过滤其中三条，剩下一条仍为 1/4，不会扩大成 1。PC 过滤后不再要求所选权重等于原始边界数。
 
@@ -322,14 +325,15 @@ GSIM 使用 `make gsim GSIM=1`，其余采集开关和运行参数相同。
 将 `test_branch` 设为 TEA 分支并勾选 `enable_tea`，即可自动构建 TEA、ChiselDB 和 Constantin，
 默认加载 `scripts/ci/tea-period1000.cst`，仅写入上述四张 TEA 表；无需另行勾选 `enable_db`。
 `enable_tea` 开启时，表筛选优先于 `enable_db` 和 `enable_rolling` 的全表导出。
+CI 默认 `-W 20000000 -I 40000000`，只记录预热结束后的正式窗口；自定义 `warmup` 时自动使用同一边界。
 需要修改采样周期时，指定自己的 `cst_file`，并在其中设置 `enableTea0 1` 和 `teaSamplePeriod0`。
 TEA CI 使用工作流固定提交的 `env-scripts` runner，默认在共享 node NFS 的服务器运行；
 自定义 `servers` 时需保证所选服务器能读取 `cst_file`。结果目录带 `-tea` 标记，避免复用未编译 TEA 的 EMU。
 
 ### 统计口径与边界
 
-- `TeaCycleSummary` 在统计 enable 开启/关闭边界，以及每 4096 个连续启用周期写一条累计快照。
-  enable 为 `enableTeaStats || enableTea`。重新开启累计值不清零，但无提交区间不会跨过关闭窗口。
+- `TeaCycleSummary` 在统计 enable 开启/关闭边界，以及每 4096 个连续启用周期和 EMU 性能计数器 dump 时写一条累计快照。
+  enable 为 `(enableTeaStats || enableTea) && inRoi`。重新开启累计值不清零，但无提交区间不会跨过关闭窗口。
 - `STATES_0..3` 是启用期间 Computing/Stalled/Flushed/Drained 的精确周期数，
   `RETIRED` 是架构指令数；不是物理 Entry 数。`CYCLE` 是已观察前缀的右开边界。
 - `GAPS_0..4` 统计完整无提交区间的 1–7、8–31、32–127、128–511、512+ 周期直方图。
@@ -338,9 +342,9 @@ TEA CI 使用工作流固定提交的 `env-scripts` runner，默认在共享 nod
 - `TeaNoCommit` 保存 `[START, ENDCYCLE)` 和区间内 Stalled/Flushed/Drained 周期数；三者之和等于区间长度。
   区间可能跨越多个队首或恢复原因，不把整个区间归给恢复提交的 PC。可按 CYCLE 查找附近 TEA 样本。
 - 关闭采集后必须再执行一个采样时钟，才能写出关闭快照及截断区间。
-  若仿真直接结束，最后快照只覆盖其 `CYCLE` 之前的启用周期，最多可能漏掉 4095 个尾部周期；
+  EMU 结束时通过最终 perf dump 输出末尾快照；若绕过该 dump 直接终止，周期快照最多可能漏掉 4095 个尾部周期。
   `PENDING` 保留快照时尚未结束的无提交长度，`CLOSED=0` 表明未观察到采集关闭。
-  重新开启立即写入 CLOSED=0 的快照，避免沿用上一窗口的关闭标记。不能将未关闭结果当作完整切片统计。
+  重新开启立即写入 CLOSED=0 的快照，避免沿用上一窗口的关闭标记。未闭合的无提交区间不能计入完整区间直方图。
 
 ### 原因快照
 

@@ -4,13 +4,53 @@ package xiangshan
 
 import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
+import difftest.common.LogPerfControl
 import org.scalatest.flatspec.AnyFlatSpec
 
 class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
   behavior of "TEA cycle statistics"
 
+  class PerfSink extends Module {
+    val io = IO(Output(new LogPerfControl))
+    io := LogPerfControl()
+  }
+
+  class PerfHarness extends Module {
+    val io = IO(new Bundle {
+      val inRoi = Input(Bool())
+      val clean = Input(Bool())
+      val dump = Input(Bool())
+      val observed = Output(new LogPerfControl)
+    })
+    val control = WireInit(0.U.asTypeOf(new LogPerfControl))
+    control.timer := 123.U
+    control.logEnable := true.B
+    control.inRoi := io.inRoi
+    control.clean := io.clean
+    control.dump := io.dump
+    LogPerfControl.setSource(control)
+    val sink = Module(new PerfSink)
+    io.observed := sink.io
+  }
+
+  it should "wire measurement control across modules without coupling it to counter dumps" in {
+    simulate(new PerfHarness) { dut =>
+      for (roi <- Seq(false, true); clean <- Seq(false, true); dump <- Seq(false, true)) {
+        dut.io.inRoi.poke(roi.B)
+        dut.io.clean.poke(clean.B)
+        dut.io.dump.poke(dump.B)
+        dut.io.observed.inRoi.expect(roi.B)
+        dut.io.observed.clean.expect(clean.B)
+        dut.io.observed.dump.expect(dump.B)
+        dut.io.observed.timer.expect(123.U)
+        dut.io.observed.logEnable.expect(true.B)
+      }
+    }
+  }
+
   it should "conserve time, separate censored intervals and reset gaps across disabled windows" in {
     simulate(new TeaCycleStats) { dut =>
+      dut.io.dump.poke(false.B)
       var cycle = 0
       def drive(enabled: Boolean, state: Int, retired: Int = 0): Unit = {
         dut.io.enable.poke(enabled.B)
@@ -64,9 +104,48 @@ class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
     }
   }
 
+  it should "exclude warmup and include the final measured cycle in a requested snapshot" in {
+    simulate(new TeaCycleStats) { dut =>
+      dut.io.enable.poke(false.B)
+      dut.io.dump.poke(true.B)
+      dut.io.state.poke(TeaState.computing)
+      dut.io.retired.poke(4.U)
+      dut.io.gapThreshold.poke(128.U)
+      for (cycle <- 0 until 10) {
+        dut.io.cycle.poke(cycle.U)
+        dut.io.summary.valid.expect(false.B)
+        dut.io.interval.valid.expect(false.B)
+        dut.clock.step()
+      }
+      dut.io.enable.poke(true.B)
+      dut.io.dump.poke(false.B)
+      dut.io.cycle.poke(10.U)
+      dut.io.state.poke(TeaState.stalled)
+      dut.io.retired.poke(0.U)
+      dut.io.summary.valid.expect(true.B)
+      dut.io.summary.bits.states(0).expect(0.U)
+      dut.io.summary.bits.states(1).expect(1.U)
+      dut.io.summary.bits.retired.expect(0.U)
+      dut.clock.step(3)
+      dut.io.cycle.poke(13.U)
+      dut.io.state.poke(TeaState.computing)
+      dut.io.retired.poke(2.U)
+      dut.io.dump.poke(true.B)
+      dut.io.summary.valid.expect(true.B)
+      dut.io.summary.bits.cycle.expect(14.U)
+      dut.io.summary.bits.states(0).expect(1.U)
+      dut.io.summary.bits.states(1).expect(3.U)
+      dut.io.summary.bits.retired.expect(2.U)
+      dut.io.interval.valid.expect(true.B)
+      dut.io.interval.bits.start.expect(10.U)
+      dut.io.interval.bits.leftCensored.expect(true.B)
+    }
+  }
+
   it should "include the current cycle in periodic summaries and preserve an open gap" in {
     simulate(new TeaCycleStats) { dut =>
       dut.io.enable.poke(true.B)
+      dut.io.dump.poke(false.B)
       dut.io.retired.poke(0.U)
       dut.io.state.poke(1.U)
       dut.io.gapThreshold.poke(128.U)

@@ -2127,6 +2127,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
     val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
     val teaActive = enableTea.asBool || enableTeaStats.asBool
+    val teaPerf = difftest.common.LogPerfControl()
+    val teaCollect = teaActive && teaPerf.inRoi
     val teaRedirectPtr = io.redirect.bits.robIdx
     val teaFlushPtr = deqExceptionRobIdx
     val teaRedirectCtrlMispred = io.redirect.valid &&
@@ -2176,7 +2178,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
     val teaSelector = Module(new TeaSampleSelector)
     val hasTeaCommit = io.commits.isCommit && io.commits.commitValid.asUInt.orR
-    teaSelector.io.enable := enableTea.asBool
+    teaSelector.io.enable := enableTea.asBool && teaPerf.inRoi
     teaSelector.io.samplePeriod := teaSamplePeriod
     teaSelector.io.state := TeaState.classify(isEmpty, state === s_walk || io.redirect.valid,
       hasTeaCommit, teaVisibleCause.valid)
@@ -2259,7 +2261,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sample.context.headReason := Mux(sample.context.headReasonValid, io.debugRobHeadStall.get.bits, 0.U)
 
     val stats = Module(new TeaCycleStats)
-    stats.io.enable := teaActive
+    stats.io.enable := teaCollect
+    stats.io.dump := teaPerf.dump
     stats.io.cycle := teaSelector.io.cycle
     stats.io.state := teaSelector.io.sample.state
     stats.io.retired := sample.context.retired

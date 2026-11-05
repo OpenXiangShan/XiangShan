@@ -71,7 +71,33 @@ class TeaAnalysisTest(unittest.TestCase):
 
     def test_spec_roi_uses_reset_counters_and_half_open_boundaries(self):
         directory = self.write_spec_logs("valid")
-        self.assertEqual(tea.read_spec_roi(directory), ((1, 3), 19_999_986, 2))
+        self.assertEqual(tea.read_spec_roi(directory, self.database), ((1, 3), 19_999_986, 2))
+
+    def test_spec_roi_maps_the_measured_window_to_tea_cycles(self):
+        directory = self.write_spec_logs("offset", 1005, 1015)
+        with sqlite3.connect(self.database) as con:
+            con.execute("CREATE TABLE TeaCycleSummary_0 (CYCLE INTEGER, STATES_0 INTEGER, "
+                        "STATES_1 INTEGER, STATES_2 INTEGER, STATES_3 INTEGER)")
+            con.executemany("INSERT INTO TeaCycleSummary_0 VALUES (?,?,?,?,?)",
+                            [(1001, 0, 1, 0, 0), (1010, 0, 10, 0, 0)])
+            con.execute("DELETE FROM Tea_0 WHERE CYCLE NOT IN (0,3,6,8)")
+            con.execute("UPDATE Tea_0 SET CYCLE = CASE WHEN CYCLE=8 THEN 1009 ELSE CYCLE+1000 END")
+        window, instructions, cycles = tea.read_spec_roi(directory, self.database)
+        self.assertEqual((window, instructions, cycles), ((1000, 1010), 19_999_986, 10))
+        coverage = tea.sampling_coverage(self.database, window, 3)
+        self.assertEqual(coverage["observed_sample_rows"], 4)
+        self.assertEqual(coverage["missing_endpoint_samples"], 0)
+        for change, restore in [("STATES_1=9", "STATES_1=10"), ("CYCLE=1011", "CYCLE=1010")]:
+            with sqlite3.connect(self.database) as con:
+                con.execute(f"UPDATE TeaCycleSummary_0 SET {change} WHERE CYCLE>1001")
+            with self.assertRaisesRegex(ValueError, "TEA summary does not match"):
+                tea.read_spec_roi(directory, self.database)
+            with sqlite3.connect(self.database) as con:
+                con.execute(f"UPDATE TeaCycleSummary_0 SET {restore} WHERE CYCLE>1001")
+        with sqlite3.connect(self.database) as con:
+            con.execute("DELETE FROM TeaCycleSummary_0 WHERE CYCLE=1001")
+        with self.assertRaisesRegex(ValueError, "TEA summary does not match"):
+            tea.read_spec_roi(directory, self.database)
 
     def test_spec_roi_rejects_failed_incomplete_and_inconsistent_checkpoints(self):
         changes = {
@@ -91,12 +117,12 @@ class TeaAnalysisTest(unittest.TestCase):
                 path = directory / filename
                 path.write_text(path.read_text().replace(before, after))
                 with self.assertRaises(ValueError):
-                    tea.read_spec_roi(directory)
+                    tea.read_spec_roi(directory, self.database)
         directory = self.write_spec_logs("missing_dump")
         path = directory / "simulator_err.txt"
         path.write_text("".join(path.read_text().splitlines(keepends=True)[:2]))
         with self.assertRaises(ValueError):
-            tea.read_spec_roi(directory)
+            tea.read_spec_roi(directory, self.database)
 
     def test_cli_selects_each_spec_roi_and_keeps_late_final_joins(self):
         first = self.write_spec_logs("first", 1, 3)
@@ -164,6 +190,20 @@ class TeaAnalysisTest(unittest.TestCase):
         self.assertEqual(run["weights"][0x90000008][0], 0.5)  # unsigned mask bit 63
         self.assertEqual(run["weights"][0x90000010][1], 2)
         self.assertEqual(sum(bucket["rows"] for bucket in run["timeline"]), 9)
+
+    def test_sampling_coverage_uses_the_measured_window_start_as_phase(self):
+        with sqlite3.connect(self.database) as con:
+            con.execute("DELETE FROM Tea_0 WHERE CYCLE NOT IN (1, 4, 7)")
+            con.execute("CREATE TABLE TeaCycleSummary_0 (CYCLE INTEGER)")
+            con.execute("INSERT INTO TeaCycleSummary_0 VALUES (2)")
+        coverage = tea.sampling_coverage(self.database, (1, 10), 3)
+        self.assertEqual(coverage["expected_sample_boundaries"], 3)
+        self.assertEqual(coverage["off_grid_sample_rows"], 0)
+        self.assertEqual(coverage["missing_interior_samples"], 0)
+        self.assertEqual(coverage["missing_endpoint_samples"], 0)
+        with sqlite3.connect(self.database) as con:
+            con.execute("DELETE FROM Tea_0 WHERE CYCLE=1")
+        self.assertEqual(tea.sampling_coverage(self.database, (1, 10), 3)["missing_endpoint_samples"], 1)
 
     def test_sampling_coverage_separates_interior_loss_duplicates_and_endpoints(self):
         with sqlite3.connect(self.database) as con:
