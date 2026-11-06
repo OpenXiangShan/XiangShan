@@ -16,6 +16,7 @@
 
 package xiangshan.backend.dispatch
 
+
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -25,7 +26,8 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan.TopDownCounters._
 import xiangshan._
-import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO, RobPtr}
+import xiangshan.backend.rob.{RobPtr}
+import xiangshan.backend.rob.Rob.{RobDispatchTopDownIO, RobEnqIO}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
@@ -38,7 +40,6 @@ import xiangshan.backend.datapath.WbConfig.VfWB
 import xiangshan.backend.fu
 import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.regcache.{RCTagTableReadPort, RegCacheTagTable}
-import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace.Itype
 import xiangshan.mem.MemCoreTopDownIO
 import xiangshan.mem.mdp._

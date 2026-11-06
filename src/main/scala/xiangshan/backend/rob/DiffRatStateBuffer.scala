@@ -68,18 +68,29 @@ object DiffRatState {
   }
 }
 
+class DiffRatStateBufferIO(params: DiffRatStateParams)(implicit p: Parameters) extends XSBundle {
+  // Rename RAT base state.
+  val diffRatBase = Input(new DiffRatState(params))
+
+  // Rename mapping updates.
+  val renameUpdates = Input(Vec(params.renameWidth, Valid(new DiffRatRenameUpdate)))
+
+  // ROB slot snapshot boundaries.
+  val snapshotEnds = Input(Vec(params.renameWidth, Valid(new RobPtr)))
+
+  // Retired slot snapshot selection.
+  val commitRobIdx = Input(Valid(new RobPtr))
+  val commitRobIdxVec = Input(Vec(params.commitWidth, Valid(new RobPtr)))
+
+  // Architectural RAT state for difftest.
+  val diffRat = Output(new DiffRatState(params))
+}
+
 class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   private val params = DiffRatStateParams()
   private val stateWidth = params.totalEntries * PhyRegIdxWidth
 
-  val io = IO(new Bundle {
-    val diffRatBase = Input(new DiffRatState(params))
-    val renameUpdates = Input(Vec(params.renameWidth, Valid(new DiffRatRenameUpdate)))
-    val snapshotEnds = Input(Vec(params.renameWidth, Valid(new RobPtr)))
-    val commitRobIdx = Input(Valid(new RobPtr))
-    val commitRobIdxVec = Input(Vec(params.commitWidth, Valid(new RobPtr)))
-    val diffRat = Output(new DiffRatState(params))
-  })
+  val io = IO(new DiffRatStateBufferIO(params))
 
   private def slotOf(ptr: RobPtr): UInt = {
     val entryBits = params.slotBits - 1

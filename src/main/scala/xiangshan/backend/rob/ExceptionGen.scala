@@ -31,22 +31,33 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
+class ExceptionGenIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
+  // Redirect.
+  val redirect = Input(Valid(new Redirect))
+  // Exception flush.
+  val flush = Input(Bool())
+
+  // Rename stage exception.
+  val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.decodeSet))))
+
+  // Execution stage exception.
+  val wb = MixedVec(
+    params.getWrite2RobParams().filter(_.needExceptionGen).map { x =>
+      Flipped(ValidIO(new RobExceptionInfo(x.exceptionOut)))
+    }
+  )
+
+  // Exception Output.
+  val out = ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params)))
+
+  // Oldest retained exception.
+  val state = ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params)))
+}
+
 class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val allExceptions = ExceptionNO.exceptionGenSet(params)
 
-  val io = IO(new Bundle {
-    val redirect = Input(Valid(new Redirect))
-    val flush = Input(Bool())
-    val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.decodeSet))))
-    // csr + load + store + varith + vload + vstore
-    val wb = MixedVec(
-      params.getWrite2RobParams().filter(_.needExceptionGen).map { x =>
-        Flipped(ValidIO(new RobExceptionInfo(x.exceptionOut)))
-      }
-    )
-    val out = ValidIO(new RobExceptionInfo(allExceptions))
-    val state = ValidIO(new RobExceptionInfo(allExceptions))
-  })
+  val io = IO(new ExceptionGenIO(params))
 
   val wbExuParams = params.getWrite2RobParams().filter(_.needExceptionGen)
 
