@@ -103,6 +103,10 @@ with ThreadPoolExecutor(max_workers=len(workers) + 1) as pool:
 stamp = datetime.now(timezone.utc).isoformat()
 result = dict(utc=stamp, run_id=identity['run_id'], source=head, nodes=observations[:-1], controller=observations[-1],
               scope='Worker list observed from the original auto-scheduled runner. Original process identities and stdout flags only; no host-load sampling, unfinished DB reads or inferred guest CPI.')
+# Preserve kernel identities even when buffered sampler output is not ready.
+(O / 'runtime-live.json').write_text(json.dumps(result, indent=2) + '\n')
+with (O / 'resource-events.jsonl').open('a') as output:
+    output.write(json.dumps(result) + '\n')
 seeds = json.loads((O / 'inputs/spec06-cov03-seeds.json').read_text())
 controllers = result['controller']['processes']
 assert len(controllers) == 1
@@ -124,11 +128,8 @@ for node in result['nodes']:
 (O / 'runtime-check.json').write_text(json.dumps(dict(utc=stamp, run_id=identity['run_id'], checks=checks,
     controller_single_thread_and_default_node_pool=True, completed_spec_difftest_validated=None,
     scope='Observed argv, affinity and sampler stdout only. Difftest is requested; a missing announcement in buffered live stdout is unknown, not a pass or failure. No SPEC DB read.'), indent=2) + '\n')
-(O / 'runtime-live.json').write_text(json.dumps(result, indent=2) + '\n')
 (O / 'runner-last-tail.txt').write_text(runner['tail'])
 (O / 'runner-network-retries.json').write_text(json.dumps(dict(utc=stamp, run_id=identity['run_id'], lines=runner['retry_lines'],
     scope='Original platform transport failures and automatic retries; preserved as infrastructure evidence, not new user dispatches or measured RTL failures.'), indent=2) + '\n')
-with (O / 'resource-events.jsonl').open('a') as output:
-    output.write(json.dumps(result) + '\n')
 print(json.dumps(dict(utc=stamp, workers=[dict(host=n['host'], guests=len([p for p in n['processes'] if p['role']=='guest'])) for n in result['nodes']],
                      retry_lines=len(runner['retry_lines']), controller_processes=len(result['controller']['processes'])), indent=2))
