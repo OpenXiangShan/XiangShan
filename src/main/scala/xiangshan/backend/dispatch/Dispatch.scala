@@ -25,11 +25,10 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan.TopDownCounters._
 import xiangshan._
-import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rob.Rob.{RobDispatchTopDownIO, RobEnqIO}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.rename.{BusyTable, VlBusyTable}
+import xiangshan.backend.rename.{BusyTable, CompressType, VlBusyTable}
 import xiangshan.backend.vector.{VecIssueQueue, BusyTable => VpBusyTable}
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.datapath.DataConfig._
@@ -144,8 +143,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // redirect
     val redirect = Flipped(ValidIO(new Redirect))
-    // singleStep
-    val singleStep = Input(Bool())
     // lfst
     val lfst = new DispatchLFSTIO
 
@@ -403,32 +400,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     ))
   }
 
-  // Singlestep should only commit one machine instruction after dret, and then hart enter debugMode according to singlestep exception.
-  val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
-  val singleStepState = RegInit(s_updateRobidx)
-
-  val robidxStepHold = WireInit(RobPtr(false.B, 0.U))
-  val robidxStepReg = RegInit(RobPtr(false.B, 0.U))
-  val robidxCanCommitStepping = WireInit(RobPtr(false.B, 0.U))
-  robidxStepReg := robidxCanCommitStepping
-
-  when(!io.singleStep) {
-    singleStepState := s_updateRobidx
-  }.elsewhen(io.singleStep && fromRename(0).fire && io.enqRob.req(0).valid) {
-    singleStepState := s_holdRobidx
-    robidxStepHold := fromRename(0).bits.robIdx
-  }
-
-  when(singleStepState === s_updateRobidx) {
-    robidxCanCommitStepping := robidxStepHold
-  }.elsewhen(singleStepState === s_holdRobidx) {
-    when(io.redirect.valid){
-      robidxCanCommitStepping.flag := !robidxStepReg.flag
-    }.otherwise {
-      robidxCanCommitStepping := robidxStepReg
-    }
-  }
-
   val uopSelIQ = Reg(Vec(renameWidth, Vec(issueQueueNum, Bool())))
   val needAppendIQValidNumVec = Wire(Vec(exuNum, UInt(RenameWidth.U.getWidth.W)))
   allExuParams.zipWithIndex.map { case (exuParams, iqDeqIdx) => {
@@ -592,7 +563,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   for (i <- 0 until RenameWidth){
     // update valid logic
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
-      !lsqRecoverStall && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
+      !lsqRecoverStall && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && !lsqRecoverStall
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(
@@ -605,8 +576,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   for (i <- 0 until RenameWidth){
     // check is drop amocas sta
     fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 0.U
-    // update singleStep
-    fromRenameUpdate(i).bits.singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
   }
   var temp = 0
   allIssueParams.zipWithIndex.map{ case(issue, iqidx) => {
@@ -787,12 +756,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     } else {
       fromRenameUpdate(i).bits.loadWaitBit := isLs(i) && !isStore(i) && fromRename(i).bits.loadWaitBit
     }
-    // // update singleStep, singleStep exception only enable in next machine instruction.
-    updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
     XSDebug(
       fromRename(i).fire &&
-        (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)), s"Debug Mode: inst ${i} has frontend trigger exception\n")
-    XSDebug(fromRename(i).fire && updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
+        updatedUop(i).exceptionVec(breakPoint), s"Debug Mode: inst ${i} has frontend trigger exception\n")
+    XSDebug(
+      fromRename(i).fire && updatedUop(i).exceptionVec(breakPoint) &&
+        updatedUop(i).trigger === TriggerAction.SingleStep,
+      s"Debug Mode: inst ${i} has single step exception\n")
     if (env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
@@ -854,11 +824,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // blockedByWaitForward: this instruction is blocked by itself (based on waitForward)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
-  val hasException = VecInit(fromRename.zip(updatedUop).map {
-    case (fromRename, uop) =>
-      fromRename.bits.hasException || uop.singleStep
-  })
-
   private val blockedByWaitForward = Wire(Vec(RenameWidth, Bool()))
   blockedByWaitForward(0) := !io.enqRob.isEmpty && isWaitForward(0)
   for (i <- 1 until RenameWidth) {

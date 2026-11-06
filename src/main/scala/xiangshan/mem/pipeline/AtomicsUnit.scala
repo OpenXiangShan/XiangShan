@@ -242,9 +242,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   val actionVec = VecInit(tdata.map(_.action))
   val triggerAction = Wire(TriggerAction())
-  TriggerUtil.triggerActionGen(triggerAction, backendTriggerCanFireVec, actionVec, triggerCanRaiseBpExp)
-  val triggerDebugMode = TriggerAction.isDmode(triggerAction)
-  val triggerBreakpoint = TriggerAction.isExp(triggerAction)
+  TriggerUtil.triggerActionGen(triggerAction, backendTriggerCanFireVec, actionVec, triggerCanRaiseBpExp, isMem = true)
+  val triggerBreakpoint = TriggerAction.isBreakpoint(triggerAction)
 
   // tlb translation, manipulating signals && deal with exception
   // at the same time, flush sbuffer
@@ -280,7 +279,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       trigger                  := triggerAction
 
       when (!io.dtlb.resp.bits.miss) {
-        when (!addrAligned || triggerDebugMode || triggerBreakpoint) {
+        when (!addrAligned || triggerBreakpoint) {
           // NOTE: when addrAligned or trigger fire, do not need to wait tlb actually
           // check for miss aligned exceptions, tlb exception are checked next cycle for timing
           // if there are exceptions, no need to execute it

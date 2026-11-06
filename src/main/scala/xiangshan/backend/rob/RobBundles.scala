@@ -293,7 +293,6 @@ class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Paramet
   val satpFlush = Bool()
   val isVset = Bool()
   val replayInst = Bool() // redirect to that inst itself
-  val singleStep = Bool() // TODO add frontend hit beneath
   val crossPageIPFFix = Bool()
   val trigger = TriggerAction()
   // if vstart is udpated by vector unit
@@ -310,10 +309,10 @@ class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Paramet
   val veew = VSew()
   val vlmul = VLmul()
 
-  def has_exception = hasException || flushPipe || singleStep || replayInst || TriggerAction.isDmode(trigger)
-  def not_commit = hasException || singleStep || replayInst || TriggerAction.isDmode(trigger)
+  def has_exception = exceptionVec.orR || flushPipe || replayInst
+  def not_commit = exceptionVec.orR || replayInst
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = hasException || singleStep || TriggerAction.isDmode(trigger)
+  def can_writeback = exceptionVec.orR
 }
 
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {

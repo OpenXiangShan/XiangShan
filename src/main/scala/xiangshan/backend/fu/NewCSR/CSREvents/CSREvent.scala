@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{SignExt, ZeroExt}
-import xiangshan.HasXSParameter
+import xiangshan.{HasXSParameter, TriggerAction}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{HgatpMode, SatpMode}
@@ -125,7 +125,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val isCrossPageIPF = Input(Bool())
   val isHls = Input(Bool())
   val isFetchMalAddr = Input(Bool())
-  val isFetchBkpt = Input(Bool())
+  val trigger = Input(TriggerAction())
   val trapIsForVSnonLeafPTE = Input(Bool())
   val hasDTExcp = Input(Bool())
   val satpFlushFirstFetchFault = Input(Bool())
