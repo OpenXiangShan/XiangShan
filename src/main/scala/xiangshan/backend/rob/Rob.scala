@@ -1237,8 +1237,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       !io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself()
     )
   val resetsPendingSlot = flushesHeadEntry || clearsHeadLatter
+  val resetsPendingSlotNext = RegNext(resetsPendingSlot, false.B)
+  val headEntryCannotBeLatter = !pendingEntry.valid ||
+    CompressType.isNORMAL(pendingEntry.entryPairType) ||
+    pendingEntry.formerUopNum =/= 0.U ||
+    pendingEntry.slotNeedFlushMask(0)
+  val resetsCurrentPendingSlot = resetsPendingSlot || resetsPendingSlotNext || headEntryCannotBeLatter
   val pendingPtrIsFormer = RegInit(true.B)
-  when (resetsPendingSlot || io.commits.isCommit && io.commits.commitValid.asUInt.orR) {
+  when (resetsCurrentPendingSlot || io.commits.isCommit && io.commits.commitValid.asUInt.orR) {
     pendingPtrIsFormer := true.B
   }.elsewhen(
     !pendingBackPtr.needFlush(io.redirect) &&
@@ -1251,18 +1257,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   val pendingPtrInput = WireInit(deqPtr)
-  pendingPtrInput.isFormer := Mux(resetsPendingSlot, true.B, pendingPtrIsFormer)
+  pendingPtrInput.isFormer := Mux(resetsCurrentPendingSlot, true.B, pendingPtrIsFormer)
   val pendingPtrReg = RegInit(RobPtr(false.B, 0.U))
   pendingPtrReg := pendingPtrInput
 
   // VirtualStoreQueue samples this boundary in the redirect cycle.  Do not let
   // a stale latter state survive either a whole-entry flush or a redirect that
   // removes only the latter half of the head entry.
-  io.lsq.pendingPtr := Mux(resetsPendingSlot, deqPtr.asFormer, pendingPtrReg)
+  io.lsq.pendingPtr := Mux(resetsPendingSlot || resetsPendingSlotNext, deqPtr.asFormer, pendingPtrReg)
 
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head) // TODO: useless, delete it
   io.lsq.scommit := RegNext(
     Mux(io.commits.isCommit && newStCommit ||
+      !resetsCurrentPendingSlot &&
+      !pendingBackPtr.needFlush(io.redirect) &&
+      pendingEntry.valid &&
       CompressType.isCC(pendingEntry.entryPairType) &&
       pendingEntry.entryHasStore &&
       pendingEntry.formerUopNum === 0.U &&
