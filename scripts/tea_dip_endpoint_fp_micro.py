@@ -21,7 +21,7 @@ def main():
     environment = Path('/nfs/home/wujiabin/work/xs-env/rtl-dip-experiments-20261103')
     output = environment / 'tea-exact-endpoint-fp-micro'
     assert not output.exists(), 'Observe the original attempts instead of restarting'
-    prior = json.loads((environment / 'wb-query-recovery-micro/experiment.json').read_text())
+    prior = json.loads((Path(__file__).resolve().parents[1] / 'reports/wb-query-recovery-micro-20261106/experiment.json').read_text())
     builds = {name: json.loads((environment / path / 'build-state.json').read_text()) for name, path in [('control7efc', 'gate-observe-v2'), ('endpoint', 'tea-exact-endpoint-analysis-tools')]}
     assert [build['source'] for build in builds.values()] == ['7efc7832caaf32fda099e53528cc6badc7054cb6', 'addd8cc4d35a5a3f5f3fa3cfe8371280ff787807']
     assert all(build['phase'] == 'complete' and digest(build['binary']) == build['binary_sha256'] for build in builds.values())
