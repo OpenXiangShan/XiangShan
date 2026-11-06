@@ -205,9 +205,13 @@ class TLBFA(
   val sfence_vpn = sfence.bits.addr(VAddrBits - 1, offLen)
   val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
   val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
+  // MPT may reduce the cached entry's effective range below the translation leaf page size.
+  // Over-fence by address so SFENCE cannot miss another subrange of the same leaf mapping.
+  val mptSfenceOverFence = if (HasMptCheck) io.csr.mmpt.mode =/= 0.U else false.B
   // Sfence will flush all sectors of an entry when hit
   when (sfence_valid) {
-    when (sfence.bits.rs1 || io.csr.priv.virt || (if (HasBitmapCheck) (io.csr.mbmc.BME === 1.U && io.csr.mbmc.CMODE === 0.U) else false.B)) { // virtual address *.rs1 <- (rs1===0.U)
+    when (sfence.bits.rs1 || io.csr.priv.virt || mptSfenceOverFence ||
+      (if (HasBitmapCheck) (io.csr.mbmc.BME === 1.U && io.csr.mbmc.CMODE === 0.U) else false.B)) { // virtual address *.rs1 <- (rs1===0.U)
       // Note: when virt=1, always flush all addr. See hfence.vvma comment.
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid
