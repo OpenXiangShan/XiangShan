@@ -16,7 +16,7 @@ import xiangshan.backend.fu.vector.Utils.NOnes
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.mem.Bundles.{LrqSpecialCtrl, MemWaitUpdateReqBundle}
+import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 
 class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   override def desiredName: String = params.getEntryName
@@ -410,9 +410,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     in.issueResp                := issueRespVec(entryIdx)
     validVec(entryIdx)          := out.valid
     issuedVec(entryIdx)         := out.issued
-    val specialPermit = io.lrqSpecialCtrl.map(ctrl => !ctrl.active || ctrl.targetValid &&
-      out.entry.bits.payload.og1Payload.lqIdx.get === ctrl.lqIdx && out.robIdx === ctrl.robIdx).getOrElse(true.B)
-    canIssueVec(entryIdx)       := out.canIssue && specialPermit
+    canIssueVec(entryIdx)       := out.canIssue
     rfWenVec(entryIdx)          := out.entry.bits.payload.rfWen.getOrElse(false.B)
     srcReadyVec(entryIdx)       := out.srcReady
     fuTypeVec(entryIdx)         := out.fuType
@@ -512,7 +510,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
 class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   val flush               = Flipped(ValidIO(new Redirect))
-  val lrqSpecialCtrl      = Option.when(params.isLdAddrIQ)(Input(new LrqSpecialCtrl))
   //enq
   val enq                 = Vec(params.numEnq, Flipped(ValidIO(new EntryBundle)))
   val og0Resp             = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))

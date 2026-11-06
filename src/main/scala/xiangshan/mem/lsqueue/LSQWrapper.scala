@@ -107,11 +107,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // from store_s0, store data, send to sq from rs
     }
     val bypass = Flipped(Vec(LoadPipelineWidth, new UncacheBypass))
-    val lrqAlloc = Vec(LoadPipelineWidth, Flipped(Valid(new LrqAlloc)))
-    val lrqAllocIndex = Output(Vec(LoadPipelineWidth, UInt(log2Ceil(LoadQueueReplaySize).W)))
-    val lrqCancel = Vec(LoadPipelineWidth, Flipped(Valid(new LrqCancel)))
-    val lrqCreditReturn = Output(new LrqCreditReturn)
-    val specialCtrl = Output(new LrqSpecialCtrl)
     val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
     val sbuffer = new SbufferWriteIO
     val forward = Flipped(Vec(LoadPipelineWidth, new SQForward))
@@ -156,6 +151,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
+    val specialMode = Output(Bool())
 
     val diffStore = OptionWrapper(debugEn, Flipped(new DiffStoreIO))
   })
@@ -244,11 +240,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.rob.commit          := io.rob.commit
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
-  loadQueue.io.lrqAlloc            <> io.lrqAlloc
-  loadQueue.io.lrqAllocIndex       <> io.lrqAllocIndex
-  loadQueue.io.lrqCancel           <> io.lrqCancel
-  loadQueue.io.lrqCreditReturn     <> io.lrqCreditReturn
-  loadQueue.io.specialCtrl         <> io.specialCtrl
   loadQueue.io.replay              <> io.replay
   loadQueue.io.loadWakeup          <> io.loadWakeup
   loadQueue.io.release             <> io.release
@@ -341,6 +332,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   loadQueue.io.debugTopDown <> io.debugTopDown
   loadQueue.io.replayAllocate <> io.replayAllocate
+  io.specialMode := loadQueue.io.specialMode
 
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.toUncacheBuffer.resp.valid))
   assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.toUncacheBuffer.idResp.valid))

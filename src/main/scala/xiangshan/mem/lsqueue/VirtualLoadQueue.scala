@@ -47,7 +47,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle)))
     // to LoadQueueReplay and LoadQueueRAR
     val ldWbPtr     = Output(new LqPtr)
-    val specialCtrl = Output(new LrqSpecialCtrl)
     // global
     val lqFull      = Output(Bool())
     val lqEmpty     = Output(Bool())
@@ -157,26 +156,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   io.lqEmpty := RegNext(validCount === 0.U)
   val lqRecoverStall = io.redirect.valid || lastCycleRedirect.valid || lastLastCycleRedirect.valid
   io.lqRecoverStall := RegNext(lqRecoverStall) // means loadqueue haven't pending redirect
-
-  val specialCtrl = RegInit(0.U.asTypeOf(new LrqSpecialCtrl))
-  val specialCounter = RegInit(0.U(12.W))
-  val headLive = allocated(deqPtr.value) && deqPtr =/= enqPtrExt.head &&
-    !committed(deqPtr.value) && !needCancel(deqPtr.value) && !lqRecoverStall
-  val sameHead = specialCtrl.targetValid && specialCtrl.lqIdx === deqPtr &&
-    specialCtrl.robIdx === robIdx(deqPtr.value)
-  specialCtrl.targetValid := headLive
-  specialCtrl.lqIdx := deqPtr
-  specialCtrl.robIdx := robIdx(deqPtr.value)
-  when (!headLive || !sameHead) {
-    specialCounter := 0.U
-    specialCtrl.active := false.B
-  } .elsewhen (!specialCtrl.active) {
-    specialCounter := specialCounter + 1.U
-    when (specialCounter === 2047.U) {
-      specialCtrl.active := true.B
-    }
-  }
-  io.specialCtrl := specialCtrl
 
   XSError((enqPtrExt.head < deqPtr) &&
   !(enqPtrExt.head.value === deqPtr.value && enqPtrExt.head.flag ^ deqPtr.flag), s"deqPtr exceed enqptr\n")

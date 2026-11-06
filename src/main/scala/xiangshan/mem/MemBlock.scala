@@ -46,7 +46,6 @@ import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
-import xiangshan.mem.Bundles.{LrqCreditReturn, LrqSpecialCtrl}
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
 
 trait HasMemBlockParameters extends HasXSParameter {
@@ -202,7 +201,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val hybridPc = Vec(HyuCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
 
   val intIssue: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(intSchdParams.genExuInputBundle(DecoupledIO(_), _.hasMemFu))
-  val lrqUsesGuard = Input(Vec(LoadPipelineWidth, Bool()))
   val wakeupToLRQ = Flipped(Vec(StaCnt + StdCnt, ValidIO(new IssueQueueLRQWakeUpBundle)))
   val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new IssueQueueLRQWakeUpCancelBundle))
   val vstdStoreData: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
@@ -210,8 +208,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 }
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
-  val lrqCreditReturn = Output(new LrqCreditReturn)
-  val lrqSpecialCtrl = Output(new LrqSpecialCtrl)
   val topToBackendBypass = new TopToBackendBundle
 
   // used by VLSU issue queue, the vector store would wait all store before it, and the vector load would wait all load
@@ -592,8 +588,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val lsq     = Module(new LsqWrapper)
   val sbuffer = Module(new Sbuffer)
-  io.mem_to_ooo.lrqCreditReturn := lsq.io.lrqCreditReturn
-  io.mem_to_ooo.lrqSpecialCtrl := lsq.io.specialCtrl
 
   // Violation rollback: same-ROB redirects that flush themselves take priority.
   def isOlder(left: Redirect, right: Redirect): Bool = {
@@ -938,11 +932,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     newLoadUnits(i).io.robHeadPtr := io.ooo_to_mem.lsqio.pendingPtr
     newLoadUnits(i).io.perfLqHeadPtr := lsq.io.lqDeqPtr
     newLoadUnits(i).io.perfLqFull := lsq.io.lqFull
-    newLoadUnits(i).io.specialCtrl := lsq.io.specialCtrl
-    newLoadUnits(i).io.lrqUsesGuard := io.ooo_to_mem.lrqUsesGuard(i)
-    lsq.io.lrqAlloc(i) := newLoadUnits(i).io.lrqAlloc
-    newLoadUnits(i).io.lrqAllocIndex := lsq.io.lrqAllocIndex(i)
-    lsq.io.lrqCancel(i) := newLoadUnits(i).io.lrqCancel
+    newLoadUnits(i).io.specialMode := lsq.io.specialMode
 
     // software prefetch to frontend (prefetch.i)
     io.ifetchPrefetch(i) <> newLoadUnits(i).io.swInstrPrefetch

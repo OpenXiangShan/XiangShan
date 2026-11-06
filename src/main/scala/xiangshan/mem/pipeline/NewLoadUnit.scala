@@ -57,10 +57,6 @@ class LoadUnitS0(param: ExeUnitParams)(
     // TODO: canAcceptHigh/LowConfPrefetch
     val prefetchReq = Flipped(DecoupledIO(new L1PrefetchReq))
     val ldin = Flipped(DecoupledIO(new ExuInput(param)))
-    val specialCtrl = Input(new LrqSpecialCtrl)
-    val lrqUsesGuard = Input(Bool())
-    val lrqAlloc = ValidIO(new LrqAlloc)
-    val lrqAllocIndex = Input(UInt(log2Ceil(LoadQueueReplaySize).W))
 
     // Tlb request
     val tlbReq = DecoupledIO(new TlbReq)
@@ -177,7 +173,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   prefetch.hasROBEntry := false.B
   prefetch.missDbUpdated := false.B
   prefetch.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
-  prefetchHiConf.valid := io.prefetchReq.valid && prefetchIsHiConf && !io.specialCtrl.active
+  prefetchHiConf.valid := io.prefetchReq.valid && prefetchIsHiConf
   prefetchHiConf.bits := prefetch
   prefetchHiConf.bits.entrance := LoadEntrance.prefetchHiConf.U
 
@@ -212,14 +208,13 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.noQuery.get := ldin.fuOpType === LSUOpType.prefetch_i // swInstr
   scalarIssue.bits.DontCareUnalign() // assign later in sink
   scalarIssue.bits.DontCareReplayFromLRQFields()
-  scalarIssue.bits.replayQueueIdx.get := io.lrqAllocIndex
   scalarIssue.bits.DontCareVectorFields()
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
   scalarIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // 7. low-confidence prefetch
-  prefetchLoConf.valid := io.prefetchReq.valid && !io.specialCtrl.active
+  prefetchLoConf.valid := io.prefetchReq.valid
   prefetchLoConf.bits := prefetch
   prefetchLoConf.bits.entrance := LoadEntrance.prefetchLoConf.U
   prefetchLoConf.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
@@ -403,11 +398,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   assert(!sink.ready || unalignTail.ready, "unalignTail should always be ready")
   io.replay.ready := replayIsHiPrio && replayHiPrio.ready || replayIsLoPrio && replayLoPrio.ready
   io.fastReplay.ready := fastReplay.ready
-  io.prefetchReq.ready := Mux(prefetchIsHiConf, prefetchHiConf.ready, prefetchLoConf.ready) && !io.specialCtrl.active
+  io.prefetchReq.ready := Mux(prefetchIsHiConf, prefetchHiConf.ready, prefetchLoConf.ready)
   io.ldin.ready := scalarIssue.ready
-  io.lrqAlloc.valid := scalarIssue.fire && !LSUOpType.isPrefetch(ldin.fuOpType)
-  io.lrqAlloc.bits.uop := ldin.toDynInst()
-  io.lrqAlloc.bits.usesGuard := io.lrqUsesGuard
 
   io.tlbReq.valid := tlbReqValid
   io.tlbReq.bits.vaddr := tlbVAddr
@@ -513,7 +505,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
-    val specialCtrl = Input(new LrqSpecialCtrl)
+    val specialMode = Input(Bool())
     val robHeadPtr = Input(new RobPtr)
 
     // Tlb response
@@ -524,7 +516,6 @@ class LoadUnitS1(param: ExeUnitParams)(
     // DCache request: paddr and s1 kill signal
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
-    val lrqCancel = ValidIO(new LrqCancel)
 
     /**
       * Data forward request and kill
@@ -614,9 +605,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val noQuery = in.noQuery.get
   val tlbHit = tlbResp.valid && !tlbResp.bits.miss && !noQuery
   val tlbMiss = tlbResp.valid && tlbResp.bits.miss
-  val isSpecialTarget = io.specialCtrl.targetValid &&
-    uop.lqIdx === io.specialCtrl.lqIdx && robIdx === io.specialCtrl.robIdx
-  val specialRequest = io.specialCtrl.active && !isSpecialTarget
+  val specialRequest = io.specialMode && robIdx =/= io.robHeadPtr
   val paddrEffective = tlbHit || noQuery // hit or noQuery
   val pbmt = Mux(tlbHit, tlbResp.bits.pbmt.head, Pbmt.pma)
   val noQueryPAddr = Mux(io.uncacheBypassResp.valid, io.uncacheBypassResp.bits.paddr, in.paddr.get)
@@ -757,10 +746,6 @@ class LoadUnitS1(param: ExeUnitParams)(
 
   io.dcachePAddr := paddrDCache
   io.dcacheKill := killDCache
-  io.lrqCancel.valid := pipeIn.valid && kill && !accessType.isPrefetch()
-  io.lrqCancel.bits.index := in.replayQueueIdx.get
-  io.lrqCancel.bits.robIdx := robIdx
-  io.lrqCancel.bits.lqIdx := uop.lqIdx
 
   // use kill instead of killDCache if timing does not allow it
   io.storeForwardReq.paddr := paddr
@@ -825,7 +810,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
-    val specialCtrl = Input(new LrqSpecialCtrl)
+    val specialMode = Input(Bool())
     val robHeadPtr = Input(new RobPtr)
     val unalignTailValid = Output(Bool())
 
@@ -1620,7 +1605,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.handledByMSHR := lqWriteHandledByMSHR
   lqWrite.replacementUpdated := DontCare // TODO: remove this
   lqWrite.missDbUpdated := DontCare // TODO: remove this
-  lqWrite.schedIndex := Mux(s4HeadValid, s4Head.replayQueueIdx.get, in.replayQueueIdx.get)
+  lqWrite.schedIndex := in.replayQueueIdx.get
   lqWrite.updateAddrValid := ldoutValid || vldoutValid
   lqWrite.rep_info.mshr_id := lqWriteMshrId
   lqWrite.rep_info.full_fwd := false.B
@@ -2016,11 +2001,7 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
 class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   private val numMemChannels = p(XSCoreParamsKey).dcacheParametersOpt.get.numMemChannels
   val redirect = Flipped(ValidIO(new Redirect))
-  val specialCtrl = Input(new LrqSpecialCtrl)
-  val lrqUsesGuard = Input(Bool())
-  val lrqAlloc = ValidIO(new LrqAlloc)
-  val lrqAllocIndex = Input(UInt(log2Ceil(LoadQueueReplaySize).W))
-  val lrqCancel = ValidIO(new LrqCancel)
+  val specialMode = Input(Bool())
   val robHeadPtr = Input(new RobPtr)
   // Request sources
   val ldin = Flipped(DecoupledIO(new ExuInput(param)))
@@ -2117,10 +2098,6 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s0.io.replay <> io.replay
   s0.io.prefetchReq <> io.prefetchReq
   s0.io.ldin <> io.ldin
-  s0.io.specialCtrl := io.specialCtrl
-  s0.io.lrqUsesGuard := io.lrqUsesGuard
-  s0.io.lrqAllocIndex := io.lrqAllocIndex
-  io.lrqAlloc := s0.io.lrqAlloc
   io.tlb.req <> s0.io.tlbReq
   io.dcache.req <> s0.io.dcacheReq
   io.dcache.is128Req := s0.io.is128Req
@@ -2136,8 +2113,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   // S1
   s1.io.redirect := io.redirect
-  s1.io.specialCtrl := io.specialCtrl
-  io.lrqCancel := s1.io.lrqCancel
+  s1.io.specialMode := io.specialMode
   s1.io.robHeadPtr := io.robHeadPtr
   s1.io.tlbResp <> io.tlb.resp
   io.tlb.req_kill := s1.io.tlbReqKill
@@ -2166,7 +2142,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   // S2
   s2.io.redirect := io.redirect
-  s2.io.specialCtrl := io.specialCtrl
+  s2.io.specialMode := io.specialMode
   s2.io.robHeadPtr := io.robHeadPtr
   s2.io.pmp := io.pmp
   s2.io.tlbHint := io.tlbHint

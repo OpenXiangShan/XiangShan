@@ -33,7 +33,6 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
     val doAllocate = Input(Vec(allocWidth, Bool()))
 
     val free = Input(UInt(size.W))
-    val recycled = Output(UInt(size.W))
 
     val validCount = Output(UInt())
     val empty = Output(Bool())
@@ -74,7 +73,6 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
   // update freeMask
   require((size % freeWidth) == 0)
   freeSelMask := freeSelMaskVec.reduce(_|_)
-  io.recycled := freeSelMask
   freeMask := (io.free | freeMask) & ~freeSelMask
 
   val remFreeSelMaskVec = VecInit(Seq.tabulate(freeWidth)(rem => getRemBits((freeMask & ~freeSelMask))(rem)))

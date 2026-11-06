@@ -521,8 +521,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     toExu.map(x => MixedVec(x.map(_.valid.cloneType).toSeq)).toSeq
   ))
   val s1_toExuData: MixedVec[MixedVec[Og1InUop]] = Reg(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType).toSeq)).toSeq))
-  io.lrqRequestValid.foreach(_ := s1_toExuValid.flatten.zip(s1_toExuData.flatten)
-    .filter(_._2.exuParams.hasLoadFu).map(_._1))
   val s1_toExuDataWire: MixedVec[MixedVec[Og1InUop]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType).toSeq)).toSeq))
   s1_toExuData := s1_toExuDataWire
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType).toSeq))))
@@ -872,8 +870,6 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
   val og0CancelForStdFromFltRegion = Input((Vec(backendParams.getFltRegionParam.getFpWriteSize, Bool())))
 
   val og1Cancel = Output(ExuVec())
-
-  val lrqRequestValid = Option.when(param.isIntSchd)(Output(Vec(LoadPipelineWidth, Bool())))
 
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
