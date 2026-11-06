@@ -9,6 +9,7 @@ import xiangshan._
 import xiangshan.TopDownCounters._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.{PipelineStallReason, StoreBubbleReason}
+import xiangshan.backend.decode.DecodeDebug
 import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
@@ -83,6 +84,17 @@ class DecodeStageImp(
   out.toCSR.trapInstInfo.valid := !redirect_reg && hasIllegalInst
   out.toCSR.trapInstInfo.bits  := illegalTrapInstInfo
 
+  val debug = Module(new DecodeDebug)
+  debug.in.singleStep := in.fromCSR.singlestep
+  debug.in.trapTrigger := in.fromCSR.trapTrigger
+  debug.in.debugMode := in.debugMode
+  debug.in.redirect := in.redirect.valid
+  debug.in.replay := in.stepReplay
+  debug.in.mops.zip(in.mop).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.fire := source.fire
+    sink.triggerAction := source.bits.trigger
+  }
 
   for (i <- decodeChannels.in.mops.indices) {
     val inMopBits = in.mop(i).bits
@@ -103,7 +115,7 @@ class DecodeStageImp(
         ctrl.exceptionVec     := inMopBits.exceptionVec
         ctrl.satpFlushFirstFetchFault := inMopBits.satpFlushFirstFetchFault
         ctrl.isFetchMalAddr   := inMopBits.isFetchMalAddr
-        ctrl.trigger          := inMopBits.trigger
+        ctrl.trigger          := debug.out.triggerAction(i)
         ctrl.isRVC            := inMopBits.isRVC
         ctrl.predTaken        := inMopBits.predTaken
         ctrl.crossPageIPFFix  := inMopBits.crossPageIPFFix
@@ -134,7 +146,7 @@ class DecodeStageImp(
         bits.exceptionVec extendFrom mopInfo.exceptionVec
         bits.exceptionVec(illegalInstr) := mopInfo.exceptionVec(illegalInstr) || uopInfo.exceptionII
         bits.exceptionVec(virtualInstr) := uopInfo.exceptionVI
-        bits.exceptionVec(breakPoint)   := TriggerAction.isExp(mopInfo.trigger)
+        bits.exceptionVec(breakPoint)   := TriggerAction.isException(mopInfo.trigger)
         bits.satpFlushFirstFetchFault := mopInfo.satpFlushFirstFetchFault
         bits.isFetchMalAddr := mopInfo.isFetchMalAddr
         bits.trigger := mopInfo.trigger
@@ -280,6 +292,8 @@ class DecodeStageImp(
 
 object DecodeStage {
   class In(implicit p: Parameters) extends XSBundle {
+    val debugMode = Input(Bool())
+    val stepReplay = Input(Bool())
     val redirect = Input(ValidIO(new Redirect))
     val isResumeVType = Input(Bool())
     val toRenameValid = Input(Vec(RenameWidth, Bool()))

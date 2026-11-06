@@ -207,6 +207,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val backendCriticalError = Wire(Bool())
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
+  ctrlBlock.io.fromCSR.debugMode := csrio.debugMode
   ctrlBlock.io.frontend <> io.frontend
   ctrlBlock.io.fromBJUResolve := intRegion.io.toFrontendBJUResolve.get
   ctrlBlock.io.fromCSR.toDecode := intRegion.io.csrToDecode.get

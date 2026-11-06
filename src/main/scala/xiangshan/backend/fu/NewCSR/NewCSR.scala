@@ -143,8 +143,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         val pcGPA = UInt(PAddrBitsMax.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
-        val isFetchBkpt = Bool()
-        val singleStep = Bool()
         val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
@@ -282,10 +280,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
   val trigger = io.fromRob.trap.bits.trigger
-  val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
-  val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
   val trapIsSatpFlushFirstFetchFault = io.fromRob.trap.bits.satpFlushFirstFetchFault
 
@@ -294,8 +290,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val oldPrivState = io.oldPrivState
   val trapIsFormer = io.fromRob.trap.bits.isFormer
 
-  // debug_intrrupt
-  val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
+  // Debug interrupt handling follows origin/kunminghu-v3's CSR path.
+  val debugIntrEnable = RegInit(true.B)
   val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // CSR Privilege State
@@ -458,7 +454,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.mtvec := mtvec.regOut
   trapHandleMod.io.in.stvec := stvec.regOut
   trapHandleMod.io.in.vstvec := vstvec.regOut
-  trapHandleMod.io.in.trapInfo.bits.singleStep  := hasTrap && !trapIsInterrupt && singleStep
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
   val entryDebugMode = WireInit(false.B)
@@ -863,7 +858,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
-        in.isFetchBkpt := trapIsFetchBkpt
+        in.trigger := trigger
         in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
         in.hasDTExcp := hasDTExcp
         in.satpFlushFirstFetchFault := trapIsSatpFlushFirstFetchFault
@@ -1264,13 +1259,17 @@ class NewCSR(implicit val p: Parameters) extends Module
     medeleg.regOut.EX_BP && privState.isModeHS && !mstatus.sstatus.SIE ||
     medeleg.regOut.EX_BP && hedeleg.regOut.EX_BP && privState.isModeVS && !vsstatus.regOut.SIE)
 
+  // Notify decode of taken traps, including interrupts before the first
+  // single-step instruction. Trigger types may supply an encoded action here.
+  io.toDecode.trapTrigger.valid := hasTrap
+  io.toDecode.trapTrigger.bits := TriggerAction.None
+
   val debugMod = Module(new Debug)
   debugMod.io.in.trapInfo.valid            := hasTrap
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
   debugMod.io.in.trapInfo.bits.isDebugIntr := debug
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   debugMod.io.in.trapInfo.bits.trigger     := trigger
-  debugMod.io.in.trapInfo.bits.singleStep  := singleStep
   debugMod.io.in.trapInfo.bits.criticalErrorState := criticalErrorState
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode

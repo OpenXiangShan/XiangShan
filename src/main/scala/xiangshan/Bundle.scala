@@ -758,17 +758,32 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
 }
 
 object TriggerAction extends NamedUInt(4) {
-  // Put breakpoint Exception gererated by trigger in ExceptionVec[3].
-  def BreakpointExp = 0.U(width.W)  // raise breakpoint exception
-  def DebugMode     = 1.U(width.W)  // enter debug mode
-  def TraceOn       = 2.U(width.W)
-  def TraceOff      = 3.U(width.W)
-  def TraceNotify   = 4.U(width.W)
-  def None          = 15.U(width.W) // use triggerAction = 15.U to express that action is None;
+  // Pipeline actions share four bits; architectural mcontrol6.action = 0
+  // is distinguished by the fetch or memory trigger that fired.
+  def FetchTrigger  = 0.U(width.W) // mcontrol6 fetch trigger breakpoint exception
+  def DebugMode     = 1.U(width.W) // all type of trigger dmode
+  def TraceOn       = 2.U(width.W) // all type of trigger TraceOn
+  def TraceOff      = 3.U(width.W) // all type of trigger TraceOff
+  def TraceNotify   = 4.U(width.W) // all type of trigger TraceOff
+  def TraceReserved = 5.U(width.W)
+  def External0     = 8.U(width.W)
+  def External1     = 9.U(width.W)
+  def MemTrigger    = 10.U(width.W) // mcontrol6 mem trigger breakpoint exception
+  def SingleStep    = 11.U(width.W) // dcsr step, only to dmode
+  def Ebreak        = 12.U(width.W) // ebreak breakpoint or dmode
+  def OtherTrigger  = 13.U(width.W) // icount, itrigger, etrigger, tmexttrigger.. breakpoint exception
+  def DebugIntr     = 14.U(width.W) // debug intr, only to dmode
+  def None          = 15.U(width.W) // NONE
 
-  def isExp(action: UInt)   = action === BreakpointExp
+  def isFetch(action: UInt) = action === FetchTrigger
+  def isMem(action: UInt)   = action === MemTrigger
+  def isExp(action: UInt)   = isFetch(action) || isMem(action)
   def isDmode(action: UInt) = action === DebugMode
   def isNone(action: UInt)  = action === None
+  def isBreakpoint(action: UInt) = isExp(action) || isDmode(action)
+  def isDebug(action: UInt) = isDmode(action) || action === DebugIntr
+  def isException(action: UInt) = isBreakpoint(action) || isDebug(action) ||
+    action === SingleStep || action === Ebreak || action === OtherTrigger
 }
 
 // these 3 bundles help distribute trigger control signals from CSR
