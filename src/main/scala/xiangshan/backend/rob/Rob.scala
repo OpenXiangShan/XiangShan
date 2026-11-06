@@ -68,6 +68,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val hartId = Input(UInt(hartIdLen.W))
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
+    val dip = Option.when(backendParams.teaEn)(Output(new DipRob))
     val teaMembers = Option.when(backendParams.teaEn)(Input(Vec(RenameWidth, Valid(new TeaRenameMember))))
     val flushOut = ValidIO(new Redirect)
     val flushPcInfo = Output(new RobFlushPcInfo)
@@ -2127,10 +2128,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
     val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
     val teaActive = enableTea.asBool || enableTeaStats.asBool
+    val trackerActive = teaActive || Constantin.createRecord(s"enableDip$hartId", false).asBool
     val teaPerf = difftest.common.LogPerfControl()
     val teaCollect = teaActive && teaPerf.inRoi
     val teaRedirectPtr = io.redirect.bits.robIdx
-    val teaFlushPtr = deqExceptionRobIdx
+    val teaFlushPtr = io.flushOut.bits.robIdx
     val teaRedirectCtrlMispred = io.redirect.valid &&
       io.redirect.bits.debugIsCtrl && io.redirect.bits.isMisPred
     val teaRedirectMemVio = io.redirect.valid && io.redirect.bits.debugIsMemVio
@@ -2185,7 +2187,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     teaSelector.io.flushCause := teaVisibleCause
 
     val tracker = Module(new TeaMemberTracker(io.writeback.size, teaPsvSetSources.length))
-    tracker.io.enable := teaActive
+    tracker.io.enable := trackerActive
     tracker.io.cycle := teaSelector.io.cycle
     tracker.io.addrTransType := io.debugInstrAddrTransType
     tracker.io.head := deqPtr
@@ -2232,7 +2234,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       tracker.io.commits(slot).bits.isFormer := (slot % 2 == 0).B
     }
     // Keep tracker inputs stable while disabled.
-    when(!teaActive) {
+    when(!trackerActive) {
       Seq(tracker.io.cycle, tracker.io.addrTransType, tracker.io.alloc, tracker.io.enqPsv,
         tracker.io.writeback, tracker.io.events, tracker.io.redirect, tracker.io.slotReady,
         tracker.io.commits, tracker.io.head, tracker.io.readPtr, tracker.io.markStalled
@@ -2242,10 +2244,24 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     teaSelector.io.commitPc := VecInit(tracker.io.committed.map(_.bits.pc))
     teaSelector.io.commitPsv := VecInit(tracker.io.committed.map(_.bits.psv))
     for (lane <- 0 until CommitWidth) {
-      when(teaActive && io.commits.isCommit && io.commits.commitValid(lane)) {
+      when(trackerActive && io.commits.isCommit && io.commits.commitValid(lane)) {
         assert(PopCount(tracker.io.committed.slice(lane * RenameWidth, (lane + 1) * RenameWidth).map(_.valid)) ===
           commitInstrCntByEntry(lane), "TEA members disagree with architectural retirement count")
       }
+    }
+
+    io.dip.foreach { dip =>
+      dip.cycle := teaSelector.io.cycle
+      dip.retired := PopCount(tracker.io.committed.map(_.valid))
+      dip.commits := tracker.io.commits
+      // ROB flush is observed here, before the later redirect echo clears state.
+      dip.flush.valid := io.flushOut.valid || io.redirect.valid && !teaRobFlushEcho
+      dip.flush.bits.robIdx := Mux(io.flushOut.valid, io.flushOut.bits.robIdx, teaRedirectPtr)
+      dip.flush.bits.self := Mux(io.flushOut.valid, io.flushOut.bits.flushItself(), io.redirect.bits.flushItself())
+      dip.flush.bits.pc := Mux(io.flushOut.valid, teaExceptionPc, teaRedirectPc)
+      dip.flush.bits.cause := Mux(io.flushOut.valid,
+        Mux(teaExceptionFlush, 2.U, Mux(intrEnable, 16.U, 8.U)),
+        Mux(teaRedirectCtrlMispred, 1.U, Mux(teaRedirectMemVio, 4.U, 8.U)))
     }
 
     val sample = WireInit(teaSelector.io.sample)
