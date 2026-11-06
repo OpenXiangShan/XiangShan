@@ -194,6 +194,16 @@ trait CSRDocDump { self: NewCSR =>
         tdata2Mod.bundle.asInstanceOf[CSRBundle],
         tdata2Mod.modName,
       )
+      Seq("itrigger" -> new Itrigger, "etrigger" -> new Etrigger).foreach { case (name, bundle) =>
+        dumpBundleCSV(
+          writer,
+          "D",
+          s"$name[$idx]",
+          CSRs.tdata1,
+          bundle,
+          s"${tdata1Mod.modName}(tdata1.DATA view)",
+        )
+      }
     }
   }
 
