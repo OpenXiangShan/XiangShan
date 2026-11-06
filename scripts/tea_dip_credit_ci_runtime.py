@@ -1,4 +1,4 @@
-"""Observe one of the two fixed-resource credit CIs without reading live DBs."""
+"""Observe paired fixed-resource CI build and SPEC processes without live DB reads."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +8,7 @@ import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--report-dir', type=Path, required=True)
-parser.add_argument('--ci-evidence', choices=['ci-credit-div','ci-fdiv-credit'], required=True)
+parser.add_argument('--ci-evidence', choices=['ci-credit-div','ci-fdiv-credit','fdiv-wb-query-paired-ci'], required=True)
 args = parser.parse_args()
 R = args.report_dir.resolve()
 O = R / 'evidence' / args.ci_evidence
@@ -19,12 +19,26 @@ assert identity['run_id'] == run['id'] and identity['source'] == run['head_sha']
 assert len(jobs['jobs']) == 1 and jobs['jobs'][0]['run_id'] == run['id']
 runner_host = jobs['jobs'][0]['runner_name'].removeprefix('xs-perf-').rsplit('-', 1)[0]
 head = identity['source']
-code = r'''from pathlib import Path
-import json
+code = r"""from pathlib import Path
+import json,subprocess,socket
 root=Path(REPORT)
-text=(root/RUNNER).read_text()
-print(json.dumps(dict(tail=text[-8000:],server_lines=[line for line in text.splitlines() if 'Server list:' in line],retry_lines=[line for line in text.splitlines() if any(s in line for s in ['failed','retrying','resetting'])])))
-'''.replace('REPORT', repr(identity['report'])).replace('RUNNER', repr(identity['runner_log']))
+log=root/RUNNER if RUNNER is not None else max(root.glob('runner_*.log'),key=lambda p:p.stat().st_mtime_ns,default=None)
+text=log.read_text() if log is not None else ''
+servers=[line for line in text.splitlines() if 'Server list:' in line]
+building=[]
+if not servers and WORKSPACE is not None:
+ workspace=Path(WORKSPACE)
+ source=subprocess.check_output(['git','-c','safe.directory='+str(workspace),'-C',str(workspace),'rev-parse','HEAD'],text=True).strip()
+ assert source==SOURCE,'CI workspace source changed'
+ for proc in Path('/proc').glob('[0-9]*'):
+  try:
+   args=[a for a in (proc/'cmdline').read_bytes().decode(errors='replace').split(chr(0)) if a]
+   if str(workspace/'scripts/xiangshan.py') not in args or '--build' not in args:continue
+   stat=(proc/'stat').read_text().rsplit(')',1)[1].split()
+   building.append(dict(pid=int(proc.name),start_ticks=stat[19],state=stat[0],cpu_ticks=int(stat[11])+int(stat[12]),role='build',args=args))
+  except (FileNotFoundError,PermissionError,ProcessLookupError):continue
+print(json.dumps(dict(host=socket.gethostname(),runner_log=log.name if log is not None else None,tail=text[-8000:],server_lines=servers,build_processes=building,retry_lines=[line for line in text.splitlines() if any(s in line for s in ['failed','retrying','resetting'])])))
+""".replace('REPORT',repr(identity['report'])).replace('RUNNER',repr(identity['runner_log'])).replace('WORKSPACE',repr(identity.get('workspace'))).replace('SOURCE',repr(head))
 
 def remote(host, script):
     result = subprocess.run(['proxychains', '-q', 'ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', host, 'python3', '-'],
@@ -32,6 +46,16 @@ def remote(host, script):
     return json.loads(result.stdout)
 
 runner = remote(runner_host, code)
+if not runner['server_lines']:
+    stamp=datetime.now(timezone.utc).isoformat()
+    result=dict(utc=stamp,run_id=identity['run_id'],source=head,phase='before_spec',nodes=[],controller=dict(host=runner['host'],processes=runner['build_processes']),runner_log=runner['runner_log'],scope='Actual CI workspace source and original build PIDs only; SPEC workers not announced yet, no completed-window inference or live DB read.')
+    (O/'runtime-live.json').write_text(json.dumps(result,indent=2)+'\n')
+    with (O/'resource-events.jsonl').open('a') as output:output.write(json.dumps(result)+'\n')
+    print(json.dumps(dict(utc=stamp,pending_spec=True,original_build_processes=len(runner['build_processes']),workers=None,controller_processes=0)))
+    raise SystemExit(0)
+if identity['runner_log'] is None:
+    identity['runner_log']=runner['runner_log']
+    (O/'archive-identity.json').write_text(json.dumps(identity,indent=2)+'\n')
 workers = runner['server_lines'][-1].split('Server list: ', 1)[1].split(', ')
 code = r'''"""Read the current CI's actual SPEC guest/controller processes on one node."""
 from pathlib import Path

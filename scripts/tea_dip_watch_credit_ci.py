@@ -27,10 +27,9 @@ def observe_once(root, namespace):
         if reply.returncode == 0:
             # The validated runtime checks actual controller/guest argv and appends original PID/startticks.
             result.update(capture_passed=True, capture=json.loads(reply.stdout))
-            return result
     except subprocess.TimeoutExpired as error:
         result.update(runtime_returncode=None, runtime_error=str(error))
-    # Observation failure is not a CI termination signal. Ask the original official run only on failure.
+    # Check the official run even after a valid process snapshot; cancelled runs may retain remote guests.
     api = 'repos/OpenXiangShan/XiangShan/actions/runs/' + str(identity['run_id'])
     try:
         reply = subprocess.run(['proxychains', '-q', 'ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', 'node032',
@@ -51,7 +50,7 @@ def observe_once(root, namespace):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', type=Path, required=True)
-    parser.add_argument('--ci-evidence', choices=['ci-credit-div', 'ci-fdiv-credit'], required=True)
+    parser.add_argument('--ci-evidence', choices=['ci-credit-div', 'ci-fdiv-credit', 'fdiv-wb-query-paired-ci'], required=True)
     args = parser.parse_args()
     root = args.report_dir.resolve()
     folder = root / 'evidence' / args.ci_evidence
