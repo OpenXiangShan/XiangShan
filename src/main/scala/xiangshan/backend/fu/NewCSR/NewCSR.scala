@@ -427,7 +427,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
-  val nmi = intrMod.io.out.nmi
+  val nmi = trapIsInterrupt && intrMod.io.out.nmi
   val virtualInterruptIsHvictlInject = intrMod.io.out.virtualInterruptIsHvictlInject
   val irToHS = RegEnable(intrMod.io.out.irToHS, false.B, intrMod.io.out.interruptVec.valid)
   val irToVS = RegEnable(intrMod.io.out.irToVS, false.B, intrMod.io.out.interruptVec.valid)
@@ -1259,10 +1259,45 @@ class NewCSR(implicit val p: Parameters) extends Module
     medeleg.regOut.EX_BP && privState.isModeHS && !mstatus.sstatus.SIE ||
     medeleg.regOut.EX_BP && hedeleg.regOut.EX_BP && privState.isModeVS && !vsstatus.regOut.SIE)
 
-  // Notify decode of taken traps, including interrupts before the first
-  // single-step instruction. Trigger types may supply an encoded action here.
+  // Match the trap while its source mode/context is still current. DecodeDebug
+  // marks the handler's instructions before they split into uops.
+  val trapTriggerMatcher = Module(new TrapTriggerMatcher)
+  trapTriggerMatcher.in.trap.valid := hasTrap && nonDebugTrapEventValid
+  trapTriggerMatcher.in.trap.bits := Mux1H(Seq(
+    trapEntryMEvent.valid -> trapEntryMEvent.out.mcause.bits,
+    trapEntryMNEvent.valid -> trapEntryMNEvent.out.mncause.bits,
+    trapEntryHSEvent.valid -> trapEntryHSEvent.out.scause.bits,
+    trapEntryVSEvent.valid -> trapEntryVSEvent.out.vscause.bits,
+  ))
+  trapTriggerMatcher.in.isNmi := hasTrap && nmi
+  trapTriggerMatcher.in.privState := privState
+  trapTriggerMatcher.in.debugMode := debugMode
+  trapTriggerMatcher.in.canRaiseBreakpoint := triggerCanRaiseBpExp
+  trapTriggerMatcher.in.tdata1 := tdata1Vec
+  trapTriggerMatcher.in.tdata2 := VecInit(tdata2RegVec.map(_.rdata))
+  trapTriggerMatcher.in.tdata3 := tdata3Vec
+  trapTriggerMatcher.in.scontext := scontext.regOut.ALL.asUInt
+  trapTriggerMatcher.in.mhcontext := mcontext.regOut.HCONTEXT.asUInt
+  trapTriggerMatcher.in.satpAsid := satp.regOut.ASID.asUInt
+  trapTriggerMatcher.in.vsatpAsid := vsatp.regOut.ASID.asUInt
+  trapTriggerMatcher.in.vmid := hgatp.regOut.VMID.asUInt
+
+  // Native triggers also obey reentrancy protection in the handler mode.
+  // Trap entry clears that mode's xIE, so action0 is allowed only when the
+  // breakpoint goes to a higher privilege. RNMI retains MIE unchanged.
+  val handlerCanRaiseBreakpoint = MuxCase(false.B, Seq(
+    trapEntryMNEvent.valid -> mstatus.regOut.MIE.asBool,
+    trapEntryHSEvent.valid -> !medeleg.regOut.EX_BP.asBool,
+    trapEntryVSEvent.valid -> !(medeleg.regOut.EX_BP.asBool && hedeleg.regOut.EX_BP.asBool),
+  ))
+  val matchedTrapTriggerAction = trapTriggerMatcher.out.action
   io.toDecode.trapTrigger.valid := hasTrap
-  io.toDecode.trapTrigger.bits := TriggerAction.None
+  // Convert architectural action0 to the pipeline's native-trigger BP code
+  // before leaving CSR. DebugMode and None already use pipeline encodings.
+  io.toDecode.trapTrigger.bits := Mux(
+    matchedTrapTriggerAction === TrigAction.BreakpointExp.asUInt,
+    Mux(handlerCanRaiseBreakpoint, TriggerAction.OtherTrigger, TriggerAction.None),
+    matchedTrapTriggerAction)
 
   val debugMod = Module(new Debug)
   debugMod.io.in.trapInfo.valid            := hasTrap
@@ -1309,7 +1344,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     tdata1Pre := (if (idx > 0) tdata1RegVec(idx - 1) else tdata1RegVec(idx)).rdata.asUInt
     mcontrol6Pre := tdata1Pre.DATA.asUInt
     val canWriteDmode = WireInit(false.B)
-    canWriteDmode := (if (idx > 0) (Mux(mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool && tdata1Pre.TYPE.isLegal, true.B)) && debugMode else debugMode).asBool
+    canWriteDmode := (if (idx > 0) (Mux(tdata1Pre.isMcontrol6 && mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool, true.B)) && debugMode else debugMode).asBool
 
     val tdata1Next = Wire(new Tdata1Bundle)
     tdata1Next := (if (idx < TriggerNum - 1) tdata1RegVec(idx + 1) else tdata1RegVec(idx)).rdata.asUInt

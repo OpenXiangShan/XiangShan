@@ -826,10 +826,10 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
     this.select    := mcontrol6.SELECT.asBool
     this.timing    := false.B
     this.action    := mcontrol6.ACTION.asUInt
-    this.chain     := mcontrol6.CHAIN.asBool
-    this.execute   := mcontrol6.EXECUTE.asBool
-    this.load      := mcontrol6.LOAD.asBool
-    this.store     := mcontrol6.STORE.asBool
+    this.chain     := tdata1.isMcontrol6 && mcontrol6.CHAIN.asBool
+    this.execute   := tdata1.isMcontrol6 && mcontrol6.EXECUTE.asBool
+    this.load      := tdata1.isMcontrol6 && mcontrol6.LOAD.asBool
+    this.store     := tdata1.isMcontrol6 && mcontrol6.STORE.asBool
     this.tdata2    := tdata2.asUInt
     this
   }
