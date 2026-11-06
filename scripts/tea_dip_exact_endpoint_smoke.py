@@ -1,7 +1,7 @@
 """Run a single CoreMark check after the original independent TEA endpoint build."""
 from datetime import datetime, timezone
 from pathlib import Path
-import hashlib, json, os, re, socket, subprocess, time
+import argparse, hashlib, json, os, re, socket, subprocess, time
 
 
 def digest(path):
@@ -17,8 +17,12 @@ def write(path, value):
 
 def main():
     assert socket.gethostname().startswith('node032')
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--stage', default='tea-exact-endpoint-analysis-tools')
+    parser.add_argument('--source', default='addd8cc4d35a5a3f5f3fa3cfe8371280ff787807')
+    args = parser.parse_args()
     environment = Path('/nfs/home/wujiabin/work/xs-env/rtl-dip-experiments-20261103')
-    output = environment / 'tea-exact-endpoint-analysis-tools'
+    output = environment / args.stage
     stage = output / 'coremark'
     state_path = output / 'smoke-state.json'
     assert not state_path.exists() and not stage.exists(), 'Observe the original attempt instead of restarting'
@@ -27,7 +31,7 @@ def main():
     try:
         while True:
             build = json.loads((output / 'build-state.json').read_text())
-            assert build['source'] == 'addd8cc4d35a5a3f5f3fa3cfe8371280ff787807'
+            assert build['source'] == args.source
             if build['phase'] == 'complete':
                 break
             assert build['phase'] == 'building'
