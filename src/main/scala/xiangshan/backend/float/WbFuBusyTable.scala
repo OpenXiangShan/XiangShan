@@ -246,7 +246,7 @@ object WbFuBusyTable {
     writebackSlot: UInt,
     fuType: UInt,
   ): Bool = {
-    val isNonFixedLatFu = FuType.FuTypeOrR(fuType, FuType.vidiv)
+    val isNonFixedLatFu = FuType.FuTypeOrR(fuType, FuType.fDivSqrt)
     targetPortId match {
       case Some(portId) =>
         val wbPortIdx = wbPortIds.indexOf(portId)
