@@ -125,6 +125,12 @@ _BIN906_SIGNALS = {
     "to_ibuffer_exception": _aliases(
         "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionType_value"
     ),
+    # The native packed UInt retains all 36 lanes, including lane 35.
+    "exception_mask": _aliases(
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask"
+    ) + _aliases(
+        "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_exceptionMask"
+    ) + ("inner_ifu.io_toIBuffer_bits_exceptionMask",),
     "to_ibuffer_enq": _aliases(
         "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable"
     ),
@@ -208,17 +214,6 @@ def _sample_bin906_pipeline(env) -> dict:
     sample["s1_raw_candidate_count"] = (
         int(instr_end_mask) & int(sample["s1_total_range"])
     ).bit_count()
-    sample["exception_mask"] = sum(
-        _require_read(
-            env,
-            _aliases(
-                "Frontend_top.Frontend.inner_ifu."
-                f"__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}"
-            ),
-        )
-        << slot
-        for slot in range(35)
-    )
     return sample
 
 
@@ -424,6 +419,63 @@ def test_icache_miss_response_signal_contract_matches_dut_inventory() -> None:
 class _Signal:
     def __init__(self, value: int = 0) -> None:
         self.value = int(value)
+
+
+@pytest.mark.parametrize("exception_mask", [0, 1 << 35, (1 << 36) - 1])
+def test_bin906_pipeline_reads_complete_packed_exception_mask(exception_mask) -> None:
+    dut = SimpleNamespace()
+    for aliases in _BIN906_SIGNALS.values():
+        setattr(dut, aliases[0], _Signal())
+    setattr(dut, _BIN906_SIGNALS["exception_mask"][0], _Signal(exception_mask))
+    for index in range(32):
+        setattr(
+            dut,
+            f"Frontend_top.Frontend.inner_ifu.s1_instrEndMask_{index}",
+            _Signal(),
+        )
+    sample = _sample_bin906_pipeline(SimpleNamespace(dut=dut, current_cycle=7))
+    assert sample["exception_mask"] == exception_mask
+
+
+def test_bin906_pipeline_requires_packed_exception_mask() -> None:
+    dut = SimpleNamespace()
+    for name, aliases in _BIN906_SIGNALS.items():
+        if name != "exception_mask":
+            setattr(dut, aliases[0], _Signal())
+    with pytest.raises(AssertionError, match="missing_internal_signals"):
+        _sample_bin906_pipeline(SimpleNamespace(dut=dut, current_cycle=7))
+
+
+def test_bin906_pipeline_rejects_toggle_only_exception_mask() -> None:
+    dut = SimpleNamespace()
+    for name, aliases in _BIN906_SIGNALS.items():
+        if name != "exception_mask":
+            setattr(dut, aliases[0], _Signal())
+    setattr(
+        dut,
+        "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask",
+        _Signal(1 << 35),
+    )
+    with pytest.raises(AssertionError, match="missing_internal_signals"):
+        _sample_bin906_pipeline(SimpleNamespace(dut=dut, current_cycle=7))
+
+
+def test_bin906_exception_mask_matches_native_packed_inventory() -> None:
+    from env.funcov.registry import decode_signal_inventory_name
+
+    offset = frontend_offset_path()
+    assert offset.is_file(), "Native signal inventory is required"
+    widths = {}
+    current = None
+    for line in offset.read_text(encoding="utf-8").splitlines():
+        if line.startswith("  - name: "):
+            current = decode_signal_inventory_name(line[len("  - name: ") :])
+        elif current is not None and line.startswith("    rtl_width: "):
+            widths[current] = int(line.split(":", 1)[1])
+    available = [name for name in _BIN906_SIGNALS["exception_mask"] if name in widths]
+    assert available, {"missing_native_exception_mask": _BIN906_SIGNALS["exception_mask"]}
+    assert all(widths[name] == 36 for name in available), {name: widths[name] for name in available}
+    assert all("__Vtogcov__" not in name for name in _BIN906_SIGNALS["exception_mask"])
 
 
 def _unit_icache_interface() -> SimpleNamespace:
