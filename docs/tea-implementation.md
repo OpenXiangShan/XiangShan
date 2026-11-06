@@ -127,7 +127,7 @@ PSV_new = PSV_old OR 新增事件 mask
 
 构建时 `WITH_TEA=1` 独立控制 TEA tracker、selector 和数据库记录逻辑是否 elaboration。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 256（详细验证可设为 1），period 为 0 时当前实现也逐周期采样。
 
-采样间隔按周期推进，不等待先前目标退休。`enableTea || enableTeaStats` 控制成员跟踪；两者均为 0 时，tracker 输入固定为零、状态停止更新、输出清零。只开启 `enableTeaStats` 的 Summary 模式仍保留成员跟踪。
+采样间隔按周期推进，不等待先前目标退休。`enableTea || enableTeaStats || enableDip` 控制成员跟踪；三者均为 0 时，tracker 输入固定为零、状态停止更新、输出清零。只开启 `enableTeaStats` 的 Summary 模式仍保留成员跟踪。
 EMU 指定 `-W N` 时，预热期间只维护成员历史；完成预热并清零性能计数器后的首周期才开始采样和统计，四表不写预热记录。
 未指定 `-W` 或 `-W 0` 时从启动采集。TEA 周期编号在预热结束时不清零，采样相位从正式窗口首周期开始。
 
@@ -301,7 +301,7 @@ python3 scripts/tea_visualize.py build/tea.db \
 
 | 模式 | Constantin 配置（hart 0） | 行为 |
 | --- | --- | --- |
-| Off | `enableTeaStats0 0`、`enableTea0 0` | 停止成员跟踪和采集，保留已生成的模块 |
+| Off | `enableTeaStats0 0`、`enableTea0 0`、`enableDip0 0` | 停止成员跟踪和采集，保留已生成的模块 |
 | Summary | `enableTeaStats0 1`、`enableTea0 0` | 精确周期计数和区间摘要，不写 TEA 边界样本 |
 | Sample | `enableTea0 1`、`teaSamplePeriod0 256` | 自动启用周期统计，同时稀疏采样 |
 | Detail | `enableTea0 1`、`teaSamplePeriod0 1` | 逐周期采样，用于短窗口验证 |
