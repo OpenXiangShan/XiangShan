@@ -91,6 +91,8 @@ def analyze(root):
     assert experiment['runner_sha256']==digest(root/'evidence/query-endpoint-validation/tea_dip_query_endpoint_focused.py')
     control_stage=root/'tea-exact-endpoint-spec';control_receipt=json.loads((control_stage/'closure-receipt.json').read_text());assert control_receipt['ready'] and not control_receipt['controller_live'] and control_receipt['all_original_guests_closed'];verify(control_stage,control_receipt['files'])
     raw_manifest=json.loads((root/'raw/manifest.json').read_text())
+    baseline_evidence=root/'evidence/rebuild-control';baseline_manifest=json.loads((baseline_evidence/'build-coremark-manifest.json').read_text());verify(baseline_evidence,{'build-state.json':baseline_manifest['build-state.json']})
+    baseline_build=json.loads((baseline_evidence/'build-state.json').read_text());assert baseline_build['phase']=='complete' and baseline_build['source']=='84112d0b65231ca690a4ef2fea4b5169f2146e10' and baseline_build['binary_sha256']=='02207e4f4165926a87a67e282c3e0623910dc10a8d6cef1bd3dd60c6e5244def'
     folders={}
     # Establish all source/config/closure/raw contracts before opening any database.
     for case in experiment['cases']:
@@ -109,7 +111,7 @@ def analyze(root):
         prefix='rebuild-control/short/'+point+'/'
         selected={name:entry for name,entry in raw_manifest.items() if name.startswith(prefix)};assert all(prefix+name in selected for name in ['command.json','result.json','exitcode','simulator_out.txt','simulator_err.txt','simulator.db']);verify(root/'raw',selected)
         raw_control=root/'raw/rebuild-control/short'/point
-        assert json.loads((raw_control/'result.json').read_text())['source']=='84112d0b65231ca690a4ef2fea4b5169f2146e10'
+        baseline_result=json.loads((raw_control/'result.json').read_text());assert baseline_result['binary_sha256']==baseline_build['binary_sha256'] and baseline_result['binary']==baseline_build['binary']
         commands=[json.loads((folder/'command.json').read_text()) for folder in [raw_control,controls[point],old,folders['query_endpoint',point]]]
         for flag in ['-W','-I','-C','-s','-i','--diff','--dump-select-db']:
             assert len({command[command.index(flag)+1] for command in commands})==1
@@ -125,7 +127,7 @@ def analyze(root):
         query_neutrality=old_execution(originals[point],after,exact_new_names)
         comparison=pair(before,after);valid=control_neutrality['passed'] and query_neutrality['passed']
         rows.append(dict(point=point,control_instrumentation_neutrality=control_neutrality,query_instrumentation_neutrality=query_neutrality,observation_neutrality_valid=valid,performance_speedup=comparison['observed_native_speedup'] if valid else None,comparison=comparison))
-    return dict(pending=False,database_read=True,completed=3,expected=3,consumer_sha256=digest(Path(__file__)),closed_receipt_sha256=digest(receipt_path),coremark_gate_sha256=digest(gate_path),helper_sha256={name:digest(root/name) for name in ['native_perf.py','analyze_windows.py']},rows=rows,all_observation_pairs_neutral=all(row['observation_neutrality_valid'] for row in rows),scope='Existing candidate only: original b0a vs instrumented2915 full-old-native and six complete table neutrality, plus addd baseline calibration against841. Exact new diagnostic name set derived from calibrated same-point baseline; no wildcard exclusions or lost duplicate native values. Focused native/exact TEA/DIP/native-probe budgets retain retirement offsets and unknown event phase. Three selected windows are not a suite score or default adoption.')
+    return dict(pending=False,database_read=True,completed=3,expected=3,consumer_sha256=digest(Path(__file__)),closed_receipt_sha256=digest(receipt_path),coremark_gate_sha256=digest(gate_path),baseline_build_state_sha256=digest(baseline_evidence/'build-state.json'),helper_sha256={name:digest(root/name) for name in ['native_perf.py','analyze_windows.py']},rows=rows,all_observation_pairs_neutral=all(row['observation_neutrality_valid'] for row in rows),scope='Existing candidate only: original b0a vs instrumented2915 full-old-native and six complete table neutrality, plus addd baseline calibration against841. Exact new diagnostic name set derived from calibrated same-point baseline; no wildcard exclusions or lost duplicate native values. Focused native/exact TEA/DIP/native-probe budgets retain retirement offsets and unknown event phase. Three selected windows are not a suite score or default adoption.')
 
 
 def main():
