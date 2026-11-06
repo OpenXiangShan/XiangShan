@@ -218,6 +218,7 @@ def test_ifu_exception_metadata_all_components_one_run(env, monkeypatch):
     # The testpoint explicitly says to construct these components separately.
     # Use real reset/re-entry between them, retaining the same DUT, recorder,
     # waveform and artifact. Never combine independent pytest artifacts.
+    sink = env.functional_coverage.toffee_sink
     original_clear = env.monitor.clear
 
     def checked_clear():
@@ -244,8 +245,8 @@ def test_ifu_exception_metadata_all_components_one_run(env, monkeypatch):
             "monitor_errors": len(env.monitor.get_errors()),
             "translation_error_count": env.translation_oracle.get_stats()["error_count"],
             "sampler_checks": sorted(getattr(sink, "_ifu_exception_metadata_checks", ())),
-        "component_witnesses": dict(getattr(sink, "_ifu_exception_metadata_witnesses", {})),
-        "missing_probes": sorted(getattr(sink, "_ifu_exception_metadata_gaps", ())),
+            "component_witnesses": dict(getattr(sink, "_ifu_exception_metadata_witnesses", {})),
+            "missing_probes": sorted(getattr(sink, "_ifu_exception_metadata_gaps", ())),
         })
         # A fully checked phase has ended; do not interpret reset cycles under
         # the prior phase's translation oracle. No errors/counters are erased.
