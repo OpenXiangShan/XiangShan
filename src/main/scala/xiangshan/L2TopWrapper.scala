@@ -307,8 +307,7 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
     beu.module.io.errors.l2 := 0.U.asTypeOf(beu.module.io.errors.l2)
     io.decoupledCHI.foreach(_ := DontCare)
 
-    // L1 hint/degree feedback has no Oceanus counterpart in this migration.
-    io.l2_hint := 0.U.asTypeOf(io.l2_hint)
+    // Refill hints are connected below when the Oceanus L2 is present.
     io.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
     io.l2_tlb_req.req.valid := false.B
     io.l2_tlb_req.req.bits := 0.U.asTypeOf(io.l2_tlb_req.req.bits)
@@ -333,7 +332,9 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
         pfTlbEnable = coreParams.oceanusPrefetch.tlb,
         pfTrainEnable = coreParams.oceanusPrefetch.tlb,
         vbopStubEnable = coreParams.oceanusPrefetch.vbop,
-        cdpStubEnable = coreParams.oceanusPrefetch.cdp
+        cdpStubEnable = coreParams.oceanusPrefetch.cdp,
+        hintEnable = true,
+        hintMissEntries = coreParams.dcacheParametersOpt.get.nMissEntries
       )
       // XiangShan freezes its parameter lookup before module construction.
       // Give L2 a regular lookup view so its local observation keys can be
@@ -412,6 +413,15 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
         tlb.pmp_resp.atomic := io.l2_pmp_resp.atomic
       }
 
+      oceanusL2.io.refillHint.zip(io.l2_hint).foreach { case (from, to) =>
+        to.valid := from.valid
+        to.bits.sourceId := from.bits.sourceId
+        to.bits.isKeyword := from.bits.isKeyword
+        when(from.valid) {
+          assert(from.bits.sourceId < coreParams.dcacheParametersOpt.get.nMissEntries.U,
+            "refill hint must identify an L1 MissQueue entry")
+        }
+      }
       require(oceanusL2.io.t1p.size == io.dcache_cchi.size)
       oceanusL2.io.t1p.zip(io.dcache_cchi).foreach { case (t1, l1) => CCHIConnect.type1(t1, l1) }
       oceanusL2.io.pfTrain.foreach { trains =>
@@ -468,6 +478,7 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
         dontTouch(intf.mbist)
       }
     } else {
+      io.l2_hint := 0.U.asTypeOf(io.l2_hint)
       io.chi.foreach(_ := DontCare)
       io.dcache_cchi.foreach { p =>
         p.upEVT.ready := true.B
