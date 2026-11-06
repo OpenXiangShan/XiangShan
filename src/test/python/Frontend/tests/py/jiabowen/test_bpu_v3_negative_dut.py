@@ -101,7 +101,7 @@ def test_bpu_all_not_taken_does_not_emit_s3_override(env) -> None:
     for _ in range(_cycle_limit("TB_BPU_ALL_NT_MAX_CYCLES", 1024)):
         env.step(1)
         try:
-            sample = sample_bpu_v3_cycle(reader)
+            sample = sample_bpu_v3_cycle(reader, require_native=True)
         except BpuV3SignalUnavailable as exc:
             pytest.fail(str(exc), pytrace=False)
         if not sample.is_all_not_taken_candidate:

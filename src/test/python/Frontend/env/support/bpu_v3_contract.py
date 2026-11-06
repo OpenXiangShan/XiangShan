@@ -13,7 +13,12 @@ _WAYLOOKUP = _ICACHE + "wayLookup."
 PREFETCH_DEPTH = 32
 BTB_TARGET_COMPARE_WIDTH = 22
 MBTB_TARGET_WIDTH = 20
+MBTB_WAYS = 4
 MBTB_ALIGN_BANKS = 2
+VBTB_WAYS_PER_ALIGN_BANK = 16
+SC_STORAGE_WAYS = 8
+# Physical bank order: four SRAM results followed by one VBTB result.
+BTB_RESULT_ENTRIES = MBTB_ALIGN_BANKS * (MBTB_WAYS + 1)
 MBTB_INTERNAL_BANKS = 4
 MBTB_WRITE_PORTS = 4
 MBTB_WRITE_BUFFER_ROWS = 4
@@ -29,6 +34,7 @@ BPU_V3_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
         _BPU + "__Vtogcov__s2_s1Prediction_taken",
     ),
     "s3_override": (
+        _FTQ + "bpuS3Redirect",
         _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
         _MAINPIPE + "io_flushFromBpu_s3_valid",
         _WAYLOOKUP + "bpuS3FlushValid",
@@ -39,7 +45,7 @@ BPU_V3_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
             _BPU + f"s3_takenMask_{index}",
             _BPU + f"__Vtogcov__s3_takenMask_{index}",
         )
-        for index in range(8)
+        for index in range(BTB_RESULT_ENTRIES)
     },
 }
 
@@ -432,8 +438,11 @@ def _read_required(
     reader: Callable[[str], int | None],
     key: str,
     candidates: tuple[str, ...],
+    *, native_only: bool = False,
 ) -> tuple[int, str]:
     for name in candidates:
+        if native_only and "__Vtogcov__" in name:
+            continue
         try:
             value = reader(str(name))
         except Exception:
@@ -443,16 +452,25 @@ def _read_required(
     raise BpuV3SignalUnavailable(key, candidates)
 
 
-def sample_bpu_v3_cycle(reader: Callable[[str], int | None]) -> BpuV3Cycle:
+def sample_bpu_v3_cycle(
+    reader: Callable[[str], int | None], *, require_native: bool = False,
+) -> BpuV3Cycle:
+    """Sample all ten results; require_native=True is the new strict contract.
+
+    Default alias behavior is retained for existing public API consumers;
+    legacy/toggle-only sampling does not qualify current canonical evidence.
+    """
     values: dict[str, int] = {}
     paths: dict[str, str] = {}
     for key, candidates in BPU_V3_SIGNAL_GROUPS.items():
-        values[key], paths[key] = _read_required(reader, key, candidates)
+        values[key], paths[key] = _read_required(reader, key, candidates, native_only=require_native)
+        if require_native and values[key] not in (0, 1):
+            raise AssertionError(f"BPU single-bit contract exceeded for {key}: {values[key]}")
 
     return BpuV3Cycle(
         s3_valid=int(values["s3_valid"]),
         s3_s1_prediction_taken=int(values["s3_s1_prediction_taken"]),
-        s3_taken_mask=tuple(int(values[f"s3_taken_mask_{index}"]) for index in range(8)),
+        s3_taken_mask=tuple(int(values[f"s3_taken_mask_{index}"]) for index in range(BTB_RESULT_ENTRIES)),
         s3_override=int(values["s3_override"]),
         signal_paths=paths,
     )
@@ -662,6 +680,10 @@ __all__ = [
     "BPU_V3_SIGNAL_GROUPS",
     "BPU_TARGET_DIFF_SIGNAL_GROUPS",
     "BTB_TARGET_COMPARE_WIDTH",
+    "BTB_RESULT_ENTRIES",
+    "MBTB_WAYS",
+    "VBTB_WAYS_PER_ALIGN_BANK",
+    "SC_STORAGE_WAYS",
     "MBTB_ALIGN_BANKS",
     "MBTB_INTERNAL_BANKS",
     "MBTB_TARGET_WIDTH",
