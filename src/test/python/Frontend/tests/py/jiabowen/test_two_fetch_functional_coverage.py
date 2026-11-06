@@ -1138,7 +1138,14 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(hub.definitions) == 573
+    with default_pilot_csv_path().open(encoding="utf-8-sig", newline="") as handle:
+        active_registry = [
+            (row["Bin_ID"].strip(), row["Coverage_Group"].strip(),
+             row["Coverpoint"].strip(), row["Bin_Name"].strip())
+            for row in csv.DictReader(handle) if row["Coverpoint"].strip()
+        ]
+    assert sorted((item.bin_id, item.coverage_group, item.coverpoint, item.bin_name)
+                  for item in hub.definitions) == sorted(active_registry)
     assert all(item.coverpoint for item in hub.definitions)
     assert "set_line_coverage" in fixture_source
     assert "TB_ENABLE_TOFFEE_LINE_COVERAGE" in fixture_source
