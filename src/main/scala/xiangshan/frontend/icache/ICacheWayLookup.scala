@@ -179,7 +179,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
 
   /* *** perf *** */
   // tell ICache top if queue is empty
-  io.perf.empty := empty
+  io.perf.empty         := empty
+  io.perf.pendingUpdate := updateStall(0)
 
   // perf counter
   // occupancy
