@@ -32,6 +32,8 @@ class TeaCycleStats extends Module {
     val retired = Input(UInt(16.W))
     val gapThreshold = Input(UInt(64.W))
     val summary = Output(Valid(new TeaCycleSummary))
+    // Read-only cumulative prefix for an exact final native PERF dump.
+    val exactPrefix = Output(new TeaCycleSummary)
     val interval = Output(Valid(new TeaNoCommit))
   })
   val wasEnabled = RegNext(io.enable, false.B)
@@ -86,6 +88,7 @@ class TeaCycleStats extends Module {
   io.summary.bits.censoredGaps := nextCensored
   io.summary.bits.pending := nextPending
   io.summary.bits.closed := stopped
+  io.exactPrefix := io.summary.bits
 
   io.interval.valid := closeGap && (pending >= io.gapThreshold || censored)
   io.interval.bits.start := io.cycle - pending

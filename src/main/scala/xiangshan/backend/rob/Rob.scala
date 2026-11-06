@@ -2277,6 +2277,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sample.context.headReason := Mux(sample.context.headReasonValid, io.debugRobHeadStall.get.bits, 0.U)
 
     val stats = Module(new TeaCycleStats)
+    XSPerfReference("tea_exact_endpoint_cycle", stats.io.exactPrefix.cycle)
+    XSPerfReference("tea_exact_endpoint_retired", stats.io.exactPrefix.retired)
+    for (i <- 0 until 4) {
+      XSPerfReference(s"tea_exact_endpoint_state_$i", stats.io.exactPrefix.states(i))
+    }
     stats.io.enable := enableTeaStats.asBool || enableTea.asBool
     stats.io.cycle := teaSelector.io.cycle
     stats.io.state := teaSelector.io.sample.state
