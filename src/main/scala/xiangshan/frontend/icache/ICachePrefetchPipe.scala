@@ -166,7 +166,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // NOTE: in kunminghu-v3, Bpu/Ftq ensure that a single fetch request will not cross page,
   //       so we need only one Itlb port to get pAddr / itlbException,
   //       and we can simply use vAddr of first cacheline to send Itlb request.
-  private val itlbVAddr  = Mux(s1_needItlb, s1_readMetaVAddr(0), s0_readMetaVAddr(0))
+  private val itlbVAddr  = Mux(s1_needItlb, s1_req(0).startVAddr, s0_req(0).startVAddr)
   private val itlbFullVa = itlbVAddr.signExt(XLEN).toUInt
 
   toItlb.valid             := s1_needItlb || s0_valid
@@ -196,9 +196,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   // Guest page fault related: save tlb raw response, select later
   // NOTE: we don't use GPAddrBits or XLEN here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  private val s1_gpAddr = VecInit(
-    DataHoldBypass(getGPAddr(fromItlb.bits.gpaddr.head, s1_req(0).startVAddr), 0.U(PAddrBitsMax.W), tlbValidPulse),
-    DataHoldBypass(getGPAddr(fromItlb.bits.gpaddr.head, s1_req(1).startVAddr), 0.U(PAddrBitsMax.W), tlbValidPulse)
+  private val s1_gpAddr = VecInit.fill(2)(
+    DataHoldBypass(fromItlb.bits.gpaddr.head, 0.U(PAddrBitsMax.W), tlbValidPulse)
   )
   private val s1_isForVSnonLeafPTE =
     DataHoldBypass(
