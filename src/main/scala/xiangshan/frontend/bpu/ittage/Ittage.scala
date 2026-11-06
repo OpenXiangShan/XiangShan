@@ -470,119 +470,71 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     tables(i).io.update.foldedHist     := t2_updateFoldedPhr
   }
 
-  // Debug and perf info
-  // Count accepted training transactions, not cycles spent waiting for a bank.
-  // The three read reasons are mutually exclusive and sum to need_read.
+  // Prediction-time coverage and selection within ITTAGE. These counters do
+  // not imply that the BPU ultimately used the ITTAGE target.
+  private def predPerf(name: String, cond: Bool): Unit =
+    XSPerfAccumulate(s"ittage_${name}_at_pred", cond && s2_fire)
+
+  private val predUseAltPred  = s2_provided && s2_altProvided && s2_providerCnt.isSaturateNegative
+  private val predUseProvider = s2_provided && !predUseAltPred
+
+  predPerf("total", true.B)
+  predPerf("provided", s2_provided)
+  predPerf("alt_provided", s2_altProvided)
+  predPerf("use_provider", predUseProvider)
+  predPerf("use_altpred", predUseAltPred)
+  predPerf("provider_useful", s2_provided && !providerInfo.usefulCnt.isSaturateNegative)
+
+  for (cnt <- 0 until (1 << ConfidenceCntWidth)) {
+    predPerf(s"provider_cnt_${cnt}", s2_provided && s2_providerCnt.value === cnt.U)
+  }
+
+  for (i <- 0 until NumTables) {
+    predPerf(s"table_${i}_provided", s2_provided && s2_provider === i.U)
+    predPerf(s"table_${i}_final_provided", predUseProvider && s2_provider === i.U)
+    predPerf(s"table_${i}_alt_provider_as_final_pred", predUseAltPred && s2_altProvider === i.U)
+  }
+
+  // Compare the freshly re-read targets with the actual target. These describe
+  // training-time table state, not the accuracy of the original prediction.
+  // Transactions without a training read have no table state to classify.
+  private def trainPerf(name: String, cond: Bool): Unit =
+    XSPerfAccumulate(s"ittage_${name}_at_train", cond && t2_updateValid && t2_needRead)
+
+  private val perf_altProviderCorrect = t2_hasAltProvider && t2_altProviderTarget === t2_updateRealTarget
+  trainPerf("provided", t2_hasProvider)
+  trainPerf("alt_provided", t2_hasAltProvider)
+  trainPerf("provider_correct", providerCorrect)
+  trainPerf("altprovider_correct", perf_altProviderCorrect)
+  trainPerf("altprovider_better", t2_hasProvider && !providerCorrect && perf_altProviderCorrect)
+  trainPerf("provider_better", t2_hasAltProvider && providerCorrect && !perf_altProviderCorrect)
+
+  // Keep only the accepted training/read totals for read overhead. Do not count
+  // waiting cycles here; BPU.train_stall_ittage already tracks training stalls.
   XSPerfSeqAccumulate(
     "ittage_train",
     t0_fire,
     Seq(
       ("total", true.B),
-      ("need_read", t0_needRead),
-      ("no_read", !t0_needRead),
-      ("need_read_provider_only", t0_meta.provider.valid && !t0_updateMisPred),
-      ("need_read_mispredict_only", !t0_meta.provider.valid && t0_updateMisPred),
-      ("need_read_provider_and_mispredict", t0_meta.provider.valid && t0_updateMisPred)
+      ("need_read", t0_needRead)
     )
   )
 
-  // Correlate each t0 read decision with its own t2 update mask. An update
-  // means a table update request (table.io.update.valid in this cycle),
-  // rather than merely entering training or changing the stored data value.
-  // Useful-counter reset sweeps are independent and are excluded here.
-  private val perf_hasUpdate = t2_updateMask.asUInt.orR
-  private val perf_hasAlloc = VecInit(t2_updateMask.zip(t2_updateAlloc).map { case (valid, alloc) =>
-    valid && alloc
-  }).asUInt.orR
-  private val perf_metaProvider = t2_train.meta.ittage.provider
+  // Updates count requests to the table write buffers, even if the stored value
+  // stays unchanged. Background useful-counter clears are counted separately.
   XSPerfSeqAccumulate(
     "ittage_train",
     t2_updateValid,
     Seq(
-      ("read_update", t2_needRead && perf_hasUpdate),
-      ("read_no_update", t2_needRead && !perf_hasUpdate),
-      ("no_read_update", !t2_needRead && perf_hasUpdate),
-      ("no_read_no_update", !t2_needRead && !perf_hasUpdate),
-      ("update", perf_hasUpdate),
+      ("update", t2_updateMask.asUInt.orR),
       ("update_provider", t2_hasProvider && t2_updateMask(provider)),
       ("update_altprovider", t2_hasAltProvider && t2_updateMask(altProvider)),
-      ("update_allocate", perf_hasAlloc),
-      ("update_entries", true.B, PopCount(t2_updateMask)),
-      ("allocate_failed", needAllocate && !t2_allocateValid),
-      ("read_provider_lost", t2_needRead && perf_metaProvider.valid && !t2_hasProvider),
-      ("read_provider_found", t2_needRead && !perf_metaProvider.valid && t2_hasProvider),
-      (
-        "read_provider_changed",
-        t2_needRead && perf_metaProvider.valid && t2_hasProvider &&
-          perf_metaProvider.bits =/= provider
-      )
+      ("update_allocate", needAllocate && t2_allocateValid),
+      ("allocate_failed", needAllocate && !t2_allocateValid)
     )
   )
 
   XSPerfAccumulate("ittage_reset_u", t2_updateResetUsefulCnt)
-  XSPerfAccumulate("ittage_used", s1_fire && s1_isIndirect)
-  XSPerfAccumulate("ittage_closed_due_to_uftb_info", s1_fire && !s1_isIndirect)
-  XSPerfAccumulate("ittage_allocate", t2_updateValid && perf_hasAlloc)
-  XSPerfAccumulate("ittage_hit", io.prediction.hit)
-
-  private def predPerf(name: String, cond: Bool): Unit =
-    XSPerfAccumulate(s"${name}_at_pred", cond && s2_fire)
-
-  private def commitPerf(name: String, cond: Bool): Unit =
-    XSPerfAccumulate(s"${name}_at_commit", cond && t2_updateValid)
-
-  private def ittagePerf(name: String, predCond: Bool, commitCond: Bool): Unit = {
-    predPerf(s"ittage_${name}", predCond)
-    commitPerf(s"ittage_${name}", commitCond)
-  }
-
-  private val predUseProvider     = s2_provided && !s2_providerCnt.isSaturateNegative
-  private val predUseAltPred      = s2_provided && s2_providerCnt.isSaturateNegative
-  private val predUseHtAsAltPred  = predUseAltPred && s2_altProvided
-  private val predUseBimAsAltPred = predUseAltPred && !s2_altProvided
-  private val predUseBimAsPred    = !s2_provided
-
-  private val commitUseProvider     = t2_hasProvider && !t2_providerInfo.cnt.isSaturateNegative
-  private val commitUseAltPred      = t2_hasProvider && t2_providerInfo.cnt.isSaturateNegative
-  private val commitUseHtAsAltPred  = commitUseAltPred && t2_hasAltProvider
-  private val commitUseFtbAsAltPred = commitUseAltPred && !t2_hasAltProvider
-  private val commitUseFtbAsPred    = !t2_hasProvider
-
-  for (i <- 0 until NumTables) {
-    val predThisIsProvider   = s2_provider === i.U
-    val predThisIsAltPred    = s2_altProvider === i.U
-    val commitThisIsProvider = t2_providerInfo.tableIdx === i.U
-    val commitThisIsAltPred  = t2_altProviderInfo.tableIdx === i.U
-    ittagePerf(
-      s"table_${i}_final_provided",
-      predUseProvider && predThisIsProvider,
-      commitUseProvider && commitThisIsProvider
-    )
-    ittagePerf(
-      s"table_${i}_provided_not_used",
-      predUseAltPred && predThisIsProvider,
-      commitUseAltPred && commitThisIsProvider
-    )
-    ittagePerf(
-      s"table_${i}_alt_provider_as_final_pred",
-      predUseHtAsAltPred && predThisIsAltPred,
-      commitUseHtAsAltPred && commitThisIsAltPred
-    )
-    ittagePerf(
-      s"table_${i}_alt_provider_not_used",
-      predUseProvider && predThisIsAltPred,
-      commitUseProvider && commitThisIsAltPred
-    )
-  }
-
-  ittagePerf("provided", s2_provided, t2_hasProvider)
-  ittagePerf("use_provider", predUseProvider, commitUseProvider)
-  ittagePerf("use_altpred", predUseAltPred, commitUseAltPred)
-  ittagePerf("use_ht_as_altpred", predUseHtAsAltPred, commitUseHtAsAltPred)
-  ittagePerf("use_ftb_when_no_provider", predUseBimAsPred, commitUseFtbAsPred)
-  ittagePerf("use_ftb_as_alt_provider", predUseBimAsAltPred, commitUseFtbAsAltPred)
-  // Historical counter: counts training transactions, including those without updates.
-  XSPerfAccumulate("updated", t2_updateValid)
 
   if (debug) {
     val s2_respsRegs = RegEnable(s2_resps, s2_fire)
