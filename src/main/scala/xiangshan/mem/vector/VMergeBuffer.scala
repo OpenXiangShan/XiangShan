@@ -282,7 +282,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     // Only the first unaligned uop of unit-stride needs to be offset.
     // When unaligned, the lowest bit of mask is 0.
     //  example: 16'b1111_1111_1111_0000
-    val firstUnmask            = genVFirstUnmask(selPort(0).mask).asUInt
+    val isTrigger              = TriggerAction.isExp(selPort(0).trigger) || TriggerAction.isDmode(selPort(0).trigger)
+    val excpMask               = Mux(isTrigger, selPort(0).vecTriggerMask, selPort(0).mask)
+    val firstUnmask            = genVFirstUnmask(excpMask).asUInt
     val addrOffset             = Mux(entryIsUS, firstUnmask, 0.U)
     val vaddr                  = selVaddr + addrOffset
     val gpaddr                 = Mux(selPort(0).isForVSnonLeafPTE, selPort(0).gpaddr, selPort(0).gpaddr + addrOffset)
