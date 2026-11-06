@@ -41,7 +41,7 @@ else:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', required=True, type=Path)
-    parser.add_argument('--ci-evidence', required=True, choices=['ci-credit-div', 'ci-fdiv-credit'])
+    parser.add_argument('--ci-evidence', required=True, choices=['ci-credit-div', 'ci-fdiv-credit', 'fdiv-wb-query-paired-ci'])
     parser.add_argument('--point', help='Check one observed point, including a still-running point')
     parser.add_argument('--check-only', action='store_true', help='Verify closure and hashes without copying raw files')
     args = parser.parse_args()

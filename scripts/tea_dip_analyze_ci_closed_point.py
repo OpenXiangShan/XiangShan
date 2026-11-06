@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('point')
     parser.add_argument('--report-dir', type=Path, default=ROOT)
-    parser.add_argument('--ci-evidence', choices=['ci-readiness','ci-credit-div','ci-fdiv-credit'], default='ci-readiness')
+    parser.add_argument('--ci-evidence', choices=['ci-readiness','ci-credit-div','ci-fdiv-credit','fdiv-wb-query-paired-ci'], default='ci-readiness')
     args = parser.parse_args();point = args.point
     root = args.report_dir.resolve();base = root.parents[1]/'ci-41413249290'
     sys.path.insert(0, str(root))
@@ -23,6 +23,7 @@ def main():
         'ci-readiness': ('ci','fpiq24',41654009482),
         'ci-credit-div': ('ci-credit-div','fp-credit-div',41811820348),
         'ci-fdiv-credit': ('ci-fdiv-credit','fp-credit-fdiv-only',41823116823),
+        'fdiv-wb-query-paired-ci': ('fdiv-wb-query-paired-ci','fdiv-wb-query',42159911532),
     }[args.ci_evidence]
     rows = list(csv.DictReader((base / 'analysis/points.csv').open()))
     expected = next(row for row in rows if row['point'] == point)
