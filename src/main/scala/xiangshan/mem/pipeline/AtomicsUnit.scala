@@ -539,6 +539,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.out.toRob.bits.trigger.foreach(_ := trigger)
   io.out.toRob.bits.isRVC.foreach(_ := uop.isRVC)
   io.out.toRob.bits.lqIdx.foreach(_ := uop.lqIdx)
+  io.out.toRob.bits.vstartEn.foreach(_ := false.B)
+  io.out.toRob.bits.vstart.foreach(_ := 0.U)
   io.out.toRob.bits.debugInfo.isNCIO.foreach(_ := false.B)
   io.out.toRob.bits.debugInfo.isPerfCnt.foreach(_ := DontCare)
   io.out.toRob.bits.debugInfo.isMMIO.foreach(_ := is_mmio)

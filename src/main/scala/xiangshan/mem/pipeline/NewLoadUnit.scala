@@ -187,7 +187,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.accessType.instrType := Mux(
     LSUOpType.isPrefetch(ldin.fuOpType),
     InstrType.prefetch.U, // software prefetch
-    InstrType.scalar.U
+    Mux(LSUOpType.isVecMemOp(ldin.fuOpType), InstrType.vector.U, InstrType.scalar.U)
   )
   scalarIssue.bits.accessType.pftType := Mux( // valid only when instrType is prefetch
     ldin.fuOpType === LSUOpType.prefetch_i,
@@ -209,6 +209,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.DontCareUnalign() // assign later in sink
   scalarIssue.bits.DontCareReplayFromLRQFields()
   scalarIssue.bits.DontCareVectorFields()
+  scalarIssue.bits.vecBaseVaddr.foreach(_ := ldin.src(0))
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
   scalarIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
@@ -632,7 +633,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.csrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode := io.csrTrigger.debugMode
   loadTrigger.io.fromLoadStore.vaddr := vaddr
-  loadTrigger.io.fromLoadStore.isVectorUnitStride := accessType.isVector() && VlduType.isUnitStride(fuOpType)
+  loadTrigger.io.fromLoadStore.isVectorUnitStride := accessType.isVector() && LSUOpType.isVecMemContinousOp(fuOpType)
   loadTrigger.io.fromLoadStore.mask := mask
   loadTrigger.io.isPrf.get := accessType.isPrefetch()
 
@@ -641,8 +642,8 @@ class LoadUnitS1(param: ExeUnitParams)(
   val bp = TriggerAction.isExp(triggerAction)
   val vecVaddrOffset = Mux(
     isDebugMode || bp,
-    loadTrigger.io.toLoadStore.triggerVaddr - in.vecBaseVaddr.get,
-    vaddr + genVFirstUnmask(mask).asUInt - in.vecBaseVaddr.get
+    loadTrigger.io.toLoadStore.triggerVaddr - in.vecBaseVaddr.getOrElse(0.U),
+    vaddr + genVFirstUnmask(mask).asUInt - in.vecBaseVaddr.getOrElse(0.U)
   )
   val vecTriggerMask = Mux(
     isDebugMode || bp,
@@ -1533,6 +1534,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.toRob.bits.exceptionVec extendFrom exceptionVec
   ldout.toRob.bits.lqIdx.get := uop.lqIdx
   ldout.toRob.bits.trigger.get := uop.trigger
+  ldout.toRob.bits.vstartEn.foreach(_ := isVector && exception)
+  ldout.toRob.bits.vstart.foreach(_ := (in.vecVaddrOffset.getOrElse(0.U) >> LSUOpType.vecElemSize(uop.fuOpType)).asUInt)
   ldout.toRob.bits.isRVC.get := uop.isRVC
   ldout.toRob.bits.debugInfo.isMMIO.foreach(_ := in.isMMIOReplay())
   ldout.toRob.bits.debugInfo.isNCIO.foreach(_ := in.isNCReplay() && in.pmp.get.mmio)
@@ -1685,18 +1688,20 @@ class LoadUnitS3(param: ExeUnitParams)(
   /**
     * Exception info
     */
-  val exceptionInfoValid = ldoutValid && !in.isMMIOReplay() // MMIO replay sends exceptionInfo independently
+  val isBp = exceptionVec(breakPoint)
+  val triggerVaddr = in.vecBaseVaddr.getOrElse(0.U) + in.vecVaddrOffset.getOrElse(0.U)
+  val exceptionInfoValid = (ldoutValid || vldoutValid) && !in.isMMIOReplay() // MMIO replay sends exceptionInfo independently
   val exceptionInfo = Wire(new MemExceptionInfo)
   exceptionInfo.robIdx := robIdx
   exceptionInfo.exceptionVec extendFrom exceptionVec
-  exceptionInfo.vaddr := exceptionFullva
+  exceptionInfo.vaddr := Mux(isBp && isVector, triggerVaddr, exceptionFullva)
   exceptionInfo.gpaddr := exceptionGpaddr
   exceptionInfo.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
   exceptionInfo.vaNeedExt := exceptionVaNeedExt
   exceptionInfo.isHyper := in.tlbException.get.isHyper
   exceptionInfo.uopIdx := 0.U.asTypeOf(UopIdx())
   exceptionInfo.vl := 0.U
-  exceptionInfo.vstart := 0.U
+  exceptionInfo.vstart := Mux(isVector, (in.vecVaddrOffset.getOrElse(0.U) >> LSUOpType.vecElemSize(uop.fuOpType)).asUInt, 0.U)
 
   /**
     * Pipeline connect

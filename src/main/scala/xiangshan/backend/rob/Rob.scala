@@ -1777,8 +1777,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.crossPageIPFFix := false.B
     val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
     exc_wb.bits.trigger := trigger
-    exc_wb.bits.vstartEn := false.B // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vstart := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vstartEn := wb.bits.vstartEn.getOrElse(false.B)
+    exc_wb.bits.vstart := wb.bits.vstart.getOrElse(0.U)
     exc_wb.bits.vuopIdx :=  0.U // Todo[Vector]: support vector ls exception
     exc_wb.bits.isVecLoad := false.B // Todo[Vector]: support vector ls exception
     exc_wb.bits.isVlm := false.B // Todo[Vector]: support vector ls exception

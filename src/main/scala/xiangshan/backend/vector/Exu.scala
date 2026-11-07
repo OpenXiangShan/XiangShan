@@ -477,6 +477,8 @@ object Exu {
     val vxsat         = Option.when(param.needVxsatWen)(Bool())
     val exceptionVec  = ExceptSparseVec(param.exceptionOut)
     val trigger       = Option.when(param.needTrigger)(TriggerAction())
+    val vstartEn      = Option.when(param.hasLdu || param.hasSta)(Bool())
+    val vstart        = Option.when(param.hasLdu || param.hasSta)(UInt(XLEN.W))
     val debug         = Option.when(backendParams.debugEn)(new DebugBundle)
 
     def toWriteBackRobBundle(implicit p: Parameters): xiangshan.backend.Bundles.WriteBackRobBundle = {
@@ -492,11 +494,13 @@ object Exu {
       toRob.exceptionVec  := this.exceptionVec
       toRob.lqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.sqIdx         .foreach(x => x := 0.U.asTypeOf(x))
-      toRob.trigger       .foreach(x => x := 0.U.asTypeOf(x))
+      toRob.trigger       .foreach(x => x := this.trigger.getOrElse(0.U.asTypeOf(x)))
       toRob.data          := 0.U
       toRob.pdest         := 0.U
       toRob.vecWen        .foreach(_ := false.B)
       toRob.v0Wen         .foreach(_ := false.B)
+      toRob.vstartEn      .foreach(_ := this.vstartEn.getOrElse(false.B))
+      toRob.vstart        .foreach(_ := this.vstart.getOrElse(0.U))
       toRob.debug                    := this.debug.map(_.debug).getOrElse(0.U.asTypeOf(toRob.debug))
       toRob.perfDebugInfo .foreach(_ := this.debug.get.perfDebugInfo)
       toRob.debug_seqNum  .foreach(_ := this.debug.get.seqNum)
@@ -513,6 +517,8 @@ object Exu {
       this.vxsat       .foreach(_ := source.toRob.bits.vxsat       .get)
       this.exceptionVec := source.toRob.bits.exceptionVec
       this.trigger     .foreach(_ := source.toRob.bits.trigger     .get)
+      this.vstartEn    .foreach(_ := source.toRob.bits.vstartEn    .getOrElse(false.B))
+      this.vstart      .foreach(_ := source.toRob.bits.vstart      .getOrElse(0.U))
       this.debug.foreach { case x =>
         x.debug         := source.debug
         x.perfDebugInfo := source.perfDebugInfo.get
@@ -529,6 +535,8 @@ object Exu {
       this.vxsat       .foreach(x => x := 0.U.asTypeOf(x))
       this.exceptionVec.zeroInit()
       this.trigger     .foreach(x => x := 0.U.asTypeOf(x))
+      this.vstartEn    .foreach(_ := false.B)
+      this.vstart      .foreach(_ := 0.U)
       this.debug       .foreach(x => x := source.ctrl.debug.get)
     }
   }

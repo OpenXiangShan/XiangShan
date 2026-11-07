@@ -277,6 +277,11 @@ class StorePipeBundle(
   val ssid = Option.when(param.hasStoreSet)(UInt(SSIDWidth.W))
   val storeSetHit = Option.when(param.hasStoreSet)(Bool())
 
+  // Vector info
+  val vecBaseVaddr = Option.when(param.hasVector)(UInt(VAddrBits.W))
+  val vecVaddrOffset = Option.when(param.hasVector)(UInt(VAddrBits.W)) // only used in s1 & s2, to generate vstart
+  val vecTriggerMask = Option.when(param.hasVector)(UInt((VLEN/8).W))
+
   // Unalign handling
   val align = Option.when(param.hasUnalignHandling)(Bool())
   val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
@@ -307,6 +312,12 @@ class StorePipeBundle(
   def DontCareStoreSet(): Unit = {
     ssid.get := 0.U
     storeSetHit.get := false.B
+  }
+
+  def DontCareVectorFields(): Unit = {
+    vecBaseVaddr.foreach(_ := 0.U)
+    vecVaddrOffset.foreach(_ := 0.U)
+    vecTriggerMask.foreach(_ := 0.U)
   }
 }
 

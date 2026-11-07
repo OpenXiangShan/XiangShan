@@ -88,7 +88,11 @@ class StoreUnitS0(param: ExeUnitParams)(
   val stinSize = Cat(0.U, LSUOpType.size(stinUop.fuOpType))
   scalarIssue.valid := io.stin.valid
   scalarIssue.bits.entrance := StoreEntrance.scalarIssue.U
-  scalarIssue.bits.accessType.instrType := InstrType.scalar.U
+  scalarIssue.bits.accessType.instrType := Mux(
+    LSUOpType.isVecMemOp(stinUop.fuOpType),
+    InstrType.vector.U,
+    InstrType.scalar.U
+  )
   scalarIssue.bits.accessType.isCbo := LSUOpType.isCboAll(stinUop.fuOpType)
   scalarIssue.bits.accessType.isCboNoZero := LSUOpType.isCboNotZero(stinUop.fuOpType)
   scalarIssue.bits.uop := stinUop
@@ -105,6 +109,8 @@ class StoreUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.storeSetHit.get := stinUop.storeSetHit
   scalarIssue.bits.illegalIssue := DontCare
   scalarIssue.bits.DontCareUnalign()
+  scalarIssue.bits.DontCareVectorFields()
+  scalarIssue.bits.vecBaseVaddr.foreach(_ := stin.src(0))
 
   // 2. hardware prefetch requests
   prefetchReq.valid := io.prefetchReq.valid && io.dcacheReq.ready
@@ -116,6 +122,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   prefetchReq.bits.fullva := io.prefetchReq.bits.vaddr
   prefetchReq.bits.DontCareUnalign()
   prefetchReq.bits.DontCareStoreSet()
+  prefetchReq.bits.DontCareVectorFields()
   prefetchReq.bits.uop := 0.U.asTypeOf(new DynInst())
   prefetchReq.bits.size := MemorySize.QB.U
   prefetchReq.bits.mask := Fill(VLEN/8, 1.U(1.W))
@@ -353,7 +360,7 @@ class StoreUnitS1(param: ExeUnitParams)(
 
   // Store trigger
   val storeTrigger = Module(new MemTrigger(MemType.STORE))
-  val isVectorUnitStride = isVector && VstuType.isUnitStride(fuOpType)
+  val isVectorUnitStride = isVector && LSUOpType.isVecMemContinousOp(fuOpType)
   storeTrigger.io.fromCsrTrigger.tdataVec := io.csrTrigger.tdataVec
   storeTrigger.io.fromCsrTrigger.tEnableVec := io.csrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.csrTrigger.triggerCanRaiseBpExp
@@ -366,6 +373,16 @@ class StoreUnitS1(param: ExeUnitParams)(
   val triggerAction = storeTrigger.io.toLoadStore.triggerAction
   val isDebugMode = TriggerAction.isDmode(triggerAction)
   val isBreakPoint = TriggerAction.isExp(triggerAction)
+  val vecVaddrOffset = Mux(
+    isDebugMode || isBreakPoint,
+    storeTrigger.io.toLoadStore.triggerVaddr - in.vecBaseVaddr.getOrElse(0.U),
+    vaddr + genVFirstUnmask(mask).asUInt - in.vecBaseVaddr.getOrElse(0.U)
+  )
+  val vecTriggerMask = Mux(
+    isDebugMode || isBreakPoint,
+    storeTrigger.io.toLoadStore.triggerMask,
+    0.U
+  )
 
   // Unalign tail inject to s0
   val unalignTailInjectValid = fire && isUnalignHead
@@ -478,6 +495,8 @@ class StoreUnitS1(param: ExeUnitParams)(
   stageInfo.fullva := fullva
   stageInfo.needRSReplay.get := needRSReplay
   stageInfo.hasException.get := hasException || isDebugMode || isBreakPoint
+  stageInfo.vecVaddrOffset.foreach(_ := vecVaddrOffset)
+  stageInfo.vecTriggerMask.foreach(_ := vecTriggerMask)
   stageInfo.uop.trigger := triggerAction
   stageInfo.uop.exceptionVec(breakPoint) := isBreakPoint
   stageInfo.uop.exceptionVec(storePageFault) := pf
@@ -806,13 +825,18 @@ class StoreUnitS3(param: ExeUnitParams)(
   io_pipeOut.get.bits := pipeOutBits
   io_pipeIn.get.ready := !pipeOutValid || kill || pipeOut.ready
 
-  io.stout.toRob.valid := sxValid && !sxVector
+  val isBp = TriggerAction.isExp(sxData.uop.trigger)
+  val triggerVaddr = sxData.vecBaseVaddr.getOrElse(0.U) + sxData.vecVaddrOffset.getOrElse(0.U)
+
+  io.stout.toRob.valid := sxValid && (!sxVector || sxData.hasException.getOrElse(false.B))
   io.stout.toRob.bits.robIdx := sxData.uop.robIdx
   io.stout.toRob.bits.isRVC.foreach(_ := sxData.uop.isRVC)
   io.stout.toRob.bits.trigger.foreach(_ := sxData.uop.trigger)
   io.stout.toRob.bits.sqIdx.foreach(_ := sxData.uop.sqIdx)
   io.stout.toRob.bits.lqIdx.foreach(_ := sxData.uop.lqIdx)
   io.stout.toRob.bits.exceptionVec extendFrom sxData.uop.exceptionVec.selectByFu(StaCfg)
+  io.stout.toRob.bits.vstartEn.foreach(_ := sxVector && sxData.hasException.getOrElse(false.B))
+  io.stout.toRob.bits.vstart.foreach(_ := (sxData.vecVaddrOffset.getOrElse(0.U) >> LSUOpType.vecElemSize(sxData.uop.fuOpType)).asUInt)
   io.stout.toRob.bits.debugInfo.isMMIO.foreach(_ := sxData.mmio.get)
   io.stout.toRob.bits.debugInfo.isNCIO.foreach(_ := sxData.nc.get && !sxData.memBackTypeMM.get)
   io.stout.toRob.bits.debugInfo.isPerfCnt.foreach(_ := false.B)
@@ -821,17 +845,17 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.stout.toRob.bits.debugInfo.debug_seqNum.foreach(_ := sxData.uop.debug_seqNum)
   io.stout.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := sxData.uop.perfDebugInfo)
 
-  io.exceptionInfo.valid := sxValid && !sxVector
+  io.exceptionInfo.valid := sxValid && (!sxVector || sxData.hasException.getOrElse(false.B))
   io.exceptionInfo.bits.robIdx := sxData.uop.robIdx
   io.exceptionInfo.bits.exceptionVec extendFrom sxData.uop.exceptionVec.selectByFu(StaCfg)
-  io.exceptionInfo.bits.vaddr := sxData.fullva
+  io.exceptionInfo.bits.vaddr := Mux(isBp && sxVector, triggerVaddr, sxData.fullva)
   io.exceptionInfo.bits.gpaddr := sxData.gpaddr.get
   io.exceptionInfo.bits.isForVSnonLeafPTE := sxData.isForVSnonLeafPTE.get
   io.exceptionInfo.bits.vaNeedExt := sxData.tlbException.get.vaNeedExt
   io.exceptionInfo.bits.isHyper := sxData.tlbException.get.isHyper
   io.exceptionInfo.bits.uopIdx := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
   io.exceptionInfo.bits.vl := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
-  io.exceptionInfo.bits.vstart := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
+  io.exceptionInfo.bits.vstart := Mux(sxVector, (sxData.vecVaddrOffset.getOrElse(0.U) >> LSUOpType.vecElemSize(sxData.uop.fuOpType)).asUInt, 0.U.asTypeOf(io.exceptionInfo.bits.vstart))
 }
 
 class StoreUnitS4(param: ExeUnitParams)(

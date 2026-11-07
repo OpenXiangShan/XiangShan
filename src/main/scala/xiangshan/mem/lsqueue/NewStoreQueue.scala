@@ -1126,6 +1126,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     writeBackToRob.trigger.foreach(_ := DontCare)
     writeBackToRob.isRVC.foreach(_ := DontCare)
     writeBackToRob.sqIdx.foreach(_ := io.rdataPtrExt.head)
+    writeBackToRob.vstartEn.foreach(_ := false.B)
+    writeBackToRob.vstart.foreach(_ := 0.U)
     // for difftest, ref will skip mmio store
     writeBackToRob.debugInfo := DontCare
     writeBackToRob.debugInfo.vaddr.foreach(_ := dataEntries.head.debugVaddr.get)
