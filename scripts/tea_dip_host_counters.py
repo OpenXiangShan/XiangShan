@@ -60,6 +60,8 @@ def sample(pid, start_ticks, seconds):
     counters = parse_perf(result.stderr)
     delta = {key: after[key] - before[key] for key in ['cpu_ticks', 'minor_faults', 'major_faults', 'sched_run_ns', 'sched_wait_ns', 'sched_slices']}
     return dict(utc=datetime.now(timezone.utc).isoformat(), host=socket.gethostname(), pid=pid, start_ticks=start_ticks,
+                host_platform=dict(cpu_model=next(line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')),
+                                   perf_version=subprocess.check_output(['perf', '--version'], text=True).strip()),
                 original_process_live_before_and_after=True, command_line=command_line, affinity=sorted(os.sched_getaffinity(pid)),
                 clock_ticks_per_second=os.sysconf('SC_CLK_TCK'), before=before, after=after, delta=delta,
                 perf_command=command, perf_returncode=result.returncode, perf_stdout=result.stdout, perf_stderr=result.stderr,
