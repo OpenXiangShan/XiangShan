@@ -45,6 +45,19 @@ def state_delta_bounds(counts, windows):
                        counts[0][state] / a['instructions']) for state in counts[0]}
 
 
+def state_direction_audit(state_bounds, comparison):
+    audit = {}
+    for state, interval in state_bounds.items():
+        sampled = comparison['delta_TEA_' + state]
+        sampled_direction = 'decrease' if sampled < 0 else 'increase' if sampled > 0 else 'unchanged'
+        direction = ('decrease' if interval['upper'] < 0 else 'increase' if interval['lower'] > 0
+                     else 'unchanged' if interval['lower'] == interval['upper'] == 0 else 'undetermined')
+        audit[state] = dict(sampled_direction=sampled_direction, native_roi_direction=direction,
+                            strict_sign_conflict=None if direction == 'undetermined' else
+                            {sampled_direction, direction} == {'increase', 'decrease'})
+    return audit
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', type=Path, required=True)
@@ -116,13 +129,14 @@ def main():
         rows.append(dict(point=point, comparison=record['comparison'], native_phase_differences=native_changes, equality=equality,
                          exact_delta_cpi=exact, exact_omitted_edges=[window['exact_tea_interior']['omitted_edge_cycles'] for window in windows],
                          native_roi_state_delta_cpi_bounds=roi_state_bounds,
+                         native_roi_state_direction_audit=state_direction_audit(roi_state_bounds, record['comparison']),
                          dip_exclusive_delta_cpi=dip, gap_delta_cpi_bounds=deltas,
                          counters={key: [window['counters'][key] for window in windows] for key in windows[0]['counters']},
                          top_sampled_pc_deltas=top_pcs, source_window_sha256=digest(path)))
     result = dict(run_id=run['id'], source=identity['source'], ci_evidence=args.ci_evidence, rows=rows,
                   source_sha256={str(Path(__file__).name): digest(Path(__file__)),
                                  **{name: digest(root / name) for name in ['analyze_gaps.py', 'native_perf.py', 'analyze_queue_observation.py']}},
-                  scope='Individually closed CI windows. Exact interior TEA keeps its own retired denominator. Native-ROI state bounds assign omitted edge cycles conservatively to each state and use each native retired denominator; marginal extremes are not jointly additive. Exclusive DIP closes each full ROI. State and gap bounds are conservative intervals, not confidence intervals. Zero CPI still requires all old native and six execution categories. PC evidence is sampled attribution, not unique dynamic causality. No partial-suite score.')
+                  scope='Individually closed CI windows. Exact interior TEA keeps its own retired denominator. Native-ROI state bounds assign omitted edge cycles conservatively to each state and use each native retired denominator; marginal extremes are not jointly additive. Exclusive DIP closes each full ROI. State and gap bounds are conservative intervals, not confidence intervals. State direction is strict only when the whole native-ROI bound has that sign; a sampled sign conflict is explicit and a bound crossing zero remains undetermined. Zero CPI still requires all old native and six execution categories. PC evidence is sampled attribution, not unique dynamic causality. No partial-suite score.')
     (out / 'mechanism-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(dict(run_id=result['run_id'], points=len(rows), rows=[dict(point=row['point'], speedup=row['comparison']['speedup'],
         native_changed_names=[phase['changed_names'] for phase in row['native_phase_differences']],
