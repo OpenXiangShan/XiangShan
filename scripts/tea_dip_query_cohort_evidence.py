@@ -19,14 +19,26 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def collect(root):
+def collect(root, point=None):
     evidence = root / 'evidence/query-cohort-observe'
     spec = json.loads((evidence / 'experiment.json').read_text())
     launch = json.loads((evidence / 'launch.json').read_text())
+    cases = [spec['coremark'], *spec['short_cases']]
+    observed = None
+    if point:
+        cases = [case for case in cases if case['point'] == point]
+        assert len(cases) == 1, 'Select an original cohort point'
+        if point == 'coremark':
+            first = json.loads((evidence / 'coremark-first-live.json').read_text())
+            assert first['original_guest_live']
+            observed = first['process']
+        else:
+            first = json.loads((evidence / 'short-first-live.json').read_text())
+            observed = next(row['process'] for row in first['guests'] if row['point'] == point and row['live'])
     code = r'''from pathlib import Path
 from datetime import datetime,timezone
 import hashlib,json
-root=Path(RUN_DIR);spec=SPEC;launch=LAUNCH
+root=Path(RUN_DIR);spec=SPEC;launch=LAUNCH;cases=CASES;point=POINT;observed=OBSERVED
 assert hashlib.sha256((root/'experiment.json').read_bytes()).hexdigest()==launch['spec_sha256']
 assert hashlib.sha256((root/'run.py').read_bytes()).hexdigest()==launch['runner_sha256']
 state=json.loads((root/'run-state.json').read_text())
@@ -34,35 +46,42 @@ assert all(state[key]==launch['process'][key]for key in ['pid','start_ticks'])
 def live(p):
  path=Path('/proc',str(p['pid']),'stat')
  return path.exists()and path.read_text().rsplit(')',1)[1].split()[19]==p['start_ticks']
-if live(state)or state['phase']!='complete':
+if point:
+ folder=root/point;process=json.loads((folder/'process.json').read_text());assert process==observed,'Original cohort point identity changed'
+ if live(process)or not(folder/'result.json').exists():
+  print(json.dumps(dict(ready=False,point=point,original_process_live=live(process),database_read=False)))
+  raise SystemExit(0)
+if not point and (live(state)or state['phase']!='complete'):
  print(json.dumps(dict(ready=False,controller=state,controller_live=live(state),database_read=False)))
 else:
- assert state['completed']==3 and state['all_short_pairs_neutral']and state['coremark_gate_passed']
+ if not point:assert state['completed']==3 and state['all_short_pairs_neutral']and state['coremark_gate_passed']
  build=json.loads(Path(spec['build_state']).read_text());assert build['source']==spec['source']and build['phase']=='complete'
- cases=[spec['coremark'],*spec['short_cases']];guests=[]
+ guests=[]
  for case in cases:
   folder=root/case['point'];p=json.loads((folder/'process.json').read_text());start=json.loads((folder/'launch-observation.json').read_text());result=json.loads((folder/'result.json').read_text())
   assert not live(p)and start['original_process_live']and start['process']==result['process']==p
   assert result['source']==spec['source']and result['binary_sha256']==build['binary_sha256']
   assert result['original_process_closed']and result['exitcode']==0 and result['difftest_passed']and result['observation_neutrality']['passed']
   guests.append(dict(point=case['point'],process=p,original_process_live=False))
- names=[case['point']+'/'+name for case in cases for name in FILES]+['experiment.json','run.py','native_perf.py','tea_dip_query_endpoint_evidence.py','parent-closed-inputs.json','run-state.json','short-results.json']
+ names=[case['point']+'/'+name for case in cases for name in FILES]+['experiment.json','run.py','native_perf.py','tea_dip_query_endpoint_evidence.py','parent-closed-inputs.json']
+ if not point:names+=['run-state.json','short-results.json']
  files={}
  for name in names:
   p=root/name
   with p.open('rb')as stream:sha=hashlib.file_digest(stream,'sha256').hexdigest()
   files[name]=dict(bytes=p.stat().st_size,sha256=sha)
- print(json.dumps(dict(ready=True,utc=datetime.now(timezone.utc).isoformat(),root=str(root),controller=state,controller_live=False,guests=guests,build=build,files=files,database_read=False)))
-'''.replace('RUN_DIR', repr(launch['run_dir'])).replace('SPEC', repr(spec)).replace('LAUNCH', repr(launch)).replace('FILES', repr(FILES))
+ print(json.dumps(dict(ready=True,utc=datetime.now(timezone.utc).isoformat(),root=str(root),controller=state,controller_live=live(state),point=point,guests=guests,build=build,files=files,database_read=False)))
+'''.replace('RUN_DIR', repr(launch['run_dir'])).replace('SPEC', repr(spec)).replace('LAUNCH', repr(launch)).replace('FILES', repr(FILES)).replace('CASES', repr(cases)).replace('POINT', repr(point)).replace('OBSERVED', repr(observed))
     reply = subprocess.run(['proxychains', '-q', 'ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', 'node031', 'python3', '-'],
                            input=code, capture_output=True, text=True, check=True, timeout=50)
     receipt = json.loads(reply.stdout)
-    (evidence / 'collection-status.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    status_path = evidence / (point + '-collection-status.json' if point else 'collection-status.json')
+    status_path.write_text(json.dumps(receipt, indent=2) + '\n')
     if not receipt['ready']:
         return receipt
-    stage = root / 'query-cohort-observation'
+    stage = evidence / 'closed-points' / point if point else root / 'query-cohort-observation'
     assert not stage.exists(), 'Analyze the existing closed archive'
-    stage.mkdir()
+    stage.mkdir(parents=True)
     command = 'tar -C ' + shlex.quote(receipt['root']) + ' -czf - ' + ' '.join(map(shlex.quote, receipt['files']))
     with (stage / 'originals.tar.gz').open('wb') as stream:
         subprocess.run(['proxychains', '-q', 'ssh', 'node031', command], stdout=stream, check=True, timeout=60)
@@ -105,15 +124,20 @@ def gain_span(before, after):
                 success_fraction_bounds={key: value / count for key, value in bounds['success'].items()} if count else None)
 
 
-def analyze(root):
+def analyze(root, point=None):
     evidence = root / 'evidence/query-cohort-observe'
-    stage = root / 'query-cohort-observation'
+    stage = evidence / 'closed-points' / point if point else root / 'query-cohort-observation'
     receipt_path = stage / 'closure-receipt.json'
     if not receipt_path.exists():
         return dict(pending=True, database_read=False, rows=[], reason='Original cohort controller and four guests not archived closed')
     receipt = json.loads(receipt_path.read_text())
     launch = json.loads((evidence / 'launch.json').read_text())
-    assert receipt['ready'] and not receipt['controller_live'] and receipt['controller']['phase'] == 'complete'
+    assert receipt['ready']
+    if point:
+        assert receipt['point'] == point and len(receipt['guests']) == 1
+        assert receipt['guests'][0]['point'] == point and not receipt['guests'][0]['original_process_live']
+    else:
+        assert not receipt['controller_live'] and receipt['controller']['phase'] == 'complete'
     assert all(receipt['controller'][key] == launch['process'][key] for key in ['pid', 'start_ticks'])
     for name, row in receipt['files'].items():
         assert (stage / name).stat().st_size == row['bytes'] and digest(stage / name) == row['sha256'], name
@@ -132,8 +156,8 @@ def analyze(root):
         if '/' not in name:
             path = parent_archives / name
         else:
-            point, filename = name.split('/', 1)
-            path = parent_archives / 'coremark-closed' / filename if point == 'coremark' else parent_archives / 'short-closed' / point / point / filename
+            parent_point, filename = name.split('/', 1)
+            path = parent_archives / 'coremark-closed' / filename if parent_point == 'coremark' else parent_archives / 'short-closed' / parent_point / parent_point / filename
         assert path.stat().st_size == row['bytes'] and digest(path) == row['sha256'], name
     sys.path.insert(0, str(root))
     from native_perf import read_blocks, unique_counters
@@ -141,7 +165,9 @@ def analyze(root):
     helper = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(helper)
     rows = []
-    for case in [spec['coremark'], *spec['short_cases']]:
+    cases = [case for case in [spec['coremark'], *spec['short_cases']] if point is None or case['point'] == point]
+    assert cases
+    for case in cases:
         point = case['point']
         folder = stage / point
         result = json.loads((folder / 'result.json').read_text())
@@ -188,11 +214,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', required=True, type=Path)
     parser.add_argument('--action', choices=['collect', 'analyze'], required=True)
+    parser.add_argument('--point', help='Collect or analyze one independently closed original cohort point')
     args = parser.parse_args()
     root = args.report_dir.resolve()
-    result = collect(root) if args.action == 'collect' else analyze(root)
+    result = collect(root, args.point) if args.action == 'collect' else analyze(root, args.point)
     if args.action == 'analyze' and not result['pending']:
-        out = root / 'query-cohort-observation/analysis'
+        out = (root / 'evidence/query-cohort-observe/closed-points' / args.point if args.point else root / 'query-cohort-observation') / 'analysis'
         out.mkdir(exist_ok=True)
         (out / 'evidence.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
