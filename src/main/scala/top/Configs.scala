@@ -491,6 +491,7 @@ class KunminghuV2Config(n: Int = 1) extends Config(
   */
 class KunminghuV2WithoutLLCConfig(n: Int = 1) extends Config(
   (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case MonitorsEnabled => false
     case coupledL2.WithoutLLC => true
     case SoCParamsKey => up(SoCParamsKey).copy(
       OpenLLCParamsOpt = None,

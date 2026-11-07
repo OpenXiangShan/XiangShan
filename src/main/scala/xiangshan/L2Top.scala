@@ -129,6 +129,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None
       )
       case coupledL2.WithoutLLC => p(coupledL2.WithoutLLC)
+      // This standalone L2 config must retain the enclosing monitor policy.
+      case MonitorsEnabled => p(MonitorsEnabled)
       case EnableCHI => p(EnableCHI)
       case EnableL2ClockGate => EnableClockGate
       case CHIIssue => p(CHIIssue)
