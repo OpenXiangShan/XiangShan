@@ -72,6 +72,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
   val nderr = RegInit(false.B)
   val derr = RegInit(false.B)
+  val respAccept = RegInit(false.B)
 
   val writeback = Mux(req.nc, io.ncOut.fire, io.mmioOut.fire)
   val slaveAck = req_valid && io.uncache.idResp.valid && io.uncache.idResp.bits.mid === entryIndex.U
@@ -190,10 +191,16 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.uncache.resp.ready := true.B
 
   /* uncache resp */
-  when (io.uncache.resp.fire) {
+  when (io.uncache.resp.fire && !respAccept) {
     uncacheData := io.uncache.resp.bits.data
     nderr := io.uncache.resp.bits.nderr
     derr := io.uncache.resp.bits.error
+  }
+
+  when(needFlush || writeback) {
+    respAccept := false.B
+  }.elsewhen(io.uncache.resp.fire && !needFlushReg && !needFlush) {
+    respAccept := true.B
   }
 
   /* uncache writeback */
