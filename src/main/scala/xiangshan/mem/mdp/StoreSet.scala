@@ -153,7 +153,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
 
   switch (state) {
     is(s_idle) {
-      when(resetCounter(ResetTimeMax2Pow - 1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
+      when(resetCounter(ResetTimeMax2Pow - 1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpredTimeout))) {
         state := s_flush
         resetCounter := 0.U
       }
@@ -483,8 +483,8 @@ class LFST(implicit p: Parameters) extends XSModule {
     io.dispatch.resp(i).bits.shouldWait := (
         (valid(io.dispatch.req(i).bits.ssid) || hitInDispatchBundle) &&
         io.dispatch.req(i).valid &&
-        (!io.dispatch.req(i).bits.isstore || io.csrCtrl.storeset_wait_store)
-      ) && !io.csrCtrl.lvpred_disable || io.csrCtrl.no_spec_load
+        (!io.dispatch.req(i).bits.isstore || io.csrCtrl.storesetWaitStore)
+      ) && !io.csrCtrl.lvpredDisable || io.csrCtrl.noSpecLoad
     val respSsid = io.dispatch.req(i).bits.ssid
     io.dispatch.resp(i).bits.sqIdx := sqIdxVec(respSsid)(allocPtr(respSsid) - 1.U)
     // A younger store may issue before an older one. Select the newest slot that is still valid.

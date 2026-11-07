@@ -603,7 +603,7 @@ class InterruptFilterIO extends Bundle {
     val fromAIA = new Bundle {
       val meip = Bool()
       val seip = Bool()
-      val notice_pending = Bool()
+      val noticePending = Bool()
     }
     val mvienSEIE = Bool()
     val mvipSEIP = Bool()
