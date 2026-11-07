@@ -110,11 +110,11 @@ class PMAEntryHandleIOBundle(implicit p: Parameters) extends PMABundle {
 }
 
 trait PMAReadWrite extends PMAConst with PMPReadWrite {
-  def shift_addr(addr: BigInt): BigInt = {
+  def shiftAddr(addr: BigInt): BigInt = {
     addr >> 2
   }
 
-  def get_napot(base: BigInt, range: BigInt): BigInt = {
+  def getNapot(base: BigInt, range: BigInt): BigInt = {
     val PlatformGrainBytes = 1 << PlatformGrain
     if ((base % PlatformGrainBytes) != 0) {
       println("base: %x", base)
@@ -147,9 +147,9 @@ trait PMAReadWrite extends PMAConst with PMPReadWrite {
 
   def genAddr(init: PMAConfigEntry): BigInt = {
     if (init.a < 2) {
-      shift_addr(init.base_addr)
+      shiftAddr(init.base_addr)
     } else {
-      get_napot(init.base_addr, init.range)
+      getNapot(init.base_addr, init.range)
     }
   }
 

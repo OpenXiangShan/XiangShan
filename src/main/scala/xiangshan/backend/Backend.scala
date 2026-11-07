@@ -270,7 +270,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.csrCtrl <> intRegion.io.csrio.get.customCtrl
   ctrlBlock.io.robio.csr.intrBitSet := intRegion.io.csrio.get.interrupt
   ctrlBlock.io.robio.csr.trapTarget := intRegion.io.csrio.get.trapTarget
-  ctrlBlock.io.robio.csr.wfiEvent := intRegion.io.csrio.get.wfi_event
+  ctrlBlock.io.robio.csr.wfiEvent := intRegion.io.csrio.get.wfiEvent
   ctrlBlock.io.robio.csr.criticalErrorState := intRegion.io.csrio.get.criticalErrorState
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
@@ -522,7 +522,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
   csrin.l2FlushDone := RegNext(io.fromTop.l2FlushDone)
-  csrin.reset_mtvec.foreach(_ := io.fromTop.reset_mtvec.get)
+  csrin.resetMtvec.foreach(_ := io.fromTop.reset_mtvec.get)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
   csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   csrin.criticalErrorState := backendCriticalError
@@ -530,7 +530,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrio.hartId := io.fromTop.hartId
   csrio.fpu.fflags := ctrlBlock.io.robio.csr.fflags
   csrio.fpu.isIllegal := false.B // Todo: remove it
-  csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
+  csrio.fpu.dirtyFs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> WireDefault(0.U.asTypeOf(csrio.vpu)) // Todo
 
   val fromIntExuVsetVType = intRegion.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
@@ -542,17 +542,17 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
   val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
 
-  csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
-  csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
-  csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
+  csrio.vpu.setVxsat := ctrlBlock.io.robio.csr.vxsat
+  csrio.vpu.setVstart.valid := ctrlBlock.io.robio.csr.vstart.valid
+  csrio.vpu.setVstart.bits := ctrlBlock.io.robio.csr.vstart.bits
   ctrlBlock.io.toDecode.vstart := csrio.vpu.vstart
   //Todo here need change design
-  csrio.vpu.set_vtype.valid := commitVType.valid
-  csrio.vpu.set_vtype.bits := ZeroExt(vtype, XLEN)
+  csrio.vpu.setVtype.valid := commitVType.valid
+  csrio.vpu.setVtype.bits := ZeroExt(vtype, XLEN)
   csrio.vpu.diffVl.zip(vecRegion.out.diff).foreach { case (sink, source) =>
     sink := source.diffVl
   }
-  csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
+  csrio.vpu.dirtyVs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.diffCommitForTrap.zip(ctrlBlock.io.robio.diffCommitForTrap).foreach { case (sink, source) => sink := source }
   ctrlBlock.io.robio.diffArchEvent.zip(csrio.diffArchEvent).foreach { case (sink, source) => sink := source }
@@ -697,7 +697,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   // TODO fix perf events and topDown
   val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := RegNext(csrio.customCtrl.distribute_csr)
+  pfevent.io.distributeCsr := RegNext(csrio.customCtrl.distributeCsr)
   val csrevents = pfevent.io.hpmevent.slice(8,16)
 
   val ctrlBlockPerf    = ctrlBlock.getPerfEvents

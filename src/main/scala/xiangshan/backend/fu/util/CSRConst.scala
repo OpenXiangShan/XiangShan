@@ -50,42 +50,42 @@ trait HasCSRConst {
   def ModeS     = 0x1.U
   def ModeU     = 0x0.U
 
-  def IRQ_USIP  = 0
-  def IRQ_SSIP  = 1
-  def IRQ_VSSIP = 2
-  def IRQ_MSIP  = 3
+  def irqUsip  = 0
+  def irqSsip  = 1
+  def irqVssip = 2
+  def irqMsip  = 3
 
-  def IRQ_UTIP  = 4
-  def IRQ_STIP  = 5
-  def IRQ_VSTIP = 6
-  def IRQ_MTIP  = 7
+  def irqUtip  = 4
+  def irqStip  = 5
+  def irqVstip = 6
+  def irqMtip  = 7
 
-  def IRQ_UEIP  = 8
-  def IRQ_SEIP  = 9
-  def IRQ_VSEIP = 10
-  def IRQ_MEIP  = 11
+  def irqUeip  = 8
+  def irqSeip  = 9
+  def irqVseip = 10
+  def irqMeip  = 11
 
-  def IRQ_SGEIP = 12
-  def IRQ_DEBUG = 17
+  def irqSgeip = 12
+  def irqDebug = 17
 
-  val Hgatp_Mode_len = 4
-  val Hgatp_Vmid_len = 16
-  val Hgatp_Addr_len = 44
+  val hgatpModeLen = 4
+  val hgatpVmidLen = 16
+  val hgatpAddrLen = 44
 
-  val Satp_Mode_len = 4
-  val Satp_Asid_len = 16
-  val Satp_Addr_len = 44
-  def satp_part_wmask(max_length: Int, length: Int) : UInt = {
-    require(length > 0 && length <= max_length)
-    ((1L << length) - 1).U(max_length.W)
+  val satpModeLen = 4
+  val satpAsidLen = 16
+  val satpAddrLen = 44
+  def satpPartWmask(maxLength: Int, length: Int) : UInt = {
+    require(length > 0 && length <= maxLength)
+    ((1L << length) - 1).U(maxLength.W)
   }
 
   val IntPriority = Seq(
-    IRQ_DEBUG,
-    IRQ_MEIP, IRQ_MSIP, IRQ_MTIP,
-    IRQ_SEIP, IRQ_SSIP, IRQ_STIP,
-    IRQ_UEIP, IRQ_USIP, IRQ_UTIP,
-    IRQ_VSEIP, IRQ_VSSIP, IRQ_VSTIP, IRQ_SGEIP
+    irqDebug,
+    irqMeip, irqMsip, irqMtip,
+    irqSeip, irqSsip, irqStip,
+    irqUeip, irqUsip, irqUtip,
+    irqVseip, irqVssip, irqVstip, irqSgeip
   )
 
   def csrAccessPermissionCheck(addr: UInt, wen: Bool, mode: UInt, virt: Bool, hasH: Bool): UInt = {

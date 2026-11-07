@@ -290,14 +290,14 @@ class HgeipBundle(implicit val p: Parameters) extends CSRBundle with HasSoCParam
 class HedelegBundle extends ExceptionBundle {
   this.getALL.foreach(_.setRW().withReset(0.U))
   // The default configs are RW
-  this.EX_HSCALL.setRO().withReset(0.U)
-  this.EX_VSCALL.setRO().withReset(0.U)
-  this.EX_MCALL .setRO().withReset(0.U)
-  this.EX_IGPF  .setRO().withReset(0.U)
-  this.EX_LGPF  .setRO().withReset(0.U)
-  this.EX_VI    .setRO().withReset(0.U)
-  this.EX_SGPF  .setRO().withReset(0.U)
-  this.EX_DBLTRP.setRO().withReset(0.U) // double trap is not delegatable
+  this.exHscall.setRO().withReset(0.U)
+  this.exVscall.setRO().withReset(0.U)
+  this.exMcall .setRO().withReset(0.U)
+  this.exIgpf  .setRO().withReset(0.U)
+  this.exLgpf  .setRO().withReset(0.U)
+  this.exVI    .setRO().withReset(0.U)
+  this.exSgpf  .setRO().withReset(0.U)
+  this.exDbltrp.setRO().withReset(0.U) // double trap is not delegatable
 }
 
 class HidelegBundle extends InterruptBundle {
@@ -362,11 +362,11 @@ class HgatpBundle extends CSRBundle {
 }
 
 class HEnvCfg extends EnvCfg {
-  if (CSRConfig.EXT_SSTC) {
+  if (CSRConfig.extSstc) {
     this.STCE.setRW().withReset(1.U)
   }
   this.PBMTE.setRW().withReset(0.U)
-  if (CSRConfig.EXT_DBLTRP) {
+  if (CSRConfig.extDbltrp) {
     // software write envcfg to open ssdbltrp if need
     // set 0 to pass ci
     this.DTE.setRW().withReset(0.U)

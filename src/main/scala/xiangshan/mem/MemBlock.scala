@@ -500,11 +500,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   //val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
 
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
-  dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_store_only, false.B)
+  dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.pfCtrl.l2_pf_store_only, false.B)
   val dcacheError = DelayNWithValid(dcache.io.error, 2)
   io.dcacheError <> dcacheError.bits.toL1BusErrorUnitInfo(dcacheError.valid)
   io.uncacheError.ecc_error <> DelayNWithValid(uncache.io.busError.ecc_error, 2)
-  when(!csrCtrl.cache_error_enable){
+  when(!csrCtrl.cacheErrorEnable){
     io.dcacheError.ecc_error.valid := false.B
     io.uncacheError.ecc_error.valid := false.B
   }
@@ -620,7 +620,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
-  ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
+  ptw.io.csr.distribute_csr <> csrCtrl.distributeCsr
   ptw.io.wfi.wfiReq := io.wfi.wfiReq
 
   io.wfi.wfiSafe := dcache.io.wfi.wfiSafe && uncache.io.wfi.wfiSafe && lsq.io.wfi.wfiSafe && ptw.io.wfi.wfiSafe
@@ -761,7 +761,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // pmp
   val pmp = Module(new PMP())
-  pmp.io.distribute_csr <> csrCtrl.distribute_csr
+  pmp.io.distribute_csr <> csrCtrl.distributeCsr
 
   val pmp_checkers = Seq.fill(DTlbSize)(Module(new PMPChecker(4, leaveHitMux = true)))
   val pmp_check = pmp_checkers.map(_.io)
@@ -792,7 +792,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val prefetcher = Module(new PrefetcherWrapper)
   prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
   prefetcher.io.l2_fdbk_pf_ctrl := io.l2_fdbk_pf_ctrl
-  prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
+  prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pfCtrl
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
   prefetcher.io.fromDCache.refillTrain := dcache.io.refillTrain
@@ -888,12 +888,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // trigger
   val tdata = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-  tEnable := csrCtrl.mem_trigger.tEnableVec
-  when(csrCtrl.mem_trigger.tUpdate.valid) {
-    tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
+  tEnable := csrCtrl.memTrigger.tEnableVec
+  when(csrCtrl.memTrigger.tUpdate.valid) {
+    tdata(csrCtrl.memTrigger.tUpdate.bits.addr) := csrCtrl.memTrigger.tUpdate.bits.tdata
   }
-  val triggerCanRaiseBpExp = csrCtrl.mem_trigger.triggerCanRaiseBpExp
-  val debugMode = csrCtrl.mem_trigger.debugMode
+  val triggerCanRaiseBpExp = csrCtrl.memTrigger.triggerCanRaiseBpExp
+  val debugMode = csrCtrl.memTrigger.debugMode
 
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
@@ -1054,10 +1054,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // Uncache
-  uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
+  uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncacheWriteOutstandingEnable
   uncache.io.hartId := io.hartId
   uncache.io.wfi.wfiReq := io.wfi.wfiReq
-  lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
+  lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncacheWriteOutstandingEnable
 
   // Lsq
   io.mem_to_ooo.lsqio.mmioBusy   := lsq.io.rob.mmioBusy
@@ -1110,12 +1110,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     is (s_idle) {
       when (uncacheReq.fire) {
         when (lsq.io.uncache.req.valid) {
-          when (!lsq.io.uncache.req.bits.nc || !io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
+          when (!lsq.io.uncache.req.bits.nc || !io.ooo_to_mem.csrCtrl.uncacheWriteOutstandingEnable) {
             uncacheState := s_scalar_uncache
           }
         }.otherwise {
           // val isStore = vsFlowQueue.io.uncache.req.bits.cmd === MemoryOpConstants.M_XWR
-          when (!io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
+          when (!io.ooo_to_mem.csrCtrl.uncacheWriteOutstandingEnable) {
             uncacheState := s_vector_uncache
           }
         }
@@ -1138,7 +1138,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   when (lsq.io.uncache.req.valid) {
     uncacheReq <> lsq.io.uncache.req
   }
-  when (io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
+  when (io.ooo_to_mem.csrCtrl.uncacheWriteOutstandingEnable) {
     lsq.io.uncache.resp <> uncacheResp
     lsq.io.uncache.idResp <> uncacheIdResp
   }.otherwise {
@@ -1287,8 +1287,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.externalInterrupt.meip  := RegNext(outer.plic_int_sink.in.head._1(0))
     x.externalInterrupt.seip  := RegNext(outer.plic_int_sink.in.last._1(0))
     x.externalInterrupt.debug := RegNext(outer.debug_int_sink.in.head._1(0))
-    x.externalInterrupt.nmi.nmi_31 := RegNext(outer.nmi_int_sink.in.head._1(0) | outer.beu_local_int_sink.in.head._1(0))
-    x.externalInterrupt.nmi.nmi_43 := RegNext(outer.nmi_int_sink.in.head._1(1))
+    x.externalInterrupt.nmi.nmi31 := RegNext(outer.nmi_int_sink.in.head._1(0) | outer.beu_local_int_sink.in.head._1(0))
+    x.externalInterrupt.nmi.nmi43 := RegNext(outer.nmi_int_sink.in.head._1(1))
     x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
     x.teemsiInfo zip io.fromTopToBackend.teemsiInfo foreach { case (x_teemsiInfo, io_teemsiInfo) =>
       x_teemsiInfo        := DelayNWithValid(io_teemsiInfo, 1)
@@ -1304,8 +1304,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.inner_hartId := io.hartId
   io.inner_reset_vector := RegNext(io.outer_reset_vector)
   io.outer_cpu_wfi := RegNext(io.ooo_to_mem.backendToTopBypass.cpuWfi)
-  io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
-  io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
+  io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flushL2Enable
+  io.outer_power_down_en := io.ooo_to_mem.csrCtrl.powerDownEnable
   io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError, false.B)
   io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck
   io.outer_teemsi_ack zip io.ooo_to_mem.backendToTopBypass.teemsiAck foreach { case (teemsi_ack, teemsiAck) =>
@@ -1313,7 +1313,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
-  io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
+  io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pfCtrl.toL2PrefetchCtrl(), 2)
 
   // reset tree of MemBlock
   if (p(DebugOptionsKey).ResetGen) {
@@ -1550,7 +1550,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   XSPerfAccumulate("replay_mdp_hit_strict_addr_miss_lq_head_full", perfReplayMdpStrictAddrMissLqHeadFull)
 
   val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := csrCtrl.distribute_csr
+  pfevent.io.distributeCsr := csrCtrl.distributeCsr
   val csrevents = pfevent.io.hpmevent.slice(16,24)
 
   val perfFromUnits = (newLoadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)

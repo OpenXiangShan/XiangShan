@@ -80,15 +80,15 @@ class TrapHandleModule extends Module {
   private val causeNO = Mux(hasIR, interruptNO, exceptionNO)
 
   // sm/ssdbltrp
-  private val m_EX_DT  = handleTrapUnderM  && mstatus.MDT.asBool  && hasTrap
-  private val s_EX_DT  = handleTrapUnderHS && sstatus.SDT.asBool  && hasTrap
-  private val vs_EX_DT = handleTrapUnderVS && vsstatus.SDT.asBool && hasTrap
+  private val mExDT  = handleTrapUnderM  && mstatus.MDT.asBool  && hasTrap
+  private val sExDT  = handleTrapUnderHS && sstatus.SDT.asBool  && hasTrap
+  private val vsExDT = handleTrapUnderVS && vsstatus.SDT.asBool && hasTrap
 
-  private val dbltrpToMN = m_EX_DT && mnstatus.NMIE.asBool // NMI not allow double trap
-  private val hasDTExcp  = m_EX_DT || s_EX_DT || vs_EX_DT
+  private val dbltrpToMN = mExDT && mnstatus.NMIE.asBool // NMI not allow double trap
+  private val hasDTExcp  = mExDT || sExDT || vsExDT
 
-  private val trapToHS = handleTrapUnderHS && !s_EX_DT && !vs_EX_DT
-  private val traptoVS = handleTrapUnderVS && !vs_EX_DT
+  private val trapToHS = handleTrapUnderHS && !sExDT && !vsExDT
+  private val traptoVS = handleTrapUnderVS && !vsExDT
 
   private val xtvec = MuxCase(io.in.mtvec, Seq(
     traptoVS -> io.in.vstvec,

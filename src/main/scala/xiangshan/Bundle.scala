@@ -324,8 +324,8 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
 }
 
 class NonmaskableInterruptIO() extends Bundle {
-  val nmi_31 = Input(Bool())
-  val nmi_43 = Input(Bool())
+  val nmi31 = Input(Bool())
+  val nmi43 = Input(Bool())
   // reserve for other nmi type
 }
 
@@ -628,36 +628,36 @@ class StoreSetLoadUnitCheckDBEntry(implicit p: Parameters) extends XSBundle {
 
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
-  val pf_ctrl = Output(new PrefetchCtrl)
+  val pfCtrl = Output(new PrefetchCtrl)
   // Load violation predictor
-  val lvpred_disable = Output(Bool())
-  val no_spec_load = Output(Bool())
-  val storeset_wait_store = Output(Bool())
-  val storeset_no_fast_wakeup = Output(Bool())
-  val lvpred_timeout = Output(UInt(5.W))
+  val lvpredDisable = Output(Bool())
+  val noSpecLoad = Output(Bool())
+  val storesetWaitStore = Output(Bool())
+  val storesetNoFastWakeup = Output(Bool())
+  val lvpredTimeout = Output(UInt(5.W))
   // Branch predictor
-  val bp_ctrl = Output(new BpuCtrl)
+  val bpCtrl = Output(new BpuCtrl)
   // Memory Block
-  val sbuffer_timeout = Output(UInt(22.W))
-  val sbuffer_threshold = Output(UInt(4.W))
-  val ldld_vio_check_enable = Output(Bool())
-  val soft_prefetch_enable = Output(Bool())
-  val cache_error_enable = Output(Bool())
-  val uncache_write_outstanding_enable = Output(Bool())
-  val hd_misalign_st_enable = Output(Bool())
-  val hd_misalign_ld_enable = Output(Bool())
-  val power_down_enable = Output(Bool())
-  val commit_stuck_check_enable = Output(Bool())
-  val flush_l2_enable = Output(Bool())
+  val sbufferTimeout = Output(UInt(22.W))
+  val sbufferThreshold = Output(UInt(4.W))
+  val ldldVioCheckEnable = Output(Bool())
+  val softPrefetchEnable = Output(Bool())
+  val cacheErrorEnable = Output(Bool())
+  val uncacheWriteOutstandingEnable = Output(Bool())
+  val hdMisalignStEnable = Output(Bool())
+  val hdMisalignLdEnable = Output(Bool())
+  val powerDownEnable = Output(Bool())
+  val commitStuckCheckEnable = Output(Bool())
+  val flushL2Enable = Output(Bool())
   // Rename
-  val fusion_enable = Output(Bool())
-  val high_density_rob_compression_enable = Output(Bool())
-  val wfi_enable = Output(Bool())
+  val fusionEnable = Output(Bool())
+  val highDensityRobCompressionEnable = Output(Bool())
+  val wfiEnable = Output(Bool())
 
   // distribute csr write signal
-  val distribute_csr = new DistributedCSRIO()
-  val frontend_trigger = new FrontendTdataDistributeIO()
-  val mem_trigger = new MemTdataDistributeIO()
+  val distributeCsr = new DistributedCSRIO()
+  val frontendTrigger = new FrontendTdataDistributeIO()
+  val memTrigger = new MemTdataDistributeIO()
   // Virtualization Mode
   val virtMode = Output(Bool())
   // xstatus.fs field is off
@@ -683,12 +683,12 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
     val addr = Output(UInt(12.W))
     val data = Output(UInt(XLEN.W))
   })
-  def apply(valid: Bool, addr: UInt, data: UInt, src_description: String) = {
+  def apply(valid: Bool, addr: UInt, data: UInt, srcDescription: String) = {
     when(valid){
       w.bits.addr := addr
       w.bits.data := data
     }
-    println("Distributed CSR update req registered for " + src_description)
+    println("Distributed CSR update req registered for " + srcDescription)
   }
 }
 

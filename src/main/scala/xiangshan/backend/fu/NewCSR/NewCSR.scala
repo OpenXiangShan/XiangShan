@@ -63,9 +63,9 @@ object CSRConfig {
   // perf
   final val perfCntNum = 29       // in Spec
 
-  final val EXT_SSTC = true
+  final val extSstc = true
 
-  final val EXT_DBLTRP = true
+  final val extDbltrp = true
 
   final val PPNLength = 44
   final val PPNLengthMpt = 44
@@ -89,8 +89,8 @@ class NewCSRInput(implicit p: Parameters) extends Bundle {
 }
 
 class NewCSROutput(implicit p: Parameters) extends Bundle {
-  val EX_II = Bool()
-  val EX_VI = Bool()
+  val exII = Bool()
+  val exVI = Bool()
   val flushPipe = Bool()
   val rData = UInt(64.W)
   val regOut = UInt(64.W)
@@ -127,7 +127,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
       val l2FlushDone = Input(Bool())
-      val reset_mtvec = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
+      val resetMtvec = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
       val criticalErrorState = Input(Bool())
     })
     val in = Flipped(DecoupledIO(new NewCSRInput))
@@ -387,8 +387,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // interrupt
   val nmip = RegInit(new NonMaskableIRPendingBundle, (new NonMaskableIRPendingBundle).init)
-  nmip.NMI_43 := nonMaskableIRP.NMI_43
-  nmip.NMI_31 := nonMaskableIRP.NMI_31
+  nmip.nmi43 := nonMaskableIRP.nmi43
+  nmip.nmi31 := nonMaskableIRP.nmi31
 
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.privState := privState
@@ -424,7 +424,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.platform.seip := platformIRP.SEIP
   intrMod.io.in.fromAIA.meip := fromAIA.meip
   intrMod.io.in.fromAIA.seip := fromAIA.seip
-  intrMod.io.in.fromAIA.notice_pending := fromAIA.notice_pending
+  intrMod.io.in.fromAIA.noticePending := fromAIA.noticePending
   intrMod.io.in.mvienSEIE := mvien.regOut.SEIE.asBool
   intrMod.io.in.mvipSEIP := mvip.regOut.SEIP.asBool
 
@@ -606,7 +606,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   mhartid.hartid := this.io.fromTop.hartId
   mhartid.dmode  := debugMode
-  mtvec.reset_mtvec.foreach(_ := this.io.fromTop.reset_mtvec.get)
+  mtvec.resetMtvec.foreach(_ := this.io.fromTop.resetMtvec.get)
 
   pmpcfgs.zipWithIndex.foreach { case (mod, i) =>
     mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpcfg0 + i / 8 * 2).U)
@@ -731,7 +731,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.aiaToCSR.mtopei  := fromAIA.mtopei
         m.aiaToCSR.stopei  := fromAIA.stopei
         m.aiaToCSR.vstopei := fromAIA.vstopei
-        m.aiaToCSR.notice_pending := fromAIA.notice_pending
+        m.aiaToCSR.noticePending := fromAIA.noticePending
       case _ =>
     }
     mod match {
@@ -1091,10 +1091,10 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val noCSRIllegalReg = RegEnable(noCSRIllegal, ren || wen)
 
-  private val s_idle :: s_waitIMSIC :: s_finish :: Nil = Enum(3)
+  private val sIdle :: sWaitIMSIC :: sFinish :: Nil = Enum(3)
 
   /** the state machine of newCSR module */
-  private val state = RegInit(s_idle)
+  private val state = RegInit(sIdle)
   /** the next state of newCSR */
   private val stateNext = WireInit(state)
   state := stateNext
@@ -1103,7 +1103,7 @@ class NewCSR(implicit val p: Parameters) extends Module
    * Asynchronous access operation of CSR. Check whether an access is asynchronous when read/write-enable is high.
    * AIA registers are designed to be access asynchronously, so newCSR will wait for response.
    **/
-  private val asyncAccess = (wen || ren) && !(permitMod.io.out.EX_II || permitMod.io.out.EX_VI) && (
+  private val asyncAccess = (wen || ren) && !(permitMod.io.out.exII || permitMod.io.out.exVI) && (
     mireg.addr.U === addr && miselect.inIMSICRange ||
     sireg.addr.U === addr && ((!V.asUInt.asBool && siselect.inIMSICRange) || (V.asUInt.asBool && vsiselect.inIMSICRange)) ||
     vsireg.addr.U === addr && vsiselect.inIMSICRange
@@ -1111,29 +1111,29 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   /** State machine of newCSR */
   switch(state) {
-    is(s_idle) {
+    is(sIdle) {
       when(valid && redirectFlush) {
-        stateNext := s_idle
+        stateNext := sIdle
       }.elsewhen(valid && asyncAccess) {
-        stateNext := s_waitIMSIC
+        stateNext := sWaitIMSIC
       }.elsewhen(valid) {
-        stateNext := s_finish
+        stateNext := sFinish
       }
     }
-    is(s_waitIMSIC) {
+    is(sWaitIMSIC) {
       when(redirectFlush) {
-        stateNext := s_idle
+        stateNext := sIdle
       }.elsewhen(fromAIA.rdata.valid) {
         when(io.out.ready) {
-          stateNext := s_idle
+          stateNext := sIdle
         }.otherwise {
-          stateNext := s_finish
+          stateNext := sFinish
         }
       }
     }
-    is(s_finish) {
+    is(sFinish) {
       when(redirectFlush || io.out.ready) {
-        stateNext := s_idle
+        stateNext := sIdle
       }
     }
   }
@@ -1141,11 +1141,11 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // Todo: check IMSIC EX_II and EX_VI
   private val imsicIllegal = fromAIA.rdata.valid && fromAIA.rdata.bits.illegal
-  private val imsic_EX_II = imsicIllegal && !V.asUInt.asBool
-  private val imsic_EX_VI = imsicIllegal && V.asUInt.asBool
+  private val imsicExII = imsicIllegal && !V.asUInt.asBool
+  private val imsicExVI = imsicIllegal && V.asUInt.asBool
 
   /** Set io.in.ready when state machine is ready to receive a new request synchronously */
-  io.in.ready := (state === s_idle)
+  io.in.ready := (state === sIdle)
 
   /**
    * Valid signal of newCSR output.
@@ -1154,18 +1154,18 @@ class NewCSR(implicit val p: Parameters) extends Module
    **/
 
   /** Data that have been read before,and should be stored because output not fired */
-  val normalCSRValid = state === s_idle && valid && !asyncAccess
-  val waitIMSICValid = state === s_waitIMSIC && fromAIA.rdata.valid
+  val normalCSRValid = state === sIdle && valid && !asyncAccess
+  val waitIMSICValid = state === sWaitIMSIC && fromAIA.rdata.valid
   val claimAIA = mtopei.w.wen | stopei.w.wen | vstopei.w.wen
 
-  io.out.valid := (waitIMSICValid || state === s_finish) && !redirectFlush
-  io.out.bits.EX_II := DataHoldBypass(Mux1H(Seq(
-    normalCSRValid -> (permitMod.io.out.EX_II || noCSRIllegal),
-    waitIMSICValid -> imsic_EX_II,
+  io.out.valid := (waitIMSICValid || state === sFinish) && !redirectFlush
+  io.out.bits.exII := DataHoldBypass(Mux1H(Seq(
+    normalCSRValid -> (permitMod.io.out.exII || noCSRIllegal),
+    waitIMSICValid -> imsicExII,
   )), false.B, normalCSRValid || waitIMSICValid)
-  io.out.bits.EX_VI := DataHoldBypass(Mux1H(Seq(
-    normalCSRValid -> permitMod.io.out.EX_VI,
-    waitIMSICValid -> imsic_EX_VI,
+  io.out.bits.exVI := DataHoldBypass(Mux1H(Seq(
+    normalCSRValid -> permitMod.io.out.exVI,
+    waitIMSICValid -> imsicExVI,
   )), false.B, normalCSRValid || waitIMSICValid)
   io.out.bits.flushPipe := flushPipe
 
@@ -1259,8 +1259,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   }}
 
   val triggerCanRaiseBpExp = !(privState.isModeM && !mstatus.regOut.MIE ||
-    medeleg.regOut.EX_BP && privState.isModeHS && !mstatus.sstatus.SIE ||
-    medeleg.regOut.EX_BP && hedeleg.regOut.EX_BP && privState.isModeVS && !vsstatus.regOut.SIE)
+    medeleg.regOut.exBp && privState.isModeHS && !mstatus.sstatus.SIE ||
+    medeleg.regOut.exBp && hedeleg.regOut.exBp && privState.isModeVS && !vsstatus.regOut.SIE)
 
   val debugMod = Module(new Debug)
   debugMod.io.in.trapInfo.valid            := hasTrap
@@ -1448,56 +1448,56 @@ class NewCSR(implicit val p: Parameters) extends Module
   /**
    * [[io.status.custom]] connection
    */
-  io.status.custom.pf_ctrl.l1I_pf_enable           := spfctl.regOut.L1I_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_enable            := spfctl.regOut.L2_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable           := spfctl.regOut.L1D_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_train_on_hit     := spfctl.regOut.L1D_PF_TRAIN_ON_HIT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable_agt       := spfctl.regOut.L1D_PF_ENABLE_AGT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_stride_enable    := spfctl.regOut.L1D_PF_STRIDE_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
-  io.status.custom.pf_ctrl.l2_pf_recv_enable       := spfctl.regOut.L2_PF_RECV_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_pbop_enable       := spfctl.regOut.L2_PF_PBOP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_vbop_enable       := spfctl.regOut.L2_PF_VBOP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_tp_enable         := spfctl.regOut.L2_PF_TP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_delay_latency     := spfctl.regOut.L2_PF_DELAY_LATENCY.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_berti_enable     := spfctl.regOut.L1D_PF_BERTI_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_stream_enable    := spfctl.regOut.L1D_PF_STREAM_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_cdp_enable        := spfctl.regOut.L2_PF_CDP_ENABLE.asBool
+  io.status.custom.pfCtrl.l1I_pf_enable           := spfctl.regOut.l1iPfEnable.asBool
+  io.status.custom.pfCtrl.l2_pf_enable            := spfctl.regOut.l2PfEnable.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable           := spfctl.regOut.l1dPfEnable.asBool
+  io.status.custom.pfCtrl.l1D_pf_train_on_hit     := spfctl.regOut.l1dPfTrainOnHit.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable_agt       := spfctl.regOut.l1dPfEnableAgt.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable_pht       := spfctl.regOut.l1dPfEnablePht.asBool
+  io.status.custom.pfCtrl.l1D_pf_active_threshold := spfctl.regOut.l1dPfActiveThreshold.asUInt
+  io.status.custom.pfCtrl.l1D_pf_active_stride    := spfctl.regOut.l1dPfActiveStride.asUInt
+  io.status.custom.pfCtrl.l1D_pf_stride_enable    := spfctl.regOut.l1dPfStrideEnable.asBool
+  io.status.custom.pfCtrl.l2_pf_store_only        := spfctl.regOut.l2PfStoreOnly.asBool
+  io.status.custom.pfCtrl.l2_pf_recv_enable       := spfctl.regOut.l2PfRecvEnable.asBool
+  io.status.custom.pfCtrl.l2_pf_pbop_enable       := spfctl.regOut.l2PfPbopEnable.asBool
+  io.status.custom.pfCtrl.l2_pf_vbop_enable       := spfctl.regOut.l2PfVbopEnable.asBool
+  io.status.custom.pfCtrl.l2_pf_tp_enable         := spfctl.regOut.l2PfTpEnable.asBool
+  io.status.custom.pfCtrl.l2_pf_delay_latency     := spfctl.regOut.l2PfDelayLatency.asUInt
+  io.status.custom.pfCtrl.l1D_pf_berti_enable     := spfctl.regOut.l1dPfBertiEnable.asBool
+  io.status.custom.pfCtrl.l1D_pf_stream_enable    := spfctl.regOut.l1dPfStreamEnable.asBool
+  io.status.custom.pfCtrl.l2_pf_cdp_enable        := spfctl.regOut.l2PfCdpEnable.asBool
 
-  io.status.custom.lvpred_disable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
-  io.status.custom.no_spec_load            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
-  io.status.custom.storeset_wait_store     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool
-  io.status.custom.storeset_no_fast_wakeup := slvpredctl.regOut.STORESET_NO_FAST_WAKEUP.asBool
-  io.status.custom.lvpred_timeout          := slvpredctl.regOut.LVPRED_TIMEOUT.asUInt
+  io.status.custom.lvpredDisable          := slvpredctl.regOut.lvpredDisable.asBool
+  io.status.custom.noSpecLoad            := slvpredctl.regOut.noSpecLoad.asBool
+  io.status.custom.storesetWaitStore     := slvpredctl.regOut.storesetWaitStore.asBool
+  io.status.custom.storesetNoFastWakeup := slvpredctl.regOut.storesetNoFastWakeup.asBool
+  io.status.custom.lvpredTimeout          := slvpredctl.regOut.lvpredTimeout.asUInt
 
-  io.status.custom.bp_ctrl.ubtbEnable   := sbpctl.regOut.UBTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.abtbEnable   := sbpctl.regOut.ABTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.mbtbEnable   := sbpctl.regOut.MBTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.tageEnable   := sbpctl.regOut.TAGE_ENABLE.asBool
-  io.status.custom.bp_ctrl.scEnable     := sbpctl.regOut.SC_ENABLE.asBool
-  io.status.custom.bp_ctrl.ittageEnable := sbpctl.regOut.ITTAGE_ENABLE.asBool
-  io.status.custom.bp_ctrl.rasEnable    := sbpctl.regOut.RAS_ENABLE.asBool
+  io.status.custom.bpCtrl.ubtbEnable   := sbpctl.regOut.ubtbEnable.asBool
+  io.status.custom.bpCtrl.abtbEnable   := sbpctl.regOut.abtbEnable.asBool
+  io.status.custom.bpCtrl.mbtbEnable   := sbpctl.regOut.mbtbEnable.asBool
+  io.status.custom.bpCtrl.tageEnable   := sbpctl.regOut.tageEnable.asBool
+  io.status.custom.bpCtrl.scEnable     := sbpctl.regOut.scEnable.asBool
+  io.status.custom.bpCtrl.ittageEnable := sbpctl.regOut.ittageEnable.asBool
+  io.status.custom.bpCtrl.rasEnable    := sbpctl.regOut.rasEnable.asBool
 
-  io.status.custom.sbuffer_timeout                  := smblockctl.regOut.SBUFFER_TIMEOUT.asUInt
-  io.status.custom.sbuffer_threshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
-  io.status.custom.ldld_vio_check_enable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
-  io.status.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
-  io.status.custom.cache_error_enable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
-  io.status.custom.uncache_write_outstanding_enable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
-  io.status.custom.hd_misalign_st_enable            := smblockctl.regOut.HD_MISALIGN_ST_ENABLE.asBool
-  io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
+  io.status.custom.sbufferTimeout                  := smblockctl.regOut.sbufferTimeout.asUInt
+  io.status.custom.sbufferThreshold                := smblockctl.regOut.sbufferThreshold.asUInt
+  io.status.custom.ldldVioCheckEnable            := smblockctl.regOut.ldldVioCheckEnable.asBool
+  io.status.custom.softPrefetchEnable             := smblockctl.regOut.softPrefetchEnable.asBool
+  io.status.custom.cacheErrorEnable               := smblockctl.regOut.cacheErrorEnable.asBool
+  io.status.custom.uncacheWriteOutstandingEnable := smblockctl.regOut.uncacheWriteOutstandingEnable.asBool
+  io.status.custom.hdMisalignStEnable            := smblockctl.regOut.hdMisalignStEnable.asBool
+  io.status.custom.hdMisalignLdEnable            := smblockctl.regOut.hdMisalignLdEnable.asBool
 
-  io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
-  io.status.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
-  io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.status.custom.fusionEnable           := srnctl.regOut.fusionEnable.asBool
+  io.status.custom.highDensityRobCompressionEnable := srnctl.regOut.highDensityRobCompressionEnable.asBool
+  io.status.custom.wfiEnable              := srnctl.regOut.wfiEnable.asBool && (!io.status.singleStepFlag) && !debugMode
 
-  io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
-  io.status.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
+  io.status.custom.powerDownEnable := mcorepwr.regOut.powerDownEnable.asBool
+  io.status.custom.commitStuckCheckEnable := mcorepwr.regOut.commitStuckCheckEnable.asBool
 
-  io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
+  io.status.custom.flushL2Enable := mflushpwr.regOut.flushL2Enable.asBool
 
   io.status.instrAddrTransType.bare := privState.isModeM ||
     (!privState.isVirtual && satp.regOut.MODE === SatpMode.Bare) ||
@@ -1604,8 +1604,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off
   io.toDecode.illegalInst.wfi        := isModeHU || !isModeM && mstatus.regOut.TW
   io.toDecode.virtualInst.wfi        := isModeVS && !mstatus.regOut.TW && hstatus.regOut.VTW || isModeVU && !mstatus.regOut.TW
-  io.toDecode.illegalInst.wrs_nto    := !isModeM && mstatus.regOut.TW
-  io.toDecode.virtualInst.wrs_nto    := privState.V && !mstatus.regOut.TW && hstatus.regOut.VTW
+  io.toDecode.illegalInst.wrsNto    := !isModeM && mstatus.regOut.TW
+  io.toDecode.virtualInst.wrsNto    := privState.V && !mstatus.regOut.TW && hstatus.regOut.VTW
   io.toDecode.illegalInst.frm        := frmIsReserved
   // Ref: The RISC-V Instruction Set Manual Volume I - 20.5. Control and Status Register State
   io.toDecode.illegalInst.cboZ       := !isModeM && !menvcfg.regOut.CBZE || isModeHU && !senvcfg.regOut.CBZE
@@ -1631,10 +1631,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     henvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeVS || isModeVU)
   )
   // Rename
-  io.toDecode.custom.fusion_enable := srnctl.regOut.FUSION_ENABLE.asBool
-  io.toDecode.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
-  io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
-  io.toDecode.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
+  io.toDecode.custom.fusionEnable := srnctl.regOut.fusionEnable.asBool
+  io.toDecode.custom.highDensityRobCompressionEnable := srnctl.regOut.highDensityRobCompressionEnable.asBool
+  io.toDecode.custom.wfiEnable    := srnctl.regOut.wfiEnable.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.toDecode.custom.commitStuckCheckEnable := mcorepwr.regOut.commitStuckCheckEnable.asBool
   io.toDecode.singlestep := io.status.singleStepFlag
 
   io.distributedWenLegal := wenLegalReg && !noCSRIllegalReg

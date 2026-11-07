@@ -44,7 +44,7 @@ trait CSRCustom { self: NewCSR =>
   val mflushpwr = Module(new CSRModule("Mflushpwr", new MflushpwrBundle)
     with HasMachineFlushL2Bundle
   {
-    regOut.L2_FLUSH_DONE := l2FlushDone
+    regOut.l2FlushDone := l2FlushDone
   })
     .setAddr(0xBC1)
 
@@ -68,69 +68,69 @@ trait CSRCustom { self: NewCSR =>
 }
 
 class SbpctlBundle extends CSRBundle {
-  val RAS_ENABLE    = RW(6).withReset(true.B).withDescription("Enable the return-address stack predictor.")
-  val ITTAGE_ENABLE = RW(5).withReset(true.B).withDescription("Enable the indirect-target TAGE predictor.")
-  val SC_ENABLE     = RW(4).withReset(true.B).withDescription("Enable the statistical corrector.")
-  val TAGE_ENABLE   = RW(3).withReset(true.B).withDescription("Enable the TAGE predictor.")
-  val MBTB_ENABLE   = RW(2).withReset(true.B).withDescription("Enable the macro-BTB predictor.")
-  val ABTB_ENABLE   = RW(1).withReset(true.B).withDescription("Enable the alternate branch target buffer.")
-  val UBTB_ENABLE   = RW(0).withReset(true.B).withDescription("Enable the micro-BTB predictor.")
+  val rasEnable    = RW(6).withReset(true.B).withDescription("Enable the return-address stack predictor.")
+  val ittageEnable = RW(5).withReset(true.B).withDescription("Enable the indirect-target TAGE predictor.")
+  val scEnable     = RW(4).withReset(true.B).withDescription("Enable the statistical corrector.")
+  val tageEnable   = RW(3).withReset(true.B).withDescription("Enable the TAGE predictor.")
+  val mbtbEnable   = RW(2).withReset(true.B).withDescription("Enable the macro-BTB predictor.")
+  val abtbEnable   = RW(1).withReset(true.B).withDescription("Enable the alternate branch target buffer.")
+  val ubtbEnable   = RW(0).withReset(true.B).withDescription("Enable the micro-BTB predictor.")
 }
 
 class SpfctlBundle extends CSRBundle {
-  val L2_PF_CDP_ENABLE        = RW(    34).withReset(true.B).withDescription("Enable CDP-based L2 training and L2 prefetching.")
-  val L1D_PF_STREAM_ENABLE    = RW(    33).withReset(true.B).withDescription("Enable the L1D Stream prefetcher.")
-  val L1D_PF_BERTI_ENABLE     = RW(    32).withReset(true.B).withDescription("Enable the L1D Berti prefetcher.")
-  val L2_PF_DELAY_LATENCY     = SpfctlL2PfDelayLatency(31, 22).withReset(SpfctlL2PfDelayLatency.initValue).withDescription("Delay latency used when training the L2 prefetcher.")
-  val L2_PF_TP_ENABLE         = RW(    21).withReset(true.B).withDescription("Enable TP-based L2 training and L2 prefetching.")
-  val L2_PF_VBOP_ENABLE       = RW(    20).withReset(true.B).withDescription("Enable VBOP-based L2 training and L2 prefetching.")
-  val L2_PF_PBOP_ENABLE       = RW(    19).withReset(true.B).withDescription("Enable PBOP-based L2 training and L2 prefetching.")
-  val L2_PF_RECV_ENABLE       = RW(    18).withReset(true.B).withDescription("Enable L2 prefetch requests received from the SMS/L1 training path.")
-  val L2_PF_STORE_ONLY        = RW(    17).withReset(false.B).withDescription("Restrict L2 prefetching to store-triggered training.")
-  val L1D_PF_STRIDE_ENABLE    = RW(    16).withReset(true.B).withDescription("Enable the L1D stride prefetcher.")
-  val L1D_PF_ACTIVE_STRIDE    = SpfctlL1DPfActiveStride(15, 10).withReset(SpfctlL1DPfActiveStride.initValue).withDescription("Active-page stride threshold for the L1D prefetcher.")
-  val L1D_PF_ACTIVE_THRESHOLD = SpfctlL1DPfActiveThreshold( 9,  6).withReset(SpfctlL1DPfActiveThreshold.initValue).withDescription("Active-page confidence threshold for the L1D prefetcher.")
-  val L1D_PF_ENABLE_PHT       = RW(     5).withReset(true.B).withDescription("Enable the L1D PHT prefetcher.")
-  val L1D_PF_ENABLE_AGT       = RW(     4).withReset(true.B).withDescription("Enable the L1D AGT prefetcher.")
-  val L1D_PF_TRAIN_ON_HIT     = RW(     3).withReset(false.B).withDescription("Train the L1D prefetcher on cache hits.")
-  val L1D_PF_ENABLE           = RW(     2).withReset(true.B).withDescription("Enable the L1D cache prefetcher.")
-  val L2_PF_ENABLE            = RW(     1).withReset(true.B).withDescription("Master enable for the L2 cache prefetcher.")
-  val L1I_PF_ENABLE           = RW(     0).withReset(true.B).withDescription("Enable the L1I cache prefetcher.")
+  val l2PfCdpEnable        = RW(    34).withReset(true.B).withDescription("Enable CDP-based L2 training and L2 prefetching.")
+  val l1dPfStreamEnable    = RW(    33).withReset(true.B).withDescription("Enable the L1D Stream prefetcher.")
+  val l1dPfBertiEnable     = RW(    32).withReset(true.B).withDescription("Enable the L1D Berti prefetcher.")
+  val l2PfDelayLatency     = SpfctlL2PfDelayLatency(31, 22).withReset(SpfctlL2PfDelayLatency.initValue).withDescription("Delay latency used when training the L2 prefetcher.")
+  val l2PfTpEnable         = RW(    21).withReset(true.B).withDescription("Enable TP-based L2 training and L2 prefetching.")
+  val l2PfVbopEnable       = RW(    20).withReset(true.B).withDescription("Enable VBOP-based L2 training and L2 prefetching.")
+  val l2PfPbopEnable       = RW(    19).withReset(true.B).withDescription("Enable PBOP-based L2 training and L2 prefetching.")
+  val l2PfRecvEnable       = RW(    18).withReset(true.B).withDescription("Enable L2 prefetch requests received from the SMS/L1 training path.")
+  val l2PfStoreOnly        = RW(    17).withReset(false.B).withDescription("Restrict L2 prefetching to store-triggered training.")
+  val l1dPfStrideEnable    = RW(    16).withReset(true.B).withDescription("Enable the L1D stride prefetcher.")
+  val l1dPfActiveStride    = SpfctlL1DPfActiveStride(15, 10).withReset(SpfctlL1DPfActiveStride.initValue).withDescription("Active-page stride threshold for the L1D prefetcher.")
+  val l1dPfActiveThreshold = SpfctlL1DPfActiveThreshold( 9,  6).withReset(SpfctlL1DPfActiveThreshold.initValue).withDescription("Active-page confidence threshold for the L1D prefetcher.")
+  val l1dPfEnablePht       = RW(     5).withReset(true.B).withDescription("Enable the L1D PHT prefetcher.")
+  val l1dPfEnableAgt       = RW(     4).withReset(true.B).withDescription("Enable the L1D AGT prefetcher.")
+  val l1dPfTrainOnHit     = RW(     3).withReset(false.B).withDescription("Train the L1D prefetcher on cache hits.")
+  val l1dPfEnable           = RW(     2).withReset(true.B).withDescription("Enable the L1D cache prefetcher.")
+  val l2PfEnable            = RW(     1).withReset(true.B).withDescription("Master enable for the L2 cache prefetcher.")
+  val l1iPfEnable           = RW(     0).withReset(true.B).withDescription("Enable the L1I cache prefetcher.")
 }
 
 class SlvpredctlBundle extends CSRBundle {
-  val LVPRED_TIMEOUT          = SlvpredCtlTimeOut(8, 4).withReset(SlvpredCtlTimeOut.initValue).withDescription("Timeout period for the load-violation predictor.")
-  val STORESET_NO_FAST_WAKEUP = RW(3).withReset(false.B).withDescription("Disable fast wake-up for StoreSet resets.")
-  val STORESET_WAIT_STORE     = RW(2).withReset(false.B).withDescription("Require a store before resetting StoreSet state.")
-  val NO_SPEC_LOAD            = RW(1).withReset(false.B).withDescription("Disable speculative loads.")
-  val LVPRED_DISABLE          = RW(0).withReset(false.B).withDescription("Disable the load-violation predictor.")
+  val lvpredTimeout          = SlvpredCtlTimeOut(8, 4).withReset(SlvpredCtlTimeOut.initValue).withDescription("Timeout period for the load-violation predictor.")
+  val storesetNoFastWakeup = RW(3).withReset(false.B).withDescription("Disable fast wake-up for StoreSet resets.")
+  val storesetWaitStore     = RW(2).withReset(false.B).withDescription("Require a store before resetting StoreSet state.")
+  val noSpecLoad            = RW(1).withReset(false.B).withDescription("Disable speculative loads.")
+  val lvpredDisable          = RW(0).withReset(false.B).withDescription("Disable the load-violation predictor.")
 }
 
 class SmblockctlBundle extends CSRBundle {
-  val SBUFFER_TIMEOUT                  = SbufferTimeout(31, 10).withReset(SbufferTimeout.initValue).withDescription("Store-buffer flush timeout.")
-  val HD_MISALIGN_LD_ENABLE            = RW(   9).withReset(true.B).withDescription("Enable hardware handling of misaligned loads.")
-  val HD_MISALIGN_ST_ENABLE            = RW(   8).withReset(true.B).withDescription("Enable hardware handling of misaligned stores.")
-  val UNCACHE_WRITE_OUTSTANDING_ENABLE = RW(   7).withReset(false.B).withDescription("Enable outstanding uncacheable writes.")
-  val CACHE_ERROR_ENABLE               = RW(   6).withReset(true.B).withDescription("Enable cache-error handling after reset.")
-  val SOFT_PREFETCH_ENABLE             = RW(   5).withReset(true.B).withDescription("Enable software prefetch support after reset.")
-  val LDLD_VIO_CHECK_ENABLE            = RW(   4).withReset(true.B).withDescription("Enable load-load violation checking after reset.")
-  val SBUFFER_THRESHOLD                = SbufferThreshold(3, 0).withReset(SbufferThreshold.initValue).withDescription("Store-buffer flush threshold.")
+  val sbufferTimeout                  = SbufferTimeout(31, 10).withReset(SbufferTimeout.initValue).withDescription("Store-buffer flush timeout.")
+  val hdMisalignLdEnable            = RW(   9).withReset(true.B).withDescription("Enable hardware handling of misaligned loads.")
+  val hdMisalignStEnable            = RW(   8).withReset(true.B).withDescription("Enable hardware handling of misaligned stores.")
+  val uncacheWriteOutstandingEnable = RW(   7).withReset(false.B).withDescription("Enable outstanding uncacheable writes.")
+  val cacheErrorEnable               = RW(   6).withReset(true.B).withDescription("Enable cache-error handling after reset.")
+  val softPrefetchEnable             = RW(   5).withReset(true.B).withDescription("Enable software prefetch support after reset.")
+  val ldldVioCheckEnable            = RW(   4).withReset(true.B).withDescription("Enable load-load violation checking after reset.")
+  val sbufferThreshold                = SbufferThreshold(3, 0).withReset(SbufferThreshold.initValue).withDescription("Store-buffer flush threshold.")
 }
 
 class SrnctlBundle extends CSRBundle {
-  val HIGH_DENSITY_ROB_COMPRESSION_ENABLE = RW(4).withReset(true.B).withDescription("Enable high-density ROB compression.")
-  val WFI_ENABLE     = RW(2).withReset(true.B).withDescription("Enable WFI execution.")
-  val FUSION_ENABLE  = RW(0).withReset(true.B).withDescription("Enable instruction fusion.")
+  val highDensityRobCompressionEnable = RW(4).withReset(true.B).withDescription("Enable high-density ROB compression.")
+  val wfiEnable     = RW(2).withReset(true.B).withDescription("Enable WFI execution.")
+  val fusionEnable  = RW(0).withReset(true.B).withDescription("Enable instruction fusion.")
 }
 
 class McorepwrBundle extends CSRBundle {
-  val COMMIT_STUCK_CHECK_ENABLE = RW(1).withReset(false.B).withDescription("Enable commit stuck check.")
-  val POWER_DOWN_ENABLE         = RW(0).withReset(false.B).withDescription("Enable core power-down requests.")
+  val commitStuckCheckEnable = RW(1).withReset(false.B).withDescription("Enable commit stuck check.")
+  val powerDownEnable         = RW(0).withReset(false.B).withDescription("Enable core power-down requests.")
 }
 
 class MflushpwrBundle extends CSRBundle {
-  val FLUSH_L2_ENABLE = RW(0).withReset(false.B).withDescription("Enable L2 cache flush requests.")
-  val L2_FLUSH_DONE   = RO(1).withReset(false.B).withDescription("Indicates that the L2 cache flush has completed.")
+  val flushL2Enable = RW(0).withReset(false.B).withDescription("Enable L2 cache flush requests.")
+  val l2FlushDone   = RO(1).withReset(false.B).withDescription("Indicates that the L2 cache flush has completed.")
 }
 
 object SbufferThreshold extends CSREnum with RWApply {

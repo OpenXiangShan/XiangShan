@@ -122,7 +122,7 @@ class CtrlBlockImp(
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
-  private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusion_enable
+  private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusionEnable
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s0_robFlushPcInfo = rob.io.flushPcInfo
@@ -864,8 +864,8 @@ class CtrlBlockImp(
   io.robio.csr <> rob.io.csr
   // When wfi is disabled, it will not block ROB commit.
   rob.io.csr.wfiEvent := io.robio.csr.wfiEvent
-  rob.io.wfi_enable := decode.in.fromCSR.custom.wfi_enable
-  rob.io.commit_stuck_check_enable := decode.in.fromCSR.custom.commit_stuck_check_enable
+  rob.io.wfi_enable := decode.in.fromCSR.custom.wfiEnable
+  rob.io.commit_stuck_check_enable := decode.in.fromCSR.custom.commitStuckCheckEnable
 
   io.toTop.cpuWfi := DelayN(rob.io.cpu_wfi, 5)
 

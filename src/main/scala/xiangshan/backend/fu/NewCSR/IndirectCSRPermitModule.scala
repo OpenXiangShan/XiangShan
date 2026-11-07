@@ -15,8 +15,8 @@ abstract class IndirectCSRWindowPermitModule extends Module {
       val xstateen = new xstateenIO
     })
     val out = Output(new Bundle {
-      val indirectCSR_EX_II = Bool()
-      val indirectCSR_EX_VI = Bool()
+      val indirectCSRExII = Bool()
+      val indirectCSRExVI = Bool()
     })
   })
 
@@ -39,17 +39,17 @@ abstract class IndirectCSRWindowPermitModule extends Module {
 
   protected final val isMireg = Ireg.isInMireg(addr)
   protected final val isMiregX = Ireg.isInMiregX(addr)
-  protected final val isMireg2_6 = Ireg.isInMireg2_6(addr)
+  protected final val isMireg2To6 = Ireg.isInMireg2To6(addr)
 
   protected final val isSireg = Ireg.isInSireg(addr)
   protected final val isSireg2 = Ireg.isInSireg2(addr)
   protected final val isSiregX = Ireg.isInSiregX(addr)
-  protected final val isSireg2_6 = Ireg.isInSireg2_6(addr)
-  protected final val isSireg3_6 = Ireg.isInSireg3_6(addr)
+  protected final val isSireg2To6 = Ireg.isInSireg2To6(addr)
+  protected final val isSireg3To6 = Ireg.isInSireg3To6(addr)
 
   protected final val isVSireg = Ireg.isInVSireg(addr)
   protected final val isVSiregX = Ireg.isInVSiregX(addr)
-  protected final val isVSireg2_6 = Ireg.isInVSireg2_6(addr)
+  protected final val isVSireg2To6 = Ireg.isInVSireg2To6(addr)
 
   // In VS/VU-mode, accesses to sireg* are really accesses to vsireg* selected by vsiselect.
   protected final val effectiveSiregSelect = Mux(isVirtual, vsiselect, siselect)
@@ -66,24 +66,24 @@ class IndirectSmcdelegPermitModule extends IndirectCSRWindowPermitModule {
   private val siregInSmcdeleg = Iselect.isInSmcdeleg(effectiveSiregSelect)
   private val siregIsSmcdelegTime = Iselect.isSmcdelegTime(siselect)
 
-  private val rwMiregX_EX_II = miregInSmcdeleg && isMiregX
+  private val rwMiregXExII = miregInSmcdeleg && isMiregX
 
-  private val rwVSiregX_EX_II = vsiregInSmcdeleg && isVSiregX
+  private val rwVSiregXExII = vsiregInSmcdeleg && isVSiregX
 
-  private val rwSireg1_2_EX_II = (
+  private val rwSireg1To2ExII = (
     !isVirtual && (!menvcfgCDE || !siregCounterDelegated || siregIsSmcdelegTime) ||
     isModeVS && !menvcfgCDE
   ) && siregInSmcdeleg && (isSireg || isSireg2)
 
-  private val rwSireg3_6_EX_II = (
+  private val rwSireg3To6ExII = (
     !isVirtual ||
     isModeVS && !menvcfgCDE
-  ) && siregInSmcdeleg && isSireg3_6
+  ) && siregInSmcdeleg && isSireg3To6
 
-  private val rwSiregX_EX_VI = isModeVS && menvcfgCDE && siregInSmcdeleg && isSiregX
+  private val rwSiregXExVI = isModeVS && menvcfgCDE && siregInSmcdeleg && isSiregX
 
-  io.out.indirectCSR_EX_II :=  rwMiregX_EX_II || rwVSiregX_EX_II || rwSireg1_2_EX_II || rwSireg3_6_EX_II
-  io.out.indirectCSR_EX_VI := rwSiregX_EX_VI
+  io.out.indirectCSRExII :=  rwMiregXExII || rwVSiregXExII || rwSireg1To2ExII || rwSireg3To6ExII
+  io.out.indirectCSRExVI := rwSiregXExVI
 }
 
 class IndirectAIAPermitModule extends IndirectCSRWindowPermitModule {
@@ -93,30 +93,30 @@ class IndirectAIAPermitModule extends IndirectCSRWindowPermitModule {
   private val siregInAIA = Iselect.isInAIA(effectiveSiregSelect)
   private val vsiregInAIA = Iselect.isInAIA(vsiselect)
 
-  private val rwMireg_EX_II = miregInAIA && Iselect.isOdd(miselect) && isMireg
-  private val rwMireg2_6_EX_II = miregInAIA && isMireg2_6
+  private val rwMiregExII = miregInAIA && Iselect.isOdd(miselect) && isMireg
+  private val rwMireg2To6ExII = miregInAIA && isMireg2To6
 
-  private val rwVSiregX_EX_II = vsiregInAIA && isVSiregX
+  private val rwVSiregXExII = vsiregInAIA && isVSiregX
 
-  private val rwSireg_EX_II = (
+  private val rwSiregExII = (
     !isVirtual && Iselect.isOdd(siselect) ||
     isModeHS && !mstateen0.AIA.asBool
   ) && siregInAIA && isSireg
 
-  private val rwSireg_EX_VI = isModeVS && siregInAIA && isSireg
+  private val rwSiregExVI = isModeVS && siregInAIA && isSireg
 
-  private val rwSireg2_6_EX_II = !isVirtual && siregInAIA && isSireg2_6
-  private val rwSireg2_6_EX_VI = isModeVS && siregInAIA && isSireg2_6
+  private val rwSireg2To6ExII = !isVirtual && siregInAIA && isSireg2To6
+  private val rwSireg2To6ExVI = isModeVS && siregInAIA && isSireg2To6
 
 
-  io.out.indirectCSR_EX_II := (
-    rwMireg_EX_II ||
-    rwMireg2_6_EX_II ||
-    rwVSiregX_EX_II ||
-    rwSireg_EX_II ||
-    rwSireg2_6_EX_II
+  io.out.indirectCSRExII := (
+    rwMiregExII ||
+    rwMireg2To6ExII ||
+    rwVSiregXExII ||
+    rwSiregExII ||
+    rwSireg2To6ExII
   )
-  io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
+  io.out.indirectCSRExVI := rwSiregExVI || rwSireg2To6ExVI
 }
 
 class IndirectIMSICPermitModule extends IndirectCSRWindowPermitModule {
@@ -128,30 +128,30 @@ class IndirectIMSICPermitModule extends IndirectCSRWindowPermitModule {
   private val siregInIMSIC = Iselect.isInImsic(effectiveSiregSelect)
   private val vsiregInIMSIC = Iselect.isInImsic(vsiselect)
 
-  private val rwMireg2_6_EX_II = miregInIMSIC && isMireg2_6
+  private val rwMireg2To6ExII = miregInIMSIC && isMireg2To6
 
-  private val rwVSireg_EX_II = vsiregInIMSIC && isModeHS && !mstateen0.IMSIC.asBool && isVSireg
-  private val rwVSireg2_6_EX_II = vsiregInIMSIC && isVSireg2_6
+  private val rwVSiregExII = vsiregInIMSIC && isModeHS && !mstateen0.IMSIC.asBool && isVSireg
+  private val rwVSireg2To6ExII = vsiregInIMSIC && isVSireg2To6
 
-  private val rwSireg_EX_II = (
+  private val rwSiregExII = (
     isModeHS && (mvienSEIE || !mstateen0.IMSIC.asBool) ||
     isModeVS && !mstateen0.IMSIC.asBool
   ) && siregInIMSIC && isSireg
-  private val rwSireg_EX_VI = isModeVS && !hstateen0.IMSIC.asBool && siregInIMSIC && isSireg
+  private val rwSiregExVI = isModeVS && !hstateen0.IMSIC.asBool && siregInIMSIC && isSireg
 
-  private val rwSireg2_6_EX_II = !isVirtual && siregInIMSIC && isSireg2_6
-  private val rwSireg2_6_EX_VI = isModeVS && vsiregInIMSIC && isSireg2_6
+  private val rwSireg2To6ExII = !isVirtual && siregInIMSIC && isSireg2To6
+  private val rwSireg2To6ExVI = isModeVS && vsiregInIMSIC && isSireg2To6
 
 
 
-  io.out.indirectCSR_EX_II := (
-    rwMireg2_6_EX_II ||
-    rwVSireg_EX_II ||
-    rwVSireg2_6_EX_II ||
-    rwSireg_EX_II ||
-    rwSireg2_6_EX_II
+  io.out.indirectCSRExII := (
+    rwMireg2To6ExII ||
+    rwVSiregExII ||
+    rwVSireg2To6ExII ||
+    rwSiregExII ||
+    rwSireg2To6ExII
   )
-  io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
+  io.out.indirectCSRExVI := rwSiregExVI || rwSireg2To6ExVI
 }
 
 class IndirectOtherPermitModule extends IndirectCSRWindowPermitModule {
@@ -159,15 +159,15 @@ class IndirectOtherPermitModule extends IndirectCSRWindowPermitModule {
   private val siregInOther = Iselect.isInOthers(effectiveSiregSelect)
   private val vsiregInOther = Iselect.isInOthers(vsiselect)
 
-  private val rwMiregX_EX_II = miregInOther && isMiregX
+  private val rwMiregXExII = miregInOther && isMiregX
 
-  private val rwVSiregX_EX_II = vsiregInOther && isVSiregX
+  private val rwVSiregXExII = vsiregInOther && isVSiregX
 
-  private val rwSiregX_EX_II = siregInOther && isSiregX
+  private val rwSiregXExII = siregInOther && isSiregX
 
 
-  io.out.indirectCSR_EX_II := rwMiregX_EX_II || rwSiregX_EX_II || rwVSiregX_EX_II
-  io.out.indirectCSR_EX_VI := false.B
+  io.out.indirectCSRExII := rwMiregXExII || rwSiregXExII || rwVSiregXExII
+  io.out.indirectCSRExVI := false.B
 }
 
 class IndirectCSRPermitModule extends Module {
@@ -181,8 +181,8 @@ class IndirectCSRPermitModule extends Module {
       val xstateen = new xstateenIO
     })
     val out = Output(new Bundle {
-      val indirectCSR_EX_II = Bool()
-      val indirectCSR_EX_VI = Bool()
+      val indirectCSRExII = Bool()
+      val indirectCSRExVI = Bool()
     })
   })
 
@@ -196,16 +196,16 @@ class IndirectCSRPermitModule extends Module {
   imsicPermitMod.io.in := io.in
   otherPermitMod.io.in := io.in
 
-  io.out.indirectCSR_EX_II := (
-    smcdelegPermitMod.io.out.indirectCSR_EX_II ||
-    aiaPermitMod.io.out.indirectCSR_EX_II ||
-    imsicPermitMod.io.out.indirectCSR_EX_II ||
-    otherPermitMod.io.out.indirectCSR_EX_II
+  io.out.indirectCSRExII := (
+    smcdelegPermitMod.io.out.indirectCSRExII ||
+    aiaPermitMod.io.out.indirectCSRExII ||
+    imsicPermitMod.io.out.indirectCSRExII ||
+    otherPermitMod.io.out.indirectCSRExII
   )
-  io.out.indirectCSR_EX_VI := (
-    smcdelegPermitMod.io.out.indirectCSR_EX_VI ||
-    aiaPermitMod.io.out.indirectCSR_EX_VI ||
-    imsicPermitMod.io.out.indirectCSR_EX_VI ||
-    otherPermitMod.io.out.indirectCSR_EX_VI
+  io.out.indirectCSRExVI := (
+    smcdelegPermitMod.io.out.indirectCSRExVI ||
+    aiaPermitMod.io.out.indirectCSRExVI ||
+    imsicPermitMod.io.out.indirectCSRExVI ||
+    otherPermitMod.io.out.indirectCSRExVI
   )
 }

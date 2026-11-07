@@ -273,15 +273,15 @@ object TrigMatch extends CSREnum with WARLApply {
   val NAPOT     = Value(1.U)
   val GE        = Value(2.U)
   val LT        = Value(3.U)
-  val MASK_LO   = Value(4.U)
-  val MASK_HI   = Value(5.U)
+  val maskLo   = Value(4.U)
+  val maskHi   = Value(5.U)
   val NE        = Value(8.U)  // not eq
   val NNAPOT    = Value(9.U)  // not napot
-  val NMASK_LO  = Value(12.U) // not mask low
-  val NMASK_HI  = Value(13.U) // not mask high
+  val nmaskLo  = Value(12.U) // not mask low
+  val nmaskHi  = Value(13.U) // not mask high
   def isRVSpecLegal(enumeration: CSREnumType) : Bool = enumeration.isOneOf(
-    EQ, NAPOT, GE, LT, MASK_LO, MASK_HI,
-    NE, NNAPOT, NMASK_LO, NMASK_HI,
+    EQ, NAPOT, GE, LT, maskLo, maskHi,
+    NE, NNAPOT, nmaskLo, nmaskHi,
   )
   override protected def legalValues: Seq[EnumType] = Seq(EQ, GE, LT)
   override protected def illegalValueBehavior: Option[String] =
@@ -334,15 +334,15 @@ class Tdata3Bundle extends CSRBundle {
 
 // Tinfo
 class TinfoBundle extends CSRBundle{
-  val VERSION     = TriggerVer(31, 24).withReset(TriggerVer.Spec_1dot0)
+  val VERSION     = TriggerVer(31, 24).withReset(TriggerVer.spec1dot0)
     .withDescription("Trigger-information format version field. XiangShan reports version 1, matching the ratified Debug Spec 1.0 trigger encoding.")
   val MCONTROL6EN = RO(6).withReset(1.U)
     .withDescription("Indicates that the mcontrol6 trigger format is supported.")
 }
 
 object TriggerVer extends CSREnum with ROApply {
-  val Spec_2302  = Value(0.U)
-  val Spec_1dot0 = Value(1.U)
+  val spec2302  = Value(0.U)
+  val spec1dot0 = Value(1.U)
 }
 
 // Dscratch

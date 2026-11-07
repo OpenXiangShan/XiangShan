@@ -63,37 +63,37 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
 
   private val csrAccess = WireInit(ren || wen)
 
-  val mPermit_EX_II = mLevelPermitMod.io.out.mLevelPermit_EX_II
+  val mPermitExII = mLevelPermitMod.io.out.mLevelPermitExII
 
-  val sPermit_EX_II = sLevelPermitMod.io.out.sLevelPermit_EX_II
+  val sPermitExII = sLevelPermitMod.io.out.sLevelPermitExII
 
-  val pPermit_EX_II = privilegePermitMod.io.out.privilege_EX_II
-  val pPermit_EX_VI = privilegePermitMod.io.out.privilege_EX_VI
+  val pPermitExII = privilegePermitMod.io.out.privilegeExII
+  val pPermitExVI = privilegePermitMod.io.out.privilegeExVI
 
-  val vPermit_EX_II = virtualLevelPermitMod.io.out.virtualLevelPermit_EX_II
-  val vPermit_EX_VI = virtualLevelPermitMod.io.out.virtualLevelPermit_EX_VI
+  val vPermitExII = virtualLevelPermitMod.io.out.virtualLevelPermitExII
+  val vPermitExVI = virtualLevelPermitMod.io.out.virtualLevelPermitExVI
 
-  val indirectPermit_EX_II = indirectCSRPermitMod.io.out.indirectCSR_EX_II
-  val indirectPermit_EX_VI = indirectCSRPermitMod.io.out.indirectCSR_EX_VI
+  val indirectPermitExII = indirectCSRPermitMod.io.out.indirectCSRExII
+  val indirectPermitExVI = indirectCSRPermitMod.io.out.indirectCSRExVI
 
-  val directPermit_illegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI || vPermit_EX_II || vPermit_EX_VI
+  val directPermitIllegal = mPermitExII || sPermitExII || pPermitExII || pPermitExVI || vPermitExII || vPermitExVI
 
-  val csrAccess_EX_II = csrAccess && (
-    (mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || vPermit_EX_II) ||
-    (!directPermit_illegal && indirectPermit_EX_II)
+  val csrAccessExII = csrAccess && (
+    (mPermitExII || sPermitExII || pPermitExII || vPermitExII) ||
+    (!directPermitIllegal && indirectPermitExII)
   )
-  val csrAccess_EX_VI = csrAccess && (
-    (pPermit_EX_VI || vPermit_EX_VI) ||
-    (!directPermit_illegal && indirectPermit_EX_VI)
+  val csrAccessExVI = csrAccess && (
+    (pPermitExVI || vPermitExVI) ||
+    (!directPermitIllegal && indirectPermitExVI)
   )
 
-  val Xret_EX_II = xRetPermitMod.io.out.Xret_EX_II
-  val Xret_EX_VI = xRetPermitMod.io.out.Xret_EX_VI
+  val xRetExII = xRetPermitMod.io.out.xRetExII
+  val xRetExVI = xRetPermitMod.io.out.xRetExVI
 
-  io.out.EX_II := csrAccess_EX_II || Xret_EX_II
-  io.out.EX_VI := !io.out.EX_II && (csrAccess_EX_VI || Xret_EX_VI)
+  io.out.exII := csrAccessExII || xRetExII
+  io.out.exVI := !io.out.exII && (csrAccessExVI || xRetExVI)
 
-  io.out.hasLegalWen   := wen   && !(io.out.EX_II || io.out.EX_VI)
+  io.out.hasLegalWen   := wen   && !(io.out.exII || io.out.exVI)
   io.out.hasLegalMNret := xRetPermitMod.io.out.hasLegalMNret
   io.out.hasLegalMret  := xRetPermitMod.io.out.hasLegalMret
   io.out.hasLegalSret  := xRetPermitMod.io.out.hasLegalSret
@@ -112,8 +112,8 @@ class XRetPermitModule extends Module {
       val status = new statusIO
     })
     val out = Output(new Bundle {
-      val Xret_EX_II = Bool()
-      val Xret_EX_VI = Bool()
+      val xRetExII = Bool()
+      val xRetExVI = Bool()
       val hasLegalMNret = Bool()
       val hasLegalMret  = Bool()
       val hasLegalSret  = Bool()
@@ -138,21 +138,21 @@ class XRetPermitModule extends Module {
     io.in.status.vtsr,
   )
 
-  private val mnret_EX_II = mnret && !privState.isModeM
-  private val mnretIllegal =  mnret_EX_II
+  private val mnretExII = mnret && !privState.isModeM
+  private val mnretIllegal =  mnretExII
 
-  private val mret_EX_II = mret && !privState.isModeM
-  private val mretIllegal = mret_EX_II
+  private val mretExII = mret && !privState.isModeM
+  private val mretIllegal = mretExII
 
-  private val sret_EX_II = sret && (privState.isModeHU || privState.isModeHS && tsr)
-  private val sret_EX_VI = sret && (privState.isModeVU || privState.isModeVS && vtsr)
-  private val sretIllegal = sret_EX_II || sret_EX_VI
+  private val sretExII = sret && (privState.isModeHU || privState.isModeHS && tsr)
+  private val sretExVI = sret && (privState.isModeVU || privState.isModeVS && vtsr)
+  private val sretIllegal = sretExII || sretExVI
 
-  private val dret_EX_II = dret && !debugMode
-  private val dretIllegal = dret_EX_II
+  private val dretExII = dret && !debugMode
+  private val dretIllegal = dretExII
 
-  io.out.Xret_EX_II := mnret_EX_II || mret_EX_II || sret_EX_II || dret_EX_II
-  io.out.Xret_EX_VI := sret_EX_VI
+  io.out.xRetExII := mnretExII || mretExII || sretExII || dretExII
+  io.out.xRetExVI := sretExVI
   io.out.hasLegalMNret := mnret && !mnretIllegal
   io.out.hasLegalMret  := mret  && !mretIllegal
   io.out.hasLegalSret  := sret  && !sretIllegal
@@ -171,7 +171,7 @@ class MLevelPermitModule extends Module {
       val aia = new aiaIO
     })
     val out = Output(new Bundle {
-      val mLevelPermit_EX_II = Bool()
+      val mLevelPermitExII = Bool()
       val hasLegalWriteFcsr = Bool()
       val hasLegalWriteVcsr = Bool()
     })
@@ -220,27 +220,27 @@ class MLevelPermitModule extends Module {
   private val fsEffectiveOff = sFSIsOff && !privState.isVirtual || sOrVsFSIsOff && privState.isVirtual
   private val vsEffectiveOff = sVSIsOff && !privState.isVirtual || sOrVsVSIsOff && privState.isVirtual
 
-  private val fpOff_EX_II  = csrIsFp  && fsEffectiveOff
-  private val vecOff_EX_II = csrIsVec && vsEffectiveOff
+  private val fpOffExII  = csrIsFp  && fsEffectiveOff
+  private val vecOffExII = csrIsVec && vsEffectiveOff
 
-  private val fpVec_EX_II = fpOff_EX_II || vecOff_EX_II
+  private val fpVecExII = fpOffExII || vecOffExII
 
-  private val rwStimecmp_EX_II = !privState.isModeM &&
+  private val rwStimecmpExII = !privState.isModeM &&
                                 (!mcounterenTM && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U) ||
                                  !menvcfgSTCE && (addr === CSRs.stimecmp.U))
 
-  private val accessHPM_EX_II = csrIsHPM && !privState.isModeM && !mcounteren(counterAddr)
+  private val accessHPMExII = csrIsHPM && !privState.isModeM && !mcounteren(counterAddr)
 
-  private val rwSatp_EX_II = privState.isModeHS && tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
+  private val rwSatpExII = privState.isModeHS && tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
 
-  private val rwStopei_EX_II = privState.isModeHS && mvienSEIE && (addr === CSRs.stopei.U)
-  private val rwScountinhibit_EX_II = !menvcfgCDE && (addr === CSRs.scountinhibit.U)
+  private val rwStopeiExII = privState.isModeHS && mvienSEIE && (addr === CSRs.stopei.U)
+  private val rwScountinhibitExII = !menvcfgCDE && (addr === CSRs.scountinhibit.U)
 
   /**
    * Sm/Ssstateen begin
    */
   // SE bit 63
-  private val accessStateen_EX_II = (
+  private val accessStateenExII = (
     mstateen0.SE0.asBool +: Seq(mstateen1, mstateen2, mstateen3).map(_.SE.asBool)
     ).zipWithIndex.map{ case(se, i) => {
     val csrIsHstateen = addr === (CSRs.hstateen0 + i).U
@@ -253,33 +253,33 @@ class MLevelPermitModule extends Module {
   private val csrIsHenvcfg = addr === CSRs.henvcfg.U
   private val csrIsSenvcfg = addr === CSRs.senvcfg.U
   private val csrIsEnvcfg = csrIsHenvcfg || csrIsSenvcfg
-  private val accessEnvcfg_EX_II = csrIsEnvcfg && !privState.isModeM && !mstateen0.ENVCFG.asBool
+  private val accessEnvcfgExII = csrIsEnvcfg && !privState.isModeM && !mstateen0.ENVCFG.asBool
 
   // CSRIND bit 60 indirect reg (Sscsrind extensions), this is not implemented
   // csr addr S: [0x150, 0x157]     VS: [0x250, 0x257]
   private val csrIsSi = Ireg.isInSCsrInd(addr)
   private val csrIsVSi = Ireg.isInVSCsrInd(addr)
   private val csrIsIND = csrIsSi || csrIsVSi
-  private val accessIND_EX_II = csrIsIND && !privState.isModeM && !mstateen0.CSRIND.asBool
+  private val accessINDExII = csrIsIND && !privState.isModeM && !mstateen0.CSRIND.asBool
 
   // AIA bit 59
   private val ssAiaHaddr = Seq(CSRs.hvien.U, CSRs.hvictl.U, CSRs.hviprio1.U, CSRs.hviprio2.U)
   private val ssAiaVSaddr = addr === CSRs.vstopi.U
   private val ssAiaSaddr = addr === CSRs.stopi.U
   private val csrIsAIA = ssAiaHaddr.map(_ === addr).reduce(_ || _) || ssAiaVSaddr || ssAiaSaddr
-  private val accessAIA_EX_II = csrIsAIA && !privState.isModeM && !mstateen0.AIA.asBool
+  private val accessAIAExII = csrIsAIA && !privState.isModeM && !mstateen0.AIA.asBool
 
   // IMSIC bit 58 (Ssaia extension)
   private val csrIsStopei = addr === CSRs.stopei.U
   private val csrIsVStopei = addr === CSRs.vstopei.U
   private val csrIsTpoie = csrIsStopei || csrIsVStopei
-  private val accessTopie_EX_II = csrIsTpoie && !privState.isModeM && !mstateen0.IMSIC.asBool
+  private val accessTopieExII = csrIsTpoie && !privState.isModeM && !mstateen0.IMSIC.asBool
 
   // CONTEXT bit 57 context reg (Sdtrig extensions)
   private val csrIsHcontext = addr === CSRs.hcontext.U
   private val csrIsScontext = addr === CSRs.scontext.U
   private val csrIsContext = csrIsHcontext || csrIsScontext
-  private val accessContext_EX_II = csrIsContext && !privState.isModeM && !mstateen0.CONTEXT.asBool
+  private val accessContextExII = csrIsContext && !privState.isModeM && !mstateen0.CONTEXT.asBool
 
   // P1P13 bit 56, Read-only 0
 
@@ -291,16 +291,16 @@ class MLevelPermitModule extends Module {
   // [0x800, 0x8ff], [0xcc0, 0xcff]
   private val csrIsUCustom   = (addr(11, 8) === "b1000".U) || (addr(11, 6) === "b110011".U)
   private val allCustom      = csrIsHVSCustom || csrIsSCustom || csrIsUCustom
-  private val accessCustom_EX_II = allCustom && !privState.isModeM && !mstateen0.C.asBool
+  private val accessCustomExII = allCustom && !privState.isModeM && !mstateen0.C.asBool
 
-  private val xstateControlAccess_EX_II = accessStateen_EX_II || accessEnvcfg_EX_II || accessIND_EX_II || accessAIA_EX_II ||
-    accessTopie_EX_II || accessContext_EX_II || accessCustom_EX_II
+  private val xstateControlAccessExII = accessStateenExII || accessEnvcfgExII || accessINDExII || accessAIAExII ||
+    accessTopieExII || accessContextExII || accessCustomExII
   /**
    * Sm/Ssstateen end
    */
 
-  io.out.mLevelPermit_EX_II := rwIllegal || fpVec_EX_II || rwStimecmp_EX_II ||
-    accessHPM_EX_II || rwSatp_EX_II || rwStopei_EX_II || rwScountinhibit_EX_II || xstateControlAccess_EX_II
+  io.out.mLevelPermitExII := rwIllegal || fpVecExII || rwStimecmpExII ||
+    accessHPMExII || rwSatpExII || rwStopeiExII || rwScountinhibitExII || xstateControlAccessExII
   io.out.hasLegalWriteFcsr := wen && csrIsFp && !fsEffectiveOff
   io.out.hasLegalWriteVcsr := wen && csrIsWritableVec && !vsEffectiveOff
 }
@@ -314,7 +314,7 @@ class SLevelPermitModule extends Module {
       val xstateen = new xstateenIO
     })
     val out = Output(new Bundle {
-      val sLevelPermit_EX_II = Bool()
+      val sLevelPermitExII = Bool()
     })
   })
 
@@ -330,12 +330,12 @@ class SLevelPermitModule extends Module {
   private val csrIsHPM = addr >= CSRs.cycle.U && addr <= CSRs.hpmcounter31.U
   private val counterAddr = addr(4, 0) // 32 counters
 
-  private val accessHPM_EX_II = csrIsHPM && privState.isModeHU && !scounteren(counterAddr)
+  private val accessHPMExII = csrIsHPM && privState.isModeHU && !scounteren(counterAddr)
 
   private val csrIsUCustom   = (addr(11, 8) === "b1000".U) || (addr(11, 6) === "b110011".U)
-  private val accessCustom_EX_II = csrIsUCustom && privState.isModeHU && !sstateen0.C.asBool
+  private val accessCustomExII = csrIsUCustom && privState.isModeHU && !sstateen0.C.asBool
 
-  io.out.sLevelPermit_EX_II := accessHPM_EX_II || accessCustom_EX_II
+  io.out.sLevelPermitExII := accessHPMExII || accessCustomExII
 }
 
 class PrivilegePermitModule extends Module {
@@ -346,8 +346,8 @@ class PrivilegePermitModule extends Module {
       val debugMode = Bool()
     })
     val out = Output(new Bundle {
-      val privilege_EX_II = Bool()
-      val privilege_EX_VI = Bool()
+      val privilegeExII = Bool()
+      val privilegeExVI = Bool()
     })
   })
 
@@ -381,8 +381,8 @@ class PrivilegePermitModule extends Module {
   private val isDebugReg   = addr(11, 4) === "h7b".U
   private val privilegeLegal = Mux(isDebugReg, debugMode, regularPrivilegeLegal || debugMode)
 
-  io.out.privilege_EX_II := !privilegeLegal && (!privState.isVirtual || csrIsM)
-  io.out.privilege_EX_VI := !privilegeLegal && privState.isVirtual && !csrIsM
+  io.out.privilegeExII := !privilegeLegal && (!privState.isVirtual || csrIsM)
+  io.out.privilegeExVI := !privilegeLegal && privState.isVirtual && !csrIsM
 }
 
 class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with HasSoCParameter {
@@ -397,8 +397,8 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
       val aia = new aiaIO
     })
     val out = Output(new Bundle {
-      val virtualLevelPermit_EX_II = Bool()
-      val virtualLevelPermit_EX_VI = Bool()
+      val virtualLevelPermitExII = Bool()
+      val virtualLevelPermitExVI = Bool()
     })
   })
 
@@ -438,19 +438,19 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
   private val csrIsHPM = addr >= CSRs.cycle.U && addr <= CSRs.hpmcounter31.U
   private val counterAddr = addr(4, 0) // 32 counters
 
-  private val rwSatp_EX_VI = privState.isModeVS && vtvm && (addr === CSRs.satp.U)
+  private val rwSatpExVI = privState.isModeVS && vtvm && (addr === CSRs.satp.U)
 
-  private val rwVStopei_EX_II = (privState.isModeM || privState.isModeHS) && (addr === CSRs.vstopei.U) && (vgein === 0.U || vgein > soc.IMSICParams.geilen.U)
-  private val rwStopei_EX_VI = privState.isModeVS && (addr === CSRs.stopei.U) && (vgein === 0.U || vgein > soc.IMSICParams.geilen.U)
+  private val rwVStopeiExII = (privState.isModeM || privState.isModeHS) && (addr === CSRs.vstopei.U) && (vgein === 0.U || vgein > soc.IMSICParams.geilen.U)
+  private val rwStopeiExVI = privState.isModeVS && (addr === CSRs.stopei.U) && (vgein === 0.U || vgein > soc.IMSICParams.geilen.U)
 
-  private val rwSip_Sie_EX_VI = privState.isModeVS && hvictlVTI && (addr === CSRs.sip.U || addr === CSRs.sie.U)
+  private val rwSipSieExVI = privState.isModeVS && hvictlVTI && (addr === CSRs.sip.U || addr === CSRs.sie.U)
 
-  private val rwStimecmp_EX_VI = privState.isModeVS && (addr === CSRs.stimecmp.U) &&
+  private val rwStimecmpExVI = privState.isModeVS && (addr === CSRs.stimecmp.U) &&
     (!hcounterenTM || !henvcfgSTCE || wen && hvictlVTI)
-  private val readScountovf_EX_VI = privState.isVirtual && menvcfgCDE && (addr === CSRs.scountovf.U)
-  private val rwScountinhibit_EX_VI = privState.isVirtual && menvcfgCDE && (addr === CSRs.scountinhibit.U)
+  private val readScountovfExVI = privState.isVirtual && menvcfgCDE && (addr === CSRs.scountovf.U)
+  private val rwScountinhibitExVI = privState.isVirtual && menvcfgCDE && (addr === CSRs.scountinhibit.U)
 
-  private val accessHPM_EX_VI = csrIsHPM && (
+  private val accessHPMExVI = csrIsHPM && (
       privState.isModeVS && !hcounteren(counterAddr) ||
       privState.isModeVU && (!hcounteren(counterAddr) || !scounteren(counterAddr))
     )
@@ -460,7 +460,7 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
    */
 
   //  SE0 bit 63
-  private val accessStateen_EX_VI = (
+  private val accessStateenExVI = (
     hstateen0.SE0.asBool +: Seq(hstateen1, hstateen2, hstateen3).map(_.SE.asBool)
     ).zipWithIndex.map{case(se, i) => {
     val csrIsSstateen = addr === (CSRs.sstateen0 + i).U
@@ -469,24 +469,24 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
 
   // ENVCFG bit 62
   private val csrIsSenvcfg = addr === CSRs.senvcfg.U
-  private val accessEnvcfg_EX_VI = csrIsSenvcfg && privState.isVirtual && !hstateen0.ENVCFG.asBool
+  private val accessEnvcfgExVI = csrIsSenvcfg && privState.isVirtual && !hstateen0.ENVCFG.asBool
 
   // CSRIND bit 60 indirect reg (Sscsrind extensions), this is not implemented
   // csr addr S: [0x150, 0x157]
   private val csrIsSi = Ireg.isInSCsrInd(addr)
-  private val accessIND_EX_VI = csrIsSi && privState.isVirtual && !hstateen0.CSRIND.asBool
+  private val accessINDExVI = csrIsSi && privState.isVirtual && !hstateen0.CSRIND.asBool
 
   // AIA bit 59
   private val ssAiaSaddr = addr === CSRs.stopi.U
-  private val accessAIA_EX_VI = ssAiaSaddr && privState.isVirtual && !hstateen0.AIA.asBool
+  private val accessAIAExVI = ssAiaSaddr && privState.isVirtual && !hstateen0.AIA.asBool
 
   // IMSIC bit 58 (Ssaia extension)
   private val csrIsStopei = addr === CSRs.stopei.U
-  private val accessTopie_EX_VI = csrIsStopei && privState.isVirtual && !hstateen0.IMSIC.asBool
+  private val accessTopieExVI = csrIsStopei && privState.isVirtual && !hstateen0.IMSIC.asBool
 
   // CONTEXT bit 57 context reg (Sdtrig extensions)
   private val csrIsScontext = addr === CSRs.scontext.U
-  private val accessContext_EX_VI = csrIsScontext && privState.isVirtual && !hstateen0.CONTEXT.asBool
+  private val accessContextExVI = csrIsScontext && privState.isVirtual && !hstateen0.CONTEXT.asBool
 
   // P1P13 bit 56, Read-only 0
 
@@ -495,15 +495,15 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
   private val csrIsSCustom   = (addr(11, 10) =/= "b00".U) && (addr(9, 8) === "b01".U) && (addr(7, 6) === "b11".U)
   // [0x800, 0x8ff], [0xcc0, 0xcff]
   private val csrIsUCustom   = (addr(11, 8) === "b1000".U) || (addr(11, 6) === "b110011".U)
-  private val accessCustom_EX_VI = (csrIsSCustom || csrIsUCustom) && privState.isVirtual && !hstateen0.C.asBool ||
+  private val accessCustomExVI = (csrIsSCustom || csrIsUCustom) && privState.isVirtual && !hstateen0.C.asBool ||
     csrIsUCustom && privState.isModeVU && hstateen0.C.asBool && !sstateen0.C.asBool
 
-  private val xstateControlAccess_EX_VI = accessStateen_EX_VI || accessEnvcfg_EX_VI || accessIND_EX_VI || accessAIA_EX_VI ||
-    accessTopie_EX_VI || accessContext_EX_VI || accessCustom_EX_VI
+  private val xstateControlAccessExVI = accessStateenExVI || accessEnvcfgExVI || accessINDExVI || accessAIAExVI ||
+    accessTopieExVI || accessContextExVI || accessCustomExVI
 
-  io.out.virtualLevelPermit_EX_II := rwVStopei_EX_II
-  io.out.virtualLevelPermit_EX_VI := rwSatp_EX_VI || rwStopei_EX_VI || rwSip_Sie_EX_VI || rwStimecmp_EX_VI ||
-    accessHPM_EX_VI || xstateControlAccess_EX_VI || readScountovf_EX_VI || rwScountinhibit_EX_VI
+  io.out.virtualLevelPermitExII := rwVStopeiExII
+  io.out.virtualLevelPermitExVI := rwSatpExVI || rwStopeiExVI || rwSipSieExVI || rwStimecmpExVI ||
+    accessHPMExVI || xstateControlAccessExVI || readScountovfExVI || rwScountinhibitExVI
 }
 
 class csrAccessIO extends Bundle {
@@ -598,7 +598,7 @@ class CSRPermitIO extends Bundle {
     val hasLegalDret  = Bool()
     val hasLegalWriteFcsr = Bool()
     val hasLegalWriteVcsr = Bool()
-    val EX_II = Bool()
-    val EX_VI = Bool()
+    val exII = Bool()
+    val exVI = Bool()
   })
 }

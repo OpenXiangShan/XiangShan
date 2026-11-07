@@ -23,10 +23,10 @@ import scala.collection.immutable.SeqMap
 trait MachineLevel { self: NewCSR =>
   // Machine level Custom Read/Write
   val mbmc = if (HasBitmapCheck) Some(Module(new CSRModule("Mbmc", new MbmcBundle) {
-    val mbmc_lock = reg.BME.asBool
-    reg.BME := Mux(wen && !mbmc_lock, wdata.BME, reg.BME)
+    val mbmcLock = reg.BME.asBool
+    reg.BME := Mux(wen && !mbmcLock, wdata.BME, reg.BME)
     reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
-    reg.BMA := Mux(wen && !mbmc_lock, wdata.BMA, reg.BMA)
+    reg.BMA := Mux(wen && !mbmcLock, wdata.BMA, reg.BMA)
     reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
     reg.KEYIDEN := Mux(wen, wdata.KEYIDEN, reg.KEYIDEN)
   })
@@ -131,10 +131,10 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.mie)
 
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle){
-    val reset_mtvec = Option.when(enableResetMtvec)(IO(Input(UInt(PAddrBits.W))))
-    reset_mtvec.foreach{ init =>
-      val should_reset = RegNext(false.B, true.B)
-      when(should_reset){
+    val resetMtvec = Option.when(enableResetMtvec)(IO(Input(UInt(PAddrBits.W))))
+    resetMtvec.foreach{ init =>
+      val shouldReset = RegNext(false.B, true.B)
+      when(shouldReset){
         reg := init.asTypeOf(reg)
       }.elsewhen(wen){
         reg.addr := wdata.addr
@@ -343,7 +343,7 @@ trait MachineLevel { self: NewCSR =>
 
     if (soc.IMSICParams.HasTEEIMSIC) {
       // bit 48 LCOFIP
-      regOut.LC48IP := aiaToCSR.notice_pending
+      regOut.LC48IP := aiaToCSR.noticePending
     }
   }).setAddr(CSRs.mip)
 
@@ -704,8 +704,8 @@ class MisaBundle extends CSRBundle {
 
 class MedelegBundle extends ExceptionBundle {
   this.getALL.foreach(_.setRW().withReset(0.U))
-  this.EX_MCALL.setRO().withReset(0.U) // never delegate machine level ecall
-  this.EX_DBLTRP.setRO().withReset(0.U)// double trap is not delegatable
+  this.exMcall.setRO().withReset(0.U) // never delegate machine level ecall
+  this.exDbltrp.setRO().withReset(0.U)// double trap is not delegatable
 }
 
 class MidelegBundle extends InterruptBundle {
@@ -776,12 +776,12 @@ class Mtval2Bundle extends FieldInitBundle(Some("Guest physical address or addit
 class MhpmcounterBundle extends FieldInitBundle(Some("Hardware performance-monitoring counter value."))
 
 class MEnvCfg extends EnvCfg {
-  if (CSRConfig.EXT_SSTC) {
+  if (CSRConfig.extSstc) {
     this.STCE.setRW().withReset(1.U)
   }
   this.PBMTE.setRW().withReset(0.U)
   this.CDE.setRW().withReset(0.U)
-  if (CSRConfig.EXT_DBLTRP) {
+  if (CSRConfig.extDbltrp) {
     // software write envcfg to open ssdbltrp if need
     // set 0 to pass ci
     this.DTE.setRW().withReset(0.U)
@@ -894,8 +894,8 @@ trait HasExternalInterruptBundle {
 }
 trait HasNonMaskableIRPBundle {
   val nonMaskableIRP = IO(new Bundle {
-    val NMI_43 = Input(Bool())
-    val NMI_31 = Input(Bool())
+    val nmi43 = Input(Bool())
+    val nmi31 = Input(Bool())
   })
 }
 

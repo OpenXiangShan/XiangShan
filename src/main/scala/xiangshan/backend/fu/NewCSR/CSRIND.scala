@@ -232,11 +232,11 @@ object Ireg {
   def isInSiregX(ireg: UInt): Bool = ireg >= CSRs.sireg.U && ireg <= CSRs.sireg6.U && ireg =/= CSRs.siph.U
   def isInVSiregX(ireg: UInt): Bool = ireg >= CSRs.vsireg.U && ireg <= CSRs.vsireg6.U && ireg =/= CSRs.vsiph.U
 
-  def isInMireg2_6(ireg: UInt): Bool = ireg >= CSRs.mireg2.U && ireg <= CSRs.mireg6.U && ireg =/= CSRs.miph.U
-  def isInSireg2_6(ireg: UInt): Bool = ireg >= CSRs.sireg2.U && ireg <= CSRs.sireg6.U && ireg =/= CSRs.siph.U
-  def isInVSireg2_6(ireg: UInt): Bool = ireg >= CSRs.vsireg2.U && ireg <= CSRs.vsireg6.U && ireg =/= CSRs.vsiph.U
+  def isInMireg2To6(ireg: UInt): Bool = ireg >= CSRs.mireg2.U && ireg <= CSRs.mireg6.U && ireg =/= CSRs.miph.U
+  def isInSireg2To6(ireg: UInt): Bool = ireg >= CSRs.sireg2.U && ireg <= CSRs.sireg6.U && ireg =/= CSRs.siph.U
+  def isInVSireg2To6(ireg: UInt): Bool = ireg >= CSRs.vsireg2.U && ireg <= CSRs.vsireg6.U && ireg =/= CSRs.vsiph.U
 
-  def isInMireg3_6(ireg: UInt): Bool = ireg >= CSRs.mireg3.U && ireg <= CSRs.mireg6.U && ireg =/= CSRs.miph.U
-  def isInSireg3_6(ireg: UInt): Bool = ireg >= CSRs.sireg3.U && ireg <= CSRs.sireg6.U && ireg =/= CSRs.siph.U
-  def isInVSireg3_6(ireg: UInt): Bool = ireg >= CSRs.vsireg3.U && ireg <= CSRs.vsireg6.U && ireg =/= CSRs.vsiph.U
+  def isInMireg3To6(ireg: UInt): Bool = ireg >= CSRs.mireg3.U && ireg <= CSRs.mireg6.U && ireg =/= CSRs.miph.U
+  def isInSireg3To6(ireg: UInt): Bool = ireg >= CSRs.sireg3.U && ireg <= CSRs.sireg6.U && ireg =/= CSRs.siph.U
+  def isInVSireg3To6(ireg: UInt): Bool = ireg >= CSRs.vsireg3.U && ireg <= CSRs.vsireg6.U && ireg =/= CSRs.vsiph.U
 }

@@ -194,13 +194,13 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val csrCtrl = io.csrCtrl
   val tdata = Reg(Vec(TriggerNum, new MatchTriggerIO))
   val tEnableVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-  tEnableVec := csrCtrl.mem_trigger.tEnableVec
-  when (csrCtrl.mem_trigger.tUpdate.valid) {
-    tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
+  tEnableVec := csrCtrl.memTrigger.tEnableVec
+  when (csrCtrl.memTrigger.tUpdate.valid) {
+    tdata(csrCtrl.memTrigger.tUpdate.bits.addr) := csrCtrl.memTrigger.tUpdate.bits.tdata
   }
 
-  val debugMode = csrCtrl.mem_trigger.debugMode
-  val triggerCanRaiseBpExp = csrCtrl.mem_trigger.triggerCanRaiseBpExp
+  val debugMode = csrCtrl.memTrigger.debugMode
+  val triggerCanRaiseBpExp = csrCtrl.memTrigger.triggerCanRaiseBpExp
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
@@ -407,7 +407,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       ))
     )
 
-    val canTriggerCacheError = dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cache_error_enable
+    val canTriggerCacheError = dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cacheErrorEnable
 
     exceptionVec(loadAccessFault)  := canTriggerCacheError && isLr && dcache_resp_tl_error.tl_denied
     exceptionVec(storeAccessFault) := canTriggerCacheError && !isLr && dcache_resp_tl_error.tl_denied
