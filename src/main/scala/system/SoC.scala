@@ -608,7 +608,14 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
       debugModule.debug.node := device_xbar.get
     }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
-      error_xbar.get := sb2tl.node
+      if (p(coupledL2.WithoutLLC)) {
+        // Debug SBA must reach the SoC memory port, not the IMSIC/peripheral
+        // xbar selected by the legacy CHI path.
+        soc_xbar.get := AXI4Buffer() := AXI4UserYanker() :=
+          TLToAXI4(wcorrupt = false) := TLWidthWidget(1) := sb2tl.node
+      } else {
+        error_xbar.get := sb2tl.node
+      }
     }
     if(hasSeperateBus){
       timer.node := SepTLXbarOpt.get
