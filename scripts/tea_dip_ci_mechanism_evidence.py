@@ -33,7 +33,7 @@ def gap_window(directory, window, bounds):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', type=Path, required=True)
-    parser.add_argument('--ci-evidence', choices=['ci-readiness', 'ci-credit-div', 'ci-fdiv-credit'], required=True)
+    parser.add_argument('--ci-evidence', choices=['ci-readiness', 'ci-credit-div', 'ci-fdiv-credit', 'fdiv-wb-query-paired-ci'], required=True)
     parser.add_argument('--point', action='append', help='Analyze only these already audited points')
     args = parser.parse_args()
     root = args.report_dir.resolve()

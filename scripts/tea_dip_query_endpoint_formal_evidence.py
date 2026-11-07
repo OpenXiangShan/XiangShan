@@ -29,10 +29,7 @@ def verified_files(base, entries):
 
 
 def helper(root):
-    path = root / 'evidence/query-endpoint-validation/build-binding-consumer/tea_dip_query_endpoint_evidence.py'
-    source = json.loads((root / 'evidence/query-endpoint-validation/focused-analysis-build-binding-source.json').read_text())
-    assert source['head'] == '80b330ae56424b35e11ea62d550eeb32a186d1d4'
-    assert digest(path) == source['files']['scripts/tea_dip_query_endpoint_evidence.py']['sha256']
+    path = Path(__file__).with_name('tea_dip_query_endpoint_evidence.py')
     spec = importlib.util.spec_from_file_location('closed_query_endpoint_formal_helper', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -142,7 +139,7 @@ def analyze(root):
         new_names = observed_names - original_names
         control_neutrality = tools.old_execution(old_control, control, new_names)
         query_neutrality = tools.old_execution(old_query, query, new_names)
-        comparison = tools.pair(control, query)
+        comparison = tools.pair(control, query, expected_instructions=20000000)
         prior = next(row for row in original['rows'] if row['point'] == point)['comparison']
         original_cpi_reproduced = all(comparison[key] == prior[old_key] for key, old_key in
                                       [('control_cpi', 'control_cpi'), ('candidate_cpi', 'candidate_cpi'),

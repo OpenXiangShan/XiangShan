@@ -66,10 +66,10 @@ def endpoint(folder):
     return dict(frames=frames,native_roi_cycle_duration_matches=matched,state_event_phase_alignment_verified=None,roi=dict(tea_cycles=duration,native_cycles=after['native_interval_cycles'],native_reported_retired=retired,tea_retired_difference=after['tea_retired']-before['tea_retired'],retirement_counter_difference=after['tea_retired']-before['tea_retired']-retired,states=states,coarse_interior=dict(begin=first['CYCLE'],end=last['CYCLE'],cycles=sum(interior.values()),states=interior),newly_visible_edges=dict(cycles=sum(edges.values()),states=edges),state_budget_per_native_reported_retired=budget),native_probe_counts=probes,native_probe_unit='Per-queue entry-cycles or boolean cycles as named; overlapping observations, not additive CPU critical cycles.')
 
 
-def pair(before,after):
+def pair(before,after,expected_instructions=1000000):
     from analyze_windows import extract
     audits=[extract(folder,variant)[0] for folder,variant in [(before,'control_endpoint'),(after,'query_endpoint')]]
-    for audit in audits:assert abs(audit['warmup_instructions']-1000000)<128 and abs(audit['instructions']-1000000)<128
+    for audit in audits:assert abs(audit['warmup_instructions']-expected_instructions)<128 and abs(audit['instructions']-expected_instructions)<128
     assert audits[0]['seed']==audits[1]['seed']
     endpoints=[endpoint(folder) for folder in [before,after]]
     delta=audits[1]['cpi']-audits[0]['cpi'];dip={state:audits[1]['metrics']['DIP_'+state]-audits[0]['metrics']['DIP_'+state] for state in ['Base','Stall','FrontEnd','Misspeculation','Unresolved']}
