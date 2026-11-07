@@ -41,7 +41,7 @@ import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 class FpuCsrIO extends Bundle {
   val fflags = Output(Vec(5, Bool()))
   val isIllegal = Output(Bool())
-  val dirty_fs = Output(Bool())
+  val dirtyFs = Output(Bool())
   val frm = Input(UInt(3.W))
 }
 
@@ -51,11 +51,11 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
 
   val diffVl = Option.when(backendParams.basicDebugEn)(Output(Vl()))
 
-  val set_vstart = Output(Valid(UInt(XLEN.W)))
-  val set_vtype = Output(Valid(UInt(XLEN.W)))
-  val set_vxsat = Output(Bool())
+  val setVstart = Output(Valid(UInt(XLEN.W)))
+  val setVtype = Output(Valid(UInt(XLEN.W)))
+  val setVxsat = Output(Bool())
 
-  val dirty_vs = Output(Bool())
+  val dirtyVs = Output(Bool())
 }
 
 
@@ -97,7 +97,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   // to ROB
   val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
-  val wfi_event = Output(Bool())
+  val wfiEvent = Output(Bool())
   //trace
   val traceCSR = Output(new TraceCSR)
   // from LSQ

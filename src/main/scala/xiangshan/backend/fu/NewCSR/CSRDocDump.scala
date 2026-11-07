@@ -205,12 +205,12 @@ trait CSRDocDump { self: NewCSR =>
 
   private def pmaGenAddr(init: PMAConfigEntry): BigInt = {
     if (init.a < 2) {
-      init.base_addr >> PMPOffBits
+      init.baseAddr >> PMPOffBits
     } else {
       val platformGrainBytes = BigInt(1) << p(PMParameKey).PlatformGrain
-      require((init.base_addr % platformGrainBytes) == 0)
+      require((init.baseAddr % platformGrainBytes) == 0)
       require((init.range % platformGrainBytes) == 0)
-      (init.base_addr + (init.range / 2 - 1)) >> PMPOffBits
+      (init.baseAddr + (init.range / 2 - 1)) >> PMPOffBits
     }
   }
 

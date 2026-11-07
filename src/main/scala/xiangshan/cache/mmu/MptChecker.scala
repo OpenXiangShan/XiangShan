@@ -92,7 +92,7 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   val mptEn = io.csr.mmpt.mode =/= 0.U
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
-    io.csr.priv.virt_changed || io.csr.mmpt.changed
+    io.csr.priv.virtChanged || io.csr.mmpt.changed
 
   when(io.mptOut.valid) {
     mptOutDataReg := mptOutDataWire
@@ -448,7 +448,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   }
   val flushAll      = mfenceActive || io.csr.mmpt.changed
   val flushPipeOnly = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
-    io.csr.priv.virt_changed || io.csr.mmpt.changed
+    io.csr.priv.virtChanged || io.csr.mmpt.changed
 
   val pipeFlowEn = Wire(Bool())
   val refilling     = Wire(Bool())
@@ -961,7 +961,7 @@ class MptMissQueue(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val io = IO(new MptMissQueueIO)
 
   val flush = io.csr.satp.changed || io.csr.vsatp.changed ||
-io.csr.hgatp.changed || io.csr.priv.virt_changed || io.sfence.valid || io.csr.mmpt.changed
+io.csr.hgatp.changed || io.csr.priv.virtChanged || io.sfence.valid || io.csr.mmpt.changed
   val reqFIFO = Module(new Queue(new MissCacheBundle(), entries = 4, pipe = true, hasFlush = true)).io
   // FIFO queue,record offset
   val fifoNotEmpty = reqFIFO.deq.valid
@@ -1093,7 +1093,7 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   // an in-flight translation transaction, so a change of any translation
   // context must invalidate its local FSM state.
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed ||
-    io.csr.hgatp.changed || io.csr.priv.virt_changed || io.csr.mmpt.changed
+    io.csr.hgatp.changed || io.csr.priv.virtChanged || io.csr.mmpt.changed
 
   // PTW convention: true means that no response is currently expected.  The
   // L2TLB source ownership (io.mem.mask) remains asserted until the old

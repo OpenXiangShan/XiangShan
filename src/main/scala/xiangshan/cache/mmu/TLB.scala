@@ -66,7 +66,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val sfence = DelayN(io.sfence, q.fenceDelay)
   val csr = DelayN(io.csr, q.fenceDelay)
 
-  val flush_mmu = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virt_changed ||
+  val flush_mmu = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virtChanged ||
   (if (HasMptCheck) csr.mmpt.changed else false.B)
   val mmu_flush_pipe = sfence.valid && sfence.bits.flushPipe // for svinval, won't flush pipe
   val flush_pipe = io.flushPipe

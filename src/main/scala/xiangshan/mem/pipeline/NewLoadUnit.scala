@@ -935,7 +935,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val afUnaccessable = uop.exceptionVec(loadAccessFault) || pmpUnaccessable
   val afVectorUncache = accessType.isVector() && isUncache
   val afUnalignMMIO = !in.align.get && isMMIO
-  val afTagError = io.dcacheResp.bits.tag_error && tlbHit && io.csrCtrl.cache_error_enable
+  val afTagError = io.dcacheResp.bits.tag_error && tlbHit && io.csrCtrl.cacheErrorEnable
   val afForwardDenied = Wire(Bool())
   val afBypassDenied = Wire(Bool())
   val af = afUnaccessable || afVectorUncache || afUnalignMMIO || afTagError || afForwardDenied || afBypassDenied
@@ -1427,7 +1427,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     *
     * Noted that exception can affect control signals for wakeup and writeback
     */
-  val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
+  val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cacheErrorEnable && troubleMaker && io.dcacheError
   val s3ExceptionVec = uop.exceptionVec.selectByFu(LduCfg)
   val s3Exception = s3ExceptionVec.orR || TriggerAction.isDmode(uop.trigger)
   val exceptionVec = ExceptSparseVec.mux2(
@@ -1496,7 +1496,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   // RAR violation
   val rarResp = io.rarNukeQueryResp
-  val s3RarViolation = rarResp.valid && rarResp.bits.nuke && io.csrCtrl.ldld_vio_check_enable && !s3Exception
+  val s3RarViolation = rarResp.valid && rarResp.bits.nuke && io.csrCtrl.ldldVioCheckEnable && !s3Exception
   val rarViolation = s3RarViolation || s4HeadValid && s4HeadShouldRARViolation
   // vaddr / paddr mismatch in STLF
   val s3MatchInvalid = in.matchInvalid.get && !s3Exception

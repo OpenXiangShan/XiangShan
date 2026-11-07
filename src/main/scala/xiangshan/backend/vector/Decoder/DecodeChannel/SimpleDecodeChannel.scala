@@ -127,7 +127,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     (PrivExceptionCause.mfence,     in.fromCSR.illegalInst.mfence.getOrElse(false.B), false.B),
     (PrivExceptionCause.hlsv,       in.fromCSR.illegalInst.hlsv,                   in.fromCSR.virtualInst.hlsv),
     (PrivExceptionCause.wfi,        in.fromCSR.illegalInst.wfi,                    in.fromCSR.virtualInst.wfi),
-    (PrivExceptionCause.wrsNto,     in.fromCSR.illegalInst.wrs_nto,                in.fromCSR.virtualInst.wrs_nto),
+    (PrivExceptionCause.wrsNto,     in.fromCSR.illegalInst.wrsNto,                in.fromCSR.virtualInst.wrsNto),
     (PrivExceptionCause.cboZ,       !HasCMO.B || in.fromCSR.illegalInst.cboZ,      in.fromCSR.virtualInst.cboZ),
     (PrivExceptionCause.cboCF,      !HasCMO.B || in.fromCSR.illegalInst.cboCF,     in.fromCSR.virtualInst.cboCF),
     (PrivExceptionCause.cboI,       !HasCMO.B || in.fromCSR.illegalInst.cboI,      in.fromCSR.virtualInst.cboI),

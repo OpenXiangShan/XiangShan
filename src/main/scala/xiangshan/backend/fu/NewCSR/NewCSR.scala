@@ -425,7 +425,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.platform.seip := platformIRP.SEIP
   intrMod.io.in.fromAIA.meip := fromAIA.meip
   intrMod.io.in.fromAIA.seip := fromAIA.seip
-  intrMod.io.in.fromAIA.notice_pending := fromAIA.notice_pending
+  intrMod.io.in.fromAIA.noticePending := fromAIA.noticePending
   intrMod.io.in.mvienSEIE := mvien.regOut.SEIE.asBool
   intrMod.io.in.mvipSEIP := mvip.regOut.SEIP.asBool
 
@@ -732,7 +732,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.aiaToCSR.mtopei  := fromAIA.mtopei
         m.aiaToCSR.stopei  := fromAIA.stopei
         m.aiaToCSR.vstopei := fromAIA.vstopei
-        m.aiaToCSR.notice_pending := fromAIA.notice_pending
+        m.aiaToCSR.noticePending := fromAIA.noticePending
       case _ =>
     }
     mod match {
@@ -1467,56 +1467,56 @@ class NewCSR(implicit val p: Parameters) extends Module
   /**
    * [[io.status.custom]] connection
    */
-  io.status.custom.pf_ctrl.l1I_pf_enable           := spfctl.regOut.L1I_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_enable            := spfctl.regOut.L2_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable           := spfctl.regOut.L1D_PF_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_train_on_hit     := spfctl.regOut.L1D_PF_TRAIN_ON_HIT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable_agt       := spfctl.regOut.L1D_PF_ENABLE_AGT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
-  io.status.custom.pf_ctrl.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_stride_enable    := spfctl.regOut.L1D_PF_STRIDE_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
-  io.status.custom.pf_ctrl.l2_pf_recv_enable       := spfctl.regOut.L2_PF_RECV_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_pbop_enable       := spfctl.regOut.L2_PF_PBOP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_vbop_enable       := spfctl.regOut.L2_PF_VBOP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_tp_enable         := spfctl.regOut.L2_PF_TP_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_delay_latency     := spfctl.regOut.L2_PF_DELAY_LATENCY.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_berti_enable     := spfctl.regOut.L1D_PF_BERTI_ENABLE.asBool
-  io.status.custom.pf_ctrl.l1D_pf_stream_enable    := spfctl.regOut.L1D_PF_STREAM_ENABLE.asBool
-  io.status.custom.pf_ctrl.l2_pf_cdp_enable        := spfctl.regOut.L2_PF_CDP_ENABLE.asBool
+  io.status.custom.pfCtrl.l1I_pf_enable           := spfctl.regOut.L1I_PF_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_enable            := spfctl.regOut.L2_PF_ENABLE.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable           := spfctl.regOut.L1D_PF_ENABLE.asBool
+  io.status.custom.pfCtrl.l1D_pf_train_on_hit     := spfctl.regOut.L1D_PF_TRAIN_ON_HIT.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable_agt       := spfctl.regOut.L1D_PF_ENABLE_AGT.asBool
+  io.status.custom.pfCtrl.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
+  io.status.custom.pfCtrl.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
+  io.status.custom.pfCtrl.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
+  io.status.custom.pfCtrl.l1D_pf_stride_enable    := spfctl.regOut.L1D_PF_STRIDE_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
+  io.status.custom.pfCtrl.l2_pf_recv_enable       := spfctl.regOut.L2_PF_RECV_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_pbop_enable       := spfctl.regOut.L2_PF_PBOP_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_vbop_enable       := spfctl.regOut.L2_PF_VBOP_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_tp_enable         := spfctl.regOut.L2_PF_TP_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_delay_latency     := spfctl.regOut.L2_PF_DELAY_LATENCY.asUInt
+  io.status.custom.pfCtrl.l1D_pf_berti_enable     := spfctl.regOut.L1D_PF_BERTI_ENABLE.asBool
+  io.status.custom.pfCtrl.l1D_pf_stream_enable    := spfctl.regOut.L1D_PF_STREAM_ENABLE.asBool
+  io.status.custom.pfCtrl.l2_pf_cdp_enable        := spfctl.regOut.L2_PF_CDP_ENABLE.asBool
 
-  io.status.custom.lvpred_disable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
-  io.status.custom.no_spec_load            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
-  io.status.custom.storeset_wait_store     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool
-  io.status.custom.storeset_no_fast_wakeup := slvpredctl.regOut.STORESET_NO_FAST_WAKEUP.asBool
-  io.status.custom.lvpred_timeout          := slvpredctl.regOut.LVPRED_TIMEOUT.asUInt
+  io.status.custom.lvpredDisable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
+  io.status.custom.noSpecLoad            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
+  io.status.custom.storesetWaitStore     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool
+  io.status.custom.storesetNoFastWakeup := slvpredctl.regOut.STORESET_NO_FAST_WAKEUP.asBool
+  io.status.custom.lvpredTimeout          := slvpredctl.regOut.LVPRED_TIMEOUT.asUInt
 
-  io.status.custom.bp_ctrl.ubtbEnable   := sbpctl.regOut.UBTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.abtbEnable   := sbpctl.regOut.ABTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.mbtbEnable   := sbpctl.regOut.MBTB_ENABLE.asBool
-  io.status.custom.bp_ctrl.tageEnable   := sbpctl.regOut.TAGE_ENABLE.asBool
-  io.status.custom.bp_ctrl.scEnable     := sbpctl.regOut.SC_ENABLE.asBool
-  io.status.custom.bp_ctrl.ittageEnable := sbpctl.regOut.ITTAGE_ENABLE.asBool
-  io.status.custom.bp_ctrl.rasEnable    := sbpctl.regOut.RAS_ENABLE.asBool
+  io.status.custom.bpCtrl.ubtbEnable   := sbpctl.regOut.UBTB_ENABLE.asBool
+  io.status.custom.bpCtrl.abtbEnable   := sbpctl.regOut.ABTB_ENABLE.asBool
+  io.status.custom.bpCtrl.mbtbEnable   := sbpctl.regOut.MBTB_ENABLE.asBool
+  io.status.custom.bpCtrl.tageEnable   := sbpctl.regOut.TAGE_ENABLE.asBool
+  io.status.custom.bpCtrl.scEnable     := sbpctl.regOut.SC_ENABLE.asBool
+  io.status.custom.bpCtrl.ittageEnable := sbpctl.regOut.ITTAGE_ENABLE.asBool
+  io.status.custom.bpCtrl.rasEnable    := sbpctl.regOut.RAS_ENABLE.asBool
 
-  io.status.custom.sbuffer_timeout                  := smblockctl.regOut.SBUFFER_TIMEOUT.asUInt
-  io.status.custom.sbuffer_threshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
-  io.status.custom.ldld_vio_check_enable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
-  io.status.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
-  io.status.custom.cache_error_enable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
-  io.status.custom.uncache_write_outstanding_enable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
-  io.status.custom.hd_misalign_st_enable            := smblockctl.regOut.HD_MISALIGN_ST_ENABLE.asBool
-  io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
+  io.status.custom.sbufferTimeout                  := smblockctl.regOut.SBUFFER_TIMEOUT.asUInt
+  io.status.custom.sbufferThreshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
+  io.status.custom.ldldVioCheckEnable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
+  io.status.custom.softPrefetchEnable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
+  io.status.custom.cacheErrorEnable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
+  io.status.custom.uncacheWriteOutstandingEnable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
+  io.status.custom.hdMisalignStEnable            := smblockctl.regOut.HD_MISALIGN_ST_ENABLE.asBool
+  io.status.custom.hdMisalignLdEnable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
 
-  io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
-  io.status.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
-  io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.status.custom.fusionEnable           := srnctl.regOut.FUSION_ENABLE.asBool
+  io.status.custom.highDensityRobCompressionEnable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
+  io.status.custom.wfiEnable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
 
-  io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
-  io.status.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
+  io.status.custom.powerDownEnable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
+  io.status.custom.commitStuckCheckEnable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
 
-  io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
+  io.status.custom.flushL2Enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
 
   io.status.instrAddrTransType.bare := privState.isModeM ||
     (!privState.isVirtual && satp.regOut.MODE === SatpMode.Bare) ||
@@ -1624,8 +1624,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off
   io.toDecode.illegalInst.wfi        := isModeHU || !isModeM && mstatus.regOut.TW
   io.toDecode.virtualInst.wfi        := isModeVS && !mstatus.regOut.TW && hstatus.regOut.VTW || isModeVU && !mstatus.regOut.TW
-  io.toDecode.illegalInst.wrs_nto    := !isModeM && mstatus.regOut.TW
-  io.toDecode.virtualInst.wrs_nto    := privState.V && !mstatus.regOut.TW && hstatus.regOut.VTW
+  io.toDecode.illegalInst.wrsNto    := !isModeM && mstatus.regOut.TW
+  io.toDecode.virtualInst.wrsNto    := privState.V && !mstatus.regOut.TW && hstatus.regOut.VTW
   io.toDecode.illegalInst.frm        := frmIsReserved
   // Ref: The RISC-V Instruction Set Manual Volume I - 20.5. Control and Status Register State
   io.toDecode.illegalInst.cboZ       := !isModeM && !menvcfg.regOut.CBZE || isModeHU && !senvcfg.regOut.CBZE
@@ -1651,10 +1651,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     henvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeVS || isModeVU)
   )
   // Rename
-  io.toDecode.custom.fusion_enable := srnctl.regOut.FUSION_ENABLE.asBool
-  io.toDecode.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
-  io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
-  io.toDecode.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
+  io.toDecode.custom.fusionEnable := srnctl.regOut.FUSION_ENABLE.asBool
+  io.toDecode.custom.highDensityRobCompressionEnable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
+  io.toDecode.custom.wfiEnable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.toDecode.custom.commitStuckCheckEnable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
   io.toDecode.singlestep := io.status.singleStepFlag
 
   io.distributedWenLegal := wenLegalReg && !noCSRIllegalReg
