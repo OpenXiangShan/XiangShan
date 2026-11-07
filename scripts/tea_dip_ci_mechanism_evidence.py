@@ -26,8 +26,23 @@ def gap_window(directory, window, bounds):
         assert sum(interval[f'STATES_{n}'] for n in range(3)) == interval['ENDCYCLE'] - interval['START']
         previous_end = interval['ENDCYCLE']
     noncommit = sum(last[f'STATES_{n}'] - first[f'STATES_{n}'] for n in range(1, 4))
-    return {threshold: bounds(intervals, window['roi_start'], window['roi_end'], last['CYCLE'] - last['PENDING'],
-                             noncommit, noncommit + interior['omitted_edge_cycles'], threshold) for threshold in [128, 512]}
+    states = {state: last[f'STATES_{i}'] - first[f'STATES_{i}']
+              for i, state in enumerate(['Computing', 'Stalled', 'Flushed', 'Drained'])}
+    assert min(states.values()) >= 0 and sum(states.values()) == interior['cycles']
+    assert interior['cycles'] + interior['omitted_edge_cycles'] == window['cycles']
+    return ({threshold: bounds(intervals, window['roi_start'], window['roi_end'], last['CYCLE'] - last['PENDING'],
+                              noncommit, noncommit + interior['omitted_edge_cycles'], threshold) for threshold in [128, 512]}, states)
+
+
+def state_delta_bounds(counts, windows):
+    # Each omitted cycle can belong to any one state. These marginal bounds
+    # use native ROI denominators; their extrema cannot all occur together.
+    a, b = windows
+    assert all(window['exact_tea_interior']['omitted_edge_cycles'] >= 0 for window in windows)
+    return {state: dict(lower=counts[1][state] / b['instructions'] -
+                       (counts[0][state] + a['exact_tea_interior']['omitted_edge_cycles']) / a['instructions'],
+                       upper=(counts[1][state] + b['exact_tea_interior']['omitted_edge_cycles']) / b['instructions'] -
+                       counts[0][state] / a['instructions']) for state in counts[0]}
 
 
 def main():
@@ -78,7 +93,9 @@ def main():
                         for label in ['control', 'candidate']]
             equality = compare_windows(*windows, *directories, *profiles)
             assert equality['checks']['all_old_native_warmup_and_roi_equal'] == all(not phase['changed_names'] for phase in native_changes)
-        gap_windows = [gap_window(directory, window, bounds) for directory, window in zip(directories, windows)]
+        gap_windows, state_counts = zip(*(gap_window(directory, window, bounds)
+                                          for directory, window in zip(directories, windows)))
+        roi_state_bounds = state_delta_bounds(state_counts, windows)
         deltas = []
         for threshold in [128, 512]:
             delta = dict(threshold=threshold)
@@ -98,13 +115,14 @@ def main():
                    for view in ['TEA', 'DIP']}
         rows.append(dict(point=point, comparison=record['comparison'], native_phase_differences=native_changes, equality=equality,
                          exact_delta_cpi=exact, exact_omitted_edges=[window['exact_tea_interior']['omitted_edge_cycles'] for window in windows],
+                         native_roi_state_delta_cpi_bounds=roi_state_bounds,
                          dip_exclusive_delta_cpi=dip, gap_delta_cpi_bounds=deltas,
                          counters={key: [window['counters'][key] for window in windows] for key in windows[0]['counters']},
                          top_sampled_pc_deltas=top_pcs, source_window_sha256=digest(path)))
     result = dict(run_id=run['id'], source=identity['source'], ci_evidence=args.ci_evidence, rows=rows,
                   source_sha256={str(Path(__file__).name): digest(Path(__file__)),
                                  **{name: digest(root / name) for name in ['analyze_gaps.py', 'native_perf.py', 'analyze_queue_observation.py']}},
-                  scope='Individually closed CI windows. Exact TEA excludes recorded interior edges; exclusive DIP closes each full ROI. Gap bounds are conservative intervals, not confidence intervals. Zero CPI still requires all old native and six execution categories. PC evidence is sampled attribution, not unique dynamic causality. No partial-suite score.')
+                  scope='Individually closed CI windows. Exact interior TEA keeps its own retired denominator. Native-ROI state bounds assign omitted edge cycles conservatively to each state and use each native retired denominator; marginal extremes are not jointly additive. Exclusive DIP closes each full ROI. State and gap bounds are conservative intervals, not confidence intervals. Zero CPI still requires all old native and six execution categories. PC evidence is sampled attribution, not unique dynamic causality. No partial-suite score.')
     (out / 'mechanism-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(dict(run_id=result['run_id'], points=len(rows), rows=[dict(point=row['point'], speedup=row['comparison']['speedup'],
         native_changed_names=[phase['changed_names'] for phase in row['native_phase_differences']],
