@@ -3,6 +3,7 @@ from pathlib import Path
 import argparse
 import importlib.util
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -13,6 +14,67 @@ from tea_dip_fdiv_unit_state_evidence import unit_counts, PARTITION
 
 FILES = ['command.json', 'result.json', 'exitcode', 'simulator_out.txt', 'simulator_err.txt',
          'simulator.db', 'process.json', 'launch-observation.json']
+
+
+
+def import_launch_metadata(root):
+    evidence = root / 'evidence/fdiv-gain-state-observe'
+    descriptor = evidence / 'launch-gate.json'
+    if not descriptor.exists():
+        return dict(pending=True, ready=False, database_read=False, rows=[],
+                    reason='No original gain-state observer launch archived; collection and analysis pending')
+    gate = json.loads(descriptor.read_text())
+    assert digest(evidence / 'launch-gate-config.json') == gate['config_sha256']
+    code = r'''from pathlib import Path
+import hashlib,json
+record=__RECORD__;root=Path(record['run_dir'])
+def digest(path):
+ with path.open('rb')as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
+def live(process):
+ path=Path('/proc',str(process['pid']),'stat')
+ return path.exists()and path.read_text().rsplit(')',1)[1].split()[19]==process['start_ticks']
+assert digest(root/'config.json')==record['config_sha256']
+assert digest(root/'gate.py')==record['gate_script_sha256']
+state_path=root/'gate-state.json'
+if not state_path.exists():
+ assert live(record['process'])
+ print(json.dumps(dict(ready=False,phase='starting',original_gate_live=True,database_read=False)))
+else:
+ state=json.loads(state_path.read_text());assert all(state[key]==record['process'][key]for key in ['pid','start_ticks'])
+ assert state['config_sha256']==record['config_sha256']and state['source']=='6cbc9752d352b43b15fc2177b9451caccbfe74f9'
+ assert state['phase']!='failed',state
+ if state['phase']!='launched':
+  assert live(record['process'])
+  print(json.dumps(dict(ready=False,gate=state,original_gate_live=True,database_read=False)))
+ else:
+  cfg=json.loads((root/'config.json').read_text());observer=Path(cfg['node_run_dir'])
+  files={name:(observer/name).read_text()for name in ['launch.json','experiment.json','run.py','native_perf.py','tea_dip_query_endpoint_evidence.py','parent-closed-inputs.json']}
+  files['parent-gate-validation.json']=(root/'parent-gate-validation.json').read_text()
+  launch=json.loads(files['launch.json']);spec=json.loads(files['experiment.json']);parent=json.loads(files['parent-closed-inputs.json'])
+  assert launch['process']==state['observer']and digest(root/'observer-launch.json')==state['launch_sha256']
+  assert launch['source']==spec['source']==state['source']and launch['parent_source']==spec['parent_source']==cfg['parent_source']
+  assert launch['spec_sha256']==hashlib.sha256(files['experiment.json'].encode()).hexdigest()
+  assert launch['runner_sha256']==cfg['parent_runner_sha256']==hashlib.sha256(files['run.py'].encode()).hexdigest()
+  assert digest(root/'parent-gate-validation.json')==parent['gate_validation_sha256']==launch['parent_gate_validation_sha256']
+  assert spec['parent_receipt_sha256']==hashlib.sha256(files['parent-closed-inputs.json'].encode()).hexdigest()
+  if not(observer/'run-state.json').exists():
+   assert live(launch['process'])
+   print(json.dumps(dict(ready=False,gate=state,observer_starting=True,original_gate_live=live(record['process']),database_read=False)))
+  else:
+   print(json.dumps(dict(ready=True,gate=state,original_gate_live=live(record['process']),files=files,database_read=False)))
+'''.replace('__RECORD__', repr(gate))
+    reply = subprocess.run(['proxychains', '-q', 'ssh', '-o', 'BatchMode=yes', 'node031', 'python3', '-'],
+                           input=code, text=True, capture_output=True, check=True, timeout=50)
+    value = json.loads(reply.stdout)
+    if not value['ready']:
+        return dict(pending=True, ready=False, database_read=False, rows=[], launch_gate=value,
+                    reason='Original launch metadata is not ready for collection')
+    for name in [name for name in value['files'] if name != 'launch.json'] + ['launch.json']:
+        path = evidence / name
+        temporary = path.with_name(path.name + '.' + str(os.getpid()) + '.tmp')
+        temporary.write_text(value['files'][name])
+        temporary.replace(path)
+    return dict(pending=False, ready=True, database_read=False)
 
 
 def metadata(root):
@@ -205,10 +267,8 @@ def main():
     parser.add_argument('--point', help='Use one closed point from the original four cases')
     args = parser.parse_args()
     root = args.report_dir.resolve()
-    if not (root / 'evidence/fdiv-gain-state-observe/launch.json').exists():
-        result = dict(pending=True, ready=False, database_read=False, rows=[],
-                      reason='No original gain-state observer launch archived; collection and analysis pending')
-    else:
+    result = import_launch_metadata(root) if not (root / 'evidence/fdiv-gain-state-observe/launch.json').exists() else None
+    if (root / 'evidence/fdiv-gain-state-observe/launch.json').exists():
         result = collect(root, args.point) if args.action == 'collect' else analyze(root, args.point)
     if args.action == 'analyze' and not result['pending']:
         folder = (root / 'evidence/fdiv-gain-state-observe/closed-points' / args.point if args.point else root / 'fdiv-gain-state-observation') / 'analysis'
