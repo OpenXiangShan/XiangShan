@@ -9,6 +9,20 @@ object CSROoORead {
    *
    * Note: SHOULD NOT CONTAIN VL and VLENB, since they have other decode results
    */
+  val counterCsrList = List(
+    CSRs.cycle,
+    CSRs.instret,
+    CSRs.mcycle,
+    CSRs.minstret,
+    CSRs.cycleh,
+    CSRs.instreth,
+    CSRs.mcycleh,
+    CSRs.minstreth,
+  ) ++ (CSRs.hpmcounter3 to CSRs.hpmcounter31) ++
+    (CSRs.mhpmcounter3 to CSRs.mhpmcounter31) ++
+    (CSRs.hpmcounter3h to CSRs.hpmcounter31h) ++
+    (CSRs.mhpmcounter3h to CSRs.mhpmcounter31h)
+
   val waitForwardCsrReadList = List(
     CSRs.fflags,
     CSRs.fcsr,
@@ -37,7 +51,7 @@ object CSROoORead {
     CSRs.hip,
     CSRs.hvip,
     CSRs.mvip,
-  )
+  ) ++ counterCsrList
   val blockBackwardCsrReadList = List(
     CSRs.mireg,
     CSRs.sireg,
