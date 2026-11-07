@@ -30,6 +30,7 @@ import freechips.rocketchip.devices.debug._
 import openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
+import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.EnableJtag
@@ -484,13 +485,33 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     ++ new WithCHI
 )
 
-/** Single-core CHI SoC with the L2 connected directly to DDR through AXI4. */
+/** Single-core CHI SoC with the L2 connected directly to DDR through AXI4.
+  * The SoC address/PMA map, interrupt count, and module prefix match NHV3A.
+  * CPU and XSTile microarchitecture parameters are inherited from KunminghuV2Config.
+  */
 class KunminghuV2WithoutLLCConfig(n: Int = 1) extends Config(
   (new KunminghuV2Config(n)).alter((site, here, up) => {
     case coupledL2.WithoutLLC => true
     case SoCParamsKey => up(SoCParamsKey).copy(
       OpenLLCParamsOpt = None,
-      L3CacheParamsOpt = None
+      L3CacheParamsOpt = None,
+      PmemRanges = Seq(MemoryRange(0x80000000L, 0x880000000L)),
+      PMAConfigs = Seq(
+        PMAConfigEntry(0x0L, range = 0x1000000000000L, a = 3),
+        PMAConfigEntry(0x880000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),
+        PMAConfigEntry(0x80000000L, a = 1, w = true, r = true),
+        PMAConfigEntry(0x3C000000L, a = 1, w = true, r = true),
+        PMAConfigEntry(0x38021000L, a = 1, x = true, w = true, r = true),
+        PMAConfigEntry(0x38020000L, a = 1, w = true, r = true),
+        PMAConfigEntry(0x38000000L, a = 1),
+        PMAConfigEntry(0x06200000L, a = 1, x = true, w = true, r = true),
+        // Cache only the 2 MiB boot image; QSPI control/printf windows stay uncached.
+        PMAConfigEntry(0x02400000L, c = true, a = 1, x = true, w = true, r = true),
+        PMAConfigEntry(0x02200000L, a = 1, w = true, r = true),
+        PMAConfigEntry(0x00040000L, a = 1, x = true, r = true)
+      ),
+      extIntrs = 256,
+      XSTopPrefix = Some("bosc_")
     )
   })
 )
