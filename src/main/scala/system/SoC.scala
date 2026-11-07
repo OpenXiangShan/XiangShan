@@ -478,9 +478,18 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
       beatBytes = 8
     ))
     error.node := error_xbar.get
+    // Only the external AXI peripheral port needs cache-line splitting for
+    // cached QSPI XIP.  Keep internal debug/device accesses on their native
+    // path; fragmenting the shared device crossbar also rewrites their IDs.
+    val peripheralTransferNode = if (p(coupledL2.WithoutLLC)) {
+      TLFragmenter(8, L3BlockSize, holdFirstDeny = true)
+    } else {
+      TLTempNode()
+    }
     axi4peripheral_node :=
       AXI4Deinterleaver(8) :=
       TLToAXI4() :=
+      peripheralTransferNode :=
       error_xbar.get :=
       TLBuffer.chainNode(2, Some("llc_to_peripheral_buffer")) :=
       TLFIFOFixer() :=
