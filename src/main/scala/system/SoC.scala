@@ -486,6 +486,14 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     } else {
       TLTempNode()
     }
+    // The no-LLC CHI endpoint starts W after its AW is accepted, while
+    // AXI4ToTL accepts AW only with the final W beat. Buffer the channels
+    // here so cache writeback to peripheral-backed memory can make progress.
+    val peripheralAxiBufferNode = if (p(coupledL2.WithoutLLC)) {
+      AXI4Buffer()
+    } else {
+      AXI4IdentityNode()
+    }
     axi4peripheral_node :=
       AXI4Deinterleaver(8) :=
       TLToAXI4() :=
@@ -496,6 +504,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
       TLWidthWidget(L3OuterBusWidth / 8) :=
       AXI4ToTL() :=
       AXI4UserYanker() :=
+      peripheralAxiBufferNode :=
       soc_xbar.get
   } else {
     axi4peripheral_node :=
