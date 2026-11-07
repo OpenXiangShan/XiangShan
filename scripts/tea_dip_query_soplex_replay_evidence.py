@@ -104,6 +104,7 @@ def analyze(root):
     record = json.loads((stage / 'result.json').read_text())
     assert record['source'] == spec['source_identity']['source'] and record['binary_sha256'] == spec['binary_sha256']
     assert record['spec_sha256'] == launch['spec_sha256'] and record['runner_sha256'] == launch['runner_sha256']
+    assert record['reference_sha256'] == spec['reference_sha256'] and record['cst_sha256'] == spec['cst_sha256']
     ci_receipt_path = root / 'fdiv-wb-query-paired-ci/raw/closed-receipts' / (POINT + '.json')
     assert digest(ci_receipt_path) == spec['original_ci_closed_receipt_sha256']
     ci_receipt = json.loads(ci_receipt_path.read_text())
@@ -131,6 +132,7 @@ def analyze(root):
     assert original['closed_receipt_sha256'] == digest(ci_receipt_path)
     assert original['analysis_source_sha256'] == digest(Path(__file__).with_name('tea_dip_analyze_ci_closed_point.py'))
     assert windows[0]['cpi'] == original['comparison']['candidate_cpi']
+    assert windows[1]['cpi'] == record['cpi'] and windows[1]['cycles'] == record['cycles'] and windows[1]['instructions'] == record['instructions']
     return dict(pending=False, database_read=True, point=POINT, pgo_vs_nonpgo_all_native_six_complete_table_equality=equality,
                 original_ci_cpi_reproduced=windows[1]['cpi'] == windows[0]['cpi'], windows=windows,
                 speedup_vs_archived841=original['comparison']['control_cpi'] / windows[1]['cpi'] - 1,
