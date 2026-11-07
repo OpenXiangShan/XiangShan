@@ -122,6 +122,7 @@ def validate_parent(parent, spec, config):
 
 def launch_observer(gate, config, parent, spec, source, build, receipt, rows):
     assert parent_status(parent, config)['parent_closed']
+    assert os.getpriority(os.PRIO_PROCESS, 0) == 0, 'The unchanged runner adds nice10; gate must retain nice0'
     root = Path(config['node_run_dir'])
     assert not root.exists(), 'Follow the original gain-state observer'
     assert digest(Path(build['binary'])) == build['binary_sha256']
@@ -151,6 +152,7 @@ def launch_observer(gate, config, parent, spec, source, build, receipt, rows):
         child = subprocess.Popen(command, cwd=root, stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True)
     process = dict(pid=child.pid, start_ticks=Path('/proc', str(child.pid), 'stat').read_text().rsplit(')', 1)[1].split()[19], host=socket.gethostname())
     launch = dict(utc=datetime.now(timezone.utc).isoformat(), run_dir=str(root), process=process, command=command,
+                  observer_controller_nice=os.getpriority(os.PRIO_PROCESS, child.pid),
                   spec_sha256=digest(root / 'experiment.json'), runner_sha256=digest(root / 'run.py'), source=source['head'],
                   parent_source=spec['source'], parent_gate_validation_sha256=receipt['gate_validation_sha256'], database_read=False)
     write(root / 'launch.json', launch)
@@ -169,13 +171,14 @@ def main():
     parent, spec, source, build = context(config)
     check = parent_status(parent, config)
     if args.check_only:
+        check['gate_nice'] = os.getpriority(os.PRIO_PROCESS, 0)
         print(json.dumps(check))
         return
     assert not (gate / 'gate-state.json').exists(), 'Follow the original launch gate'
     assert not Path(config['node_run_dir']).exists(), 'Follow the original gain-state observer'
-    os.nice(10)
     state = dict(pid=os.getpid(), start_ticks=Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19],
-                 host=socket.gethostname(), config_sha256=digest(gate / 'config.json'), source=source['head'])
+                 host=socket.gethostname(), nice=os.getpriority(os.PRIO_PROCESS, 0),
+                 config_sha256=digest(gate / 'config.json'), source=source['head'])
     def save(**values):
         state.update(values, utc=datetime.now(timezone.utc).isoformat())
         write(gate / 'gate-state.json', state)
