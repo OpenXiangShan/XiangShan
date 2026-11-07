@@ -8,11 +8,11 @@ import xiangshan.backend.decode.isa.CSRs
 
 class PFEvent(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val distribute_csr = Flipped(new DistributedCSRIO())
+    val distributeCsr = Flipped(new DistributedCSRIO())
     val hpmevent = Output(Vec(perfCntNum, UInt(XLEN.W)))
   })
 
-  val w = io.distribute_csr.w
+  val w = io.distributeCsr.w
 
   val perfEvents: Seq[CSRModule[_]] = (0 until perfCntNum).map(num =>
     Module(new CSRModule(s"perfEvents", new MhpmeventBundle))

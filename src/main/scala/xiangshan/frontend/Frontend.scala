@@ -146,18 +146,18 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val sfence  = DelayN(io.sfence, SfencePortDelay)
 
   // trigger
-  ifu.io.frontendTrigger := csrCtrl.frontend_trigger
+  ifu.io.frontendTrigger := csrCtrl.frontendTrigger
 
   // RVCDecoder fsIsOff
   ifu.io.csrFsIsOff := csrCtrl.fsIsOff
 
   // bpu ctrl
-  bpu.io.ctrl        := csrCtrl.bp_ctrl
+  bpu.io.ctrl        := csrCtrl.bpCtrl
   bpu.io.resetVector := io.reset_vector
 
   // pmp
   private val pmp = Module(new PMP)
-  pmp.io.distribute_csr := csrCtrl.distribute_csr
+  pmp.io.distributeCsr := csrCtrl.distributeCsr
 
   private val pmpChecker = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(sameCycle = true)).io))
 
@@ -240,7 +240,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ifu.io.fromICache <> icache.io.toIfu
 
   // ICache-Backend
-  icache.io.csrPfEnable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
+  icache.io.csrPfEnable := RegNext(csrCtrl.pfCtrl.l1I_pf_enable)
   icache.io.fencei      := RegNext(io.fencei)
 
   // IFU-Ibuffer
@@ -278,7 +278,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // PFEvent
   private val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  pfevent.io.distributeCsr := io.csrCtrl.distributeCsr
   private val csrevents = pfevent.io.hpmevent.take(8)
 
   private val perfFromUnits = Seq(ifu, ibuffer, icache, ftq).flatMap(_.getPerfEvents)

@@ -76,15 +76,15 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
   val indirectPermit_EX_II = indirectCSRPermitMod.io.out.indirectCSR_EX_II
   val indirectPermit_EX_VI = indirectCSRPermitMod.io.out.indirectCSR_EX_VI
 
-  val directPermit_illegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI || vPermit_EX_II || vPermit_EX_VI
+  val directPermitIllegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI || vPermit_EX_II || vPermit_EX_VI
 
   val csrAccess_EX_II = csrAccess && (
     (mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || vPermit_EX_II) ||
-    (!directPermit_illegal && indirectPermit_EX_II)
+    (!directPermitIllegal && indirectPermit_EX_II)
   )
   val csrAccess_EX_VI = csrAccess && (
     (pPermit_EX_VI || vPermit_EX_VI) ||
-    (!directPermit_illegal && indirectPermit_EX_VI)
+    (!directPermitIllegal && indirectPermit_EX_VI)
   )
 
   val Xret_EX_II = xRetPermitMod.io.out.Xret_EX_II

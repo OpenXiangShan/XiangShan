@@ -2,18 +2,18 @@ PmemRanges:
   - { lower: 0x80000000, upper: 0x80000000000 }
 
 PMAConfigs:
-  - { base_addr: 0x0, range: 0x1000000000000, a: 3 }
-  - { base_addr: 0x80000000000, c: true, atomic: true, a: 1, x: true, w: true, r: true }
-  - { base_addr: 0x80000000, a: 1, w: true, r: true }
-  - { base_addr: 0x3A000000, a: 1 }
-  - { base_addr: 0x39002000, a: 1, w: true, r: true }
-  - { base_addr: 0x39000000, a: 1, w: true, r: true }
-  - { base_addr: 0x38022000, a: 1, w: true, r: true }
-  - { base_addr: 0x38021000, a: 1, x: true, w: true, r: true }
-  - { base_addr: 0x38020000, a: 1, w: true, r: true }
-  - { base_addr: 0x20000000, a: 1, x: true, w: true, r: true }
-  - { base_addr: 0x10000000, a: 1, w: true, r: true }
-  - { base_addr: 0 }
+  - { baseAddr: 0x0, range: 0x1000000000000, a: 3 }
+  - { baseAddr: 0x80000000000, c: true, atomic: true, a: 1, x: true, w: true, r: true }
+  - { baseAddr: 0x80000000, a: 1, w: true, r: true }
+  - { baseAddr: 0x3A000000, a: 1 }
+  - { baseAddr: 0x39002000, a: 1, w: true, r: true }
+  - { baseAddr: 0x39000000, a: 1, w: true, r: true }
+  - { baseAddr: 0x38022000, a: 1, w: true, r: true }
+  - { baseAddr: 0x38021000, a: 1, x: true, w: true, r: true }
+  - { baseAddr: 0x38020000, a: 1, w: true, r: true }
+  - { baseAddr: 0x20000000, a: 1, x: true, w: true, r: true }
+  - { baseAddr: 0x10000000, a: 1, w: true, r: true }
+  - { baseAddr: 0 }
 
 EnableCHIAsyncBridge: true
 

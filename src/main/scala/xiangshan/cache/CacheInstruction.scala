@@ -128,7 +128,7 @@ class CacheCtrlRespInfo(implicit p: Parameters) extends XSBundle with HasICacheP
 }
 
 class L1CacheToCsrIO(implicit p: Parameters) extends DCacheBundle {
-  val distribute_csr = Flipped(new DistributedCSRIO)
+  val distributeCsr = Flipped(new DistributedCSRIO)
   val update = new DistributedCSRUpdateReq
 }
 
@@ -165,15 +165,15 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   // }}
 
   def cacheop_csr_is_being_write(csr_name: String): Bool = {
-    io.csr.distribute_csr.w.bits.addr === (CacheInstrucion.CacheInsRegisterList(csr_name)("offset").toInt + Scachebase).U &&
-      io.csr.distribute_csr.w.valid
+    io.csr.distributeCsr.w.bits.addr === (CacheInstrucion.CacheInsRegisterList(csr_name)("offset").toInt + Scachebase).U &&
+      io.csr.distributeCsr.w.valid
   }
 
   def update_cache_req_when_write(csr_name: String, req_field: Data) = {
     when(
       cacheop_csr_is_being_write(csr_name)
     ){
-      req_field := io.csr.distribute_csr.w.bits.data
+      req_field := io.csr.distributeCsr.w.bits.data
       assert(wait_csr_op_req)
     }
   }

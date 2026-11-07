@@ -122,7 +122,7 @@ class CtrlBlockImp(
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
-  private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusion_enable
+  private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusionEnable
 
   private val s0_robFlushRedirect = rob.out.flushOut
   private val s0_robFlushPcInfo = rob.out.flushPcInfo
@@ -443,18 +443,18 @@ class CtrlBlockImp(
     s1_robFlushPcAdjusted, // replay inst
     s1_robFlushPcAdjusted + Mux(s1_robFlushPcInfo.flushIsRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
-  private val s4_csrIsTrap = DelayN(rob.out.exception.valid, 3)
-  private val s4_trapTargetFromCsr = io.robio.csr.trapTarget
+  private val s4CsrIsTrap = DelayN(rob.out.exception.valid, 3)
+  private val s4TrapTargetFromCsr = io.robio.csr.trapTarget
 
-  val flushTarget = Mux(s4_csrIsTrap, s4_trapTargetFromCsr.pc, s2_robFlushPc)
-  val s4_trapTargetIAF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIAF
-  val s4_trapTargetIPF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIPF
-  val s4_trapTargetIGPF = s4_csrIsTrap && s4_trapTargetFromCsr.raiseIGPF
+  val flushTarget = Mux(s4CsrIsTrap, s4TrapTargetFromCsr.pc, s2_robFlushPc)
+  val s4TrapTargetIAF = s4CsrIsTrap && s4TrapTargetFromCsr.raiseIAF
+  val s4TrapTargetIPF = s4CsrIsTrap && s4TrapTargetFromCsr.raiseIPF
+  val s4TrapTargetIGPF = s4CsrIsTrap && s4TrapTargetFromCsr.raiseIGPF
   when (s5_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.target := RegEnable(flushTarget, s4_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIAF := RegEnable(s4_trapTargetIAF, s4_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIPF := RegEnable(s4_trapTargetIPF, s4_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.backendIGPF := RegEnable(s4_trapTargetIGPF, s4_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIAF := RegEnable(s4TrapTargetIAF, s4_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIPF := RegEnable(s4TrapTargetIPF, s4_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.backendIGPF := RegEnable(s4TrapTargetIGPF, s4_flushFromRobValidAhead)
   }
 
   for (i <- 0 until DecodeWidth) {
@@ -860,13 +860,13 @@ class CtrlBlockImp(
   io.robio.csr.fflags := rob.out.csr.fflags
   io.robio.csr.vxsat := rob.out.csr.vxsat
   io.robio.csr.vstart := rob.out.csr.vstart
-  io.robio.csr.dirty_fs := rob.out.csr.dirty_fs
-  io.robio.csr.dirty_vs := rob.out.csr.dirty_vs
+  io.robio.csr.dirtyFs := rob.out.csr.dirtyFs
+  io.robio.csr.dirtyVs := rob.out.csr.dirtyVs
   io.robio.csr.perfinfo := rob.out.csr.perfinfo
   // When wfi is disabled, it will not block ROB commit.
   rob.in.csr.wfiEvent := io.robio.csr.wfiEvent
-  rob.in.wfi_enable := decode.in.fromCSR.custom.wfi_enable
-  rob.in.commit_stuck_check_enable := decode.in.fromCSR.custom.commit_stuck_check_enable
+  rob.in.wfiEnable := decode.in.fromCSR.custom.wfiEnable
+  rob.in.commitStuckCheckEnable := decode.in.fromCSR.custom.commitStuckCheckEnable
 
   io.toTop.cpuWfi := DelayN(rob.out.cpu_wfi, 5)
 

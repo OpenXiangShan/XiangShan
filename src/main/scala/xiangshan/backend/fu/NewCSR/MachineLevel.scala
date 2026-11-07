@@ -23,10 +23,10 @@ import scala.collection.immutable.SeqMap
 trait MachineLevel { self: NewCSR =>
   // Machine level Custom Read/Write
   val mbmc = if (HasBitmapCheck) Some(Module(new CSRModule("Mbmc", new MbmcBundle) {
-    val mbmc_lock = reg.BME.asBool
-    reg.BME := Mux(wen && !mbmc_lock, wdata.BME, reg.BME)
+    val mbmcLock = reg.BME.asBool
+    reg.BME := Mux(wen && !mbmcLock, wdata.BME, reg.BME)
     reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
-    reg.BMA := Mux(wen && !mbmc_lock, wdata.BMA, reg.BMA)
+    reg.BMA := Mux(wen && !mbmcLock, wdata.BMA, reg.BMA)
     reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
     reg.KEYIDEN := Mux(wen, wdata.KEYIDEN, reg.KEYIDEN)
   })
@@ -133,8 +133,8 @@ trait MachineLevel { self: NewCSR =>
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle){
     val reset_mtvec = Option.when(enableResetMtvec)(IO(Input(UInt(PAddrBits.W))))
     reset_mtvec.foreach{ init =>
-      val should_reset = RegNext(false.B, true.B)
-      when(should_reset){
+      val shouldReset = RegNext(false.B, true.B)
+      when(shouldReset){
         reg := init.asTypeOf(reg)
       }.elsewhen(wen){
         reg.addr := wdata.addr
@@ -343,7 +343,7 @@ trait MachineLevel { self: NewCSR =>
 
     if (soc.IMSICParams.HasTEEIMSIC) {
       // bit 48 LCOFIP
-      regOut.LC48IP := aiaToCSR.notice_pending
+      regOut.LC48IP := aiaToCSR.noticePending
     }
   }).setAddr(CSRs.mip)
 
