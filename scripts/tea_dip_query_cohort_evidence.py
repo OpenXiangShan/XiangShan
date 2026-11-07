@@ -124,6 +124,30 @@ def gain_span(before, after):
                 success_fraction_bounds={key: value / count for key, value in bounds['success'].items()} if count else None)
 
 
+def cancel_source_contract(evidence, source):
+    # These implications use the actual pipe equations AND the region wiring.
+    # In particular, IS0 read failure is tied low in this revision.
+    assert source == '3630fe3ca743aa00a26c2183d1a03c54c80844bd'
+    files = {
+        'FltIssuePipe.scala': 'c819fb4c1f41bf21d764e6e25dacebf48da9981652ed0b76bc88a5828ae624db',
+        'FltRegionModule.scala': 'dbaaeafb695322f96f33650faae04b9215d62167f447b51e94a6d10687c0a925',
+        'FltIssueQueue.scala': '4cb1d372dd91bd97e58f9997ec6ad5f217d750a30bd5a47f3124b207466a611a',
+    }
+    assert all(digest(evidence / 'source' / name) == sha for name, sha in files.items()), 'Cancellation source contract changed'
+    return dict(source=source, files_sha256=files)
+
+
+def cancel_subsets(span):
+    delta = span['delta']
+    assert delta['cancel_is0_no_src'] <= delta['cancel_is0'] and delta['cancel_ex0_no_src'] <= delta['cancel_ex0']
+    counts = dict(fdiv_fu_busy_without_source_cancel=delta['cancel_ex0_no_src'],
+                  i2f_wb_arbiter_without_source_cancel=delta['cancel_is0_no_src'])
+    counts['unclassified_cancel'] = delta['cancel'] - sum(counts.values())
+    return {name: dict(response_span_count=count, selected_origin_eventual_count_bounds=dict(
+        lower=max(0, count - span['pending_begin']), upper=min(delta['selected'], count + span['pending_end'])))
+        for name, count in counts.items()}
+
+
 def analyze(root, point=None):
     evidence = root / 'evidence/query-cohort-observe'
     stage = evidence / 'closed-points' / point if point else root / 'query-cohort-observation'
@@ -144,6 +168,7 @@ def analyze(root, point=None):
     spec = json.loads((evidence / 'experiment.json').read_text())
     source = json.loads((evidence / 'source.json').read_text())
     assert spec['source'] == source['head'] == receipt['build']['source']
+    cause_contract = cancel_source_contract(evidence, source['head'])
     assert digest(evidence / 'experiment.json') == digest(stage / 'experiment.json') == launch['spec_sha256']
     assert digest(stage / 'run.py') == launch['runner_sha256']
     for name, key in [('native_perf.py', 'native_reader'), ('tea_dip_query_endpoint_evidence.py', 'helper'), ('parent-closed-inputs.json', 'parent_receipt')]:
@@ -201,13 +226,14 @@ def analyze(root, point=None):
                 selected_interval = counters[queue + '.diag_fdiv_query_gain_selected_uops']
                 span['native_interval_gain_selected'] = selected_interval
                 span['selection_interval_alignment_verified'] = span['delta']['selected'] == selected_interval
+                span['source_verified_rejection_subsets'] = cancel_subsets(span)
                 queue_rows.append(dict(queue=queue, lifetime=counts, span=span))
             phases.append(dict(phase=label, native_print_stamp=stamp, queues=queue_rows))
             previous = queues
         rows.append(dict(point=point, parent_native_six_table_neutrality=neutral, phases=phases))
     return dict(pending=False, database_read=True, completed=len(rows), rows=rows, consumer_sha256=digest(Path(__file__)),
-                closed_receipt_sha256=digest(receipt_path), source=source['head'],
-                scope='Gain-selected issue attempts, not unique retired instructions. One pending tag follows entry movement. Lifetime and dump-span conservation include pending boundaries; eventual outcome bounds are conservative, not confidence intervals. Success means IQ issue-response success, not final writeback/retirement. Cancellation stage and no-src flags do not prove unique FU-busy cause or criticality. Old/new shadow predicates are in the current machine state. No opportunity-to-CPI conversion or suite score.')
+                closed_receipt_sha256=digest(receipt_path), source=source['head'], cancel_source_contract=cause_contract,
+                scope='Gain-selected issue attempts, not unique retired instructions. One pending tag follows entry movement. Lifetime and dump-span conservation include pending boundaries; eventual outcome bounds are conservative, not confidence intervals. Success means IQ issue-response success, not final writeback/retirement. For this source and wiring, EX0 fail without srcCancel implies FDIV FU busy; IS0 fail without srcCancel implies I2F WB arbitration blocked. These are sufficient rejection subsets, not complete cause counts or retirement-criticality. Old/new shadow predicates are in the current machine state. No opportunity-to-CPI conversion or suite score.')
 
 
 def main():
