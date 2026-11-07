@@ -19,15 +19,22 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def collect(root):
+def collect(root, point=None):
     evidence = root / 'evidence/query-trigger-observe'
     spec = json.loads((evidence / 'experiment.json').read_text())
     launch = json.loads((evidence / 'launch.json').read_text())
     original = next(row for row in launch['children'] if row['mode'] == 'observation')
+    cases = [spec['coremark'], *spec['short_cases'], spec['formal_case']]
+    observed = None
+    if point:
+        cases = [case for case in spec['short_cases'] if case['point'] == point]
+        assert len(cases) == 1, 'Select an original short diagnostic point'
+        starts = json.loads((evidence / 'short-first-live.json').read_text())
+        observed = next(row['process'] for row in starts['guests'] if row['point'] == point and row['live'])
     code = r'''from pathlib import Path
 from datetime import datetime,timezone
 import hashlib,json
-root=Path(RUN_DIR);spec=SPEC;original=ORIGINAL
+root=Path(RUN_DIR);spec=SPEC;original=ORIGINAL;cases=CASES;point=POINT;observed=OBSERVED
 assert hashlib.sha256((root/'experiment.json').read_bytes()).hexdigest()==SPEC_SHA
 assert hashlib.sha256((root/'run.py').read_bytes()).hexdigest()==RUNNER_SHA
 state=json.loads((root/'run-state.json').read_text())
@@ -36,33 +43,42 @@ def live(process):
  p=Path('/proc',str(process['pid']),'stat')
  return p.exists() and p.read_text().rsplit(')',1)[1].split()[19]==process['start_ticks']
 controller_live=live(state)
-if controller_live or state['phase']!='complete':
+if point:
+ folder=root/point;process=json.loads((folder/'process.json').read_text())
+ assert process==observed, 'Original short process identity changed'
+ if live(process) or not(folder/'result.json').exists():
+  print(json.dumps(dict(ready=False,point=point,phase=state['phase'],original_process_live=live(process),result_available=(folder/'result.json').exists(),database_read=False)))
+  raise SystemExit(0)
+if not point and (controller_live or state['phase']!='complete'):
  print(json.dumps(dict(ready=False,phase=state['phase'],controller=state,controller_live=controller_live,database_read=False)))
 else:
  build=json.loads(Path(spec['build_state']).read_text());assert build['source']==spec['source'] and build['phase']=='complete'
  rows=[]
- for case in [spec['coremark'],*spec['short_cases'],spec['formal_case']]:
+ for case in cases:
   folder=root/case['point'];process=json.loads((folder/'process.json').read_text());start=json.loads((folder/'launch-observation.json').read_text());result=json.loads((folder/'result.json').read_text())
   assert not live(process) and start['original_process_live'] and start['process']==result['process']==process
   assert result['source']==spec['source'] and result['binary_sha256']==build['binary_sha256']
   assert result['original_process_closed'] and result['exitcode']==0 and result['difftest_passed']
   rows.append(dict(point=case['point'],process=process,original_process_live=False))
  files={}
- for name in [case['point']+'/'+name for case in [spec['coremark'],*spec['short_cases'],spec['formal_case']] for name in FILES]+['experiment.json','run.py','native_perf.py','tea_dip_query_endpoint_evidence.py','run-state.json','short-results.json','formal-result.json']:
+ names=[case['point']+'/'+name for case in cases for name in FILES]+['experiment.json','run.py','native_perf.py','tea_dip_query_endpoint_evidence.py']
+ if not point:names+=['run-state.json','short-results.json','formal-result.json']
+ for name in names:
   path=root/name
   with path.open('rb') as stream:sha=hashlib.file_digest(stream,'sha256').hexdigest()
   files[name]=dict(bytes=path.stat().st_size,sha256=sha)
- print(json.dumps(dict(ready=True,utc=datetime.now(timezone.utc).isoformat(),root=str(root),controller=state,controller_live=False,guests=rows,build=build,files=files,database_read=False)))
-'''.replace('RUN_DIR', repr(launch['run_dir'])).replace('SPEC_SHA', repr(launch['spec_sha256'])).replace('RUNNER_SHA', repr(launch['runner_sha256'])).replace('SPEC', repr(spec)).replace('ORIGINAL', repr(original)).replace('FILES', repr(FILES))
+ print(json.dumps(dict(ready=True,utc=datetime.now(timezone.utc).isoformat(),root=str(root),controller=state,controller_live=controller_live,point=point,guests=rows,build=build,files=files,database_read=False)))
+'''.replace('RUN_DIR', repr(launch['run_dir'])).replace('SPEC_SHA', repr(launch['spec_sha256'])).replace('RUNNER_SHA', repr(launch['runner_sha256'])).replace('SPEC', repr(spec)).replace('ORIGINAL', repr(original)).replace('FILES', repr(FILES)).replace('CASES', repr(cases)).replace('OBSERVED', repr(observed)).replace('POINT', repr(point))
     reply = subprocess.run(['proxychains', '-q', 'ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', 'node031', 'python3', '-'],
                            input=code, text=True, capture_output=True, timeout=50, check=True)
     receipt = json.loads(reply.stdout)
-    (evidence / 'collection-status.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    status_path = evidence / (point + '-collection-status.json' if point else 'collection-status.json')
+    status_path.write_text(json.dumps(receipt, indent=2) + '\n')
     if not receipt['ready']:
         return receipt
-    stage = root / 'query-trigger-observation'
+    stage = evidence / 'short-closed' / point if point else root / 'query-trigger-observation'
     assert not stage.exists(), 'Use the existing closed archive for offline analysis'
-    stage.mkdir()
+    stage.mkdir(parents=True)
     command = 'tar -C ' + shlex.quote(receipt['root']) + ' -czf - ' + ' '.join(map(shlex.quote, receipt['files']))
     with (stage / 'originals.tar.gz').open('wb') as stream:
         subprocess.run(['proxychains', '-q', 'ssh', 'node031', command], stdout=stream, check=True, timeout=60)
@@ -76,14 +92,19 @@ else:
     return receipt
 
 
-def analyze(root):
+def analyze(root, point=None):
     evidence = root / 'evidence/query-trigger-observe'
-    stage = root / 'query-trigger-observation'
+    stage = evidence / 'short-closed' / point if point else root / 'query-trigger-observation'
     receipt_path = stage / 'closure-receipt.json'
     if not receipt_path.exists():
         return dict(pending=True, database_read=False, rows=[], reason='Original diagnostic controller and guests not archived closed')
     receipt = json.loads(receipt_path.read_text())
-    assert receipt['ready'] and not receipt['controller_live'] and receipt['controller']['phase'] == 'complete'
+    assert receipt['ready']
+    if point:
+        assert receipt['point'] == point and len(receipt['guests']) == 1
+        assert receipt['guests'][0]['point'] == point and not receipt['guests'][0]['original_process_live']
+    else:
+        assert not receipt['controller_live'] and receipt['controller']['phase'] == 'complete'
     launch = json.loads((evidence / 'launch.json').read_text())
     original = next(row for row in launch['children'] if row['mode'] == 'observation')
     assert all(receipt['controller'][key] == original[key] for key in ['pid', 'start_ticks'])
@@ -114,7 +135,8 @@ def analyze(root):
     helper = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(helper)
     fields = source['new_exact_counter_names']
-    cases = [spec['coremark'], *spec['short_cases'], spec['formal_case']]
+    cases = [case for case in spec['short_cases'] if case['point'] == point] if point else [spec['coremark'], *spec['short_cases'], spec['formal_case']]
+    assert cases
     rows = []
     for case in cases:
         point = case['point']
@@ -160,8 +182,7 @@ def analyze(root):
                 results.append(dict(queue=queue, counts=short, checks=checks))
             phases.append(dict(phase=phase, native_print_stamp=stamp, queues=results))
         assert len(phases) == (2 if case.get('warmup') else 1)
-        rows.append(dict(point=point, parent_native_six_table_neutrality=original_neutrality, phases=phases,
-                         formal_instrumentation_neutrality=None if 'control' not in case else original_neutrality['passed']))
+        rows.append(dict(point=point, parent_native_six_table_neutrality=original_neutrality, phases=phases))
     return dict(pending=False, database_read=True, completed=len(rows), rows=rows,
                 source=source['head'], consumer_sha256=digest(Path(__file__)), closed_receipt_sha256=digest(receipt_path),
                 performance_causality_validated=None,
@@ -172,11 +193,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', type=Path, required=True)
     parser.add_argument('--action', choices=['collect', 'analyze'], required=True)
+    parser.add_argument('--point', help='Collect or analyze one independently closed original short point')
     options = parser.parse_args()
     root = options.report_dir.resolve()
-    result = collect(root) if options.action == 'collect' else analyze(root)
+    result = collect(root, options.point) if options.action == 'collect' else analyze(root, options.point)
     if options.action == 'analyze' and not result['pending']:
-        out = root / 'query-trigger-observation/analysis'
+        out = (root / 'evidence/query-trigger-observe/short-closed' / options.point if options.point else root / 'query-trigger-observation') / 'analysis'
         out.mkdir(exist_ok=True)
         (out / 'evidence.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
