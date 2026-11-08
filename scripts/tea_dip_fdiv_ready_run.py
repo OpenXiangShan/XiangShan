@@ -30,7 +30,9 @@ def completed_guest(folder, build, case):
         write(folder / 'process.json', process)
         write(folder / 'launch-observation.json', dict(process=process, command=command, source=build['source'],
               binary_sha256=build['binary_sha256'], original_process_live=True, utc=datetime.now(timezone.utc).isoformat()))
-        rc = child.wait()
+        _, status, usage = os.wait4(child.pid, 0)
+        child.returncode = os.waitstatus_to_exitcode(status)
+        rc = child.returncode
     (folder / 'exitcode').write_text(str(rc))
     text = (folder / 'simulator_out.txt').read_text()
     flags = {name: bool(re.search(r'^' + name + ' = ' + str(value) + '$', text, re.M))
@@ -43,7 +45,10 @@ def completed_guest(folder, build, case):
     result = dict(point=case['point'], source=build['source'], binary_sha256=build['binary_sha256'], process=process,
                   original_process_closed=True, exitcode=rc, difftest_passed=passed, sampler_flags=flags,
                   trap_counts=[int(v.replace(',', '')) for v in counts.groups()] if counts else None,
-                  host_wall_seconds=time.monotonic() - began, performance_speedup=None)
+                  host_wall_seconds=time.monotonic() - began,
+                  host_rusage={name: getattr(usage, 'ru_' + name) for name in
+                               ['utime', 'stime', 'minflt', 'majflt', 'nvcsw', 'nivcsw', 'inblock', 'oublock', 'maxrss']},
+                  performance_speedup=None)
     write(folder / 'result.json', result)
     assert passed, result
     return result
