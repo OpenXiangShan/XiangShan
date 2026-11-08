@@ -494,12 +494,15 @@ class KunminghuV2WithoutLLCConfig(n: Int = 1) extends Config(
     case MonitorsEnabled => false
     case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDiff = false)
     case coupledL2.WithoutLLC => true
+    case CVMParamsKey => up(CVMParamsKey).copy(KeyIDBits = 1)
     case SoCParamsKey => up(SoCParamsKey).copy(
+      PAddrBits = 48, // Retain the upstream CPU, MMU and cache address widths.
       OpenLLCParamsOpt = None,
       L3CacheParamsOpt = None,
       PmemRanges = Seq(MemoryRange(0x80000000L, 0x880000000L)),
       PMAConfigs = Seq(
-        PMAConfigEntry(0x0L, range = 0x1000000000000L, a = 3),
+        // Higher addresses match no PMA entry and retain the default deny.
+        PMAConfigEntry(0x0L, range = 1L << 37, a = 3),
         PMAConfigEntry(0x880000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),
         PMAConfigEntry(0x80000000L, a = 1, w = true, r = true),
         PMAConfigEntry(0x3C000000L, a = 1, w = true, r = true),
