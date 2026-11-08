@@ -92,6 +92,8 @@ def main():
         save(phase='protocol_micro', coremark_gate_passed=True)
         command = ['python3', '-u', spec['micro_runner'], '--output-dir', str(root / 'protocol-micro'),
                    '--candidate-build', str(root / 'build-identity.json'), '--control-build', spec['control_build'], '--iterative']
+        if spec.get('turnover_micro'):
+            command.append('--turnover')
         with (root / 'micro.stdout').open('w') as stdout, (root / 'micro.stderr').open('w') as stderr:
             child = subprocess.Popen(command, cwd=root, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr)
             write(root / 'micro-controller.json', dict(command=command, pid=child.pid,
@@ -99,8 +101,8 @@ def main():
             rc = child.wait()
         assert rc == 0, 'Inspect original protocol-micro output'
         rows = json.loads((root / 'protocol-micro/results.json').read_text())
-        assert len(rows) == 12 and all(row['passed'] for row in rows), rows
-        save(phase='short', micro_gate_passed=True, micro_completed=12)
+        assert len(rows) == (18 if spec.get('turnover_micro') else 12) and all(row['passed'] for row in rows), rows
+        save(phase='short', micro_gate_passed=True, micro_completed=len(rows))
         with ThreadPoolExecutor(max_workers=3) as pool:
             results = list(pool.map(lambda case: completed_guest(root / case['point'], build, case), spec['short_cases']))
         write(root / 'short-results.json', results)
