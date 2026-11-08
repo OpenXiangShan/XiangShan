@@ -84,6 +84,7 @@ print(json.dumps(dict(succeeded=sorted(set(re.findall(r'([A-Za-z0-9_.-]+) succee
         for name in ['archives','results','closed-receipts']:(raw/name).mkdir(parents=True,exist_ok=True)
         names = [point+'/'+name for name in receipt['files']]
         archive = raw/'archives'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+point+'.tar.gz')
+        archive.with_suffix('.receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
         command = 'tar -C '+shlex.quote(identity['report'])+' -czf - '+' '.join(map(shlex.quote,names))
         with archive.open('wb') as stream:
             subprocess.run(['proxychains','-q','ssh',old['host'].split('.')[0],command],stdout=stream,check=True,timeout=50)
@@ -94,7 +95,7 @@ print(json.dumps(dict(succeeded=sorted(set(re.findall(r'([A-Za-z0-9_.-]+) succee
         manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
         for name, entry in receipt['files'].items():
             body = (raw/'results'/point/name).read_bytes()
-            assert len(body) == entry['bytes'] and hashlib.sha256(body).hexdigest() == entry['sha256']
+            assert len(body) == entry['bytes'] and hashlib.sha256(body).hexdigest() == entry['sha256'], f'{point}/{name}: copied data differ from archived closure receipt {archive.with_suffix(".receipt.json")}'
             manifest['results/'+point+'/'+name] = entry
         manifest_path.write_text(json.dumps(manifest,indent=2)+'\n')
         (raw/'closed-receipts'/(point+'.json')).write_text(json.dumps(receipt,indent=2)+'\n')
