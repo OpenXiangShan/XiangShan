@@ -313,7 +313,7 @@ class Sbuffer(implicit p: Parameters)
   // * remove dcache write block (if there is)
   
   // When TSO active, behaves as a queue, where no duplicated ptags are allowed, and merge only happens at tail
-  val tsoActive = RegInit(true.B)
+  val tsoActive = RegInit(false.B)
   // If we're transitioning to TSO. During the time, block all enqueuing, and drain the buffer
   val tsoTransitioning = RegInit(false.B)
   val tsoTail = RegInit(0.U(log2Up(StoreBufferSize).W))
@@ -683,7 +683,7 @@ class Sbuffer(implicit p: Parameters)
   // sbuffer_out_s0
   // ---------------------------------------------------------------------------
 
-  val need_drain = needDrain(sbuffer_state) || tsoActive
+  val need_drain = needDrain(sbuffer_state) || tsoActive || tsoTransitioning
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val sbuffer_out_s0_evictionIdx = Mux(missqReplayHasTimeOut,
     missqReplayTimeOutIdx,
