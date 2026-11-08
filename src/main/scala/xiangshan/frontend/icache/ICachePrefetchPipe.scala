@@ -175,6 +175,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   toItlb.bits.vaddr        := itlbVAddr.toUInt(VAddrBits - 1, 0)
   toItlb.bits.debug.pc     := itlbFullVa
   toItlb.bits.cmd          := TlbCmd.exec
+  toItlb.bits.fromHwPrefetch := false.B
   toItlb.bits.no_translate := false.B
   toItlb.bits.fullva       := itlbFullVa
   toItlb.bits.checkfullva  := true.B
