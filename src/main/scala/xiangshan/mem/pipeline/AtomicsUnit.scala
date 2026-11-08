@@ -503,6 +503,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dtlb.req.bits.checkfullva := true.B
   io.dtlb.resp.ready      := true.B
   io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
+  io.dtlb.req.bits.fromHwPrefetch := false.B
   io.dtlb.req.bits.debug.pc := uop.pc
   io.dtlb.req.bits.debug.robIdx := uop.robIdx
   io.dtlb.req.bits.debug.isFirstIssue := false.B
