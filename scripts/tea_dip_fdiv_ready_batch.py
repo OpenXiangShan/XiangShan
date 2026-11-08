@@ -13,8 +13,9 @@ def main():
     assert socket.gethostname().startswith('node')and not(root/'run-state.json').exists()
     gate=json.loads((root/'short-gate.json').read_text())
     assert digest(root/'short-gate.json')==spec['short_gate_sha256']and gate['validation_passed']and not gate['pending']
-    assert gate['source']==spec['builds']['candidate']['source']=='39a163eb3910ff9ecab02df4ac8e3c99d772feeb'
-    assert gate['control_source']=='2915a6b022bd957570bd961a01611026c2220fb7'
+    sources=('8f8ece60ac8b08b358743bc9db15a5a227dde0b8','39a163eb3910ff9ecab02df4ac8e3c99d772feeb')if spec.get('turnover')else('39a163eb3910ff9ecab02df4ac8e3c99d772feeb','2915a6b022bd957570bd961a01611026c2220fb7')
+    assert gate['source']==spec['builds']['candidate']['source']==sources[0]
+    assert gate['control_source']==spec['builds']['control']['source']==sources[1]
     assert len(gate['short_pairs'])==3 and any(r['comparison']['observed_native_speedup']>0 for r in gate['short_pairs'])
     for path,sha in spec['input_hashes'].items():assert digest(Path(path))==sha,path
     for build in spec['builds'].values():assert build['phase']=='complete'and digest(Path(build['binary']))==build['binary_sha256']
