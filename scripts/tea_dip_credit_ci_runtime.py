@@ -8,7 +8,7 @@ import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--report-dir', type=Path, required=True)
-parser.add_argument('--ci-evidence', choices=['ci-credit-div','ci-fdiv-credit','fdiv-wb-query-paired-ci'], required=True)
+parser.add_argument('--ci-evidence', choices=['ci-credit-div','ci-fdiv-credit','fdiv-wb-query-paired-ci','fdiv-turnover-ci-20261108'], required=True)
 args = parser.parse_args()
 R = args.report_dir.resolve()
 O = R / 'evidence' / args.ci_evidence

@@ -50,7 +50,7 @@ def observe_once(root, namespace):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', type=Path, required=True)
-    parser.add_argument('--ci-evidence', choices=['ci-credit-div', 'ci-fdiv-credit', 'fdiv-wb-query-paired-ci'], required=True)
+    parser.add_argument('--ci-evidence', choices=['ci-credit-div', 'ci-fdiv-credit', 'fdiv-wb-query-paired-ci','fdiv-turnover-ci-20261108'], required=True)
     args = parser.parse_args()
     root = args.report_dir.resolve()
     folder = root / 'evidence' / args.ci_evidence
