@@ -513,6 +513,8 @@ class KunminghuV2WithoutLLCConfig(n: Int = 1) extends Config(
         PMAConfigEntry(0x00040000L, a = 1, x = true, r = true)
       ),
       extIntrs = 256,
+      DMAIdBits = 12, // The SoC DMA path, including its AXI register slice, carries 12-bit IDs.
+      MemIdBits = 12, // Match the SoC memory register slice and x2x bridge.
       XSTopPrefix = Some("bosc_")
     )
   })
