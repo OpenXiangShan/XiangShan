@@ -13,12 +13,12 @@ from tea_dip_fdiv_ready_evidence import metadata
 from tea_dip_query_endpoint_evidence import digest, old_execution, verify
 
 
-def collect(root):
-    evidence, launch = metadata(root, early_ready=True)
+def collect(root, retry_ready=False):
+    evidence, launch = metadata(root, early_ready=not retry_ready, retry_ready=retry_ready)
     stage = evidence / 'protocol-closure'
     if (stage / 'closure-receipt.json').exists():
         return json.loads((stage / 'closure-receipt.json').read_text())
-    code = 'launch=' + repr(launch) + '\n' + r'''from pathlib import Path
+    code = 'launch=' + repr(launch) + '\nretry_ready=' + repr(retry_ready) + '\n' + r'''from pathlib import Path
 from datetime import datetime,timezone
 import hashlib,json
 root=Path(launch['run_dir']);micro=root/'protocol-micro'
@@ -38,6 +38,7 @@ else:
  else:
   names=[str(p.relative_to(root))for p in micro.rglob('*')if p.is_file()and'__pycache__'not in p.parts]
   names+=['experiment.json','build-identity.json','control-coremark-closure.json','micro-controller.json','tea_dip_fdiv_ready_run.py','tea_dip_wb_protocol_micro.py','native_perf.py','tea_dip_query_endpoint_evidence.py','coremark-gate.json','micro.stdout','micro.stderr']
+  if retry_ready:names.append('tea_dip_fdiv_retry_run.py')
   files={n:dict(bytes=(root/n).stat().st_size,sha256=sha(root/n))for n in names}
   print(json.dumps(dict(utc=datetime.now(timezone.utc).isoformat(),ready=True,root=str(root),parent=parent,parent_live=live(parent),original_micro_controller_closed=True,all_original_guests_closed=True,child=child,state=state,files=files,database_read=False)))
 '''
@@ -59,8 +60,8 @@ else:
     return receipt
 
 
-def analyze(root):
-    evidence, launch = metadata(root, early_ready=True)
+def analyze(root, retry_ready=False):
+    evidence, launch = metadata(root, early_ready=not retry_ready, retry_ready=retry_ready)
     stage = evidence / 'protocol-closure'
     if not (stage / 'closure-receipt.json').exists():
         return dict(pending=True, database_read=False)
@@ -84,6 +85,8 @@ def analyze(root):
     assert spec['binaries']['stage_control']['sha256'] == control['build']['binary_sha256']
     for name in ['tea_dip_fdiv_ready_run.py', 'tea_dip_wb_protocol_micro.py', 'native_perf.py', 'tea_dip_query_endpoint_evidence.py']:
         assert digest(stage / name) == launch['spec']['input_hashes'][str(Path(launch['run_dir']) / name)]
+    if retry_ready:
+        assert digest(stage/'tea_dip_fdiv_retry_run.py') == launch['spec']['input_hashes'][str(Path(launch['run_dir'])/'tea_dip_fdiv_retry_run.py')]
     assert spec['runner_sha256'] == digest(stage / 'tea_dip_wb_protocol_micro.py')
     assert read_json(stage / 'coremark-gate.json')['passed']
     for row in rows:
@@ -155,7 +158,7 @@ def analyze(root):
         a, b = [observations[variant, name] for variant in ['stage_control', 'candidate']]
         delta = values[1]['cycles'] - values[0]['cycles']
         comparisons.append(dict(case=name, control_trap_instructions=values[0]['instructions'], candidate_trap_instructions=values[1]['instructions'], trap_instruction_change=values[1]['instructions']-values[0]['instructions'], control_trap_cycles=values[0]['cycles'], candidate_trap_cycles=values[1]['cycles'], trap_cycle_change=delta, native_six_table_equality=equality, original8f8_control_reproduced=True, observations=[a, b], endpoint_state_delta={state: b['endpoint_states'][state]-a['endpoint_states'][state] for state in a['endpoint_states']}, endpoint_cycle_delta=b['endpoint_cycle']-a['endpoint_cycle'], endpoint_cycle_delta_matches_trap_delta=b['endpoint_cycle']-a['endpoint_cycle']==delta, performance_speedup=None))
-    return dict(pending=False, database_read=True, validation_passed=True, source=build['source'], control_source=control['build']['source'], binary_sha256=build['binary_sha256'], all18_Difftest_passed=True, all9_controls_reproduce_original8f8=True, rows=comparisons, closed_files=len(receipt['files']), parent_live_at_collection=receipt['parent_live'], closed_receipt_sha256=digest(stage / 'closure-receipt.json'), consumer_sha256=digest(Path(__file__)), scope='Closed early-ready protocol child only. Exact native endpoint-prefix states and independent DIP samples; original8f8 control full-native/six-table calibration. Whole-boot trap counts are diagnostic progress, not SPEC intended-work CPI, unique critical-chain savings, suite score, physical timing or adoption proof.')
+    return dict(pending=False, database_read=True, validation_passed=True, source=build['source'], control_source=control['build']['source'], binary_sha256=build['binary_sha256'], all18_Difftest_passed=True, all9_controls_reproduce_original8f8=True, rows=comparisons, closed_files=len(receipt['files']), parent_live_at_collection=receipt['parent_live'], closed_receipt_sha256=digest(stage / 'closure-receipt.json'), consumer_sha256=digest(Path(__file__)), scope='Closed scalar-ready protocol child only. Exact native endpoint-prefix states and independent DIP samples; original8f8 control full-native/six-table calibration. Whole-boot trap counts are diagnostic progress, not SPEC intended-work CPI, unique critical-chain savings, suite score, physical timing or adoption proof.')
 
 
 def read_json(path):
@@ -166,16 +169,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', required=True, type=Path)
     parser.add_argument('--collect', action='store_true')
+    parser.add_argument('--retry-ready', action='store_true', help='Use the registered edba/8f8 retry-ready protocol child')
     args = parser.parse_args()
     root = args.report_dir.resolve()
     if args.collect:
-        receipt = collect(root)
+        receipt = collect(root, args.retry_ready)
         if not receipt['ready']:
             print(json.dumps(receipt, indent=2))
             return
-    result = analyze(root)
+    result = analyze(root, args.retry_ready)
     if not result['pending']:
-        evidence, _ = metadata(root, early_ready=True)
+        evidence, _ = metadata(root, early_ready=not args.retry_ready, retry_ready=args.retry_ready)
         (evidence / 'protocol-closure/analysis.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
 
