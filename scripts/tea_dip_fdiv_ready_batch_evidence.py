@@ -110,7 +110,11 @@ def guard_pair(root,point,turnover=False):
     for flag in ['-I','-W','-s','-i','--diff','--cst-file','--dump-select-db']:
         commands=[item['case']['command']for item in items];assert commands[0][commands[0].index(flag)+1]==commands[1][commands[1].index(flag)+1]
     sys.path.insert(0,str(root))
-    return dict(pending=False,database_read=True,validation_passed=True,point=point,comparison=pair(a['folder'],b['folder']),full_native_six_tables=old_execution(a['folder'],b['folder'],set()),closed_receipt_sha256=[item['receipt_sha256']for item in items],consumer_sha256=digest(Path(__file__)),scope='Registered same-window stage-control/candidate short guard. Exact TEA conditional on observed endpoint alignment; no suite score or physical timing claim.')
+    from analyze_windows import extract
+    from tea_dip_sampling_concordance import concordance
+    comparison=pair(a['folder'],b['folder'])
+    sampling=concordance([extract(item['folder'],variant)[0] for item,variant in zip(items,['control','candidate'])],comparison)
+    return dict(pending=False,database_read=True,validation_passed=True,point=point,comparison=comparison,tea_sampling_concordance=sampling,full_native_six_tables=old_execution(a['folder'],b['folder'],set()),closed_receipt_sha256=[item['receipt_sha256']for item in items],consumer_sha256=digest(Path(__file__)),scope='Registered same-window stage-control/candidate short guard. Exact TEA conditional on observed endpoint alignment; no suite score or physical timing claim.')
 
 
 def main():
