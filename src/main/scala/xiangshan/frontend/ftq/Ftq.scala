@@ -23,6 +23,7 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.ChiselDB
 import utility.DataHoldBypass
 import utility.HasCircularQueuePtrHelper
 import utility.HasPerfEvents
@@ -47,6 +48,7 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.IfuToFtqIO
+import xiangshan.frontend.Pc
 import xiangshan.frontend.PcInit
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuCommitMeta
@@ -58,6 +60,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
 import xiangshan.frontend.icache.TwoFetchFailReason
@@ -760,4 +763,41 @@ class Ftq(implicit p: Parameters) extends FtqModule
     ) ++ TwoFetchFailReason.getValidSeq(io.fromICache.fromMainPipe.perf_twoFetchFailReason),
     withPriority = true
   )
+
+  // Joint metadata for committed mispredicts; existing native counters are marginal views.
+  private class BpuCommitAudit extends Bundle {
+    val bpId      = UInt(XLEN.W)
+    val startPc   = new Pc
+    val source    = new BpuPredictionSource
+    val s1        = new Prediction
+    val s2        = new Prediction
+    val s3        = new Prediction
+    val branch    = new BranchInfo
+    val reason    = BlameBpuSource.BlameType()
+    val mbtbMatch = Bool()
+    val usedSc    = Bool()
+  }
+
+  private val bpuCommitAudit = Wire(new BpuCommitAudit)
+  private val bpuAuditMatches = commitPerfMeta.bpuPerf.mbtbMeta.entries.flatten.map(e =>
+    e.hit(commitPerfMeta.mispredictBranchInfo) && e.attribute === commitPerfMeta.mispredictBranchInfo.attribute
+  )
+  bpuCommitAudit.bpId      := commitPerfMeta.bpuPerf.bpId
+  bpuCommitAudit.startPc   := commitPerfMeta.bpuPerf.startPc
+  bpuCommitAudit.source    := commitPerfMeta.bpuPerf.bpSource
+  bpuCommitAudit.s1        := commitPerfMeta.bpuPerf.s1Prediction
+  bpuCommitAudit.s2        := commitPerfMeta.bpuPerf.s2Prediction
+  bpuCommitAudit.s3        := commitPerfMeta.bpuPerf.s3Prediction
+  bpuCommitAudit.branch    := commitPerfMeta.mispredictBranchInfo
+  bpuCommitAudit.reason := BlameBpuSource(
+    perf_commitHasMispredict,
+    commitPerfMeta.bpuPerf,
+    commitPerfMeta.mispredictBranchInfo
+  )
+  bpuCommitAudit.mbtbMatch := bpuAuditMatches.reduce(_ || _)
+  bpuCommitAudit.usedSc    := bpuCommitAudit.mbtbMatch &&
+    Mux1H(PriorityEncoderOH(bpuAuditMatches), commitPerfMeta.bpuPerf.scUsed.asBools)
+
+  private val bpuCommitTable = ChiselDB.createTable("BpuCommitMispredict", new BpuCommitAudit, basicDB = true)
+  bpuCommitTable.log(bpuCommitAudit, perf_commitHasMispredict, clock = clock, reset = reset)
 }
