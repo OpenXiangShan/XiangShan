@@ -83,7 +83,7 @@ else:
  if live(process):print(json.dumps(dict(ready=False,point=point,original_process_live=True,database_read=False)))
  else:
   build=json.loads((root/'build-identity.json').read_text());assert build['phase']=='complete'and build['source']==result['source']==launch['spec']['source']and result['binary_sha256']==build['binary_sha256']
-  assert result['process']==process and result['original_process_closed']and result['exitcode']==0 and result['difftest_passed']
+  assert result['process']==process and result['original_process_closed']
   names=['command.json','result.json','exitcode','process.json','launch-observation.json','simulator_out.txt','simulator_err.txt','simulator.db']
   files={n:dict(bytes=(folder/n).stat().st_size,sha256=hashlib.sha256((folder/n).read_bytes()).hexdigest())for n in names}
   print(json.dumps(dict(ready=True,utc=datetime.now(timezone.utc).isoformat(),root=str(folder),point=point,controller=state,controller_live=live(state),original_process_live=False,process=process,build=build,spec_sha256=launch['spec_sha256'],files=files,database_read=False)))
@@ -243,12 +243,18 @@ def analyze_point(root, point, turnover=False, early_ready=False):
     row = json.loads((folder / 'result.json').read_text())
     started = json.loads((folder / 'launch-observation.json').read_text())
     assert row['source'] == source and row['binary_sha256'] == receipt['build']['binary_sha256']
-    assert row['original_process_closed'] and row['difftest_passed'] and row['exitcode'] == 0 and (folder / 'exitcode').read_text().strip() == '0'
+    assert row['original_process_closed'] and (folder / 'exitcode').read_text().strip() == str(row['exitcode'])
     assert row['process'] == started['process'] == receipt['process'] and started['original_process_live']
     command = json.loads((folder / 'command.json').read_text())
     assert command == started['command'] and command[6] == receipt['build']['binary']
     for flag in ['-I','-C','-s','-i','--diff','--cst-file','--dump-select-db']:
         assert command[command.index(flag)+1] == case['command'][case['command'].index(flag)+1]
+    if row['exitcode'] != 0 or not row['difftest_passed']:
+        return dict(pending=False,database_read=False,validation_passed=False,point=point,
+                    source=source,control_source=control_source,original_point_closed=True,
+                    original_result=row,comparison=None,performance_speedup=None,
+                    closed_receipt_sha256=digest(folder/'closure-receipt.json'),consumer_sha256=digest(Path(__file__)),
+                    reason='Original point failed correctness; archived logs have no valid performance result')
     assert digest(root / 'native_perf.py') == launch['spec']['input_hashes'][str(Path(launch['run_dir'])/'native_perf.py')]
     assert digest(Path(__file__).with_name('tea_dip_query_endpoint_evidence.py')) == launch['spec']['input_hashes'][str(Path(launch['run_dir'])/'tea_dip_query_endpoint_evidence.py')]
     control_root = root / ('fdiv-turnover-validation-20261108' if early_ready else 'fdiv-ready-validation' if turnover else ('wb-query-endpoint-validation' if point == 'coremark' else 'wb-query-endpoint-focused'))
