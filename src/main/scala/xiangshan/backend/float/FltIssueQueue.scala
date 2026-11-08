@@ -189,6 +189,19 @@ class FltIssueQueue(
   dontTouch(enqEntryCanIssueVec)
   dontTouch(fastEntryCanIssueVec)
 
+  // Preserve the WB-only eligibility vectors for their existing diagnostics.
+  // Only selection additionally waits for the variable-latency FU.
+  private val enqEntrySelectVec = in.fdivReadyAhead3Cycle.map { ready =>
+    VecInit(enqEntryCanIssueVec.zipWithIndex.map { case (eligible, deqIdx) =>
+      eligible & VecInit(enqEntries.map(e => !FuType.isFdiv(e.bits.payload.fuType) || ready(deqIdx))).asUInt
+    })
+  }.getOrElse(enqEntryCanIssueVec)
+  private val fastEntrySelectVec = in.fdivReadyAhead3Cycle.map { ready =>
+    VecInit(fastEntryCanIssueVec.zipWithIndex.map { case (eligible, deqIdx) =>
+      eligible & VecInit(fastEntries.map(e => !FuType.isFdiv(e.bits.payload.fuType) || ready(deqIdx))).asUInt
+    })
+  }.getOrElse(fastEntryCanIssueVec)
+
   private val enqEntryDeqSel = Wire(Vec(param.numEnq, Bool()))
   private val fastEntryDeqSel = Wire(Vec(param.numFastEntry, Bool()))
   private val entryDeqSel: Seq[Bool] = enqEntryDeqSel ++ fastEntryDeqSel
@@ -270,13 +283,13 @@ class FltIssueQueue(
   private val enqEntryOldest: Vec[ValidIO[UInt]] = NewAgeDetector(
     numEntries = param.numEnq,
     enq = enqEntryEnqNotFlush,
-    canIssue = enqEntryCanIssueVec,
+    canIssue = enqEntrySelectVec,
   )
 
   private val fastEntryOldest: Vec[ValidIO[UInt]] = AgeDetector(
     numEntries = param.numFastEntry,
     enq = fastEntryEnqNotFlushOH,
-    canIssue = fastEntryCanIssueVec,
+    canIssue = fastEntrySelectVec,
   )
 
   for (etyIdx <- in.enq.indices) {
@@ -742,6 +755,9 @@ object FltIssueQueue {
     val flush = ValidIO(new Redirect)
     val enq = Vec(param.numEnq, ValidIO(new Enq))
     val resps = new InResp
+    val fdivReadyAhead3Cycle = Option.when(param.getFuCfgs.exists(_.fuType == FuType.fDivSqrt))(
+      Vec(param.numDeq, Bool())
+    )
     val fromWbFuBusyTable = new WbFuBusyTableReadBundle()
     val wakeup = new InWakeUp()
     val ldCancel = Vec(backendParams.LdExuCnt, Input(new LoadCancelIO))

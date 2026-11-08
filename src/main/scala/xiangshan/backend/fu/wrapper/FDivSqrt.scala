@@ -68,6 +68,8 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
 
 class FDivSqrtFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltNonFixedLatFunc(cfg) {
 
+  val startReadyAhead3Cycle = IO(Output(Bool()))
+
   // io alias
   private val opcode = fuOpType(3)
   private val src0 = ex0src0
@@ -115,6 +117,7 @@ class FDivSqrtFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltNonFixedL
   fdiv.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN
   fdiv.io.wakeupSuccess := in.busyTableEmpty.get
   outFuBusy := !fdiv.io.start_ready_o
+  startReadyAhead3Cycle := fdiv.io.startReadyAhead3Cycle
 
   private val outFmt = RegEnable(FDivOpcodes.getFormat(ex0ctrl.opcode), inFire)
 
