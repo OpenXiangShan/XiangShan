@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--candidate-build', required=True, type=Path)
     parser.add_argument('--control-build', type=Path, help='Closed build identity for the stage control')
     parser.add_argument('--iterative', action='store_true', help='Also exercise non-power division, inexact sqrt and subnormal division')
+    parser.add_argument('--turnover', action='store_true', help='Also alternate FDIV/FSQRT formats, owners and special operands')
     args = parser.parse_args(); out = args.output_dir.resolve()
     assert socket.gethostname().startswith('node') and not out.exists()
     environment = Path('/nfs/home/wujiabin/work/xs-env/rtl-dip-experiments-20261103')
@@ -58,6 +59,10 @@ def main():
         bodies['iter_div_mixed'] = bodies['div_fli_mixed']
         bodies['iter_sqrt_mixed'] = bodies['sqrt_div_mixed']
         bodies['denormal_div_mixed'] = bodies['div_fli_mixed']
+    if args.turnover:
+        bodies['turnover_formats'] = '  fdiv.s fs0, ft0, ft1\n  fsqrt.d fs1, ft2\n  fdiv.d fs2, ft2, ft3\n  fsqrt.s fs3, ft1\n  fsd fs2, 0(t1)\n'
+        bodies['turnover_special'] = '  fdiv.d fs0, ft0, ft1\n  fdiv.d fs1, ft2, ft2\n  fsqrt.d fs2, ft3\n  fdiv.d fs3, ft4, ft0\n  fsd fs3, 0(t1)\n'
+        bodies['turnover_subnormal_sqrt'] = '  fsqrt.d fs0, ft2\n  fdiv.d fs1, ft1, ft0\n  fsqrt.d fs2, ft1\n  fdiv.d fs3, ft2, ft0\n  fsd fs3, 0(t1)\n'
     cases = []
     for name, body in bodies.items():
         folder = out / 'images' / name; folder.mkdir(parents=True)
@@ -66,7 +71,17 @@ def main():
             values = '0x3ff8000000000000, 0x4015333333333333'
         elif name == 'denormal_div_mixed':
             values = '0x3ff8000000000000, 0x0010000000000000'
-        assembly = '.section .text\n.globl _start\n.option norelax\n_start:\n  li t0, 0x6000\n  csrs mstatus, t0\n  la t0, values\n  fld ft0, 0(t0)\n  fld ft1, 8(t0)\n  la t1, sink\n  li s0, 256\nloop:\n' + body + '  addi s0, s0, -1\n  bnez s0, loop\n  li a0, 0\n_pass:\n  .word 0x0000006b\n.section .data\n.balign 8\nvalues:\n  .dword ' + values + '\nsink:\n  .zero 8\n'
+        extra_loads = ''
+        if name == 'turnover_formats':
+            values = '0xffffffff3fc00000, 0xffffffff40a9999a, 0x4015333333333333, 0x3ff8000000000000'
+            extra_loads = '  fld ft2, 16(t0)\n  fld ft3, 24(t0)\n'
+        elif name == 'turnover_special':
+            values = '0x3ff8000000000000, 0x4015333333333333, 0, 0xbff0000000000000, 0x0010000000000000'
+            extra_loads = '  fld ft2, 16(t0)\n  fld ft3, 24(t0)\n  fld ft4, 32(t0)\n'
+        elif name == 'turnover_subnormal_sqrt':
+            values = '0x3ff8000000000000, 0x4015333333333333, 0x0000000000000001'
+            extra_loads = '  fld ft2, 16(t0)\n'
+        assembly = '.section .text\n.globl _start\n.option norelax\n_start:\n  li t0, 0x6000\n  csrs mstatus, t0\n  la t0, values\n  fld ft0, 0(t0)\n  fld ft1, 8(t0)\n' + extra_loads + '  la t1, sink\n  li s0, 256\nloop:\n' + body + '  addi s0, s0, -1\n  bnez s0, loop\n  li a0, 0\n_pass:\n  .word 0x0000006b\n.section .data\n.balign 8\nvalues:\n  .dword ' + values + '\nsink:\n  .zero 8\n'
         source = folder / 'program.S'; source.write_text(assembly); elf = folder / 'program.elf'; image = folder / 'program.bin'
         command = [str(tools / 'riscv64-unknown-linux-gnu-gcc'), '-march=rv64gc_zfa', '-mabi=lp64d', '-mcmodel=medany', '-nostdlib', '-nostartfiles', '-static', '-Wl,--no-relax', '-Wl,-Ttext=0x80000000', '-Wl,-e,_start', str(source), '-o', str(elf)]
         subprocess.run(command, check=True, capture_output=True)
@@ -77,7 +92,7 @@ def main():
         write(folder / 'source.json', case); cases.append(case)
     state = dict(pid=os.getpid(),start_ticks=Path('/proc/self/stat').read_text().rsplit(')',1)[1].split()[19],host=socket.gethostname(),phase='running',completed=0,total=len(binaries)*len(cases))
     write(out/'run-state.json',state)
-    write(out/'experiment.json',dict(utc=datetime.now(timezone.utc).isoformat(),binaries=binaries,reference=spec['reference'],reference_sha256=spec['reference_sha256'],cst_sha256=digest(cst),cases=cases,cores=[132,133,134,135],seed=99,instruction_limit=100000,cycle_limit=200000,period=1000,selectors=selectors,runner_sha256=digest(Path(__file__)),scope='Focused stage-control/candidate FP protocol attempts. Optional iterative operands cover non-power division, inexact sqrt and subnormal division. Each has256iterations, bounded200kcycles, exact passPC and1700–3000 retired requirement; failed/limited attempts have no intended-work CPI or suite score.'))
+    write(out/'experiment.json',dict(utc=datetime.now(timezone.utc).isoformat(),binaries=binaries,reference=spec['reference'],reference_sha256=spec['reference_sha256'],cst_sha256=digest(cst),cases=cases,cores=[132,133,134,135],seed=99,instruction_limit=100000,cycle_limit=200000,period=1000,selectors=selectors,runner_sha256=digest(Path(__file__)),scope='Focused stage-control/candidate FP protocol attempts. Optional iterative operands cover non-power division, inexact sqrt and subnormal division; turnover operands alternate single/double, FDIV/FSQRT and result owners including invalid/subnormal inputs. Each has256iterations, bounded200kcycles, exact passPC and1700–3000 retired requirement; failed/limited attempts have no intended-work CPI or suite score.'))
     slots = queue.Queue()
     for core in [132,133,134,135]:slots.put(core)
     worker = threading.local()
