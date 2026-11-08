@@ -23,7 +23,7 @@ def scores(path):
     return rows
 
 
-def aggregate(baseline, comparisons, profile, before_scores, after_scores):
+def aggregate(baseline, comparisons, profile, before_scores, after_scores, variant='fdiv-wb-query'):
     expected = {r['point']: r for r in baseline}
     paired = {r['point']: r for r in comparisons}
     assert len(expected) == len(baseline) == len(paired) == len(comparisons) == 145
@@ -31,7 +31,7 @@ def aggregate(baseline, comparisons, profile, before_scores, after_scores):
     points = []
     for name, base in expected.items():
         row = paired[name]
-        assert row['variant'] == 'fdiv-wb-query'
+        assert row['variant'] == variant
         workload = base['workload']; benchmark = base['benchmark']
         checkpoint = name[len(workload) + 1:].rsplit('_', 1)[0]
         inputs = [w for w in profile if w.split('_')[0] == benchmark]
