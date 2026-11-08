@@ -53,9 +53,11 @@ def main():
         receipt = json.loads(Path(spec['control_receipt']).read_text())
         assert receipt['ready'] and not receipt['original_process_live']
         verify(Path(spec['control']), receipt['files'])
+        gate = None
         if spec['case']['point'] == 'coremark':
             assert receipt['build']['source'] == spec['control_source']
         else:
+            assert receipt['source'] == spec['control_source']
             gate = json.loads(Path(spec['coremark_gate']).read_text())
             assert gate['passed'] and gate['source'] == spec['source']
             assert gate['native_six_table_neutrality']['passed'] and gate['event_audit']['passed']
@@ -69,7 +71,11 @@ def main():
             time.sleep(15)
         assert digest(Path(build['binary'])) == build['binary_sha256']
         write(root / 'build-identity.json', build)
-        budget = resources(Path(spec['control_fir']), Path(spec['observer_fir']))
+        if gate is None:
+            budget = resources(Path(spec['control_fir']), Path(spec['observer_fir']))
+        else:
+            assert gate['binary_sha256'] == build['binary_sha256']
+            budget = gate['resource_audit']
         write(root / 'resource-audit.json', budget)
         assert budget['passed'], budget
         case = spec['case']
