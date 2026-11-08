@@ -7,7 +7,7 @@ import sqlite3
 
 from native_perf import read_blocks, unique_counters
 from tea_dip_bpu_native_cohort import cohorts
-from tea_dip_query_endpoint_evidence import digest, verify
+from tea_dip_query_endpoint_evidence import digest, old_execution, verify
 
 S1 = ['Ubtb', 'Abtb', 'UbtbUtage', 'AbtbUtage', 'Fallthrough']
 S3 = ['Ras', 'ITTage', 'Sc', 'Tage', 'Mbtb', 'Fallthrough']
@@ -75,7 +75,7 @@ def summarize(rows, expected):
                                      for key, value in pcs.most_common(20)])
 
 
-def analyze(root):
+def analyze(root, control):
     receipt = json.loads((root / 'closure-receipt.json').read_text())
     assert receipt['ready'] and not receipt['original_process_live']
     verify(root, receipt['files'])
@@ -85,9 +85,14 @@ def analyze(root):
     assert result['original_process_closed'] and result['exitcode'] == 0 and result['difftest_passed']
     assert result['source'] == spec['source'] == receipt['source']
     assert result['process'] == receipt['process'] and result['spec_sha256'] == receipt['spec_sha256']
-    neutrality = json.loads((root / 'neutrality.json').read_text())
-    assert neutrality['passed'] and json.loads((root / 'resource-audit.json').read_text())['passed']
+    control_receipt = json.loads((root / 'control-closure-receipt.json').read_text())
+    assert control_receipt['ready'] and not control_receipt['original_process_live']
+    control_source = control_receipt['build']['source'] if spec['case']['point'] == 'coremark' else control_receipt['source']
+    assert control_source == spec['control_source']
+    verify(control, control_receipt['files'])
     folder = root / spec['case']['point']
+    neutrality = old_execution(control, folder, set())
+    assert neutrality['passed'] and json.loads((root / 'resource-audit.json').read_text())['passed']
     blocks = sorted(read_blocks(folder / 'simulator_err.txt').items())
     assert len(blocks) == (2 if '-W' in spec['case']['command'] else 1)
     phases = []
@@ -120,10 +125,11 @@ def analyze(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', type=Path, required=True)
+    parser.add_argument('--control-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     assert not args.output.exists()
-    data = analyze(args.run_dir.resolve())
+    data = analyze(args.run_dir.resolve(), args.control_dir.resolve())
     args.output.write_text(json.dumps(data, indent=2) + '\n')
     print(json.dumps(dict(passed=data['passed'], point=data['point'], phase_rows={p['phase']: p['rows'] for p in data['phases']},
                          unassigned_tail_events=data['unassigned_tail_events']), indent=2))
