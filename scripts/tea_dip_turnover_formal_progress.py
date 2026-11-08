@@ -15,6 +15,8 @@ def analyze(root, point):
     items = [closed(root, 'formal', 'candidate', point, turnover=value) for value in [False, True]]
     if any(item is None for item in items):
         return dict(pending=True, database_read=False, point=point, reason='Both original closed formal points required')
+    if not all(item['valid'] for item in items):
+        return dict(pending=False, database_read=False, validation_passed=False, point=point, comparison=None, performance_speedup=None)
     assert [item['result']['source'] for item in items] == ['39a163eb3910ff9ecab02df4ac8e3c99d772feeb', '8f8ece60ac8b08b358743bc9db15a5a227dde0b8']
     commands = [item['case']['command'] for item in items]
     for flag in ['-W', '-I', '-C', '-s', '-i', '--diff', '--cst-file', '--dump-select-db']:
