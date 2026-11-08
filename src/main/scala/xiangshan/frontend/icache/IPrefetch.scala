@@ -178,6 +178,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     toITLB(i).bits.vaddr        := vaddr
     toITLB(i).bits.debug.pc     := SignExt(vaddr, XLEN)
     toITLB(i).bits.cmd          := TlbCmd.exec
+    toITLB(i).bits.fromHwPrefetch := false.B
     toITLB(i).bits.no_translate := false.B
     toITLB(i).bits.checkfullva  := true.B
     toITLB(i).bits.fullva       := SignExt(vaddr, XLEN)

@@ -101,6 +101,14 @@ class TLBFA(
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
+  val pfClearEnable = io.csr.pfRefresh.enable
+  val pfHitClearMasks = WireInit(VecInit(Seq.fill(ports)(0.U(nWays.W))))
+  def hasPf(e: TlbSectorEntry): Bool = {
+    (e.s2xlate =/= onlyStage2 && e.perm.pf) ||
+      (e.s2xlate =/= onlyStage1 && e.s2xlate =/= noS2xlate && e.g_perm.pf)
+  }
+  val redirectPfClearVec = VecInit(entries.map(e => pfClearEnable && io.pfClear && hasPf(e)))
+
   for (i <- 0 until ports) {
     val req = io.r.req(i)
     val resp = io.r.resp(i)
@@ -112,13 +120,24 @@ class TLBFA(
     val OnlyS2 = req.bits.s2xlate === onlyStage2
     val OnlyS1 = req.bits.s2xlate === onlyStage1
     val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
-    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
+    val rawHitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
         val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
         val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
         s2xlate_hit && hit && m._1 && !m._2
       }
     })
+    // Normal requests should not consume PF entries installed by hardware prefetch
+    val clearHwPrefetchPfHit = req.fire && !req.bits.fromHwPrefetch
+    val hwPrefetchPfHitVec = VecInit(rawHitVec.zip(entries).map { case (hit, e) =>
+      hit && hasPf(e) && e.entryFromHwPrefetch
+    })
+    // Hide those entries from normal requests so the request misses and walks again
+    val hitVec = VecInit((rawHitVec zip hwPrefetchPfHitVec zip redirectPfClearVec).map {
+      case ((hit, hwPrefetchPfHit), redirectPfClear) =>
+        hit && !(clearHwPrefetchPfHit && hwPrefetchPfHit) && !redirectPfClear
+    })
+    pfHitClearMasks(i) := Mux(clearHwPrefetchPfHit, hwPrefetchPfHitVec.asUInt, 0.U(nWays.W))
 
     hitVec.suggestName("hitVec")
 
@@ -171,7 +190,12 @@ class TLBFA(
     entries(io.w.bits.wayIdx).apply(io.w.bits.data)
   }
   // write assert, should not duplicate with the existing entries
-  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi })
+  val pfHitClearMask = pfHitClearMasks.reduce(_ | _)
+  val redirectPfClearMask = redirectPfClearVec.asUInt
+  val clearMask = pfHitClearMask | redirectPfClearMask
+  val w_hit_vec = VecInit(entries.zip(v).zipWithIndex.map{case ((e, vi), i) =>
+    e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi && !clearMask(i)
+  })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
@@ -245,11 +269,11 @@ class TLBFA(
      *  sfence addr ---> |        |
      *  try to flush     |        |
      *                   +--------+
-     * 
-     * In this case, the VS-stage is a large page, while the G-stage is a small page. L1TLB stores them as a small page. 
-     * When hfence.vvma comes with an address in that VS large page but outside the small page, it should flush the VS page. 
+     *
+     * In this case, the VS-stage is a large page, while the G-stage is a small page. L1TLB stores them as a small page
+     * When hfence.vvma comes with an address in that VS large page but outside the small page, it should flush the VS page
      * However, since L1TLB always treats this entry as a small page, it cannot match this address, thus cannot flush this entry.
-     * 
+     *
     ***/
     // when (hfencev.bits.rs1) {
     //   // all addr
@@ -272,6 +296,12 @@ class TLBFA(
       v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate) }
     }.otherwise {
       v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === sfence.bits.id) }
+    }
+  }
+
+  for (i <- 0 until nWays) {
+    when (clearMask(i) && !(io.w.valid && io.w.bits.wayIdx === i.U)) {
+      v(i) := false.B
     }
   }
 
@@ -397,9 +427,11 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       valid = io.r.req(i).valid,
       vpn = io.r.req(i).bits.vpn,
       i = i,
-      s2xlate = io.r.req(i).bits.s2xlate
+      s2xlate = io.r.req(i).bits.s2xlate,
+      fromHwPrefetch = io.r.req(i).bits.fromHwPrefetch
     )
   }
+  page.pfClear := io.pfClear
 
   for (i <- 0 until ports) {
     val q = page.r.req(i)

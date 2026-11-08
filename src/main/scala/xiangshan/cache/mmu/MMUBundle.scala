@@ -202,6 +202,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   val g_perm = new TlbPermBundle
   val vmid = UInt(vmidLen.W)
   val s2xlate = UInt(2.W)
+  val entryFromHwPrefetch = Bool()
 
 
   /** level usage:
@@ -286,7 +287,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     vpn_hit && index_hit.reduce(_ || _) && PopCount(wb_valididx) === 1.U && s2xlate_hit && pteidx_hit
   }
 
-  def apply(item: PtwRespS2): TlbSectorEntry = {
+  def apply(item: PtwRespS2withMemIdx): TlbSectorEntry = {
     this.asid := item.s1.entry.asid
     val merge_level = MuxLookup(item.s2xlate, 2.U)(Seq(
       onlyStage1 -> item.s1.entry.level.getOrElse(0.U),
@@ -376,6 +377,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.g_pbmt := item.s2.entry.pbmt
     this.g_perm.applyS2(item.s2)
     this.s2xlate := item.s2xlate
+    this.entryFromHwPrefetch := item.fromHwPrefetch
     this
   }
 
@@ -451,6 +453,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
       val s2xlate = Output(UInt(2.W))
+      val fromHwPrefetch = Output(Bool())
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
@@ -464,14 +467,16 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   }
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
-    val data = Output(new PtwRespS2)
+    val data = Output(new PtwRespS2withMemIdx)
   }))
+  val pfClear = Input(Bool())
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate:UInt): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate: UInt, fromHwPrefetch: Bool): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
     this.r.req(i).bits.s2xlate := s2xlate
+    this.r.req(i).bits.fromHwPrefetch := fromHwPrefetch
 
   }
 
@@ -479,7 +484,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
   }
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2withMemIdx): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
@@ -492,6 +497,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
       val s2xlate = Output(UInt(2.W))
+      val fromHwPrefetch = Output(Bool())
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
@@ -504,21 +510,23 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
-    val data = Output(new PtwRespS2)
+    val data = Output(new PtwRespS2withMemIdx)
   }))
+  val pfClear = Input(Bool())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
 
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate: UInt): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate: UInt, fromHwPrefetch: Bool): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
     this.r.req(i).bits.s2xlate := s2xlate
+    this.r.req(i).bits.fromHwPrefetch := fromHwPrefetch
   }
 
   def r_resp_apply(i: Int) = {
     (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
   }
 
-  def w_apply(valid: Bool, data: PtwRespS2): Unit = {
+  def w_apply(valid: Bool, data: PtwRespS2withMemIdx): Unit = {
     this.w.valid := valid
     this.w.bits.data := data
   }
@@ -570,7 +578,7 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val size = Output(UInt(log2Ceil(log2Ceil(VLEN/8)+1).W))
   val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
   val memidx = Output(new MemBlockidxBundle)
-  val isPrefetch = Output(Bool())
+  val fromHwPrefetch = Output(Bool())
   // do not translate, but still do pmp/pma check
   val no_translate = Output(Bool())
   val pmp_addr = Output(UInt(PAddrBits.W)) // load s1 send prefetch paddr
@@ -1130,6 +1138,8 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
 class PtwReqwithMemIdx(implicit p: Parameters) extends PtwReq {
   val memidx = new MemBlockidxBundle
   val getGpa = Bool() // this req is to get gpa when having guest page fault
+  // True only when this PTW request is sourced solely from hardware prefetch
+  val fromHwPrefetch = Bool()
 }
 
 class PtwResp(implicit p: Parameters) extends PtwBundle {
@@ -1409,6 +1419,8 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
 class PtwRespS2withMemIdx(implicit p: Parameters) extends PtwRespS2 {
   val memidx = new MemBlockidxBundle()
   val getGpa = Bool() // this req is to get gpa when having guest page fault
+  // True only when this response/refill should keep hardware-prefetch-origin semantics
+  val fromHwPrefetch = Bool()
 }
 
 class L2TLBIO(implicit p: Parameters) extends PtwBundle {
