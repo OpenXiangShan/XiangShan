@@ -38,7 +38,7 @@ def brackets(rows):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', required=True, type=Path)
-    parser.add_argument('--ci-evidence', required=True, choices=['ci-readiness', 'ci-credit-div', 'ci-fdiv-credit','fdiv-wb-query-paired-ci'])
+    parser.add_argument('--ci-evidence', required=True, choices=['ci-readiness', 'ci-credit-div', 'ci-fdiv-credit','fdiv-wb-query-paired-ci','fdiv-turnover-ci-20261108'])
     parser.add_argument('--point', required=True)
     args = parser.parse_args()
     root = args.report_dir.resolve()

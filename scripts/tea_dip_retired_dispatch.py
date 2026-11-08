@@ -37,7 +37,7 @@ def sample_bands(dip,samples,finals,width,period):
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--report-dir',type=Path,required=True);parser.add_argument('--ci-evidence',choices=['ci-readiness','ci-credit-div','ci-fdiv-credit','fdiv-wb-query-paired-ci'],required=True);parser.add_argument('--point',required=True);args=parser.parse_args();root=args.report_dir.resolve();sys.path.insert(0,str(root))
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--report-dir',type=Path,required=True);parser.add_argument('--ci-evidence',choices=['ci-readiness','ci-credit-div','ci-fdiv-credit','fdiv-wb-query-paired-ci','fdiv-turnover-ci-20261108'],required=True);parser.add_argument('--point',required=True);args=parser.parse_args();root=args.report_dir.resolve();sys.path.insert(0,str(root))
     from analyze_windows import DIP
     namespace='ci' if args.ci_evidence=='ci-readiness' else args.ci_evidence;out=root/namespace/'partial-analysis';record_path=out/(args.point+'.json');record=json.loads(record_path.read_text());receipt_path=root/namespace/'raw/closed-receipts'/(args.point+'.json');receipt=json.loads(receipt_path.read_text());run=json.loads((root/'evidence'/args.ci_evidence/'run.json').read_text())
     assert record['run_id']==receipt['run_id']==run['id'] and record['source']==receipt['source']==run['head_sha']
