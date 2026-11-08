@@ -872,10 +872,6 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     canRefill
   }
 
-  def onlyPf(levelUInt: UInt, s2xlate: UInt, pbmte: Bool) = {
-    s2xlate === noS2xlate && isPf(levelUInt, pbmte) && !isAf()
-  }
-
   override def toPrintable: Printable = {
     p"ppn:0x${Hexadecimal(ppn)} perm:b${Binary(perm.asUInt)}"
   }
@@ -1015,19 +1011,14 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
   val ppns = Vec(num, UInt(gvpnLen.W))
   // valid or not, vs = 0 will not hit
   val vs   = Vec(num, Bool())
-  // only pf or not, onlypf = 1 means only trigger pf when nox2late
+  // Kept as a width-compatible SRAM payload field. The page-fault-only refill
+  // behavior was removed, so this field is always written as false and unused
   val onlypf = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   val prefetch = Bool()
   val reservedBits = if(ReservedBits > 0) Some(UInt(ReservedBits.W)) else None
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
-  // NOTE: vs is used for different usage:
-  // for l0, which store the leaf(leaves), vs is page fault or not.
-  // for l1, which shoule not store leaf, vs is valid or not, that will anticipate in hit check
-  // Because, l1 should not store leaf(no perm), it doesn't store perm.
-  // If l1 hit a leaf, the perm is still unavailble. Should still page walk. Complex but nothing helpful.
-  // TODO: divide vs into validVec and pfVec
-  // for l1: may valid but pf, so no need for page walk, return random pte with pf.
+  // NOTE: vs is the per-sector refill-valid bit for both l0 and l1
 
   def tagClip(vpn: UInt) = {
     require(vpn.getWidth == vpnLen)
@@ -1064,11 +1055,10 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
       val denyNapotInSector = if (hasPerm && level == 0) pte.isNapot(levelUInt) else false.B
       val isRefillEntry = pte.canRefill(levelUInt, s2xlate, pbmte, mode) &&
         (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
-      val onlyPf = (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
       ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.getPPN()
-      ps.vs(i)   := (isRefillEntry || onlyPf) && !denyNapotInSector
-      ps.onlypf(i) := onlyPf && !denyNapotInSector
+      ps.vs(i) := isRefillEntry && !denyNapotInSector
+      ps.onlypf(i) := false.B
       ps.perms.map(_(i) := pte.getPerm())
       when (s2xlate === onlyStage2) {
         // g bit in G-stage PTEs should be ignored by hardware
@@ -1102,7 +1092,7 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
     val data_align_num = data_length / ecc_block
     val data_not_align = (data_length % ecc_block) != 0 // ugly code
     val data_unalign_length = data_length - data_align_num * ecc_block
-    val eccBits_unalign = eccCode.width(data_unalign_length) - data_unalign_length
+    val eccBits_unalign = if (data_not_align) eccCode.width(data_unalign_length) - data_unalign_length else 0
 
     val eccBits = eccBits_per * data_align_num + eccBits_unalign
     (eccBits, eccBits_per, data_align_num, data_unalign_length)
