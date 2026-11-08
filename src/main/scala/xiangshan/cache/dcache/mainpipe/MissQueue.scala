@@ -1196,8 +1196,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val refill_to_ldq = ValidIO(new Refill)
 
     // All accepted allocations stay distinct. Owners validate PENDING lifetime.
-    val misstrack_alloc = Vec(reqNum, ValidIO(new MissTrackAlloc))
-    val misstrack_owners = Vec(cfg.nMissEntries, ValidIO(new MissTrackLine))
 
     // cmo req
     val cmo_req = Flipped(DecoupledIO(new CMOReq))
@@ -1328,16 +1326,21 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
   val spec_candidate_fire = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
   val spec_candidate_id = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(log2Up(cfg.nMissEntries).W))))
-  val spec_grant_register = Module(new SpecMissGrantRegister(LoadPipelineWidth))
+  // One-cycle candidate.fire to S2 grant handoff; payloads are overwritten every cycle.
+  val reserve_valid = RegNext(spec_candidate_fire, VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
+  val reserve_id = RegNext(spec_candidate_id)
+  val reserve_line = Reg(Vec(LoadPipelineWidth, new MissTrackLine))
+  val reserve_alias = Reg(Vec(LoadPipelineWidth, UInt(math.max(1, blockOffBits + idxBits - pgIdxBits).W)))
   for (w <- 0 until LoadPipelineWidth) {
-    spec_grant_register.io.capture(w).valid := spec_candidate_fire(w)
-    spec_grant_register.io.capture(w).bits.id := spec_candidate_id(w)
-    spec_grant_register.io.capture(w).bits.line := io.spec_query(w).req.bits
-    io.spec_query(w).grant := spec_grant_register.io.grant(w)
+    reserve_line(w) := io.spec_query(w).req.bits
+    reserve_alias(w) := get_alias(io.spec_query(w).req.bits.vaddr)
+    io.spec_query(w).grant.valid := reserve_valid(w)
+    io.spec_query(w).grant.bits := reserve_id(w)
+    when (reserve_valid(w)) {
+      assert(reserve_alias(w) === get_alias(reserve_line(w).vaddr),
+        "SpecMiss reservation alias must match its line")
+    }
   }
-  val reserve_valid = VecInit(spec_grant_register.io.grant.map(_.valid))
-  val reserve_id = VecInit(spec_grant_register.io.grant.map(_.bits))
-  val reserve_line = spec_grant_register.io.line
   for (w <- 0 until LoadPipelineWidth; other <- 0 until w) {
     assert(!(reserve_valid(w) && reserve_valid(other) && reserve_id(w) === reserve_id(other)),
       "SpecMiss reservations must own distinct MSHR IDs")
@@ -1351,7 +1354,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       query_valid(i) && io.queryMQ(i).req.bits.isSpecMiss && reserve_valid(w) &&
         io.queryMQ(i).req.bits.id === reserve_id(w) &&
         get_block(io.queryMQ(i).req.bits.addr) === get_block(reserve_line(w).paddr) &&
-        io.queryMQ(i).req.bits.vaddrAlias === spec_grant_register.io.alias(w) &&
+        io.queryMQ(i).req.bits.vaddrAlias === reserve_alias(w) &&
         VecInit(primary_ready_vec)(reserve_id(w))
     } else {
       false.B
@@ -1689,34 +1692,46 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val spec_requests = io.spec_query.map(request =>
     request.req.valid -> get_block(request.req.bits.paddr)
   )
-  val spec_choices = SpecMissReservationLogic.allocate(
-    initial_free,
-    free_count_before,
-    query_valid,
-    spec_requests,
-    occupied_blocks
-  )
+  val normal_bound = PopCount(query_valid)
+  // Pre-encode suffix IDs before the late S1 valids select among them.
+  val suffix_choices = (0 until LoadPipelineWidth).map { offset =>
+    val rank = normal_bound +& offset.U
+    val choice_oh = VecInit(initial_free.zip(free_count_before).map {
+      case (free, before) => free && before === rank
+    }).asUInt
+    (choice_oh.orR, OHToUInt(choice_oh), choice_oh)
+  }
   for (w <- 0 until LoadPipelineWidth) {
     val request = io.spec_query(w).req
-    val choice = spec_choices(w)
+    // Raw valids consume ranks even when earlier candidates are blocked or not ready.
+    val earlier = spec_requests.take(w)
+    val earlier_count = if (w == 0) 0.U else PopCount(earlier.map(_._1))
+    val select = UIntToOH(earlier_count, w + 1).asBools
+    val choices = suffix_choices.take(w + 1)
+    val address_busy = VecInit((occupied_blocks ++ earlier).map {
+      case (valid, block) => valid && block === spec_requests(w)._2
+    }).asUInt.orR
+    val choice_valid = ParallelMux(select, choices.map(_._1))
+    val choice_id = ParallelMux(select, choices.map(_._2))
+    val choice_oh = ParallelMux(select, choices.map(_._3))
 
-    io.spec_fabric.candidate(w).valid := choice.valid
+    io.spec_fabric.candidate(w).valid := request.valid && choice_valid && !address_busy
     io.spec_fabric.candidate(w).bits.vaddr := request.bits.vaddr
     io.spec_fabric.candidate(w).bits.paddr := get_block_addr(request.bits.paddr)
     io.spec_fabric.candidate(w).bits.pc := request.bits.pc
     io.spec_fabric.candidate(w).bits.grow := request.bits.grow
-    io.spec_fabric.candidate(w).bits.id := choice.id
+    io.spec_fabric.candidate(w).bits.id := choice_id
     io.spec_fabric.candidate(w).bits.alias := get_alias(request.bits.vaddr)
     io.spec_fabric.candidate(w).bits.prefetch := !io.l2_pf_store_only
-    io.spec_fabric.candidate(w).bits.channel := selectChannel(request.bits.paddr, choice.id)
+    io.spec_fabric.candidate(w).bits.channel := selectChannel(request.bits.paddr, choice_id)
     spec_candidate_fire(w) := io.spec_fabric.candidate(w).fire
-    spec_candidate_id(w) := choice.id
-    when(request.valid && choice.addressBusy) {
+    spec_candidate_id(w) := choice_id
+    when(request.valid && address_busy) {
       assert(!io.spec_fabric.candidate(w).valid,
         "SpecMiss reserved a physical block already owned by MissQueue")
     }
     when(io.spec_fabric.candidate(w).valid) {
-      assert(PopCount(choice.choiceOH) === 1.U && choice.rank < free_entry_count,
+      assert(PopCount(choice_oh) === 1.U && (normal_bound +& earlier_count) < free_entry_count,
         "SpecMiss rank allocator selected an invalid free-entry rank")
     }
   }
@@ -1755,22 +1770,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
   }
 
-  // Observe the allocation on the same cycle that the MissEntry becomes valid.
-  for (i <- 0 until reqNum) {
-    val preg = active_pipe_regs(i)
-    io.misstrack_alloc(i).valid := RegNext(preg.alloc && !preg.cancel, false.B)
-    io.misstrack_alloc(i).bits.vaddr := RegNext(preg.req.vaddr)
-    io.misstrack_alloc(i).bits.paddr := RegNext(preg.req.addr)
-    io.misstrack_alloc(i).bits.mshr_id := RegNext(preg.mshr_id)
-  }
-  for (i <- entries.indices) {
-    // Register the owner handoff here to cut the MissEntry address path before
-    // it reaches MissTrack. The committed allocation is accepted first; this
-    // owner takes over PENDING liveness checks on the following cycle.
-    io.misstrack_owners(i).valid := RegNext(entries(i).io.req_addr.valid, false.B)
-    io.misstrack_owners(i).bits.paddr := RegNext(entries(i).io.req_addr.bits)
-    io.misstrack_owners(i).bits.vaddr := RegNext(entries(i).io.req_vaddr.bits)
-  }
   for (i <- entries.indices; j <- 0 until i) {
     assert(!(entries(i).io.req_addr.valid && entries(j).io.req_addr.valid &&
       get_block(entries(i).io.req_addr.bits) === get_block(entries(j).io.req_addr.bits)),
@@ -2028,18 +2027,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       val finishes      = demuxedEntryFinishes.map(_(ch))
       val cmoAcquire    = demuxedCmoAcquire(ch)
       val acquireSources = Seq(cmoAcquire) ++ pipeAcquires ++ entryAcquires
-      val acquirePayloadGroupSizes =
-        Seq(acquireSources.take(5).size) ++ acquireSources.drop(5).grouped(4).map(_.size).toSeq
-      DCacheAcquireArbiter(edge, io.mem_acquire(ch), acquirePayloadGroupSizes,
-        acquireSources:_*)
+      TLArbiter.lowest(edge, io.mem_acquire(ch), acquireSources:_*)
       TLArbiter.lowest(edge, io.mem_finish(ch), finishes:_*)
     }
   } else {
     val acquire_sources = Seq(cmo_unit.io.req_chanA) ++ acquire_from_pipereg_vec ++ entries.map(_.io.mem_acquire)
-    val acquirePayloadGroupSizes =
-      Seq(acquire_sources.take(5).size) ++ acquire_sources.drop(5).grouped(4).map(_.size).toSeq
-    DCacheAcquireArbiter(edge, io.mem_acquire(0), acquirePayloadGroupSizes,
-      acquire_sources:_*)
+    TLArbiter.lowest(edge, io.mem_acquire(0), acquire_sources:_*)
     TLArbiter.lowest(edge, io.mem_finish(0), entries.map(_.io.mem_finish):_*)
   }
 

@@ -18,6 +18,8 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(new SpecMissBufferedA(gen, nOwners, idBits)))
     val deq = Decoupled(gen.cloneType)
+    // Existing head origin, used only to count actual speculative A handshakes.
+    val deq_speculative = Output(Bool())
     val resolve = Input(Vec(nOwners, Valid(new Bundle {
       val id = UInt(idBits.W)
       val commit = Bool()
@@ -40,6 +42,7 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
   val headCommittedNow = resolved(0) && io.resolve(entries(0).owner).bits.commit
   io.deq.valid := count =/= 0.U && (!entries(0).speculative || entries(0).committed || headCommittedNow)
   io.deq.bits := entries(0).data
+  io.deq_speculative := entries(0).speculative
   io.enq.ready := count < depth.U
   when(io.deq.valid && entries(0).speculative) {
     assert(entries(0).committed || headCommittedNow, "uncommitted SpecMiss reached TileLink A")

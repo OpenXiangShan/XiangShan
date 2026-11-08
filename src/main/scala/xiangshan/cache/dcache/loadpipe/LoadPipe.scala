@@ -37,7 +37,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val lsu = Flipped(new DCacheLoadIO)
     val dwpu = Flipped(new DwpuBaseIO(nWays = nWays, nPorts = 1))
     val mtrack = Output(new MissTrackLoadIO)
-    val specmiss = Input(new MissTrackSpec)
+    val specmiss = Input(Bool())
     val mshr_full = Input(Bool())
     val spec_query = new DCacheSpecMissQueryIOBundle
     val load128Req = Input(Bool())
@@ -180,7 +180,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // in stage 1, load unit gets the physical address
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
-  io.mtrack.s1_paddr := s1_paddr_dup_dcache
   val s1_load128Req = RegEnable(s0_load128Req, s0_fire)
   val s1_is_prefetch = s1_req.instrtype === DCACHE_PREFETCH_SOURCE.U
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
@@ -192,7 +191,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   io.mtrack.s1_valid := s1_fire && !s1_nack && !io.lsu.s1_kill
-  val s1_spec_candidate = io.specmiss.valid && io.specmiss.candidate && !io.mshr_full &&
+  val s1_spec_candidate = io.specmiss && !io.mshr_full &&
     s1_fire && !s1_nack && !io.lsu.s1_kill
   io.spec_query.req.valid := s1_spec_candidate
   io.spec_query.req.bits.vaddr := s1_vaddr
@@ -515,15 +514,14 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.tag_error := false.B
   resp.bits.mshr_id := io.miss_resp.id
   resp.bits.handled := s2_miss_req_fire && !s2_request_cancel && !io.wbq_block_miss_req && io.miss_resp.handled
-  // Keep truth, VA, PA and actual way together in s2. Bank/WPU replays do not
+  // Keep truth, VA and actual way together in s2. Bank/WPU replays do not
   // change residency; tag/permission truth must not depend on the WPU guess.
   io.mtrack.s2.valid := s2_valid && !s2_nack_hit && !io.lsu.s2_kill &&
     !s2_tag_error && !s2_tl_error.asUInt.orR && !s2_load128Req &&
-    s2_req.cmd === MemoryOpConstants.M_XRD && s2_req.instrtype === LOAD_SOURCE.U
+    s2_req.cmd === MemoryOpConstants.M_XRD && s2_req.instrtype === LOAD_SOURCE.U &&
+    s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
   io.mtrack.s2.bits.vaddr := s2_vaddr
-  io.mtrack.s2.bits.paddr := s2_paddr
   io.mtrack.s2.bits.way := s2_real_way_en
-  io.mtrack.s2.bits.hit := s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit

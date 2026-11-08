@@ -13,7 +13,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleField
 import org.chipsalliance.cde.config.Parameters
-import utility.{MemReqSource, ReqSourceKey}
+import utility.{MemReqSource, ReqSourceKey, XSPerfAccumulate}
 import xscache.common.{AliasKey, PrefetchKey}
 import xscache.coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
 import xiangshan.cache.SpecMissFabricIO
@@ -203,6 +203,7 @@ class CustomL1L2Fabric(
           matchedBySlice(slice)(w) := buffer.io.matched(w)
         }
         downstream.a <> buffer.io.deq
+        XSPerfAccumulate(s"specmiss_a_fire_$slice", buffer.io.deq.fire && buffer.io.deq_speculative)
         arbitrationOut.b <> b(downstream.b)
         downstream.c <> c(arbitrationOut.c)
         arbitrationOut.d <> d(downstream.d)

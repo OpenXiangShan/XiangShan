@@ -1470,7 +1470,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   /** MissTrack observes all load ports and qualifies SpecMiss requests. */
   if (cfg.enMissTrack) {
-    val misstrack = Module(new MissTrack(MissReqPortCount))
+    val misstrack = Module(new MissTrack)
     // Keep ECC/readline control off the same-cycle MissTrack age cone. The
     // table is advisory, so observing install/error events one cycle later is
     // safe; the functional load/miss pipeline is unchanged.
@@ -1487,8 +1487,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       ldu(w).io.specmiss := misstrack.io.spec(w)
       ldu(w).io.mshr_full := missQueue.io.full
     }
-    misstrack.io.alloc := missQueue.io.misstrack_alloc
-    misstrack.io.owners := missQueue.io.misstrack_owners
     misstrack.io.install := delayedInstall
     val tagWrite = mainPipe.io.tag_write
     val metaWrite = mainPipe.io.meta_write
@@ -1505,7 +1503,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     misstrack.io.clear := delayedClear
   } else {
     for (w <- 0 until LoadPipelineWidth) {
-      ldu(w).io.specmiss := 0.U.asTypeOf(new MissTrackSpec)
+      ldu(w).io.specmiss := false.B
       ldu(w).io.mshr_full := missQueue.io.full
     }
   }

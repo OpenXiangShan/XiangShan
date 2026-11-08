@@ -69,15 +69,7 @@ private[cache] object SpecMissReservationLogic {
       val earlierRequestCount = if (w == 0) 0.U else PopCount(VecInit(requests.take(w).map(_._1)))
       val rank = Wire(UInt(rankWidth.W))
       rank := normalBound +& earlierRequestCount
-      val suffixSelect = w match {
-        case 0 => Seq(true.B)
-        case 1 => Seq(!requests(0)._1, requests(0)._1)
-        case 2 =>
-          val a = requests(0)._1
-          val b = requests(1)._1
-          Seq(!(a || b), a ^ b, a && b)
-        case _ => (0 to w).map(offset => earlierRequestCount === offset.U)
-      }
+      val suffixSelect = UIntToOH(earlierRequestCount, w + 1).asBools
       val choices = suffixChoices.take(w + 1)
       val choiceValid = ParallelMux(suffixSelect.zip(choices.map(_._1)))
       val id = ParallelMux(suffixSelect.zip(choices.map(_._2)))

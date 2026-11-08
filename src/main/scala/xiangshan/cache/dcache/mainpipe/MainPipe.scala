@@ -1058,7 +1058,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.misstrack_install.valid := io.tag_write.fire && io.meta_write.fire &&
     new_coh.isValid() && !s3_l2_error_wb.asUInt.orR && !s3_error_wb
   io.misstrack_install.bits.vaddr := s3_req.vaddr
-  io.misstrack_install.bits.paddr := s3_req.addr
   io.misstrack_install.bits.way := s3_way_en
 
   io.tag_write_intend := s3_req.miss && s3_valid
