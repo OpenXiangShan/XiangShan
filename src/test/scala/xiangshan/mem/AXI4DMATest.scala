@@ -8,13 +8,14 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
+import system.{SoCParameters, SoCParamsKey}
 import top.KunminghuV2WithoutLLCConfig
 import xiangshan.{XSCoreParamsKey, XSTileKey}
 import xiangshan.cache.DCacheToSbufferIO
 
 private class DMAHarness(implicit p: Parameters) extends LazyModule {
   val master = AXI4MasterNode(Seq(AXI4MasterPortParameters(Seq(
-    AXI4MasterParameters("test_dma", id = IdRange(0, 1 << 14), aligned = true, maxFlight = Some(1))
+    AXI4MasterParameters("test_dma", id = IdRange(0, 1 << p(SoCParamsKey).DMAIdBits), aligned = true, maxFlight = Some(1))
   ))))
   val bridge = LazyModule(new AXI4DMABridge)
   bridge.axiNode := AXI4Fragmenter() := AXI4Buffer() := AXI4IdIndexer(1) := master
@@ -84,7 +85,7 @@ class AXI4DMATest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   private def aw(c: DMAHarness#Impl, addr: BigInt, size: Int = 5, len: Int = 0,
-                 burst: Int = 1, id: Int = 0x2a35): Unit = {
+                 burst: Int = 1, id: Int = 0xa35): Unit = {
     address(c, c.io.axi.aw.bits, addr, size, len, burst, id)
     c.io.axi.aw.valid.poke(true.B)
     waitUntil(c)(c.io.axi.aw.ready.peek().litToBoolean)
@@ -137,7 +138,7 @@ class AXI4DMATest extends AnyFlatSpec with ChiselScalatestTester {
     c.io.dcache.main_pipe_hit_resp.valid.poke(false.B)
   }
 
-  private def b(c: DMAHarness#Impl, id: Int = 0x2a35, resp: Int = 0): Unit = {
+  private def b(c: DMAHarness#Impl, id: Int = 0xa35, resp: Int = 0): Unit = {
     waitUntil(c)(c.io.axi.b.valid.peek().litToBoolean)
     c.io.axi.b.bits.id.expect(id.U)
     c.io.axi.b.bits.resp.expect(resp.U)
@@ -219,7 +220,7 @@ class AXI4DMATest extends AnyFlatSpec with ChiselScalatestTester {
   it should "read coherent cache lines and preserve burst IDs, byte lanes, and R backpressure" in {
     test(LazyModule(new DMAHarness).module) { c =>
       init(c)
-      address(c, c.io.axi.ar.bits, 0x80000038L, 3, 1, 1, 0x3abc)
+      address(c, c.io.axi.ar.bits, 0x80000038L, 3, 1, 1, 0xabc)
       c.io.axi.ar.valid.poke(true.B)
       waitUntil(c)(c.io.axi.ar.ready.peek().litToBoolean)
       c.clock.step()
@@ -247,7 +248,7 @@ class AXI4DMATest extends AnyFlatSpec with ChiselScalatestTester {
           c.io.mem.d.valid.poke(false.B)
         }
         waitUntil(c)(c.io.axi.r.valid.peek().litToBoolean)
-        c.io.axi.r.bits.id.expect(0x3abc.U)
+        c.io.axi.r.bits.id.expect(0xabc.U)
         c.io.axi.r.bits.last.expect((beat == 1).B)
         c.io.axi.r.bits.resp.expect(0.U)
         c.io.axi.r.bits.data.expect((BigInt(0x1234) + beat * 16 + (if (beat == 0) 1 else 0)).U)
@@ -267,15 +268,55 @@ class AXI4DMATest extends AnyFlatSpec with ChiselScalatestTester {
       w(c, 1, 1, last = true)
       b(c, resp = 3)
       c.io.dcache.req.valid.expect(false.B)
-      address(c, c.io.axi.ar.bits, 0x10000000L, 5, 0, 1, 0x1234)
+      address(c, c.io.axi.ar.bits, 0x10000000L, 5, 0, 1, 0x234)
       c.io.axi.ar.valid.poke(true.B)
       waitUntil(c)(c.io.axi.ar.ready.peek().litToBoolean)
       c.clock.step()
       c.io.axi.ar.valid.poke(false.B)
       waitUntil(c)(c.io.axi.r.valid.peek().litToBoolean)
-      c.io.axi.r.bits.id.expect(0x1234.U)
+      c.io.axi.r.bits.id.expect(0x234.U)
       c.io.axi.r.bits.resp.expect(3.U)
       c.io.mem.a.valid.expect(false.B)
+    }
+  }
+
+  for (idBits <- Seq(config(SoCParamsKey).DMAIdBits, SoCParameters().DMAIdBits)) {
+    it should s"return all $idBits DMA ID bits through the indexer with response backpressure" in {
+      val widthParams = p.alterPartial {
+        case SoCParamsKey => p(SoCParamsKey).copy(DMAIdBits = idBits)
+      }
+      test(LazyModule(new DMAHarness()(widthParams)).module) { c =>
+        init(c)
+        assert(c.io.axi.aw.bits.id.getWidth == idBits)
+        assert(c.io.axi.ar.bits.id.getWidth == idBits)
+        assert(c.io.axi.b.bits.id.getWidth == idBits)
+        assert(c.io.axi.r.bits.id.getWidth == idBits)
+        val ids = Seq(0, 1, 1 << (idBits - 1), (1 << idBits) - 2, (1 << idBits) - 1)
+        for (id <- ids) {
+          // Decode errors exercise both response channels without a cache responder.
+          aw(c, 0x10000000L, id = id)
+          w(c, 1, 1, last = true)
+          b(c, id = id, resp = 3)
+          address(c, c.io.axi.ar.bits, 0x10000000L, 5, 0, 1, id)
+          c.io.axi.ar.valid.poke(true.B)
+          waitUntil(c)(c.io.axi.ar.ready.peek().litToBoolean)
+          c.clock.step()
+          c.io.axi.ar.valid.poke(false.B)
+          waitUntil(c)(c.io.axi.r.valid.peek().litToBoolean)
+          for (_ <- 0 until 4) {
+            c.io.axi.r.valid.expect(true.B)
+            c.io.axi.r.bits.id.expect(id.U)
+            c.io.axi.r.bits.resp.expect(3.U)
+            c.io.axi.r.bits.last.expect(true.B)
+            c.clock.step()
+          }
+          c.io.axi.r.ready.poke(true.B)
+          c.clock.step()
+          c.io.axi.r.ready.poke(false.B)
+          c.io.mem.a.valid.expect(false.B)
+          c.io.dcache.req.valid.expect(false.B)
+        }
+      }
     }
   }
 }

@@ -86,6 +86,8 @@ case class SoCParameters
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
   extIntrs: Int = 64,
+  DMAIdBits: Int = 14, // External coherent DMA AXI slave ID width.
+  MemIdBits: Int = 14, // External memory AXI master ID width.
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "L3",
@@ -304,7 +306,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
 trait HaveSlaveAXI4Port {
   this: BaseSoC =>
 
-  val idBits = 14
+  val idBits = p(SoCParamsKey).DMAIdBits
 
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
@@ -403,7 +405,7 @@ trait HaveAXI4MemPort {
       AXI4Buffer() :=
       AXI4Buffer() :=
       AXI4Buffer() :=
-      AXI4IdIndexer(idBits = 14) :=
+      AXI4IdIndexer(idBits = soc.MemIdBits) :=
       AXI4UserYanker(Some(1)) :=
       axi4memencrpty.get.node
 
@@ -415,7 +417,7 @@ trait HaveAXI4MemPort {
       AXI4Buffer() :=
       AXI4Buffer() :=
       AXI4Buffer() :=
-      AXI4IdIndexer(idBits = 14) :=
+      AXI4IdIndexer(idBits = soc.MemIdBits) :=
       AXI4UserYanker(Some(1)) :=
       AXI4Deinterleaver(L3BlockSize) :=
       axi4mem_node
