@@ -76,7 +76,7 @@ class FDivSqrtFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltNonFixedL
   private val src1 = ex0src1
 
   // modules
-  private val fdiv = Module(new FloatDivider)
+  private val fdiv = Module(new FloatDivider(enableTurnover = true))
 
   private val fp_fmt = fuOpType(2, 1)
   private val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0.head(32).andR ||
@@ -86,14 +86,16 @@ class FDivSqrtFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltNonFixedL
 
   private val thisRobIdx = Wire(new RobPtr)
   val inFire = in.ex(0).valid && fdiv.io.start_ready_o
+  // A finishing result keeps the old owner while the next request is accepted.
+  val useNewCtrl = inFire && !fdiv.io.finish_valid_o
   when(inFire){
     thisRobIdx := ex0ctrl.robIdx
   }.otherwise{
     thisRobIdx := out.ex(0).bits.ctrl.robIdx
   }
-  out.ex(0).bits.ctrl := Mux(inFire, nonFixedLatOutCtrlNext, nonFixedLatOutCtrl)
+  out.ex(0).bits.ctrl := Mux(useNewCtrl, nonFixedLatOutCtrlNext, nonFixedLatOutCtrl)
   out.ex(0).bits.debug.zip(nonFixedLatOutDebug).foreach { case (sink, source) =>
-    sink := Mux(inFire, in.ex(0).bits.debug.get, source)
+    sink := Mux(useNewCtrl, in.ex(0).bits.debug.get, source)
   }
   when(inFire) {
     nonFixedLatOutCtrl := nonFixedLatOutCtrlNext
