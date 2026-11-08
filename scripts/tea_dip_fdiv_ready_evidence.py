@@ -15,10 +15,14 @@ SOURCE = '39a163eb3910ff9ecab02df4ac8e3c99d772feeb'
 CONTROL = '2915a6b022bd957570bd961a01611026c2220fb7'
 
 
-def metadata(root, turnover=False):
+def metadata(root, turnover=False, early_ready=False):
     evidence = root / 'evidence' / ('fdiv-turnover-20261108' if turnover else 'fdiv-ready-ahead')
     expected_source = '8f8ece60ac8b08b358743bc9db15a5a227dde0b8' if turnover else SOURCE
     expected_control = SOURCE if turnover else CONTROL
+    if early_ready:
+        evidence = root / 'evidence/fdiv-early-ready-20261108'
+        expected_source = '6fde9c2fddf57062d43b93f971ec42d75022fc3f'
+        expected_control = '8f8ece60ac8b08b358743bc9db15a5a227dde0b8'
     launch = json.loads((evidence / 'validation-launch.json').read_text())
     source = json.loads((evidence / 'source.json').read_text())
     assert source['head'] == launch['spec']['source'] == expected_source and source['base'] == expected_control
@@ -26,8 +30,9 @@ def metadata(root, turnover=False):
     return evidence, launch
 
 
-def collect(root, point=None, turnover=False):
-    evidence, launch = metadata(root, turnover)
+def collect(root, point=None, turnover=False, early_ready=False):
+    turnover = turnover or early_ready
+    evidence, launch = metadata(root, turnover, early_ready)
     stage_name = Path(launch['run_dir']).name
     cases = [launch['spec']['coremark'], *launch['spec']['short_cases']]
     assert point is None or point in {case['point'] for case in cases}
@@ -101,8 +106,9 @@ else:
     return receipt
 
 
-def analyze(root, turnover=False):
-    evidence, launch = metadata(root, turnover)
+def analyze(root, turnover=False, early_ready=False):
+    turnover = turnover or early_ready
+    evidence, launch = metadata(root, turnover, early_ready)
     source, control_source = launch['spec']['source'], launch['spec']['control_source']
     stage = root / Path(launch['run_dir']).name
     receipt_path = stage / 'closure-receipt.json'
@@ -124,12 +130,12 @@ def analyze(root, turnover=False):
     assert build['source'] == source and build['phase'] == 'complete'
     for name in ['tea_dip_fdiv_ready_run.py', 'tea_dip_wb_protocol_micro.py', 'native_perf.py', 'tea_dip_query_endpoint_evidence.py']:
         assert digest(stage / name) == spec['input_hashes'][str(Path(launch['run_dir']) / name)]
-    controls = root / ('fdiv-ready-validation' if turnover else 'wb-query-endpoint-focused')
+    controls = root / ('fdiv-turnover-validation-20261108' if early_ready else 'fdiv-ready-validation' if turnover else 'wb-query-endpoint-focused')
     control_receipt = json.loads((controls / 'closure-receipt.json').read_text())
     assert control_receipt['ready'] and not control_receipt['controller_live'] and control_receipt['all_original_processes_closed' if turnover else 'all_original_guests_closed']
     verify(controls, control_receipt['files'])
     coremark_receipt = json.loads((stage / 'control-coremark-closure.json').read_text())
-    archived_coremark = root / ('fdiv-ready-validation' if turnover else 'wb-query-endpoint-validation')
+    archived_coremark = root / ('fdiv-turnover-validation-20261108' if early_ready else 'fdiv-ready-validation' if turnover else 'wb-query-endpoint-validation')
     assert coremark_receipt['ready'] and not coremark_receipt['original_guest_live']
     verify(archived_coremark, coremark_receipt['files'])
     assert coremark_receipt['build']['source'] == control_source
@@ -219,8 +225,9 @@ def analyze(root, turnover=False):
 
 
 
-def analyze_point(root, point, turnover=False):
-    evidence, launch = metadata(root, turnover)
+def analyze_point(root, point, turnover=False, early_ready=False):
+    turnover = turnover or early_ready
+    evidence, launch = metadata(root, turnover, early_ready)
     source, control_source = launch['spec']['source'], launch['spec']['control_source']
     stage_name = Path(launch['run_dir']).name
     cases = [launch['spec']['coremark'], *launch['spec']['short_cases']]
@@ -244,7 +251,7 @@ def analyze_point(root, point, turnover=False):
         assert command[command.index(flag)+1] == case['command'][case['command'].index(flag)+1]
     assert digest(root / 'native_perf.py') == launch['spec']['input_hashes'][str(Path(launch['run_dir'])/'native_perf.py')]
     assert digest(Path(__file__).with_name('tea_dip_query_endpoint_evidence.py')) == launch['spec']['input_hashes'][str(Path(launch['run_dir'])/'tea_dip_query_endpoint_evidence.py')]
-    control_root = root / ('fdiv-ready-validation' if turnover else ('wb-query-endpoint-validation' if point == 'coremark' else 'wb-query-endpoint-focused'))
+    control_root = root / ('fdiv-turnover-validation-20261108' if early_ready else 'fdiv-ready-validation' if turnover else ('wb-query-endpoint-validation' if point == 'coremark' else 'wb-query-endpoint-focused'))
     control_receipt = json.loads((control_root / 'closure-receipt.json').read_text())
     if turnover:assert control_receipt['ready'] and not control_receipt['controller_live'] and control_receipt['all_original_processes_closed']
     elif point == 'coremark':assert control_receipt['ready'] and not control_receipt['original_guest_live']
@@ -272,15 +279,16 @@ def main():
     parser.add_argument('--report-dir', required=True, type=Path)
     parser.add_argument('--collect', action='store_true')
     parser.add_argument('--turnover', action='store_true', help='Use the registered 8f8/39a turnover experiment and its closed controls')
+    parser.add_argument('--early-ready', action='store_true', help='Use the registered short-path6fde/8f8 prediction experiment')
     parser.add_argument('--point', help='Collect/analyze one closed point while the original parent continues')
     args = parser.parse_args(); root = args.report_dir.resolve()
-    _, launch = metadata(root, args.turnover)
+    _, launch = metadata(root, args.turnover, args.early_ready)
     stage_name = Path(launch['run_dir']).name
     if args.collect:
-        receipt = collect(root, args.point, args.turnover)
+        receipt = collect(root, args.point, args.turnover, args.early_ready)
         if not receipt['ready']:
             print(json.dumps(dict(pending=True,database_read=False,observation=receipt),indent=2));return
-    value = analyze_point(root,args.point,args.turnover) if args.point else analyze(root,args.turnover)
+    value = analyze_point(root,args.point,args.turnover,args.early_ready) if args.point else analyze(root,args.turnover,args.early_ready)
     if not value['pending']:
         output = (root / (stage_name+'-points') / args.point if args.point else root / stage_name) / 'analysis'; output.mkdir(exist_ok=True)
         write(output / 'evidence.json', value)
