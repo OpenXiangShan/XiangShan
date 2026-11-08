@@ -38,7 +38,7 @@ def target(row, prefix):
     return (row[prefix + '_GENERATION'], *pointer(row, prefix + '_ROBIDX'))
 
 
-def analyze(samples, finals, width, warmup_instr=0, end_cycle=None):
+def analyze(samples, finals, width, warmup_instr=0, end_cycle=None, unresolved_details=False):
     # Events precede the sample at the same cycle, just as in the RTL tracker.
     from heapq import merge
     pending = defaultdict(Counter)
@@ -133,6 +133,17 @@ def analyze(samples, finals, width, warmup_instr=0, end_cycle=None):
         'trace_rows': sample_rows + final_rows,
         'weight_unit': 'sampled cycles (one slot = 1 / dispatch_width)',
     }
+    if unresolved_details:
+        def provisional(counts):
+            return [dict(state=STATES[state], cause_mask=cause, pc=hex(pc), slots=count)
+                    for (state, cause, pc), count in sorted(counts.items()) if count]
+        summary['unresolved_details'] = dict(
+            waiting_for_dispatch_successor=[dict(generation=generation, provisional=provisional(counts))
+                                           for generation, counts in sorted(waiting.items()) if sum(counts.values())],
+            pending_selected_target=[dict(target=dict(generation=ref[0], rob_flag=ref[1], rob_value=ref[2], rob_isformer=ref[3]),
+                                          provisional=provisional(counts))
+                                     for ref, counts in sorted(pending.items()) if sum(counts.values())],
+            scope='Unresolved bookkeeping at trace end. States and PCs are provisional, not final attribution; no missing events or cycles are synthesized.')
     return profile, summary
 
 
@@ -143,6 +154,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--warmup-instr', type=int, default=0, help='exclude samples whose preceding retirement prefix is below this count')
     parser.add_argument('--end-cycle', type=int, help='exclusive measurement end; later final records still finalize samples')
+    parser.add_argument('--unresolved-details', action='store_true', help='report unresolved dispatch generations and selected ROB targets with provisional slot counts')
     args = parser.parse_args()
     with sqlite3.connect(f'file:{args.database.resolve()}?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
@@ -155,7 +167,7 @@ def main():
         profile, summary = analyze(
             db.execute(f'SELECT * FROM {table} ORDER BY CYCLE, ID'),
             db.execute(f'SELECT * FROM {final_table} ORDER BY CYCLE, CASE KIND WHEN 1 THEN 0 WHEN 0 THEN 1 WHEN 3 THEN 2 ELSE 3 END, ID'),
-            width, args.warmup_instr, args.end_cycle)
+            width, args.warmup_instr, args.end_cycle, args.unresolved_details)
     args.output.mkdir(parents=True, exist_ok=True)
     with (args.output / 'pics.csv').open('w', newline='') as stream:
         writer = csv.writer(stream)
