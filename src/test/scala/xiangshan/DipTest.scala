@@ -16,12 +16,23 @@
 package xiangshan
 
 import chisel3._
+import chisel3.simulator.Settings
+import java.nio.file.{Files, Paths}
+import scala.sys.process._
 import xiangshan.backend.rob.RobPtr
 
 class DipTest extends XSTester {
   behavior of "DIP dispatch sampling"
   private val dipConfig = config.alterPartial {
     case XSCoreParamsKey => config(XSCoreParamsKey).copy(RobSize = 8, RenameWidth = 4, CommitWidth = 2)
+  }
+  private val nativeSettings = {
+    val directory = Files.createDirectories(Paths.get("build/chiselsim/dip-native")).toAbsolutePath
+    val source = directory.resolve("sampler.cpp")
+    val obj = directory.resolve("sampler.o")
+    Files.writeString(source, DipNative.cpp("DipNative_8_4_2_0_eval", 8, 4, 2))
+    require(Seq("g++", "-std=c++17", "-O2", "-c", source.toString, "-o", obj.toString).! == 0)
+    Settings.default[DipSampler].withLibraryPaths(Seq(obj.toString))
   }
   private def ptr(port: RobPtr): Unit = {
     port.flag.poke(false.B)
@@ -53,7 +64,7 @@ class DipTest extends XSTester {
   }
 
   it should "compact fired lanes and attribute all remaining capacity to the oldest blocked uop" in {
-    simulate(new DipSampler()(dipConfig)) { dut =>
+    simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.io.dispatch.validMask.poke("b1100".U)
       dut.io.dispatch.fireMask.poke("b0100".U)
@@ -71,7 +82,7 @@ class DipTest extends XSTester {
   }
 
   it should "retain a flush cause until a recovery uop enters dispatch" in {
-    simulate(new DipSampler()(dipConfig)) { dut =>
+    simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.io.rob.flush.valid.poke(true.B)
       dut.io.trace.bits.slots.foreach { slot =>
@@ -100,7 +111,7 @@ class DipTest extends XSTester {
   }
 
   it should "sample periodically without exporting unsampled lifecycle events" in {
-    simulate(new DipSampler()(dipConfig)) { dut =>
+    simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.io.period.poke(3.U)
       for (cycle <- 0 until 7) {
@@ -124,7 +135,7 @@ class DipTest extends XSTester {
     }
   }
   it should "emit terminal events only for selected targets, including after sampling stops" in {
-    simulate(new DipSampler()(dipConfig)) { dut =>
+    simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.io.period.poke(10.U)
       dut.io.dispatch.validMask.poke(15.U)
@@ -157,7 +168,7 @@ class DipTest extends XSTester {
   }
 
   it should "bind frontend waiting once and create a new generation after ROB reuse" in {
-    simulate(new DipSampler()(dipConfig)) { dut =>
+    simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.clock.step()
       dut.io.rob.cycle.poke(1.U)
@@ -198,7 +209,7 @@ class DipTest extends XSTester {
   }
 
   it should "track nested flush causes and settle self-flushed slots at a later commit" in {
-    simulate(new DipSampler()(dipConfig)) { dut =>
+    simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.io.dispatch.validMask.poke(1.U)
       dut.io.dispatch.fireMask.poke(1.U)

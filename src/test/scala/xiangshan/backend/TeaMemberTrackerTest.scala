@@ -16,11 +16,23 @@
 package xiangshan.backend
 
 import chisel3._
+import chisel3.simulator.Settings
+import java.nio.file.{Files, Paths}
+import scala.sys.process._
 import xiangshan._
-import xiangshan.backend.rob.{RobPtr, TeaMemberTracker}
+import xiangshan.backend.rob.{RobPtr, TeaMemberTracker, TeaMemberTrackerNative}
 
 class TeaMemberTrackerTest extends XSTester {
   behavior of "TEA architectural member tracking"
+
+  private val nativeSettings = {
+    val directory = Files.createDirectories(Paths.get("build/chiselsim/tea-native")).toAbsolutePath
+    val source = directory.resolve("member-tracker.cpp")
+    val obj = directory.resolve("member-tracker.o")
+    Files.writeString(source, TeaMemberTrackerNative.cpp("TeaMemberTrackerNative_8_4_2_3_2_0_eval", 8, 4, 2, 3, 2))
+    require(Seq("g++", "-std=c++17", "-O2", "-c", source.toString, "-o", obj.toString).! == 0)
+    Settings.default[TeaMemberTracker].withLibraryPaths(Seq(obj.toString))
+  }
 
   private val trackerConfig = config.alterPartial {
     case XSCoreParamsKey => config(XSCoreParamsKey).copy(RobSize = 8, RenameWidth = 4, CommitWidth = 2)
@@ -68,7 +80,7 @@ class TeaMemberTrackerTest extends XSTester {
   }
 
   it should "attribute a long simple run to unfinished B and retire every member" in {
-    simulate(new TeaMemberTracker(3, 2)(trackerConfig)) { dut =>
+    simulate(new TeaMemberTracker(3, 2)(trackerConfig), settings = nativeSettings) { dut =>
       init(dut)
       alloc(dut, 0, psv = 1 << TeaEvent.DR_L1)
       alloc(dut, 1)
@@ -110,7 +122,7 @@ class TeaMemberTrackerTest extends XSTester {
   }
 
   it should "track an undispatched latter, merge late events, and cancel without aliasing ROB reuse" in {
-    simulate(new TeaMemberTracker(3, 2)(trackerConfig)) { dut =>
+    simulate(new TeaMemberTracker(3, 2)(trackerConfig), settings = nativeSettings) { dut =>
       init(dut)
       alloc(dut, 0, numWB = 0, psv = 1 << TeaEvent.DR_L1)
       alloc(dut, 1, former = false)
@@ -162,8 +174,45 @@ class TeaMemberTrackerTest extends XSTester {
     }
   }
 
+  it should "merge allocation-cycle events using the incoming member identity" in {
+    simulate(new TeaMemberTracker(3, 2)(trackerConfig), settings = nativeSettings) { dut =>
+      init(dut)
+      alloc(dut, 0, psv = 1 << TeaEvent.DR_L1)
+      dut.io.alloc(0).bits.robIdx.flag.poke(true.B)
+      alloc(dut, 1, former = false, owner = 0)
+      dut.io.alloc(1).bits.robIdx.value.poke(1.U)
+      dut.io.alloc(1).bits.rank.poke(0.U)
+      dut.io.enqPsv(0).valid.poke(true.B)
+      ptr(dut.io.enqPsv(0).bits.robIdx, flag = true)
+      dut.io.enqPsv(0).bits.rank.poke(0.U)
+      dut.io.enqPsv(0).bits.mask.poke((1 << TeaEvent.DR_SQ).U)
+      dut.io.enqPsv(1).valid.poke(true.B)
+      ptr(dut.io.enqPsv(1).bits.robIdx, former = false)
+      dut.io.enqPsv(1).bits.robIdx.value.poke(1.U)
+      dut.io.enqPsv(1).bits.rank.poke(0.U)
+      dut.io.enqPsv(1).bits.mask.poke((1 << TeaEvent.DR_TLB).U)
+      dut.io.events(0).valid.poke(true.B)
+      ptr(dut.io.events(0).bits.robIdx, flag = true)
+      dut.io.events(0).bits.mask.poke((1 << TeaEvent.ST_TLB).U)
+      dut.io.events(1).valid.poke(true.B)
+      ptr(dut.io.events(1).bits.robIdx, former = false)
+      dut.io.events(1).bits.robIdx.value.poke(1.U)
+      dut.io.events(1).bits.mask.poke((1 << TeaEvent.ST_L1).U)
+      dut.clock.step()
+      dut.io.alloc.foreach(_.valid.poke(false.B))
+      dut.io.enqPsv.foreach(_.valid.poke(false.B))
+      dut.io.events.foreach(_.valid.poke(false.B))
+      ptr(dut.io.readPtr(0), flag = true)
+      ptr(dut.io.readPtr(1), former = false)
+      dut.io.readPtr(1).value.poke(1.U)
+      dut.io.read(0).psv.expect(((1 << TeaEvent.DR_L1) | (1 << TeaEvent.DR_SQ) | (1 << TeaEvent.ST_TLB)).U)
+      dut.io.read(1).psv.expect(((1 << TeaEvent.ST_L1) | (1 << TeaEvent.DR_TLB)).U)
+      dut.io.read(1).pc.expect("h80001004".U)
+    }
+  }
+
   it should "share fusion execution readiness while retaining follower and eliminated move PCs" in {
-    simulate(new TeaMemberTracker(3, 2)(trackerConfig)) { dut =>
+    simulate(new TeaMemberTracker(3, 2)(trackerConfig), settings = nativeSettings) { dut =>
       init(dut)
       alloc(dut, 0)
       alloc(dut, 1, owner = 0, numWB = 0, psv = 1 << TeaEvent.DR_TLB)
@@ -186,7 +235,7 @@ class TeaMemberTrackerTest extends XSTester {
   }
 
   it should "use functional completion for singleton multi-uop instructions" in {
-    simulate(new TeaMemberTracker(3, 2)(trackerConfig)) { dut =>
+    simulate(new TeaMemberTracker(3, 2)(trackerConfig), settings = nativeSettings) { dut =>
       init(dut)
       alloc(dut, 0)
       dut.clock.step()
@@ -203,7 +252,7 @@ class TeaMemberTrackerTest extends XSTester {
   }
 
   it should "preserve full PCs using the allocation-time address translation mode" in {
-    simulate(new TeaMemberTracker(3, 2)(sv39TrackerConfig)) { dut =>
+    simulate(new TeaMemberTracker(3, 2)(sv39TrackerConfig), settings = nativeSettings) { dut =>
       init(dut)
       dut.io.addrTransType.bare.poke(false.B)
       dut.io.addrTransType.sv39.poke(true.B)
