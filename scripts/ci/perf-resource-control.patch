@@ -1,0 +1,63 @@
+--- a/perf_trigger/modules/server.py
++++ b/perf_trigger/modules/server.py
+@@ -1,3 +1,4 @@
++import json
+ import logging
+ import os
+ from pathlib import Path
+@@ -16,7 +17,7 @@
+ with GET_FREE_CORE_SCRIPT_PATH.open("r", encoding="utf-8") as f:
+     GET_FREE_CORE_SCRIPT = f.read()
+ 
+-MIN_ALLOC_CORES = 8
++MIN_ALLOC_CORES = 1
+ LOG_TRUNCATE_LIMIT = 2048
+ 
+ 
+@@ -36,6 +37,8 @@
+             free=False, mem_node=0, start=0, end=0, total=0
+         )
+         self.tracker = tracker
++        seed_map = os.environ.get("PERF_SEED_MAP")
++        self.seed_map = json.loads(Path(seed_map).read_text()) if seed_map else None
+ 
+     def __str__(self) -> str:
+         return self.hostname
+@@ -81,6 +84,8 @@
+         return self.__use_inline_script
+ 
+     def get_free_cores(self, threads: int) -> FreeCoreInfo:
++        if len(self.pending_task) >= 4:
++            return FreeCoreInfo.none()
+         try:
+             if self.use_inline_script:
+                 p = self.run(
+@@ -282,6 +287,8 @@
+     ):
+         p = subprocess.Popen(
+             [
++                "proxychains",
++                "-q",
+                 "ssh",
+                 self.hostname,
+                 "-o",
+@@ -326,7 +333,8 @@
+             gcpt.stderr_path.open("w", encoding="utf-8") as ferr,
+         ):
+             run_cmd = (
+-                (
++                ["nice", "-n", "10"]
++                + (
+                     [
+                         "numactl",
+                         "-m",
+@@ -346,7 +354,8 @@
+                     "-i",
+                     shlex.quote(str(gcpt.bin_path)),
+                     "-s",
+-                    str(random.randint(0, 9999)),
++                    str(self.seed_map[gcpt.result_path.name]
++                        if self.seed_map is not None else random.randint(0, 9999)),
+                 ]
+                 + (
+                     ["--diff", str(self.nemu_so_path)]
