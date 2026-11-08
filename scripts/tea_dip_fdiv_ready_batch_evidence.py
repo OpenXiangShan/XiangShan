@@ -60,8 +60,7 @@ else:
 
 
 def closed(root,batch,variant,point,turnover=False):
-    if turnover and variant=='control':
-        assert batch=='guards'
+    if turnover and variant=='control'and batch=='guards':
         launch,_,_=metadata(root,batch,'candidate',point,True)
         item=closed(root,batch,'candidate',point)
         assert item is not None and item['valid']and item['receipt_sha256']==launch['spec']['reused_control_receipts'][point]
@@ -118,7 +117,7 @@ def guard_pair(root,point,turnover=False):
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--report-dir',required=True,type=Path);parser.add_argument('--batch',choices=['guards','formal'],required=True);parser.add_argument('--point',required=True);parser.add_argument('--variant',choices=['control','candidate']);parser.add_argument('--turnover',action='store_true',help='Use registered8f8/39a batches and closed39a guard controls');parser.add_argument('--action',choices=['collect','analyze','pair'],required=True);args=parser.parse_args();root=args.report_dir.resolve()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--report-dir',required=True,type=Path);parser.add_argument('--batch',choices=['guards','formal','soplex12322'],required=True);parser.add_argument('--point',required=True);parser.add_argument('--variant',choices=['control','candidate']);parser.add_argument('--turnover',action='store_true',help='Use registered8f8/39a batches and closed39a guard controls');parser.add_argument('--action',choices=['collect','analyze','pair'],required=True);args=parser.parse_args();root=args.report_dir.resolve()
     if args.action=='pair':
         assert args.batch=='guards'and args.variant is None;result=guard_pair(root,args.point,args.turnover)
     else:
