@@ -25,9 +25,11 @@ def metadata(root):
     return evidence, launch
 
 
-def collect(root):
+def collect(root, point=None):
     evidence, launch = metadata(root)
-    stage = root / STAGE
+    cases = [launch['spec']['coremark'], *launch['spec']['short_cases']]
+    assert point is None or point in {case['point'] for case in cases}
+    stage = root / STAGE if point is None else root / (STAGE + '-points') / point
     if (stage / 'closure-receipt.json').exists():
         return json.loads((stage / 'closure-receipt.json').read_text())
     code = r'''from pathlib import Path
@@ -58,13 +60,34 @@ else:
     files[str(p.relative_to(root))]=dict(bytes=p.stat().st_size,sha256=sha)
   print(json.dumps(dict(ready=True,utc=datetime.now(timezone.utc).isoformat(),root=str(root),controller=state,controller_live=False,all_original_processes_closed=True,processes=processes,files=files,database_read=False)))
 '''.replace('__LAUNCH__', repr(launch))
+    if point is not None:
+        code = r'''from pathlib import Path
+from datetime import datetime,timezone
+import hashlib,json
+launch=__LAUNCH__;point=__POINT__;root=Path(launch['run_dir']);folder=root/point
+assert hashlib.sha256((root/'experiment.json').read_bytes()).hexdigest()==launch['spec_sha256']
+state=json.loads((root/'run-state.json').read_text());assert all(state[k]==launch['process'][k]for k in ['pid','start_ticks'])
+def live(row):
+ p=Path('/proc',str(row['pid']),'stat');return p.exists()and p.read_text().rsplit(')',1)[1].split()[19]==row['start_ticks']
+if not(folder/'result.json').exists():
+ print(json.dumps(dict(ready=False,point=point,controller_live=live(state),database_read=False)))
+else:
+ result=json.loads((folder/'result.json').read_text());process=json.loads((folder/'process.json').read_text())
+ if live(process):print(json.dumps(dict(ready=False,point=point,original_process_live=True,database_read=False)))
+ else:
+  build=json.loads((root/'build-identity.json').read_text());assert build['phase']=='complete'and build['source']==result['source']==launch['spec']['source']and result['binary_sha256']==build['binary_sha256']
+  assert result['process']==process and result['original_process_closed']and result['exitcode']==0 and result['difftest_passed']
+  names=['command.json','result.json','exitcode','process.json','launch-observation.json','simulator_out.txt','simulator_err.txt','simulator.db']
+  files={n:dict(bytes=(folder/n).stat().st_size,sha256=hashlib.sha256((folder/n).read_bytes()).hexdigest())for n in names}
+  print(json.dumps(dict(ready=True,utc=datetime.now(timezone.utc).isoformat(),root=str(folder),point=point,controller=state,controller_live=live(state),original_process_live=False,process=process,build=build,spec_sha256=launch['spec_sha256'],files=files,database_read=False)))
+'''.replace('__LAUNCH__',repr(launch)).replace('__POINT__',repr(point))
     reply = subprocess.run(['proxychains', '-q', 'ssh', '-o', 'BatchMode=yes', 'node031', 'python3', '-'],
                            input=code, text=True, capture_output=True, check=True, timeout=50)
     receipt = json.loads(reply.stdout)
     if not receipt['ready']:
         return receipt
     assert not stage.exists(), 'Inspect the existing partial archive before collecting'
-    stage.mkdir()
+    stage.mkdir(parents=True)
     command = 'tar -C ' + shlex.quote(receipt['root']) + ' -czf - ' + ' '.join(map(shlex.quote, receipt['files']))
     with (stage / 'originals.tar.gz').open('wb') as stream:
         subprocess.run(['proxychains', '-q', 'ssh', 'node031', command], stdout=stream, check=True, timeout=60)
@@ -191,18 +214,65 @@ def analyze(root):
                 scope='One closed candidate validation: CoreMark neutral gate, six focused FP protocols and three1M+1M SPEC windows. Micro trap counts are diagnostic progress, not intended-work CPI or a suite score. Short native CPI uses each own retirement denominator; exact TEA budgets require observed endpoint alignment. No formal/full-suite result, physical timing or adoption claim.')
 
 
+
+def analyze_point(root, point):
+    evidence, launch = metadata(root)
+    cases = [launch['spec']['coremark'], *launch['spec']['short_cases']]
+    case, = [case for case in cases if case['point'] == point]
+    folder = root / (STAGE + '-points') / point
+    if not (folder / 'closure-receipt.json').exists():
+        return dict(pending=True,database_read=False,point=point,reason='Original point closure not archived')
+    receipt = json.loads((folder / 'closure-receipt.json').read_text())
+    assert receipt['ready'] and receipt['point'] == point and not receipt['original_process_live']
+    assert receipt['spec_sha256'] == launch['spec_sha256']
+    assert all(receipt['controller'][k] == launch['process'][k] for k in ['pid','start_ticks'])
+    verify(folder,receipt['files'])
+    row = json.loads((folder / 'result.json').read_text())
+    started = json.loads((folder / 'launch-observation.json').read_text())
+    assert row['source'] == SOURCE and row['binary_sha256'] == receipt['build']['binary_sha256']
+    assert row['original_process_closed'] and row['difftest_passed'] and row['exitcode'] == 0 and (folder / 'exitcode').read_text().strip() == '0'
+    assert row['process'] == started['process'] == receipt['process'] and started['original_process_live']
+    command = json.loads((folder / 'command.json').read_text())
+    assert command == started['command'] and command[6] == receipt['build']['binary']
+    for flag in ['-I','-C','-s','-i','--diff','--cst-file','--dump-select-db']:
+        assert command[command.index(flag)+1] == case['command'][case['command'].index(flag)+1]
+    assert digest(root / 'native_perf.py') == launch['spec']['input_hashes'][str(Path(launch['run_dir'])/'native_perf.py')]
+    assert digest(Path(__file__).with_name('tea_dip_query_endpoint_evidence.py')) == launch['spec']['input_hashes'][str(Path(launch['run_dir'])/'tea_dip_query_endpoint_evidence.py')]
+    control_root = root / ('wb-query-endpoint-validation' if point == 'coremark' else 'wb-query-endpoint-focused')
+    control_receipt = json.loads((control_root / 'closure-receipt.json').read_text())
+    if point == 'coremark':assert control_receipt['ready'] and not control_receipt['original_guest_live']
+    else:assert control_receipt['ready'] and not control_receipt['controller_live'] and control_receipt['all_original_guests_closed']
+    verify(control_root,control_receipt['files'])
+    control = control_root / 'coremark' if point == 'coremark' else control_root / 'query_endpoint' / point
+    baseline = json.loads((control / 'result.json').read_text())
+    assert baseline['source'] == CONTROL and baseline['original_process_closed'] and baseline['exitcode'] == 0 and baseline['difftest_passed']
+    control_command = json.loads((control / 'command.json').read_text())
+    for flag in ['-I','-C','-s','-i','--diff','--dump-select-db']:
+        assert control_command[control_command.index(flag)+1] == command[command.index(flag)+1]
+    if point != 'coremark':
+        assert control_command[control_command.index('-W')+1] == command[command.index('-W')+1] == case['command'][case['command'].index('-W')+1]
+    sys.path.insert(0,str(root))
+    equality = old_execution(control,folder,set())
+    comparison = None if point == 'coremark' else pair(control,folder)
+    return dict(pending=False,database_read=True,point=point,source=SOURCE,control_source=CONTROL,
+                parent_controller_live_at_collection=receipt['controller_live'],original_point_closed=True,
+                native_six_table_equality=equality,comparison=comparison,closed_receipt_sha256=digest(folder/'closure-receipt.json'),
+                consumer_sha256=digest(Path(__file__)),scope='One closed point only. The original parent and other points may still be live; their databases are not opened. No whole-stage gate, suite score or adoption claim.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report-dir', required=True, type=Path)
     parser.add_argument('--collect', action='store_true')
+    parser.add_argument('--point', help='Collect/analyze one closed point while the original parent continues')
     args = parser.parse_args(); root = args.report_dir.resolve()
     if args.collect:
-        receipt = collect(root)
+        receipt = collect(root, args.point)
         if not receipt['ready']:
             print(json.dumps(dict(pending=True,database_read=False,observation=receipt),indent=2));return
-    value = analyze(root)
+    value = analyze_point(root,args.point) if args.point else analyze(root)
     if not value['pending']:
-        output = root / STAGE / 'analysis'; output.mkdir(exist_ok=True)
+        output = (root / (STAGE+'-points') / args.point if args.point else root / STAGE) / 'analysis'; output.mkdir(exist_ok=True)
         write(output / 'evidence.json', value)
     print(json.dumps(value,indent=2))
 
