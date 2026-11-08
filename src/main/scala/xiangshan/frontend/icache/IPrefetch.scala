@@ -172,15 +172,16 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
 
   (0 until PortNumber).foreach { i =>
     val vaddr = Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
-    toITLB(i).valid             := s1_need_itlb(i) || (s0_valid && (if (i == 0) true.B else s0_doubleline))
-    toITLB(i).bits              := DontCare
-    toITLB(i).bits.size         := 3.U
-    toITLB(i).bits.vaddr        := vaddr
-    toITLB(i).bits.debug.pc     := SignExt(vaddr, XLEN)
-    toITLB(i).bits.cmd          := TlbCmd.exec
-    toITLB(i).bits.no_translate := false.B
-    toITLB(i).bits.checkfullva  := true.B
-    toITLB(i).bits.fullva       := SignExt(vaddr, XLEN)
+    toITLB(i).valid               := s1_need_itlb(i) || (s0_valid && (if (i == 0) true.B else s0_doubleline))
+    toITLB(i).bits                := DontCare
+    toITLB(i).bits.size           := 3.U
+    toITLB(i).bits.vaddr          := vaddr
+    toITLB(i).bits.debug.pc       := SignExt(vaddr, XLEN)
+    toITLB(i).bits.cmd            := TlbCmd.exec
+    toITLB(i).bits.fromHwPrefetch := false.B
+    toITLB(i).bits.no_translate   := false.B
+    toITLB(i).bits.checkfullva    := true.B
+    toITLB(i).bits.fullva         := SignExt(vaddr, XLEN)
   }
   fromITLB.foreach(_.ready := true.B)
   io.itlb.foreach(_.req_kill := false.B)
