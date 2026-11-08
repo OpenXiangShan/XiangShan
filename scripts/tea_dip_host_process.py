@@ -9,7 +9,7 @@ import signal
 import socket
 import subprocess
 import time
-from tea_dip_host_counters import metrics, parse_perf, snapshot
+from tea_dip_host_counters import EVENTS, metrics, parse_perf, snapshot
 
 
 def measure(command, output):
@@ -25,7 +25,7 @@ def measure(command, output):
         record['process'] = dict(pid=child.pid, start_ticks=ticks)
         (output / 'process.json').write_text(json.dumps(record, indent=2) + '\n')
         first = last = snapshot(child.pid, ticks)
-        perf_command = ['perf', 'stat', '-x,', '-p', str(child.pid), '-e', 'task-clock,cycles,instructions']
+        perf_command = ['perf', 'stat', '-x,', '-p', str(child.pid), '-e', ','.join(EVENTS)]
         perf_started = time.monotonic_ns()
         perf = subprocess.Popen(perf_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                 env={**os.environ, 'LC_ALL': 'C'})
