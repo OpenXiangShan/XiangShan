@@ -1,4 +1,4 @@
-"""Calibrate cycle-by-cycle TEA/DIP on an already validated short protocol pair."""
+"""Run dense short-protocol diagnostics with explicit native-calibration gates."""
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from datetime import datetime,timezone
 from pathlib import Path
@@ -23,6 +23,7 @@ def main():
     assert socket.gethostname().startswith('node') and not(root/'run-state.json').exists()
     spec=json.loads((root/'experiment.json').read_text())
     assert spec['period']==1 and len(spec['cases'])==2
+    native_neutrality_required=spec['require_native_neutrality']
     state=dict(pid=os.getpid(),start_ticks=Path('/proc/self/stat').read_text().rsplit(')',1)[1].split()[19],host=socket.gethostname(),phase='preflight',completed=0,total=2)
     def save(**values):
         state.update(values,utc=datetime.now(timezone.utc).isoformat());write(root/'run-state.json',state)
@@ -63,13 +64,16 @@ def main():
                 for table in TABLES:tables[table]=[old.execute('SELECT count(*) FROM '+table).fetchone()[0],new.execute('SELECT count(*) FROM '+table).fetchone()[0]]
                 for table in ['TeaCycleSummary_0','TeaNoCommit_0']:auxiliary[table]=old.execute('SELECT * FROM '+table+' ORDER BY ID').fetchall()==new.execute('SELECT * FROM '+table+' ORDER BY ID').fetchall()
             calibration=dict(passed=before==after and all(auxiliary.values()) and instructions==case['original_instructions'] and cycles==case['original_cycles'],all_native_multivalues_equal=before==after,auxiliary_tables_equal=auxiliary,original_instructions=case['original_instructions'],observed_instructions=instructions,original_cycles=case['original_cycles'],observed_cycles=cycles,table_row_counts_period1000_period1=tables,scope='Only this micro and exact binary: runtime sampler changes1000→1. Native multi-counters and independent summary/gap tables must be identical. Other sampled tables intentionally differ; no suite score or isolated host-overhead claim.')
-            write(folder/'sampling-calibration.json',calibration);assert calibration['passed'],calibration
-            return dict(variant=variant,passed=True,native_sampling_neutrality=True,instructions=instructions,cycles=cycles)
+            calibration['required']=native_neutrality_required
+            if not native_neutrality_required:calibration['scope']='Declared program-padding experiment: full-run native equality is descriptive only, not a sampler-neutrality gate. Matched original payload requires separate retirement-trace verification.'
+            write(folder/'sampling-calibration.json',calibration)
+            if native_neutrality_required:assert calibration['passed'],calibration
+            return dict(variant=variant,passed=True,native_sampling_neutrality=calibration['passed'] if native_neutrality_required else None,instructions=instructions,cycles=cycles)
         rows=[]
         with ThreadPoolExecutor(max_workers=2)as pool:
             for future in as_completed([pool.submit(run,case)for case in spec['cases']]):
                 rows.append(future.result());write(root/'results.json',rows);save(completed=len(rows))
-        save(phase='complete',all_guests_Difftest_and_sampling_neutral=True)
+        save(phase='complete',all_guests_Difftest_passed=True,native_sampling_neutrality_verified=True if native_neutrality_required else None)
     except BaseException as error:save(phase='failed',error=repr(error));raise
 
 
