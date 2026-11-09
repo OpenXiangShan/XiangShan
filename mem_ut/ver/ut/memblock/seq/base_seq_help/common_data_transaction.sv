@@ -1792,9 +1792,15 @@ class common_data_transaction extends uvm_object;
                                $sformatf("LOAD raw ROB=%0d/%0d maps to incompatible uid=%0d behavior=%0d load_dispatched=%0d",
                                          key.flag, key.value, candidate_uid,
                                          behavior.kind, status.load_dispatched))
+                    return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
                 end
             end else begin
-                if (behavior.kind != MEMBLOCK_OP_BEHAVIOR_STORE ||
+                // 中文注释：StoreQueue 的 non-zero CBO 复用 CMO/MMIO 状态机，
+                // 因而会合法产生 storeMmio raw。resolver 仍只负责证明唯一 active
+                // owner 和 dispatch provenance；是否写 ordinary store canonical tag
+                // 由 adapter 根据最终 behavior 决定。
+                if ((behavior.kind != MEMBLOCK_OP_BEHAVIOR_STORE &&
+                     behavior.kind != MEMBLOCK_OP_BEHAVIOR_CBO) ||
                     !behavior.commit_is_store ||
                     !status.sta_dispatched || !status.std_dispatched) begin
                     `uvm_fatal("MMIO_RESOLVE",
@@ -1802,6 +1808,7 @@ class common_data_transaction extends uvm_object;
                                          key.flag, key.value, candidate_uid,
                                          behavior.kind, status.sta_dispatched,
                                          status.std_dispatched))
+                    return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
                 end
             end
             current_candidate_count++;

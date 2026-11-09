@@ -1533,6 +1533,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
             memblock_uid_t uid;
             string stale_reason;
             memblock_mmio_resolve_result_e result;
+            memblock_op_behavior_t behavior;
             int existing_idx;
 
             result = data.resolve_mmio_uid_by_rob_value(
@@ -1550,26 +1551,41 @@ class dispatch_monitor_event_adapter extends uvm_object;
                                     raw.mmio_flush_epoch, stale_reason),
                           UVM_LOW)
             end else begin
-                existing_idx = -1;
-                foreach (staged_tags[idx]) begin
-                    if (staged_tags[idx].uid == uid) begin
-                        existing_idx = idx;
-                        break;
+                behavior = memblock_op_behavior_util::derive_op_behavior(
+                    data.get_main_transaction(uid));
+                // 中文注释：non-zero CBO 的 StoreQueue 状态机会复用 storeMmio
+                // sideband。该 raw 已由 resolver 完成唯一 owner/provenance 校验，
+                // 这里只消费事实，不能污染 ordinary load/store canonical MMIO tag。
+                if (behavior.kind == MEMBLOCK_OP_BEHAVIOR_CBO) begin
+                    `uvm_info("MMIO_RAW",
+                              $sformatf({"consume CBO storeMmio uid=%0d ",
+                                         "ROB value=%0d epoch=%0d sample=%0d ",
+                                         "without canonical MMIO tag"},
+                                        uid, raw.store_mmio_rob_value,
+                                        raw.mmio_flush_epoch, raw.mmio_sample_seq),
+                              UVM_LOW)
+                end else begin
+                    existing_idx = -1;
+                    foreach (staged_tags[idx]) begin
+                        if (staged_tags[idx].uid == uid) begin
+                            existing_idx = idx;
+                            break;
+                        end
                     end
-                end
-                if (existing_idx >= 0 &&
-                    staged_tags[existing_idx].kind != MEMBLOCK_MMIO_KIND_STORE) begin
-                    `uvm_fatal("MMIO_RAW",
-                               $sformatf("same raw assigns load/store MMIO kinds to uid=%0d",
-                                         uid))
-                end
-                if (existing_idx < 0) begin
-                    memblock_mmio_tag_stage_t stage;
+                    if (existing_idx >= 0 &&
+                        staged_tags[existing_idx].kind != MEMBLOCK_MMIO_KIND_STORE) begin
+                        `uvm_fatal("MMIO_RAW",
+                                   $sformatf("same raw assigns load/store MMIO kinds to uid=%0d",
+                                             uid))
+                    end
+                    if (existing_idx < 0) begin
+                        memblock_mmio_tag_stage_t stage;
 
-                    stage.uid = uid;
-                    stage.kind = MEMBLOCK_MMIO_KIND_STORE;
-                    stage.first_port_order = port_order;
-                    staged_tags.push_back(stage);
+                        stage.uid = uid;
+                        stage.kind = MEMBLOCK_MMIO_KIND_STORE;
+                        stage.first_port_order = port_order;
+                        staged_tags.push_back(stage);
+                    end
                 end
             end
         end

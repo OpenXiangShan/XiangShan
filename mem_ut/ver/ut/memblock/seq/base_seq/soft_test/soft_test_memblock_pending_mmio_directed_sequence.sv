@@ -74,6 +74,8 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task run_inactive_head_pointer_scenario();
     extern virtual task run_directed_tag_scenario();
     extern virtual task run_monitor_raw_scenario();
+    extern virtual task run_cbo_store_mmio_consume_scenario();
+    extern virtual task run_incompatible_store_mmio_fatal_scenario();
     extern virtual task run_uncache_retry_boost_scenario();
     extern virtual task run_rollback_xmr_path_scenario();
     extern virtual task run_rollback_subtype_decode_scenario();
@@ -100,6 +102,7 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task build_load_store_table();
     extern virtual task build_load_table(input int unsigned load_count);
     extern virtual task build_store_table();
+    extern virtual task build_cbo_table();
     extern virtual task run_rob_wrap_admission_fatal_scenario(input string scenario_name);
     extern virtual task establish_redirect_anchor(
         input memblock_redirect_payload_t redirect,
@@ -113,6 +116,13 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
         output longint unsigned anchor_sample_seq
     );
     extern virtual task apply_load_mmio_raw(
+        input bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value,
+        input longint unsigned sample_seq,
+        input string scenario_name,
+        input bit expect_fatal = 1'b0,
+        input string expected_fatal_pattern = ""
+    );
+    extern virtual task apply_store_mmio_raw(
         input bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value,
         input longint unsigned sample_seq,
         input string scenario_name,
@@ -141,6 +151,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::body();
     run_inactive_head_pointer_scenario();
     run_directed_tag_scenario();
     run_monitor_raw_scenario();
+    run_cbo_store_mmio_consume_scenario();
+    run_incompatible_store_mmio_fatal_scenario();
     run_uncache_retry_boost_scenario();
     run_rollback_xmr_path_scenario();
     run_rollback_subtype_decode_scenario();
@@ -731,6 +743,21 @@ task soft_test_memblock_pending_mmio_directed_sequence::build_store_table();
     import_manual_main_table();
 endtask:build_store_table
 
+task soft_test_memblock_pending_mmio_directed_sequence::build_cbo_table();
+    main_control_transaction cbo_tr;
+
+    clear_manual_main_table();
+    cbo_tr = make_directed_transaction("pending_mmio_cbo_clean",
+                                       MEMBLOCK_OP_CLASS_STORE,
+                                       0,
+                                       64'h0000_0000_8400_1000);
+    cbo_tr.op_class = MEMBLOCK_OP_CLASS_CBO;
+    apply_op_class_template(cbo_tr, MEMBLOCK_LSUOP_CBO_CLEAN);
+    cbo_tr.update_vaddr();
+    set_manual_main_transaction(0, cbo_tr);
+    import_manual_main_table();
+endtask:build_cbo_table
+
 task soft_test_memblock_pending_mmio_directed_sequence::run_rob_wrap_admission_fatal_scenario(
     input string scenario_name
 );
@@ -883,6 +910,40 @@ task soft_test_memblock_pending_mmio_directed_sequence::apply_load_mmio_raw(
     end
 endtask:apply_load_mmio_raw
 
+task soft_test_memblock_pending_mmio_directed_sequence::apply_store_mmio_raw(
+    input bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value,
+    input longint unsigned sample_seq,
+    input string scenario_name,
+    input bit expect_fatal = 1'b0,
+    input string expected_fatal_pattern = ""
+);
+    memblock_sync_pkg::dispatch_raw_ctrl_t raw;
+    memblock_pending_mmio_expected_fatal_catcher catcher;
+
+    wait_for_dut_sample_watermark(sample_seq, scenario_name);
+    raw = memblock_sync_pkg::make_empty_raw_ctrl();
+    raw.valid = 1'b1;
+    raw.store_mmio_valid = 1'b1;
+    raw.store_mmio_rob_value = rob_value;
+    raw.mmio_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+    raw.mmio_sample_seq = sample_seq;
+    raw.cycle = $time;
+
+    if (!expect_fatal) begin
+        monitor_adapter.apply_raw_ctrl_mmio_tags(raw);
+        return;
+    end
+    catcher = new({scenario_name, "_catcher"}, expected_fatal_pattern);
+    uvm_report_cb::add(null, catcher);
+    monitor_adapter.apply_raw_ctrl_mmio_tags(raw);
+    uvm_report_cb::delete(null, catcher);
+    if (catcher.caught_count != 1) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s expected one MMIO_RESOLVE fatal, got %0d",
+                             scenario_name, catcher.caught_count))
+    end
+endtask:apply_store_mmio_raw
+
 task soft_test_memblock_pending_mmio_directed_sequence::check_load_head_sideband(
     input memblock_uid_t expected_uid,
     input string scenario_name
@@ -986,6 +1047,60 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_monitor_raw_scenario
     end
     check_load_head_sideband(0, "monitor-raw");
 endtask:run_monitor_raw_scenario
+
+// 中文注释：non-zero CBO 经过 StoreQueue CMO/MMIO 状态机会产生 storeMmio raw。
+// adapter 必须消费该 sideband，但不能把 CBO 标成 ordinary store MMIO。
+task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_store_mmio_consume_scenario();
+    memblock_issue_q_item_t fired_items[$];
+    status_transaction status;
+    longint unsigned sample_seq;
+
+    reset_directed_owner_state();
+    build_cbo_table();
+    admit_lsq_and_route_issue();
+    fire_all_issue_items(fired_items);
+    sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
+    if (sample_seq == 0) begin
+        wait_for_dut_sample_watermark(1, "cbo-store-mmio-consume");
+        sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
+    end
+    apply_store_mmio_raw(data.get_status(0).robIdx_value,
+                         sample_seq,
+                         "cbo-store-mmio-consume");
+    status = data.get_status(0);
+    if (status.mmio_tag_valid || status.is_mmio_load || status.is_mmio_store ||
+        status.mmio_tag_source != MEMBLOCK_MMIO_TAG_NONE) begin
+        `uvm_fatal(get_type_name(),
+                   "CBO storeMmio sideband incorrectly created canonical MMIO tag")
+    end
+endtask:run_cbo_store_mmio_consume_scenario
+
+// 中文注释：只放宽合法 CBO owner；load/prefetch等其它 behavior 收到 storeMmio
+// 仍必须由 resolver 拒绝，避免 value-only raw 被错误归属。
+task soft_test_memblock_pending_mmio_directed_sequence::
+    run_incompatible_store_mmio_fatal_scenario();
+    memblock_issue_q_item_t fired_items[$];
+    longint unsigned sample_seq;
+
+    reset_directed_owner_state();
+    build_load_table(1);
+    admit_lsq_and_route_issue();
+    fire_all_issue_items(fired_items);
+    sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
+    if (sample_seq == 0) begin
+        wait_for_dut_sample_watermark(1, "incompatible-store-mmio");
+        sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
+    end
+    apply_store_mmio_raw(data.get_status(0).robIdx_value,
+                         sample_seq,
+                         "incompatible-store-mmio",
+                         1'b1,
+                         "*STORE raw ROB=*maps to incompatible uid=*");
+    if (data.get_status(0).mmio_tag_valid) begin
+        `uvm_fatal(get_type_name(),
+                   "incompatible storeMmio fatal path incorrectly wrote canonical tag")
+    end
+endtask:run_incompatible_store_mmio_fatal_scenario
 
 function memblock_wb_event_t
 soft_test_memblock_pending_mmio_directed_sequence::make_uncache_nack_event(

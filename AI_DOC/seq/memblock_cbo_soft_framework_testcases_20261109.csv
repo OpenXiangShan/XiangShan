@@ -1,0 +1,3 @@
+test_type,testcase_name,entry,cfg,purpose,expected_result,status
+soft_framework,cbo_store_mmio_sideband_consume,memblock_pending_mmio_directed_vseq,default,"验证non-zero CBO复用StoreQueue CMO/MMIO状态机产生storeMmio raw时，框架完成唯一active ROB与STA/STD provenance校验后只消费sideband","CBO不生成ordinary store canonical MMIO tag，resolver与adapter不报错",STATIC_ONLY_20261109
+soft_framework,incompatible_store_mmio_behavior_reject,memblock_pending_mmio_directed_vseq,default,"验证storeMmio raw映射到已发射load等不兼容behavior时仍保持严格拒绝","捕获一条MMIO_RESOLVE fatal，且不写canonical MMIO tag",STATIC_ONLY_20261109
