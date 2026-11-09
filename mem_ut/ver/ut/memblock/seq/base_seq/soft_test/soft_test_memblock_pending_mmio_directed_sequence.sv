@@ -672,6 +672,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::reset_directed_owner_sta
     end
     commit_handler.reset_lsqcommit_runtime_state();
     commit_handler.bind_lsq_ctrl(lsq_ctrl);
+    monitor_adapter.reset_cbo_store_mmio_level_context();
 endtask:reset_directed_owner_state
 
 // 中文注释：directed sequence只等待 ctrl monitor/cancel snapshot owner推进的真实
@@ -1048,11 +1049,14 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_monitor_raw_scenario
     check_load_head_sideband(0, "monitor-raw");
 endtask:run_monitor_raw_scenario
 
-// 中文注释：non-zero CBO 经过 StoreQueue CMO/MMIO 状态机会产生 storeMmio raw。
-// adapter 必须消费该 sideband，但不能把 CBO 标成 ordinary store MMIO。
+// 中文注释：non-zero CBO 经过 StoreQueue CMO/MMIO 状态机会产生 level storeMmio。
+// 首拍完成 owner 校验；owner 正式 retire 后的连续高电平仍被消费。拉低结束
+// context 后，同 ROB value 的 load 新 owner 必须重新走 resolver 并触发不兼容 fatal。
 task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_store_mmio_consume_scenario();
     memblock_issue_q_item_t fired_items[$];
+    memblock_sync_pkg::dispatch_raw_ctrl_t raw;
     status_transaction status;
+    bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value;
     longint unsigned sample_seq;
 
     reset_directed_owner_state();
@@ -1064,7 +1068,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_store_mmio_consu
         wait_for_dut_sample_watermark(1, "cbo-store-mmio-consume");
         sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
     end
-    apply_store_mmio_raw(data.get_status(0).robIdx_value,
+    rob_value = data.get_status(0).robIdx_value;
+    apply_store_mmio_raw(rob_value,
                          sample_seq,
                          "cbo-store-mmio-consume");
     status = data.get_status(0);
@@ -1072,6 +1077,58 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_store_mmio_consu
         status.mmio_tag_source != MEMBLOCK_MMIO_TAG_NONE) begin
         `uvm_fatal(get_type_name(),
                    "CBO storeMmio sideband incorrectly created canonical MMIO tag")
+    end
+
+    data.set_status_field(0, MEMBLOCK_STATUS_STA_WRITEBACK, 1'b1);
+    data.set_status_field(0, MEMBLOCK_STATUS_STD_WRITEBACK, 1'b1);
+    data.set_status_field(0, MEMBLOCK_STATUS_STA_PASS, 1'b1);
+    data.set_status_field(0, MEMBLOCK_STATUS_STD_PASS, 1'b1);
+    data.set_status_field(0, MEMBLOCK_STATUS_WRITEBACK, 1'b1);
+    data.set_status_field(0, MEMBLOCK_STATUS_PASS, 1'b1);
+    data.set_status_field(0, MEMBLOCK_STATUS_ROB_COMMIT, 1'b1);
+    data.release_uid_sq_mapping(0);
+    data.try_retire_committed_uid(0);
+    if (data.get_status(0).active || !data.get_status(0).terminal_done ||
+        data.uid_by_active_rob.num() != 0) begin
+        `uvm_fatal(get_type_name(),
+                   "CBO owner did not formally retire before held-level sample")
+    end
+
+    apply_store_mmio_raw(rob_value,
+                         sample_seq + 1,
+                         "cbo-store-mmio-held-after-retire");
+    status = data.get_status(0);
+    if (status.mmio_tag_valid || status.is_mmio_load || status.is_mmio_store ||
+        status.mmio_tag_source != MEMBLOCK_MMIO_TAG_NONE) begin
+        `uvm_fatal(get_type_name(),
+                   "held CBO storeMmio after retire created canonical MMIO tag")
+    end
+
+    wait_for_dut_sample_watermark(sample_seq + 2, "cbo-store-mmio-deassert");
+    raw = memblock_sync_pkg::make_empty_raw_ctrl();
+    raw.valid = 1'b1;
+    raw.mmio_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+    raw.mmio_sample_seq = sample_seq + 2;
+    raw.cycle = $time;
+    monitor_adapter.apply_raw_ctrl_mmio_tags(raw);
+
+    lsq_ctrl.reset();
+    commit_handler.reset_lsqcommit_runtime_state();
+    build_load_table(1);
+    admit_lsq_and_route_issue();
+    fire_all_issue_items(fired_items);
+    if (data.get_status(0).robIdx_value != rob_value) begin
+        `uvm_fatal(get_type_name(),
+                   "deassert test failed to reuse the original ROB value")
+    end
+    apply_store_mmio_raw(rob_value,
+                         sample_seq + 3,
+                         "cbo-store-mmio-deassert-new-load",
+                         1'b1,
+                         "*STORE raw ROB=*maps to incompatible uid=*");
+    if (data.get_status(0).mmio_tag_valid) begin
+        `uvm_fatal(get_type_name(),
+                   "deasserted CBO context hid incompatible load or wrote MMIO tag")
     end
 endtask:run_cbo_store_mmio_consume_scenario
 

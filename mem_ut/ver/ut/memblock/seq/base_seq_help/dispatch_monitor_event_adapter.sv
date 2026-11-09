@@ -23,6 +23,15 @@ class dispatch_monitor_event_adapter extends uvm_object;
     // 每个 dispatch service sample 只允许一次 destructive raw-fence service。
     // C4 pending work 的唯一真源在 common_data_transaction，adapter 不再维护镜像队列。
     longint unsigned last_l2tlb_sfence_service_sample_seq;
+    // 中文注释：StoreQueue 的 CBO storeMmio 是 level sideband。首拍完成唯一
+    // active owner、STA/STD dispatch 和 behavior 校验后，连续同 ROB value 的后续
+    // sample 可在 owner retire 后继续消费；低电平、值变化或 sample 不连续时清除。
+    bit cbo_store_mmio_level_valid;
+    bit [MEMBLOCK_ROB_VALUE_W-1:0] cbo_store_mmio_level_rob_value;
+    longint unsigned cbo_store_mmio_level_last_sample_seq;
+    memblock_uid_t cbo_store_mmio_level_uid;
+    int unsigned cbo_store_mmio_level_dynamic_epoch;
+    int unsigned cbo_store_mmio_level_first_flush_epoch;
 
     `uvm_object_utils(dispatch_monitor_event_adapter)
 
@@ -32,11 +41,51 @@ class dispatch_monitor_event_adapter extends uvm_object;
         monitor_commit_handler = null;
         adapter_reset_serviced_epoch = 0;
         last_l2tlb_sfence_service_sample_seq = 0;
+        reset_cbo_store_mmio_level_context();
     endfunction:new
 
     function void bind_commit_handler(input lsq_commit_handler handler);
         monitor_commit_handler = handler;
     endfunction:bind_commit_handler
+
+    // 中文注释：清除 CBO storeMmio 连续 level 的已验证 owner context。
+    // 生产路径在 sideband 拉低时调用；soft directed 场景也显式调用以隔离场景。
+    function void reset_cbo_store_mmio_level_context();
+        cbo_store_mmio_level_valid = 1'b0;
+        cbo_store_mmio_level_rob_value = '0;
+        cbo_store_mmio_level_last_sample_seq = 0;
+        cbo_store_mmio_level_uid = 0;
+        cbo_store_mmio_level_dynamic_epoch = 0;
+        cbo_store_mmio_level_first_flush_epoch = 0;
+    endfunction:reset_cbo_store_mmio_level_context
+
+    // 中文注释：只复用首拍已验证为 CBO 的连续 level。相同 sample 允许 deferred
+    // raw 重试，下一 sample 允许 owner 已 retire；任何 identity/gap 变化都回到 resolver。
+    function bit consume_held_cbo_store_mmio_level(
+        input memblock_sync_pkg::dispatch_raw_ctrl_t raw
+    );
+        if (!cbo_store_mmio_level_valid) begin
+            return 1'b0;
+        end
+        if (raw.store_mmio_rob_value != cbo_store_mmio_level_rob_value ||
+            (raw.mmio_sample_seq != cbo_store_mmio_level_last_sample_seq &&
+             raw.mmio_sample_seq != cbo_store_mmio_level_last_sample_seq + 1)) begin
+            reset_cbo_store_mmio_level_context();
+            return 1'b0;
+        end
+        cbo_store_mmio_level_last_sample_seq = raw.mmio_sample_seq;
+        `uvm_info("MMIO_RAW",
+                  $sformatf({"consume held CBO storeMmio uid=%0d dynamic_epoch=%0d ",
+                             "ROB value=%0d first/current flush epoch=%0d/%0d sample=%0d"},
+                            cbo_store_mmio_level_uid,
+                            cbo_store_mmio_level_dynamic_epoch,
+                            raw.store_mmio_rob_value,
+                            cbo_store_mmio_level_first_flush_epoch,
+                            raw.mmio_flush_epoch,
+                            raw.mmio_sample_seq),
+                  UVM_LOW)
+        return 1'b1;
+    endfunction:consume_held_cbo_store_mmio_level
 
     function void reset_l2tlb_sfence_state();
         // Runtime reset owns the epoch boundary. The adapter only clears its
@@ -1467,6 +1516,9 @@ class dispatch_monitor_event_adapter extends uvm_object;
         int unsigned port_order;
 
         ensure_handles();
+        if (!raw.store_mmio_valid) begin
+            reset_cbo_store_mmio_level_context();
+        end
         if (raw.load_mmio_valid == '0 && !raw.store_mmio_valid) begin
             return;
         end
@@ -1534,57 +1586,67 @@ class dispatch_monitor_event_adapter extends uvm_object;
             string stale_reason;
             memblock_mmio_resolve_result_e result;
             memblock_op_behavior_t behavior;
+            status_transaction status;
             int existing_idx;
 
-            result = data.resolve_mmio_uid_by_rob_value(
-                raw.store_mmio_rob_value,
-                MEMBLOCK_MMIO_KIND_STORE,
-                raw.mmio_flush_epoch,
-                raw.mmio_sample_seq,
-                raw.cycle,
-                uid,
-                stale_reason);
-            if (result == MEMBLOCK_MMIO_RESOLVE_STALE_DROP) begin
-                `uvm_info("MMIO_RAW",
-                          $sformatf("drop stale storeMmio ROB value=%0d epoch=%0d reason=%s",
-                                    raw.store_mmio_rob_value,
-                                    raw.mmio_flush_epoch, stale_reason),
-                          UVM_LOW)
-            end else begin
-                behavior = memblock_op_behavior_util::derive_op_behavior(
-                    data.get_main_transaction(uid));
-                // 中文注释：non-zero CBO 的 StoreQueue 状态机会复用 storeMmio
-                // sideband。该 raw 已由 resolver 完成唯一 owner/provenance 校验，
-                // 这里只消费事实，不能污染 ordinary load/store canonical MMIO tag。
-                if (behavior.kind == MEMBLOCK_OP_BEHAVIOR_CBO) begin
+            if (!consume_held_cbo_store_mmio_level(raw)) begin
+                result = data.resolve_mmio_uid_by_rob_value(
+                    raw.store_mmio_rob_value,
+                    MEMBLOCK_MMIO_KIND_STORE,
+                    raw.mmio_flush_epoch,
+                    raw.mmio_sample_seq,
+                    raw.cycle,
+                    uid,
+                    stale_reason);
+                if (result == MEMBLOCK_MMIO_RESOLVE_STALE_DROP) begin
                     `uvm_info("MMIO_RAW",
-                              $sformatf({"consume CBO storeMmio uid=%0d ",
-                                         "ROB value=%0d epoch=%0d sample=%0d ",
-                                         "without canonical MMIO tag"},
-                                        uid, raw.store_mmio_rob_value,
-                                        raw.mmio_flush_epoch, raw.mmio_sample_seq),
+                              $sformatf("drop stale storeMmio ROB value=%0d epoch=%0d reason=%s",
+                                        raw.store_mmio_rob_value,
+                                        raw.mmio_flush_epoch, stale_reason),
                               UVM_LOW)
                 end else begin
-                    existing_idx = -1;
-                    foreach (staged_tags[idx]) begin
-                        if (staged_tags[idx].uid == uid) begin
-                            existing_idx = idx;
-                            break;
+                    behavior = memblock_op_behavior_util::derive_op_behavior(
+                        data.get_main_transaction(uid));
+                    // 中文注释：non-zero CBO 的 StoreQueue 状态机会复用 storeMmio
+                    // sideband。首拍 resolver 已完成唯一 owner/provenance 校验；
+                    // 记录连续 level context，但不写 ordinary store canonical tag。
+                    if (behavior.kind == MEMBLOCK_OP_BEHAVIOR_CBO) begin
+                        status = data.get_status(uid);
+                        cbo_store_mmio_level_valid = 1'b1;
+                        cbo_store_mmio_level_rob_value = raw.store_mmio_rob_value;
+                        cbo_store_mmio_level_last_sample_seq = raw.mmio_sample_seq;
+                        cbo_store_mmio_level_uid = uid;
+                        cbo_store_mmio_level_dynamic_epoch = status.dynamic_epoch;
+                        cbo_store_mmio_level_first_flush_epoch = raw.mmio_flush_epoch;
+                        `uvm_info("MMIO_RAW",
+                                  $sformatf({"consume first CBO storeMmio uid=%0d ",
+                                             "ROB value=%0d epoch=%0d sample=%0d ",
+                                             "without canonical MMIO tag"},
+                                            uid, raw.store_mmio_rob_value,
+                                            raw.mmio_flush_epoch, raw.mmio_sample_seq),
+                                  UVM_LOW)
+                    end else begin
+                        existing_idx = -1;
+                        foreach (staged_tags[idx]) begin
+                            if (staged_tags[idx].uid == uid) begin
+                                existing_idx = idx;
+                                break;
+                            end
                         end
-                    end
-                    if (existing_idx >= 0 &&
-                        staged_tags[existing_idx].kind != MEMBLOCK_MMIO_KIND_STORE) begin
-                        `uvm_fatal("MMIO_RAW",
-                                   $sformatf("same raw assigns load/store MMIO kinds to uid=%0d",
-                                             uid))
-                    end
-                    if (existing_idx < 0) begin
-                        memblock_mmio_tag_stage_t stage;
+                        if (existing_idx >= 0 &&
+                            staged_tags[existing_idx].kind != MEMBLOCK_MMIO_KIND_STORE) begin
+                            `uvm_fatal("MMIO_RAW",
+                                       $sformatf("same raw assigns load/store MMIO kinds to uid=%0d",
+                                                 uid))
+                        end
+                        if (existing_idx < 0) begin
+                            memblock_mmio_tag_stage_t stage;
 
-                        stage.uid = uid;
-                        stage.kind = MEMBLOCK_MMIO_KIND_STORE;
-                        stage.first_port_order = port_order;
-                        staged_tags.push_back(stage);
+                            stage.uid = uid;
+                            stage.kind = MEMBLOCK_MMIO_KIND_STORE;
+                            stage.first_port_order = port_order;
+                            staged_tags.push_back(stage);
+                        end
                     end
                 end
             end
