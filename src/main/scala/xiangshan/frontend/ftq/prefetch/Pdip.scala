@@ -23,6 +23,7 @@ package xiangshan.frontend.ftq.prefetch
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.DataHoldBypass
 import utility.ReplacementPolicy
 import utility.ValidHold
 import utility.XSPerfAccumulate
@@ -53,7 +54,7 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
     val fetchPtr: FtqPtr          = Input(new FtqPtr)
 
     // to prefetch queue
-    val req: Vec[Valid[PrefetchQueueEntry]] = Vec(NumAdjacent, Valid(new PrefetchQueueEntry))
+    val req: Vec[DecoupledIO[PrefetchQueueEntry]] = Vec(NumAdjacent, DecoupledIO(new PrefetchQueueEntry))
   }
 
   val io: PdipIO = IO(new PdipIO)
@@ -91,12 +92,15 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
   entries.io.r.req.valid       := r0_valid
   entries.io.r.req.bits.setIdx := r0_setIdx
 
-  private val r1_valid   = RegNext(r0_valid, false.B)
-  private val r1_startPc = RegEnable(r0_startPc, r0_valid)
-  private val r1_setIdx  = getSetIdx(r1_startPc)
-  private val r1_tag     = getTag(r1_startPc)
+  // no backpressure to r0, drop if failed to enqueue
+  private val r1_fire      = Wire(Bool())
+  private val r1_valid     = ValidHold(r0_valid, r1_fire)
+  private val r1_sramValid = RegNext(r0_valid, false.B)
+  private val r1_startPc   = RegEnable(r0_startPc, r0_valid)
+  private val r1_setIdx    = getSetIdx(r1_startPc)
+  private val r1_tag       = getTag(r1_startPc)
 
-  private val r1_entries = entries.io.r.resp.data
+  private val r1_entries = DataHoldBypass(entries.io.r.resp.data, r1_sramValid)
 
   // hold for write pipeline reuse, we need control of this, so do not use DataHoldBypass
   private val r1_hitMask = VecInit(r1_entries.map(e => e.valid && e.tag === r1_tag)).asUInt
@@ -107,18 +111,26 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
 
   private val r1_blkVAddrs = VecInit.tabulate(NumAdjacent)(i => r1_entry.blkVAddr + i.U)
 
-  (io.req zip r1_blkVAddrs).foreach { case (port, blkVAddr) =>
-    port.valid       := r1_valid && r1_hit
-    port.bits.vAddr  := getPc(blkVAddr).signGuard // for prefetch, we don't care about guard bit
+  private val r1_sent        = io.req.map(port => ValidHold(port.fire, r1_fire, flush = r0_valid))
+  private val r1_needEnqueue = io.req.indices.map(i => r1_hit && r1_entry.mask(i) && !r1_sent(i))
+
+  io.req.zipWithIndex.foreach { case (port, i) =>
+    port.valid       := r1_valid && r1_needEnqueue(i)
+    port.bits.vAddr  := getPc(r1_blkVAddrs(i)).signGuard // for prefetch, we don't care about guard bit
     port.bits.source := PrefetchSource.Pdip
   }
 
+  r1_fire := r1_valid && !r1_needEnqueue.reduce(_ || _)
+
   // save result for write pipeline reuse
-  private val r2_valid     = RegEnable(true.B, false.B, r1_valid) // forever true after the first r1_valid
-  private val r2_blkVAddrs = RegEnable(r1_blkVAddrs, r1_valid)
-  private val r2_entry     = RegEnable(r1_entry, r1_valid)
-  private val r2_hitMask   = RegEnable(r1_hitMask, r1_valid)
+  // use r1_sramValid instead of r1_fire, to let w stage reuse without waiting for pq
+  private val r2_valid     = RegEnable(true.B, false.B, r1_sramValid) // forever true after the first r1_valid
+  private val r2_blkVAddrs = RegEnable(r1_blkVAddrs, r1_sramValid)
+  private val r2_entry     = RegEnable(r1_entry, r1_sramValid)
+  private val r2_hitMask   = RegEnable(r1_hitMask, r1_sramValid)
   private val r2_hit       = r2_hitMask.orR
+  private val r2_setIdx    = RegEnable(r1_setIdx, r1_sramValid)
+  private val r2_tag       = RegEnable(r1_tag, r1_sramValid)
 
   /* *** write *** */
   // 1. mark a Ftq entry as FEC candidate when:
@@ -161,26 +173,32 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
   private val w1_candidates = RegEnable(w0_candidates, w0_valid)
   private val w1_startPc    = RegEnable(w0_startPc, w0_valid)
 
-  private val w1_blkVAddr = getBlockVAddr(w1_startPc)
-  private val w1_setIdx   = getSetIdx(w1_startPc)
+  private val w1_setIdx = r2_setIdx
+  private val w1_tag    = r2_tag
 
-  private val w1_wayMask = Mux(r2_hit, r2_hitMask, replacer.way(w1_setIdx))
-
+  private val w1_blkVAddr   = getBlockVAddr(w1_startPc)
   private val w1_blkHitMask = VecInit(r2_blkVAddrs.map(_ === w1_blkVAddr))
-  private val w1_blkHit     = w1_blkHitMask.reduce(_ || _)
+  private val w1_blkHitIdx  = OHToUInt(w1_blkHitMask)
+  private val w1_blkHit     = r2_hit && w1_blkHitMask.reduce(_ || _)
+
+  // if w1 is 1 blk before r2, also prevent dropping candidate
+  private val w1_blkHitPrev = r2_hit && (w1_blkVAddr + 1.U) === r2_blkVAddrs(0)
 
   private val w1_entry = WireDefault(r2_entry)
-  when(!w1_blkHit) { // blkAddr does not match => init a new entry
+  when(w1_blkHit) {
+    w1_entry.mask := r2_entry.mask | (w1_candidates.asUInt << w1_blkHitIdx).asUInt
+  }.elsewhen(w1_blkHitPrev) {
+    w1_entry.blkVAddr := w1_blkVAddr
+    w1_entry.mask     := (r2_entry.mask << 1).asUInt | w1_candidates.asUInt
+  }.otherwise {
+    // allocate a new entry if not hit (or hit, but may drop candidate)
     w1_entry.blkVAddr := w1_blkVAddr
     w1_entry.mask     := w1_candidates.asUInt
-  }.otherwise { // otherwise => save it in mask
-    w1_entry.mask := r2_entry.mask | w1_blkHitMask.asUInt
+    w1_entry.tag      := w1_tag
   }
 
-  // if there are 2 continuous cycles have w0_valid, and the previous one have r0_valid also
-  // the previous is dropped (no w1_fire, but w1 stage registers are overwritten by w0_valid)
-  // PDIP promotion should be rare so we consider this not a big problem, just count it and do nothing
-  XSPerfAccumulate("promotionFailure", w0_valid && w1_valid && !w1_fire)
+  private val w1_wayMask = Mux(r2_hit, r2_hitMask, UIntToOH(replacer.way(r2_setIdx)))
+
   entries.io.w.req.valid := w1_fire
   entries.io.w.req.bits.apply(
     data = w1_entry,
@@ -189,9 +207,10 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
   )
 
   // also update r2 buffer
-  when(w1_fire) {
-    r2_entry   := w1_entry
-    r2_hitMask := w1_wayMask
+  when(w1_fire && !(r1_valid && (r1_setIdx =/= w1_setIdx || r1_tag =/= w1_tag))) {
+    r2_blkVAddrs := VecInit.tabulate(NumAdjacent)(i => w1_entry.blkVAddr + i.U)
+    r2_entry     := w1_entry
+    r2_hitMask   := w1_wayMask
   }
 
   w1_fire := w1_valid && !r0_valid // prioritize read
@@ -201,7 +220,7 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
   private val touchWays = Seq.tabulate(2)(_ => // magic number 2: read touch & write touch
     Wire(Valid(UInt(log2Ceil(NumWay).W)))
   )
-  touchWays.head.valid := r1_valid && r1_hit
+  touchWays.head.valid := r1_sramValid && r1_hit
   touchWays.head.bits  := OHToUInt(r1_hitMask)
   touchWays.last.valid := w1_fire
   touchWays.last.bits  := OHToUInt(w1_wayMask)
@@ -216,4 +235,14 @@ class Pdip(implicit p: Parameters) extends FtqModule with HasPdipParameters {
     "fec",
     Mux(io.commit.valid, PopCount(candidates(io.commit.bits.ptr.value)), 0.U)
   )
+
+  XSPerfAccumulate("hit", r1_sramValid && r1_hit)
+
+  // if there are 2 continuous cycles have w0_valid, and the previous one have r0_valid also
+  // the previous is dropped (no w1_fire, but w1 stage registers are overwritten by w0_valid)
+  // PDIP promotion should be rare so we consider this not a big problem, just count it and do nothing
+  XSPerfAccumulate("promotionFailure", w0_valid && w1_valid && !w1_fire)
+
+  // same for enqueue
+  XSPerfAccumulate("enqueueFailure", r0_valid && r1_valid && !r1_fire)
 }

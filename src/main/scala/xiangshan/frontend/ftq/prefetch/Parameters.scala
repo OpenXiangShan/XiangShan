@@ -37,9 +37,9 @@ trait HasPrefetchQueueParameters extends HasFtqParameters {
 
   def PreferFdipDistance: Int = pqParameters.PreferFdipDistance
 
-  def EnqueueSwNum:   Int = backendParams.LduCnt // every load unit may send software prefetch.i request to pq
+  def EnqueueSwNum:   Int = backendParams.LduCnt          // every load unit may send software prefetch.i request to pq
   def EnqueuePdipNum: Int = ftqParameters.pdipParameters.NumAdjacent
-  def EnqueueNum:     Int = EnqueueSwNum         // TODO: more prefetch source
+  def EnqueueNum:     Int = EnqueueSwNum + EnqueuePdipNum // TODO: more prefetch source
 }
 
 case class PdipParameters(

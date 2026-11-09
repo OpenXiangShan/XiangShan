@@ -275,7 +275,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   pdip.io.fetchPtr              := fetchPtr(0)
 
   (prefetchQueue.io.enqFromPdip zip pdip.io.req).foreach { case (qPort, pdipPort) =>
-    qPort := pdipPort
+    qPort <> pdipPort
   }
 
   // prefetch: fdip
