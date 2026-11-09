@@ -303,11 +303,18 @@ class Ftq(implicit p: Parameters) extends FtqModule
       when(i.U < io.fromBpu.s3NumBlocks) {
         val groupPtr = (io.fromBpu.s3FtqPtr + i.U).value
         metaQueueRedirect(groupPtr) := io.fromBpu.meta.bits.redirectMeta
-        // Only the entry the lookup started from has a resolve meta. A group's later blocks are enqueued without one.
-        if (i == 0) {
-          metaQueueResolve(groupPtr)      := io.fromBpu.meta.bits.resolveMeta
-          metaQueueResolveValid(groupPtr) := true.B
+        if (i > 0) {
+          // A redirect inside a later block rebuilds the path history from what its entry records, then adds the
+          // redirecting branch. The group's own record stands before the first block, so restoring from it would
+          // leave the first block's taken branch out of every history built after the redirect. The later block's
+          // record stands after the first block, which is also the history its lookup and its training used.
+          metaQueueRedirect(groupPtr).phr := io.fromBpu.s3LaterResolveMeta.phr
         }
+        // Each block trains from its own resolve meta. The group's later block carries one too, so its branches
+        // train rather than being dropped for want of a meta.
+        metaQueueResolve(groupPtr) :=
+          (if (i == 0) io.fromBpu.meta.bits.resolveMeta else io.fromBpu.s3LaterResolveMeta)
+        metaQueueResolveValid(groupPtr) := true.B
         // Commit meta belongs to the group for the same reason the recovery state does: any of its entries can be the
         // one that commits, and this is what the return stack is trained from. An entry left holding what the index
         // last carried would train it from a block that retired long ago.
@@ -693,9 +700,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate("resolve_branch_mispredicts", backendRedirect.valid && backendRedirect.bits.isMisPred)
   XSPerfAccumulate("resolve_other_redirects", backendRedirect.valid && !backendRedirect.bits.isMisPred)
 
-  // how many blocks the groups Bpu enqueued carried
+  // how many blocks the groups Bpu enqueued carried, and how many backend redirects landed on a group's later block
   XSPerfAccumulate("groupEnqueueSize1", entryEnqueue && prediction.bits.numBlocks === 1.U)
   XSPerfAccumulate("groupEnqueueSize2", entryEnqueue && prediction.bits.numBlocks === 2.U)
+  XSPerfAccumulate(
+    "mispredictOnLaterBlock",
+    backendRedirect.valid && backendRedirect.bits.isMisPred && metaQueueResolve(
+      backendRedirect.bits.ftqIdx.value
+    ).isLaterBlock
+  )
 
   // Commit-time statistics, should be correct-path only
   XSPerfSeqAccumulate(
@@ -730,10 +743,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
     )
   )
 
-  // An entry Bpu wrote no meta for has perf meta from whichever block last held the index, so a mispredict there
-  // cannot be attributed to a prediction.
+  // A group's later blocks are enqueued without Bpu meta of their own, so their perf meta describes whichever block
+  // last held the index. Attributing a mispredict from one would blame a prediction that was never made.
   private val perf_commitHasMispredict =
-    commit && commitPerfMeta.mispredict && metaQueueResolveValid(commitPtr(0).value)
+    commit && commitPerfMeta.mispredict && metaQueueResolveValid(commitPtr(0).value) &&
+      !metaQueueResolve(commitPtr(0).value).isLaterBlock
   private val perf_commitHasMispredictConditional =
     perf_commitHasMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
 
