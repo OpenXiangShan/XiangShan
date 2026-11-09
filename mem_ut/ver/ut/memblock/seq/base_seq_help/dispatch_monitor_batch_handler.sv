@@ -66,7 +66,8 @@ class dispatch_monitor_batch_handler extends uvm_object;
             return 1'b0;
         end
         status = data.get_status(wb_event.uid);
-        return status.active && !status.rob_commit && !status.terminal_done;
+        return status.active && !status.rob_commit && !status.terminal_done &&
+               (status.fault || status.exception_pending);
     endfunction:store_fault_redirect_must_wait
 
     function bit batch_has_fault_for_uid(input memblock_wb_event_t events[$],
@@ -203,6 +204,51 @@ class dispatch_monitor_batch_handler extends uvm_object;
         return 1'b0;
     endfunction:process_allowed_non_redirect_event
 
+    // 中文注释：non-zero CBO 的 STA0 writeback 同时携带 owner completion 和
+    // flushAfter。先清除副本中的 redirect 并固化 STA target，成功后才允许公共
+    // recovery 接收原事件，保证 redirect 不会跳过被保留 owner 的真实完成。
+    function bit process_redirect_owner_completion(
+        input memblock_wb_event_t redirect_event
+    );
+        memblock_wb_event_t      completion_event;
+        main_control_transaction main_tr;
+        status_transaction       status;
+
+        if (!redirect_event.completion_before_redirect) begin
+            return 1'b1;
+        end
+        main_tr = data.get_main_transaction(redirect_event.uid);
+        if (!event_is_redirect(redirect_event) ||
+            redirect_event.source != MEMBLOCK_WB_EVENT_SOURCE_STORE_WB ||
+            redirect_event.target != MEMBLOCK_ISSUE_TARGET_STA ||
+            redirect_event.port_id != 0 || !redirect_event.real_wb_valid ||
+            event_has_fault(redirect_event) || event_is_replay(redirect_event) ||
+            !redirect_event.flush_pipe_valid || !redirect_event.flush_pipe ||
+            main_tr.op_class != MEMBLOCK_OP_CLASS_CBO ||
+            main_tr.fuOpType == MEMBLOCK_LSUOP_CBO_ZERO) begin
+            `uvm_fatal("CBO_COMPLETION_BEFORE_REDIRECT",
+                       $sformatf("invalid CBO completion-before-redirect uid=%0d source=%0d target=%0d port=%0d",
+                                 redirect_event.uid, redirect_event.source,
+                                 redirect_event.target, redirect_event.port_id))
+        end
+        completion_event = redirect_event;
+        completion_event.redirect_valid = 1'b0;
+        completion_event.redirect = '{default:'0};
+        completion_event.completion_before_redirect = 1'b0;
+        if (!writeback_handler.handle_real_writeback_event(completion_event)) begin
+            return 1'b0;
+        end
+        status = data.get_status(redirect_event.uid);
+        if (!status.sta_writeback || !status.sta_pass ||
+            status.get_rob_key() != redirect_event.rob_key) begin
+            `uvm_fatal("CBO_COMPLETION_BEFORE_REDIRECT",
+                       $sformatf("CBO owner completion was not frozen uid=%0d sta_wb/pass=%0d/%0d",
+                                 redirect_event.uid,
+                                 status.sta_writeback, status.sta_pass))
+        end
+        return 1'b1;
+    endfunction:process_redirect_owner_completion
+
     task process_monitor_event_batch(input memblock_wb_event_t events[$]);
         memblock_wb_event_t normalized_events[$];
         memblock_wb_event_t selected_redirect_event;
@@ -269,6 +315,12 @@ class dispatch_monitor_batch_handler extends uvm_object;
             defer_store_fault_redirect =
                 store_fault_redirect_must_wait(selected_redirect_event) ||
                 batch_has_fault_for_uid(normalized_events, selected_redirect_event.uid);
+            if (!process_redirect_owner_completion(selected_redirect_event)) begin
+                `uvm_warning("DISP_MON_BATCH",
+                             $sformatf("drop stale redirect owner completion uid=%0d",
+                                       selected_redirect_event.uid))
+                return;
+            end
             if (!defer_store_fault_redirect) begin
                 data.push_feedback_event(selected_redirect_event);
             end else begin

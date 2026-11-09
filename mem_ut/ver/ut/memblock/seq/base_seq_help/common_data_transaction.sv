@@ -5998,6 +5998,8 @@ class common_data_transaction extends uvm_object;
         int unsigned planned_deleted_lq_owner_count;
         int unsigned planned_deleted_sq_owner_count;
         int record_idx;
+        bit cbo_flush_after_owner_valid;
+        memblock_uid_t cbo_flush_after_owner_uid;
 
         if (!redirect.valid) begin
             `uvm_fatal("COMMON_DATA", "apply_redirect_flush_range requires valid redirect")
@@ -6034,6 +6036,33 @@ class common_data_transaction extends uvm_object;
         planned_cancel_sq_count = cancel_record_q[record_idx].software_cancel_sq_count;
         planned_deleted_lq_owner_count = 0;
         planned_deleted_sq_owner_count = 0;
+        cbo_flush_after_owner_valid = 1'b0;
+        cbo_flush_after_owner_uid = 0;
+        if (!redirect.flush_itself &&
+            lookup_active_uid_by_rob(redirect.rob_key,
+                                     cbo_flush_after_owner_uid) &&
+            main_table_by_uid[cbo_flush_after_owner_uid].op_class ==
+                MEMBLOCK_OP_CLASS_CBO) begin
+            status_transaction cbo_owner_status;
+            main_control_transaction cbo_owner_tr;
+
+            cbo_owner_status = status_by_uid[cbo_flush_after_owner_uid];
+            cbo_owner_tr = main_table_by_uid[cbo_flush_after_owner_uid];
+            if (!cbo_owner_status.active || !cbo_owner_status.sta_writeback ||
+                cbo_owner_status.get_rob_key() != redirect.rob_key ||
+                (cbo_owner_tr.fuOpType != MEMBLOCK_LSUOP_CBO_CLEAN &&
+                 cbo_owner_tr.fuOpType != MEMBLOCK_LSUOP_CBO_FLUSH &&
+                 cbo_owner_tr.fuOpType != MEMBLOCK_LSUOP_CBO_INVAL)) begin
+                `uvm_fatal("CBO_REDIRECT_BOUNDARY",
+                           $sformatf("invalid CBO flushAfter owner uid=%0d active=%0d sta_wb=%0d fuOp=0x%0h",
+                                     cbo_flush_after_owner_uid,
+                                     cbo_owner_status.active,
+                                     cbo_owner_status.sta_writeback,
+                                     cbo_owner_tr.fuOpType))
+                return 1'b0;
+            end
+            cbo_flush_after_owner_valid = 1'b1;
+        end
 
         // Phase 1: read-only plan/precheck.  No public state may change until
         // every UID, marker, post-prefix and cancel/window condition is approved.
@@ -6131,6 +6160,38 @@ class common_data_transaction extends uvm_object;
             end
         end else begin
             new_end_uid = end_uid;
+        end
+        if (cbo_flush_after_owner_valid) begin
+            foreach (reissue_uids[idx]) begin
+                if (reissue_uids[idx] == cbo_flush_after_owner_uid) begin
+                    `uvm_fatal("CBO_REDIRECT_BOUNDARY",
+                               $sformatf("CBO flushAfter attempted to reissue owner uid=%0d",
+                                         cbo_flush_after_owner_uid))
+                    return 1'b0;
+                end
+            end
+            if (found_flushed &&
+                oldest_flushed_uid != cbo_flush_after_owner_uid + 1) begin
+                `uvm_fatal("CBO_REDIRECT_BOUNDARY",
+                           $sformatf("CBO flushAfter oldest recovery uid=%0d expected=%0d owner=%0d",
+                                     oldest_flushed_uid,
+                                     cbo_flush_after_owner_uid + 1,
+                                     cbo_flush_after_owner_uid))
+                return 1'b0;
+            end
+        end
+        foreach (fault_head_uids[idx]) begin
+            if (main_table_by_uid[fault_head_uids[idx]].op_class ==
+                    MEMBLOCK_OP_CLASS_CBO &&
+                found_flushed &&
+                oldest_flushed_uid != fault_head_uids[idx] + 1) begin
+                `uvm_fatal("CBO_REDIRECT_BOUNDARY",
+                           $sformatf("fault CBO oldest recovery uid=%0d expected=%0d owner=%0d",
+                                     oldest_flushed_uid,
+                                     fault_head_uids[idx] + 1,
+                                     fault_head_uids[idx]))
+                return 1'b0;
+            end
         end
         if (!precheck_redirect_post_state_invariant(
                 redirect, new_end_uid, reissue_uids,
@@ -6247,6 +6308,9 @@ class common_data_transaction extends uvm_object;
         wb_event.real_wb_valid      = 1'b0;
         wb_event.has_exception     = 1'b0;
         wb_event.exception_vec     = '0;
+        wb_event.flush_pipe_valid  = 1'b0;
+        wb_event.flush_pipe        = 1'b0;
+        wb_event.completion_before_redirect = 1'b0;
         wb_event.iq_feedback_valid = 1'b0;
         wb_event.iq_feedback_hit   = 1'b0;
         wb_event.iq_feedback_failed = 1'b0;

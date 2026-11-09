@@ -373,6 +373,8 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event.has_issue_epoch = 1'b1;
         wb_event.replay_seq = status.replay_seq;
         wb_event.has_replay_seq = 1'b1;
+        wb_event.dynamic_epoch = status.dynamic_epoch;
+        wb_event.has_dynamic_epoch = 1'b1;
         return 1'b1;
     endfunction:fill_current_issue_snapshot
 
@@ -988,14 +990,52 @@ class dispatch_monitor_event_adapter extends uvm_object;
         input memblock_wb_event_t wb_event
     );
         main_control_transaction main_tr;
+        status_transaction       status;
 
         if (raw.source_kind == memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA && raw.port_id == 0) begin
             main_tr = data.get_main_transaction(wb_event.uid);
-            if (raw.flush_pipe) begin
-                if (main_tr.op_class != MEMBLOCK_OP_CLASS_CBO) begin
-                    `uvm_fatal("INT_WB_STA0_FLUSH_PIPE", "STA0 flushPipe is only legal for CBO/CMO producer")
+            status = data.get_status(wb_event.uid);
+            if (main_tr.op_class == MEMBLOCK_OP_CLASS_CBO) begin
+                if (!wb_event.has_uid || !wb_event.has_rob || !wb_event.has_sq ||
+                    !wb_event.has_issue_epoch || !wb_event.has_replay_seq ||
+                    !wb_event.has_dynamic_epoch ||
+                    wb_event.dynamic_epoch != status.dynamic_epoch ||
+                    wb_event.rob_key != status.get_rob_key() ||
+                    wb_event.sq_key.flag != status.sqIdx_flag ||
+                    wb_event.sq_key.value != status.sqIdx_value ||
+                    !raw.flush_pipe_valid) begin
+                    `uvm_fatal("INT_WB_STA0_CBO_IDENTITY",
+                               $sformatf("CBO STA0 owner snapshot mismatch uid=%0d epoch=%0d/%0d rob=%0d/%0d sq=%0d/%0d",
+                                         wb_event.uid, wb_event.dynamic_epoch,
+                                         status.dynamic_epoch,
+                                         wb_event.rob_key.flag, wb_event.rob_key.value,
+                                         wb_event.sq_key.flag, wb_event.sq_key.value))
                 end
-                `uvm_fatal("INT_WB_STA0_CBO_UNSUPPORTED", "STA0 CBO flushAfter has no current adapter consumer")
+                if (!wb_event.has_exception) begin
+                    case (main_tr.fuOpType)
+                        MEMBLOCK_LSUOP_CBO_ZERO: begin
+                            if (raw.flush_pipe) begin
+                                `uvm_fatal("INT_WB_STA0_CBO_ZERO",
+                                           "successful CBO.ZERO STA0 writeback must keep flushPipe=0")
+                            end
+                        end
+                        MEMBLOCK_LSUOP_CBO_CLEAN,
+                        MEMBLOCK_LSUOP_CBO_FLUSH,
+                        MEMBLOCK_LSUOP_CBO_INVAL: begin
+                            if (!raw.flush_pipe) begin
+                                `uvm_fatal("INT_WB_STA0_CBO_NONZERO",
+                                           "successful non-zero CBO STA0 writeback must set flushPipe=1")
+                            end
+                        end
+                        default: begin
+                            `uvm_fatal("INT_WB_STA0_CBO_FUOP",
+                                       $sformatf("uid=%0d has unsupported CBO fuOpType=0x%0h",
+                                                 wb_event.uid, main_tr.fuOpType))
+                        end
+                    endcase
+                end
+            end else if (raw.flush_pipe) begin
+                `uvm_fatal("INT_WB_STA0_FLUSH_PIPE", "STA0 flushPipe is only legal for CBO/CMO producer")
             end
             if (seq_csr_common::get_trigger_check_en() &&
                 raw.trigger == 4'h0 && !raw.exception_vec[3] &&
@@ -1005,6 +1045,68 @@ class dispatch_monitor_event_adapter extends uvm_object;
             end
         end
     endfunction:check_attached_int_wb_metadata
+
+    // 中文注释：把 STA0 的真实 flushPipe 事实投影成 semantic event。non-zero
+    // CBO 只在 modeled ROB head 完成时产生 flushAfter；fault 继续走既有
+    // scalar-store exception redirect，不在这里建立第二个 redirect owner。
+    function void apply_cbo_flush_pipe_semantics(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
+        ref memblock_wb_event_t wb_event
+    );
+        main_control_transaction main_tr;
+        memblock_op_behavior_t   behavior;
+        memblock_uid_t           head_uid;
+
+        head_uid = 0;
+        wb_event.flush_pipe_valid = raw.flush_pipe_valid;
+        wb_event.flush_pipe = raw.flush_pipe;
+        if (raw.source_kind != memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA ||
+            raw.port_id != 0) begin
+            return;
+        end
+        main_tr = data.get_main_transaction(wb_event.uid);
+        if (main_tr.op_class != MEMBLOCK_OP_CLASS_CBO || wb_event.has_exception) begin
+            return;
+        end
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        if (behavior.kind != MEMBLOCK_OP_BEHAVIOR_CBO || !behavior.is_cbo ||
+            behavior.is_atomic ||
+            !memblock_op_behavior_util::is_scalar_rob_store_commit(behavior)) begin
+            `uvm_fatal("INT_WB_STA0_CBO_BEHAVIOR",
+                       $sformatf("uid=%0d has invalid CBO completion behavior kind=%0d",
+                                 wb_event.uid, behavior.kind))
+        end
+        case (main_tr.fuOpType)
+            MEMBLOCK_LSUOP_CBO_ZERO: begin
+                return;
+            end
+            MEMBLOCK_LSUOP_CBO_CLEAN,
+            MEMBLOCK_LSUOP_CBO_FLUSH,
+            MEMBLOCK_LSUOP_CBO_INVAL: begin
+                if (!monitor_commit_handler.resolve_sideband_head_uid(head_uid) ||
+                    head_uid != wb_event.uid ||
+                    monitor_commit_handler.modeled_rob_deq_ptr != wb_event.rob_key ||
+                    monitor_commit_handler.head_pending_ptr_blocked(head_uid)) begin
+                    `uvm_fatal("INT_WB_STA0_CBO_HEAD",
+                               $sformatf("non-zero CBO completion is not modeled ROB head uid=%0d resolved=%0d rob=%0d/%0d",
+                                         wb_event.uid, head_uid,
+                                         wb_event.rob_key.flag, wb_event.rob_key.value))
+                end
+                wb_event.completion_before_redirect = 1'b1;
+                wb_event.redirect_valid = 1'b1;
+                wb_event.redirect.valid = 1'b1;
+                wb_event.redirect.rob_key = wb_event.rob_key;
+                wb_event.redirect.flush_itself = 1'b0;
+                wb_event.redirect.level = 1'b1;
+                wb_event.redirect.is_vls_exception = 1'b0;
+            end
+            default: begin
+                `uvm_fatal("INT_WB_STA0_CBO_FUOP",
+                           $sformatf("uid=%0d has unsupported CBO fuOpType=0x%0h",
+                                     wb_event.uid, main_tr.fuOpType))
+            end
+        endcase
+    endfunction:apply_cbo_flush_pipe_semantics
 
     function bit normalize_v2_int_wb_key(
         input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
@@ -1130,6 +1232,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
             default: `uvm_fatal("DISP_MON_ADAPT", "invalid V2 int-WB source kind")
         endcase
         check_attached_int_wb_metadata(raw, wb_event);
+        apply_cbo_flush_pipe_semantics(raw, wb_event);
         wb_event.cycle = raw.cycle;
         if (!normalize_v2_int_wb_key(raw, wb_event)) begin
             `uvm_fatal("INT_WB_KEY", "V2 int-WB normalization returned failure")

@@ -699,11 +699,22 @@ class lsq_commit_handler extends uvm_object;
                 memblock_op_behavior_util::is_scalar_rob_store_commit(head_behavior);
             tr.io_ooo_to_mem_lsqio_pendingMMIOld =
                 head_behavior.commit_is_load && data.uid_is_mmio_load(head_uid);
+            if (data.get_main_transaction(head_uid).op_class == MEMBLOCK_OP_CLASS_CBO &&
+                !tr.io_ooo_to_mem_lsqio_pendingst) begin
+                `uvm_fatal("CBO_COMMIT_INVARIANT",
+                           $sformatf("modeled CBO head uid=%0d did not publish pendingst", head_uid))
+            end
         end
         foreach (commit_uids[idx]) begin
             memblock_op_behavior_t behavior;
 
             behavior = lsq_ctrl_model::derive_op_behavior(data.get_main_transaction(commit_uids[idx]));
+            if (data.get_main_transaction(commit_uids[idx]).op_class == MEMBLOCK_OP_CLASS_CBO &&
+                !memblock_op_behavior_util::is_scalar_rob_store_commit(behavior)) begin
+                `uvm_fatal("CBO_COMMIT_INVARIANT",
+                           $sformatf("normal CBO commit uid=%0d is not scalar-store classified",
+                                     commit_uids[idx]))
+            end
             if (memblock_op_behavior_util::is_scalar_rob_store_commit(behavior)) begin
                 tr.io_ooo_to_mem_lsqio_scommit++;
             end

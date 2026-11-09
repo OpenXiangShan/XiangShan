@@ -1010,6 +1010,13 @@ typedef struct {
     bit                         real_wb_valid;
     bit                         has_exception;
     bit [23:0]                  exception_vec;
+    // 中文注释：保留真实 writeback 端口提供的 flushPipe 快照。该字段只描述
+    // monitor 事实，不替代 enqueue uop 中恒为 0 的静态 flushPipe。
+    bit                         flush_pipe_valid;
+    bit                         flush_pipe;
+    // 中文注释：同一 STA0 CBO writeback 既完成 owner 又产生 flushAfter 时置位，
+    // batch handler 必须先固化 owner completion，再把 redirect 交给公共 recovery。
+    bit                         completion_before_redirect;
     // 中文注释：DUT IssueQueue feedback 有效标志。置位后只表示本次 issue response 已返回，不等价于 ROB/RF writeback。
     // 由 convert_raw_iq_feedback() 设置；handler 按 target 的兼容策略决定是否只记录 feedback done。
     bit                         iq_feedback_valid;
