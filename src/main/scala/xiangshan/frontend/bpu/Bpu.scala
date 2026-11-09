@@ -225,12 +225,28 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   ras.io.redirect                := redirect
   ras.io.commit                  := commit
-  ras.io.specIn.valid            := s3_fire
-  ras.io.specIn.bits.startPc     := s3_startPc.get.toUInt
-  ras.io.specIn.bits.attribute   := s3_prediction.attribute
-  ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
+  ras.io.specIn.valid            := s1_fire
+  ras.io.specIn.bits.startPc     := s1_startPc.get.toUInt
+  ras.io.specIn.bits.attribute   := s1_prediction.attribute
+  ras.io.specIn.bits.cfiPosition := s1_prediction.cfiPosition
+  ras.io.s2SpecIn.valid              := s2_fire
+  ras.io.s2SpecIn.bits.hasOverride   := s2_override
+  ras.io.s2SpecIn.bits.startPc       := s2_startPc.get.toUInt
+  ras.io.s2SpecIn.bits.attribute     := s2_prediction.attribute
+  ras.io.s2SpecIn.bits.cfiPosition   := s2_prediction.cfiPosition
+  ras.io.s3SpecIn.valid              := s3_fire
+  ras.io.s3SpecIn.bits.hasOverride   := s3_override
+  ras.io.s3SpecIn.bits.startPc       := s3_startPc.get.toUInt
+  ras.io.s3SpecIn.bits.attribute     := s3_prediction.attribute
+  ras.io.s3SpecIn.bits.cfiPosition   := s3_prediction.cfiPosition
   ras.io.specRead.req            := io.fromFtq.specReadReq
   io.toFtq.specRead              := ras.io.specRead.retAddr(1)
+  private val s1_canUseRas     = ras.io.topRetAddrValid
+  private val s2_canUseRas     = RegEnable(s1_canUseRas, s1_fire)
+  private val s3_canUseRas  = RegEnable(s2_canUseRas, s2_fire)
+  private val s1_rasTopAddr = ras.io.topRetAddr
+  private val s2_rasTopAddr = RegEnable(s1_rasTopAddr, s1_fire)
+  private val s3_rasTopAddr = RegEnable(s2_rasTopAddr, s2_fire)
 
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
@@ -285,8 +301,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_abtbPrediction = Wire(Vec(NumAheadBtbPredictionEntries, new Prediction))
   s1_ubtbPrediction := ubtb.io.prediction.bits
   s1_ubtbPrediction.target := Mux(
-    ubtb.io.prediction.bits.attribute.isReturn && uras.io.specOut.isCanUse,
-    uras.io.specOut.retTarget,
+    ubtb.io.prediction.bits.attribute.isReturn && s1_canUseRas,
+    s1_rasTopAddr,
     ubtb.io.prediction.bits.target
   )
   for (i <- 0 until NumAheadBtbPredictionEntries) {
@@ -322,8 +338,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s1_abtbResult       := s1_abtbFirstTakenBr
   s1_abtbResult.taken := s1_abtbTakenMask.reduce(_ || _)
   s1_abtbResult.target := Mux(
-    s1_abtbFirstTakenBr.attribute.isReturn && uras.io.specOut.isCanUse,
-    uras.io.specOut.retTarget,
+    s1_abtbFirstTakenBr.attribute.isReturn && s1_canUseRas,
+    s1_rasTopAddr,
     s1_abtbFirstTakenBr.target
   )
   s1_prediction := Mux(
@@ -370,6 +386,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   s2_prediction       := Mux(s2_taken, s2_firstTakenBranch.bits, s2_fallThroughPrediction)
   s2_prediction.taken := s2_taken
+  when (s2_prediction.attribute.isReturn && s2_canUseRas) {
+    s2_prediction.target := s2_rasTopAddr
+  }
 
   private val s2_mbtbCfiPositionDiffVec =
     VecInit(mbtb.io.result.map(_.bits.cfiPosition =/= s2_s1Prediction.cfiPosition))
@@ -412,11 +431,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     ittage.io.prediction.target =/= s3_s2Prediction.target,
     ittage.io.prediction.target =/= s3_s1Prediction.target
   )
-  private val s3_rasTargetDiff = Mux(
-    s3_s2Override,
-    ras.io.topRetAddr =/= s3_s2Prediction.target,
-    ras.io.topRetAddr =/= s3_s1Prediction.target
-  )
+  // private val s3_rasTargetDiff = Mux(
+  //   s3_s2Override,
+  //   ras.io.topRetAddr =/= s3_s2Prediction.target,
+  //   ras.io.topRetAddr =/= s3_s1Prediction.target
+  // )
 
   private val s3_takenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
     val useTage   = s3_tagePrediction.takenVec(i).valid
@@ -440,7 +459,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_firstTakenBranch   = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
   // tage, ittage, etc.'s `hit` is gated by `enable` so no extra `&& .enable` is required.
   // ras has no `hit`, so gate it with `enable` and additionally require a non-empty stack.
-  private val s3_useRas    = s3_firstTakenBranch.bits.attribute.isReturn && ras.io.enable && ras.io.topRetAddrValid
+  private val s3_useRas    = s3_firstTakenBranch.bits.attribute.isReturn && ras.io.enable && s3_canUseRas
   private val s3_useIttage = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
 
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
@@ -454,7 +473,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     MuxCase(
       s3_fallThroughPrediction.target,
       Seq(
-        (s3_taken && s3_useRas)    -> ras.io.topRetAddr,
+        (s3_taken && s3_useRas)    -> s3_rasTopAddr,
         (s3_taken && s3_useIttage) -> ittage.io.prediction.target,
         s3_taken                   -> s3_firstTakenBranch.bits.target
       )
@@ -464,7 +483,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     MuxCase(
       false.B,
       Seq(
-        (s3_taken && s3_useRas)    -> s3_rasTargetDiff,
+        // (s3_taken && s3_useRas)    -> s3_rasTargetDiff,
         (s3_taken && s3_useIttage) -> s3_ittageTargetDiff,
         s3_taken                   -> Mux1H(s3_firstTakenBranchOH, s3_mbtbTargetDiffVec)
       )
@@ -492,6 +511,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_redirectMeta.phr          := s3_phrMeta
   s3_redirectMeta.commonHRMeta := s3_commonHRMeta
   s3_redirectMeta.ras          := ras.io.redirectMeta
+  s3_redirectMeta.ras.debug_topRetAddr.foreach(_ := s3_rasTopAddr)
 
   private val s3_resolveMeta = Wire(new BpuResolveMeta)
   s3_resolveMeta.mbtb     := RegEnable(mbtb.io.meta, s2_fire)
