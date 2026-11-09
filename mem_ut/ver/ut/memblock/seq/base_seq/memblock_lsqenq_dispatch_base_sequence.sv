@@ -208,11 +208,26 @@ task memblock_lsqenq_dispatch_base_sequence::drive_lsqenq_loop();
             if (no_progress_warn_cycles != 0 &&
                 idle_count >= no_progress_warn_cycles) begin
                 `uvm_warning(get_type_name(),
-                             $sformatf("no LSQ enqueue progress for %0d cycles: cycle=%0d terminal_done_uid=%0d main_trans_num=%0d",
+                             $sformatf("no LSQ enqueue progress for %0d cycles: cycle=%0d terminal_done_uid=%0d main_trans_num=%0d next_uid=%0d max_enqueued(valid/uid)=%0d/%0d blocked(global/deleted/pointer)=%0d/%0d/%0d lq_ptr(sw/shadow)=%0d:%0d/%0d:%0d sq_ptr(sw/shadow)=%0d:%0d/%0d:%0d",
                                        idle_count,
                                        cycle_idx,
                                        data.dispatch_progress.terminal_done_uid,
-                                       data.main_trans_num))
+                                       data.main_trans_num,
+                                       data.get_next_new_admit_uid(),
+                                       data.dispatch_progress.max_enqueued_uid_valid,
+                                       data.dispatch_progress.max_enqueued_uid,
+                                       admission_blocked_by_flush(),
+                                       data.redirect_deleted_owner_window_pending(),
+                                       lsq_ctrl.lq_enq_ptr != lsq_ctrl.shadow_lq_enq_ptr ||
+                                           lsq_ctrl.sq_enq_ptr != lsq_ctrl.shadow_sq_enq_ptr,
+                                       lsq_ctrl.lq_enq_ptr.flag,
+                                       lsq_ctrl.lq_enq_ptr.value,
+                                       lsq_ctrl.shadow_lq_enq_ptr.flag,
+                                       lsq_ctrl.shadow_lq_enq_ptr.value,
+                                       lsq_ctrl.sq_enq_ptr.flag,
+                                       lsq_ctrl.sq_enq_ptr.value,
+                                       lsq_ctrl.shadow_sq_enq_ptr.flag,
+                                       lsq_ctrl.shadow_sq_enq_ptr.value))
                 idle_count = 0;
             end
         end
