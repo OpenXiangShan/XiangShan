@@ -38,10 +38,13 @@ import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BpuCommit
 import xiangshan.frontend.bpu.BpuRedirect
+import xiangshan.frontend.bpu.HalfAlignHelper
 
-class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters with HasCircularQueuePtrHelper {
+class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters with HalfAlignHelper with HasCircularQueuePtrHelper {
   class RasIO(implicit p: Parameters) extends BasePredictorIO {
     val specIn:   Valid[RasSpecInfo] = Flipped(Valid(new RasSpecInfo))
+    val s2SpecIn: Valid[RasPipeLineInfo] = Flipped(Valid(new RasPipeLineInfo))
+    val s3SpecIn: Valid[RasPipeLineInfo] = Flipped(Valid(new RasPipeLineInfo))
     val commit:   Valid[BpuCommit]   = Flipped(Valid(new BpuCommit))
     val redirect: Valid[BpuRedirect] = Flipped(Valid(new BpuRedirect))
 
@@ -59,20 +62,18 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   io.trainReady := true.B
 
-  def alignMask: UInt = Cat(Fill(GuardedVAddrBits - FetchBlockAlignWidth, 1.U), 0.U(FetchBlockAlignWidth.W))
-
   private val stack = Module(new RasStack).io
   // Here is an assertion that the same piece of valid data lasts for only one cycle.
   // io.specIn.valid = s3_fire
   private val specPush = io.specIn.valid && io.specIn.bits.attribute.isCall
   private val specPop  = io.specIn.valid && io.specIn.bits.attribute.isReturn
 
-  private val specIn      = io.specIn.bits
-  private val specAlignPc = specIn.startPc & alignMask
   stack.spec.pushValid := specPush
   stack.spec.popValid  := specPop
-  stack.spec.pushAddr  := GuardedPcInit(specAlignPc + (specIn.cfiPosition << 1.U).asUInt + 2.U)
+  stack.spec.pushAddr  := getCfiPcFromPosition(GuardedPcInit(io.specIn.bits.startPc), io.specIn.bits.cfiPosition) + 2.U
   stack.spec.fire      := io.specIn.valid && io.enable
+  stack.s2SpecIn       := io.s2SpecIn
+  stack.s3SpecIn       := io.s3SpecIn
 
   private val redirectMeta = Wire(new RasRedirectMeta)
   redirectMeta.ssp        := stack.meta.ssp
@@ -81,7 +82,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   redirectMeta.nos        := stack.meta.nos
   redirectMeta.tosrInSpec := stack.meta.tosrInSpec
   redirectMeta.nosInSpec  := stack.meta.nosInSpec
-  redirectMeta.debug_topRetAddr.foreach(_ := stack.spec.popAddr)
+  redirectMeta.debug_topRetAddr.foreach(_ := 0.U.asTypeOf(GuardedPc()))
 
   private val commitMeta = Wire(new RasCommitMeta)
   commitMeta.ssp  := stack.meta.ssp
@@ -93,11 +94,8 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   io.topRetAddrValid  := stack.topRetAddrValid
   io.specRead.retAddr := stack.specRead.retAddr
 
-  private val redirect = RegNextWithEnable(io.redirect)
-  // when we mispredict a call, we must redo a push operation
-  // similarly, when we mispredict a return, we should redo a pop
-  private val stackTOSW    = stack.meta.tosw
-  private val redirectTOSW = redirect.bits.meta.ras.tosw
+  // private val redirect = RegNextWithEnable(io.redirect)
+  private val redirect = io.redirect
 
   stack.redirect.valid  := redirect.valid && io.enable
   stack.redirect.isCall := redirect.bits.attribute.isCall

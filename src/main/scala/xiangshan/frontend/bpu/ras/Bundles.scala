@@ -128,3 +128,7 @@ class RasSpecInfo(implicit p: Parameters) extends RasBundle {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val startPc:     UInt            = UInt(GuardedVAddrBits.W)
 }
+
+class RasPipeLineInfo(implicit p: Parameters) extends RasSpecInfo {
+  val hasOverride:  Bool      = Bool()
+}
