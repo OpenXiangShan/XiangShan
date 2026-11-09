@@ -464,7 +464,10 @@ class lsq_commit_handler extends uvm_object;
         ensure_handles();
         uids.delete();
         ensure_modeled_rob_deq_ptr_initialized();
-        if (data.issue_blocked_by_global_flush() || fault_head_waiting) begin
+        // 中文注释：monitor redirect intent 入队后到 active_redirect 生效前，
+        // normal commit 必须停住，避免年轻 UID 穿过即将执行的 recovery 边界。
+        if (data.issue_blocked_by_global_flush() || fault_head_waiting ||
+            has_pending_monitor_redirect()) begin
             return;
         end
         rebase_framework_head_from_commit_cursor();
