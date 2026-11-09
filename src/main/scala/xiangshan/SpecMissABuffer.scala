@@ -24,7 +24,6 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
       val id = UInt(idBits.W)
       val commit = Bool()
     })))
-    val pending = Output(Vec(nOwners, Bool()))
     val matched = Output(Vec(nOwners, Bool()))
     val committed = Output(Vec(nOwners, Bool()))
   })
@@ -32,14 +31,20 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
   val entries = Reg(Vec(depth, new SpecMissBufferedA(gen, nOwners, idBits)))
   val count = RegInit(0.U(log2Ceil(depth + 1).W))
   val occupied = VecInit((0 until depth).map(i => i.U < count))
-  val resolved = VecInit((0 until depth).map { i =>
-    val decision = io.resolve(entries(i).owner)
-    occupied(i) && entries(i).speculative && !entries(i).committed &&
-      decision.valid && decision.bits.id === entries(i).id
+  // Compare each owner's resolution directly, without selecting it before the ID comparison.
+  val resolveMatches = VecInit((0 until depth).map { i =>
+    val waiting = occupied(i) && entries(i).speculative && !entries(i).committed
+    VecInit((0 until nOwners).map { w =>
+      waiting && entries(i).owner === w.U && io.resolve(w).valid &&
+        entries(i).id === io.resolve(w).bits.id
+    })
   })
-  val canceled = VecInit((0 until depth).map(i => resolved(i) && !io.resolve(entries(i).owner).bits.commit))
+  val resolved = VecInit(resolveMatches.map(_.asUInt.orR))
+  val canceled = VecInit((0 until depth).map(i =>
+    VecInit((0 until nOwners).map(w => resolveMatches(i)(w) && !io.resolve(w).bits.commit)).asUInt.orR))
 
-  val headCommittedNow = resolved(0) && io.resolve(entries(0).owner).bits.commit
+  val headCommittedNow = VecInit((0 until nOwners).map(w =>
+    resolveMatches(0)(w) && io.resolve(w).bits.commit)).asUInt.orR
   io.deq.valid := count =/= 0.U && (!entries(0).speculative || entries(0).committed || headCommittedNow)
   io.deq.bits := entries(0).data
   io.deq_speculative := entries(0).speculative
@@ -49,11 +54,9 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
   }
 
   for (w <- 0 until nOwners) {
-    io.pending(w) := VecInit((0 until depth).map(i => occupied(i) &&
-      entries(i).speculative && !entries(i).committed && entries(i).owner === w.U)).asUInt.orR
-    val matches = VecInit((0 until depth).map(i => resolved(i) && entries(i).owner === w.U))
+    val matches = VecInit((0 until depth).map(i => resolveMatches(i)(w)))
     io.matched(w) := matches.asUInt.orR
-    io.committed(w) := io.resolve(w).valid && io.resolve(w).bits.commit && matches.asUInt.orR
+    io.committed(w) := io.resolve(w).bits.commit && matches.asUInt.orR
     when(io.resolve(w).valid) {
       assert(PopCount(matches) <= 1.U, "specmiss resolution matched multiple candidates in one slice")
     }

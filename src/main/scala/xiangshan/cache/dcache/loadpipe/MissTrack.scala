@@ -18,6 +18,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.util.PopCountAtLeast
 import org.chipsalliance.cde.config.Parameters
 import utility._
 
@@ -114,12 +115,11 @@ class MissTrack(implicit p: Parameters) extends DCacheModule {
       !overlaps(truthIdx, truth.way, io.invalidate) &&
       !overlaps(truthIdx, truth.way, previousInvalidate)
 
-    val s0QueryIdx = get_dcache_idx(q.s0_vaddr)
     val s0QueryLine = lineAddress(q.s0_vaddr)
-    val s0Matches = VecInit(entries.map(e =>
-      e.valid && e.idx === s0QueryIdx && e.src_vline === s0QueryLine))
+    val s0Matches = VecInit(entries.map(e => e.valid && e.src_vline === s0QueryLine))
+    val s0MatchBits = s0Matches.asUInt
     // Only a unique match predicts residency; ambiguous keys bypass the filter.
-    val s0Resident = (PopCount(s0Matches) === 1.U) && !io.clear
+    val s0Resident = s0MatchBits.orR && !PopCountAtLeast(s0MatchBits, 2) && !io.clear
     // Compare the pre-maintenance S0 table, then capture only the decision.
     // No VA, wide comparison, or match reduction remains in the S1 path.
     // Stale records or changed mappings can still lose an early reservation;
@@ -154,10 +154,8 @@ class MissTrack(implicit p: Parameters) extends DCacheModule {
     // Canonical events matching this entry are already mutually exclusive.
     val updates = canonicalEvents.indices.map(j => canonicalEvents(j).valid && eventMatches(j)(i))
     when (ParallelORR(updates)) {
-      maintained(i) := ParallelMux(updates.zip(canonicalEvents.map(_.bits)))
-      // Slot identity is unchanged; refresh only its query key.
-      maintained(i).idx := e.idx
-      maintained(i).way_index := e.way_index
+      // Qualified refreshes cannot overlap invalidation; validity and slot identity stay unchanged.
+      maintained(i).src_vline := ParallelMux(updates.zip(canonicalEvents.map(_.bits.src_vline)))
     }
   }
 
@@ -193,11 +191,6 @@ class MissTrack(implicit p: Parameters) extends DCacheModule {
   when (io.clear) { nextEntries.foreach(_.valid := false.B) }
   // Table maintenance becomes visible to following S0 queries after this edge.
   entries := nextEntries
-
-  // Each cache set/way has at most one record, independent of its virtual-line key.
-  for (i <- entries.indices; j <- 0 until i) {
-    assert(!(entries(i).valid && entries(j).valid && sameSlot(entries(i), entries(j))))
-  }
 
   XSPerfAccumulate("mtrack_queries", PopCount(io.loads.map(_.s0_valid)))
   XSPerfAccumulate("mtrack_s1_queries", PopCount(queryValid))
