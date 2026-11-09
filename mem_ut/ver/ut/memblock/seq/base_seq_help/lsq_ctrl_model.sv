@@ -33,8 +33,6 @@ class lsq_ctrl_model extends uvm_object;
     bit               shadow_t1_redirect;
     bit               shadow_t2_redirect;
     bit               shadow_t3_update;
-    int unsigned      shadow_t3_lq_cancel;
-    int unsigned      shadow_t3_sq_cancel;
     bit               shadow_t3_cancel_record_valid;
     int unsigned      shadow_t3_cancel_record_id;
     int unsigned      shadow_t3_redirect_epoch;
@@ -105,8 +103,6 @@ class lsq_ctrl_model extends uvm_object;
         shadow_t1_redirect = 1'b0;
         shadow_t2_redirect = 1'b0;
         shadow_t3_update = 1'b0;
-        shadow_t3_lq_cancel = 0;
-        shadow_t3_sq_cancel = 0;
         shadow_t3_cancel_record_valid = 1'b0;
         shadow_t3_cancel_record_id = 0;
         shadow_t3_redirect_epoch = 0;
@@ -306,6 +302,8 @@ class lsq_ctrl_model extends uvm_object;
         bit          source_offer_for_sample;
         int unsigned rename_prefix;
         int unsigned dispatch_prefix;
+        int          shadow_restore_record_idx;
+        memblock_lsq_cancel_record_t shadow_restore_record;
 
         if (!snapshot.valid || !snapshot.complete || snapshot.sample_seq == 0) begin
             `uvm_fatal("LSQ_SHADOW", "advance requires one complete, non-zero ctrl sample")
@@ -376,10 +374,34 @@ class lsq_ctrl_model extends uvm_object;
             if (!shadow_t3_cancel_record_valid) begin
                 `uvm_fatal("LSQ_SHADOW", "t3 restore has no bound cancel record identity")
             end
-            next_lq_credit += shadow_t3_lq_cancel;
-            next_sq_credit += shadow_t3_sq_cancel;
-            shadow_lq_enq_ptr = rewind_lq_key(shadow_lq_enq_ptr, shadow_t3_lq_cancel);
-            shadow_sq_enq_ptr = rewind_sq_key(shadow_sq_enq_ptr, shadow_t3_sq_cancel);
+            shadow_restore_record_idx =
+                data.find_cancel_record_index_by_id(shadow_t3_cancel_record_id);
+            if (shadow_restore_record_idx < 0) begin
+                `uvm_fatal("LSQ_SHADOW",
+                           $sformatf("t3 restore lost bound cancel record id=%0d epoch=%0d sample=%0d",
+                                     shadow_t3_cancel_record_id,
+                                     shadow_t3_redirect_epoch,
+                                     snapshot.sample_seq))
+                return;
+            end
+            shadow_restore_record = data.cancel_record_q[shadow_restore_record_idx];
+            if (!shadow_restore_record.valid ||
+                shadow_restore_record.redirect_epoch != shadow_t3_redirect_epoch ||
+                shadow_restore_record.compare_snapshot_sample_seq != snapshot.sample_seq) begin
+                `uvm_fatal("LSQ_SHADOW",
+                           $sformatf("t3 restore sample mismatch id=%0d epoch=%0d sample=%0d record_idx=%0d compare_sample=%0d",
+                                     shadow_t3_cancel_record_id,
+                                     shadow_t3_redirect_epoch,
+                                     snapshot.sample_seq,
+                                     shadow_restore_record_idx,
+                                     shadow_restore_record.compare_snapshot_sample_seq))
+            end
+            // 中文注释：t2 只绑定 cancel record；monitor offset 后的 compare snapshot
+            // 才携带 DUT 可见取消数，t3 必须用本拍观测值恢复 shadow credit 和 pointer。
+            next_lq_credit += snapshot.lq_cancel_count;
+            next_sq_credit += snapshot.sq_cancel_count;
+            shadow_lq_enq_ptr = rewind_lq_key(shadow_lq_enq_ptr, snapshot.lq_cancel_count);
+            shadow_sq_enq_ptr = rewind_sq_key(shadow_sq_enq_ptr, snapshot.sq_cancel_count);
             data.mark_cancel_shadow_restore_consumed(
                 shadow_t3_cancel_record_id,
                 shadow_t3_redirect_epoch,
@@ -405,8 +427,6 @@ class lsq_ctrl_model extends uvm_object;
         shadow_can_accept = next_can_accept;
         shadow_baseline_valid = 1'b1;
         shadow_t3_update = t2_update;
-        shadow_t3_lq_cancel = snapshot.lq_cancel_count;
-        shadow_t3_sq_cancel = snapshot.sq_cancel_count;
         if (t2_update) begin
             if (!data.bind_cancel_record_for_shadow_restore(
                     snapshot.sample_seq,

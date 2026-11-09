@@ -887,6 +887,7 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
     task check_cancel_shadow_restore_credential();
         memblock_sync_pkg::dispatch_raw_cancel_snapshot_t snapshot;
         memblock_lsq_cancel_record_t record;
+        memblock_sq_key_t expected_sq_ptr;
 
         check_expect(data.cancel_record_q.size() == 0,
                "cancel restore soft test requires an empty record queue");
@@ -894,6 +895,10 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
         sample_seq = 0;
         snapshot = next_snapshot();
         lsq_ctrl.advance_rtl_admission_sample(snapshot, 1'b0);
+        lsq_ctrl.shadow_sq_enq_ptr =
+            lsq_ctrl.advance_sq_key(lsq_ctrl.shadow_sq_enq_ptr, 4);
+        lsq_ctrl.shadow_sq_credit = MEMBLOCK_SQ_SIZE - 4;
+        expected_sq_ptr = lsq_ctrl.rewind_sq_key(lsq_ctrl.shadow_sq_enq_ptr, 2);
 
         record = '{default:'0};
         record.valid = 1'b1;
@@ -901,6 +906,8 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
         record.cancel_record_id = 91;
         record.redirect_anchor_valid = 1'b1;
         record.dut_cancel_update_sample_seq = sample_seq + 1;
+        record.compare_snapshot_sample_seq =
+            record.dut_cancel_update_sample_seq + MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET;
         data.cancel_record_q.push_back(record);
         lsq_ctrl.shadow_t2_redirect = 1'b1;
         snapshot = next_snapshot();
@@ -908,13 +915,17 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
         check_expect(lsq_ctrl.shadow_t3_update &&
                lsq_ctrl.shadow_t3_cancel_record_valid &&
                lsq_ctrl.shadow_t3_cancel_record_id == record.cancel_record_id &&
+               lsq_ctrl.shadow_sq_enq_ptr.value == 4 &&
                !data.cancel_record_q[0].shadow_restore_consumed,
                "t2 update did not bind the exact cancel record identity");
         snapshot = next_snapshot();
+        snapshot.sq_cancel_count = 2;
         lsq_ctrl.advance_rtl_admission_sample(snapshot, 1'b0);
         check_expect(data.cancel_record_q[0].shadow_restore_consumed &&
-               data.cancel_record_q[0].shadow_restore_sample_seq == sample_seq,
-               "K=0 t3 restore did not publish its consumption credential");
+               data.cancel_record_q[0].shadow_restore_sample_seq == sample_seq &&
+               lsq_ctrl.shadow_sq_enq_ptr == expected_sq_ptr &&
+               lsq_ctrl.shadow_sq_credit == MEMBLOCK_SQ_SIZE - 2,
+               "non-zero t3 restore did not rewind SQ pointer 4->2 and consume its credential");
         data.cancel_record_q.delete();
     endtask:check_cancel_shadow_restore_credential
 
