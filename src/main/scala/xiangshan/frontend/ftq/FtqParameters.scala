@@ -23,7 +23,6 @@ case class FtqParameters(
     FtqSize:           Int = 64,
     ResolveQueueSize:  Int = 16,
     BpTrainStallLimit: Int = 8,
-    CommitQueueSize:   Int = 64,
     // submodules
     pqParameters: FtqPrefetchQueueParameters = FtqPrefetchQueueParameters()
 ) {
@@ -36,7 +35,6 @@ trait HasFtqParameters extends HasFrontendParameters {
 
   def ResolveQueueSize:  Int = ftqParameters.ResolveQueueSize
   def BpTrainStallLimit: Int = ftqParameters.BpTrainStallLimit
-  def CommitQueueSize:   Int = ftqParameters.CommitQueueSize
 }
 
 case class FtqPrefetchQueueParameters(
