@@ -31,6 +31,8 @@ import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Utils, VecPipedFuncUnit, VecSrcTypeModule}
 import xiangshan.SrcType
 import yunsuan.vector.alu.{VAluOpcode, VIAlu}
+import yunsuan.vector.{VIFuInput, VIFuOutput}
+import yunsuan.vector.VectorALU.VIPUComputeCarrier
 import yunsuan.{OpType, VipuType}
 
 class VIAluDecodeResultBundle extends Bundle {
@@ -105,6 +107,14 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   // modules
   private val decoder = Module(new VIAluDecoder)
   private val vialu   = Module(new VIAlu)
+  private val puLaneModel = SimulationModels.enabled("vec-int-pu-lane")
+  private val puWholeModel = SimulationModels.enabled("vec-int-pu-whole")
+  require(!(puLaneModel && puWholeModel), "vector PU lane and whole models are mutually exclusive")
+  require(!puWholeModel, "vec-int-pu-whole requires a complete whole-vector carrier and is not enabled yet")
+  private val puBehaviorModel = puLaneModel || puWholeModel
+  private val puBehaviorModelName = if (puLaneModel) "vec-int-pu-lane" else "vec-int-pu-whole"
+  private val puComputeGrouped = SimulationModels.computeGrouped(puBehaviorModelName)
+  private val puCarrier = if (puBehaviorModel) Some(Module(new VIPUComputeCarrier(puBehaviorModelName))) else None
 
   /**
    * [[decoder]]'s in connection
@@ -123,28 +133,79 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   /**
    * [[vialu]]'s in connection
    */
-  vialu.io match {
-    case subIO =>
-      subIO.in.valid            := io.in.valid
-      subIO.in.bits.opcode.op   := decoder.io.out.opcode
-      subIO.in.bits.info.vm     := vm
-      subIO.in.bits.info.ma     := vma
-      subIO.in.bits.info.ta     := vta
-      subIO.in.bits.info.vlmul  := vlmul
-      subIO.in.bits.info.vl     := vl
-      subIO.in.bits.info.vstart := vstart
-      subIO.in.bits.info.uopIdx := vuopIdx
-      subIO.in.bits.info.vxrm   := vxrm
-      subIO.in.bits.srcType(0)  := srcTypeVs2
-      subIO.in.bits.srcType(1)  := srcTypeVs1
-      subIO.in.bits.vdType      := vdType
-      subIO.in.bits.vs1         := Mux1H(Seq(needClearVs1 -> 0.U,
-        needShiftVs1 -> ZeroExt(vs1(127,64), 128),
-        ((!needClearVs1) && (!needShiftVs1)) -> vs1))
-      subIO.in.bits.vs2         := vs2
-      subIO.in.bits.old_vd      := oldVd
-      subIO.in.bits.mask        := srcMask
+  private val puInput = Wire(new VIFuInput)
+  puInput.opcode.op   := decoder.io.out.opcode
+  puInput.info.vm     := vm
+  puInput.info.ma     := vma
+  puInput.info.ta     := vta
+  puInput.info.vlmul  := vlmul
+  puInput.info.vl     := vl
+  puInput.info.vstart := vstart
+  puInput.info.uopIdx := vuopIdx
+  puInput.info.vxrm   := vxrm
+  puInput.srcType(0)  := srcTypeVs2
+  puInput.srcType(1)  := srcTypeVs1
+  puInput.vdType      := vdType
+  puInput.vs1         := Mux1H(Seq(needClearVs1 -> 0.U,
+    needShiftVs1 -> ZeroExt(vs1(127,64), 128),
+    ((!needClearVs1) && (!needShiftVs1)) -> vs1))
+  puInput.vs2         := vs2
+  puInput.old_vd      := oldVd
+  puInput.mask        := srcMask
+
+  vialu.io.in.valid := io.in.valid
+  vialu.io.in.bits := puInput
+  puCarrier.foreach(_.io.in := puInput.asUInt)
+
+  // The pure carrier is deliberately guarded to the single-uop cases for
+  // which it has a complete semantic implementation.  Reductions and the
+  // multi-uop mask accumulators keep the original VIAlu state machine.
+  private val puCarrierSafeOp = decoder.io.out.opcode === VAluOpcode.vcpop ||
+    decoder.io.out.opcode === VAluOpcode.vfirst ||
+    decoder.io.out.opcode === VAluOpcode.vmsbf ||
+    decoder.io.out.opcode === VAluOpcode.vmsif ||
+    decoder.io.out.opcode === VAluOpcode.vmsof ||
+    decoder.io.out.opcode === VAluOpcode.viota ||
+    decoder.io.out.opcode === VAluOpcode.vid ||
+    decoder.io.out.opcode === VAluOpcode.vmvxs
+  private val puCarrierUse = if (puBehaviorModel) {
+    puCarrierSafeOp && vlmul === 0.U && vuopIdx === 0.U
+  } else {
+    false.B
+  }
+  private val puCarrierOut = if (puBehaviorModel) {
+    puCarrier.get.io.out.asTypeOf(new VIFuOutput)
+  } else {
+    0.U.asTypeOf(new VIFuOutput)
+  }
+  // VIAlu has two internal timing stages.  Keep the same boundary around the
+  // combinational carrier; the outer FuncUnit pipeline remains unchanged.
+  private val puCarrierS1 = RegEnable(puCarrierOut, io.in.valid)
+  private val puCarrierS2 = RegEnable(puCarrierS1, RegNext(io.in.valid))
+  private val puCarrierUseS1 = RegEnable(puCarrierUse, io.in.valid)
+  private val puCarrierUseS2 = RegEnable(puCarrierUseS1, RegNext(io.in.valid))
+
+  if (puBehaviorModel) {
+    SimulationModels.functionalPipeline(
+      puBehaviorModelName,
+      puCarrier.get,
+      0,
+      "",
+      Seq((8, 8), (16, 16), (32, 32), (64, 64)),
+      if (puComputeGrouped) puCarrier else None,
+      if (puLaneModel) "lane-core" else "whole-unit",
+      Seq(
+        HostOpSpec("vcpop", Seq(128), 64, laneWidth = 1),
+        HostOpSpec("vfirst", Seq(128), 64, laneWidth = 1),
+        HostOpSpec("vmsbf", Seq(128), 128, laneWidth = 1),
+        HostOpSpec("vmsif", Seq(128), 128, laneWidth = 1),
+        HostOpSpec("vmsof", Seq(128), 128, laneWidth = 1),
+        HostOpSpec("viota", Seq(128), 128, laneWidth = 8),
+        HostOpSpec("vid", Seq(128), 128, laneWidth = 8),
+        HostOpSpec("vmvxs", Seq(128), 64, laneWidth = 64)
+      )
+    )
   }
 
-  io.out.bits.res.data := vialu.io.out.bits.vd
+  io.out.bits.res.data := Mux(puCarrierUseS2, puCarrierS2.vd, vialu.io.out.bits.vd)
 }

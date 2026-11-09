@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, ZeroExt}
+import utility.{HostOpSpec, LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, SimulationModels, ZeroExt}
 import utility.{XSDebug, XSError}
 import xiangshan._
 import xiangshan.backend.fu.util._
@@ -318,6 +318,57 @@ class CryptoModule(implicit p: Parameters) extends XSModule {
   io.out := Mux(funcReg(4), hashModule.io.out, blockCipherModule.io.out)
 }
 
+/** Pure Count/CLMUL/XPERM carrier. Crypto operations remain on the original path. */
+class IntBkuComputeCarrier extends RawModule {
+  override def desiredName: String = "WolvrixBehaviorComputeGroup_v1_int_bku"
+  val io = IO(new Bundle {
+    val in = Input(UInt(134.W)) // Cat(func[5:0], src2[63:0], src1[63:0])
+    val out = Output(UInt(64.W))
+  })
+
+  private val src1 = io.in(63, 0)
+  private val src2 = io.in(127, 64)
+  private val func = io.in(133, 128)
+
+  private def countLeading(value: UInt, width: Int): UInt = {
+    val zero = value === 0.U
+    Mux(zero, width.U(64.W), PriorityEncoder(Reverse(value)).pad(64))
+  }
+  private def countTrailing(value: UInt, width: Int): UInt = {
+    val zero = value === 0.U
+    Mux(zero, width.U(64.W), PriorityEncoder(value).pad(64))
+  }
+  private val count = MuxLookup(func, 0.U(64.W))(Seq(
+    BKUOpType.clz -> countLeading(src1, 64), BKUOpType.clzw -> countLeading(src1(31, 0), 32),
+    BKUOpType.ctz -> countTrailing(src1, 64), BKUOpType.ctzw -> countTrailing(src1(31, 0), 32),
+    BKUOpType.cpop -> PopCount(src1).pad(64), BKUOpType.cpopw -> PopCount(src1(31, 0)).pad(64)
+  ))
+
+  private var clmulValue = 0.U(128.W)
+  for (i <- 0 until 64) {
+    clmulValue = clmulValue ^ Mux(src1(i), Cat(0.U(64.W), src2) << i, 0.U(128.W))
+  }
+  private val clmul = clmulValue(63, 0)
+  private val clmulh = clmulValue(127, 64)
+  private val clmulr = clmulValue(126, 63)
+  private val clmulResult = MuxLookup(func, clmul)(Seq(
+    BKUOpType.clmul -> clmul, BKUOpType.clmulh -> clmulh, BKUOpType.clmulr -> clmulr
+  ))
+
+  private def xperm(table: UInt, index: UInt, width: Int): UInt =
+    MuxLookup(index, 0.U(width.W))((0 until 64 / width).map { i =>
+      i.U -> table(i * width + width - 1, i * width)
+    })
+  private val xpermn = Cat((0 until 16).map { i =>
+    xperm(src1, src2(i * 4 + 3, i * 4), 4)
+  }.reverse)
+  private val xpermb = Cat((0 until 8).map { i =>
+    Mux(src2(i * 8 + 7, i * 8 + 3).orR, 0.U(8.W), xperm(src1, src2(i * 8 + 2, i * 8), 8))
+  }.reverse)
+  private val misc = Mux(func(0), xpermb, xpermn)
+  io.out := Mux(func(3), count, Mux(func(2), misc, clmulResult))
+}
+
 class Bku(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasPipelineReg {
 
   override def latency = 2
@@ -326,6 +377,15 @@ class Bku(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasP
     io.in.bits.data.src(0),
     io.in.bits.data.src(1),
     io.in.bits.ctrl.fuOpType
+  )
+
+  private val behavior = SimulationModels.enabled("int-bku")
+  private val grouped = SimulationModels.computeGrouped("int-bku")
+  private val behaviorCarrier = if (behavior) Some(Module(new IntBkuComputeCarrier)) else None
+  private val bkuOps = Seq(
+    HostOpSpec("clz-ctz", Seq(64), 64), HostOpSpec("cpop", Seq(64), 64),
+    HostOpSpec("clmul", Seq(64, 64), 128, implementation = "fallback"),
+    HostOpSpec("xperm", Seq(64, 64), 64, implementation = "fallback")
   )
 
   val countModule = Module(new CountModule)
@@ -354,10 +414,20 @@ class Bku(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with HasP
 
   // CountModule, ClmulModule, MiscModule, and CryptoModule have a latency of 1 cycle
   val funcReg = RegEnable(func, io.in.fire)
-  val result = Mux(funcReg(5), cryptoModule.io.out,
-                  Mux(funcReg(3), countModule.io.out,
-                      Mux(funcReg(2),miscModule.io.out, clmulModule.io.out)))
+  behaviorCarrier.foreach(_.io.in := Cat(func(5, 0), src2, src1))
+  val behaviorResultS1 = behaviorCarrier.map(carrier => RegEnable(carrier.io.out, regEnable(1)))
+  val hardwareResult = Mux(funcReg(5), cryptoModule.io.out,
+                           Mux(funcReg(3), countModule.io.out,
+                               Mux(funcReg(2), miscModule.io.out, clmulModule.io.out)))
+  val result = if (behavior) {
+    Mux(funcReg(5), cryptoModule.io.out, behaviorResultS1.get)
+  } else hardwareResult
 
   io.out.bits.res.data := RegEnable(result, regEnable(2))
+  if (behavior) {
+    SimulationModels.functionalPipeline(
+      "int-bku", behaviorCarrier.get, 2, "", Seq((64, 64)),
+      if (grouped) behaviorCarrier else None, "none", bkuOps)
+  }
   // connectNonPipedCtrlSingal
 }

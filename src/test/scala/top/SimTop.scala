@@ -17,7 +17,7 @@
 
 package top
 
-import utility.{SimulationModels, SimulationModelsKey, SimulationPrimitives, SimulationPrimitivesKey}
+import utility.{SimulationModels, SimulationModelsKey, SimulationModelLoweringKey, SimulationModelComputeLoweringKey, SimulationPrimitives, SimulationPrimitivesKey}
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -186,9 +186,19 @@ object XiangShanSim extends App {
     "Simulation primitives require the simulation target")
   require(!envInFPGA || config(SimulationModelsKey) == "hardware",
     "Simulation behavior models require the simulation target")
+  require(!SimulationModels.selected(config(SimulationModelsKey)).contains("commit-rat") ||
+    (config(DebugOptionsKey).EnableDifftest && config(xiangshan.XSTileKey).size == 1),
+    "commit-rat requires full DiffTest and exactly one core")
+  require(!SimulationModels.selected(config(SimulationModelsKey)).contains("commit-rat") || !config(DebugOptionsKey).ResetGen,
+    "commit-rat requires a shared synchronous reset; reset-tree generation is unsupported")
   val modelReport = Some(java.nio.file.Paths.get(
     sys.env.getOrElse("NOOP_HOME", "."), "build", "simulation_models.json"))
-  SimulationModels.withMode(config(SimulationModelsKey), modelReport) {
+  require(config(SimulationModelLoweringKey) == "ordinary" || SimulationModels.selected(config(SimulationModelsKey)).contains("commit-rat"),
+    "grouped state lowering requires commit-rat")
+  require(config(SimulationModelComputeLoweringKey) == "ordinary" ||
+    SimulationModels.selected(config(SimulationModelsKey)).exists(_ != "commit-rat"),
+    "grouped compute lowering requires a functional model")
+  SimulationModels.withMode(config(SimulationModelsKey), modelReport, config(SimulationModelLoweringKey), config(SimulationModelComputeLoweringKey)) {
     SimulationPrimitives.withMode(config(SimulationPrimitivesKey),
       Some(java.nio.file.Paths.get(sys.env.getOrElse("NOOP_HOME", "."), "build", "simulation_primitives.json"))) {
       Generator.execute(

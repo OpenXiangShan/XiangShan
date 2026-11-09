@@ -24,6 +24,7 @@ import utility.HasCircularQueuePtrHelper
 import utility.ParallelPriorityMux
 import utility.GatedValidRegNext
 import utility.XSError
+import utility.SimulationModels
 import xiangshan._
 
 abstract class RegType
@@ -81,9 +82,10 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     val old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val diffWritePorts = Option.when(backendParams.basicDebugEn)(Input(Vec(numDiffWritePorts, new RatWritePort(renameTableWidth))))
+    val keepRawDiffTable = !SimulationModels.enabled("commit-rat") || reg_t == Reg_Vl
+    val diffWritePorts = Option.when(backendParams.basicDebugEn && keepRawDiffTable)(Input(Vec(numDiffWritePorts, new RatWritePort(renameTableWidth))))
     val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_rdata = if (backendParams.basicDebugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_rdata = if (backendParams.basicDebugEn && keepRawDiffTable) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_v0 = if (backendParams.debugEn) reg_t match {
       case Reg_V0 => Some(Output(UInt(PhyRegIdxWidth.W)))
       case _ => None
@@ -182,7 +184,8 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
   }
   io.debug_v0.foreach(_ := arch_table(0))
   io.debug_vl.foreach(_ := arch_table(0))
-  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+  if ((env.EnableDifftest || env.AlwaysBasicDiff) &&
+      (!SimulationModels.enabled("commit-rat") || reg_t == Reg_Vl)) {
     val difftest_table = RegInit(rename_table_init)
     val difftest_table_next = WireDefault(difftest_table)
 
@@ -202,7 +205,7 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     io.diff_vl.foreach(_ := difftest_table(0))
   }
   else {
-    io.diff_rdata.foreach(_ := 0.U.asTypeOf(io.debug_rdata.get))
+    io.diff_rdata.foreach(x => x := 0.U.asTypeOf(x))
     io.diff_v0.foreach(_ := 0.U)
     io.diff_vl.foreach(_ := 0.U)
   }
@@ -258,7 +261,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val vlRat  = Module(new RenameTable(Reg_Vl, CommitWidth))
 
   io.debug_int_rat .foreach(_ := intRat.io.debug_rdata.get)
-  if (env.AlwaysBasicDiff || env.EnableDifftest) {
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && !SimulationModels.enabled("commit-rat")) {
     // Delay of RenameTable should be same as PhyRegFile
     val difftest = DifftestModule(new DiffArchIntRenameTable(IntPhyRegs), delay = 2)
     difftest.coreid := io.hartId
@@ -289,17 +292,31 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.basicDebugEn) {
+  if (backendParams.basicDebugEn && !SimulationModels.enabled("commit-rat")) {
     for ((diff, i) <- intRat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).rfWen
       diff.addr := io.diffCommits.get.info(i).ldest
       diff.data := io.diffCommits.get.info(i).pdest
     }
   }
+  if (SimulationModels.enabled("commit-rat")) {
+    DifftestModule.registerRatWrites(
+      "int-rat",
+      32,
+      PhyRegIdxWidth,
+      log2Ceil(IntLogicRegs),
+      io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) =>
+        io.diffCommits.get.isCommit && valid && info.rfWen
+      },
+      io.diffCommits.get.info.map(_.ldest(log2Ceil(IntLogicRegs) - 1, 0)),
+      io.diffCommits.get.info.map(_.pdest),
+      delay = 2,
+    )
+  }
 
   // debug read ports for difftest
   io.debug_fp_rat.foreach(_ := fpRat.io.debug_rdata.get)
-  if (env.AlwaysBasicDiff || env.EnableDifftest) {
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && !SimulationModels.enabled("commit-rat")) {
     val difftest = DifftestModule(new DiffArchFpRenameTable(FpPhyRegs), delay = 2)
     difftest.coreid := io.hartId
     difftest.value := fpRat.io.diff_rdata.get
@@ -326,15 +343,29 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.basicDebugEn) {
+  if (backendParams.basicDebugEn && !SimulationModels.enabled("commit-rat")) {
     for ((diff, i) <- fpRat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).fpWen
       diff.addr := io.diffCommits.get.info(i).ldest
       diff.data := io.diffCommits.get.info(i).pdest
     }
   }
+  if (SimulationModels.enabled("commit-rat")) {
+    DifftestModule.registerRatWrites(
+      "fp-rat",
+      32,
+      PhyRegIdxWidth,
+      log2Ceil(FpLogicRegs),
+      io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) =>
+        io.diffCommits.get.isCommit && valid && info.fpWen
+      },
+      io.diffCommits.get.info.map(_.ldest(log2Ceil(FpLogicRegs) - 1, 0)),
+      io.diffCommits.get.info.map(_.pdest),
+      delay = 2,
+    )
+  }
 
-  if (env.AlwaysBasicDiff || env.EnableDifftest) {
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && !SimulationModels.enabled("commit-rat")) {
     // Split each 128-bit vector reg into two 64-bit regs (lo, hi), so convert index to (2*index, 2*index+1)
     val splitVecPregs = 2 * (V0PhyRegs + VfPhyRegs)
     val difftest = DifftestModule(new DiffArchVecRenameTable(splitVecPregs), delay = 2)
@@ -374,12 +405,38 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.basicDebugEn) {
+  if (backendParams.basicDebugEn && !SimulationModels.enabled("commit-rat")) {
     for ((diff, i) <- vecRat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).vecWen
       diff.addr := io.diffCommits.get.info(i).ldest
       diff.data := io.diffCommits.get.info(i).pdest
     }
+  }
+  if (SimulationModels.enabled("commit-rat")) {
+    DifftestModule.registerRatWrites(
+      "v0-rat",
+      1,
+      PhyRegIdxWidth,
+      log2Ceil(V0LogicRegs),
+      io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) =>
+        io.diffCommits.get.isCommit && valid && info.v0Wen
+      },
+      io.diffCommits.get.info.map(_ => 0.U(0.W)),
+      io.diffCommits.get.info.map(_.pdest),
+      delay = 2,
+    )
+    DifftestModule.registerRatWrites(
+      "vec-rat",
+      32,
+      PhyRegIdxWidth,
+      log2Ceil(VecLogicRegs),
+      io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) =>
+        io.diffCommits.get.isCommit && valid && info.vecWen
+      },
+      io.diffCommits.get.info.map(_.ldest(log2Ceil(VecLogicRegs) - 1, 0)),
+      io.diffCommits.get.info.map(_.pdest),
+      delay = 2,
+    )
   }
 
   // debug read ports for difftest
@@ -409,7 +466,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.basicDebugEn) {
+  if (backendParams.basicDebugEn && !SimulationModels.enabled("commit-rat")) {
     for ((diff, i) <- v0Rat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).v0Wen
       diff.addr := io.diffCommits.get.info(i).ldest

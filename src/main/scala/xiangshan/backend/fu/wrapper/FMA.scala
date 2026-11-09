@@ -2,6 +2,7 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
+import utility.SimulationModels
 import chisel3.util._
 import utility.XSError
 import xiangshan.backend.fu.FuConfig
@@ -20,7 +21,10 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   private val src2 = inData.src(2)
 
   // modules
-  private val fma = Module(new FloatFMA)
+  private val fpBehavior = SimulationModels.enabled("fp-mul")
+  private val fpComputeGrouped = SimulationModels.computeGrouped("fp-mul")
+  private val fma = Module(new FloatFMA(behavior = fpBehavior, computeGrouped = fpComputeGrouped))
+  SimulationModels.functionalPipeline("fp-mul", fma, 3, "io_fire", Seq((53, 53), (24, 24), (11, 11)), fma.simulationComputeCarrier)
 
   val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0.head(32).andR ||
                               fp_fmt === VSew.e16 && !src0.head(48).andR

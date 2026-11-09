@@ -3,7 +3,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.XSError
+import utility.{HostOpSpec, SimulationModels, XSError}
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
@@ -61,7 +61,27 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val oldVdSplit  = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
-  private val vimacs = Seq.fill(numVecModule)(Module(new VIMac64b))
+  private val laneModel = SimulationModels.enabled("vec-int-mac-lane")
+  private val wholeModel = SimulationModels.enabled("vec-int-mac-whole")
+  private val legacyModel = SimulationModels.enabled("vec-int-mul")
+  require(!(laneModel && wholeModel), "vector MAC lane and whole models are mutually exclusive")
+  require(!wholeModel, "vec-int-mac-whole requires a complete whole-vector carrier and is not enabled yet")
+  require(!(legacyModel && (laneModel || wholeModel)),
+    "legacy vec-int-mul cannot be combined with a boundary-specific MAC model")
+  private val vecIntBehavior = laneModel || wholeModel || legacyModel
+  private val modelName = if (laneModel) "vec-int-mac-lane" else if (wholeModel) "vec-int-mac-whole" else "vec-int-mul"
+  private val boundary = if (laneModel) "lane-core" else if (wholeModel) "whole-unit" else "none"
+  private val vecIntComputeGrouped = SimulationModels.computeGrouped(modelName)
+  private val vimacs = Seq.fill(numVecModule)(Module(new VIMac64b(
+    behavior = vecIntBehavior, computeGrouped = vecIntComputeGrouped, modelName = modelName)))
+  private val vecIntOps = Seq(
+    HostOpSpec("lane-mul", Seq(64, 64), 128, laneWidth = 8),
+    HostOpSpec("lane-macc", Seq(64, 64, 64), 128, laneWidth = 8),
+    HostOpSpec("fixed-round", Seq(64), 64, laneWidth = 8),
+    HostOpSpec("vector-merge", Seq(dataWidth), dataWidth, laneWidth = 8, implementation = "fallback"))
+  vimacs.foreach(mod => SimulationModels.functionalPipeline(modelName, mod, 2, "io_fire",
+    Seq((8, 8), (16, 16), (32, 32), (64, 64)), mod.simulationComputeCarrier,
+    boundary, vecIntOps))
   private val mgu = Module(new Mgu(dataWidth))
 
   /**

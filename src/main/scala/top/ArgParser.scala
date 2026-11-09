@@ -53,7 +53,9 @@ object ArgParser {
       |--disable-alwaysdb
       |--enable-dfx
       |--wolvrix-sim-primitives <none|priority-encode|popcount|popcount-ge4|gray-decode|decode-table>
-      |--wolvrix-sim-models <hardware|commit-rat>
+      |--wolvrix-sim-models <hardware|comma-separated:commit-rat,int-mul,fp-mul,vec-int-mul,vec-fp-mul,int-alu,int-bku,vec-int-alu-lane,vec-int-alu-whole,vec-int-pu-lane,vec-int-pu-whole,vec-int-mac-lane,vec-int-mac-whole>
+      |--wolvrix-behavior-state-lowering <ordinary|grouped>
+      |--wolvrix-behavior-compute-lowering <ordinary|grouped>
       |--enable-simfrontend
       |""".stripMargin
 
@@ -86,8 +88,18 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SimulationPrimitivesKey => mode
           }), tail)
+        case "--wolvrix-behavior-state-lowering" :: lowering :: tail =>
+          require(Set("ordinary", "grouped").contains(lowering))
+          nextOption(config.alter((site, here, up) => {
+            case SimulationModelLoweringKey => lowering
+          }), tail)
+        case "--wolvrix-behavior-compute-lowering" :: lowering :: tail =>
+          require(Set("ordinary", "grouped").contains(lowering))
+          nextOption(config.alter((site, here, up) => {
+            case SimulationModelComputeLoweringKey => lowering
+          }), tail)
         case "--wolvrix-sim-models" :: mode :: tail =>
-          require(Set("hardware", "commit-rat").contains(mode))
+          utility.SimulationModels.selected(mode)
           nextOption(config.alter((site, here, up) => {
             case SimulationModelsKey => mode
           }), tail)

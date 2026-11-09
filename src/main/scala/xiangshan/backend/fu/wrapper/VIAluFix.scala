@@ -4,14 +4,15 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
 import org.chipsalliance.cde.config.Parameters
-import utility.XSError
+import utility.{HostOpSpec, SimulationModels, XSError}
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{DstMgu, Mgtu, Mgu, NewMgu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils._
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import yunsuan.VialuFixType
 import yunsuan.vector.SewOH
-import yunsuan.vector.VectorALU.VIAluFixPoint
+import yunsuan.vector.VectorALU.{VIAluFixComputeCarrier, VIAluFixPoint, VIAluFixPointInput, VIAluFixPointOutput}
+import yunsuan.encoding.Opcode.VIAluOpcode
 
 import math.pow
 
@@ -28,11 +29,45 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   // modules
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
-  private val vIAluFixPoints = Seq.fill(numVecModule)(Module(new VIAluFixPoint(XLEN)))
+  private val laneModel = SimulationModels.enabled("vec-int-alu-lane")
+  private val wholeModel = SimulationModels.enabled("vec-int-alu-whole")
+  require(!(laneModel && wholeModel), "vector ALU lane and whole models are mutually exclusive")
+  require(!wholeModel, "vec-int-alu-whole requires a complete whole-vector carrier and is not enabled yet")
+  private val behaviorModel = laneModel || wholeModel
+  private val behaviorModelName = if (laneModel) "vec-int-alu-lane" else "vec-int-alu-whole"
+  private val computeGrouped = SimulationModels.computeGrouped(behaviorModelName)
+  private val pointInputs = Seq.fill(numVecModule)(Wire(new VIAluFixPointInput(XLEN)))
+  private val pointOuts = Seq.fill(numVecModule)(Wire(new VIAluFixPointOutput(XLEN)))
+  private val pointModules = if (!behaviorModel) Seq.fill(numVecModule)(Module(new VIAluFixPoint(XLEN))) else Seq.empty
+  private val pointCarriers = if (behaviorModel) Seq.fill(numVecModule)(Module(new VIAluFixComputeCarrier(behaviorModelName))) else Seq.empty
+  pointInputs.zip(pointOuts).zipWithIndex.foreach { case ((input, output), i) =>
+    if (behaviorModel) {
+      pointCarriers(i).io.in := input.asUInt
+      // VIAluFixPoint's original S1 register is outside the pure carrier.
+      // Recreate that one-cycle boundary here while keeping the grouped node
+      // stateless.
+      output := RegEnable(pointCarriers(i).io.out.asTypeOf(new VIAluFixPointOutput(XLEN)), valid)
+    } else {
+      pointModules(i).io.in := input
+      output := pointModules(i).io.out
+    }
+  }
+  if (behaviorModel) {
+    val ops = Seq(
+      HostOpSpec("lane-add-sub", Seq(64, 64), 64, laneWidth = 8),
+      HostOpSpec("lane-compare", Seq(64, 64), 64, laneWidth = 8),
+      HostOpSpec("lane-shift-logic", Seq(64, 64), 64, laneWidth = 8),
+      HostOpSpec("lane-saturating-round", Seq(64), 64, laneWidth = 8, implementation = "fallback"))
+    pointCarriers.foreach { carrier =>
+      SimulationModels.functionalPipeline(behaviorModelName, carrier, 0, "", Seq((8, 8), (16, 16), (32, 32), (64, 64)),
+        if (computeGrouped) Some(carrier) else None,
+        if (laneModel) "lane-core" else "whole-unit", ops)
+    }
+  }
   private val mgu = Module(new NewMgu(dataWidth))
   private val mgtu = Module(new Mgtu(dataWidth))
 
-  private val opcode = VialuFixType.getOpcode(fuOpType).asTypeOf(vIAluFixPoints.head.io.in.opcode)
+  private val opcode = VialuFixType.getOpcode(fuOpType).asTypeOf(new VIAluOpcode)
   private val isSigned = VialuFixType.isSigned(fuOpType)
   private val isMisc = VialuFixType.isMisc(fuOpType)
   private val widenVs2 = inCtrl.vialuCtrl.get.widenVs2
@@ -67,31 +102,31 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
     vs1WidenVec(i) := Mux(vuopIdx(0), vs1Split.io.outVec32b(i + 2), vs1Split.io.outVec32b(i))
   }
 
-  vIAluFixPoints.zipWithIndex.foreach {
-    case (mod, i) =>
-      mod.io.in.ctrl.valid := valid
-      mod.io.in.opcode := opcode
-      mod.io.in.info.sel8 := sel8
-      mod.io.in.info.sel16 := sel16
-      mod.io.in.info.sel32 := sel32
-      mod.io.in.info.sel64 := sel64
-      mod.io.in.info.vm := vm
-      mod.io.in.ctrl.widen := widen
-      mod.io.in.ctrl.isSigned := isSigned
-      mod.io.in.ctrl.adderCtrl.widenVs2 := widenVs2
-      mod.io.in.ctrl.adderCtrl.isAddCarry := isAddCarry
-      mod.io.in.ctrl.miscCtrl.isExt.valid := isExt
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf2 := isVf2
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf4 := isVf4
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf8 := isVf8
-      mod.io.in.ctrl.miscCtrl.isMisc := isMisc
-      mod.io.in.ctrl.miscCtrl.isNarrow := isNarrow
-      mod.io.in.data.vs2 := vs2Vec(i)
-      mod.io.in.data.vs1 := vs1Vec(i)
-      mod.io.in.data.vs2Widen := vs2WidenVec(i)
-      mod.io.in.data.vs1Widen := vs1WidenVec(i)
-      mod.io.in.data.mask := maskVec(i)
-      mod.io.in.data.vxrm := vxrm
+  pointInputs.zipWithIndex.foreach {
+    case (point, i) =>
+      point.ctrl.valid := valid
+      point.opcode := opcode
+      point.info.sel8 := sel8
+      point.info.sel16 := sel16
+      point.info.sel32 := sel32
+      point.info.sel64 := sel64
+      point.info.vm := vm
+      point.ctrl.widen := widen
+      point.ctrl.isSigned := isSigned
+      point.ctrl.adderCtrl.widenVs2 := widenVs2
+      point.ctrl.adderCtrl.isAddCarry := isAddCarry
+      point.ctrl.miscCtrl.isExt.valid := isExt
+      point.ctrl.miscCtrl.isExt.bits.isVf2 := isVf2
+      point.ctrl.miscCtrl.isExt.bits.isVf4 := isVf4
+      point.ctrl.miscCtrl.isExt.bits.isVf8 := isVf8
+      point.ctrl.miscCtrl.isMisc := isMisc
+      point.ctrl.miscCtrl.isNarrow := isNarrow
+      point.data.vs2 := vs2Vec(i)
+      point.data.vs1 := vs1Vec(i)
+      point.data.vs2Widen := vs2WidenVec(i)
+      point.data.vs1Widen := vs1WidenVec(i)
+      point.data.mask := maskVec(i)
+      point.data.vxrm := vxrm
   }
 
   private val maskToMgu = Mux(isAddCarry, allMaskTrue, srcMask)
@@ -130,10 +165,10 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val vlIsZero = !vl.orR
   private val vlIsZeroS1 = RegEnable(vlIsZero, valid)
 
-  private val vd = Cat(vIAluFixPoints.map(_.io.out.vd).reverse)
+  private val vd = Cat(pointOuts.map(_.vd).reverse)
   private val outNarrow = outVecCtrl.isNarrow
   private val outVuopIdx0 = outVecCtrl.vuopIdx(0).asBool
-  private val narrowVd = Cat(vIAluFixPoints.map(_.io.out.narrowVd).reverse)
+  private val narrowVd = Cat(pointOuts.map(_.narrowVd).reverse)
   private val outNarrowVd = Mux(outVuopIdx0,
     Cat(narrowVd, outOldVd(dataWidth / 2 - 1, 0)),
     Cat(outOldVd(dataWidth - 1, dataWidth / 2), narrowVd))
@@ -151,7 +186,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outVsewOH = RegEnable(vsewOH, valid)
 
   private val addCarryCmpMask = Mux1H(outVsewOH, Seq(8, 4, 2, 1).map(i =>
-    Cat(vIAluFixPoints.map(_.io.out.addCarryCmpMask(i - 1, 0)).reverse)  
+    Cat(pointOuts.map(_.addCarryCmpMask(i - 1, 0)).reverse)
   ))
 
   private val dstMgu = Module(new DstMgu(dataWidth))
@@ -170,9 +205,9 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outOpMask = outVecCtrl.isOpMask
 
   private val outVxsat = Mux1H(Seq(
-    (outNarrow & outVuopIdx0) -> Cat(Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse), 0.U(8.W)),
-    (outNarrow & !outVuopIdx0) -> Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse),
-    !outNarrow -> Cat(vIAluFixPoints.map(_.io.out.vxsat).reverse),
+    (outNarrow & outVuopIdx0) -> Cat(Cat(pointOuts.map(_.vxsat(3, 0)).reverse), 0.U(8.W)),
+    (outNarrow & !outVuopIdx0) -> Cat(pointOuts.map(_.vxsat(3, 0)).reverse),
+    !outNarrow -> Cat(pointOuts.map(_.vxsat).reverse),
   ))
 
   mgtu.io.in.vd := Mux(outOpMask, vd, dstMgu.io.out.vd)

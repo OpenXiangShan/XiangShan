@@ -245,19 +245,19 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   io.fromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
 
   private val intDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isIntSchd, Wire(Vec(intSchdParams.numPregs, UInt(XLEN.W))))
+    OptionWrapper(backendParams.basicDebugEn && param.isIntSchd && !SimulationModels.enabled("commit-rat"), Wire(Vec(intSchdParams.numPregs, UInt(XLEN.W))))
   private val fpDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isFpSchd, Wire(Vec(fpSchdParams.numPregs, UInt(XLEN.W))))
+    OptionWrapper(backendParams.basicDebugEn && param.isFpSchd && !SimulationModels.enabled("commit-rat"), Wire(Vec(fpSchdParams.numPregs, UInt(XLEN.W))))
   private val vfDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(Vec(vecSchdParams.numPregs, UInt(VLEN.W))))
+    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd && !SimulationModels.enabled("commit-rat"), Wire(Vec(vecSchdParams.numPregs, UInt(VLEN.W))))
   private val v0DiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(Vec(V0PhyRegs, UInt(V0Data().dataWidth.W))))
+    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd && !SimulationModels.enabled("commit-rat"), Wire(Vec(V0PhyRegs, UInt(V0Data().dataWidth.W))))
   private val vlDiffRead: Option[(Vec[UInt], Vec[UInt])] =
     OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
 
   private val vecDiffNumPregs = 2 * (V0PhyRegs + vecSchdParams.numPregs)
   private val vecDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(Vec(vecDiffNumPregs, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
+    OptionWrapper(backendParams.basicDebugEn && param.isVecSchd && !SimulationModels.enabled("commit-rat"), Wire(Vec(vecDiffNumPregs, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
   private val vlDiffReadData: Option[UInt] =
     OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(UInt(VlData().dataWidth.W)))
 
@@ -335,11 +335,23 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     io.toBypassNetworkRCData := s1_RCReadData
     regCache.io.writePorts := io.fromBypassNetwork
 
-    if (env.AlwaysBasicDiff || env.EnableDifftest) {
+    if ((env.AlwaysBasicDiff || env.EnableDifftest) && !SimulationModels.enabled("commit-rat")) {
       // Delay of PhyRegFile should be same as RenameTable
       val difftest = DifftestModule(new DiffPhyIntRegState(intSchdParams.numPregs), delay = 2)
       difftest.coreid := io.hartId
       difftest.value := intDiffReadData.get
+    }
+    if (SimulationModels.enabled("commit-rat")) {
+      DifftestModule.registerPhysicalWrites(
+        "int",
+        intSchdParams.numPregs,
+        intSchdParams.rfDataWidth,
+        intSchdParams.pregIdxWidth,
+        intRfWen,
+        intRfWaddr,
+        intRfWdata,
+        delay = 2,
+      )
     }
   }
   else if (param.isFpSchd) {
@@ -360,10 +372,22 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       else
         fpRfRaddr(portIdx) := 0.U
     }
-    if (env.AlwaysBasicDiff || env.EnableDifftest) {
+    if ((env.AlwaysBasicDiff || env.EnableDifftest) && !SimulationModels.enabled("commit-rat")) {
       val difftest = DifftestModule(new DiffPhyFpRegState(fpSchdParams.numPregs), delay = 2)
       difftest.coreid := io.hartId
       difftest.value := fpDiffReadData.get
+    }
+    if (SimulationModels.enabled("commit-rat")) {
+      DifftestModule.registerPhysicalWrites(
+        "fp",
+        fpSchdParams.numPregs,
+        fpSchdParams.rfDataWidth,
+        fpSchdParams.pregIdxWidth,
+        fpRfWen,
+        fpRfWaddr,
+        fpRfWdata,
+        delay = 2,
+      )
     }
   }
   else {
@@ -464,10 +488,34 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       )
     }
 
-    if (env.AlwaysBasicDiff || env.EnableDifftest) {
+    if ((env.AlwaysBasicDiff || env.EnableDifftest) && !SimulationModels.enabled("commit-rat")) {
       val difftest = DifftestModule(new DiffPhyVecRegState(vecDiffNumPregs), delay = 2)
       difftest.coreid := io.hartId
       difftest.value := vecDiffReadData.get
+    }
+    if (SimulationModels.enabled("commit-rat")) {
+      val vfModelWen = vfRfWen.head.indices.map(i => vfRfWen.map(_(i)).reduce(_ || _))
+      val v0ModelWen = v0RfWen.head.indices.map(i => v0RfWen.map(_(i)).reduce(_ || _))
+      DifftestModule.registerPhysicalWrites(
+        "vf",
+        vecSchdParams.numPregs,
+        vecSchdParams.rfDataWidth,
+        vecSchdParams.pregIdxWidth,
+        vfModelWen,
+        vfRfWaddr,
+        vfRfWdata,
+        delay = 2,
+      )
+      DifftestModule.registerPhysicalWrites(
+        "v0",
+        V0PhyRegs,
+        V0Data().dataWidth,
+        log2Up(V0PhyRegs),
+        v0ModelWen,
+        v0RfWaddr,
+        v0RfWdata,
+        delay = 2,
+      )
     }
   }
 

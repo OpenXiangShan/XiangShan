@@ -2,6 +2,7 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
+import utility.SimulationModels
 import chisel3.util._
 import utility.XSError
 import xiangshan.backend.fu.FuConfig
@@ -26,7 +27,10 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val resWiden  = fuOpType(4)
 
   // modules
-  private val vfmas = Seq.fill(numVecModule)(Module(new VectorFloatFMA))
+  private val vecFpBehavior = SimulationModels.enabled("vec-fp-mul")
+  private val vecFpComputeGrouped = SimulationModels.computeGrouped("vec-fp-mul")
+  private val vfmas = Seq.fill(numVecModule)(Module(new VectorFloatFMA(behavior = vecFpBehavior, computeGrouped = vecFpComputeGrouped)))
+  vfmas.foreach(mod => SimulationModels.functionalPipeline("vec-fp-mul", mod, 3, "io_fire", Seq((53, 53), (24, 24), (11, 11)), mod.simulationComputeCarrier))
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val oldVdSplit  = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
