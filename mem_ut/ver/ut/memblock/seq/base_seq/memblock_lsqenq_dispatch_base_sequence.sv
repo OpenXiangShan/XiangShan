@@ -477,12 +477,15 @@ function bit memblock_lsqenq_dispatch_base_sequence::admission_blocked_by_flush(
     return data.issue_blocked_by_global_flush();
 endfunction:admission_blocked_by_flush
 
-// 中文注释：只阻止需要分配物理 LQ/SQ key 的新 launch。control、non-LSQ
-// admission 和已经 launch 的 pending sample 保持原有 flush/epoch 语义。
+// 中文注释：只阻止需要分配物理 LQ/SQ key 的新 launch。redirect 后 software
+// allocator 会先按 cancel record 回退，DUT shadow pointer 到 t3 才回退；两者未
+// 收敛时不得生成新 key。control、non-LSQ 和已 launch pending sample 保持原语义。
 function bit memblock_lsqenq_dispatch_base_sequence::lsq_allocating_admission_blocked();
     ensure_helpers();
     return admission_blocked_by_flush() ||
-           data.redirect_deleted_owner_window_pending();
+           data.redirect_deleted_owner_window_pending() ||
+           lsq_ctrl.lq_enq_ptr != lsq_ctrl.shadow_lq_enq_ptr ||
+           lsq_ctrl.sq_enq_ptr != lsq_ctrl.shadow_sq_enq_ptr;
 endfunction:lsq_allocating_admission_blocked
 
 function bit memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admission(output memblock_uid_t uid,
