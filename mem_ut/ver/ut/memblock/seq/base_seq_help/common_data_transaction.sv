@@ -261,9 +261,10 @@ class common_data_transaction extends uvm_object;
     // 固定短窗口内存在，不能替代 active ROB owner 或 redirect-deleted LQ/SQ owner。
     memblock_std_late_raw_tombstone_t std_late_raw_tombstone_by_rob[memblock_rob_map_key_t];
 
-    // 中文注释：单代 redirect 删除 owner 的固定保护窗口。redirect scan 在删除
-    // active map 前写入；迟到 deq 消费或剩余 cancel 应用完成后清除。
-    // 窗口有效期间禁止新的 LSQ allocating admission 和下一次 redirect。
+    // 中文注释：单代 redirect 删除 owner 的基础保护窗口。redirect scan 在删除
+    // active map 前写入；到期后仍由 SBuffer Uncache outstanding/排空 sample 延长，
+    // 迟到 deq 消费或剩余 cancel 应用完成后清除。窗口有效期间禁止新的 LSQ
+    // allocating admission 和下一次 redirect。
     localparam int unsigned MEMBLOCK_REDIRECT_DELETED_OWNER_HOLD_SAMPLES = 4;
     memblock_redirect_deleted_owner_t redirect_deleted_lq_owner_by_key[memblock_lq_map_key_t];
     memblock_redirect_deleted_owner_t redirect_deleted_sq_owner_by_key[memblock_sq_map_key_t];
@@ -5874,6 +5875,8 @@ class common_data_transaction extends uvm_object;
         check_cancel_pending_aggregate();
     endfunction:commit_redirect_deleted_deq
 
+    // 抽象职责：在基础 hold 已严格跨过后，统一判断 delayed deq 与 SBuffer
+    // Uncache 生命周期是否允许固定 cancel count；应用完成后再释放 owner/admission。
     function void service_redirect_deleted_owner_window(
         input longint unsigned current_sample,
         input bit deferred_deq_blocks);
@@ -5888,10 +5891,16 @@ class common_data_transaction extends uvm_object;
                        "active owner window lost its cancel record")
         end
         if (!cancel_record_q[record_idx].software_count_finalized &&
-            current_sample >= redirect_deleted_owner_expire_sample) begin
+            current_sample > redirect_deleted_owner_expire_sample) begin
             // 中文注释：只等待仍可能扣减本记录取消数的延迟出队；无关旧store
-            // 等STD不能阻塞当前redirect冻结。依赖由唯一LSQ owner只读推导。
-            if (deferred_deq_blocks) begin
+            // 等STD不能阻塞当前redirect冻结。Uncache outstanding 不设固定超时；
+            // 最后一个 D.fire 后继续覆盖 StoreQueue completion 的吸收保护期，
+            // 严格跨过保护边界后才允许收口。
+            // 两类依赖均由唯一 owner 的 O(1) 公共状态只读推导。
+            if (deferred_deq_blocks ||
+                memblock_sync_pkg::sbuffer_uncache_redirect_guard_active(
+                    current_sample,
+                    MEMBLOCK_REDIRECT_DELETED_OWNER_HOLD_SAMPLES)) begin
                 return;
             end
             cancel_record_q[record_idx].software_count_finalized = 1'b1;

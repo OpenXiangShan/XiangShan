@@ -681,6 +681,96 @@ package memblock_sync_pkg;
     longint unsigned dispatch_service_cycle = 0;
     int unsigned raw_csr_rearm_epoch = 0;
 
+    // 中文注释：SBuffer responder 是 Uncache A/D lifecycle 的唯一生产者；redirect
+    // service 只通过这些标量查询 outstanding 与最近活动，不扫描 responder queue。
+    bit [15:0]       sbuffer_uncache_outstanding_mask = '0;
+    longint unsigned sbuffer_uncache_last_a_sample = 0;
+    longint unsigned sbuffer_uncache_last_d_sample = 0;
+    longint unsigned sbuffer_uncache_last_drain_sample = 0;
+
+    // 抽象职责：在 SBuffer responder reset 时原子清除公共 Uncache 生命周期镜像。
+    // 本函数不清 DUT global sample，也不改 redirect/cancel owner 状态。
+    function void reset_sbuffer_uncache_lifecycle();
+        sbuffer_uncache_outstanding_mask = '0;
+        sbuffer_uncache_last_a_sample = 0;
+        sbuffer_uncache_last_d_sample = 0;
+        sbuffer_uncache_last_drain_sample = 0;
+    endfunction:reset_sbuffer_uncache_lifecycle
+
+    // 抽象职责：发布一个已经真实 A.fire 的 source owner，并冻结其 sample provenance。
+    // source 复用或 sample 回退均表示 responder 与公共镜像失配，必须严格拒绝。
+    function void publish_sbuffer_uncache_a_accept(
+        input bit [3:0] source,
+        input longint unsigned sample_seq
+    );
+        if (sample_seq == 0 ||
+            (sbuffer_uncache_last_a_sample != 0 &&
+             sample_seq < sbuffer_uncache_last_a_sample) ||
+            (sbuffer_uncache_last_d_sample != 0 &&
+             sample_seq < sbuffer_uncache_last_d_sample) ||
+            sbuffer_uncache_outstanding_mask[source]) begin
+            `uvm_fatal("SBUFFER_UNCACHE_LIFECYCLE",
+                       $sformatf("invalid A accept source=%0d sample=%0d last_a=%0d mask=0x%04h",
+                                 source, sample_seq,
+                                 sbuffer_uncache_last_a_sample,
+                                 sbuffer_uncache_outstanding_mask))
+            return;
+        end
+        sbuffer_uncache_outstanding_mask[source] = 1'b1;
+        sbuffer_uncache_last_a_sample = sample_seq;
+    endfunction:publish_sbuffer_uncache_a_accept
+
+    // 抽象职责：发布一个已经真实 D.fire 的 source completion；最后一个 owner
+    // 排空时额外记录 drain sample，供 redirect window 跨过同 sample 调度边界。
+    function void publish_sbuffer_uncache_d_complete(
+        input bit [3:0] source,
+        input longint unsigned sample_seq
+    );
+        if (sample_seq == 0 ||
+            (sbuffer_uncache_last_d_sample != 0 &&
+             sample_seq < sbuffer_uncache_last_d_sample) ||
+            (sbuffer_uncache_last_a_sample != 0 &&
+             sample_seq < sbuffer_uncache_last_a_sample) ||
+            !sbuffer_uncache_outstanding_mask[source]) begin
+            `uvm_fatal("SBUFFER_UNCACHE_LIFECYCLE",
+                       $sformatf("invalid D complete source=%0d sample=%0d last_d=%0d mask=0x%04h",
+                                 source, sample_seq,
+                                 sbuffer_uncache_last_d_sample,
+                                 sbuffer_uncache_outstanding_mask))
+            return;
+        end
+        sbuffer_uncache_outstanding_mask[source] = 1'b0;
+        sbuffer_uncache_last_d_sample = sample_seq;
+        if (sbuffer_uncache_outstanding_mask == '0) begin
+            sbuffer_uncache_last_drain_sample = sample_seq;
+        end
+    endfunction:publish_sbuffer_uncache_d_complete
+
+    // 抽象职责：提供只读 O(1) 生命周期快照；调用者不得据此修改 responder owner。
+    function void get_sbuffer_uncache_lifecycle(
+        output bit [15:0] outstanding_mask,
+        output longint unsigned last_a_sample,
+        output longint unsigned last_d_sample,
+        output longint unsigned last_drain_sample
+    );
+        outstanding_mask = sbuffer_uncache_outstanding_mask;
+        last_a_sample = sbuffer_uncache_last_a_sample;
+        last_d_sample = sbuffer_uncache_last_d_sample;
+        last_drain_sample = sbuffer_uncache_last_drain_sample;
+    endfunction:get_sbuffer_uncache_lifecycle
+
+    // 抽象职责：判断 redirect owner window 是否仍需保护 SBuffer 尾响应。
+    // outstanding 生命周期无超时；排空后继续覆盖调用者声明的下游吸收 sample 数。
+    function bit sbuffer_uncache_redirect_guard_active(
+        input longint unsigned current_sample,
+        input int unsigned post_drain_hold_samples
+    );
+        return sbuffer_uncache_outstanding_mask != '0 ||
+               (sbuffer_uncache_last_drain_sample != 0 &&
+                current_sample <= sbuffer_uncache_last_drain_sample +
+                                  post_drain_hold_samples);
+    endfunction:sbuffer_uncache_redirect_guard_active
+
     function void publish_atomic_issue_owner_snapshot(
         input int unsigned uid,
         input int unsigned dynamic_epoch,

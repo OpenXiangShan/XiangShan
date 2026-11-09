@@ -4992,6 +4992,7 @@ endfunction:new
 
 function void sbuffer_mem_access_base_sequence::clear_runtime_state();
     abort_uncache_d_error_pending("SBuffer responder reset");
+    memblock_sync_pkg::reset_sbuffer_uncache_lifecycle();
     a_accept_armed = 1'b0;
     armed_a_req_xact = null;
     armed_a_owner_snapshot_valid = 1'b0;
@@ -5742,6 +5743,8 @@ function void sbuffer_mem_access_base_sequence::note_uncache_source_accept(
                              accept_cycle))
     end
     uncache_source_outstanding[source] = 1'b1;
+    memblock_sync_pkg::publish_sbuffer_uncache_a_accept(
+        source, memblock_sync_pkg::peek_current_dut_global_sample());
     uncache_source_accept_cycle[source] = accept_cycle;
     uncache_source_address[source] = address;
     uncache_source_a_fire_count[source]++;
@@ -5788,6 +5791,8 @@ function void sbuffer_mem_access_base_sequence::note_uncache_source_complete(
                         outstanding_before),
               UVM_HIGH)
     uncache_source_outstanding[source] = 1'b0;
+    memblock_sync_pkg::publish_sbuffer_uncache_d_complete(
+        source, memblock_sync_pkg::peek_current_dut_global_sample());
     uncache_source_accept_cycle[source] = 0;
     uncache_source_address[source] = '0;
     uncache_source_d_fire_count[source]++;

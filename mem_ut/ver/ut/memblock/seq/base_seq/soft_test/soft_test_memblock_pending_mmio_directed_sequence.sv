@@ -102,6 +102,7 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task run_cbo_fault_late_sta_scenario();
     extern virtual task run_cbo_fault_observed_redirect_coverage_scenario();
     extern virtual task run_store_post_sqdeq_wb_attach_scenario();
+    extern virtual task run_uncache_redirect_window_guard_scenario();
     extern virtual task run_incompatible_store_mmio_fatal_scenario();
     extern virtual task run_uncache_retry_boost_scenario();
     extern virtual task run_rollback_xmr_path_scenario();
@@ -192,6 +193,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::body();
     run_cbo_fault_late_sta_scenario();
     run_cbo_fault_observed_redirect_coverage_scenario();
     run_store_post_sqdeq_wb_attach_scenario();
+    run_uncache_redirect_window_guard_scenario();
     run_incompatible_store_mmio_fatal_scenario();
     run_uncache_retry_boost_scenario();
     run_rollback_xmr_path_scenario();
@@ -349,7 +351,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cancel_window_deferr
     if (data.cancel_record_q[record_idx].software_count_finalized) begin
         `uvm_fatal(get_type_name(), "owner window finalized before expiry")
     end
-    wait_for_dut_sample_watermark(data.redirect_deleted_owner_expire_sample,
+    wait_for_dut_sample_watermark(data.redirect_deleted_owner_expire_sample + 1,
         "cancel-dependency-expire");
     if (commit_handler.deferred_ctrl_blocks_deleted_owner_window()) begin
         `uvm_fatal(get_type_name(), "unrelated live old store blocked cancel finalization")
@@ -714,6 +716,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::reset_directed_owner_sta
     commit_handler.bind_lsq_ctrl(lsq_ctrl);
     monitor_adapter.reset_cbo_store_mmio_level_context();
     monitor_adapter.reset_cbo_fault_late_sta_context();
+    memblock_sync_pkg::reset_sbuffer_uncache_lifecycle();
 endtask:reset_directed_owner_state
 
 // 中文注释：directed sequence只等待 ctrl monitor/cancel snapshot owner推进的真实
@@ -1512,7 +1515,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
                    "fault redirect record was not held open by the owner window")
     end
     wait_for_dut_sample_watermark(
-        data.redirect_deleted_owner_expire_sample,
+        data.redirect_deleted_owner_expire_sample + 1,
         "cbo-fault-observed-redirect-expire");
     data.service_redirect_deleted_owner_window(
         memblock_sync_pkg::peek_current_dut_global_sample(), 1'b0);
@@ -1666,6 +1669,150 @@ task soft_test_memblock_pending_mmio_directed_sequence::
                    "STORE without sqDeq did not retain strict active SQ mapping rejection")
     end
 endtask:run_store_post_sqdeq_wb_attach_scenario
+
+// 抽象职责：验证 redirect 删除旧 SQ owner 后，SBuffer Uncache 尾响应及其
+// StoreQueue completion 吸收保护期会延长同一个 owner window。场景只调用生产
+// 发布/查询和正式 cancel 应用入口，不直接改 mask、record 或 admission gate。
+task soft_test_memblock_pending_mmio_directed_sequence::
+    run_uncache_redirect_window_guard_scenario();
+    memblock_uid_t victim_uids[$];
+    memblock_redirect_payload_t redirect;
+    memblock_lsqenq_dispatch_base_sequence enq;
+    main_control_transaction cbo_tr;
+    status_transaction victim_status;
+    bit [15:0] outstanding_mask;
+    longint unsigned last_a_sample;
+    longint unsigned last_d_sample;
+    longint unsigned last_drain_sample;
+    longint unsigned anchor_sample;
+    longint unsigned a_sample;
+    longint unsigned d_sample;
+    int unsigned post_drain_hold_samples;
+    int record_idx;
+
+    reset_directed_owner_state();
+    clear_manual_main_table();
+    cbo_tr = make_directed_transaction(
+        "uncache_window_guard_cbo", MEMBLOCK_OP_CLASS_STORE,
+        0, 64'h0000_0000_8498_1000);
+    cbo_tr.op_class = MEMBLOCK_OP_CLASS_CBO;
+    apply_op_class_template(cbo_tr, MEMBLOCK_LSUOP_CBO_CLEAN);
+    cbo_tr.update_vaddr();
+    set_manual_main_transaction(0, cbo_tr);
+    set_manual_main_transaction(
+        1, make_directed_transaction(
+               "uncache_window_guard_younger_store",
+               MEMBLOCK_OP_CLASS_STORE, 1,
+               64'h0000_0000_8498_2000));
+    import_manual_main_table();
+    admit_lsq_and_route_issue();
+    victim_status = data.get_status(1);
+    wait_for_dut_sample_watermark(1, "uncache-window-a-accept");
+    a_sample = memblock_sync_pkg::peek_current_dut_global_sample();
+    memblock_sync_pkg::publish_sbuffer_uncache_a_accept(4'h3, a_sample);
+    memblock_sync_pkg::get_sbuffer_uncache_lifecycle(
+        outstanding_mask, last_a_sample, last_d_sample, last_drain_sample);
+    if (outstanding_mask != 16'h0008 || last_a_sample != a_sample ||
+        last_d_sample != 0 || last_drain_sample != 0) begin
+        `uvm_fatal(get_type_name(),
+                   "Uncache A accept was not published with exact lifecycle provenance")
+    end
+    victim_uids.push_back(1);
+    redirect = '{default:'0};
+    redirect.valid = 1'b1;
+    redirect.flush_itself = 1'b0;
+    redirect.level = 1'b0;
+    redirect.rob_key = data.get_status(0).get_rob_key();
+    prepare_redirect_deleted_owner_window(
+        victim_uids, redirect, "uncache-window-guard", anchor_sample);
+    record_idx = data.find_cancel_record_index_by_id(
+        data.redirect_deleted_owner_record_id);
+    enq = memblock_lsqenq_dispatch_base_sequence::type_id::create(
+        "uncache_window_guard_enq");
+    if (record_idx < 0 ||
+        data.cancel_record_q[record_idx].software_count_finalized ||
+        !enq.lsq_allocating_admission_blocked()) begin
+        `uvm_fatal(get_type_name(),
+                   "redirect owner window did not freeze LSQ allocating admission")
+    end
+    post_drain_hold_samples =
+        data.redirect_deleted_owner_expire_sample -
+        data.cancel_record_q[record_idx].redirect_sample_seq;
+    if (post_drain_hold_samples == 0) begin
+        `uvm_fatal(get_type_name(),
+                   "redirect owner window exposed a zero post-drain hold")
+    end
+
+    // 原始 expiry sample 本身不能 finalize，给同 sample responder activity 留出
+    // 完整发布边界，避免 service 与 A/D producer 的调度顺序决定结果。
+    data.service_redirect_deleted_owner_window(
+        data.redirect_deleted_owner_expire_sample, 1'b0);
+    if (data.cancel_record_q[record_idx].software_count_finalized) begin
+        `uvm_fatal(get_type_name(),
+                   "redirect owner window finalized on its expiry boundary")
+    end
+
+    // 跨越基础 hold sample 后 outstanding 仍无超时；窗口和 admission 必须继续冻结。
+    wait_for_dut_sample_watermark(
+        data.redirect_deleted_owner_expire_sample + 8,
+        "uncache-window-outstanding");
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample(), 1'b0);
+    if (data.cancel_record_q[record_idx].software_count_finalized ||
+        !data.redirect_deleted_owner_window_pending() ||
+        !enq.lsq_allocating_admission_blocked()) begin
+        `uvm_fatal(get_type_name(),
+                   "Uncache outstanding did not retain redirect window/admission freeze")
+    end
+
+    d_sample = memblock_sync_pkg::peek_current_dut_global_sample();
+    memblock_sync_pkg::publish_sbuffer_uncache_d_complete(4'h3, d_sample);
+    memblock_sync_pkg::get_sbuffer_uncache_lifecycle(
+        outstanding_mask, last_a_sample, last_d_sample, last_drain_sample);
+    if (outstanding_mask != '0 || last_a_sample != a_sample ||
+        last_d_sample != d_sample || last_drain_sample != d_sample) begin
+        `uvm_fatal(get_type_name(),
+                   "Uncache D drain was not published with exact lifecycle provenance")
+    end
+    data.service_redirect_deleted_owner_window(d_sample, 1'b0);
+    if (data.cancel_record_q[record_idx].software_count_finalized ||
+        !data.redirect_deleted_owner_window_pending() ||
+        !enq.lsq_allocating_admission_blocked()) begin
+        `uvm_fatal(get_type_name(),
+                   "Uncache D drain sample prematurely released redirect window")
+    end
+
+    wait_for_dut_sample_watermark(
+        d_sample + post_drain_hold_samples,
+        "uncache-window-post-drain-hold");
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample(), 1'b0);
+    if (data.cancel_record_q[record_idx].software_count_finalized ||
+        !data.redirect_deleted_owner_window_pending() ||
+        !enq.lsq_allocating_admission_blocked()) begin
+        `uvm_fatal(get_type_name(),
+                   "Uncache post-drain hold boundary prematurely released redirect window")
+    end
+
+    wait_for_dut_sample_watermark(
+        d_sample + post_drain_hold_samples + 1,
+        "uncache-window-post-drain-release");
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample(), 1'b0);
+    if (!data.cancel_record_q[record_idx].software_count_finalized ||
+        !data.redirect_deleted_owner_window_pending()) begin
+        `uvm_fatal(get_type_name(),
+                   "post-drain sample did not finalize cancel count "
+                   "while retaining unapplied window")
+    end
+    enq.apply_pending_lsq_cancels();
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample(), 1'b0);
+    if (data.redirect_deleted_owner_window_pending()) begin
+        `uvm_fatal(get_type_name(),
+                   "applied cancel did not release Uncache-protected owner window")
+    end
+endtask:run_uncache_redirect_window_guard_scenario
 
 // 中文注释：只放宽合法 CBO owner；load/prefetch等其它 behavior 收到 storeMmio
 // 仍必须由 resolver 拒绝，避免 value-only raw 被错误归属。
