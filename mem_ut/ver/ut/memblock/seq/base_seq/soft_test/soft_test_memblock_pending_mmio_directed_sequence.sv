@@ -75,6 +75,7 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task run_directed_tag_scenario();
     extern virtual task run_monitor_raw_scenario();
     extern virtual task run_cbo_store_mmio_consume_scenario();
+    extern virtual task run_cbo_fault_late_sta_scenario();
     extern virtual task run_incompatible_store_mmio_fatal_scenario();
     extern virtual task run_uncache_retry_boost_scenario();
     extern virtual task run_rollback_xmr_path_scenario();
@@ -103,6 +104,15 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task build_load_table(input int unsigned load_count);
     extern virtual task build_store_table();
     extern virtual task build_cbo_table();
+    extern virtual task build_cbo_rob_reuse_table();
+    extern virtual task activate_directed_store_issue(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch
+    );
+    extern virtual function memblock_sync_pkg::dispatch_raw_int_wb_t make_sta0_raw(
+        input memblock_uid_t uid,
+        input bit [23:0] exception_vec
+    );
     extern virtual task run_rob_wrap_admission_fatal_scenario(input string scenario_name);
     extern virtual task establish_redirect_anchor(
         input memblock_redirect_payload_t redirect,
@@ -152,6 +162,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::body();
     run_directed_tag_scenario();
     run_monitor_raw_scenario();
     run_cbo_store_mmio_consume_scenario();
+    run_cbo_fault_late_sta_scenario();
     run_incompatible_store_mmio_fatal_scenario();
     run_uncache_retry_boost_scenario();
     run_rollback_xmr_path_scenario();
@@ -673,6 +684,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::reset_directed_owner_sta
     commit_handler.reset_lsqcommit_runtime_state();
     commit_handler.bind_lsq_ctrl(lsq_ctrl);
     monitor_adapter.reset_cbo_store_mmio_level_context();
+    monitor_adapter.reset_cbo_fault_late_sta_context();
 endtask:reset_directed_owner_state
 
 // 中文注释：directed sequence只等待 ctrl monitor/cancel snapshot owner推进的真实
@@ -758,6 +770,82 @@ task soft_test_memblock_pending_mmio_directed_sequence::build_cbo_table();
     set_manual_main_transaction(0, cbo_tr);
     import_manual_main_table();
 endtask:build_cbo_table
+
+task soft_test_memblock_pending_mmio_directed_sequence::build_cbo_rob_reuse_table();
+    main_control_transaction main_tr;
+    memblock_rob_key_t base_rob_key;
+    memblock_rob_key_t rob_key;
+
+    clear_manual_main_table();
+    base_rob_key = '{flag:1'b0, value:'0};
+    for (int unsigned uid = 0; uid <= 2 * MEMBLOCK_ROB_SIZE; uid++) begin
+        main_tr = make_directed_transaction(
+            $sformatf("pending_mmio_cbo_reuse_%0d", uid),
+            MEMBLOCK_OP_CLASS_STORE,
+            uid % MEMBLOCK_ROB_SIZE,
+            64'h0000_0000_8500_0000 + (uid * 64'h40));
+        rob_key = rob_order_util::rob_advance(base_rob_key, uid);
+        main_tr.robIdx_flag = rob_key.flag;
+        main_tr.robIdx_value = rob_key.value;
+        if (uid == 0) begin
+            main_tr.op_class = MEMBLOCK_OP_CLASS_CBO;
+            apply_op_class_template(main_tr, MEMBLOCK_LSUOP_CBO_CLEAN);
+            main_tr.update_vaddr();
+        end
+        set_manual_main_transaction(uid, main_tr);
+    end
+    import_manual_main_table();
+endtask:build_cbo_rob_reuse_table
+
+// 中文注释：本专项只构造 adapter 所需的 active ROB/SQ 与 STA/STD issue identity；
+// 不驱动 DUT，也不伪造 writeback/terminal 结果。
+task soft_test_memblock_pending_mmio_directed_sequence::activate_directed_store_issue(
+    input memblock_uid_t uid,
+    input int unsigned dynamic_epoch
+);
+    status_transaction status;
+
+    data.activate_uid(uid, 1'b0, 1'b1);
+    status = data.get_status(uid);
+    status.dynamic_epoch = dynamic_epoch;
+    data.set_status_field(uid, MEMBLOCK_STATUS_STA_DISPATCHED, 1'b1);
+    data.set_status_field(uid, MEMBLOCK_STATUS_STD_DISPATCHED, 1'b1);
+    status.set_target_issue_epoch(MEMBLOCK_ISSUE_TARGET_STA,
+                                  data.alloc_issue_epoch());
+    status.set_target_instance_flush_epoch(MEMBLOCK_ISSUE_TARGET_STA,
+                                           memblock_sync_pkg::dispatch_flush_epoch);
+    status.set_target_issue_epoch(MEMBLOCK_ISSUE_TARGET_STD,
+                                  data.alloc_issue_epoch());
+    status.set_target_instance_flush_epoch(MEMBLOCK_ISSUE_TARGET_STD,
+                                           memblock_sync_pkg::dispatch_flush_epoch);
+endtask:activate_directed_store_issue
+
+function memblock_sync_pkg::dispatch_raw_int_wb_t
+soft_test_memblock_pending_mmio_directed_sequence::make_sta0_raw(
+    input memblock_uid_t uid,
+    input bit [23:0] exception_vec
+);
+    memblock_sync_pkg::dispatch_raw_int_wb_t raw;
+    status_transaction status;
+
+    status = data.get_status(uid);
+    raw = memblock_sync_pkg::make_empty_raw_int_wb();
+    raw.valid = 1'b1;
+    raw.source_kind = memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA;
+    raw.port_id = 0;
+    raw.sample_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+    raw.key_needs_state_lookup = 1'b1;
+    raw.rob_valid = 1'b1;
+    raw.rob_flag = status.robIdx_flag;
+    raw.rob_value = status.robIdx_value;
+    raw.flush_pipe_valid = 1'b1;
+    raw.flush_pipe = 1'b0;
+    raw.trigger_valid = 1'b1;
+    raw.trigger = 4'hf;
+    raw.exception_vec = exception_vec;
+    raw.cycle = $time;
+    return raw;
+endfunction:make_sta0_raw
 
 task soft_test_memblock_pending_mmio_directed_sequence::run_rob_wrap_admission_fatal_scenario(
     input string scenario_name
@@ -1131,6 +1219,100 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_store_mmio_consu
                    "deasserted CBO context hid incompatible load or wrote MMIO tag")
     end
 endtask:run_cbo_store_mmio_consume_scenario
+
+// 中文注释：fault CBO 的首个 STA0 fault raw 在 live owner 上冻结动态身份；owner
+// 正式 terminal retire 后，同完整 ROB key 的 normal STA0 尾拍只被消费，不进入
+// WB/redirect。完整 ROB key 复用的新 live owner必须优先，旧 context 随即失效。
+task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_scenario();
+    memblock_sync_pkg::dispatch_raw_int_wb_t raw;
+    memblock_wb_event_t wb_event;
+    status_transaction status;
+    memblock_rob_key_t old_rob_key;
+    memblock_uid_t reuse_uid;
+    int unsigned exception_q_size;
+    longint unsigned terminal_event_cycle;
+    bit redirect_valid;
+    bit converted;
+
+    reset_directed_owner_state();
+    build_cbo_table();
+    activate_directed_store_issue(0, 1);
+    status = data.get_status(0);
+    old_rob_key = status.get_rob_key();
+    raw = make_sta0_raw(0, 24'h000080);
+    converted = monitor_adapter.convert_raw_int_wb(raw, wb_event);
+    if (!converted || !monitor_adapter.cbo_fault_late_sta_valid ||
+        wb_event.uid != 0 || wb_event.dynamic_epoch != status.dynamic_epoch) begin
+        `uvm_fatal(get_type_name(),
+                   "CBO fault STA0 did not establish the adapter late context")
+    end
+    if (!writeback_handler.handle_real_writeback_event(wb_event) ||
+        !data.mark_target_normal_pass(0, MEMBLOCK_ISSUE_TARGET_STD,
+                                      status.std_issue_epoch,
+                                      status.replay_seq, $time) ||
+        !status.fault || !status.sta_fault || !status.sta_writeback ||
+        !status.std_writeback) begin
+        `uvm_fatal(get_type_name(),
+                   "CBO fault owner did not complete the dual real-WB barrier")
+    end
+    data.release_uid_sq_mapping(0);
+    data.set_status_field(0, MEMBLOCK_STATUS_ROB_COMMIT, 1'b1);
+    data.consume_fault_retire(0);
+    if (status.active || !status.terminal_done ||
+        data.lookup_active_uid_by_rob(old_rob_key, reuse_uid)) begin
+        `uvm_fatal(get_type_name(),
+                   "CBO fault owner did not formally retire before late STA0")
+    end
+
+    exception_q_size = data.exception_event_q.size();
+    terminal_event_cycle = status.last_event_cycle;
+    redirect_valid = data.active_redirect.valid;
+    raw = make_sta0_raw(0, 24'b0);
+    raw.cycle = $time + 1;
+    converted = monitor_adapter.convert_raw_int_wb(raw, wb_event);
+    if (converted || monitor_adapter.cbo_fault_late_sta_valid ||
+        data.exception_event_q.size() != exception_q_size ||
+        data.active_redirect.valid != redirect_valid ||
+        status.last_event_cycle != terminal_event_cycle || status.active ||
+        !status.terminal_done || !status.fault) begin
+        `uvm_fatal(get_type_name(),
+                   "late normal CBO STA0 was not consumed without WB/redirect mutation")
+    end
+
+    reset_directed_owner_state();
+    build_cbo_rob_reuse_table();
+    activate_directed_store_issue(0, 3);
+    status = data.get_status(0);
+    old_rob_key = status.get_rob_key();
+    raw = make_sta0_raw(0, 24'h000080);
+    if (!monitor_adapter.convert_raw_int_wb(raw, wb_event) ||
+        !writeback_handler.handle_real_writeback_event(wb_event) ||
+        !data.mark_target_normal_pass(0, MEMBLOCK_ISSUE_TARGET_STD,
+                                      status.std_issue_epoch,
+                                      status.replay_seq, $time)) begin
+        `uvm_fatal(get_type_name(), "failed to prepare CBO ROB-reuse tombstone")
+    end
+    data.release_uid_sq_mapping(0);
+    data.set_status_field(0, MEMBLOCK_STATUS_ROB_COMMIT, 1'b1);
+    data.consume_fault_retire(0);
+    for (memblock_uid_t uid = 1; uid < 2 * MEMBLOCK_ROB_SIZE; uid++) begin
+        data.set_status_field(uid, MEMBLOCK_STATUS_TERMINAL_DONE, 1'b1);
+    end
+    reuse_uid = 2 * MEMBLOCK_ROB_SIZE;
+    data.publish_rob_commit_frontier(reuse_uid, "cbo-fault-late-sta-reuse");
+    if (data.get_main_transaction(reuse_uid).get_rob_key() != old_rob_key) begin
+        `uvm_fatal(get_type_name(), "directed table did not reuse the full ROB key")
+    end
+    activate_directed_store_issue(reuse_uid, 9);
+    raw = make_sta0_raw(reuse_uid, 24'b0);
+    converted = monitor_adapter.convert_raw_int_wb(raw, wb_event);
+    if (!converted || wb_event.uid != reuse_uid ||
+        wb_event.dynamic_epoch != 9 ||
+        monitor_adapter.cbo_fault_late_sta_valid) begin
+        `uvm_fatal(get_type_name(),
+                   "new live ROB owner was swallowed by old CBO late STA context")
+    end
+endtask:run_cbo_fault_late_sta_scenario
 
 // 中文注释：只放宽合法 CBO owner；load/prefetch等其它 behavior 收到 storeMmio
 // 仍必须由 resolver 拒绝，避免 value-only raw 被错误归属。

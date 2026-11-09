@@ -10,6 +10,8 @@
 
 class dispatch_monitor_event_adapter extends uvm_object;
 
+    localparam longint unsigned CboFaultLateStaHoldSamples = 4;
+
     typedef struct {
         memblock_uid_t            uid;
         memblock_mmio_kind_e      kind;
@@ -32,6 +34,20 @@ class dispatch_monitor_event_adapter extends uvm_object;
     memblock_uid_t cbo_store_mmio_level_uid;
     int unsigned cbo_store_mmio_level_dynamic_epoch;
     int unsigned cbo_store_mmio_level_first_flush_epoch;
+    // 中文注释：首个已完整归属的 CBO STA0 fault raw 冻结旧动态实例身份。
+    // owner terminal 后只允许同完整 ROB key 的 normal STA0 尾拍命中；任何 live
+    // owner 均优先，防止 ROB 复用后的新实例被旧 context 吞掉。
+    bit cbo_fault_late_sta_valid;
+    memblock_uid_t cbo_fault_late_sta_uid;
+    int unsigned cbo_fault_late_sta_dynamic_epoch;
+    memblock_rob_key_t cbo_fault_late_sta_rob_key;
+    memblock_sq_key_t cbo_fault_late_sta_sq_key;
+    int unsigned cbo_fault_late_sta_issue_epoch;
+    int unsigned cbo_fault_late_sta_replay_seq;
+    int unsigned cbo_fault_late_sta_instance_flush_epoch;
+    int unsigned cbo_fault_late_sta_fault_flush_epoch;
+    longint unsigned cbo_fault_late_sta_expire_service_sample;
+    bit [8:0] cbo_fault_late_sta_fu_op_type;
 
     `uvm_object_utils(dispatch_monitor_event_adapter)
 
@@ -42,6 +58,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
         adapter_reset_serviced_epoch = 0;
         last_l2tlb_sfence_service_sample_seq = 0;
         reset_cbo_store_mmio_level_context();
+        reset_cbo_fault_late_sta_context();
     endfunction:new
 
     function void bind_commit_handler(input lsq_commit_handler handler);
@@ -58,6 +75,21 @@ class dispatch_monitor_event_adapter extends uvm_object;
         cbo_store_mmio_level_dynamic_epoch = 0;
         cbo_store_mmio_level_first_flush_epoch = 0;
     endfunction:reset_cbo_store_mmio_level_context
+
+    // 中文注释：soft directed 场景和 runtime reset 均可显式清除旧 CBO fault 身份。
+    function void reset_cbo_fault_late_sta_context();
+        cbo_fault_late_sta_valid = 1'b0;
+        cbo_fault_late_sta_uid = 0;
+        cbo_fault_late_sta_dynamic_epoch = 0;
+        cbo_fault_late_sta_rob_key = '{default:'0};
+        cbo_fault_late_sta_sq_key = '{default:'0};
+        cbo_fault_late_sta_issue_epoch = 0;
+        cbo_fault_late_sta_replay_seq = 0;
+        cbo_fault_late_sta_instance_flush_epoch = 0;
+        cbo_fault_late_sta_fault_flush_epoch = 0;
+        cbo_fault_late_sta_expire_service_sample = 0;
+        cbo_fault_late_sta_fu_op_type = '0;
+    endfunction:reset_cbo_fault_late_sta_context
 
     // 中文注释：只复用首拍已验证为 CBO 的连续 level。相同 sample 允许 deferred
     // raw 重试，下一 sample 允许 owner 已 retire；任何 identity/gap 变化都回到 resolver。
@@ -1161,6 +1193,178 @@ class dispatch_monitor_event_adapter extends uvm_object;
         endcase
     endfunction:apply_cbo_flush_pipe_semantics
 
+    // 抽象职责：在 fault STA0 仍有 live owner 时冻结完整 CBO 动态身份，供 owner
+    // terminal 删除后确认紧随其后的 normal STA0 pipeline 尾拍。这里只记录身份，
+    // 不修改 fault、writeback、redirect 或 LSQ 生命周期。
+    function void capture_cbo_fault_late_sta_context(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
+        input memblock_wb_event_t wb_event
+    );
+        main_control_transaction main_tr;
+        memblock_op_behavior_t   behavior;
+        status_transaction       status;
+        int unsigned             instance_flush_epoch;
+
+        if (raw.source_kind != memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA ||
+            raw.port_id != 0 || raw.exception_vec == 24'b0 ||
+            !wb_event.has_uid || !wb_event.has_rob || !wb_event.has_sq ||
+            !wb_event.has_issue_epoch || !wb_event.has_replay_seq ||
+            !wb_event.has_dynamic_epoch) begin
+            return;
+        end
+        main_tr = data.get_main_transaction(wb_event.uid);
+        if (main_tr.op_class != MEMBLOCK_OP_CLASS_CBO) begin
+            return;
+        end
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        status = data.get_status(wb_event.uid);
+        if (cbo_fault_late_sta_valid &&
+            cbo_fault_late_sta_uid == wb_event.uid &&
+            cbo_fault_late_sta_dynamic_epoch == wb_event.dynamic_epoch &&
+            cbo_fault_late_sta_rob_key == wb_event.rob_key &&
+            cbo_fault_late_sta_sq_key == wb_event.sq_key &&
+            cbo_fault_late_sta_issue_epoch == wb_event.issue_epoch &&
+            cbo_fault_late_sta_replay_seq == wb_event.replay_seq) begin
+            if (!status.active || status.get_rob_key() != wb_event.rob_key ||
+                status.dynamic_epoch != wb_event.dynamic_epoch) begin
+                `uvm_fatal("INT_WB_STA0_CBO_LATE_CAPTURE",
+                           "duplicate CBO fault STA0 lost its active dynamic owner")
+            end
+            cbo_fault_late_sta_fault_flush_epoch = raw.sample_flush_epoch;
+            cbo_fault_late_sta_expire_service_sample =
+                memblock_sync_pkg::get_dispatch_service_cycle() +
+                CboFaultLateStaHoldSamples;
+            return;
+        end
+        if (!status.active || !status.sta_dispatched ||
+            behavior.kind != MEMBLOCK_OP_BEHAVIOR_CBO || !behavior.is_cbo ||
+            behavior.is_atomic ||
+            !memblock_op_behavior_util::is_scalar_rob_store_commit(behavior) ||
+            status.get_rob_key() != wb_event.rob_key ||
+            status.dynamic_epoch != wb_event.dynamic_epoch ||
+            status.sta_issue_epoch != wb_event.issue_epoch ||
+            status.replay_seq != wb_event.replay_seq ||
+            !status.get_target_instance_flush_epoch(MEMBLOCK_ISSUE_TARGET_STA,
+                                                    instance_flush_epoch) ||
+            raw.sample_flush_epoch < instance_flush_epoch ||
+            raw.sample_flush_epoch > memblock_sync_pkg::dispatch_flush_epoch) begin
+            `uvm_fatal("INT_WB_STA0_CBO_LATE_CAPTURE",
+                       $sformatf("invalid CBO fault STA0 capture uid=%0d rob=%0d/%0d epoch=%0d issue=%0d replay=%0d raw_flush=%0d",
+                                 wb_event.uid, wb_event.rob_key.flag,
+                                 wb_event.rob_key.value, wb_event.dynamic_epoch,
+                                 wb_event.issue_epoch, wb_event.replay_seq,
+                                 raw.sample_flush_epoch))
+        end
+        if (cbo_fault_late_sta_valid &&
+            memblock_sync_pkg::get_dispatch_service_cycle() >=
+            cbo_fault_late_sta_expire_service_sample) begin
+            reset_cbo_fault_late_sta_context();
+        end
+        if (cbo_fault_late_sta_valid &&
+            (cbo_fault_late_sta_uid != wb_event.uid ||
+             cbo_fault_late_sta_dynamic_epoch != wb_event.dynamic_epoch ||
+             cbo_fault_late_sta_rob_key != wb_event.rob_key ||
+             cbo_fault_late_sta_issue_epoch != wb_event.issue_epoch ||
+             cbo_fault_late_sta_replay_seq != wb_event.replay_seq)) begin
+            `uvm_fatal("INT_WB_STA0_CBO_LATE_CAPTURE",
+                       "new CBO fault STA0 collided with an unconsumed dynamic identity")
+        end
+        cbo_fault_late_sta_valid = 1'b1;
+        cbo_fault_late_sta_uid = wb_event.uid;
+        cbo_fault_late_sta_dynamic_epoch = wb_event.dynamic_epoch;
+        cbo_fault_late_sta_rob_key = wb_event.rob_key;
+        cbo_fault_late_sta_sq_key = wb_event.sq_key;
+        cbo_fault_late_sta_issue_epoch = wb_event.issue_epoch;
+        cbo_fault_late_sta_replay_seq = wb_event.replay_seq;
+        cbo_fault_late_sta_instance_flush_epoch = instance_flush_epoch;
+        cbo_fault_late_sta_fault_flush_epoch = raw.sample_flush_epoch;
+        cbo_fault_late_sta_expire_service_sample =
+            memblock_sync_pkg::get_dispatch_service_cycle() +
+            CboFaultLateStaHoldSamples;
+        cbo_fault_late_sta_fu_op_type = main_tr.fuOpType;
+        `uvm_info("INT_WB_STA0_CBO_LATE_CAPTURE",
+                  $sformatf("capture uid=%0d dynamic_epoch=%0d rob=%0d/%0d sq=%0d/%0d issue=%0d replay=%0d flush=%0d/%0d",
+                            wb_event.uid, wb_event.dynamic_epoch,
+                            wb_event.rob_key.flag, wb_event.rob_key.value,
+                            wb_event.sq_key.flag, wb_event.sq_key.value,
+                            wb_event.issue_epoch, wb_event.replay_seq,
+                            instance_flush_epoch, raw.sample_flush_epoch),
+                  UVM_LOW)
+    endfunction:capture_cbo_fault_late_sta_context
+
+    // 抽象职责：live ROB owner 查询始终优先。仅当完整 key 当前无 owner，且旧 UID
+    // 已完成同一 dynamic epoch 的 CBO STA fault terminal 时，消费 normal STA0 尾拍。
+    // 命中后调用者直接返回，不生成 semantic event、WB 或第二次 redirect。
+    function bit try_consume_cbo_fault_late_normal_sta(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
+        input memblock_rob_key_t raw_rob_key
+    );
+        memblock_uid_t           live_uid;
+        main_control_transaction main_tr;
+        status_transaction       status;
+        int unsigned             instance_flush_epoch;
+
+        if (raw.source_kind != memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA ||
+            raw.port_id != 0 || raw.exception_vec != 24'b0 ||
+            !raw.rob_valid || raw.rob_value_only_without_flag) begin
+            return 1'b0;
+        end
+        if (data.lookup_active_uid_by_rob(raw_rob_key, live_uid)) begin
+            if (cbo_fault_late_sta_valid &&
+                cbo_fault_late_sta_rob_key == raw_rob_key) begin
+                status = data.get_status(live_uid);
+                if (live_uid != cbo_fault_late_sta_uid ||
+                    status.dynamic_epoch != cbo_fault_late_sta_dynamic_epoch) begin
+                    reset_cbo_fault_late_sta_context();
+                end
+            end
+            return 1'b0;
+        end
+        if (!cbo_fault_late_sta_valid ||
+            cbo_fault_late_sta_rob_key != raw_rob_key ||
+            raw.sample_flush_epoch < cbo_fault_late_sta_fault_flush_epoch ||
+            raw.sample_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch) begin
+            return 1'b0;
+        end
+        if (memblock_sync_pkg::get_dispatch_service_cycle() >=
+            cbo_fault_late_sta_expire_service_sample) begin
+            reset_cbo_fault_late_sta_context();
+            return 1'b0;
+        end
+        status = data.get_status(cbo_fault_late_sta_uid);
+        main_tr = data.get_main_transaction(cbo_fault_late_sta_uid);
+        if (status.active || !status.terminal_done || !status.fault ||
+            !status.sta_fault || !status.sta_writeback ||
+            status.dynamic_epoch != cbo_fault_late_sta_dynamic_epoch ||
+            status.get_rob_key() != cbo_fault_late_sta_rob_key ||
+            status.sqIdx_flag != cbo_fault_late_sta_sq_key.flag ||
+            status.sqIdx_value != cbo_fault_late_sta_sq_key.value ||
+            status.sta_issue_epoch != cbo_fault_late_sta_issue_epoch ||
+            status.replay_seq != cbo_fault_late_sta_replay_seq ||
+            !status.get_target_instance_flush_epoch(MEMBLOCK_ISSUE_TARGET_STA,
+                                                    instance_flush_epoch) ||
+            instance_flush_epoch != cbo_fault_late_sta_instance_flush_epoch ||
+            main_tr.op_class != MEMBLOCK_OP_CLASS_CBO ||
+            main_tr.fuOpType != cbo_fault_late_sta_fu_op_type ||
+            status.exception_vec == 24'b0) begin
+            `uvm_fatal("INT_WB_STA0_CBO_LATE_IDENTITY",
+                       $sformatf("CBO late STA context no longer proves terminal owner uid=%0d rob=%0d/%0d",
+                                 cbo_fault_late_sta_uid,
+                                 raw_rob_key.flag, raw_rob_key.value))
+        end
+        `uvm_info("INT_WB_STA0_CBO_LATE_DROP",
+                  $sformatf("consume late normal STA0 uid=%0d dynamic_epoch=%0d rob=%0d/%0d issue=%0d replay=%0d raw_flush=%0d",
+                            cbo_fault_late_sta_uid,
+                            cbo_fault_late_sta_dynamic_epoch,
+                            raw_rob_key.flag, raw_rob_key.value,
+                            cbo_fault_late_sta_issue_epoch,
+                            cbo_fault_late_sta_replay_seq,
+                            raw.sample_flush_epoch),
+                  UVM_LOW)
+        reset_cbo_fault_late_sta_context();
+        return 1'b1;
+    endfunction:try_consume_cbo_fault_late_normal_sta
+
     function bit normalize_v2_int_wb_key(
         input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
         ref memblock_wb_event_t wb_event
@@ -1244,6 +1448,10 @@ class dispatch_monitor_event_adapter extends uvm_object;
                 wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STORE_WB;
                 wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
                 wb_event.has_rob = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
+                if (!wb_event.has_exception &&
+                    try_consume_cbo_fault_late_normal_sta(raw, wb_event.rob_key)) begin
+                    return 1'b0;
+                end
                 sta_fault_attached = 1'b0;
                 if (wb_event.has_exception) begin
                     sta_fault_attached = try_attach_existing_sta_fault_snapshot(
@@ -1285,6 +1493,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
             default: `uvm_fatal("DISP_MON_ADAPT", "invalid V2 int-WB source kind")
         endcase
         check_attached_int_wb_metadata(raw, wb_event);
+        capture_cbo_fault_late_sta_context(raw, wb_event);
         apply_cbo_flush_pipe_semantics(raw, wb_event);
         wb_event.cycle = raw.cycle;
         if (!normalize_v2_int_wb_key(raw, wb_event)) begin
