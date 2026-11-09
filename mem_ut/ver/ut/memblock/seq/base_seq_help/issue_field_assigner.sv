@@ -114,8 +114,18 @@ class issue_field_assigner extends uvm_object;
                 end
             end
             MEMBLOCK_FUTYPE_STU: begin
-                if (!lsq_ctrl_model::is_store_fuoptype(main_tr.fuOpType) ||
-                    lsq_ctrl_model::is_cbo_fuoptype(main_tr.fuOpType) ||
+                bit ordinary_store;
+                bit cbo_store;
+
+                ordinary_store = lsq_ctrl_model::is_store_fuoptype(main_tr.fuOpType) &&
+                                 !lsq_ctrl_model::is_cbo_fuoptype(main_tr.fuOpType) &&
+                                 behavior.kind == MEMBLOCK_OP_BEHAVIOR_STORE &&
+                                 !behavior.is_cbo;
+                cbo_store = lsq_ctrl_model::is_cbo_fuoptype(main_tr.fuOpType) &&
+                            behavior.kind == MEMBLOCK_OP_BEHAVIOR_CBO &&
+                            behavior.is_cbo;
+                if (!(ordinary_store || cbo_store) || behavior.is_atomic ||
+                    behavior.need_alloc != 2'b10 || behavior.uses_lq || !behavior.uses_sq ||
                     behavior.route_load || !behavior.route_sta || !behavior.route_std ||
                     (target != MEMBLOCK_ISSUE_TARGET_STA && target != MEMBLOCK_ISSUE_TARGET_STD)) begin
                     `uvm_fatal("ISSUE_FIELD",
@@ -233,18 +243,35 @@ class issue_field_assigner extends uvm_object;
         return memblock_op_behavior_util::generate_atomic_std_data(main_tr, slot);
     endfunction:derive_atomic_std_data
 
-    // 抽象职责：普通 Store 和原子 STD 共用数据入口，冻结值优先且不受 UID/发射顺序影响。
+    // 抽象职责：普通 Store、CBO 和原子 STD 共用数据入口。CBO 没有架构 store-data
+    // source，四类操作都固定驱动 0；普通 Store/AMO 继续消费既有冻结值，不改变其行为。
     function bit [63:0] derive_std_data(input main_control_transaction main_tr,
                                       input int unsigned slot);
         memblock_op_behavior_t behavior;
         if (main_tr == null || slot >= 4)
             `uvm_fatal("ISSUE_FIELD", "derive_std_data requires a transaction and slot in [0:3]")
-        if (main_tr.std_data_override_valid[slot]) return main_tr.std_data_override[slot];
         behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        if (behavior.is_cbo) begin
+            if (behavior.kind != MEMBLOCK_OP_BEHAVIOR_CBO ||
+                main_tr.op_class != MEMBLOCK_OP_CLASS_CBO ||
+                !lsq_ctrl_model::is_cbo_fuoptype(main_tr.fuOpType) ||
+                slot != 0) begin
+                `uvm_fatal("ISSUE_FIELD",
+                           $sformatf("uid=%0d illegal CBO STD payload request slot=%0d kind=%0d",
+                                     main_tr.uid, slot, behavior.kind))
+            end
+            return 64'h0;
+        end
+        if (main_tr.std_data_override_valid[slot]) return main_tr.std_data_override[slot];
         if (behavior.is_atomic) begin
             `uvm_fatal("ATOMIC_OPERAND",
                        $sformatf("uid=%0d atomic STD slot=%0d was not frozen before issue",
                                  main_tr.uid, slot))
+        end
+        if (behavior.kind != MEMBLOCK_OP_BEHAVIOR_STORE) begin
+            `uvm_fatal("ISSUE_FIELD",
+                       $sformatf("uid=%0d non-store behavior kind=%0d reached STD payload derivation",
+                                 main_tr.uid, behavior.kind))
         end
         return main_tr.src_0;
     endfunction:derive_std_data

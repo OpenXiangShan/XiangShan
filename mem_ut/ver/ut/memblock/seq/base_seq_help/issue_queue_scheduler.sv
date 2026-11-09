@@ -28,6 +28,7 @@ class issue_queue_scheduler extends uvm_object;
     function void prepare_issue_route_for_uid(input memblock_uid_t uid);
         status_transaction status;
         main_control_transaction main_tr;
+        memblock_op_behavior_t behavior;
 
         ensure_data();
         status = data.get_status(uid);
@@ -40,6 +41,16 @@ class issue_queue_scheduler extends uvm_object;
         // issue item；完成条件由 control service 与专用 commit 分支维护。
         if (is_control_op_class(main_tr.op_class)) begin
             return;
+        end
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        if (behavior.is_cbo &&
+            (behavior.kind != MEMBLOCK_OP_BEHAVIOR_CBO || behavior.is_atomic ||
+             behavior.need_alloc != 2'b10 || behavior.uses_lq || !behavior.uses_sq ||
+             !behavior.route_sta || !behavior.route_std || behavior.route_load ||
+             !status.active_sq_mapped || status.active_lq_mapped ||
+             status.lsq_reservation_state != MEMBLOCK_LSQ_RESERVATION_DUT_VISIBLE)) begin
+            `uvm_fatal("ISSUE_Q",
+                       $sformatf("CBO uid=%0d reached issue routing without one DUT-visible SQ owner", uid))
         end
         route_uid(uid);
     endfunction:prepare_issue_route_for_uid

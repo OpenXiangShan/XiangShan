@@ -68,6 +68,9 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
                                                output memblock_op_behavior_t behaviors[$],
                                                output memblock_lq_key_t lq_keys[$],
                                                output memblock_sq_key_t sq_keys[$]);
+    extern function void check_cbo_lsq_behavior(input main_control_transaction main_tr,
+                                                input memblock_op_behavior_t behavior,
+                                                input string caller);
     extern function void clear_lsqenq_xaction(input lsqenq_agent_agent_xaction tr);
     extern function void assign_lsqenq_slot(input lsqenq_agent_agent_xaction tr,
                                             input int unsigned slot,
@@ -516,6 +519,33 @@ function bit memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admissio
     return 1'b0;
 endfunction:next_uid_needs_lsq_admission
 
+// 中文注释：CBO 必须作为普通 scalar-store lane 复用公共 D/R/Q 和 SQ owner。
+// 本检查只防止分类漂移，不读取 credit、canAccept 或 free count，也不建立专属 admission 状态。
+function void memblock_lsqenq_dispatch_base_sequence::check_cbo_lsq_behavior(
+    input main_control_transaction main_tr,
+    input memblock_op_behavior_t behavior,
+    input string caller
+);
+    if (main_tr == null || main_tr.op_class != MEMBLOCK_OP_CLASS_CBO) begin
+        return;
+    end
+    if (main_tr.fuType != MEMBLOCK_FUTYPE_STU ||
+        main_tr.lsq_flow != MEMBLOCK_LSQ_FLOW_CBO ||
+        !lsq_ctrl_model::is_cbo_fuoptype(main_tr.fuOpType) ||
+        behavior.kind != MEMBLOCK_OP_BEHAVIOR_CBO ||
+        !behavior.is_cbo || behavior.is_atomic ||
+        behavior.need_alloc != 2'b10 ||
+        behavior.uses_lq || !behavior.uses_sq ||
+        behavior.num_ls_elem != memblock_num_ls_elem_t'(1)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s CBO classification drift uid=%0d fuType=0x%0h fuOpType=0x%0h flow=%0d needAlloc=%0b uses_lq/sq=%0b/%0b numLsElem=%0d",
+                             caller, main_tr.uid, main_tr.fuType, main_tr.fuOpType,
+                             main_tr.lsq_flow, behavior.need_alloc,
+                             behavior.uses_lq, behavior.uses_sq,
+                             behavior.num_ls_elem))
+    end
+endfunction:check_cbo_lsq_behavior
+
 function bit memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates(output memblock_uid_t uids[$],
                                                                        output int unsigned slots[$],
                                                                        output main_control_transaction trs[$],
@@ -575,6 +605,7 @@ function bit memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates(outp
             main_tr = data.get_main_transaction(uid);
             status = data.get_status(uid);
             behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+            check_cbo_lsq_behavior(main_tr, behavior, "collect_lsq_candidates_q");
             if (is_control_op_class(main_tr.op_class) || behavior.need_alloc == 2'b00 ||
                 behavior.num_ls_elem != memblock_num_ls_elem_t'(1) ||
                 status.terminal_done || status.active || status.enq ||
@@ -653,6 +684,7 @@ function bit memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates(outp
             end
             status = data.get_status(uid);
             behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+            check_cbo_lsq_behavior(main_tr, behavior, "collect_lsq_candidates_d");
             if (behavior.need_alloc == 2'b00) begin
                 break;
             end
@@ -772,6 +804,7 @@ function void memblock_lsqenq_dispatch_base_sequence::set_req_fields(input lsqen
                                  main_tr.numLsElem,
                                  behavior.num_ls_elem))
         end
+        check_cbo_lsq_behavior(main_tr, behavior, "set_req_fields");
         dut_futype = encode_and_fit_dut_futype(
             main_tr.fuType,
             $sformatf("%s::set_req_fields(slot=%0d)", get_type_name(), slot));
@@ -947,6 +980,7 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
                                  uids[idx]))
         end
 
+        check_cbo_lsq_behavior(trs[idx], behaviors[idx], "confirm_lsq_candidates");
         lsq_ctrl.preview_allocate(behaviors[idx], expected_lq_key, expected_sq_key);
         if (behaviors[idx].uses_lq && expected_lq_key != lq_keys[idx]) begin
             `uvm_fatal(get_type_name(),

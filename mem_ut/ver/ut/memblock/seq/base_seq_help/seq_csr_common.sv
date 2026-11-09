@@ -820,10 +820,6 @@ class seq_csr_common;
             (sta_pip_num_limit == 0 || std_pip_num_limit == 0)) begin
             `uvm_fatal("SEQ_CSR_CFG", "AMO requires at least STA pipe0 and STD pipe0")
         end
-        if (op_class_cbo_wt != 0) begin
-            `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_OP_CLASS_CBO_WT must be 0 until the V2 scalar CBO flow is complete")
-        end
-
         main_vaddr_upper = main_vaddr_base + main_vaddr_range - 1;
         if (main_vaddr_upper < main_vaddr_base) begin
             `uvm_fatal("SEQ_CSR_CFG", "main_vaddr_base + main_vaddr_range - 1 overflows")

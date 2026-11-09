@@ -3419,20 +3419,14 @@ endfunction:init_status_for_main_table
 
 function void memblock_dispatch_base_sequence::validate_main_table_entry(input main_control_transaction tr,
                                                                          input string caller);
+    memblock_op_behavior_t behavior;
+
     if (tr == null) begin
         `uvm_fatal(get_type_name(), $sformatf("%s got null transaction", caller))
     end
     if (is_control_op_class(tr.op_class)) begin
         validate_control_main_table_entry(tr, caller);
         return;
-    end
-    // CBO 与 AMO 的低位 fuOpType 编码存在重叠，例如 SC.D 和 CBO.ZERO 都是 7。
-    // 主表分类必须结合 op_class/lsq_flow/fuType，不能只看无上下文的 fuOpType。
-    if (tr.op_class == MEMBLOCK_OP_CLASS_CBO ||
-        tr.lsq_flow == MEMBLOCK_LSQ_FLOW_CBO ||
-        tr.fuType == MEMBLOCK_FUTYPE_STU &&
-            lsq_ctrl_model::is_cbo_fuoptype(tr.fuOpType)) begin
-        `uvm_fatal(get_type_name(), $sformatf("%s requested unsupported scalar CBO uid=%0d", caller, tr.uid))
     end
     if (!tr.validate_main_transaction()) begin
         `uvm_fatal(get_type_name(), $sformatf("%s got invalid derived fields uid=%0d", caller, tr.uid))
@@ -3444,13 +3438,10 @@ function void memblock_dispatch_base_sequence::validate_main_table_entry(input m
     if (is_vector_ls_main_tr(tr)) begin
         `uvm_fatal(get_type_name(), $sformatf("%s uid=%0d vector LS is not supported in Task5", caller, tr.uid))
     end
-    begin
-        memblock_op_behavior_t behavior;
-        behavior = derive_op_behavior(tr);
-        if (tr.numLsElem != behavior.num_ls_elem) begin
-            `uvm_fatal(get_type_name(), $sformatf("%s uid=%0d numLsElem=%0d expected=%0d",
-                                                  caller, tr.uid, tr.numLsElem, behavior.num_ls_elem))
-        end
+    behavior = derive_op_behavior(tr);
+    if (tr.numLsElem != behavior.num_ls_elem) begin
+        `uvm_fatal(get_type_name(), $sformatf("%s uid=%0d numLsElem=%0d expected=%0d",
+                                              caller, tr.uid, tr.numLsElem, behavior.num_ls_elem))
     end
 
     case (tr.op_class)
@@ -3472,7 +3463,14 @@ function void memblock_dispatch_base_sequence::validate_main_table_entry(input m
         MEMBLOCK_OP_CLASS_CBO: begin
             if (tr.fuType != MEMBLOCK_FUTYPE_STU ||
                 tr.lsq_flow != MEMBLOCK_LSQ_FLOW_CBO ||
-                !lsq_ctrl_model::is_cbo_fuoptype(tr.fuOpType)) begin
+                !lsq_ctrl_model::is_cbo_fuoptype(tr.fuOpType) ||
+                behavior.kind != MEMBLOCK_OP_BEHAVIOR_CBO ||
+                !behavior.is_cbo || behavior.is_atomic ||
+                behavior.need_alloc != 2'b10 ||
+                behavior.uses_lq || !behavior.uses_sq ||
+                behavior.route_load || !behavior.route_sta || !behavior.route_std ||
+                !behavior.commit_is_store ||
+                behavior.num_ls_elem != memblock_num_ls_elem_t'(1)) begin
                 `uvm_fatal(get_type_name(), $sformatf("%s uid=%0d has illegal CBO template", caller, tr.uid))
             end
         end
