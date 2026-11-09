@@ -104,6 +104,7 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task build_load_table(input int unsigned load_count);
     extern virtual task build_store_table();
     extern virtual task build_cbo_table();
+    extern virtual task build_two_cbo_fault_table();
     extern virtual task build_cbo_rob_reuse_table();
     extern virtual task activate_directed_store_issue(
         input memblock_uid_t uid,
@@ -771,6 +772,26 @@ task soft_test_memblock_pending_mmio_directed_sequence::build_cbo_table();
     import_manual_main_table();
 endtask:build_cbo_table
 
+task soft_test_memblock_pending_mmio_directed_sequence::build_two_cbo_fault_table();
+    main_control_transaction cbo_tr;
+
+    clear_manual_main_table();
+    for (int unsigned uid = 0; uid < 2; uid++) begin
+        cbo_tr = make_directed_transaction(
+            $sformatf("pending_mmio_cbo_fault_%0d", uid),
+            MEMBLOCK_OP_CLASS_STORE,
+            uid,
+            64'h0000_0000_8480_1000 + (uid * 64'h1000));
+        cbo_tr.op_class = MEMBLOCK_OP_CLASS_CBO;
+        apply_op_class_template(cbo_tr, MEMBLOCK_LSUOP_CBO_CLEAN);
+        cbo_tr.sqIdx_flag = 1'b0;
+        cbo_tr.sqIdx_value = uid[MEMBLOCK_SQ_VALUE_W-1:0];
+        cbo_tr.update_vaddr();
+        set_manual_main_transaction(uid, cbo_tr);
+    end
+    import_manual_main_table();
+endtask:build_two_cbo_fault_table
+
 task soft_test_memblock_pending_mmio_directed_sequence::build_cbo_rob_reuse_table();
     main_control_transaction main_tr;
     memblock_rob_key_t base_rob_key;
@@ -1241,7 +1262,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
     old_rob_key = status.get_rob_key();
     raw = make_sta0_raw(0, 24'h000080);
     converted = monitor_adapter.convert_raw_int_wb(raw, wb_event);
-    if (!converted || !monitor_adapter.cbo_fault_late_sta_valid ||
+    if (!converted || monitor_adapter.cbo_fault_late_sta_context_count() != 1 ||
         wb_event.uid != 0 || wb_event.dynamic_epoch != status.dynamic_epoch) begin
         `uvm_fatal(get_type_name(),
                    "CBO fault STA0 did not establish the adapter late context")
@@ -1267,10 +1288,13 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
     exception_q_size = data.exception_event_q.size();
     terminal_event_cycle = status.last_event_cycle;
     redirect_valid = data.active_redirect.valid;
+    repeat (8) begin
+        memblock_sync_pkg::tick_dispatch_service_cycle();
+    end
     raw = make_sta0_raw(0, 24'b0);
     raw.cycle = $time + 1;
     converted = monitor_adapter.convert_raw_int_wb(raw, wb_event);
-    if (converted || monitor_adapter.cbo_fault_late_sta_valid ||
+    if (converted || monitor_adapter.cbo_fault_late_sta_context_count() != 0 ||
         data.exception_event_q.size() != exception_q_size ||
         data.active_redirect.valid != redirect_valid ||
         status.last_event_cycle != terminal_event_cycle || status.active ||
@@ -1308,9 +1332,24 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
     converted = monitor_adapter.convert_raw_int_wb(raw, wb_event);
     if (!converted || wb_event.uid != reuse_uid ||
         wb_event.dynamic_epoch != 9 ||
-        monitor_adapter.cbo_fault_late_sta_valid) begin
+        monitor_adapter.cbo_fault_late_sta_context_count() != 0) begin
         `uvm_fatal(get_type_name(),
                    "new live ROB owner was swallowed by old CBO late STA context")
+    end
+
+    reset_directed_owner_state();
+    build_two_cbo_fault_table();
+    activate_directed_store_issue(0, 11);
+    activate_directed_store_issue(1, 12);
+    raw = make_sta0_raw(0, 24'h000080);
+    if (!monitor_adapter.convert_raw_int_wb(raw, wb_event)) begin
+        `uvm_fatal(get_type_name(), "first CBO fault context capture failed")
+    end
+    raw = make_sta0_raw(1, 24'h000080);
+    if (!monitor_adapter.convert_raw_int_wb(raw, wb_event) ||
+        monitor_adapter.cbo_fault_late_sta_context_count() != 2) begin
+        `uvm_fatal(get_type_name(),
+                   "different-key CBO fault contexts did not coexist independently")
     end
 endtask:run_cbo_fault_late_sta_scenario
 
