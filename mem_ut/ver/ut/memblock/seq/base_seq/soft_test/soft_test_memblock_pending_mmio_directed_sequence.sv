@@ -1802,8 +1802,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     if (!data.cancel_record_q[record_idx].software_count_finalized ||
         !data.redirect_deleted_owner_window_pending()) begin
         `uvm_fatal(get_type_name(),
-                   "post-drain sample did not finalize cancel count "
-                   "while retaining unapplied window")
+                   "post-drain sample did not finalize cancel count while retaining unapplied window")
     end
     enq.apply_pending_lsq_cancels();
     data.service_redirect_deleted_owner_window(
