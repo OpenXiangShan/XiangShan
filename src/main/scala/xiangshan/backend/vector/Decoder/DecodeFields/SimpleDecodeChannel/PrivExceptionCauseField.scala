@@ -22,7 +22,7 @@ object PrivExceptionCauseField extends DecodeField[InstPattern, PrivExceptionCau
       case _: SfenceOtherInstPattern      => PrivExceptionCause.sfencePart
       case _: HfenceGVMAInstPattern       => PrivExceptionCause.hfenceGVMA
       case _: HfenceVVMAInstPattern       => PrivExceptionCause.hfenceVVMA
-      case _: MfenceInstPattern           => PrivExceptionCause.mfence
+      case _: MptFenceInstPattern         => PrivExceptionCause.mfence
       case _: WaitForInterruptInstPattern => PrivExceptionCause.wfi
       case _: ZawrsNtoPattern             => PrivExceptionCause.wrsNto
       case _: HyperLoadInstPattern        => PrivExceptionCause.hlsv
