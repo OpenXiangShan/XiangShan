@@ -7,6 +7,7 @@ import utility.{SignExt, ZeroExt}
 import xiangshan.DIVOpType
 import xiangshan.backend.fu.{FuncUnit, MulDivCtrl, SRT16DividerDataModule}
 import xiangshan.backend.fu.FuConfig
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
@@ -36,8 +37,8 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val kill_r = !divDataModule.io.in_ready && robIdxReg.needFlush(io.flush)
 
   divDataModule.io.valid := io.in.valid
-  divDataModule.io.src(0) := divInputCvtFunc(io.in.bits.data.src(0))
-  divDataModule.io.src(1) := divInputCvtFunc(io.in.bits.data.src(1))
+  divDataModule.io.src(0) := divInputCvtFunc(TraceRTLChoose(io.in.bits.data.src(0), io.in.bits.ctrl.traceInfo.get.arthiSrc0))
+  divDataModule.io.src(1) := divInputCvtFunc(TraceRTLChoose(io.in.bits.data.src(1), io.in.bits.ctrl.traceInfo.get.arthiSrc1))
   divDataModule.io.sign := ctrl.sign
   divDataModule.io.kill_w := kill_w
   divDataModule.io.kill_r := kill_r

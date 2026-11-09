@@ -79,6 +79,7 @@ class XSArgs(object):
         self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
         self.trace_fst = "fst" if args.trace_fst else None
         self.simfrontend = 1 if args.simfrontend else None
+        self.tracertl = args.tracertl
         self.config = args.config
         self.yaml_config = args.yaml_config
         self.emu_optimize = args.emu_optimize
@@ -257,7 +258,13 @@ class XiangShan(object):
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
         threads = self.args.make_threads
-        if self.args.emulator == "verilator":
+        if self.args.tracertl:
+            # TraceRTL elaborates XiangShan with --trace-rtl and builds its own emu harness,
+            # see TraceRTL/xiangshan.mk for the variables it takes
+            tracertl_vars = ["CONFIG", "NUM_CORES", "WITH_DRAMSIM3", "WITH_CONSTANTIN", "WITH_CHISELDB", "EMU_THREADS", "EMU_OPTIMIZE"]
+            make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", filter(lambda arg: arg[1] in tracertl_vars, self.args.get_makefile_args())))
+            return_code = self.__exec_cmd(f'make -C $NOOP_HOME/TraceRTL MODE=xiangshan SIM={self.args.emulator} emu -j{threads} {make_args}')
+        elif self.args.emulator == "verilator":
             return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j{threads} SIM_ARGS="{sim_args}" {make_args}')
         elif self.args.emulator == "gsim":
             return_code = self.__exec_cmd(f'make -C $NOOP_HOME gsim GSIM=1 -j{threads} SIM_ARGS="{sim_args}" {make_args}')
@@ -293,12 +300,14 @@ class XiangShan(object):
                 self.numa_info = get_free_cores(self.args.threads, self.args.numa_max_retry)
             numa_args = f"numactl -m {self.numa_info[0]} -C {self.numa_info[1]}-{self.numa_info[2]}"
         fork_args = "--enable-fork" if self.args.fork else ""
-        diff_args = "--no-diff" if self.args.disable_diff else ""
+        # TraceRTL replays a trace instead of an image and checks every commit against it
+        workload_args = f"--tracertl-file {shlex.quote(workload)}" if self.args.tracertl else f"-i {shlex.quote(workload)}"
+        diff_args = "--no-diff" if self.args.disable_diff or self.args.tracertl else ""
         chiseldb_args = "--dump-db" if self.args.dump_db else ""
         instr_trace_args = f"--instr-trace {instr_trace}" if instr_trace_valid else ""
         gcpt_restore_args = f"-r {self.args.gcpt_restore_bin}" if len(self.args.gcpt_restore_bin) != 0 else ""
         flash_args = f"--flash {self.args.flash}" if self.args.flash is not None else ""
-        return_code = self.__exec_cmd(f'ulimit -s {32 * 1024}; {numa_args} $NOOP_HOME/build/emu -i {shlex.quote(workload)} {emu_args} {fork_args} {diff_args} {chiseldb_args} {gcpt_restore_args} {instr_trace_args} {flash_args}')
+        return_code = self.__exec_cmd(f'ulimit -s {32 * 1024}; {numa_args} $NOOP_HOME/build/emu {workload_args} {emu_args} {fork_args} {diff_args} {chiseldb_args} {gcpt_restore_args} {instr_trace_args} {flash_args}')
         return return_code
 
     def run_simv(self, workload):
@@ -647,6 +656,23 @@ class XiangShan(object):
             return os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])
         return ""
 
+    def __get_ci_tracertl(self, name):
+        # traces recorded by the trace-collecting NEMU, see README.txt in base_dir
+        base_dir = "/nfs/share/tracertl"
+        workloads = {
+            "tracertl-tests": [
+                "tests/exc_next.trace.zstd",    # exceptions whose trap target is the next instruction
+                "tests/exc_priv.trace.zstd",    # privilege transitions and medeleg delegation
+                "tests/ctx_fp.trace.zstd",      # mstatus.FS enabled by csrs, then FP instructions
+                "tests/ctx_restore.trace.zstd", # mstatus.FS restored from memory, which TraceRTL does not load
+                "tests/ctx_lazy.trace.zstd",    # FP instructions trapping with mstatus.FS Off
+                # tests/intr*.trace.zstd: TraceRTL does not replay the interrupt records of NEMU yet
+            ],
+            # same image as the exec coremark, see __am_apps_path
+            "coremark": ["coremark/coremark-riscv64-xs.trace.zstd"],
+        }
+        return map(lambda x: os.path.join(base_dir, x), workloads[name])
+
     def run_ci(self, test):
         all_tests = {
             "isa-smoke": self.__get_ci_isa_smoke,
@@ -664,7 +690,8 @@ class XiangShan(object):
             "iopmp-test": self.__get_ci_iopmptest,
             "frontend-misc-test": self.__get_ci_frontend_misc_test,
         }
-        for target in all_tests.get(test, self.__get_ci_workloads)(test):
+        get_workloads = self.__get_ci_tracertl if self.args.tracertl else all_tests.get(test, self.__get_ci_workloads)
+        for target in get_workloads(test):
             print(target)
             ret = self.run_emu(target)
             if ret:
@@ -844,6 +871,7 @@ if __name__ == "__main__":
     parser.add_argument('--issue', nargs='?', type=str, help='CHI issue')
     parser.add_argument('--llc', nargs='?', type=str, help='LLC backend (OpenLLC or ZhuJiang)')
     parser.add_argument('--simfrontend', action='store_true', help='enable the simfrontend')
+    parser.add_argument('--tracertl', action='store_true', help='build the TraceRTL emu, or run it on traces')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--numa-max-retry', type=int, default=60, help='max retry to find free numa cores')
