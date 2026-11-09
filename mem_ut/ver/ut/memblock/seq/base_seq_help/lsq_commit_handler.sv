@@ -1026,8 +1026,32 @@ class lsq_commit_handler extends uvm_object;
             end
             return 1'b0;
         end
+        // DUT exception redirect may already have completed its active scan before
+        // this fault token submits or services its software intent. The pinned fault
+        // resource/cancel record is the authority for that historical coverage.
+        // Retire only this token's duplicate intent; the deleted-owner window still
+        // converges through its normal count-finalize/apply/reconcile lifecycle.
+        if (!fault_head_redirect_covered &&
+            data.fault_cbo_applied_redirect_covers_owner(
+                fault_head_uid, fault_head_dynamic_epoch,
+                fault_head_rob_key)) begin
+            fault_head_redirect_covered = 1'b1;
+            if (fault_head_redirect_intent_pending) begin
+                data.retire_redirect_intent(
+                    fault_head_redirect_intent_id);
+                fault_head_redirect_intent_pending = 1'b0;
+                fault_head_redirect_intent_id = 0;
+            end
+            `uvm_info("LSQ_COMMIT",
+                      $sformatf("fault CBO uid=%0d epoch=%0d redirect covered by applied record rob=%0d/%0d",
+                                fault_head_uid, fault_head_dynamic_epoch,
+                                fault_head_rob_key.flag,
+                                fault_head_rob_key.value),
+                      UVM_LOW)
+        end
         if (has_pending_monitor_redirect()) begin
             // 让 recovery handler 先仲裁真实 monitor redirect，避免并发分配 cancel record。
+            // 已被完成scan覆盖的本token重复intent已在上方按固定record回收。
             return 1'b0;
         end
         if (data.active_redirect.valid) begin

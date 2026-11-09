@@ -100,6 +100,7 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task run_monitor_raw_scenario();
     extern virtual task run_cbo_store_mmio_consume_scenario();
     extern virtual task run_cbo_fault_late_sta_scenario();
+    extern virtual task run_cbo_fault_observed_redirect_coverage_scenario();
     extern virtual task run_store_post_sqdeq_wb_attach_scenario();
     extern virtual task run_incompatible_store_mmio_fatal_scenario();
     extern virtual task run_uncache_retry_boost_scenario();
@@ -189,6 +190,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::body();
     run_monitor_raw_scenario();
     run_cbo_store_mmio_consume_scenario();
     run_cbo_fault_late_sta_scenario();
+    run_cbo_fault_observed_redirect_coverage_scenario();
     run_store_post_sqdeq_wb_attach_scenario();
     run_incompatible_store_mmio_fatal_scenario();
     run_uncache_retry_boost_scenario();
@@ -1378,6 +1380,182 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
                    "different-key CBO fault contexts did not coexist independently")
     end
 endtask:run_cbo_fault_late_sta_scenario
+
+// 中文注释：DUT exception redirect可先于fault token的软件intent完成scan。
+// 本场景保留真实cancel record/owner window，随后提交同owner intent，验证它只被
+// 历史覆盖证明收口；年轻UID按新dynamic epoch重发，窗口仍经snapshot/apply清理。
+task soft_test_memblock_pending_mmio_directed_sequence::
+    run_cbo_fault_observed_redirect_coverage_scenario();
+    memblock_issue_q_item_t fired_items[$];
+    memblock_uid_t victim_uids[$];
+    memblock_redirect_payload_t redirect;
+    memblock_sync_pkg::dispatch_raw_int_wb_t raw;
+    memblock_sync_pkg::dispatch_raw_cancel_snapshot_t snapshot;
+    memblock_wb_event_t wb_event;
+    main_control_transaction main_tr;
+    memblock_op_behavior_t behavior;
+    status_transaction fault_status;
+    status_transaction reissue_status;
+    memblock_sq_key_t sq_deq_head;
+    memblock_lsqenq_dispatch_base_sequence enq;
+    longint unsigned anchor_sample;
+    int record_idx;
+    int unsigned reissue_old_epoch;
+    bit saved_real_smoke_active;
+
+    reset_directed_owner_state();
+    clear_manual_main_table();
+    main_tr = make_directed_transaction(
+        "cbo_fault_observed_redirect_owner", MEMBLOCK_OP_CLASS_STORE,
+        0, 64'h0000_0000_8490_1000);
+    main_tr.op_class = MEMBLOCK_OP_CLASS_CBO;
+    apply_op_class_template(main_tr, MEMBLOCK_LSUOP_CBO_CLEAN);
+    main_tr.update_vaddr();
+    set_manual_main_transaction(0, main_tr);
+    set_manual_main_transaction(
+        1, make_directed_transaction(
+               "cbo_fault_observed_redirect_reissue",
+               MEMBLOCK_OP_CLASS_INT_LOAD, 1,
+               64'h0000_0000_8490_2000));
+    import_manual_main_table();
+    admit_lsq_and_route_issue();
+    fire_all_issue_items(fired_items);
+
+    fault_status = data.get_status(0);
+    reissue_status = data.get_status(1);
+    reissue_old_epoch = reissue_status.dynamic_epoch;
+    raw = make_sta0_raw(0, 24'h000080);
+    if (!monitor_adapter.convert_raw_int_wb(raw, wb_event) ||
+        !writeback_handler.handle_real_writeback_event(wb_event) ||
+        !data.mark_target_normal_pass(0, MEMBLOCK_ISSUE_TARGET_STD,
+                                      fault_status.std_issue_epoch,
+                                      fault_status.replay_seq, $time) ||
+        !commit_handler.mark_fault_rob_commit_uid(0)) begin
+        `uvm_fatal(get_type_name(),
+                   "failed to establish committed fault CBO before observed redirect")
+    end
+    exception_handler.process_pending_events();
+    if (data.exception_event_q.size() != 0) begin
+        `uvm_fatal(get_type_name(),
+                   "fault recovery event was not consumed before observed redirect")
+    end
+
+    victim_uids.push_back(0);
+    victim_uids.push_back(1);
+    redirect = '{default:'0};
+    redirect.valid = 1'b1;
+    redirect.flush_itself = 1'b1;
+    redirect.level = 1'b1;
+    redirect.rob_key = fault_status.get_rob_key();
+    prepare_redirect_deleted_owner_window(
+        victim_uids, redirect, "cbo-fault-observed-redirect", anchor_sample);
+    if (!data.fault_cbo_applied_redirect_covers_owner(
+            0, fault_status.dynamic_epoch, fault_status.get_rob_key()) ||
+        reissue_status.dynamic_epoch != reissue_old_epoch + 1 ||
+        reissue_status.active || !reissue_status.redirect_pending ||
+        !reissue_status.flushed || reissue_status.terminal_done) begin
+        `uvm_fatal(get_type_name(),
+                   "observed redirect did not preserve fault identity and reset UID+1 for reissue")
+    end
+
+    saved_real_smoke_active = memblock_sync_pkg::dispatch_real_smoke_active;
+    memblock_sync_pkg::dispatch_real_smoke_active = 1'b1;
+    if (commit_handler.request_fault_head_redirect() ||
+        !commit_handler.fault_head_redirect_intent_pending ||
+        commit_handler.fault_head_redirect_intent_id == 0) begin
+        `uvm_fatal(get_type_name(),
+                   "duplicate fault redirect intent was not queued for coverage test")
+    end
+    void'(commit_handler.sync_modeled_head_after_fault_terminal());
+    if (!commit_handler.fault_head_redirect_covered ||
+        commit_handler.fault_head_redirect_intent_pending ||
+        data.active_redirect.valid || data.has_pending_redirect_drive() ||
+        data.exception_event_q.size() != 0) begin
+        `uvm_fatal(get_type_name(),
+                   "applied exception redirect did not retire duplicate fault intent")
+    end
+
+    record_idx = data.find_cancel_record_index_by_id(
+        data.fault_redirect_resource.cancel_record_id);
+    if (record_idx < 0 ||
+        data.cancel_record_q[record_idx].software_count_finalized ||
+        data.cancel_record_q[record_idx].software_applied) begin
+        `uvm_fatal(get_type_name(),
+                   "fault redirect record was not held open by the owner window")
+    end
+    wait_for_dut_sample_watermark(
+        data.redirect_deleted_owner_expire_sample,
+        "cbo-fault-observed-redirect-expire");
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample(), 1'b0);
+    if (!data.cancel_record_q[record_idx].software_count_finalized ||
+        data.cancel_record_q[record_idx].software_applied) begin
+        `uvm_fatal(get_type_name(),
+                   "owner window did not finalize its real cancel count at expiry")
+    end
+
+    snapshot = memblock_sync_pkg::make_empty_raw_cancel_snapshot();
+    snapshot.valid = 1'b1;
+    snapshot.complete = 1'b1;
+    snapshot.lq_cancel_count =
+        data.cancel_record_q[record_idx].software_cancel_lq_count;
+    snapshot.sq_cancel_count =
+        data.cancel_record_q[record_idx].software_cancel_sq_count;
+    snapshot.control_reset_epoch =
+        memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+    snapshot.sample_seq =
+        data.cancel_record_q[record_idx].compare_snapshot_sample_seq;
+    snapshot.cycle = $time;
+    data.add_cancel_snapshot(snapshot);
+    data.mark_cancel_shadow_restore_consumed(
+        data.cancel_record_q[record_idx].cancel_record_id,
+        data.cancel_record_q[record_idx].redirect_epoch,
+        data.cancel_record_q[record_idx].dut_cancel_update_sample_seq + 1);
+    data.service_cancel_reconcile();
+    if (!data.cancel_record_q[record_idx].observed_valid ||
+        data.fault_redirect_resource.disposition !=
+            MEMBLOCK_FAULT_LSQ_DISPOSITION_WAIT_SQ_DEQ) begin
+        `uvm_fatal(get_type_name(),
+                   "real cancel snapshot did not reconcile the fault CBO SQ path")
+    end
+
+    enq = memblock_lsqenq_dispatch_base_sequence::type_id::create(
+        "cbo_fault_observed_redirect_enq");
+    enq.apply_pending_lsq_cancels();
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample(), 1'b0);
+    if (data.redirect_deleted_owner_window_pending() ||
+        !data.cancel_record_q[record_idx].software_applied) begin
+        `uvm_fatal(get_type_name(),
+                   "applied cancel did not converge the deleted-owner window")
+    end
+
+    sq_deq_head = lsq_ctrl.sq_deq_ptr;
+    commit_handler.apply_dut_sq_deq(1, sq_deq_head, 1'b0);
+    if (commit_handler.fault_head_waiting ||
+        commit_handler.commit_cursor_uid != 1 ||
+        !fault_status.terminal_done || fault_status.active ||
+        data.fault_redirect_resource.valid) begin
+        `uvm_fatal(get_type_name(),
+                   "covered fault token did not close after its real SQ dequeue")
+    end
+    data.service_cancel_reconcile();
+
+    main_tr = data.get_main_transaction(1);
+    behavior = derive_op_behavior(main_tr);
+    lsq_ctrl.commit_allocate(1, behavior, main_tr);
+    prepare_issue_route_for_uid(1);
+    route_all_issue_queues();
+    if (!reissue_status.active ||
+        reissue_status.dynamic_epoch != reissue_old_epoch + 1 ||
+        reissue_status.redirect_pending || reissue_status.flushed ||
+        reissue_status.terminal_done ||
+        data.dispatch_progress.rob_commit_frontier_uid != 1) begin
+        `uvm_fatal(get_type_name(),
+                   "UID+1 did not reissue after covered fault redirect convergence")
+    end
+    memblock_sync_pkg::dispatch_real_smoke_active = saved_real_smoke_active;
+endtask:run_cbo_fault_observed_redirect_coverage_scenario
 
 // 中文注释：CBO redirect 后的年轻 STORE 可先观察到真实 sqDeq，再收到同一
 // active ROB 动态实例的 STA/STD real-WB。正例验证历史 SQ key attach 和公共

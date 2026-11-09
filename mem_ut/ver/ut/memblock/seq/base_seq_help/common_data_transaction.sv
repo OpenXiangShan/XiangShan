@@ -4905,6 +4905,70 @@ class common_data_transaction extends uvm_object;
                !fault_redirect_resource_terminal_ready(uid);
     endfunction:fault_redirect_resource_blocks_retire
 
+    // 抽象职责：证明某个 fault CBO 动态实例已经由完成 active scan 的同 ROB
+    // exception redirect 覆盖。该查询只读取 fault resource 与其固定 cancel record，
+    // 不推进 owner window、cancel reconcile 或 fault terminal 生命周期。
+    function bit fault_cbo_applied_redirect_covers_owner(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch,
+        input memblock_rob_key_t rob_key);
+        status_transaction status;
+        memblock_op_behavior_t behavior;
+        int record_idx;
+
+        check_uid(uid, "fault_cbo_applied_redirect_covers_owner");
+        status = get_status(uid);
+        behavior = memblock_op_behavior_util::derive_op_behavior(
+            get_main_transaction(uid));
+        if (!fault_redirect_resource_matches(uid, dynamic_epoch) ||
+            status.dynamic_epoch != dynamic_epoch ||
+            status.get_rob_key() != rob_key ||
+            !status.rob_commit ||
+            (!status.fault && !status.exception_pending &&
+             !status.load_fault && !status.sta_fault && !status.std_fault) ||
+            behavior.kind != MEMBLOCK_OP_BEHAVIOR_CBO || !behavior.is_cbo ||
+            behavior.is_atomic ||
+            !memblock_op_behavior_util::is_scalar_rob_store_commit(behavior)) begin
+            return 1'b0;
+        end
+        record_idx = find_cancel_record_index_by_id(
+            fault_redirect_resource.cancel_record_id);
+        if (record_idx < 0 || !cancel_record_q[record_idx].valid ||
+            cancel_record_q[record_idx].redirect_epoch !=
+                fault_redirect_resource.redirect_epoch) begin
+            `uvm_fatal("LSQ_CANCEL",
+                       $sformatf("fault CBO uid=%0d epoch=%0d lost applied redirect record id=%0d redirect_epoch=%0d",
+                                 uid, dynamic_epoch,
+                                 fault_redirect_resource.cancel_record_id,
+                                 fault_redirect_resource.redirect_epoch))
+            return 1'b0;
+        end
+        if (redirect_deleted_owner_window_active &&
+            (redirect_deleted_owner_record_id !=
+                 fault_redirect_resource.cancel_record_id ||
+             redirect_deleted_owner_epoch !=
+                 fault_redirect_resource.redirect_epoch)) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       $sformatf("fault CBO uid=%0d record=%0d/%0d conflicts with owner window record=%0d/%0d",
+                                 uid,
+                                 fault_redirect_resource.cancel_record_id,
+                                 fault_redirect_resource.redirect_epoch,
+                                 redirect_deleted_owner_record_id,
+                                 redirect_deleted_owner_epoch))
+            return 1'b0;
+        end
+        return cancel_record_q[record_idx].redirect_drive_done_valid &&
+               cancel_record_q[record_idx].redirect_anchor_valid &&
+               cancel_record_q[record_idx].active_scan_done &&
+               cancel_record_q[record_idx].redirect.valid &&
+               cancel_record_q[record_idx].redirect.rob_key == rob_key &&
+               cancel_record_q[record_idx].redirect.flush_itself &&
+               cancel_record_q[record_idx].redirect.level &&
+               !cancel_record_q[record_idx].redirect.is_vls_exception &&
+               rob_order_util::rob_need_flush(
+                   rob_key, cancel_record_q[record_idx].redirect);
+    endfunction:fault_cbo_applied_redirect_covers_owner
+
     function bit fault_sq_candidate_snapshot_pending(input int unsigned redirect_epoch);
         return fault_redirect_resource.valid && !fault_redirect_resource.is_lq &&
                fault_redirect_resource.redirect_epoch == redirect_epoch &&
