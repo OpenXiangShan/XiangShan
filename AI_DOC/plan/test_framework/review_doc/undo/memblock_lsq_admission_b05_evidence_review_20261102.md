@@ -24,7 +24,7 @@
 
 工作区：`/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_mother_integration_20261028`，HEAD=`e275e8819b11b2329f01f9788c47655e8711d107`。
 
-- 方案：`AI_DOC/plan/test_framework/plan/undo/memblock_lsq_rtl_equivalent_admission_formal_plan_20261031.md`。
+- 方案：`AI_DOC/plan/test_framework/plan/do/memblock_lsq_rtl_equivalent_admission_formal_plan_20261031.md`。
 - 取证：`AI_DOC/analysis/framework_design/memblock_b05_rob_sq_lifecycle_recheck_20261031.md`。
 - 原入口：`tc_dispatch_real_smoke / virtual_base_sequence / default / seed1545815340`，1000笔、CHECK_TRIGGER=0、ISSUE=1。
 - 结果：`mem_ut/ver/ut/memblock/sim/mother_b05_rob_sq_lifecycle_20261031_results/summary.log`。

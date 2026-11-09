@@ -258,6 +258,7 @@ class exception_redirect_replay_handler extends uvm_object;
     task process_pending_events();
         memblock_wb_event_t wb_event;
         memblock_wb_event_t events[$];
+        memblock_wb_event_t future_events[$];
         memblock_wb_event_t redirect_event;
         memblock_redirect_payload_t redirect;
 
@@ -274,7 +275,38 @@ class exception_redirect_replay_handler extends uvm_object;
         end
 
         while (data.pop_feedback_event(wb_event)) begin
+            if (event_is_redirect(wb_event)) begin
+                longint unsigned current_reset_epoch;
+                longint unsigned current_service_cycle;
+
+                current_reset_epoch =
+                    memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+                current_service_cycle =
+                    memblock_sync_pkg::get_dispatch_service_cycle();
+                if (!wb_event.has_control_seq ||
+                    wb_event.redirect_intent_id == 0) begin
+                    `uvm_fatal("REDIRECT_INTENT",
+                               "redirect event reached recovery without control metadata")
+                end
+                if (wb_event.control_reset_epoch != current_reset_epoch) begin
+                    `uvm_info("REDIRECT_INTENT",
+                              $sformatf("drop stale redirect intent id=%0d reset=%0d current=%0d",
+                                        wb_event.redirect_intent_id,
+                                        wb_event.control_reset_epoch,
+                                        current_reset_epoch), UVM_LOW)
+                    data.mark_redirect_intent_canceled(
+                        wb_event.redirect_intent_id);
+                    continue;
+                end
+                if (wb_event.control_eligible_seq > current_service_cycle) begin
+                    future_events.push_back(wb_event);
+                    continue;
+                end
+            end
             events.push_back(wb_event);
+        end
+        foreach (future_events[idx]) begin
+            data.exception_event_q.push_back(future_events[idx]);
         end
 
         if (select_oldest_redirect(events, redirect_event)) begin
@@ -299,6 +331,10 @@ class exception_redirect_replay_handler extends uvm_object;
             if (!data.active_redirect.valid) begin
                 data.request_redirect_flush(redirect);
                 data.push_redirect_drive(redirect);
+                if (redirect_event.source == MEMBLOCK_WB_EVENT_SOURCE_REDIRECT) begin
+                    data.mark_redirect_intent_accepted(
+                        redirect_event.redirect_intent_id);
+                end
             end
         end
 

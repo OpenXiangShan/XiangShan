@@ -1,0 +1,24 @@
+test_type,testcase_name,entry,cfg,purpose,expected_result,status
+soft_framework,atomic_issue_owner_snapshot,tc_lsq_amo_admission_soft,default,"验证atomic owner快照冻结UID、dynamic epoch、flush epoch以及STA/STD要求mask","读取值与发布值完全一致，clear后不残留旧owner",PASS_20261106
+soft_framework,atomic_missing_wb_timeout,tc_lsq_amo_admission_soft,default,"验证observer缺少atomic LDA0时前256次poll等待，第257次进入终止处理，并在写回恢复后清零计数","边界计数精确，无提前超时或永久等待",PASS_20261106
+soft_framework,casd_std_payload_swap_reject,tc_lsq_amo_admission_soft,default,"交换CAS.D compare/new两个STD payload，验证被动输入checker不接受slot正确但数据错误的样本","合法payload通过，交换payload被拒绝",PASS_20261106
+soft_framework,atomic_std_pipe1_reject,tc_lsq_amo_admission_soft,default,"把原子STD样本放到不支持的pipe1，验证固定pipe0输入约束","pipe1样本被拒绝",PASS_20261106
+soft_framework,amo_w_alu_all_ops,tc_lsq_amo_admission_soft,default,"逐项验证AMOSWAP/ADD/XOR/AND/OR/MIN/MAX/MINU/MAXU的32位运算和符号扩展","所有AMO.W新值与独立计算结果一致",PASS_20261106
+soft_framework,amo_d_alu_all_ops,tc_lsq_amo_admission_soft,default,"逐项验证AMOSWAP/ADD/XOR/AND/OR/MIN/MAX/MINU/MAXU的64位运算","所有AMO.D新值与独立计算结果一致",PASS_20261106
+soft_framework,amoaddd_memory_effect_commit,tc_lsq_amo_admission_soft,default,"构造AMOADD.D旧值、操作数和实际写回，验证RM提交后生成统一memory effect","旧值写回匹配，内存期望值等于独立ADD结果",PASS_20261106
+soft_framework,lrsc_success_memory_effect,tc_lsq_amo_admission_soft,default,"同地址LR.D后注入成功SC.D，验证reservation成功和SC写效果","LR返回旧值，SC成功并生成目标数据写效果",PASS_20261106
+soft_framework,lrsc_failure_no_write,tc_lsq_amo_admission_soft,default,"同地址LR.D后注入失败SC.D，验证失败不生成写效果并冻结SC前内存字节","无expected store effect，生成可检查的no-write obligation",PASS_20261106
+soft_framework,standalone_sc_failure_no_backing,tc_lsq_amo_admission_soft,default,"无前置LR时执行失败SC.D，验证RM不要求不存在的backing snapshot","SC失败不写内存，no-write obligation的before-valid mask为空",PASS_20261106
+soft_framework,corrupt_sc_missing_wb_reservation,tc_lsq_amo_admission_soft,default,"构造DCache corrupt SC缺少写回的终止场景，验证reservation被消费且RM游标继续","reservation清除，当前UID推进",PASS_20261106
+soft_framework,sc_no_write_shadow_obligation,tc_lsq_amo_admission_soft,default,"SC失败后由年轻原子写覆盖同一字节，验证shadowed_mask标记已无法独立核验的no-write字节","覆盖字节全部shadowed，checked_mask保持未伪造",PASS_20261106
+soft_framework,sc_bad_wb_clears_reservation,tc_lsq_amo_admission_soft,default,"破坏SC写回pdest使提交终止，验证已执行SC仍会消费LR reservation","SC提交报写回错误且reservation清除",PASS_20261106
+soft_framework,sc_missing_wb_clears_reservation,tc_lsq_amo_admission_soft,default,"构造SC最终写回缺失的终止错误，验证RM清除reservation并推进UID","reservation清除，current_uid越过SC",PASS_20261106
+soft_framework,predcache_fault_sc_missing_wb_keeps_reservation,tc_lsq_amo_admission_soft,default,"构造DCache执行前已确定异常且SC无写回，验证该SC没有真正执行时不消费reservation","reservation保持POSSIBLE",PASS_20261106
+soft_framework,denied_sc_missing_wb_clears_reservation,tc_lsq_amo_admission_soft,default,"构造DCache denied导致SC无写回，验证进入DCache后的终止路径消费reservation","reservation清除",PASS_20261106
+soft_framework,cas_w_hit_miss_memory_effect,tc_lsq_amo_admission_soft,default,"分别构造AMOCAS.W compare命中和不命中，验证32位旧值写回及条件写效果","命中生成1个写效果，不命中不写内存",PASS_20261106
+soft_framework,cas_d_hit_miss_memory_effect,tc_lsq_amo_admission_soft,default,"分别构造AMOCAS.D compare命中和不命中，验证64位旧值写回及条件写效果","命中生成1个写效果，不命中不写内存",PASS_20261106
+soft_framework,cas_q_hit_miss_memory_effect,tc_lsq_amo_admission_soft,default,"分别构造AMOCAS.Q compare命中和不命中，验证两段写回及128位条件写效果","命中生成1个128位写效果，不命中不写内存",PASS_20261106
+soft_framework,casq_missing_high_wb_reject,tc_lsq_amo_admission_soft,default,"CAS.Q只提供一条LDA0，验证两次final WB数量约束","返回ATOMIC_WB_COUNT_MISMATCH",PASS_20261106
+soft_framework,casq_low_high_pdest_swap_reject,tc_lsq_amo_admission_soft,default,"交换CAS.Q低高写回pdest，验证不能把两段数据拼接为错误的128位旧值","返回CAS结果不匹配",PASS_20261106
+soft_framework,casq_missing_high_pdest_reject,tc_lsq_amo_admission_soft,default,"删除CAS.Q高段pdest身份，验证低高写回配对检查","返回CASQ_WB_PAIR_MISMATCH",PASS_20261106
+soft_framework,fault_amo_no_memory_effect,tc_lsq_amo_admission_soft,default,"构造带预期访问异常的AMOADD.D，验证异常提交只比较异常且不产生写效果","异常匹配，expected store effect数量为0",PASS_20261106

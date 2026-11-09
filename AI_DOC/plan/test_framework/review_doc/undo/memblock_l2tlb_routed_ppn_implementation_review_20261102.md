@@ -1837,7 +1837,7 @@ endfunction:check_smoke_cfg_snapshot
 | 类别 | 文件 | 说明 |
 |---|---|---|
 | 其他RTL/接口知识文档 | `AI_DOC/analysis/interface/v2/agents/int_writeback_agent.md`、`AI_DOC/analysis/rtl/v2/flows/rob_compress_and_backend_instruction_flow.md`、`AI_DOC/analysis/rtl/v2/index.md`、`AI_DOC/analysis/rtl/v2/flows/backend_memory_writeback_flow.md` | 属于后端/写回知识维护，非本轮源码修改 |
-| 其他缺陷/准入方案 | `AI_DOC/analysis/framework_design/memblock_b05_rob_sq_lifecycle_recheck_20261031.md`、`AI_DOC/plan/test_framework/plan/undo/memblock_lsq_rtl_equivalent_admission_formal_plan_20261031.md`、`AI_DOC/plan/test_framework/review_doc/undo/memblock_lsq_admission_b05_evidence_review_20261102.md` | B05/LSQ方向，另行review |
+| 其他缺陷/准入方案 | `AI_DOC/analysis/framework_design/memblock_b05_rob_sq_lifecycle_recheck_20261031.md`、`AI_DOC/plan/test_framework/plan/do/memblock_lsq_rtl_equivalent_admission_formal_plan_20261031.md`、`AI_DOC/plan/test_framework/review_doc/undo/memblock_lsq_admission_b05_evidence_review_20261102.md` | B05/LSQ方向，另行review |
 | 既有母问题review | `AI_DOC/plan/test_framework/review_doc/undo/memblock_mother_tb_rm_bug_final_solution_review_20261031.md` | 103行章节10为既有用户修改，不stage，不把本轮review与其混合 |
 | 集成状态文档 | `AI_DOC/project_management/memblock_mother_integration_status_20261028.md` | 已有集成记录，不整体替其正确性背书 |
 | 其他参数测试 | `mem_ut/ver/ut/memblock/scripts/tests/test_runtime_parameter_priority.sh` | 参数优先级专项，非新窗口策略 |

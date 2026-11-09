@@ -99,6 +99,7 @@ package seq_pkg;
     `include "soft_test_memblock_uncache_retry_boost_sequence.sv"
     `include "soft_test_memblock_rob_admission_window_sequence.sv"
     `include "memblock_lsqenq_dispatch_base_sequence.sv"
+    `include "soft_test_memblock_lsq_amo_admission_sequence.sv"
     `include "memblock_issue_dispatch_base_sequence.sv"
     `include "memblock_lsqcommit_dispatch_base_sequence.sv"
     `include "memblock_flushsb_base_sequence.sv"

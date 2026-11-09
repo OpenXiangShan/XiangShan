@@ -296,11 +296,15 @@ function void memblock_issue_dispatch_base_sequence::assign_issue_items(input li
     foreach (items[idx]) begin
         int unsigned pipe_idx;
         memblock_issue_q_item_t fired_item;
+        memblock_op_behavior_t behavior;
 
-        pipe_idx = idx;
+        behavior = lsq_ctrl_model::derive_op_behavior(
+            data.get_main_transaction(items[idx].uid));
+        pipe_idx = behavior.is_atomic ?
+                   items[idx].issue_pipe_index : idx;
         field_assigner.assign_issue_item_fields(tr, items[idx], pipe_idx);
         fired_item = items[idx];
-        fired_item.uop_index = pipe_idx;
+        fired_item.issue_pipe_index = pipe_idx;
         fired_items.push_back(fired_item);
     end
 endfunction:assign_issue_items
@@ -312,15 +316,15 @@ function int unsigned memblock_issue_dispatch_base_sequence::port_idx_for_item(i
     case (item.target)
         MEMBLOCK_ISSUE_TARGET_LOAD: begin
             pipe_limit = MEMBLOCK_DUT_LOAD_PIPE_NUM;
-            port_idx = MEMBLOCK_DUT_LOAD_PORT_BASE + item.uop_index;
+            port_idx = MEMBLOCK_DUT_LOAD_PORT_BASE + item.issue_pipe_index;
         end
         MEMBLOCK_ISSUE_TARGET_STA: begin
             pipe_limit = MEMBLOCK_DUT_STA_PIPE_NUM;
-            port_idx = MEMBLOCK_DUT_STA_PORT_BASE + item.uop_index;
+            port_idx = MEMBLOCK_DUT_STA_PORT_BASE + item.issue_pipe_index;
         end
         MEMBLOCK_ISSUE_TARGET_STD: begin
             pipe_limit = MEMBLOCK_DUT_STD_PIPE_NUM;
-            port_idx = MEMBLOCK_DUT_STD_PORT_BASE + item.uop_index;
+            port_idx = MEMBLOCK_DUT_STD_PORT_BASE + item.issue_pipe_index;
         end
         default: begin
             `uvm_fatal(get_type_name(),
@@ -328,16 +332,16 @@ function int unsigned memblock_issue_dispatch_base_sequence::port_idx_for_item(i
             return 0;
         end
     endcase
-    if (item.uop_index >= pipe_limit) begin
+    if (item.issue_pipe_index >= pipe_limit) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("port_idx_for_item target=%0d local_pipe=%0d limit=%0d",
-                             item.target, item.uop_index, pipe_limit))
+                             item.target, item.issue_pipe_index, pipe_limit))
     end
     if (port_idx >= MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM ||
         port_idx >= MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("port_idx_for_item target=%0d local_pipe=%0d gives port=%0d total=%0d mask_w=%0d",
-                             item.target, item.uop_index, port_idx,
+                             item.target, item.issue_pipe_index, port_idx,
                              MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM,
                              MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W))
     end

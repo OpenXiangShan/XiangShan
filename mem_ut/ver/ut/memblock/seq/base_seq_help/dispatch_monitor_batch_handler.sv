@@ -180,6 +180,9 @@ class dispatch_monitor_batch_handler extends uvm_object;
             MEMBLOCK_WB_EVENT_SOURCE_STORE_WB: begin
                 return writeback_handler.handle_real_writeback_event(wb_event);
             end
+            MEMBLOCK_WB_EVENT_SOURCE_ATOMIC_WB: begin
+                return writeback_handler.handle_atomic_final_writeback_event(wb_event);
+            end
             MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK,
             MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK: begin
                 return writeback_handler.handle_issue_feedback_event(wb_event);

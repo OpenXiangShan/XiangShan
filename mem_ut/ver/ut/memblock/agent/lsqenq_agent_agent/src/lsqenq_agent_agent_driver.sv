@@ -19,6 +19,8 @@ class lsqenq_agent_agent_driver  extends tcnt_driver_base#(virtual lsqenq_agent_
     extern task send_pkt(lsqenq_agent_agent_xaction tr);
     extern task wait_lsq_can_accept(lsqenq_agent_agent_xaction tr);
     extern task sample_lsqenq_resp(lsqenq_agent_agent_xaction tr);
+    extern task publish_lsq_source_offer(input lsqenq_agent_agent_xaction tr,
+                                         input bit use_transaction_metadata);
     extern task drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
     extern function bit has_active_request(lsqenq_agent_agent_xaction tr);
     extern function void validate_v2_scalar_item(lsqenq_agent_agent_xaction tr);
@@ -41,6 +43,7 @@ task lsqenq_agent_agent_driver::reset_phase(uvm_phase phase);
 
     super.reset_phase(phase);
     phase.raise_objection(this);
+    memblock_sync_pkg::clear_lsq_source_offers();
 
     repeat(2) begin
         @this.vif.drv_mp.drv_cb;
@@ -75,20 +78,27 @@ task lsqenq_agent_agent_driver::main_phase(uvm_phase phase);
                 end
                 req.memblock_dispatch_request_launched = 1'b0;
                 req.memblock_dispatch_aborted_by_redirect = 1'b0;
+                req.memblock_source_offer_published = 1'b0;
+                req.memblock_source_offer_launch_sample_seq = 0;
+                req.memblock_source_offer_target_sample_seq = 0;
+                req.memblock_source_offer_dut_sample_seq = 0;
                 active_request = has_active_request(req);
                 if (active_request &&
                     (memblock_sync_pkg::dispatch_flush_in_progress ||
                      memblock_sync_pkg::dispatch_flush_epoch != req.memblock_dispatch_flush_epoch)) begin
                     req.memblock_dispatch_aborted_by_redirect = 1'b1;
                     this.drive_idle(this.cfg.drv_mode);
+                    publish_lsq_source_offer(req, 1'b0);
                 end else begin
                     this.send_pkt(req);
                     req.memblock_dispatch_request_launched = active_request;
+                    publish_lsq_source_offer(req, 1'b1);
                 end
                 seq_item_port.item_done();
             end
             else begin
                 this.drive_idle(this.cfg.drv_mode);
+                publish_lsq_source_offer(null, 1'b0);
             end
         end
     end
@@ -370,6 +380,48 @@ endtask:wait_lsq_can_accept
 
 task lsqenq_agent_agent_driver::sample_lsqenq_resp(lsqenq_agent_agent_xaction tr);
 endtask:sample_lsqenq_resp
+
+task lsqenq_agent_agent_driver::publish_lsq_source_offer(
+    input lsqenq_agent_agent_xaction tr,
+    input bit use_transaction_metadata
+);
+    memblock_sync_pkg::dispatch_lsq_source_offer_t offer;
+    longint unsigned launch_sample_seq;
+
+    if (!memblock_sync_pkg::get_lsq_source_offer_publish_en() ||
+        memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+        memblock_sync_pkg::l2tlb_reset_active()) begin
+        return;
+    end
+    if (use_transaction_metadata &&
+        (tr == null || !tr.memblock_source_offer_metadata_valid)) begin
+        `uvm_fatal(get_type_name(), "driven LSQ item has no source-offer metadata")
+    end
+
+    // E[n] 的真实 launch anchor 同时标识源端 Q fire，N[n] service 才重演
+    // 本拍源端信用。输出经寄存后 E[n+1] 被 DUT 采样，两者不能合并。
+    memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, launch_sample_seq);
+    if (!memblock_sync_pkg::get_lsq_source_offer_publish_en() ||
+        memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+        memblock_sync_pkg::l2tlb_reset_active()) begin
+        return;
+    end
+    offer = memblock_sync_pkg::make_lsq_source_offer_at_launch(
+        launch_sample_seq, memblock_sync_pkg::control_reset_epoch);
+    if (use_transaction_metadata) begin
+        offer.fire_mask = tr.memblock_source_offer_fire_mask;
+        offer.need_alloc_nonzero = tr.memblock_source_offer_need_alloc_nonzero;
+        offer.lq_alloc = tr.memblock_source_offer_lq_alloc;
+        offer.sq_alloc = tr.memblock_source_offer_sq_alloc;
+    end
+    memblock_sync_pkg::push_lsq_source_offer(offer);
+    if (tr != null) begin
+        tr.memblock_source_offer_published = 1'b1;
+        tr.memblock_source_offer_launch_sample_seq = offer.launch_sample_seq;
+        tr.memblock_source_offer_target_sample_seq = offer.target_sample_seq;
+        tr.memblock_source_offer_dut_sample_seq = offer.dut_sample_seq;
+    end
+endtask:publish_lsq_source_offer
 
 function bit lsqenq_agent_agent_driver::has_active_request(lsqenq_agent_agent_xaction tr);
     if (tr == null) begin

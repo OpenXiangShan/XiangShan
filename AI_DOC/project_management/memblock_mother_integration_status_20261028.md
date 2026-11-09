@@ -6,7 +6,7 @@
 
 | 子任务 | 执行人 | 状态 | 交付及限制 |
 |---|---|---|---|
-| LSQ真实RTL等价门控方案 | Carson，`01a1910d-2c8f-7080-a7bb-466ab7ef2d17` | 方案已交；两项阻断，尚不可直接coding | `AI_DOC/plan/test_framework/plan/undo/memblock_lsq_rtl_equivalent_admission_formal_plan_20261031.md`；已补寄存信用、混合前缀、固定lane与真实前级捕获；flush/epoch abort映射和多周期redirect回补归属仍待关闭，不以调大余量常量代替 |
+| LSQ真实RTL等价门控方案 | Carson，`01a1910d-2c8f-7080-a7bb-466ab7ef2d17` | 已完成 coding、基础动态验证和独立 implementation review | `AI_DOC/plan/test_framework/plan/do/memblock_lsq_rtl_equivalent_admission_formal_plan_20261031.md`；D/R/Q、registered credit、redirect/cancel 回补和隔离 AMO token 已落地，完整专项矩阵继续作为后续回归 |
 | B05原seed复跑与ROB/SQ时间线 | Mencius，`01a1910d-2d84-75e2-acc6-8b16275386fd` | 取证完成；运行1/1 PASS，但准入合法性不通过 | `tc_dispatch_real_smoke / virtual_base_sequence / default / 1545815340`，MAIN1000/CHECK0/ISSUE1、timeout1e9ns、wave1/UVM_DEBUG；mode=`mother_b05_rob_sq_lifecycle_20261031`，结果=`mem_ut/ver/ut/memblock/sim/mother_b05_rob_sq_lifecycle_20261031_results`，summary1PASS/rc0/unknown0。报告=`AI_DOC/analysis/framework_design/memblock_b05_rob_sq_lifecycle_recheck_20261031.md`；保留B05过滤，不冒充旧版本逐字节复现 |
 | 方案及动态证据主审 | 主agent | 动态证据已复核；方案保留阻断项 | `AI_DOC/plan/test_framework/review_doc/undo/memblock_lsq_admission_b05_evidence_review_20261102.md`；独立重算指针距离与132个不满足门槛的请求边沿，区分旧SQ驻留与错误准入，不以本次PASS追认历史激励合法 |
 

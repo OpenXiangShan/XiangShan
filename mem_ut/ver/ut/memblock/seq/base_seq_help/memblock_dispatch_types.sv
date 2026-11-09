@@ -885,6 +885,7 @@ typedef struct {
     memblock_num_ls_elem_t    numLsElem;
     int unsigned              uop_index;
     int unsigned              uop_count;
+    int unsigned              issue_pipe_index;
 } memblock_issue_q_item_t;
 
 typedef struct {
@@ -953,6 +954,8 @@ typedef struct {
     bit                         software_count_finalized;
     bit                         software_applied;
     bit                         observed_valid;
+    bit                         shadow_restore_consumed;
+    longint unsigned            shadow_restore_sample_seq;
     int unsigned                observed_cancel_lq_count;
     int unsigned                observed_cancel_sq_count;
 } memblock_cancel_reconcile_t;
@@ -1029,6 +1032,10 @@ typedef struct {
     // selected 阶段必须再次与 UID/ROB/status 比对，迟到旧事件不能更新新实例。
     bit                         has_dynamic_epoch;
     int unsigned                dynamic_epoch;
+    bit                         has_control_seq;
+    longint unsigned            control_eligible_seq;
+    longint unsigned            control_reset_epoch;
+    int unsigned                redirect_intent_id;
     bit                         ptw_back_replay;
     bit                         vector_ls;
     int unsigned                uop_index;

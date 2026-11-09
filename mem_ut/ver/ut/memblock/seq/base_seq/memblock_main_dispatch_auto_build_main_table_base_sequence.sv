@@ -110,6 +110,10 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
             // prepare 的 time stamp 只属于当前 reset epoch；若不清除，reset 后的
             // 首次 terminal/drain 会把 reset 前已经经过的 1us 错当作静默窗口。
             data.reset_global_stop_prepare();
+            data.reset_active_atomic_after_physical_reset("MemBlock/backend reset");
+            if (monitor_commit_handler != null) begin
+                monitor_commit_handler.reset_lsqcommit_runtime_state();
+            end
             memory_responder_final_settle_pending = 1'b0;
             memory_responder_final_settle_service_cycle = 0;
             if (control_barrier_service != null) begin
@@ -180,6 +184,9 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
 endtask:service_real_dispatch_flow
 
 task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once();
+    memblock_sync_pkg::dispatch_raw_cancel_snapshot_t ctrl_snapshot;
+    lsq_ctrl_model lsq_shadow;
+
     memblock_sync_pkg::tick_dispatch_service_cycle();
     // L2TLB adapter reset and C4-aware raw-fence service are part of the
     // dispatch service owner.  Run this first so a live reset does not let
@@ -205,6 +212,15 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
         monitor_adapter = dispatch_monitor_event_adapter::type_id::create("monitor_adapter");
     end
     monitor_adapter.drain_lsq_timing_sidebands();
+    lsq_shadow = lsq_ctrl_model::get();
+    if (!data.get_latest_ctrl_sample_snapshot(ctrl_snapshot)) begin
+        // 初始化或新 reset epoch 的首个 ctrl monitor sample 尚未发布时，
+        // LSQ shadow 还没有 baseline，所有 admission 都会保持关闭。等待下一拍
+        // 即可；一旦 snapshot 发布，add_cancel_snapshot 仍严格要求 valid+complete。
+        return;
+    end
+    lsq_shadow.advance_driver_bound_admission_sample(
+        ctrl_snapshot, data.redirect_sampled_at(ctrl_snapshot.sample_seq));
     collect_monitor_event_batch();
     // 中文注释：本拍 raw deq 必须先获得旧 owner 匹配机会；窗口到期、
     // provisional cancel finalize 和第二 redirect 放行只能发生在其后。

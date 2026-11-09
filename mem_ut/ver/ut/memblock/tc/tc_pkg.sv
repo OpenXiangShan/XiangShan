@@ -84,6 +84,7 @@ package tc_pkg;
     `include "soft_test_tc_l2tlb_ppn_reuse.sv"
     `include "soft_test_tc_l2tlb_pbmt_csr_gate.sv"
     `include "soft_test_tc_rm_pbmt_effective_fault.sv"
+    `include "soft_test_tc_lsq_amo_admission.sv"
     `include "tc_dispatch_real_smoke.sv"
     `include "tc_dispatch_real_store_smoke.sv"
     `include "tc_dispatch_real_store_wb_smoke.sv"

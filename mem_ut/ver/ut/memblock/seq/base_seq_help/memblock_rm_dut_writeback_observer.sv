@@ -362,6 +362,43 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
         return 1'b0;
     endfunction:read_latest_load_by_rob
 
+    function bit read_atomic_loads_by_rob(
+        input memblock_rob_key_t rob_key,
+        input longint unsigned minimum_sample_seq,
+        input int unsigned minimum_flush_epoch,
+        output writeback_record_q_t records
+    );
+        writeback_record_t swap_record;
+        records.delete();
+        foreach (writeback_history_q[index]) begin
+            if (writeback_history_q[index].valid &&
+                writeback_history_q[index].source_kind == RM_WB_SOURCE_LDA &&
+                writeback_history_q[index].lane == 0 &&
+                writeback_history_q[index].rob_valid &&
+                writeback_history_q[index].rob_flag_valid &&
+                writeback_history_q[index].rob_flag === rob_key.flag &&
+                writeback_history_q[index].rob_value === rob_key.value &&
+                writeback_history_q[index].sample_seq >= minimum_sample_seq &&
+                writeback_history_q[index].sample_flush_epoch == minimum_flush_epoch &&
+                writeback_history_q[index].replay_inst_valid &&
+                writeback_history_q[index].replay_inst === 1'b0 &&
+                writeback_history_q[index].flush_pipe_valid &&
+                writeback_history_q[index].flush_pipe === 1'b0) begin
+                records.push_back(writeback_history_q[index]);
+            end
+        end
+        for (int unsigned left = 0; left < records.size(); left++) begin
+            for (int unsigned right = left + 1; right < records.size(); right++) begin
+                if (records[right].sample_seq < records[left].sample_seq) begin
+                    swap_record = records[left];
+                    records[left] = records[right];
+                    records[right] = swap_record;
+                end
+            end
+        end
+        return records.size() != 0;
+    endfunction:read_atomic_loads_by_rob
+
 endclass:memblock_rm_dut_writeback_observer
 
 `endif // MEMBLOCK_RM_DUT_WRITEBACK_OBSERVER__SV

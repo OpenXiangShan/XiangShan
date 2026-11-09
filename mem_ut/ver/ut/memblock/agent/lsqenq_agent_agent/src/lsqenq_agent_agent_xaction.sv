@@ -23,6 +23,17 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     bit memblock_dispatch_aborted_by_redirect;
     bit memblock_dispatch_request_launched;
     int unsigned memblock_dispatch_flush_epoch;
+    // sequence 只冻结 payload；driver 在真实 launch 时填 source=n/dut=n+1。
+    // published 表示 driver 已记录本拍，不能据此提前开放普通 LSQ issue。
+    bit memblock_source_offer_metadata_valid;
+    bit [`MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM-1:0] memblock_source_offer_fire_mask;
+    bit memblock_source_offer_need_alloc_nonzero;
+    int unsigned memblock_source_offer_lq_alloc;
+    int unsigned memblock_source_offer_sq_alloc;
+    bit memblock_source_offer_published;
+    longint unsigned memblock_source_offer_launch_sample_seq;
+    longint unsigned memblock_source_offer_target_sample_seq;
+    longint unsigned memblock_source_offer_dut_sample_seq;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_0;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_1;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_2;
@@ -883,6 +894,15 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(memblock_dispatch_aborted_by_redirect, UVM_ALL_ON);
         `uvm_field_int(memblock_dispatch_request_launched, UVM_ALL_ON);
         `uvm_field_int(memblock_dispatch_flush_epoch, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_metadata_valid, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_fire_mask, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_need_alloc_nonzero, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_lq_alloc, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_sq_alloc, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_published, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_launch_sample_seq, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_target_sample_seq, UVM_ALL_ON);
+        `uvm_field_int(memblock_source_offer_dut_sample_seq, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_0, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_1, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_2, UVM_ALL_ON);
@@ -1450,6 +1470,15 @@ function lsqenq_agent_agent_xaction::new(string name = "lsqenq_agent_agent_xacti
     memblock_dispatch_aborted_by_redirect = 1'b0;
     memblock_dispatch_request_launched = 1'b0;
     memblock_dispatch_flush_epoch = 0;
+    memblock_source_offer_metadata_valid = 1'b0;
+    memblock_source_offer_fire_mask = '0;
+    memblock_source_offer_need_alloc_nonzero = 1'b0;
+    memblock_source_offer_lq_alloc = 0;
+    memblock_source_offer_sq_alloc = 0;
+    memblock_source_offer_published = 1'b0;
+    memblock_source_offer_launch_sample_seq = 0;
+    memblock_source_offer_target_sample_seq = 0;
+    memblock_source_offer_dut_sample_seq = 0;
 endfunction:new
 
 function void lsqenq_agent_agent_xaction::pack();
@@ -1669,13 +1698,22 @@ function string lsqenq_agent_agent_xaction::psdisplay(string prefix = "");
                         pkt_str,
                         this.pre_pkt_gap,
                         this.post_pkt_gap);
-    pkt_str = $sformatf("%swait_can_accept=%0b ready_timeout=%0d request_launched=%0b aborted_by_redirect=%0b flush_epoch=%0d ",
+    pkt_str = $sformatf("%swait_can_accept=%0b ready_timeout=%0d request_launched=%0b aborted_by_redirect=%0b flush_epoch=%0d offer={meta=%0b published=%0b launch/source/dut=%0d/%0d/%0d mask=0x%0h alloc=%0b/%0d/%0d} ",
                         pkt_str,
                         this.memblock_dispatch_wait_can_accept,
                         this.memblock_dispatch_ready_timeout,
                         this.memblock_dispatch_request_launched,
                         this.memblock_dispatch_aborted_by_redirect,
-                        this.memblock_dispatch_flush_epoch);
+                        this.memblock_dispatch_flush_epoch,
+                        this.memblock_source_offer_metadata_valid,
+                        this.memblock_source_offer_published,
+                        this.memblock_source_offer_launch_sample_seq,
+                        this.memblock_source_offer_target_sample_seq,
+                        this.memblock_source_offer_dut_sample_seq,
+                        this.memblock_source_offer_fire_mask,
+                        this.memblock_source_offer_need_alloc_nonzero,
+                        this.memblock_source_offer_lq_alloc,
+                        this.memblock_source_offer_sq_alloc);
     for (int unsigned slot = 0; slot < `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM; slot++) begin
         fields = get_v2_extra_fields(slot);
         pkt_str = $sformatf("%sslot%0d_v2_extra={exceptionVec=0x%0h trigger=0x%0h fuOpType=0x%0h flushPipe=%0b lastUop=%0b} ",
@@ -1793,7 +1831,16 @@ function bit lsqenq_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer co
             this.memblock_dispatch_ready_timeout != rhs_.memblock_dispatch_ready_timeout ||
             this.memblock_dispatch_request_launched != rhs_.memblock_dispatch_request_launched ||
             this.memblock_dispatch_aborted_by_redirect != rhs_.memblock_dispatch_aborted_by_redirect ||
-            this.memblock_dispatch_flush_epoch != rhs_.memblock_dispatch_flush_epoch) begin
+            this.memblock_dispatch_flush_epoch != rhs_.memblock_dispatch_flush_epoch ||
+            this.memblock_source_offer_metadata_valid != rhs_.memblock_source_offer_metadata_valid ||
+            this.memblock_source_offer_fire_mask != rhs_.memblock_source_offer_fire_mask ||
+            this.memblock_source_offer_need_alloc_nonzero != rhs_.memblock_source_offer_need_alloc_nonzero ||
+            this.memblock_source_offer_lq_alloc != rhs_.memblock_source_offer_lq_alloc ||
+            this.memblock_source_offer_sq_alloc != rhs_.memblock_source_offer_sq_alloc ||
+            this.memblock_source_offer_published != rhs_.memblock_source_offer_published ||
+            this.memblock_source_offer_launch_sample_seq != rhs_.memblock_source_offer_launch_sample_seq ||
+            this.memblock_source_offer_target_sample_seq != rhs_.memblock_source_offer_target_sample_seq ||
+            this.memblock_source_offer_dut_sample_seq != rhs_.memblock_source_offer_dut_sample_seq) begin
             super_result = 0;
             `uvm_info(get_type_name(),
                       $sformatf("compare fail for dispatch metadata: this={wait=%0b timeout=%0d launched=%0b aborted=%0b epoch=%0d} rhs={wait=%0b timeout=%0d launched=%0b aborted=%0b epoch=%0d}",

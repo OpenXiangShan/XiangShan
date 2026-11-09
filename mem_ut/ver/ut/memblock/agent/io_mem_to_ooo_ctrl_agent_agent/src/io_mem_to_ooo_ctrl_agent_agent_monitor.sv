@@ -687,8 +687,14 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
 
                 // 中文伪代码：每个可见 DUT sample 都记录 held cancel level，零值也保留；
                 // adapter/LSQ owner 只在对应 redirect target sample 消费一次。
+                cancel_snapshot.valid = 1'b1;
+                cancel_snapshot.complete = 1'b1;
+                cancel_snapshot.lq_deq_count = io_mem_to_ooo_lqDeq;
+                cancel_snapshot.sq_deq_count = io_mem_to_ooo_sqDeq;
                 cancel_snapshot.lq_cancel_count = io_mem_to_ooo_lqCancelCnt;
                 cancel_snapshot.sq_cancel_count = io_mem_to_ooo_sqCancelCnt;
+                cancel_snapshot.backend_done = memblock_sync_pkg::reset_backend_done;
+                cancel_snapshot.control_reset_epoch = memblock_sync_pkg::control_reset_epoch;
                 cancel_snapshot.sample_seq = sample_seq;
                 cancel_snapshot.cycle = $time;
                 memblock_sync_pkg::push_raw_cancel_snapshot(cancel_snapshot);

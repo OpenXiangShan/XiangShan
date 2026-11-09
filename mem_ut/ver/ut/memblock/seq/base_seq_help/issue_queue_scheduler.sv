@@ -66,6 +66,7 @@ class issue_queue_scheduler extends uvm_object;
         item.numLsElem   = '0;
         item.uop_index   = 0;
         item.uop_count   = 0;
+        item.issue_pipe_index = 0;
         return item;
     endfunction:make_empty_item
 
@@ -109,6 +110,19 @@ class issue_queue_scheduler extends uvm_object;
         item.has_sqIdx   = status.active_sq_mapped;
         item.sq_key.flag = status.sqIdx_flag;
         item.sq_key.value = status.sqIdx_value;
+        if (behavior.is_atomic) begin
+            // Atomic indices are non-owning dispatch snapshots.  Preserve their
+            // identity on issue fields without creating an LQ/SQ owner.
+            item.has_lqIdx = 1'b0;
+            item.lq_key.flag = main_tr.lqIdx_flag;
+            item.lq_key.value = main_tr.lqIdx_value;
+            item.has_sqIdx = 1'b0;
+            item.sq_key.flag = main_tr.sqIdx_flag;
+            item.sq_key.value = main_tr.sqIdx_value;
+            if (status.active_lq_mapped || status.active_sq_mapped) begin
+                `uvm_fatal("ISSUE_Q", "atomic issue item unexpectedly owns an LQ/SQ entry")
+            end
+        end
         item.numLsElem   = behavior.num_ls_elem;
         item.uop_index   = 0;
         item.uop_count   = 1;
@@ -227,6 +241,39 @@ class issue_queue_scheduler extends uvm_object;
         set_target_queued(uid, target, 1'b1);
     endfunction:route_target
 
+    function void route_atomic_target_slots(input memblock_uid_t uid,
+                                            input memblock_issue_target_e target,
+                                            input memblock_op_behavior_t behavior);
+        int unsigned slot_list[$];
+
+        if (target == MEMBLOCK_ISSUE_TARGET_STA) begin
+            slot_list.push_back(0);
+            if (behavior.atomic_sta_uop_count == 2) slot_list.push_back(2);
+        end else if (target == MEMBLOCK_ISSUE_TARGET_STD) begin
+            for (int unsigned slot = 0; slot < behavior.atomic_data_uop_count; slot++) begin
+                slot_list.push_back(slot);
+            end
+        end else begin
+            `uvm_fatal("ISSUE_Q", "atomic target must be STA or STD")
+        end
+        foreach (slot_list[idx]) begin
+            memblock_issue_q_item_t item;
+            status_transaction status;
+            status = data.get_status(uid);
+            if ((target == MEMBLOCK_ISSUE_TARGET_STA &&
+                 status.atomic_sta_fired_mask[slot_list[idx]]) ||
+                (target == MEMBLOCK_ISSUE_TARGET_STD &&
+                 status.atomic_std_fired_mask[slot_list[idx]])) begin
+                continue;
+            end
+            item = make_issue_item(uid, target, behavior);
+            item.uop_index = slot_list[idx];
+            item.issue_pipe_index = 0;
+            data.push_issue_queue_item(item);
+        end
+        set_target_queued(uid, target, slot_list.size() != 0);
+    endfunction:route_atomic_target_slots
+
     function void route_uid(input memblock_uid_t uid);
         main_control_transaction main_tr;
         memblock_op_behavior_t   behavior;
@@ -240,6 +287,11 @@ class issue_queue_scheduler extends uvm_object;
             return;
         end
         behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        if (behavior.is_atomic) begin
+            route_atomic_target_slots(uid, MEMBLOCK_ISSUE_TARGET_STA, behavior);
+            route_atomic_target_slots(uid, MEMBLOCK_ISSUE_TARGET_STD, behavior);
+            return;
+        end
         if (behavior.route_load) begin
             route_target(uid, MEMBLOCK_ISSUE_TARGET_LOAD, behavior);
         end
@@ -311,17 +363,24 @@ class issue_queue_scheduler extends uvm_object;
         if (data.issue_blocked_by_global_flush()) begin
             return 1'b0;
         end
+        if (!data.atomic_barrier_allows_issue(item.uid)) begin
+            return 1'b0;
+        end
         return is_issue_item_state_eligible(item);
     endfunction:is_issue_item_eligible
 
     function bit is_issue_item_state_eligible(input memblock_issue_q_item_t item);
         status_transaction status;
+        main_control_transaction main_tr;
+        memblock_op_behavior_t behavior;
         bit                eligible;
         ensure_data();
         if (item.target == MEMBLOCK_ISSUE_TARGET_NONE || !data.is_valid_uid(item.uid)) begin
             return 1'b0;
         end
         status = data.get_status(item.uid);
+        main_tr = data.get_main_transaction(item.uid);
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
         if (!status.active || !status.enq || !status.issue_ready) begin
             return 1'b0;
         end
@@ -341,6 +400,12 @@ class issue_queue_scheduler extends uvm_object;
         if (!data.target_replay_seq_match(status, item.target, item.replay_seq) ||
             item.ready_cycle != 0) begin
             return 1'b0;
+        end
+        if (behavior.is_atomic) begin
+            return data.active_atomic_barrier_valid &&
+                   data.active_atomic_barrier_uid == item.uid &&
+                   item.issue_pipe_index == 0 &&
+                   data.issue_queue_contains_exact(item);
         end
         case (item.target)
             MEMBLOCK_ISSUE_TARGET_LOAD: eligible = !status.load_dispatched && !status.writeback && !status.pass;
@@ -416,7 +481,9 @@ class issue_queue_scheduler extends uvm_object;
                left.target == right.target &&
                left.rob_key == right.rob_key &&
                left.replay_seq == right.replay_seq &&
-               left.dynamic_epoch == right.dynamic_epoch;
+               left.dynamic_epoch == right.dynamic_epoch &&
+               left.uop_index == right.uop_index &&
+               left.issue_pipe_index == right.issue_pipe_index;
     endfunction:same_issue_item_identity
 
     function bit find_oldest_uncache_retry_boost(
@@ -597,7 +664,93 @@ class issue_queue_scheduler extends uvm_object;
         sta_items.delete();
         std_items.delete();
         if (data.issue_blocked_by_global_flush()) begin
+            // 合法 redirect 只能撤销尚未 fire 的冻结片；已 fire 原子跨普通
+            // redirect 仍由该检查 fail-fast，不能悄悄换一片或清空状态。
+            data.clear_unfired_atomic_held_piece("redirect/flush before atomic fire");
             data.issue_freeze_ack = 1'b1;
+            return;
+        end
+        if (data.active_atomic_barrier_valid) begin
+            memblock_issue_q_item_t sta_eligible[$];
+            memblock_issue_q_item_t std_eligible[$];
+            memblock_issue_q_item_t selected;
+            main_control_transaction atomic_tr;
+            int unsigned mode;
+            bit choose_std;
+
+            if (data.atomic_held_piece_valid) begin
+                selected = data.atomic_held_piece;
+                if (selected.uid != data.active_atomic_barrier_uid ||
+                    !is_issue_item_eligible(selected)) begin
+                    `uvm_fatal("ATOMIC_HELD_PIECE",
+                               $sformatf("held piece is no longer eligible uid/target/slot=%0d/%0d/%0d",
+                                         selected.uid, selected.target,
+                                         selected.uop_index))
+                end
+                selected.issue_pipe_index = 0;
+                case (selected.target)
+                    MEMBLOCK_ISSUE_TARGET_STA: sta_items.push_back(selected);
+                    MEMBLOCK_ISSUE_TARGET_STD: std_items.push_back(selected);
+                    default: `uvm_fatal("ATOMIC_HELD_PIECE", "held atomic target is not STA/STD")
+                endcase
+                return;
+            end
+
+            foreach (data.sta_issue_q[idx]) begin
+                memblock_issue_q_item_t item;
+                item = data.sta_issue_q[idx];
+                if (item.uid != data.active_atomic_barrier_uid ||
+                    !is_issue_item_eligible(item)) continue;
+                if (item.uop_index == 2) begin
+                    bit sta0_pending;
+                    sta0_pending = 1'b0;
+                    foreach (data.sta_issue_q[jdx]) begin
+                        if (data.sta_issue_q[jdx].uid == item.uid &&
+                            data.sta_issue_q[jdx].uop_index == 0) sta0_pending = 1'b1;
+                    end
+                    if (sta0_pending) continue;
+                end
+                sta_eligible.push_back(item);
+            end
+            foreach (data.std_issue_q[idx]) begin
+                if (data.std_issue_q[idx].uid == data.active_atomic_barrier_uid &&
+                    is_issue_item_eligible(data.std_issue_q[idx]))
+                    std_eligible.push_back(data.std_issue_q[idx]);
+            end
+            if (sta_eligible.size() == 0 && std_eligible.size() == 0) return;
+            atomic_tr = data.get_main_transaction(data.active_atomic_barrier_uid);
+            mode = seq_csr_common::get_amo_issue_order_mode();
+            choose_std = std_eligible.size() != 0 &&
+                         ((atomic_tr.fuOpType inside {MEMBLOCK_LSUOP_LR_W, MEMBLOCK_LSUOP_LR_D}) ||
+                          atomic_tr.amo_expect_misaligned || sta_eligible.size() == 0 ||
+                          mode == 0 || (mode == 2 && $urandom_range(1, 0) == 0));
+            if (choose_std) begin
+                int selected_idx;
+                selected_idx = 0;
+                if (seq_csr_common::get_amo_std_shuffle_en() && std_eligible.size() > 1) begin
+                    selected_idx = $urandom_range(std_eligible.size() - 1, 0);
+                end else begin
+                    foreach (std_eligible[idx]) begin
+                        if (std_eligible[idx].uop_index < std_eligible[selected_idx].uop_index)
+                            selected_idx = idx;
+                    end
+                end
+                selected = std_eligible[selected_idx];
+                selected.issue_pipe_index = 0;
+                data.hold_atomic_issue_piece(selected);
+                std_items.push_back(selected);
+            end else begin
+                int selected_idx;
+                selected_idx = 0;
+                foreach (sta_eligible[idx]) begin
+                    if (sta_eligible[idx].uop_index < sta_eligible[selected_idx].uop_index)
+                        selected_idx = idx;
+                end
+                selected = sta_eligible[selected_idx];
+                selected.issue_pipe_index = 0;
+                data.hold_atomic_issue_piece(selected);
+                sta_items.push_back(selected);
+            end
             return;
         end
 
@@ -667,6 +820,7 @@ class issue_queue_scheduler extends uvm_object;
 
     function bit mark_issue_fire(input memblock_issue_q_item_t item);
         int unsigned issue_epoch;
+        memblock_op_behavior_t behavior;
 
         ensure_data();
         if (data.issue_blocked_by_global_flush()) begin
@@ -675,12 +829,44 @@ class issue_queue_scheduler extends uvm_object;
         if (!is_issue_item_eligible(item)) begin
             return 1'b0;
         end
-        if (!data.mark_issue_snapshot(item.uid, item.target, issue_epoch)) begin
-            return 1'b0;
+        behavior = lsq_ctrl_model::derive_op_behavior(data.get_main_transaction(item.uid));
+        if (behavior.is_atomic) begin
+            status_transaction status;
+            status = data.get_status(item.uid);
+            if (item.uop_index >= 4 ||
+                (item.target == MEMBLOCK_ISSUE_TARGET_STA &&
+                 status.atomic_sta_fired_mask[item.uop_index]) ||
+                (item.target == MEMBLOCK_ISSUE_TARGET_STD &&
+                 status.atomic_std_fired_mask[item.uop_index])) begin
+                `uvm_fatal("ISSUE_Q", "atomic piece fired twice or used an invalid slot")
+            end
+            if (!data.mark_atomic_issue_snapshot(item.uid, item.target,
+                                                 item.uop_index, issue_epoch)) begin
+                return 1'b0;
+            end
+            data.consume_atomic_held_piece(item);
+            if (item.target == MEMBLOCK_ISSUE_TARGET_STA)
+                status.atomic_sta_fired_mask[item.uop_index] = 1'b1;
+            else
+                status.atomic_std_fired_mask[item.uop_index] = 1'b1;
+            status.atomic_piece_fire_count++;
+            void'(data.try_finalize_atomic_owner(item.uid, memblock_sync_pkg::get_dispatch_service_cycle()));
+            data.delete_issue_queue_entry_exact(item);
+            if (data.issue_queue_contains(item.target, item.uid, item.replay_seq)) begin
+                set_target_queued(item.uid, item.target, 1'b1);
+                set_target_dispatched(item.uid, item.target, 1'b0);
+            end else begin
+                set_target_queued(item.uid, item.target, 1'b0);
+                set_target_dispatched(item.uid, item.target, 1'b1);
+            end
+        end else begin
+            if (!data.mark_issue_snapshot(item.uid, item.target, issue_epoch)) begin
+                return 1'b0;
+            end
+            data.delete_issue_queue_entry(item.target, item.uid, item.replay_seq, 1'b1);
+            set_target_queued(item.uid, item.target, 1'b0);
+            set_target_dispatched(item.uid, item.target, 1'b1);
         end
-        data.delete_issue_queue_entry(item.target, item.uid, item.replay_seq, 1'b1);
-        set_target_queued(item.uid, item.target, 1'b0);
-        set_target_dispatched(item.uid, item.target, 1'b1);
         data.clear_replay_target_after_fire(item.uid, item.target);
         void'(data.consume_uncache_retry_boost_after_issue(item));
         return 1'b1;
@@ -688,8 +874,14 @@ class issue_queue_scheduler extends uvm_object;
 
     function bit mark_issue_fire_already_accepted(input memblock_issue_q_item_t item);
         int unsigned issue_epoch;
+        memblock_op_behavior_t behavior;
 
         ensure_data();
+        behavior = lsq_ctrl_model::derive_op_behavior(data.get_main_transaction(item.uid));
+        if (behavior.is_atomic) begin
+            `uvm_fatal("ATOMIC_REDIRECT",
+                       "atomic piece fired across an active ordinary redirect/flush")
+        end
         if (!is_issue_item_state_eligible(item)) begin
             return 1'b0;
         end

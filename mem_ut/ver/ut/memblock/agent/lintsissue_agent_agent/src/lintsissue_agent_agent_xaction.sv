@@ -20,6 +20,14 @@ class lintsissue_agent_agent_xaction  extends tcnt_data_base;
     int unsigned memblock_dispatch_ready_timeout;
     bit memblock_dispatch_aborted_by_redirect;
     int unsigned memblock_dispatch_flush_epoch;
+    longint unsigned memblock_monitor_sample_seq;
+    int unsigned memblock_monitor_flush_epoch;
+    bit memblock_monitor_atomic_owner_valid;
+    int unsigned memblock_monitor_atomic_owner_uid;
+    int unsigned memblock_monitor_atomic_owner_dynamic_epoch;
+    int unsigned memblock_monitor_atomic_owner_activation_flush_epoch;
+    bit [3:0] memblock_monitor_atomic_owner_required_sta_mask;
+    bit [3:0] memblock_monitor_atomic_owner_required_std_mask;
     bit [(`MEMBLOCK_DUT_LOAD_PORT_BASE + `MEMBLOCK_DUT_LOAD_PIPE_NUM +
           `MEMBLOCK_DUT_STA_PIPE_NUM + `MEMBLOCK_DUT_STD_PIPE_NUM)-1:0]
         memblock_dispatch_fired_mask;
@@ -151,6 +159,14 @@ class lintsissue_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(memblock_dispatch_ready_timeout, UVM_ALL_ON);
         `uvm_field_int(memblock_dispatch_aborted_by_redirect, UVM_ALL_ON);
         `uvm_field_int(memblock_dispatch_flush_epoch, UVM_ALL_ON);
+        `uvm_field_int(memblock_monitor_sample_seq, UVM_ALL_ON);
+        `uvm_field_int(memblock_monitor_flush_epoch, UVM_ALL_ON);
+        `uvm_field_int(memblock_monitor_atomic_owner_valid, UVM_ALL_ON);
+        `uvm_field_int(memblock_monitor_atomic_owner_uid, UVM_ALL_ON);
+        `uvm_field_int(memblock_monitor_atomic_owner_dynamic_epoch, UVM_ALL_ON);
+        `uvm_field_int(memblock_monitor_atomic_owner_activation_flush_epoch, UVM_ALL_ON);
+        `uvm_field_int(memblock_monitor_atomic_owner_required_sta_mask, UVM_ALL_ON);
+        `uvm_field_int(memblock_monitor_atomic_owner_required_std_mask, UVM_ALL_ON);
         `uvm_field_int(memblock_dispatch_fired_mask, UVM_ALL_ON);
 
         `uvm_field_int(io_ooo_to_mem_issueLda_0_bits_src_0, UVM_ALL_ON);
@@ -402,6 +418,14 @@ function lintsissue_agent_agent_xaction::new(string name = "lintsissue_agent_age
     memblock_dispatch_ready_timeout = 1000;
     memblock_dispatch_aborted_by_redirect = 1'b0;
     memblock_dispatch_flush_epoch = 0;
+    memblock_monitor_sample_seq = 0;
+    memblock_monitor_flush_epoch = 0;
+    memblock_monitor_atomic_owner_valid = 1'b0;
+    memblock_monitor_atomic_owner_uid = 0;
+    memblock_monitor_atomic_owner_dynamic_epoch = 0;
+    memblock_monitor_atomic_owner_activation_flush_epoch = 0;
+    memblock_monitor_atomic_owner_required_sta_mask = '0;
+    memblock_monitor_atomic_owner_required_std_mask = '0;
     memblock_dispatch_fired_mask = '0;
 endfunction:new
 

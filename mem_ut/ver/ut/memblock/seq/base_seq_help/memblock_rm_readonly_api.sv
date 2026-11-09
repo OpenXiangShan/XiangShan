@@ -51,6 +51,7 @@ endfunction:memblock_rm_format_load_data
 class memblock_rm_readonly_api extends uvm_object;
 
     typedef memblock_rm_dut_writeback_record_t dut_writeback_view_t;
+    typedef dut_writeback_view_t dut_writeback_view_q_t[$];
     typedef mem_access_base_sequence::mem_addr_t      mem_addr_t;
     typedef mem_access_base_sequence::mem_line_addr_t mem_line_addr_t;
     typedef mem_access_base_sequence::mem_line_data_t mem_line_data_t;
@@ -87,6 +88,10 @@ class memblock_rm_readonly_api extends uvm_object;
         bit                  pma_af;
         bit                  corrupt;
         bit                  denied;
+        bit                  amo_expect_misaligned;
+        int unsigned         amo_alignment_bytes;
+        bit [3:0]            atomic_std_valid_mask;
+        bit [255:0]          atomic_std_data_flat;
         int unsigned         delay;
         int unsigned         send_pri;
         int unsigned         send_pri_std;
@@ -134,6 +139,20 @@ class memblock_rm_readonly_api extends uvm_object;
         bit                  active_lq_mapped;
         bit                  active_sq_mapped;
         int unsigned         dynamic_epoch;
+        bit [3:0]            atomic_required_sta_mask;
+        bit [3:0]            atomic_required_std_mask;
+        bit [3:0]            atomic_sta_fired_mask;
+        bit [3:0]            atomic_std_fired_mask;
+        int unsigned         atomic_final_wb_expected_count;
+        int unsigned         atomic_final_wb_seen_count;
+        bit                  atomic_pending_fault;
+        bit                  atomic_finalized;
+        bit                  active_instance_flush_epoch_valid;
+        int unsigned         active_instance_flush_epoch;
+        bit                  sta_instance_flush_epoch_valid;
+        int unsigned         sta_instance_flush_epoch;
+        bit                  std_instance_flush_epoch_valid;
+        int unsigned         std_instance_flush_epoch;
         int unsigned         load_issue_epoch;
         bit                  load_instance_flush_epoch_valid;
         int unsigned         load_instance_flush_epoch;
@@ -391,6 +410,14 @@ class memblock_rm_readonly_api extends uvm_object;
         input memblock_rob_key_t key,
         output dut_writeback_view_t view
     );
+    extern function bit read_dut_atomic_writebacks_for_rm(
+        input memblock_uid_t uid,
+        input memblock_rob_key_t key,
+        input int unsigned dynamic_epoch,
+        input int unsigned expected_count,
+        input longint unsigned minimum_sample_seq,
+        output dut_writeback_view_q_t records
+    );
     extern function bit read_observer_capability_for_rm(
         output memblock_rm_observer_cache::capability_view_t view
     );
@@ -427,6 +454,11 @@ class memblock_rm_readonly_api extends uvm_object;
     extern function bit read_status_for_rm(
         input  memblock_uid_t uid,
         output status_view_t view
+    );
+    extern function bit read_active_atomic_owner_for_rm(
+        output memblock_uid_t uid,
+        output main_transaction_view_t main_view,
+        output status_view_t status_view
     );
     extern function bit read_issue_membership_for_rm(
         input  memblock_uid_t uid,
@@ -628,6 +660,29 @@ function bit memblock_rm_readonly_api::read_dut_load_writeback_for_rm(
     return m_dut_writeback_observer.read_latest_load_by_rob(key, view);
 endfunction:read_dut_load_writeback_for_rm
 
+function bit memblock_rm_readonly_api::read_dut_atomic_writebacks_for_rm(
+    input memblock_uid_t uid,
+    input memblock_rob_key_t key,
+    input int unsigned dynamic_epoch,
+    input int unsigned expected_count,
+    input longint unsigned minimum_sample_seq,
+    output dut_writeback_view_q_t records
+);
+    status_view_t status_view;
+
+    records.delete();
+    void'(get());
+    if (!read_status_for_rm(uid, status_view) || !status_view.valid ||
+        status_view.dynamic_epoch != dynamic_epoch ||
+        !status_view.active_instance_flush_epoch_valid || expected_count == 0 ||
+        expected_count > 2) begin
+        return 1'b0;
+    end
+    void'(m_dut_writeback_observer.read_atomic_loads_by_rob(
+        key, minimum_sample_seq, status_view.active_instance_flush_epoch, records));
+    return records.size() >= expected_count;
+endfunction:read_dut_atomic_writebacks_for_rm
+
 function bit memblock_rm_readonly_api::read_observer_capability_for_rm(
     output memblock_rm_observer_cache::capability_view_t view
 );
@@ -759,6 +814,12 @@ function void memblock_rm_readonly_api::copy_main_transaction(
     view.pma_af             = source.pmaAF;
     view.corrupt            = source.corrupt;
     view.denied             = source.denied;
+    view.amo_expect_misaligned = source.amo_expect_misaligned;
+    view.amo_alignment_bytes = source.amo_alignment_bytes;
+    foreach (source.std_data_override_valid[slot]) begin
+        view.atomic_std_valid_mask[slot] = source.std_data_override_valid[slot];
+        view.atomic_std_data_flat[(slot * 64) +: 64] = source.std_data_override[slot];
+    end
     view.delay              = source.delay;
     view.send_pri           = source.send_pri;
     view.send_pri_std       = source.send_pri_std;
@@ -810,6 +871,20 @@ function void memblock_rm_readonly_api::copy_status(
     view.active_lq_mapped   = source.active_lq_mapped;
     view.active_sq_mapped   = source.active_sq_mapped;
     view.dynamic_epoch      = source.dynamic_epoch;
+    view.atomic_required_sta_mask = source.atomic_required_sta_mask;
+    view.atomic_required_std_mask = source.atomic_required_std_mask;
+    view.atomic_sta_fired_mask = source.atomic_sta_fired_mask;
+    view.atomic_std_fired_mask = source.atomic_std_fired_mask;
+    view.atomic_final_wb_expected_count = source.atomic_final_wb_expected_count;
+    view.atomic_final_wb_seen_count = source.atomic_final_wb_seen_count;
+    view.atomic_pending_fault = source.atomic_pending_fault;
+    view.atomic_finalized = source.atomic_finalized;
+    view.active_instance_flush_epoch_valid = source.active_instance_flush_epoch_valid;
+    view.active_instance_flush_epoch = source.active_instance_flush_epoch;
+    view.sta_instance_flush_epoch_valid = source.sta_instance_flush_epoch_valid;
+    view.sta_instance_flush_epoch = source.sta_instance_flush_epoch;
+    view.std_instance_flush_epoch_valid = source.std_instance_flush_epoch_valid;
+    view.std_instance_flush_epoch = source.std_instance_flush_epoch;
     view.load_issue_epoch   = source.load_issue_epoch;
     view.load_instance_flush_epoch_valid = source.load_instance_flush_epoch_valid;
     view.load_instance_flush_epoch = source.load_instance_flush_epoch;
@@ -985,6 +1060,24 @@ function bit memblock_rm_readonly_api::read_status_for_rm(
     copy_status(data.status_by_uid[uid], view);
     return 1'b1;
 endfunction:read_status_for_rm
+
+function bit memblock_rm_readonly_api::read_active_atomic_owner_for_rm(
+    output memblock_uid_t uid,
+    output main_transaction_view_t main_view,
+    output status_view_t status_view
+);
+    common_data_transaction data;
+
+    uid = '0;
+    main_view = '{default:'0};
+    status_view = '{default:'0};
+    if (!try_get_common_data(data) || data == null ||
+        !data.active_atomic_barrier_valid) return 1'b0;
+    uid = data.active_atomic_barrier_uid;
+    return read_main_transaction_for_rm(uid, main_view) &&
+           read_status_for_rm(uid, status_view) &&
+           main_view.valid && status_view.valid;
+endfunction:read_active_atomic_owner_for_rm
 
 function bit memblock_rm_readonly_api::read_issue_membership_for_rm(
     input  memblock_uid_t uid,

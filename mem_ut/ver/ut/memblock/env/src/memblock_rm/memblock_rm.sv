@@ -26,10 +26,16 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     bit          observer_mismatch_reported;
     // 中文注释：只为当前提交UID等待首段被动证据；成功/普通失败清0，256次poll后明确报错。
     int unsigned observer_first_split_wait_count;
+    int unsigned observer_atomic_wb_wait_count;
     bit          observer_trace_main_emitted[int unsigned];
     bit          observer_trace_translation_emitted[int unsigned];
     bit          observer_trace_translation_path_emitted[int unsigned];
     bit          observer_trace_dut_load_emitted[int unsigned];
+    longint unsigned observer_atomic_first_issue_sample[int unsigned];
+    int unsigned observer_atomic_issue_dynamic_epoch[int unsigned];
+    bit [3:0] observer_atomic_std_checked_mask[int unsigned];
+    bit [1:0] observer_atomic_sta_pdest_valid[int unsigned];
+    bit [15:0] observer_atomic_sta_pdest_flat[int unsigned];
 
     //aa_test_reg_model		reg_model;
 
@@ -63,6 +69,8 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     extern virtual task main_process();
     extern virtual task observer_poll_process();
     extern function int unsigned observer_scalar_size(bit [8:0] fu_op_type);
+    extern function int unsigned observer_atomic_size(bit [8:0] fu_op_type);
+    extern function rm_atomic_kind_e observer_atomic_kind(bit [8:0] fu_op_type);
     extern function bit [63:0] observer_compute_vaddr(bit [63:0] src_0,
                                                       bit [63:0] imm);
     extern function bit observer_stage_permission_fault(
@@ -124,6 +132,28 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         longint unsigned access_sample
     );
     extern function bit observer_capture_load_backing(rm_ls_program_item_t item);
+    extern function bit observer_capture_atomic_backing(rm_ls_program_item_t item);
+    extern function bit observer_apply_atomic_d_error_expectation(
+        rm_ls_program_item_t item,
+        longint unsigned access_sample
+    );
+    extern static function bit observer_atomic_wb_wait_pending(
+        ref int unsigned wait_count,
+        input bit missing_writeback,
+        input rm_ls_kind_e item_kind
+    );
+    extern static function bit observer_atomic_std_sample_matches(
+        input memblock_rm_readonly_api::main_transaction_view_t main_view,
+        input bit [3:0] required_std_mask,
+        input int unsigned pipe,
+        input bit [63:0] std_data,
+        input bit [8:0] std_fuop,
+        input bit [MEMBLOCK_ROB_VALUE_W-1:0] std_rob_value,
+        output int unsigned slot
+    );
+    extern function void observer_check_atomic_issue_monitor(
+        lintsissue_agent_agent_xaction monitor_tr
+    );
     extern function string observer_kind_name(rm_ls_kind_e kind);
     extern function string observer_store_size_name(int unsigned size_bytes);
     extern function void observer_trace_commit_result(
@@ -153,10 +183,16 @@ function void memblock_rm::build_phase(uvm_phase phase);
     this.observer_check_store_wait_logged = 1'b0;
     this.observer_mismatch_reported = 1'b0;
     this.observer_first_split_wait_count = 0;
+    this.observer_atomic_wb_wait_count = 0;
     this.observer_trace_main_emitted.delete();
     this.observer_trace_translation_emitted.delete();
     this.observer_trace_translation_path_emitted.delete();
     this.observer_trace_dut_load_emitted.delete();
+    this.observer_atomic_first_issue_sample.delete();
+    this.observer_atomic_issue_dynamic_epoch.delete();
+    this.observer_atomic_std_checked_mask.delete();
+    this.observer_atomic_sta_pdest_valid.delete();
+    this.observer_atomic_sta_pdest_flat.delete();
     begin
         memblock_rm_observer_cache observer;
         if (!uvm_config_db#(memblock_rm_observer_cache)::get(this, "", "rm_observer", observer)) begin
@@ -244,6 +280,49 @@ function int unsigned memblock_rm::observer_scalar_size(bit [8:0] fu_op_type);
         default: return 0;
     endcase
 endfunction:observer_scalar_size
+
+function int unsigned memblock_rm::observer_atomic_size(bit [8:0] fu_op_type);
+    case (fu_op_type)
+        MEMBLOCK_LSUOP_LR_W,
+        MEMBLOCK_LSUOP_SC_W,
+        MEMBLOCK_LSUOP_AMOSWAP_W,
+        MEMBLOCK_LSUOP_AMOADD_W,
+        MEMBLOCK_LSUOP_AMOXOR_W,
+        MEMBLOCK_LSUOP_AMOAND_W,
+        MEMBLOCK_LSUOP_AMOOR_W,
+        MEMBLOCK_LSUOP_AMOMIN_W,
+        MEMBLOCK_LSUOP_AMOMAX_W,
+        MEMBLOCK_LSUOP_AMOMINU_W,
+        MEMBLOCK_LSUOP_AMOMAXU_W,
+        MEMBLOCK_LSUOP_AMOCAS_W: return 4;
+        MEMBLOCK_LSUOP_LR_D,
+        MEMBLOCK_LSUOP_SC_D,
+        MEMBLOCK_LSUOP_AMOSWAP_D,
+        MEMBLOCK_LSUOP_AMOADD_D,
+        MEMBLOCK_LSUOP_AMOXOR_D,
+        MEMBLOCK_LSUOP_AMOAND_D,
+        MEMBLOCK_LSUOP_AMOOR_D,
+        MEMBLOCK_LSUOP_AMOMIN_D,
+        MEMBLOCK_LSUOP_AMOMAX_D,
+        MEMBLOCK_LSUOP_AMOMINU_D,
+        MEMBLOCK_LSUOP_AMOMAXU_D,
+        MEMBLOCK_LSUOP_AMOCAS_D: return 8;
+        MEMBLOCK_LSUOP_AMOCAS_Q: return 16;
+        default: return 0;
+    endcase
+endfunction:observer_atomic_size
+
+function rm_atomic_kind_e memblock_rm::observer_atomic_kind(bit [8:0] fu_op_type);
+    if (fu_op_type inside {MEMBLOCK_LSUOP_LR_W, MEMBLOCK_LSUOP_LR_D})
+        return RM_ATOMIC_LR;
+    if (fu_op_type inside {MEMBLOCK_LSUOP_SC_W, MEMBLOCK_LSUOP_SC_D})
+        return RM_ATOMIC_SC;
+    if (fu_op_type inside {MEMBLOCK_LSUOP_AMOCAS_W, MEMBLOCK_LSUOP_AMOCAS_D,
+                           MEMBLOCK_LSUOP_AMOCAS_Q}) return RM_ATOMIC_CAS;
+    if (memblock_op_behavior_util::is_amo_fuoptype(fu_op_type))
+        return RM_ATOMIC_AMO;
+    return RM_ATOMIC_NONE;
+endfunction:observer_atomic_kind
 
 function bit [63:0] memblock_rm::observer_compute_vaddr(bit [63:0] src_0,
                                                         bit [63:0] imm);
@@ -485,6 +564,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     bit all_bytes_normal_cacheable;
     memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t byte_pma_pmp_view;
     bit store_access;
+    bit atomic_access;
     bit s1_active;
     bit s2_active;
     bit bare_identity;
@@ -493,7 +573,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     bit [43:0] final_ppn;
     bit [3:0] expected_s1_mode;
     int unsigned bad_byte_index;
-    bit [7:0] required_pa_mask;
+    bit [15:0] required_pa_mask;
     rm_ls_error_e translation_path_error;
 
     deferred = 1'b0;
@@ -503,19 +583,27 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     item.uid = main_view.uid;
     item.op = main_view.fu_op_type;
     item.main_vaddr = main_view.vaddr;
-    item.computed_vaddr = observer_compute_vaddr(main_view.src_0, main_view.imm);
     item.rob.flag = main_view.rob_idx_flag;
     item.rob.value = main_view.rob_idx_value;
     item.lq_flag = main_view.lq_idx_flag;
     item.lq_value = main_view.lq_idx_value;
     item.dynamic_epoch = status_view.dynamic_epoch;
-    item.size_bytes = observer_scalar_size(main_view.fu_op_type);
+    atomic_access = main_view.fu_type == MEMBLOCK_FUTYPE_MOU &&
+                    memblock_op_behavior_util::is_amo_fuoptype(main_view.fu_op_type);
+    item.size_bytes = atomic_access ? observer_atomic_size(main_view.fu_op_type) :
+                                      observer_scalar_size(main_view.fu_op_type);
+    item.computed_vaddr = atomic_access ? main_view.src_0 :
+                                          observer_compute_vaddr(main_view.src_0,
+                                                                 main_view.imm);
     item.is_signed = main_view.fu_op_type == MEMBLOCK_LSUOP_LB ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LH ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LW ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LD;
     item.fp_wen = main_view.op_class == MEMBLOCK_OP_CLASS_FP_LOAD;
-    if (main_view.fu_type == MEMBLOCK_FUTYPE_LDU &&
+    if (atomic_access) begin
+        item.kind = RM_LS_KIND_ATOMIC;
+        item.atomic_kind = observer_atomic_kind(main_view.fu_op_type);
+    end else if (main_view.fu_type == MEMBLOCK_FUTYPE_LDU &&
         memblock_op_behavior_util::is_load_fuoptype(main_view.fu_op_type)) begin
         item.kind = RM_LS_KIND_LOAD;
     end else if (main_view.fu_type == MEMBLOCK_FUTYPE_STU &&
@@ -540,8 +628,67 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
         return 1'b1;
     end
     if (item.kind == RM_LS_KIND_STORE) begin
-        item.store_data = main_view.src_0;
-        item.store_byte_mask = 8'hff >> (8 - item.size_bytes);
+        item.store_data = main_view.atomic_std_valid_mask[0] ?
+                          main_view.atomic_std_data_flat[63:0] : main_view.src_0;
+        item.store_byte_mask = 16'hffff >> (16 - item.size_bytes);
+    end else if (item.kind == RM_LS_KIND_ATOMIC) begin
+        bit [3:0] required_std_mask;
+        required_std_mask = memblock_op_behavior_util::atomic_required_std_mask(
+            main_view.fu_op_type);
+        item.atomic_std_valid_mask = main_view.atomic_std_valid_mask;
+        if ((item.atomic_std_valid_mask & required_std_mask) != required_std_mask ||
+            item.atomic_std_valid_mask != required_std_mask) begin
+            ls_model.set_error(RM_LS_ERR_ATOMIC_OPERAND_NOT_READY,
+                               $sformatf("uid %0d atomic frozen STD mask expected=0x%0h actual=0x%0h",
+                                         item.uid, required_std_mask,
+                                         item.atomic_std_valid_mask));
+            return 1'b0;
+        end
+        foreach (item.atomic_std_data[slot]) begin
+            item.atomic_std_data[slot] =
+                main_view.atomic_std_data_flat[(slot * 64) +: 64];
+        end
+        item.atomic_operand[63:0] = item.atomic_std_data[0];
+        item.atomic_compare_value[63:0] = item.atomic_std_data[0];
+        item.atomic_new_value[63:0] = item.atomic_std_data[1];
+        if (item.size_bytes == 16) begin
+            item.atomic_compare_value[127:64] = item.atomic_std_data[2];
+            item.atomic_new_value[127:64] = item.atomic_std_data[3];
+        end
+        item.expected_atomic_wb_count = item.size_bytes == 16 ? 2 : 1;
+        item.atomic_first_issue_sample =
+            observer_atomic_first_issue_sample.exists(item.uid) ?
+            observer_atomic_first_issue_sample[item.uid] : 0;
+        item.atomic_expected_pdest_valid =
+            observer_atomic_sta_pdest_valid.exists(item.uid) ?
+            observer_atomic_sta_pdest_valid[item.uid] : '0;
+        if (observer_atomic_sta_pdest_flat.exists(item.uid)) begin
+            item.atomic_expected_pdest[0] =
+                observer_atomic_sta_pdest_flat[item.uid][7:0];
+            item.atomic_expected_pdest[1] =
+                observer_atomic_sta_pdest_flat[item.uid][15:8];
+        end
+        if (!observer_atomic_std_checked_mask.exists(item.uid) ||
+            (observer_atomic_std_checked_mask[item.uid] & required_std_mask) !=
+                required_std_mask ||
+            !item.atomic_expected_pdest_valid[0] ||
+            (item.size_bytes == 16 && !item.atomic_expected_pdest_valid[1])) begin
+            ls_model.set_error(
+                RM_LS_ERR_ATOMIC_OPERAND_NOT_READY,
+                $sformatf("uid %0d atomic passive issue evidence incomplete std=0x%0h required=0x%0h pdest_valid=0x%0h",
+                          item.uid,
+                          observer_atomic_std_checked_mask.exists(item.uid) ?
+                              observer_atomic_std_checked_mask[item.uid] : '0,
+                          required_std_mask,
+                          item.atomic_expected_pdest_valid));
+            return 1'b0;
+        end
+        if (main_view.imm != 0 || item.main_vaddr != main_view.src_0) begin
+            ls_model.set_error(RM_LS_ERR_MAIN_VADDR_MISMATCH,
+                               $sformatf("uid %0d atomic address contract requires imm=0 and vaddr=src0",
+                                         item.uid));
+            return 1'b0;
+        end
     end
     if (item.computed_vaddr != item.main_vaddr) begin
         ls_model.set_error(RM_LS_ERR_MAIN_VADDR_MISMATCH,
@@ -597,9 +744,16 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
         end
         item.translation_key = tlb_context.entry_key;
     end
-    store_access = item.kind == RM_LS_KIND_STORE;
+    store_access = item.kind == RM_LS_KIND_STORE ||
+                   (item.kind == RM_LS_KIND_ATOMIC &&
+                    item.atomic_kind != RM_ATOMIC_LR);
     misaligned = (item.computed_vaddr & (item.size_bytes - 1)) != 0;
-    pma_pmp_cmd = store_access ? PMA_PMP_CMD_WRITE : PMA_PMP_CMD_READ;
+    if (item.kind == RM_LS_KIND_ATOMIC) begin
+        pma_pmp_cmd = item.atomic_kind == RM_ATOMIC_LR ?
+                      PMA_PMP_CMD_ATOM_READ : PMA_PMP_CMD_ATOM_WRITE;
+    end else begin
+        pma_pmp_cmd = store_access ? PMA_PMP_CMD_WRITE : PMA_PMP_CMD_READ;
+    end
     first_byte_is_pma_mmio = 1'b0;
     first_byte_pma_known = 1'b0;
     first_byte_pma_fault = 1'b0;
@@ -696,6 +850,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
                 misaligned_maps_to_access_fault =
                     misaligned && effective_pbmt == 2'd2;
                 dut_stops_after_first_page =
+                    (item.kind == RM_LS_KIND_ATOMIC && misaligned) ||
                     observer_should_expect_addr_misaligned(
                         misaligned, store_access, tlb_context,
                         all_bytes_pma_pbmt);
@@ -869,7 +1024,7 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
             end
         end
     end
-    required_pa_mask = 8'hff >> (8 - item.size_bytes);
+    required_pa_mask = 16'hffff >> (16 - item.size_bytes);
     // 中文注释：PMA/PMP 只在翻译成功且所有访问字节都有 PA 时查询。翻译
     // fault 后 DUT 的后续 PMP/PMA response 不具备架构确定性，不能从模型补写 AF。
     if (!translation_access_fault && !stage_one_fault && !stage_two_fault &&
@@ -1006,6 +1161,29 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
             end
         end
     end
+    if (item.kind == RM_LS_KIND_ATOMIC) begin
+        bit [23:0] atomic_exception;
+        atomic_exception = '0;
+        if (translation_access_fault)
+            atomic_exception[store_access ? 7 : 5] = 1'b1;
+        if (stage_one_fault)
+            atomic_exception[store_access ? 15 : 13] = 1'b1;
+        if (stage_two_fault)
+            atomic_exception[store_access ? 23 : 21] = 1'b1;
+        if (!translation_access_fault && !stage_one_fault && !stage_two_fault) begin
+            if (pma_pmp_access_fault || item.expected_pma_atomic_fault ||
+                !all_bytes_pma_pbmt || all_bytes_pma_mmio ||
+                first_byte_is_pma_mmio || misaligned_maps_to_access_fault) begin
+                atomic_exception[store_access ? 7 : 5] = 1'b1;
+            end else if (misaligned) begin
+                atomic_exception[store_access ? 6 : 4] = 1'b1;
+            end else if (seq_csr_common::get_pma_pmp_model_en() &&
+                         !all_bytes_normal_cacheable) begin
+                atomic_exception[store_access ? 7 : 5] = 1'b1;
+            end
+        end
+        item.expected_exception = atomic_exception;
+    end
     if (item.expected_exception == '0 &&
         item.pa_valid_mask != required_pa_mask) begin
         ls_model.set_error(RM_LS_ERR_TRANSLATION_NOT_READY,
@@ -1015,6 +1193,8 @@ function bit memblock_rm::observer_build_commit_item_with_observation(
     end
     item.translation_valid = 1'b1;
     item.all_pma_mmio = all_bytes_pma_mmio;
+    if (!seq_csr_common::get_pma_pmp_model_en())
+        all_bytes_normal_cacheable = all_bytes_pma_pbmt;
     // PMA normal-cacheable只描述底层物理区域；PBMT-NC/IO会覆盖该属性并把
     // 实际访问路由到Uncache。这里冻结最终有效路径，避免合法NC Load同时
     // 被标成Uncache和normal-cacheable。
@@ -1252,6 +1432,55 @@ function bit memblock_rm::observer_capture_commit_actual(
         end
         return ls_model.push_load_actual(load_actual);
     end
+    if (item.kind == RM_LS_KIND_ATOMIC) begin
+        memblock_rm_readonly_api::dut_writeback_view_q_t atomic_views;
+        rm_atomic_actual_t atomic_actual;
+        longint unsigned minimum_sample;
+
+        load_rob_key.flag = main_view.rob_idx_flag;
+        load_rob_key.value = main_view.rob_idx_value;
+        minimum_sample = item.atomic_first_issue_sample;
+        if (minimum_sample == 0 ||
+            !ro.read_dut_atomic_writebacks_for_rm(
+                item.uid, load_rob_key, item.dynamic_epoch,
+                item.expected_atomic_wb_count, minimum_sample, atomic_views)) begin
+            missing_dut_load_writeback = 1'b1;
+            return 1'b1;
+        end
+        if (atomic_views.size() != item.expected_atomic_wb_count) begin
+            ls_model.set_error(
+                RM_LS_ERR_ATOMIC_WB_COUNT_MISMATCH,
+                $sformatf("uid %0d expected exactly %0d atomic LDA0 records, found %0d",
+                          item.uid, item.expected_atomic_wb_count,
+                          atomic_views.size()));
+            return 1'b0;
+        end
+        atomic_actual = new();
+        atomic_actual.valid = 1'b1;
+        atomic_actual.uid = item.uid;
+        atomic_actual.rob = item.rob;
+        atomic_actual.dynamic_epoch = item.dynamic_epoch;
+        atomic_actual.wb_count = atomic_views.size();
+        foreach (atomic_views[wb_index]) begin
+            atomic_actual.data_valid[wb_index] = atomic_views[wb_index].data_valid;
+            atomic_actual.data[wb_index] = atomic_views[wb_index].data;
+            atomic_actual.exception_vec[wb_index] =
+                atomic_views[wb_index].exception_vec;
+            atomic_actual.pdest_valid[wb_index] =
+                atomic_views[wb_index].pdest_valid;
+            atomic_actual.pdest[wb_index] = atomic_views[wb_index].pdest;
+            atomic_actual.rf_wen_valid[wb_index] =
+                atomic_views[wb_index].rf_wen_valid;
+            atomic_actual.rf_wen[wb_index] = atomic_views[wb_index].rf_wen;
+            atomic_actual.sample_seq[wb_index] = atomic_views[wb_index].sample_seq;
+            atomic_actual.sample_cycle[wb_index] = atomic_views[wb_index].sample_cycle;
+        end
+        if (!observer_apply_atomic_d_error_expectation(
+                item, atomic_actual.sample_seq[atomic_actual.wb_count - 1])) begin
+            return 1'b0;
+        end
+        return ls_model.push_atomic_actual(atomic_actual);
+    end
     return 1'b1;
 endfunction:observer_capture_commit_actual
 
@@ -1280,10 +1509,265 @@ function bit memblock_rm::observer_capture_load_backing(rm_ls_program_item_t ite
     return 1'b1;
 endfunction:observer_capture_load_backing
 
+function bit memblock_rm::observer_capture_atomic_backing(rm_ls_program_item_t item);
+    memblock_rm_readonly_api ro;
+    memblock_rm_readonly_api::mem_line_mask_t byte_mask;
+    memblock_rm_readonly_api::memory_read_view_t memory_view;
+
+    if (item.kind != RM_LS_KIND_ATOMIC || item.expected_exception != '0 ||
+        item.atomic_kind == RM_ATOMIC_SC)
+        return 1'b1;
+    ro = memblock_rm_readonly_api::get();
+    for (int unsigned byte_index = 0; byte_index < item.size_bytes; byte_index++) begin
+        if (ls_model.expected_store_byte_exists(item.pa_by_byte[byte_index])) continue;
+        byte_mask = '0; byte_mask[0] = 1'b1;
+        if (!ro.read_initialized_backing_for_rm(item.pa_by_byte[byte_index],
+                                                byte_mask, memory_view) ||
+            !memory_view.valid || !memory_view.data_valid || memory_view.corrupt ||
+            !memory_view.byte_valid[0]) begin
+            ls_model.set_error(RM_LS_ERR_ORIGINAL_L2_NOT_READY,
+                               $sformatf("uid %0d atomic backing PA 0x%0h unavailable",
+                                         item.uid, item.pa_by_byte[byte_index]));
+            return 1'b0;
+        end
+        void'(ls_model.set_backing_byte(item.pa_by_byte[byte_index],
+                                        memory_view.data[7:0]));
+    end
+    return 1'b1;
+endfunction:observer_capture_atomic_backing
+
+function bit memblock_rm::observer_apply_atomic_d_error_expectation(
+    rm_ls_program_item_t item,
+    longint unsigned access_sample
+);
+    memblock_rm_readonly_api ro;
+    memblock_rm_readonly_api::l2_d_error_view_t error_view;
+    memblock_rm_readonly_api::mem_addr_t line_addr;
+    bit store_access;
+    bit first_byte_on_line;
+
+    if (item == null || item.kind != RM_LS_KIND_ATOMIC ||
+        item.expected_exception != '0) return 1'b1;
+    if (!item.all_normal_cacheable || item.uncache_path || access_sample == 0) begin
+        ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,
+                           $sformatf("uid %0d atomic cache D-error provenance unavailable",
+                                     item.uid));
+        return 1'b0;
+    end
+    ro = memblock_rm_readonly_api::get();
+    store_access = item.atomic_kind != RM_ATOMIC_LR;
+    for (int unsigned byte_index = 0; byte_index < item.size_bytes; byte_index++) begin
+        first_byte_on_line = 1'b1;
+        for (int unsigned previous_index = 0;
+             previous_index < byte_index; previous_index++) begin
+            if (item.pa_by_byte[previous_index][47:6] ==
+                item.pa_by_byte[byte_index][47:6]) first_byte_on_line = 1'b0;
+        end
+        if (!first_byte_on_line) continue;
+        line_addr = memblock_rm_readonly_api::mem_addr_t'(
+            {item.pa_by_byte[byte_index][47:6], 6'b0});
+        if (!ro.read_l2_d_error_for_rm(line_addr, access_sample, error_view) ||
+            !error_view.valid) begin
+            ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,
+                               $sformatf("uid %0d atomic D-error ledger unavailable line=0x%0h",
+                                         item.uid, line_addr));
+            return 1'b0;
+        end
+        item.expected_dcache_denied |= error_view.denied;
+        item.expected_dcache_corrupt |= error_view.corrupt && !error_view.denied;
+    end
+    if (item.expected_dcache_denied)
+        item.expected_exception[store_access ? 7 : 5] = 1'b1;
+    if (item.expected_dcache_corrupt) item.expected_exception[19] = 1'b1;
+    return 1'b1;
+endfunction:observer_apply_atomic_d_error_expectation
+
+function bit memblock_rm::observer_atomic_wb_wait_pending(
+    ref int unsigned wait_count,
+    input bit missing_writeback,
+    input rm_ls_kind_e item_kind
+);
+    if (missing_writeback && item_kind == RM_LS_KIND_ATOMIC &&
+        wait_count < 256) begin
+        wait_count++;
+        return 1'b1;
+    end
+    wait_count = 0;
+    return 1'b0;
+endfunction:observer_atomic_wb_wait_pending
+
+function bit memblock_rm::observer_atomic_std_sample_matches(
+    input memblock_rm_readonly_api::main_transaction_view_t main_view,
+    input bit [3:0] required_std_mask,
+    input int unsigned pipe,
+    input bit [63:0] std_data,
+    input bit [8:0] std_fuop,
+    input bit [MEMBLOCK_ROB_VALUE_W-1:0] std_rob_value,
+    output int unsigned slot
+);
+    slot = std_fuop[8:6];
+    return slot < 4 && pipe == 0 &&
+           std_fuop[5:0] == main_view.fu_op_type[5:0] &&
+           std_rob_value == main_view.rob_idx_value &&
+           required_std_mask[slot] &&
+           main_view.atomic_std_valid_mask[slot] &&
+           std_data === main_view.atomic_std_data_flat[(slot * 64) +: 64];
+endfunction:observer_atomic_std_sample_matches
+
+function void memblock_rm::observer_check_atomic_issue_monitor(
+    lintsissue_agent_agent_xaction monitor_tr
+);
+    memblock_rm_readonly_api ro;
+    memblock_rm_readonly_api::main_transaction_view_t main_view;
+    memblock_rm_readonly_api::status_view_t status_view;
+    memblock_uid_t owner_uid;
+
+    if (monitor_tr == null || !monitor_tr.memblock_monitor_atomic_owner_valid) return;
+    ro = memblock_rm_readonly_api::get();
+    owner_uid = monitor_tr.memblock_monitor_atomic_owner_uid;
+    if (!ro.read_main_transaction_for_rm(owner_uid, main_view) ||
+        !ro.read_status_for_rm(owner_uid, status_view) ||
+        !main_view.valid || !status_view.valid) begin
+        `uvm_error("RM_ATOMIC_ISSUE_OWNER",
+                   $sformatf("sample owner uid=%0d is unavailable", owner_uid))
+        return;
+    end
+    if (status_view.dynamic_epoch !=
+        monitor_tr.memblock_monitor_atomic_owner_dynamic_epoch) begin
+        if (status_view.dynamic_epoch >
+            monitor_tr.memblock_monitor_atomic_owner_dynamic_epoch) return;
+        `uvm_error("RM_ATOMIC_ISSUE_OWNER",
+                   $sformatf("uid=%0d sample dynamic epoch=%0d current=%0d",
+                             owner_uid,
+                             monitor_tr.memblock_monitor_atomic_owner_dynamic_epoch,
+                             status_view.dynamic_epoch))
+        return;
+    end
+    if (observer_atomic_issue_dynamic_epoch.exists(owner_uid) &&
+        observer_atomic_issue_dynamic_epoch[owner_uid] != status_view.dynamic_epoch) begin
+        observer_atomic_std_checked_mask[owner_uid] = '0;
+        observer_atomic_sta_pdest_valid[owner_uid] = '0;
+        observer_atomic_sta_pdest_flat[owner_uid] = '0;
+        observer_atomic_first_issue_sample[owner_uid] = 0;
+    end
+    observer_atomic_issue_dynamic_epoch[owner_uid] = status_view.dynamic_epoch;
+    for (int unsigned pipe = 0; pipe < 2; pipe++) begin
+        bit std_valid;
+        bit std_ready;
+        bit [63:0] std_data;
+        bit [8:0] std_fuop;
+        bit [MEMBLOCK_ROB_VALUE_W-1:0] std_rob_value;
+        int unsigned slot;
+
+        if (pipe == 0) begin
+            std_valid = monitor_tr.io_ooo_to_mem_issueStd_0_valid;
+            std_ready = monitor_tr.io_ooo_to_mem_issueStd_0_ready;
+            std_data = monitor_tr.io_ooo_to_mem_issueStd_0_bits_src_0;
+            std_fuop = monitor_tr.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType;
+            std_rob_value = monitor_tr.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value;
+        end else begin
+            std_valid = monitor_tr.io_ooo_to_mem_issueStd_1_valid;
+            std_ready = monitor_tr.io_ooo_to_mem_issueStd_1_ready;
+            std_data = monitor_tr.io_ooo_to_mem_issueStd_1_bits_src_0;
+            std_fuop = monitor_tr.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType;
+            std_rob_value = monitor_tr.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value;
+        end
+        if (!(std_valid && std_ready)) continue;
+        if (monitor_tr.memblock_monitor_flush_epoch <
+            monitor_tr.memblock_monitor_atomic_owner_activation_flush_epoch) continue;
+        if (monitor_tr.memblock_monitor_flush_epoch !=
+            monitor_tr.memblock_monitor_atomic_owner_activation_flush_epoch) begin
+            `uvm_error("RM_ATOMIC_STD_INPUT",
+                       $sformatf("uid=%0d epoch=%0d STD sample flush epoch=%0d active=%0d",
+                                 owner_uid, status_view.dynamic_epoch,
+                                 monitor_tr.memblock_monitor_flush_epoch,
+                                 monitor_tr.memblock_monitor_atomic_owner_activation_flush_epoch))
+            continue;
+        end
+        if (!observer_atomic_std_sample_matches(
+                main_view,
+                monitor_tr.memblock_monitor_atomic_owner_required_std_mask,
+                pipe, std_data, std_fuop, std_rob_value, slot)) begin
+            `uvm_error("RM_ATOMIC_STD_INPUT",
+                       $sformatf("uid=%0d epoch=%0d pipe=%0d slot=%0d actual(op=0x%0h rob=%0d data=0x%0h) expected(op=0x%0h rob=%0d data=0x%0h required=0x%0h)",
+                                 owner_uid, status_view.dynamic_epoch, pipe, slot,
+                                 std_fuop, std_rob_value, std_data,
+                                 main_view.fu_op_type, main_view.rob_idx_value,
+                                 slot < 4 ? main_view.atomic_std_data_flat[(slot * 64) +: 64] : '0,
+                                 monitor_tr.memblock_monitor_atomic_owner_required_std_mask))
+        end else begin
+            observer_atomic_std_checked_mask[owner_uid][slot] = 1'b1;
+            if (!observer_atomic_first_issue_sample.exists(owner_uid) ||
+                observer_atomic_first_issue_sample[owner_uid] == 0)
+                observer_atomic_first_issue_sample[owner_uid] =
+                    monitor_tr.memblock_monitor_sample_seq;
+        end
+    end
+    for (int unsigned pipe = 0; pipe < 2; pipe++) begin
+        bit sta_valid;
+        bit sta_ready;
+        bit [8:0] sta_fuop;
+        bit sta_rob_flag;
+        bit [MEMBLOCK_ROB_VALUE_W-1:0] sta_rob_value;
+        bit [7:0] sta_pdest;
+        int unsigned slot;
+
+        if (pipe == 0) begin
+            sta_valid = monitor_tr.io_ooo_to_mem_issueSta_0_valid;
+            sta_ready = monitor_tr.io_ooo_to_mem_issueSta_0_ready;
+            sta_fuop = monitor_tr.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType;
+            sta_rob_flag = monitor_tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag;
+            sta_rob_value = monitor_tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_value;
+            sta_pdest = monitor_tr.io_ooo_to_mem_issueSta_0_bits_uop_pdest;
+        end else begin
+            sta_valid = monitor_tr.io_ooo_to_mem_issueSta_1_valid;
+            sta_ready = monitor_tr.io_ooo_to_mem_issueSta_1_ready;
+            sta_fuop = monitor_tr.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType;
+            sta_rob_flag = monitor_tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag;
+            sta_rob_value = monitor_tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_value;
+            sta_pdest = monitor_tr.io_ooo_to_mem_issueSta_1_bits_uop_pdest;
+        end
+        if (!(sta_valid && sta_ready)) continue;
+        if (monitor_tr.memblock_monitor_flush_epoch <
+            monitor_tr.memblock_monitor_atomic_owner_activation_flush_epoch) continue;
+        if (monitor_tr.memblock_monitor_flush_epoch !=
+            monitor_tr.memblock_monitor_atomic_owner_activation_flush_epoch) begin
+            `uvm_error("RM_ATOMIC_STA_INPUT",
+                       $sformatf("uid=%0d epoch=%0d STA sample flush epoch=%0d active=%0d",
+                                 owner_uid, status_view.dynamic_epoch,
+                                 monitor_tr.memblock_monitor_flush_epoch,
+                                 monitor_tr.memblock_monitor_atomic_owner_activation_flush_epoch))
+            continue;
+        end
+        slot = sta_fuop[8:6];
+        if (slot >= 4 || pipe != 0 || sta_fuop[5:0] != main_view.fu_op_type[5:0] ||
+            sta_rob_flag != main_view.rob_idx_flag ||
+            sta_rob_value != main_view.rob_idx_value ||
+            !monitor_tr.memblock_monitor_atomic_owner_required_sta_mask[slot]) begin
+            `uvm_error("RM_ATOMIC_STA_INPUT",
+                       $sformatf("uid=%0d epoch=%0d pipe=%0d slot=%0d STA identity mismatch",
+                                 owner_uid, status_view.dynamic_epoch, pipe, slot))
+        end else begin
+            if (slot == 0) begin
+                observer_atomic_sta_pdest_valid[owner_uid][0] = 1'b1;
+                observer_atomic_sta_pdest_flat[owner_uid][7:0] = sta_pdest;
+            end else if (slot == 2) begin
+                observer_atomic_sta_pdest_valid[owner_uid][1] = 1'b1;
+                observer_atomic_sta_pdest_flat[owner_uid][15:8] = sta_pdest;
+            end
+            if (!observer_atomic_first_issue_sample.exists(owner_uid) ||
+                observer_atomic_first_issue_sample[owner_uid] == 0)
+                observer_atomic_first_issue_sample[owner_uid] =
+                    monitor_tr.memblock_monitor_sample_seq;
+        end
+    end
+endfunction:observer_check_atomic_issue_monitor
+
 function string memblock_rm::observer_kind_name(rm_ls_kind_e kind);
     case (kind)
         RM_LS_KIND_LOAD:  return "LOAD";
         RM_LS_KIND_STORE: return "STORE";
+        RM_LS_KIND_ATOMIC: return "ATOMIC";
         default:          return "CONTROL_OR_OTHER";
     endcase
 endfunction:observer_kind_name
@@ -1294,6 +1778,7 @@ function string memblock_rm::observer_store_size_name(int unsigned size_bytes);
         2: return "HALF";
         4: return "WORD";
         8: return "DOUBLE";
+        16: return "QUAD";
         default: return "INVALID";
     endcase
 endfunction:observer_store_size_name
@@ -1316,6 +1801,24 @@ function void memblock_rm::observer_trace_commit_result(
                                 rec.vaddr, rec.first_pa, rec.expected_data,
                                 rec.expected_exception, rec.actual_data,
                                 rec.actual_exception, status_view.exception_vec,
+                                compare_result ? "PASS" : "FAIL", rec.detail),
+                      UVM_LOW)
+            return;
+        end
+    end
+    if (item.kind == RM_LS_KIND_ATOMIC && ls_model.history.size() != 0) begin
+        history_index = ls_model.history.size() - 1;
+        rec = ls_model.history[history_index];
+        if (rec.uid == item.uid) begin
+            `uvm_info("RM_LS_TRACE_COMPARE",
+                      $sformatf("node=COMPARE uid=%0d rob=%0d/%0d kind=ATOMIC atomic_kind=%0d size=%0d va=0x%0h first_pa=0x%0h wb_count=%0d EXPECTED(data_lo=0x%016h exception=0x%06h) DUT(data_lo=0x%016h exception=0x%06h status_exception=0x%06h) result=%s detail=%s",
+                                item.uid, item.rob.flag, item.rob.value,
+                                item.atomic_kind, item.size_bytes,
+                                rec.vaddr, rec.first_pa,
+                                item.expected_atomic_wb_count,
+                                rec.expected_data, rec.expected_exception,
+                                rec.actual_data, rec.actual_exception,
+                                status_view.exception_vec,
                                 compare_result ? "PASS" : "FAIL", rec.detail),
                       UVM_LOW)
             return;
@@ -1379,6 +1882,7 @@ function bit memblock_rm::observer_process_current_commit();
         observer_check_store_wait_logged = 1'b0;
         observer_mismatch_reported = 1'b0;
         observer_first_split_wait_count = 0;
+        observer_atomic_wb_wait_count = 0;
         observer_trace_main_emitted.delete();
         observer_trace_translation_emitted.delete();
         observer_trace_dut_load_emitted.delete();
@@ -1487,6 +1991,11 @@ function bit memblock_rm::observer_process_current_commit();
         return 1'b0;
     end
 
+    if (observer_atomic_wb_wait_pending(observer_atomic_wb_wait_count,
+                                        missing_dut_load_writeback,
+                                        item.kind)) begin
+        return 1'b0;
+    end
     if (missing_dut_load_writeback) begin
         // 中文注释：该 Load 没有写内存效果，且本 uid 已不再进行数据比较；不能因
         // backing 尚未可读而阻断后续 uid。后续正常 Load 会按自身地址懒采集 backing。
@@ -1494,8 +2003,10 @@ function bit memblock_rm::observer_process_current_commit();
         commit_rob.value = status_view.rob_idx_value;
         if (!ls_model.consume_current_commit_error(
                 commit_rob,
-                RM_LS_ERR_LOAD_ACTUAL_NOT_READY,
-                $sformatf("RM committed Load exists but DUT writebackLda was not found: uid=%0d robIdx=%0d/%0d expected_exception=0x%06h status_exception=0x%06h (no non-replay/non-flush LDA record matched this ROB)",
+                item.kind == RM_LS_KIND_ATOMIC ? RM_LS_ERR_ATOMIC_WB_NOT_READY :
+                                                 RM_LS_ERR_LOAD_ACTUAL_NOT_READY,
+                $sformatf("RM committed %s exists but DUT writebackLda was not found: uid=%0d robIdx=%0d/%0d expected_exception=0x%06h status_exception=0x%06h",
+                          observer_kind_name(item.kind),
                           item.uid,
                           commit_rob.flag,
                           commit_rob.value,
@@ -1526,6 +2037,25 @@ function bit memblock_rm::observer_process_current_commit();
                 end
                 return 1'b0;
             end
+        end
+    end else if (item.kind == RM_LS_KIND_ATOMIC &&
+                 ls_model.pending_atomic_actual.exists(item.uid)) begin
+        rm_atomic_actual_t atomic_actual;
+        bit atomic_exception_match;
+        atomic_actual = ls_model.pending_atomic_actual[item.uid];
+        atomic_exception_match = status_view.exception_vec === item.expected_exception;
+        for (int unsigned wb_index = 0;
+             wb_index < atomic_actual.wb_count; wb_index++) begin
+            atomic_exception_match &=
+                atomic_actual.exception_vec[wb_index] === item.expected_exception;
+        end
+        if (atomic_exception_match && item.expected_exception == '0 &&
+            !observer_capture_atomic_backing(item)) begin
+            if (!observer_mismatch_reported) begin
+                `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
+                observer_mismatch_reported = 1'b1;
+            end
+            return 1'b0;
         end
     end
 
@@ -1568,13 +2098,15 @@ function bit memblock_rm::observer_check_final_store(
     memblock_rm_readonly_api::dcache_overlay_readiness_view_t ready_view;
     memblock_rm_observer_cache::store_final_entry_view_t store_view;
     rm_ls_store_cache_entry_t store_entry;
-    bit [63:0] expected_data;
-    bit [63:0] actual_data;
-    bit [7:0] actual_valid_mask;
-    bit [7:0] actual_corrupt_mask;
+    bit [127:0] expected_data;
+    bit [127:0] actual_data;
+    bit [15:0] actual_valid_mask;
+    bit [15:0] actual_corrupt_mask;
     longint unsigned observed_cycle;
     int unsigned store_entry_count;
     int unsigned checked_store_count;
+    int unsigned obligation_count;
+    int unsigned checked_obligation_count;
     bit pass;
     bit entry_pass;
     string entry_reason;
@@ -1597,6 +2129,7 @@ function bit memblock_rm::observer_check_final_store(
     complete = 1'b1;
     pass = 1'b1;
     checked_store_count = 0;
+    checked_obligation_count = 0;
     store_entry_count = ls_model.expected_store_entry_count();
     `uvm_info("RM_LS_TRACE_CHECK_STORE",
               $sformatf("node=CHECK_STORE_START uid=%0d rob=%0d/%0d readiness_valid=%0d readiness_ready=%0d expected_store_count=%0d",
@@ -1637,10 +2170,11 @@ function bit memblock_rm::observer_check_final_store(
         entry_reason = entry_pass ? "" :
                        $sformatf(" reason=%s", ls_model.last_error_text);
         `uvm_info("RM_LS_TRACE_STORE_COMPARE",
-                  $sformatf("node=STORE_COMPARE check_uid=%0d check_rob=%0d/%0d store_uid=%0d store_rob=%0d/%0d size=%s(%0dB) first_pa=0x%0h last_pa=0x%0h mask=0x%0h EXPECTED(data=0x%0h) DUT(data=0x%0h valid_mask=0x%0h corrupt_mask=0x%0h observed_cycle=%0d) result=%s%s",
+                  $sformatf("node=STORE_COMPARE check_uid=%0d check_rob=%0d/%0d effect_uid=%0d effect_rob=%0d/%0d source=%0d size=%s(%0dB) first_pa=0x%0h last_pa=0x%0h mask=0x%0h EXPECTED(data=0x%0h) DUT(data=0x%0h valid_mask=0x%0h corrupt_mask=0x%0h observed_cycle=%0d) result=%s%s",
                             check_store_uid, check_store_rob.flag,
                             check_store_rob.value, store_entry.uid,
                             store_entry.rob.flag, store_entry.rob.value,
+                            store_entry.source_kind,
                             observer_store_size_name(store_entry.size_bytes),
                             store_entry.size_bytes, store_entry.pa_by_byte[0],
                             store_entry.pa_by_byte[store_entry.size_bytes - 1],
@@ -1654,10 +2188,91 @@ function bit memblock_rm::observer_check_final_store(
             pass = 1'b0;
         end
     end
+    obligation_count = ls_model.sc_no_write_obligation_count();
+    for (int unsigned obligation_index = 0;
+         obligation_index < obligation_count; obligation_index++) begin
+        rm_sc_no_write_obligation_t obligation;
+        bit [15:0] required_unshadowed_mask;
+        bit obligation_pass;
+
+        if (!ls_model.read_sc_no_write_obligation(obligation_index, obligation)) begin
+            ls_model.set_error(RM_LS_ERR_SC_FAILURE_MEMORY_EFFECT,
+                               $sformatf("SC no-write obligation %0d unavailable",
+                                         obligation_index));
+            `uvm_error("RM_LS_FINAL_STORE", ls_model.last_error_text)
+            pass = 1'b0;
+            continue;
+        end
+        checked_obligation_count++;
+        obligation_pass = 1'b1;
+        required_unshadowed_mask = obligation.byte_mask & ~obligation.shadowed_mask;
+        for (int unsigned byte_index = 0;
+             byte_index < obligation.size_bytes; byte_index++) begin
+            byte unsigned expected_byte;
+            byte unsigned backing_byte;
+            bit expected_valid;
+            bit backing_valid;
+            bit before_valid;
+            bit byte_pass;
+
+            if (!required_unshadowed_mask[byte_index]) continue;
+            byte_pass = 1'b1;
+            expected_valid = ls_model.read_expected_memory_byte(
+                obligation.pa_by_byte[byte_index], expected_byte);
+            backing_valid = ls_model.backing_valid.exists(
+                                obligation.pa_by_byte[byte_index]) &&
+                            ls_model.backing_valid[obligation.pa_by_byte[byte_index]];
+            if (backing_valid)
+                backing_byte = ls_model.backing_byte[obligation.pa_by_byte[byte_index]];
+            before_valid = obligation.expected_before_valid_mask[byte_index];
+            if (before_valid &&
+                (!expected_valid ||
+                 expected_byte !== obligation.expected_before_value[(byte_index * 8) +: 8])) begin
+                byte_pass = 1'b0;
+            end
+            store_view = '{default:'0};
+            if (ro.read_store_final_for_rm(obligation.pa_by_byte[byte_index],
+                                           store_view) && store_view.valid) begin
+                if (!store_view.byte_valid || store_view.corrupt ||
+                    !expected_valid || store_view.value !== expected_byte) begin
+                    byte_pass = 1'b0;
+                end
+            end else if (expected_valid != backing_valid ||
+                         (expected_valid && expected_byte !== backing_byte)) begin
+                // Both absent is a valid no-write observation: an SC that failed
+                // before touching DCache need not initialize a backing line.
+                byte_pass = 1'b0;
+            end
+            if (byte_pass) obligation.checked_mask[byte_index] = 1'b1;
+            else obligation_pass = 1'b0;
+        end
+        obligation.resolved =
+            (obligation.checked_mask & required_unshadowed_mask) ==
+            required_unshadowed_mask;
+        obligation.evidence_kind = RM_SC_NOWRITE_FINAL_CHECK_STORE;
+        `uvm_info("RM_LS_TRACE_SC_NOWRITE",
+                  $sformatf("uid=%0d rob=%0d/%0d mask=0x%0h shadowed=0x%0h checked=0x%0h resolved=%0d fully_verified=%0d result=%s",
+                            obligation.uid, obligation.rob.flag,
+                            obligation.rob.value, obligation.byte_mask,
+                            obligation.shadowed_mask, obligation.checked_mask,
+                            obligation.resolved,
+                            obligation.resolved && obligation.shadowed_mask == '0,
+                            obligation_pass && obligation.resolved ? "PASS" : "FAIL"),
+                  UVM_LOW)
+        if (!obligation_pass || !obligation.resolved) begin
+            ls_model.set_error(RM_LS_ERR_SC_FAILURE_MEMORY_EFFECT,
+                               $sformatf("SC failure uid %0d no-write obligation unresolved shadowed=0x%0h checked=0x%0h",
+                                         obligation.uid, obligation.shadowed_mask,
+                                         obligation.checked_mask));
+            `uvm_error("RM_LS_FINAL_STORE", ls_model.last_error_text)
+            pass = 1'b0;
+        end
+    end
     `uvm_info("RM_LS_TRACE_CHECK_STORE",
-              $sformatf("node=CHECK_STORE_DONE uid=%0d rob=%0d/%0d checked_stores=%0d result=%s",
+              $sformatf("node=CHECK_STORE_DONE uid=%0d rob=%0d/%0d checked_effects=%0d checked_sc_no_write=%0d result=%s",
                         check_store_uid, check_store_rob.flag,
                         check_store_rob.value, checked_store_count,
+                        checked_obligation_count,
                         pass ? "PASS" : "FAIL"),
               UVM_LOW)
     if (pass)
@@ -1693,7 +2308,6 @@ task memblock_rm::main_process();
     memblock_common_xaction  lsqenq_agent_tr_out;
 
     lintsissue_agent_agent_xaction  lintsissue_agent_tr_in;
-    memblock_common_xaction  lintsissue_agent_tr_out;
 
     vecissue_agent_agent_xaction  vecissue_agent_tr_in;
     memblock_common_xaction  vecissue_agent_tr_out;
@@ -1812,15 +2426,7 @@ task memblock_rm::main_process();
         while(1)begin
             this.lintsissue_agent_mon_item_port.get(lintsissue_agent_tr_in);
             `uvm_info(get_type_name(),$sformatf("lintsissue_agent_mon_item_port get as %s",lintsissue_agent_tr_in.psdisplay()),UVM_DEBUG)
-            //if(!$cast(lintsissue_agent_tr_out, lintsissue_agent_tr_in)) begin
-            //    `uvm_fatal(get_type_name(),$sformatf("lintsissue_agent_tr_in,is not a memblock_common_xaction or its extend"))
-            //end
-            lintsissue_agent_tr_out = memblock_common_xaction::type_id::create("lintsissue_agent_tr_out");
-            lintsissue_agent_tr_out.channel_id = lintsissue_agent_tr_in.channel_id;
-            lintsissue_agent_tr_out.pack_lintsissue_agent(lintsissue_agent_tr_in);
-
-            this.rm_item_exp_port.write(lintsissue_agent_tr_out);
-            //this.rm_item_act_port.write(lintsissue_agent_tr_out);
+            observer_check_atomic_issue_monitor(lintsissue_agent_tr_in);
         end
 
         while(1)begin
