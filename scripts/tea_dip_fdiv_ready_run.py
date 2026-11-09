@@ -14,7 +14,7 @@ from tea_dip_wb_protocol_micro import digest, write
 from tea_dip_query_endpoint_evidence import old_execution
 
 
-def completed_guest(folder, build, case):
+def completed_guest(folder, build, case, sample_period=1000):
     folder.mkdir()
     command = case['command'].copy()
     command[6] = build['binary']
@@ -36,7 +36,7 @@ def completed_guest(folder, build, case):
     (folder / 'exitcode').write_text(str(rc))
     text = (folder / 'simulator_out.txt').read_text()
     flags = {name: bool(re.search(r'^' + name + ' = ' + str(value) + '$', text, re.M))
-             for name, value in [('enableTea0', 1), ('enableDip0', 1), ('teaSamplePeriod0', 1000), ('dipSamplePeriod0', 1000)]}
+             for name, value in [('enableTea0', 1), ('enableDip0', 1), ('teaSamplePeriod0', sample_period), ('dipSamplePeriod0', sample_period)]}
     counts = re.search(r'Core-0 instrCnt = ([\d,]+), cycleCnt = ([\d,]+)', text)
     passed = rc == 0 and 'Difftest enabled' in text and 'EXCEEDING CYCLE/INSTR LIMIT' in text and all(flags.values())
     passed = passed and not any(marker in text for marker in ['ABORT', 'HIT CRITICAL', 'HIT BAD TRAP'])

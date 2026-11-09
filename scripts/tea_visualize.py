@@ -110,7 +110,7 @@ def normalize_pc(pc):
     return None if pc is None else pc & XLEN_MASK
 
 
-def load_data(path, label, args):
+def load_data(path, label, args, sample_callback=None):
     counts, weights = defaultdict(Counter), defaultdict(Counter)
     contexts = Counter()
     state_weights = {state: defaultdict(Counter) for state in STATES}
@@ -198,6 +198,8 @@ def load_data(path, label, args):
             summary["cycle_max"] = cycle if summary["cycle_max"] is None else max(summary["cycle_max"], cycle)
             summary["selected_rows"] += 1
             summary[f"state_{STATES[state].lower()}"] += 1
+            if sample_callback is not None:
+                sample_callback(cycle, STATES[state], lanes, weight)
             for pc, psv in lanes:
                 if psv not in INCOMPLETE and not 0 <= psv < (1 << len(EVENTS)):
                     raise ValueError(f"{path}: invalid PSV in row {row['ID']}")
