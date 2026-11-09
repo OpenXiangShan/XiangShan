@@ -243,26 +243,47 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     Cat(halfWords, 0.U(1.W))(formerLenWidth - 1, 0)
   }
 
+  require(isPow2(bankNum))
+  require(RenameWidth <= bankNum)
+  val enqBankBits = log2Ceil(bankNum)
+  val bankHeadUop = (0 until bankNum).map { bank =>
+    val select = VecInit(canEnqueue.zip(allocatePtrVec).map { case (valid, ptr) =>
+      valid && ptr.value(enqBankBits - 1, 0) === bank.U
+    })
+    Mux1H(select, io.enq.req.map(_.bits))
+  }
+
+  // The bank property also covers the per-entry trace selects: one enqueue group holds at
+  // most one entry per bank, so a lane's robIdx low bits already identify its entry.
+  val bankUopMask = (0 until bankNum).map { bank =>
+    VecInit(uopCanEnqueue.zip(io.enq.req).map { case (valid, req) =>
+      valid && req.bits.robIdx.value(enqBankBits - 1, 0) === bank.U
+    })
+  }
+  val bankFormerMask = bankUopMask.map { mask =>
+    VecInit(mask.zip(io.enq.req).map { case (valid, req) => valid && req.bits.robIdx.isFormer })
+  }
+  val bankYoungestUop = bankUopMask.map { mask =>
+    PriorityMux(mask.reverse, io.enq.req.map(_.bits).reverse)
+  }
+  val bankYoungestFormerUop = bankFormerMask.map { mask =>
+    PriorityMux(mask.reverse, io.enq.req.map(_.bits).reverse)
+  }
+
   // robEntries enqueue
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
-    val entryEnqValid = uopCanEnqueue.zip(io.enq.req).map { case (valid, req) =>
-      valid && req.bits.robIdx.value === i.U
-    }
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !io.redirect.valid){
       // TODO: enq
-      val entryHeadUop = Mux1H(enqOH, io.enq.req.map(_.bits))
+      val entryHeadUop = bankHeadUop(i % bankNum)
       connectEnq(robEntries(i), entryHeadUop)
-      val youngestEnqUop = PriorityMux(entryEnqValid.reverse, io.enq.req.map(_.bits).reverse)
+      val youngestEnqUop = bankYoungestUop(i % bankNum)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
       robEntries(i).traceBlockInPipe.ilastsize := youngestEnqUop.traceBlockInPipe.ilastsize
       robEntries(i).formerTraceBlockInPipe.iretire := entryHeadUop.formerTraceIretire
-      val formerEntryEnqValid = entryEnqValid.zip(io.enq.req).map { case (valid, req) =>
-        valid && req.bits.robIdx.isFormer
-      }
-      when(VecInit(formerEntryEnqValid).asUInt.orR) {
-        val youngestFormerUop = PriorityMux(formerEntryEnqValid.reverse, io.enq.req.map(_.bits).reverse)
+      when(bankFormerMask(i % bankNum).asUInt.orR) {
+        val youngestFormerUop = bankYoungestFormerUop(i % bankNum)
         robEntries(i).formerTraceBlockInPipe.itype := youngestFormerUop.traceBlockInPipe.itype
         robEntries(i).formerTraceBlockInPipe.ilastsize := youngestFormerUop.traceBlockInPipe.ilastsize
       }
