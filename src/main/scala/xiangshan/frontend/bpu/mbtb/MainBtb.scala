@@ -38,6 +38,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
+
+    // A group's later block was never looked up here, so it carries no meta and trains by reading its entries back.
+    // What was read is handed on, so that tage, which trains alongside, judges the same block by the same entries.
+    val t1_rereadMeta: MainBtbMeta = Output(new MainBtbMeta)
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -53,7 +57,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   io.sramResetDone := alignBanks.map(_.io.sramResetDone).reduce(_ && _)
 
-  io.trainReady := true.B
+  private val t0_reread = io.train.meta.isLaterBlock
+  io.trainReady := !(t0_reread && alignBanks.map(_.io.t0_trainReadConflict).reduce(_ || _))
 
   alignBanks.foreach { b =>
     b.io.stageCtrl := io.stageCtrl
@@ -123,20 +128,25 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t0_posBitsHigherVec = t0_rotator.rotate(VecInit.tabulate(NumAlignBanks)(_.U(AlignBankIdxLen.W)))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.t0_startPc := t0_startPcVec(i)
+    b.io.t0_startPc            := t0_startPcVec(i)
+    b.io.t0_trainRead          := t0_reread
+    b.io.t0_trainPosHigherBits := t0_posBitsHigherVec(i)
   }
 
   /* *** t1 ***
    * calculate write data and write to alignBanks
    */
-  private val t1_fire  = RegNext(t0_fire, init = false.B)
-  private val t1_train = RegEnable(t0_train, t0_fire)
+  private val t1_fire   = RegNext(t0_fire, init = false.B)
+  private val t1_train  = RegEnable(t0_train, t0_fire)
+  private val t1_reread = RegEnable(t0_reread, false.B, t0_fire)
 
   private val t1_rotator          = RegEnable(t0_rotator, t0_fire)
   private val t1_startPcVec       = RegEnable(t0_startPcVec, t0_fire)
   private val t1_posBitsHigherVec = RegEnable(t0_posBitsHigherVec, t0_fire)
 
-  private val t1_meta           = t1_train.meta.mbtb
+  io.t1_rereadMeta.entries := VecInit(alignBanks.map(_.io.t1_rereadMeta))
+  private val t1_meta = Wire(new MainBtbMeta)
+  t1_meta := Mux(t1_reread, io.t1_rereadMeta, t1_train.meta.mbtb)
   private val t1_mispredictInfo = t1_train.mispredictBranch
 
   private val t1_writeAlignBankIdx  = getAlignBankIndexFromPosition(t1_mispredictInfo.bits.cfiPosition)

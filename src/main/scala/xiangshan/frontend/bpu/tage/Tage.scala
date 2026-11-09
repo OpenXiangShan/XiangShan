@@ -29,6 +29,7 @@ import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.TageTableInfo
+import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 
 /**
  * This module is the implementation of the TAGE (TAgged GEometric history length predictor).
@@ -42,6 +43,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val meta:        TageMeta        = Output(new TageMeta)
 
     val debug_trainValid: Bool = Input(Bool())
+
+    // A group's later block was never looked up here, so it carries no meta and trains by reading the tables back.
+    // Which of its branches the btb holds comes from the btb's own read of the same block, a stage after training
+    // starts.
+    val t1_mbtbRereadMeta: MainBtbMeta = Input(new MainBtbMeta)
   }
   val io: TageIO = IO(new TageIO)
 
@@ -212,14 +218,17 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val t0_fire = io.stageCtrl.t0_fire && t0_hasCond && io.enable
 
+  private val t0_reread = io.train.meta.isLaterBlock
+
   private val (t0_mbtbHitMask, t0_baseCtr, t0_meta) = t0_branches.map { branch =>
     val mbtbMeta  = io.train.meta.mbtb.entries.flatten
     val tageMeta  = io.train.meta.tage.entries
     val hitMask   = mbtbMeta.map(_.hit(branch.bits))
     val hitMaskOH = PriorityEncoderOH(hitMask)
-    val mbtbHit   = hitMask.reduce(_ || _)
-    val baseCtr   = Mux1H(hitMaskOH, mbtbMeta.map(_.counter))
-    val meta      = Mux1H(hitMaskOH, tageMeta)
+    // reading back: whether the btb holds the branch is known a stage later, so assume it does for now
+    val mbtbHit = Mux(t0_reread, branch.valid && branch.bits.attribute.isConditional, hitMask.reduce(_ || _))
+    val baseCtr = Mux1H(hitMaskOH, mbtbMeta.map(_.counter))
+    val meta    = Mux1H(hitMaskOH, tageMeta)
     (mbtbHit, baseCtr, meta)
   }.unzip3
 
@@ -231,7 +240,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val useProvider  = t0_meta(i).useProvider
     val hasAlt       = t0_meta(i).hasAlt
     val mispredicted = branch.bits.mispredict
-    mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt))
+    mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt) || t0_reread)
   }.reduce(_ || _)
   private val t0_useMeta = !t0_needRead
 
@@ -300,10 +309,19 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t1_setIdx   = RegEnable(t0_setIdx, t0_fire)
   private val t1_bankMask = RegEnable(t0_bankMask, t0_fire)
 
-  private val t1_useMeta     = RegEnable(t0_useMeta, t0_fire)
-  private val t1_meta        = RegEnable(VecInit(t0_meta), t0_fire)
-  private val t1_baseCtr     = RegEnable(VecInit(t0_baseCtr), t0_fire)
-  private val t1_mbtbHitMask = RegEnable(VecInit(t0_mbtbHitMask), t0_fire)
+  private val t1_useMeta         = RegEnable(t0_useMeta, t0_fire)
+  private val t1_meta            = RegEnable(VecInit(t0_meta), t0_fire)
+  private val t1_baseCtr         = RegEnable(VecInit(t0_baseCtr), t0_fire)
+  private val t1_mbtbHitMaskMeta = RegEnable(VecInit(t0_mbtbHitMask), t0_fire)
+  private val t1_reread          = RegEnable(t0_reread, false.B, t0_fire)
+  // a block read back takes what the btb found in its own read in place of what the meta would have said
+  private val (t1_rereadHit, t1_rereadBaseCtr) = t1_branches.map { branch =>
+    val entries   = io.t1_mbtbRereadMeta.entries.flatten
+    val hitMask   = entries.map(_.hit(branch.bits))
+    val hitMaskOH = PriorityEncoderOH(hitMask)
+    (hitMask.reduce(_ || _) && branch.valid, Mux1H(hitMaskOH, entries.map(_.counter)))
+  }.unzip
+  private val t1_mbtbHitMask = Mux(t1_reread, VecInit(t1_rereadHit), t1_mbtbHitMaskMeta)
 
   private val t1_foldedHist = RegEnable(t0_foldedHist, t0_fire)
   private val t1_rawTag = VecInit((tables zip t1_foldedHist).map { case (table, hist) =>
@@ -327,10 +345,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_rawTag   = RegEnable(t1_rawTag, t1_fire)
   private val t2_readResp = RegEnable(t1_readResp, t1_fire)
 
-  private val t2_useMeta     = RegEnable(t1_useMeta, t1_fire)
-  private val t2_meta        = RegEnable(t1_meta, t1_fire)
-  private val t2_baseCtr     = RegEnable(t1_baseCtr, t1_fire)
-  private val t2_mbtbHitMask = RegEnable(t1_mbtbHitMask, t1_fire)
+  private val t2_useMeta      = RegEnable(t1_useMeta, t1_fire)
+  private val t2_isLaterBlock = RegEnable(t1_reread, t1_fire)
+  private val t2_meta         = RegEnable(t1_meta, t1_fire)
+  private val t2_baseCtr      = RegEnable(Mux(t1_reread, VecInit(t1_rereadBaseCtr), t1_baseCtr), t1_fire)
+  private val t2_mbtbHitMask  = RegEnable(t1_mbtbHitMask, t1_fire)
 
   private val t2_trainInfoVec = VecInit(t2_branches.zipWithIndex.map { case (branch, i) =>
     val isCond      = branch.valid && branch.bits.attribute.isConditional
@@ -743,6 +762,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       trainInfo.hasProvider && trainInfo.providerTableOH(NumTables - 1)
     }
   )
+  XSPerfAccumulate("train_later_block", t2_fire && t2_isLaterBlock)
   XSPerfAccumulate("allocate_needed", t3_fire && t3_needAllocate)
   XSPerfAccumulate("allocate_success", t3_fire && t3_allocate)
   XSPerfAccumulate("allocate_failure", t3_fire && t3_needAllocate && !t3_canAllocate)

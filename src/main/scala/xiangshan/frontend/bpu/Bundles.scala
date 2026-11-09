@@ -350,6 +350,10 @@ class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
   val phr:      PhrMeta             = new PhrMeta
   val commonHR: CommonHRResolveMeta = new CommonHRResolveMeta
 
+  // This entry is a group's later block. Nothing looked the block up, so the lookup fields are empty, and a predictor
+  // that trains from them reads the block back from its own arrays instead.
+  val isLaterBlock: Bool = Bool()
+
   // val debug_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
   val utage: MicroTageMeta = new MicroTageMeta
 }
