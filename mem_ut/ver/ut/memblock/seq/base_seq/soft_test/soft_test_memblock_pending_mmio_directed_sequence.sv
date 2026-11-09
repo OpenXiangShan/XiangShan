@@ -1272,9 +1272,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_store_mmio_consu
     end
 endtask:run_cbo_store_mmio_consume_scenario
 
-// 中文注释：fault CBO 的首个 STA0 fault raw 在 live owner 上冻结动态身份；owner
-// 正式 terminal retire 后，同完整 ROB key 的 normal STA0 尾拍只被消费，不进入
-// WB/redirect。完整 ROB key 复用的新 live owner必须优先，旧 context 随即失效。
+// 抽象职责：构造 fault CBO 双 real-WB 并显式完成 pending fault 屏障，随后验证
+// terminal owner 的迟到 STA 消费、多 context 共存和完整 ROB key 复用优先级。
 task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_scenario();
     memblock_sync_pkg::dispatch_raw_int_wb_t raw;
     memblock_wb_event_t wb_event;
@@ -1302,6 +1301,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
         !data.mark_target_normal_pass(0, MEMBLOCK_ISSUE_TARGET_STD,
                                       status.std_issue_epoch,
                                       status.replay_seq, $time) ||
+        !data.finalize_pending_store_fault(0) ||
         !status.fault || !status.sta_fault || !status.sta_writeback ||
         !status.std_writeback) begin
         `uvm_fatal(get_type_name(),
@@ -1344,7 +1344,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
         !writeback_handler.handle_real_writeback_event(wb_event) ||
         !data.mark_target_normal_pass(0, MEMBLOCK_ISSUE_TARGET_STD,
                                       status.std_issue_epoch,
-                                      status.replay_seq, $time)) begin
+                                      status.replay_seq, $time) ||
+        !data.finalize_pending_store_fault(0)) begin
         `uvm_fatal(get_type_name(), "failed to prepare CBO ROB-reuse tombstone")
     end
     data.release_uid_sq_mapping(0);
@@ -1384,9 +1385,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
     end
 endtask:run_cbo_fault_late_sta_scenario
 
-// 中文注释：fault CBO可先真实SQ deq并terminal retire，之后同ROB exception
-// redirect才完成scan。该顺序不会建立fault LSQ resource，因此必须用terminal
-// UID/epoch/ROB身份和owner-window固定record证明软件intent已被覆盖。
+// 抽象职责：先显式完成 fault CBO 双 real-WB 屏障和 terminal retire，再验证
+// 已观察的同 ROB exception redirect 能覆盖软件 intent 并收敛 owner window。
 task soft_test_memblock_pending_mmio_directed_sequence::
     run_cbo_fault_observed_redirect_coverage_scenario();
     memblock_issue_q_item_t fired_items[$];
@@ -1436,7 +1436,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::
         !writeback_handler.handle_real_writeback_event(wb_event) ||
         !data.mark_target_normal_pass(0, MEMBLOCK_ISSUE_TARGET_STD,
                                       fault_status.std_issue_epoch,
-                                      fault_status.replay_seq, $time)) begin
+                                      fault_status.replay_seq, $time) ||
+        !data.finalize_pending_store_fault(0)) begin
         `uvm_fatal(get_type_name(),
                    "failed to establish committed fault CBO before observed redirect")
     end
