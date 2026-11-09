@@ -87,6 +87,90 @@ class memblock_op_behavior_util;
                (fuOpType[5:2] == 4'b1011);
     endfunction:is_amo_fuoptype
 
+    static function bit [3:0] atomic_required_std_mask(input bit [8:0] fuOpType);
+        if (is_amocas_q_fuoptype(fuOpType)) return 4'b1111;
+        if (is_amocas_wd_fuoptype(fuOpType)) return 4'b0011;
+        if (is_amo_fuoptype(fuOpType)) return 4'b0001;
+        return 4'b0000;
+    endfunction:atomic_required_std_mask
+
+    static function bit [63:0] generate_atomic_std_data(
+        input main_control_transaction tr,
+        input int unsigned slot
+    );
+        bit [63:0] seed;
+
+        if (tr == null || slot >= 4 || !is_amo_fuoptype(tr.fuOpType)) begin
+            `uvm_fatal("ATOMIC_OPERAND",
+                       $sformatf("invalid atomic operand request tr=%0p slot=%0d", tr, slot))
+        end
+        if (!is_amocas_wd_fuoptype(tr.fuOpType) &&
+            !is_amocas_q_fuoptype(tr.fuOpType)) begin
+            if (slot != 0) begin
+                `uvm_fatal("ATOMIC_OPERAND",
+                           $sformatf("non-CAS atomic uid=%0d has STD slot=%0d",
+                                     tr.uid, slot))
+            end
+            return tr.src_0;
+        end
+
+        seed = tr.src_0 ^ (64'(tr.uid) << 17);
+        case (slot)
+            0: return seed ^ 64'h4341_535F_434D_504C;
+            1: return seed ^ 64'h4341_535F_4E45_574C;
+            2: return seed ^ 64'h4341_535F_434D_5048;
+            3: return seed ^ 64'h4341_535F_4E45_5748;
+            default: return '0;
+        endcase
+    endfunction:generate_atomic_std_data
+
+    // Final Main-table admission is the only place allowed to synthesize a
+    // missing atomic operand. Existing complete CAS-prefill values are kept.
+    static function void freeze_atomic_std_operands(input main_control_transaction tr);
+        bit [3:0] required_mask;
+        bit [3:0] present_mask;
+
+        if (tr == null || tr.op_class != MEMBLOCK_OP_CLASS_AMO) return;
+        required_mask = atomic_required_std_mask(tr.fuOpType);
+        present_mask = '0;
+        foreach (tr.std_data_override_valid[slot]) begin
+            present_mask[slot] = tr.std_data_override_valid[slot];
+        end
+        if (required_mask == '0) begin
+            `uvm_fatal("ATOMIC_OPERAND",
+                       $sformatf("uid=%0d has unsupported atomic fuOpType=%0d",
+                                 tr.uid, tr.fuOpType))
+        end
+        if (present_mask != '0 && present_mask != required_mask) begin
+            `uvm_fatal("ATOMIC_OPERAND",
+                       $sformatf("uid=%0d has partial atomic STD freeze mask=0x%0h required=0x%0h",
+                                 tr.uid, present_mask, required_mask))
+        end
+        if (present_mask == '0) begin
+            foreach (tr.std_data_override_valid[slot]) begin
+                if (required_mask[slot]) begin
+                    tr.std_data_override_valid[slot] = 1'b1;
+                    tr.std_data_override[slot] = generate_atomic_std_data(tr, slot);
+                end
+            end
+        end
+    endfunction:freeze_atomic_std_operands
+
+    static function bit validate_frozen_atomic_std_operands(
+        input main_control_transaction tr
+    );
+        bit [3:0] present_mask;
+        bit [3:0] required_mask;
+
+        if (tr == null || tr.op_class != MEMBLOCK_OP_CLASS_AMO) return 1'b1;
+        present_mask = '0;
+        foreach (tr.std_data_override_valid[slot]) begin
+            present_mask[slot] = tr.std_data_override_valid[slot];
+        end
+        required_mask = atomic_required_std_mask(tr.fuOpType);
+        return required_mask != '0 && present_mask == required_mask;
+    endfunction:validate_frozen_atomic_std_operands
+
     static function memblock_op_behavior_t make_default_behavior();
         memblock_op_behavior_t behavior;
 

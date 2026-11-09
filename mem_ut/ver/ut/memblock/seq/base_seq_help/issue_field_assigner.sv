@@ -230,36 +230,7 @@ class issue_field_assigner extends uvm_object;
 
     function bit [63:0] derive_atomic_std_data(input main_control_transaction main_tr,
                                                input int unsigned slot);
-        bit [63:0] seed;
-
-        if (main_tr == null) begin
-            `uvm_fatal("ISSUE_FIELD", "derive_atomic_std_data got null main transaction")
-        end
-        if (slot >= 4) begin
-            `uvm_fatal("ISSUE_FIELD",
-                       $sformatf("derive_atomic_std_data got invalid slot=%0d", slot))
-        end
-        if (!lsq_ctrl_model::is_amocas_wd_fuoptype(main_tr.fuOpType) &&
-            !lsq_ctrl_model::is_amocas_q_fuoptype(main_tr.fuOpType)) begin
-            if (slot != 0) begin
-                `uvm_fatal("ISSUE_FIELD",
-                           $sformatf("non-CAS atomic uid=%0d has STD slot=%0d",
-                                     main_tr.uid, slot))
-            end
-            return main_tr.src_0;
-        end
-
-        // The transaction has no architectural rd/rs2 value fields.  Derive
-        // four stable, distinct data halves from the owner and slot while
-        // preserving the RTL CAS role ordering: compare/new low/high.
-        seed = main_tr.src_0 ^ (64'(main_tr.uid) << 17);
-        case (slot)
-            0: return seed ^ 64'h4341_535F_434D_504C; // compare low
-            1: return seed ^ 64'h4341_535F_4E45_574C; // new low
-            2: return seed ^ 64'h4341_535F_434D_5048; // compare high
-            3: return seed ^ 64'h4341_535F_4E45_5748; // new high
-            default: return '0;
-        endcase
+        return memblock_op_behavior_util::generate_atomic_std_data(main_tr, slot);
     endfunction:derive_atomic_std_data
 
     // 抽象职责：普通 Store 和原子 STD 共用数据入口，冻结值优先且不受 UID/发射顺序影响。
@@ -270,7 +241,11 @@ class issue_field_assigner extends uvm_object;
             `uvm_fatal("ISSUE_FIELD", "derive_std_data requires a transaction and slot in [0:3]")
         if (main_tr.std_data_override_valid[slot]) return main_tr.std_data_override[slot];
         behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
-        if (behavior.is_atomic) return derive_atomic_std_data(main_tr, slot);
+        if (behavior.is_atomic) begin
+            `uvm_fatal("ATOMIC_OPERAND",
+                       $sformatf("uid=%0d atomic STD slot=%0d was not frozen before issue",
+                                 main_tr.uid, slot))
+        end
         return main_tr.src_0;
     endfunction:derive_std_data
 

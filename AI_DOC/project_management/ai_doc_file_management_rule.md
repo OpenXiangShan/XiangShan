@@ -14,6 +14,7 @@
 
 ```text
 AI_DOC/
+  seq/
   plan/
     测试框架/
       plan/
@@ -49,6 +50,7 @@ AI_DOC/
 
 目录含义：
 
+- `AI_DOC/seq`：只放测试用例 CSV 清单；真实 DUT 与 soft/framework 用例必须分别使用独立 CSV 文件记录，具体要求遵循 `AI_DOC/project_management/mem_ut_testcase_csv_management_rule.md`。
 - `AI_DOC/plan/test_framework/plan`：mem_ut 测试框架设计、重构、实现方案和 TODO plan。
 - `AI_DOC/plan/test_framework/review_doc`：mem_ut 测试框架 review、annotated review、checklist 和复查记录。
 - `AI_DOC/plan/rm_plan`：RM、scoreboard、参考模型、TLB/RM check 相关 plan。
@@ -131,7 +133,23 @@ AI_DOC/web
 - testcase 或场景流程分析：`AI_DOC/analysis/testcase_flow`
 - 测试框架架构或设计原理分析：`AI_DOC/analysis/framework_design`
 
-## 6.1 Buglist 文档入口
+测试用例的流程分析、原理说明和执行过程文档仍放在 `AI_DOC/analysis/testcase_flow`；新增测试用例的
+清单 CSV 属于长期执行索引，必须单独放在 `AI_DOC/seq`，不得与分析文档混放。
+
+## 6.1 测试用例 CSV 清单规则
+
+每次新增真实 DUT 或 soft/framework 测试用例时，必须同步维护 `AI_DOC/seq` 下的 CSV 清单：
+
+- 具体分类、字段和检查要求遵循 `AI_DOC/project_management/mem_ut_testcase_csv_management_rule.md`。
+
+- 真实 DUT 与 soft/framework 用例分别记录在独立 CSV 文件中。
+- 每个新增用例或可独立检查的测试子场景单独占一行。
+- 每行至少包含 `testcase_name` 和 `purpose`；推荐同时记录 `entry`、`cfg`、`expected_result` 和 `status`。
+- 推荐文件名为 `<feature>_real_dut_testcases_<YYYYMMDD>.csv` 和
+  `<feature>_soft_framework_testcases_<YYYYMMDD>.csv`。
+- 用例执行完成后同步更新状态；用例重命名、删除、拆分或合并时同步更新清单。
+
+## 6.2 Buglist 文档入口
 
 Buglist 与一般分析文档分开管理。只有在仿真测试过程中经过多轮 review 确认的 RM、测试框架或 RTL
 缺陷，才进入 `AI_DOC/buglist`；单次观察、尚未确认的猜测和普通源码分析仍放在 `AI_DOC/analysis`。

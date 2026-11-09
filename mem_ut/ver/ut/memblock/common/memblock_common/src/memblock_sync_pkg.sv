@@ -672,8 +672,54 @@ package memblock_sync_pkg;
     bit sbuffer_responder_done = 1'b0;
     bit dispatch_flushsb_waiting_empty = 1'b0;
     int unsigned dispatch_flush_epoch = 0;
+    bit atomic_issue_owner_snapshot_valid = 1'b0;
+    int unsigned atomic_issue_owner_snapshot_uid = 0;
+    int unsigned atomic_issue_owner_snapshot_dynamic_epoch = 0;
+    int unsigned atomic_issue_owner_snapshot_activation_flush_epoch = 0;
+    bit [3:0] atomic_issue_owner_snapshot_required_sta_mask = '0;
+    bit [3:0] atomic_issue_owner_snapshot_required_std_mask = '0;
     longint unsigned dispatch_service_cycle = 0;
     int unsigned raw_csr_rearm_epoch = 0;
+
+    function void publish_atomic_issue_owner_snapshot(
+        input int unsigned uid,
+        input int unsigned dynamic_epoch,
+        input int unsigned activation_flush_epoch,
+        input bit [3:0] required_sta_mask,
+        input bit [3:0] required_std_mask
+    );
+        atomic_issue_owner_snapshot_valid = 1'b1;
+        atomic_issue_owner_snapshot_uid = uid;
+        atomic_issue_owner_snapshot_dynamic_epoch = dynamic_epoch;
+        atomic_issue_owner_snapshot_activation_flush_epoch = activation_flush_epoch;
+        atomic_issue_owner_snapshot_required_sta_mask = required_sta_mask;
+        atomic_issue_owner_snapshot_required_std_mask = required_std_mask;
+    endfunction:publish_atomic_issue_owner_snapshot
+
+    function void clear_atomic_issue_owner_snapshot();
+        atomic_issue_owner_snapshot_valid = 1'b0;
+        atomic_issue_owner_snapshot_uid = 0;
+        atomic_issue_owner_snapshot_dynamic_epoch = 0;
+        atomic_issue_owner_snapshot_activation_flush_epoch = 0;
+        atomic_issue_owner_snapshot_required_sta_mask = '0;
+        atomic_issue_owner_snapshot_required_std_mask = '0;
+    endfunction:clear_atomic_issue_owner_snapshot
+
+    function void get_atomic_issue_owner_snapshot(
+        output bit valid,
+        output int unsigned uid,
+        output int unsigned dynamic_epoch,
+        output int unsigned activation_flush_epoch,
+        output bit [3:0] required_sta_mask,
+        output bit [3:0] required_std_mask
+    );
+        valid = atomic_issue_owner_snapshot_valid;
+        uid = atomic_issue_owner_snapshot_uid;
+        dynamic_epoch = atomic_issue_owner_snapshot_dynamic_epoch;
+        activation_flush_epoch = atomic_issue_owner_snapshot_activation_flush_epoch;
+        required_sta_mask = atomic_issue_owner_snapshot_required_sta_mask;
+        required_std_mask = atomic_issue_owner_snapshot_required_std_mask;
+    endfunction:get_atomic_issue_owner_snapshot
     // 中文注释：同一时刻唯一的L2TLB responder生命周期owner。
     // enable sequence在开放ready前claim，最终inactive item完成后release；DUT reset不清owner。
     bit l2tlb_lifecycle_owner_claimed = 1'b0;

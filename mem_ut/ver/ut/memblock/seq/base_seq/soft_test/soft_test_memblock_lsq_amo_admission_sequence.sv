@@ -973,9 +973,9 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
         amo.src_0 = 64'h8123_4567_89ab_cdef;
         amo.imm = 0;
         amo.numLsElem = 0;
-        for (int unsigned slot = 0; slot < 4; slot++) begin
-            std_data[slot] = field_assigner.derive_atomic_std_data(amo, slot);
-        end
+        memblock_op_behavior_util::freeze_atomic_std_operands(amo);
+        for (int unsigned slot = 0; slot < 4; slot++)
+            std_data[slot] = amo.std_data_override[slot];
         for (int unsigned lhs = 0; lhs < 4; lhs++) begin
             for (int unsigned rhs = lhs + 1; rhs < 4; rhs++) begin
                 check_expect(std_data[lhs] != std_data[rhs],
@@ -1114,7 +1114,6 @@ class soft_test_memblock_lsq_amo_admission_sequence extends memblock_dispatch_ba
             saved_addr_reuse_store_after_store_wt;
         seq_csr_common::boundary_profile_gen_en = saved_boundary_profile_gen_en;
     endtask:check_amo_addr_reuse_type_guard
-
     virtual task body();
         ensure_dispatch_runtime_helpers();
         check_fixed_lane_prefix_and_partial();

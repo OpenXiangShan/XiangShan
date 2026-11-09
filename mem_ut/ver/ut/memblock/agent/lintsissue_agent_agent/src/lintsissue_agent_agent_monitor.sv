@@ -266,13 +266,68 @@ task lintsissue_agent_agent_monitor::mon_data();
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
 
         end
-        //if(xxxTODOxxx==1'b1) begin
-        //    mon_tr = lintsissue_agent_agent_xaction::type_id::create("mon_tr");
+        if (this.vif.rst_n === 1'b1 && memblock_sync_pkg::reset_backend_done &&
+            (io_ooo_to_mem_issueSta_0_valid || io_ooo_to_mem_issueSta_1_valid ||
+             io_ooo_to_mem_issueStd_0_valid || io_ooo_to_mem_issueStd_1_valid)) begin
+            mon_tr = lintsissue_agent_agent_xaction::type_id::create("mon_tr");
+            mon_tr.channel_id = this.cfg.channel_id;
+            mon_tr.memblock_monitor_sample_seq =
+                memblock_sync_pkg::peek_current_dut_global_sample();
+            mon_tr.memblock_monitor_flush_epoch =
+                memblock_sync_pkg::dispatch_flush_epoch;
+            memblock_sync_pkg::get_atomic_issue_owner_snapshot(
+                mon_tr.memblock_monitor_atomic_owner_valid,
+                mon_tr.memblock_monitor_atomic_owner_uid,
+                mon_tr.memblock_monitor_atomic_owner_dynamic_epoch,
+                mon_tr.memblock_monitor_atomic_owner_activation_flush_epoch,
+                mon_tr.memblock_monitor_atomic_owner_required_sta_mask,
+                mon_tr.memblock_monitor_atomic_owner_required_std_mask);
 
-        //    mon_tr.channel_id = this.cfg.channel_id;
-        //    mon_tr.unpack();
-        //    this.mon_item_port.write(mon_tr);
-        //end
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_src_0 = io_ooo_to_mem_issueSta_0_bits_src_0;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType = io_ooo_to_mem_issueSta_0_bits_uop_fuOpType;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_fuType = io_ooo_to_mem_issueSta_0_bits_uop_fuType;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_imm = io_ooo_to_mem_issueSta_0_bits_uop_imm;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_pdest = io_ooo_to_mem_issueSta_0_bits_uop_pdest;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_rfWen = io_ooo_to_mem_issueSta_0_bits_uop_rfWen;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag = io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_value = io_ooo_to_mem_issueSta_0_bits_uop_robIdx_value;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_flag = io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_flag;
+            mon_tr.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value = io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value;
+            mon_tr.io_ooo_to_mem_issueSta_0_ready = io_ooo_to_mem_issueSta_0_ready;
+            mon_tr.io_ooo_to_mem_issueSta_0_valid = io_ooo_to_mem_issueSta_0_valid;
+
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_src_0 = io_ooo_to_mem_issueSta_1_bits_src_0;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType = io_ooo_to_mem_issueSta_1_bits_uop_fuOpType;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_fuType = io_ooo_to_mem_issueSta_1_bits_uop_fuType;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_imm = io_ooo_to_mem_issueSta_1_bits_uop_imm;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_pdest = io_ooo_to_mem_issueSta_1_bits_uop_pdest;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_rfWen = io_ooo_to_mem_issueSta_1_bits_uop_rfWen;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag = io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_value = io_ooo_to_mem_issueSta_1_bits_uop_robIdx_value;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_flag = io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_flag;
+            mon_tr.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_value = io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_value;
+            mon_tr.io_ooo_to_mem_issueSta_1_ready = io_ooo_to_mem_issueSta_1_ready;
+            mon_tr.io_ooo_to_mem_issueSta_1_valid = io_ooo_to_mem_issueSta_1_valid;
+
+            mon_tr.io_ooo_to_mem_issueStd_0_bits_src_0 = io_ooo_to_mem_issueStd_0_bits_src_0;
+            mon_tr.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType = io_ooo_to_mem_issueStd_0_bits_uop_fuOpType;
+            mon_tr.io_ooo_to_mem_issueStd_0_bits_uop_fuType = io_ooo_to_mem_issueStd_0_bits_uop_fuType;
+            mon_tr.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value = io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value;
+            mon_tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_flag = io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_flag;
+            mon_tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value = io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value;
+            mon_tr.io_ooo_to_mem_issueStd_0_ready = io_ooo_to_mem_issueStd_0_ready;
+            mon_tr.io_ooo_to_mem_issueStd_0_valid = io_ooo_to_mem_issueStd_0_valid;
+
+            mon_tr.io_ooo_to_mem_issueStd_1_bits_src_0 = io_ooo_to_mem_issueStd_1_bits_src_0;
+            mon_tr.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType = io_ooo_to_mem_issueStd_1_bits_uop_fuOpType;
+            mon_tr.io_ooo_to_mem_issueStd_1_bits_uop_fuType = io_ooo_to_mem_issueStd_1_bits_uop_fuType;
+            mon_tr.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value = io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value;
+            mon_tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_flag = io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_flag;
+            mon_tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_value = io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_value;
+            mon_tr.io_ooo_to_mem_issueStd_1_ready = io_ooo_to_mem_issueStd_1_ready;
+            mon_tr.io_ooo_to_mem_issueStd_1_valid = io_ooo_to_mem_issueStd_1_valid;
+            this.mon_item_port.write(mon_tr);
+        end
     end
 endtask:mon_data
 

@@ -450,6 +450,7 @@ class common_data_transaction extends uvm_object;
         active_control_barrier_uid = 0;
         active_atomic_barrier_valid = 1'b0;
         active_atomic_barrier_uid = 0;
+        memblock_sync_pkg::clear_atomic_issue_owner_snapshot();
         atomic_held_piece_valid = 1'b0;
         atomic_held_piece = '{default:'0};
         lsq_shadow_redirect_pipeline_idle = 1'b1;
@@ -619,6 +620,7 @@ class common_data_transaction extends uvm_object;
         active_control_barrier_uid = 0;
         active_atomic_barrier_valid = 1'b0;
         active_atomic_barrier_uid = 0;
+        memblock_sync_pkg::clear_atomic_issue_owner_snapshot();
         atomic_held_piece_valid = 1'b0;
         atomic_held_piece = '{default:'0};
         lsq_shadow_redirect_pipeline_idle = 1'b1;
@@ -1023,6 +1025,12 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA", $sformatf("set_main_transaction must not overwrite active uid=%0d", uid))
         end
         tr.uid = uid;
+        memblock_op_behavior_util::freeze_atomic_std_operands(tr);
+        if (!memblock_op_behavior_util::validate_frozen_atomic_std_operands(tr)) begin
+            `uvm_fatal("ATOMIC_OPERAND",
+                       $sformatf("uid=%0d reached Main table without complete frozen STD operands",
+                                 uid))
+        end
         main_table_by_uid[uid] = tr;
     endfunction:set_main_transaction
 
@@ -2570,6 +2578,13 @@ class common_data_transaction extends uvm_object;
                 get_main_transaction(uid).fuOpType) ? 2 : 1;
         active_atomic_barrier_valid = 1'b1;
         active_atomic_barrier_uid = uid;
+        if (!status.active_instance_flush_epoch_valid) begin
+            `uvm_fatal("ATOMIC_BARRIER",
+                       $sformatf("uid=%0d has no activation flush epoch", uid))
+        end
+        memblock_sync_pkg::publish_atomic_issue_owner_snapshot(
+            uid, status.dynamic_epoch, status.active_instance_flush_epoch,
+            status.atomic_required_sta_mask, status.atomic_required_std_mask);
     endfunction:establish_atomic_barrier
 
     function bit is_atomic_uid(input memblock_uid_t uid);
@@ -2753,6 +2768,7 @@ class common_data_transaction extends uvm_object;
         end
         active_atomic_barrier_valid = 1'b0;
         active_atomic_barrier_uid = 0;
+        memblock_sync_pkg::clear_atomic_issue_owner_snapshot();
         clear_atomic_owner_runtime(status);
     endfunction:release_atomic_barrier_after_terminal
 
@@ -2770,6 +2786,7 @@ class common_data_transaction extends uvm_object;
         clear_atomic_owner_runtime(status);
         active_atomic_barrier_valid = 1'b0;
         active_atomic_barrier_uid = 0;
+        memblock_sync_pkg::clear_atomic_issue_owner_snapshot();
         return 1'b1;
     endfunction:release_unfired_atomic_barrier_after_redirect_recovery
 
@@ -2811,6 +2828,7 @@ class common_data_transaction extends uvm_object;
         void'(rollback_max_enqueued_uid(uid));
         active_atomic_barrier_valid = 1'b0;
         active_atomic_barrier_uid = 0;
+        memblock_sync_pkg::clear_atomic_issue_owner_snapshot();
         atomic_held_piece_valid = 1'b0;
         atomic_held_piece = '{default:'0};
         `uvm_info("ATOMIC_RESET",

@@ -129,12 +129,18 @@ class main_control_transaction extends uvm_object;
             if (op_class == MEMBLOCK_OP_CLASS_STORE) begin
                 if (!std_data_override_valid[0] || std_data_override_valid[1] ||
                     std_data_override_valid[2] || std_data_override_valid[3]) return 1'b0;
-            end else if (op_class == MEMBLOCK_OP_CLASS_AMO &&
-                         fuOpType inside {MEMBLOCK_LSUOP_AMOCAS_W, MEMBLOCK_LSUOP_AMOCAS_D,
-                                          MEMBLOCK_LSUOP_AMOCAS_Q}) begin
-                if (!std_data_override_valid[0] || !std_data_override_valid[1]) return 1'b0;
-                if (std_data_override_valid[2] != (fuOpType == MEMBLOCK_LSUOP_AMOCAS_Q) ||
-                    std_data_override_valid[3] != (fuOpType == MEMBLOCK_LSUOP_AMOCAS_Q)) return 1'b0;
+            end else if (op_class == MEMBLOCK_OP_CLASS_AMO) begin
+                bit [3:0] present_mask;
+                bit [3:0] required_mask;
+                present_mask = '0;
+                foreach (std_data_override_valid[slot])
+                    present_mask[slot] = std_data_override_valid[slot];
+                if (fuOpType == MEMBLOCK_LSUOP_AMOCAS_Q) required_mask = 4'b1111;
+                else if (fuOpType inside {MEMBLOCK_LSUOP_AMOCAS_W,
+                                          MEMBLOCK_LSUOP_AMOCAS_D})
+                    required_mask = 4'b0011;
+                else required_mask = 4'b0001;
+                if (present_mask != required_mask) return 1'b0;
             end else return 1'b0;
         end
         if (vaddr != (src_0 + sign_extend_imm12(imm))) begin

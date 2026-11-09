@@ -94,6 +94,14 @@ cd mem_ut/ver/ut/memblock/sim
 
 - [ai_doc_file_management_rule.md](AI_DOC/project_management/ai_doc_file_management_rule.md)
 
+当前测试用例 CSV 清单目录为：
+
+- [seq](AI_DOC/seq)
+
+当前 `mem_ut` 测试用例 CSV 清单管理规则为：
+
+- [mem_ut_testcase_csv_management_rule.md](AI_DOC/project_management/mem_ut_testcase_csv_management_rule.md)
+
 当前 `AI_DOC` buglist 缺陷记录与分析规则为：
 
 - [buglist_bug_record_rule.md](AI_DOC/project_management/buglist_bug_record_rule.md)
@@ -535,6 +543,35 @@ V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
 - 如后续模拟真实后端Dispatch admission，公共modeled `lsqCanAccept`必须作为LSQ/non-LSQ统一运行期gate实现；不能把6/4 registered credit写成物理宽度参数、allocator永久保留项或AMO/CBO专属特判
 - 运行期状态、表项、monitor raw queue、CSR runtime snapshot 不归入参数配置系统
 - 新增 cfg key 后必须保持 `env/plus.sv`、`seq_csr_common.sv`、`default.cfg` 和 testcase preset cfg 同步
+
+## 测试用例 CSV 清单规则
+
+触发条件：
+
+- 新增真实 DUT 测试用例、testcase preset cfg 或真实 DUT 端到端测试场景
+- 新增 soft test、software-only 测试、框架自测或可独立判定结果的定向检查场景
+- 在已有 testcase 中新增可独立说明用途和结果的测试子场景
+
+核心要求：
+
+- 处理以上任务时，必须先阅读
+  `AI_DOC/project_management/mem_ut_testcase_csv_management_rule.md`。
+
+- 每次新增测试用例时，必须在同一轮修改中同步新增或更新测试用例 CSV 清单。
+- 真实 DUT 用例与 soft/framework 用例必须使用两份独立 CSV 文件分类记录，不得混在同一份 CSV 中。
+- 所有测试用例清单 CSV 统一放在 `AI_DOC/seq/`；目录不存在时必须先创建，不得放入
+  `AI_DOC/analysis/testcase_flow/` 或临时工作目录。
+- 每个新增用例或可独立检查的测试子场景必须单独占一行，至少填写 `testcase_name` 和 `purpose`；
+  推荐同时填写 `entry`、`cfg`、`expected_result` 和 `status`，便于执行与回归追踪。
+- 推荐文件名分别使用 `<feature>_real_dut_testcases_<YYYYMMDD>.csv` 和
+  `<feature>_soft_framework_testcases_<YYYYMMDD>.csv`。
+- 用例完成仿真或 soft test 后，必须及时更新对应 CSV 的执行状态；不得仅在聊天回复或日志中记录结果。
+- 删除、重命名、拆分或合并测试用例时，必须同步更新 CSV，确保用例名称、用途和实际实现一一对应。
+- 完成修改后，至少检查 CSV 可解析、真实 DUT 与 soft/framework 分类无混用、用例名称无重复，并执行：
+
+```bash
+git diff --check -- AI_DOC/seq AGENTS.md
+```
 
 ## 当前已验证状态
 

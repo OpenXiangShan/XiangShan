@@ -1246,10 +1246,11 @@ function bit memblock_pma_pmp_model::entry_matches(
     bit [47:0] na4_base;
 
     if (!entry.valid || entry.a == PMA_PMP_A_OFF) return 1'b0;
-    // V2 scalar PMPChecker 的 lgMaxSize=3 小于 PlatformGrain=12，RTL 的
+    // V2 scalar PMPChecker and AtomicsUnit CAS.Q checker both select the
+    // permission entry from the starting PA at this grain.
     // boundMatch()/napotMatch() 只比较起始 PA；不能自行按 byte end 地址扩展
     // 匹配范围，否则跨 4KiB 的标量访问会与硬件 permission 选择不同。
-    if (size_bytes == 0 || size_bytes > 8) return 1'b0;
+    if (size_bytes == 0 || size_bytes > 16) return 1'b0;
     case (entry.a)
         PMA_PMP_A_TOR: begin
             return paddr >= previous.compare_addr && paddr < entry.compare_addr;
