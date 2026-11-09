@@ -94,7 +94,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s1_setIdx     = RegEnable(s0_setIdx, s0_fire)
   private val s1_bankMask   = RegEnable(s0_bankMask, s0_fire)
 
-  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
+  private val s1_readResp = DataHoldBypass(MixedVecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
 
   private val s1_tags = VecInit(io.fromMainBtb.s1_positions.map { position =>
     VecInit(tables.zip(s1_foldedHist).map { case (table, hist) =>
@@ -137,7 +137,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
-      val hitWayMask   = s2_hits(i)(tableIdx)
+      val hitWayMask   = s2_hits(i)(tableIdx)(TableInfos(tableIdx).NumWays - 1, 0)
       val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
 
       val result = Wire(new PredictTagMatchResult)
@@ -208,7 +208,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   // way width, and merge duplicate losers from all conditional branches in the fetch block.
   private val flushMultiHitWayMasks = MixedVecInit(TableInfos.zipWithIndex.map { case (tableInfo, tableIdx) =>
     val branchFlushWayMasks = s2_multiHits(tableIdx).zipWithIndex.map { case (needFlush, branchIdx) =>
-      val hitWayMask   = s2_hits(branchIdx)(tableIdx)
+      val hitWayMask   = s2_hits(branchIdx)(tableIdx)(tableInfo.NumWays - 1, 0)
       val winnerWayOH  = PriorityEncoderOH(hitWayMask)
       val flushWayMask = Mux(needFlush, hitWayMask & ~winnerWayOH, 0.U(tableInfo.NumWays.W))
       flushWayMask
@@ -343,7 +343,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.getRawTag(t1_startPc, hist.forTag)
   })
 
-  private val t1_readResp = VecInit(tables.map(_.io.readResp(1)))
+  private val t1_readResp = MixedVecInit(tables.map(_.io.readResp(1)))
 
   /* --------------------------------------------------------------------------------------------------------------
     train pipeline stage 2
@@ -550,13 +550,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val ctrWeakAndNotUsefulMask = tableReadResp.entries.zip(tableReadResp.usefulCtrs).map { case (entry, usefulCtr) =>
       entry.takenCtr.isWeak && usefulCtr.isSaturateNegative
     }.asUInt
-    MuxCase(
+    // Cross-table selection needs a common mask width. Padding with zero excludes nonexistent ways.
+    val wayMask = Wire(UInt(MaxNumWays.W))
+    wayMask := MuxCase(
       notUsefulMask,
       Seq(
         notValidMask.orR            -> notValidMask,
         ctrWeakAndNotUsefulMask.orR -> ctrWeakAndNotUsefulMask
       )
     )
+    wayMask
   }
   private val t3_canAllocateTableMask = t3_longerHistoryTableMask & t3_allTableCanAllocateWayMask.map(_.orR).asUInt
   private val t3_canAllocate          = t3_canAllocateTableMask.orR

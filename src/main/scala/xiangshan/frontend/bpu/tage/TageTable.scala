@@ -42,7 +42,7 @@ class TageTable(
   val io: TageTableIO = IO(new TageTableIO)
 
   println(f"TageTable[$tableIdx]:")
-  println(f"  Size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${info.Size}")
+  println(f"  Size(sets per bank, banks, ways): $NumSets * $NumBanks * $NumWays = ${NumSets * NumBanks * NumWays}")
   println(f"  History length: ${info.HistoryLength}")
   println(f"  Address fields:")
   addrFields.show(indent = 4)

@@ -23,9 +23,9 @@ import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait TopHelper extends HasTageParameters {
-  def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Vec[TageFoldedHist] =
-    VecInit(TableInfos.map { implicit tableInfo =>
-      val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(TagWidth).map { histInfo =>
+  def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): MixedVec[TageFoldedHist] =
+    MixedVecInit(TableInfos.map { implicit tableInfo =>
+      val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(TagWidth, NumBanks).map { histInfo =>
         allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
       }
       val indexHist  = tageFoldedHist.head.pad(SetIdxWidth + BankIdxWidth)

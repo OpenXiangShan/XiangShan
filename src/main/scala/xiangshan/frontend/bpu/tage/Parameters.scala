@@ -15,23 +15,23 @@
 
 package xiangshan.frontend.bpu.tage
 
-import chisel3._
 import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 import xiangshan.frontend.bpu.TageTableInfo
 
 case class TageParameters(
     TableInfos: Seq[TageTableInfo] = Seq(
-      // TageTableInfo(Size, NumWays, HistoryLength)
-      // Size = NumSets * NumWays * NumBanks
-      new TageTableInfo(4096, 2, 4),
-      new TageTableInfo(4096, 2, 9),
-      new TageTableInfo(4096, 2, 17),
-      new TageTableInfo(4096, 2, 29),
-      new TageTableInfo(4096, 2, 56),
-      new TageTableInfo(4096, 2, 109),
-      new TageTableInfo(4096, 2, 211),
-      new TageTableInfo(4096, 2, 397)
+      // TageTableInfo(NumSetsLog2, NumWays, HistoryLength)
+      // Sets per bank = 1 << NumSetsLog2; total sets per table = (1 << NumSetsLog2) * NumBanks.
+      // Total entries per table = (1 << NumSetsLog2) * NumBanks * NumWays.
+      new TageTableInfo(9, 2, 4),
+      new TageTableInfo(9, 2, 9),
+      new TageTableInfo(9, 2, 17),
+      new TageTableInfo(9, 2, 29),
+      new TageTableInfo(9, 2, 56),
+      new TageTableInfo(9, 2, 109),
+      new TageTableInfo(9, 2, 211),
+      new TageTableInfo(9, 2, 397)
     ),
     NumBanks:              Int = 4, // to alleviate read-write conflicts in single-port SRAM
     TagWidth:              Int = 13,
@@ -73,12 +73,10 @@ trait HasTageParameters extends HasBpuParameters {
   def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays)
 
   // per table parameters
-  def NumSets(implicit info: TageTableInfo): Int = {
-    require(NumBanks > 0, "NumBanks must be > 0")
-    info.Size / info.NumWays / NumBanks
-  }
+  // NumSets is the number of sets in each bank.
+  def NumSets(implicit info: TageTableInfo): Int = 1 << info.NumSetsLog2
 
-  def SetIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumSets)
+  def SetIdxWidth(implicit info: TageTableInfo): Int = info.NumSetsLog2
   def NumWays(implicit info:     TageTableInfo): Int = info.NumWays
   def WayIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumWays)
 
