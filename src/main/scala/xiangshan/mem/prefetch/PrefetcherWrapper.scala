@@ -168,7 +168,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
   val smsOpt: Option[SMSPrefetcher] = if(HasSMS) Some(Module(new SMSPrefetcher())) else None
   smsOpt.foreach (pf => {
-    val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = true)
+    val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = false)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableSMS && l1D_pf_enable
     pf.io.fdbkDegree := io.l2_fdbk_pf_ctrl.smsDegree
@@ -218,8 +218,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
   val streamStrideOpt: Option[L1Prefetcher] = if(HasStreamStride) Some(Module(new L1Prefetcher())) else None
   streamStrideOpt.foreach(pf => {
-    val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = true)
-    val enableL1StridePrefetcher = Constantin.createRecord(s"pf_enableL1StridePrefetcher$hartId", initValue = true)
+    val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = false)
+    val enableL1StridePrefetcher = Constantin.createRecord(s"pf_enableL1StridePrefetcher$hartId", initValue = false)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := l1D_pf_enable
     pf.io.fdbkDegree := 1.U
@@ -267,7 +267,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
   val bertiOpt: Option[BertiPrefetcher] = if(HasBerti) Some(Module(new BertiPrefetcher())) else None
   bertiOpt.foreach(pf => {
-    val enableBerti = Constantin.createRecord(s"pf_enableBerti$hartId", initValue = true)
+    val enableBerti = Constantin.createRecord(s"pf_enableBerti$hartId", initValue = false)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableBerti && l1D_pf_enable &&
       GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_berti_enable, 2, Some(false.B)) &&

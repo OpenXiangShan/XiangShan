@@ -439,7 +439,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
   val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
   val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
 
-  val enable_l3_pf = Constantin.createRecord(s"enableL3StreamPrefetch${p(XSCoreParamsKey).HartId}", initValue = true)
+  val enable_l3_pf = Constantin.createRecord(s"enableL3StreamPrefetch${p(XSCoreParamsKey).HartId}", initValue = false)
   // s5: send the l3 prefetch req out
   val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l2_valid) && enable_l3_pf
   val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
