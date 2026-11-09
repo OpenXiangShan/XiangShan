@@ -21,6 +21,24 @@ import chisel3.util._
 import difftest.DifftestModule.createCppExtModule
 import org.chipsalliance.cde.config.Parameters
 
+/** C and SystemVerilog types of a DPI scalar that carries `width` bits. */
+private object TraceDpiType {
+  def storageWidth(width: Int): Int = width match {
+    case w if w <= 8  => 8
+    case w if w <= 16 => 16
+    case w if w <= 32 => 32
+    case w if w <= 64 => 64
+  }
+  def cpp(width: Int): String = s"uint${storageWidth(width)}_t"
+  def sv(width: Int): String = storageWidth(width) match {
+    case 8  => "byte"
+    case 16 => "shortint"
+    case 32 => "int"
+    case 64 => "longint"
+  }
+}
+
+/** Reads `width` trace instructions per enabled cycle, one output port per TraceInstrBundle field and lane. */
 class TraceReaderHelper(width: Int)(implicit p: Parameters)
     extends ExtModule
     with HasExtModuleInline {
@@ -28,184 +46,80 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
   val reset  = IO(Input(Reset()))
   val enable = IO(Input(Bool()))
 
-  private val fields             = new TraceInstrInnerBundle().elements.toSeq.reverse
-  private val fieldNames         = fields.map(_._1)
-  private val logicalFieldWidths = fields.map(_._2.getWidth)
-  private def cppStorageWidth(width: Int): Int = width match {
-    case 1            => 8
-    case w if w <= 8  => 8
-    case w if w <= 16 => 16
-    case w if w <= 32 => 32
-    case w if w <= 64 => 64
-  }
+  // Field order is the argument order of trace_read_one_instr.
+  private val fields = new TraceInstrBundle().elements.toSeq.reverse.map { case (name, data) => name -> data.getWidth }
   // GSIM's C++ ExtModule path does not automatically clear bits above a
   // narrow output port. Receive the complete C++ scalar and narrow it in RTL.
-  private val portWidths = logicalFieldWidths.map(cppStorageWidth)
-  private def field(name: String): Data = fields.find(_._1 == name).get._2
-  private def outputPorts(name: String, widthBits: Int): Seq[UInt] =
-    Seq.tabulate(width)(i => IO(Output(UInt(widthBits.W))).suggestName(s"insts_${i}_${name}"))
+  private val portWidths = fields.map { case (name, w) => name -> TraceDpiType.storageWidth(w) }
 
-  private def rawOutputPorts(name: String): Seq[UInt] = {
-    val logicalWidth = field(name).getWidth
-    outputPorts(name, cppStorageWidth(logicalWidth))
-  }
+  /** Output ports by field name, one per lane. */
+  val insts: Map[String, Seq[UInt]] = portWidths.map { case (name, w) =>
+    name -> Seq.tabulate(width)(i => IO(Output(UInt(w.W))).suggestName(s"insts_${i}_${name}"))
+  }.toMap
 
-  val insts_pcVA           = rawOutputPorts("pcVA")
-  val insts_pcPA           = rawOutputPorts("pcPA")
-  val insts_memoryAddrVA   = rawOutputPorts("memoryAddrVA")
-  val insts_memoryAddrPA   = rawOutputPorts("memoryAddrPA")
-  val insts_target         = rawOutputPorts("target")
-  val insts_inst           = rawOutputPorts("inst")
-  val insts_memoryType     = rawOutputPorts("memoryType")
-  val insts_memorySize     = rawOutputPorts("memorySize")
-  val insts_branchType     = rawOutputPorts("branchType")
-  val insts_branchTaken    = rawOutputPorts("branchTaken")
-  val insts_exception      = rawOutputPorts("exception")
-  val insts_fastSimulation = rawOutputPorts("fastSimulation")
-  val insts_InstID         = rawOutputPorts("InstID")
-
-  private def cppType(width: Int, isOutput: Boolean): String = {
-    val base = width match {
-      case 1            => "uint8_t"
-      case w if w <= 8  => "uint8_t"
-      case w if w <= 16 => "uint16_t"
-      case w if w <= 32 => "uint32_t"
-      case w if w <= 64 => "uint64_t"
+  private val cppExtModule = {
+    val params = portWidths.flatMap { case (name, w) =>
+      (0 until width).map(i => f"${TraceDpiType.cpp(w) + "&"}%-10s insts_${i}_${name}")
     }
-    s"$base${if (isOutput) "&" else ""}"
-  }
-
-  private def cppFieldParams: Seq[String] =
-    fieldNames.zip(portWidths).flatMap { case (name, fieldWidth) =>
-      (0 until width).map(i => f"${cppType(fieldWidth, isOutput = true)}%-10s insts_${i}_${name}")
+    val calls = (0 until width).map { i =>
+      val args = fields.map { case (name, _) => s"&insts_${i}_${name}" } :+ i.toString
+      val zero = fields.map { case (name, _) => s"    insts_${i}_${name} = 0;" }.mkString("\n")
+      s"""  if (!reset && enable) {
+         |    trace_read_one_instr(${args.mkString(", ")});
+         |  } else {
+         |$zero
+         |  }""".stripMargin
     }
-
-  private val cppExtModule =
     s"""
        |void TraceReaderHelper(
        |  uint8_t   reset,
        |  uint8_t   enable,
-       |  ${cppFieldParams.mkString(",\n  ")}
+       |  ${params.mkString(",\n  ")}
        |) {
-       |${(0 until width).map { i =>
-        val args = Seq(
-          s"&insts_${i}_pcVA",
-          s"&insts_${i}_pcPA",
-          s"&insts_${i}_memoryAddrVA",
-          s"&insts_${i}_memoryAddrPA",
-          s"&insts_${i}_target",
-          s"&insts_${i}_inst",
-          s"&insts_${i}_memoryType",
-          s"&insts_${i}_memorySize",
-          s"&insts_${i}_branchType",
-          s"&insts_${i}_branchTaken",
-          s"&insts_${i}_exception",
-          s"&insts_${i}_fastSimulation",
-          s"&insts_${i}_InstID",
-          i.toString
-        ).mkString(", ")
-        val zero = fieldNames.map(name => s"    insts_${i}_${name} = 0;").mkString("\n")
-        s"""  if (!reset && enable) {
-            |    trace_read_one_instr($args);
-            |  } else {
-            |$zero
-            |  }""".stripMargin
-      }.mkString("\n")}
+       |${calls.mkString("\n")}
        |}
        |""".stripMargin
+  }
   createCppExtModule("TraceReaderHelper", cppExtModule, Some("\"tracertl.h\""))
 
   private def getVerilog: String = {
-    val nameList = fieldNames
-    val sizeList = portWidths
-
-    def genElementPort(size: Int, baseName: String): String =
-      (0 until width)
-        .map(i => s"output [${size - 1}:0] insts_${i}_${baseName},")
-        .mkString("  ", "\n  ", "\n")
-
-    def genModulePort: String =
-      s"""
-         |  input  clock,
-         |  input  reset,
-         |${nameList.zip(sizeList).map { case (name, size) => genElementPort(size, name) }.mkString}
-         |  input  enable
+    // DPI outputs are written in an always block, so go through logic variables.
+    def port(i: Int, name: String) = s"insts_${i}_${name}"
+    def logic(i: Int, name: String) = s"logicInsts_${i}_${name}"
+    val lanes = (0 until width).map(i => portWidths.map { case (name, w) => (i, name, w) })
+    val calls = (0 until width).map { i =>
+      val args = fields.map { case (name, _) => logic(i, name) } :+ i.toString
+      val zero = fields.map { case (name, _) => s"    ${logic(i, name)} = 0;" }.mkString("\n")
+      s"""always @(negedge clock) begin
+         |  if (!reset && enable) begin
+         |    trace_read_one_instr(${args.mkString(", ")});
+         |  end else begin
+         |$zero
+         |  end
+         |end
          |""".stripMargin
-
-    def genLogicDeclare: String =
-      (0 until width).map { idx =>
-        nameList.zip(sizeList).map { case (name, size) =>
-          s"logic [${size - 1}:0] logicInsts_${idx}_${name};"
-        }.mkString("  ", "\n  ", "\n")
-      }.mkString
-
-    def fromLogicToIO: String =
-      (0 until width).map { idx =>
-        nameList.map(name => s"assign insts_${idx}_${name} = logicInsts_${idx}_${name};").mkString(
-          "  ",
-          "\n  ",
-          "\n"
-        )
-      }.mkString
-
-    def funcDeclare: String =
-      s"""
-         |import "DPI-C" function void trace_read_one_instr(
-         |  output longint pc_va,
-         |  output longint pc_pa,
-         |  output longint memory_addr_va,
-         |  output longint memory_addr_pa,
-         |  output longint target,
-         |  output int instr,
-         |  output byte memory_type,
-         |  output byte memory_size,
-         |  output byte branch_type,
-         |  output byte branch_taken,
-         |  output byte exception,
-         |  output byte fast_simulation,
-         |  output longint InstID,
-         |  input  byte idx
-         |);
-         |""".stripMargin
-
-    def callDPIC(destName: String): String =
-      (0 until width).map { i =>
-        val assignTrace =
-          s"""
-             |    trace_read_one_instr(
-             |      ${destName}_${i}_pcVA, ${destName}_${i}_pcPA,
-             |      ${destName}_${i}_memoryAddrVA, ${destName}_${i}_memoryAddrPA,
-             |      ${destName}_${i}_target, ${destName}_${i}_inst,
-             |      ${destName}_${i}_memoryType, ${destName}_${i}_memorySize,
-             |      ${destName}_${i}_branchType, ${destName}_${i}_branchTaken,
-             |      ${destName}_${i}_exception, ${destName}_${i}_fastSimulation,
-             |      ${destName}_${i}_InstID,
-             |      $i);
-             |""".stripMargin
-
-        val assignDummy = nameList.map(name => s"${destName}_${i}_${name} = 0;").mkString("    ", "\n    ", "\n")
-
-        s"""
-           |always @(negedge clock) begin
-           |  if (!reset && enable) begin
-           |$assignTrace
-           |  end else begin
-           |$assignDummy
-           |  end
-           |end
-           |""".stripMargin
-      }.mkString("\n")
+    }
+    val dpiArgs = portWidths.map { case (name, w) => s"  output ${TraceDpiType.sv(w)} $name," } :+ "  input  byte idx"
+    // field-major, like the Chisel ports
+    val ports   = portWidths.flatMap { case (name, w) => (0 until width).map(i => s"  output [${w - 1}:0] ${port(i, name)},") }
+    val logics  = lanes.flatten.map { case (i, name, w) => s"  logic [${w - 1}:0] ${logic(i, name)};" }
+    val assigns = lanes.flatten.map { case (i, name, _) => s"  assign ${port(i, name)} = ${logic(i, name)};" }
 
     s"""
-       |$funcDeclare
-       |
-       |module TraceReaderHelper(
-       |$genModulePort
+       |import "DPI-C" function void trace_read_one_instr(
+       |${dpiArgs.mkString("\n")}
        |);
        |
-       |$genLogicDeclare
-       |${callDPIC("logicInsts")}
-       |$fromLogicToIO
+       |module TraceReaderHelper(
+       |  input  clock,
+       |  input  reset,
+       |${ports.mkString("\n")}
+       |  input  enable
+       |);
+       |
+       |${logics.mkString("\n")}
+       |${calls.mkString("\n")}
+       |${assigns.mkString("\n")}
        |
        |endmodule
        |""".stripMargin
@@ -260,78 +174,56 @@ class TraceRedirectHelper extends ExtModule with HasExtModuleInline {
   setInline(s"$desiredName.sv", getVerilog)
 }
 
-class TraceCollectorHelper(width: Int) extends ExtModule with HasExtModuleInline {
-  val clock = IO(Input(Clock()))
-  val reset = IO(Input(Reset()))
+/** Calls `func(<args>..., idx)` at the negedge for every enabled lane. */
+abstract class TraceCollectHelperBase(width: Int, func: String, args: Seq[(String, Int)])
+    extends ExtModule
+    with HasExtModuleInline {
+  val clock  = IO(Input(Clock()))
+  val reset  = IO(Input(Reset()))
+  val enable = IO(Input(Vec(width, Bool())))
 
-  val enable  = IO(Input(Vec(width, Bool())))
-  val pc      = IO(Input(Vec(width, UInt(64.W))))
-  val inst    = IO(Input(Vec(width, UInt(32.W))))
-  val instNum = IO(Input(Vec(width, UInt(8.W))))
+  /** The per-lane input port of an argument; declare them in `args` order. */
+  protected def arg(name: String): Vec[UInt] = IO(Input(Vec(width, UInt(args.toMap.apply(name).W))))
+
+  private def callArgs(i: Int) = (args.map { case (name, _) => s"${name}_$i" } :+ i.toString).mkString(", ")
 
   private val cppExtModule = {
-    def params(cppType: String, name: String): String =
-      (0 until width).map(i => s"  $cppType ${name}_$i").mkString(",\n")
-
-    val calls = (0 until width).map { i =>
-      s"  if (!reset && enable_$i) trace_collect_commit(pc_$i, inst_$i, instNum_$i, $i);"
-    }.mkString("\n")
-
+    val params = ("enable", 1) +: args
     s"""
-       |void TraceCollectorHelper(
+       |void $desiredName(
        |  uint8_t reset,
-       |${params("uint8_t", "enable")},
-       |${params("uint64_t", "pc")},
-       |${params("uint32_t", "inst")},
-       |${params("uint8_t", "instNum")}
+       |${params.flatMap { case (name, w) => (0 until width).map(i => s"  ${TraceDpiType.cpp(w)} ${name}_$i") }.mkString(",\n")}
        |) {
-       |$calls
+       |${(0 until width).map(i => s"  if (!reset && enable_$i) $func(${callArgs(i)});").mkString("\n")}
        |}
        |""".stripMargin
   }
-  createCppExtModule("TraceCollectorHelper", cppExtModule, Some("\"tracertl.h\""))
+  createCppExtModule(desiredName, cppExtModule, Some("\"tracertl.h\""))
 
   private def getVerilog: String = {
-    def genPort(size: Int, baseName: String): String =
-      (0 until width)
-        .map(i => s"input [${size - 1}:0] ${baseName}_${i},")
-        .mkString("  ", "\n  ", "\n")
-
-    def genBoolPort(baseName: String): String =
-      (0 until width)
-        .map(i => s"input ${baseName}_${i},")
-        .mkString("  ", "\n  ", "\n")
-
-    val callDPIC = (0 until width)
-      .map(i =>
-        s"""
-           |    if (enable_${i}) begin
-           |      trace_collect_commit(pc_${i}, inst_${i}, instNum_${i}, $i);
-           |    end
-           |""".stripMargin
-      )
-      .mkString
+    val ports = (0 until width).map(i => s"  input enable_$i,") ++
+      args.flatMap { case (name, w) => (0 until width).map(i => s"  input [${w - 1}:0] ${name}_$i,") }
+    val calls = (0 until width).map { i =>
+      s"""    if (enable_$i) begin
+         |      $func(${callArgs(i)});
+         |    end""".stripMargin
+    }
+    val dpiArgs = args.map { case (name, w) => s"  input ${TraceDpiType.sv(w)} $name," } :+ "  input byte idx"
 
     s"""
-       |import "DPI-C" function void trace_collect_commit(
-       |  input longint pc,
-       |  input int inst,
-       |  input byte instNum,
-       |  input byte idx
+       |import "DPI-C" function void $func(
+       |${dpiArgs.mkString("\n")}
        |);
        |
-       |module TraceCollectorHelper(
+       |module $desiredName(
        |  input  clock,
-       |${genBoolPort("enable")}
-       |${genPort(64, "pc")}
-       |${genPort(32, "inst")}
-       |${genPort(8, "instNum")}
+       |${ports.mkString("\n")}
        |  input  reset
        |);
        |
        |  always @(negedge clock) begin
        |    if (!reset) begin
-       |$callDPIC
+       |${calls.mkString("\n")}
        |    end
        |  end
        |endmodule
@@ -341,81 +233,25 @@ class TraceCollectorHelper(width: Int) extends ExtModule with HasExtModuleInline
   setInline(s"$desiredName.sv", getVerilog)
 }
 
-class TraceDriveCollectorHelper(width: Int) extends ExtModule with HasExtModuleInline {
-  val clock = IO(Input(Clock()))
-  val reset = IO(Input(Reset()))
+/** Reports committed instructions from the ROB. */
+class TraceCollectorHelper(width: Int)
+    extends TraceCollectHelperBase(width, "trace_collect_commit", Seq("pc" -> 64, "inst" -> 32, "instNum" -> 8)) {
+  val pc      = arg("pc")
+  val inst    = arg("inst")
+  val instNum = arg("instNum")
+}
 
-  val enable = IO(Input(Vec(width, Bool())))
-  val pc     = IO(Input(Vec(width, UInt(64.W))))
-  val inst   = IO(Input(Vec(width, UInt(32.W))))
+/** Reports instructions the IBuffer hands to decode. */
+class TraceDriveCollectorHelper(width: Int)
+    extends TraceCollectHelperBase(width, "trace_collect_drive", Seq("pc" -> 64, "inst" -> 32)) {
+  val pc   = arg("pc")
+  val inst = arg("inst")
+}
 
-  private val cppExtModule = {
-    def params(cppType: String, name: String): String =
-      (0 until width).map(i => s"  $cppType ${name}_$i").mkString(",\n")
-
-    val calls = (0 until width).map { i =>
-      s"  if (!reset && enable_$i) trace_collect_drive(pc_$i, inst_$i, $i);"
-    }.mkString("\n")
-
-    s"""
-       |void TraceDriveCollectorHelper(
-       |  uint8_t reset,
-       |${params("uint8_t", "enable")},
-       |${params("uint64_t", "pc")},
-       |${params("uint32_t", "inst")}
-       |) {
-       |$calls
-       |}
-       |""".stripMargin
-  }
-  createCppExtModule("TraceDriveCollectorHelper", cppExtModule, Some("\"tracertl.h\""))
-
-  private def getVerilog: String = {
-    def genPort(size: Int, baseName: String): String =
-      (0 until width)
-        .map(i => s"input [${size - 1}:0] ${baseName}_${i},")
-        .mkString("  ", "\n  ", "\n")
-
-    def genBoolPort(baseName: String): String =
-      (0 until width)
-        .map(i => s"input ${baseName}_${i},")
-        .mkString("  ", "\n  ", "\n")
-
-    val callDPIC = (0 until width)
-      .map(i =>
-        s"""
-           |    if (enable_${i}) begin
-           |      trace_collect_drive(pc_${i}, inst_${i}, $i);
-           |    end
-           |""".stripMargin
-      )
-      .mkString
-
-    s"""
-       |import "DPI-C" function void trace_collect_drive(
-       |  input longint pc,
-       |  input int inst,
-       |  input byte idx
-       |);
-       |
-       |module TraceDriveCollectorHelper(
-       |  input  clock,
-       |${genBoolPort("enable")}
-       |${genPort(64, "pc")}
-       |${genPort(32, "inst")}
-       |  input  reset
-       |);
-       |
-       |  always @(negedge clock) begin
-       |    if (!reset) begin
-       |$callDPIC
-       |    end
-       |  end
-       |endmodule
-       |""".stripMargin
-  }
-
-  setInline(s"$desiredName.sv", getVerilog)
+class TraceATSBundle(implicit p: Parameters) extends TraceBundle {
+  val valid = Input(Bool())
+  val vaddr = Input(UInt(64.W))
+  val paddr = Output(UInt(64.W))
 }
 
 class TraceATSHelper extends ExtModule with HasExtModuleInline {
@@ -555,11 +391,7 @@ class TraceFakeSatpPpn(implicit p: Parameters) extends TraceModule {
   private val helper = Module(new TraceSatpPpnHelper)
   helper.clock := clock
   helper.reset := reset
-  val startCount = RegInit(0.U(4.W))
-  when(startCount < 10.U) {
-    startCount := startCount + 1.U
-  }
-  val workingState = startCount >= 5.U
+  val workingState = TraceWarmUp()
   helper.enable := workingState
   io.ppn        := RegEnable(helper.ppn, 0.U, RegNext(workingState))
 }
@@ -576,14 +408,7 @@ class TraceDynPageTableHelper extends ExtModule with HasExtModuleInline {
   val addr   = IO(Input(UInt(64.W)))
   // GSIM does not support array ports on external modules. Keep these as
   // scalar ports and reconstruct the vector in the enclosing Chisel module.
-  val data_0 = IO(Output(UInt(64.W)))
-  val data_1 = IO(Output(UInt(64.W)))
-  val data_2 = IO(Output(UInt(64.W)))
-  val data_3 = IO(Output(UInt(64.W)))
-  val data_4 = IO(Output(UInt(64.W)))
-  val data_5 = IO(Output(UInt(64.W)))
-  val data_6 = IO(Output(UInt(64.W)))
-  val data_7 = IO(Output(UInt(64.W)))
+  val data = Seq.tabulate(8)(i => IO(Output(UInt(64.W))).suggestName(s"data_$i"))
 
   private val cppExtModule = {
     val dataArgs = (0 until 8).map(i => s"  uint64_t& data_$i").mkString(",\n")
@@ -651,17 +476,7 @@ class TraceFakeDynPageTable(implicit p: Parameters) extends TraceModule {
   helper.addr   := io.req.bits.paddr
 
   io.resp.valid := RegNext(io.req.valid)
-  val helperData = Seq(
-    helper.data_0,
-    helper.data_1,
-    helper.data_2,
-    helper.data_3,
-    helper.data_4,
-    helper.data_5,
-    helper.data_6,
-    helper.data_7
-  )
-  val respData = helperData.map(RegEnable(_, io.req.valid))
+  val respData = helper.data.map(RegEnable(_, io.req.valid))
   io.resp.bits.data(0) := Cat(respData(3), respData(2), respData(1), respData(0))
   io.resp.bits.data(1) := Cat(respData(7), respData(6), respData(5), respData(4))
   io.resp.bits.addr    := RegEnable(helper.addr, io.req.valid)

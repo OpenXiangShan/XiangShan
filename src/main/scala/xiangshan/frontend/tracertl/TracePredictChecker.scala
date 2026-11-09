@@ -6,9 +6,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility.ParallelOR
 import utility.ParallelPriorityEncoder
 import xiangshan.ValidUndirectioned
-import xiangshan.frontend.PcInit
-import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ifu.PredCheckRedirect
 import xiangshan.frontend.ifu.PreDecodeFaultType
@@ -46,25 +43,11 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule {
   private val instrValid  = VecInit(io.decoded.map(_.compact.valid))
   private val endOffsets  = VecInit(io.decoded.map(_.compact.instrEndOffset))
   private val selectBlock = VecInit(io.decoded.map(_.compact.selectBlock))
+  private val isPredTaken = VecInit(io.decoded.map(_.isPredTaken))
 
-  private def traceAddrToPruned(addr: UInt): PrunedAddr =
-    PrunedAddrInit(addr(VAddrBits - 1, 0))
-
-  private def traceAddrToGuarded(addr: UInt) =
-    PcInit(addr(VAddrBits - 1, 0)).signGuard
-
-  private val isPredTaken = VecInit.tabulate(width) { i =>
-    val selected = Mux(selectBlock(i), io.predictInfo.block(1), io.predictInfo.block(0))
-    instrValid(i) && selected.valid && selected.ftqOffset.valid &&
-    selected.ftqOffset.bits === endOffsets(i)
-  }
-
+  // A predicted taken offset that no trace instruction ends at.
   private val predictedEndIsValid = VecInit.tabulate(FetchPorts) { block =>
-    VecInit.tabulate(width)(i =>
-      instrValid(i) && selectBlock(i) === block.B &&
-        io.predictInfo.block(block).ftqOffset.valid &&
-        endOffsets(i) === io.predictInfo.block(block).ftqOffset.bits
-    ).asUInt.orR
+    VecInit.tabulate(width)(i => isPredTaken(i) && selectBlock(i) === block.B).asUInt.orR
   }
   private val invalidTakenLane = VecInit.tabulate(FetchPorts) { block =>
     PopCount(VecInit.tabulate(width) { i =>
@@ -85,9 +68,10 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule {
     info.instRange(info.ftqOffset.bits) &&
     io.traceRange(logicalTaken)
   }
-  private val invalidTakenVec = VecInit.tabulate(width) { i =>
-    VecInit.tabulate(FetchPorts)(block => invalidTaken(block) && invalidTakenLane(block) === i.U).asUInt.orR
+  private val invalidTakenAt = Seq.tabulate(FetchPorts) { block =>
+    VecInit.tabulate(width)(i => invalidTaken(block) && invalidTakenLane(block) === i.U)
   }
+  private val invalidTakenVec = VecInit.tabulate(width)(i => invalidTakenAt.map(_(i)).reduce(_ || _))
 
   private val jalFaultVec = VecInit.tabulate(width)(i =>
     pds(i).isJal && instrValid(i) && !isPredTaken(i)
@@ -120,35 +104,24 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule {
   io.out.stage1Out.fixedTwoFetchTaken := fixedTwoFetchTaken.asUInt
 
   private val jumpTargets = VecInit.tabulate(width)(i =>
-    if (trtl.TraceOverrideTarget) traceAddrToGuarded(io.decoded(i).compact.traceInfo.target)
-    else traceAddrToGuarded(pcs(i) + io.decoded(i).jumpOffset.toUInt)
+    if (trtl.TraceOverrideTarget) traceGuardedPc(io.decoded(i).compact.traceInfo.target)
+    else traceGuardedPc(pcs(i) + io.decoded(i).jumpOffset.toUInt)
   )
   private val seqTargets = VecInit.tabulate(width)(i =>
-    traceAddrToGuarded(pcs(i) + Mux(pds(i).isRVC || !pds(i).valid, 2.U, 4.U))
+    traceGuardedPc(pcs(i) + Mux(pds(i).isRVC || !pds(i).valid, 2.U, 4.U))
   )
-  // Like upstream PredChecker, wrong direct targets are left to the backend branch units.
-  private val stage1Fault = remaskFault
 
-  private val mispredIdx = WireDefault(
-    0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(IBufferEnqueueWidth).W)))
-  )
-  mispredIdx.valid := ParallelOR(stage1Fault)
-  mispredIdx.bits  := ParallelPriorityEncoder(stage1Fault)
+  // Like upstream PredChecker, wrong direct targets are left to the backend branch units,
+  // so the first remask fault is the misprediction.
+  private val mispredIdx = Wire(ValidUndirectioned(UInt(log2Ceil(IBufferEnqueueWidth).W)))
+  mispredIdx.valid := needRemask
+  mispredIdx.bits  := remaskIdx
 
   private val mispredCompactIdx    = mispredIdx.bits
-  private val selectedInvalidBlock = WireDefault(false.B)
-  private val selectedInvalidTaken = WireDefault(false.B)
-  for (block <- 0 until FetchPorts) {
-    when(invalidTaken(block) && invalidTakenLane(block) === mispredCompactIdx) {
-      selectedInvalidTaken := true.B
-      selectedInvalidBlock := block.B
-    }
-  }
-  private val selectedInvalidInfo = Mux(
-    selectedInvalidBlock,
-    io.predictInfo.block(1),
-    io.predictInfo.block(0)
-  )
+  private val selectedInvalidTaken = invalidTakenVec(mispredCompactIdx)
+  // block 1 wins when both blocks have an invalid taken at this lane
+  private val selectedInvalidBlock = invalidTakenAt(1)(mispredCompactIdx)
+  private val selectedInvalidInfo  = io.predictInfo.block(selectedInvalidBlock)
   private val invalidTakenPc = selectedInvalidInfo.startAddr + (selectedInvalidInfo.ftqOffset.bits << 1)
 
   private val fixedIsJump = instrValid(mispredCompactIdx) && mispredIdx.valid && !selectedInvalidTaken &&
@@ -156,7 +129,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule {
       pds(mispredCompactIdx).isJalr || pds(mispredCompactIdx).brAttribute.hasPop)
   private val fixedTarget = Mux(
     selectedInvalidTaken,
-    traceAddrToGuarded(invalidTakenPc + 2.U),
+    traceGuardedPc(invalidTakenPc + 2.U),
     Mux(fixedIsJump, jumpTargets(mispredCompactIdx), seqTargets(mispredCompactIdx))
   )
   private val fixedTaken        = !selectedInvalidTaken && fixedTwoFetchTaken(mispredCompactIdx)
@@ -164,8 +137,8 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule {
   private val selectedAttribute = Mux(selectedInvalidTaken, BranchAttribute.None, pds(mispredCompactIdx).brAttribute)
   private val selectedMispredPc = Mux(
     selectedInvalidTaken,
-    traceAddrToPruned(invalidTakenPc),
-    traceAddrToPruned(pcs(mispredCompactIdx))
+    tracePrunedAddr(invalidTakenPc),
+    tracePrunedAddr(pcs(mispredCompactIdx))
   )
   private val selectedEndOffset = Mux(
     selectedInvalidTaken,
