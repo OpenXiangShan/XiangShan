@@ -845,11 +845,12 @@ trait HasXSParameter {
   def EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
   def EnableHardwareStoreMisalign = coreParams.EnableHardwareStoreMisalign
   def EnableHardwareLoadMisalign = coreParams.EnableHardwareLoadMisalign
-  def EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
-  def EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
+  // Isolated BOP experiments also disable the independent store prefetch paths.
+  def EnableStorePrefetchAtIssue = false
+  def EnableStorePrefetchAtCommit = false
   def EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
-  def EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
-  def EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  def EnableStorePrefetchSMS = false
+  def EnableStorePrefetchSPB = false
   def MissReqPortCount = {
     if (EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB) {
       1 + backendParams.LduCnt + backendParams.StaCnt
