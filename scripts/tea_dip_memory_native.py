@@ -50,6 +50,7 @@ def analyze(folder, receipt_path):
     conserved = (samples[0] == samples[1] == samples[2]
                  and all(v is not None for v in totals) and totals[0] + totals[1] == totals[2])
     head = scalar('.l2cache.topDown.RobBlockByL2Miss', 'ROB-head address match cycles')
+    load_wait = scalar('.rob.waitLoadCycle', 'ROB-head not-writeback LOAD cycles')
     pressure = {}
     for name, values in counters.items():
         if re.search(r'\.l2cache\.slices_\d+\.reqArb\.sinkA_stall_by_mshrFull$', name):
@@ -66,10 +67,14 @@ def analyze(folder, receipt_path):
                 prefetch_marked_entry_time_share=totals[1]/totals[2] if conserved and totals[2] else None,
                 ROB_head_L2_miss_match=head,
                 ROB_head_L2_miss_match_per_retired=number(head)/number(retired) if number(head) is not None else None,
+                ROB_head_load_wait=load_wait,
+                ROB_head_load_wait_per_retired=number(load_wait)/number(retired) if number(load_wait) is not None else None,
                 L2_sinkA_mshrFull=pressure,PTW=ptw,
                 receipt_sha256=digest(receipt_path),native_log_sha256=digest(folder/'simulator_err.txt'),
                 tool_sha256=digest(Path(__file__)),
-                scope='CPU means fromA/is_miss/!is_prefetch, not exclusively demand loads. '
+                scope='ROB-head L2 address match is not qualified by not-writeback or LOAD type; '
+                      'it is not a subset of native load-head wait. '
+                      'CPU means fromA/is_miss/!is_prefetch, not exclusively demand loads. '
                       'Prefetch share is miss-entry time, not useless traffic or CPU-loss share. '
                       'Bank stall conditions can overlap and propagate; PTW handshakes and blocked '
                       'cycles have different units. Absent/ambiguous counters remain unknown; '
