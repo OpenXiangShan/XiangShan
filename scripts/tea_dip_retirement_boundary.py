@@ -37,7 +37,7 @@ def inspect(folder):
     if result['trap_counts'] != [terminal_instr, terminal_cycle]:
         raise ValueError(f'{folder}: runner and terminal counts disagree')
     native_total = native[0][1] + native[1][1]
-    return dict(point=result['point'], final_pc=pc[0], terminal_instrCnt=terminal_instr,
+    return dict(point=result['point'], terminal_printed_pc=pc[0], terminal_instrCnt=terminal_instr,
                 terminal_cycleCnt=terminal_cycle, native_dumps=[dict(stamp=stamp, commitInstr=count, clock_cycle=clocks[i][1], tea_exact_endpoint_retired=tea[i][1]) for i, (stamp, count) in enumerate(native)],
                 native_total_commitInstr=native_total, native_minus_terminal_instrCnt=native_total-terminal_instr,
                 tea_final_minus_native_total=tea[-1][1]-native_total,
@@ -56,8 +56,8 @@ def compare(control, candidate):
                 native_roi_retired_delta=b['native_dumps'][1]['commitInstr']-a['native_dumps'][1]['commitInstr'],
                 terminal_instrCnt_delta=b['terminal_instrCnt']-a['terminal_instrCnt'],
                 tea_final_retired_delta=b['native_dumps'][-1]['tea_exact_endpoint_retired']-a['native_dumps'][-1]['tea_exact_endpoint_retired'],
-                final_pc_equal=a['final_pc'] == b['final_pc'], database_read=False,
-                scope='Count and final-PC cross-check only. Matching endpoints do not prove an identical dynamic instruction prefix; no ROI denominator is silently adjusted.')
+                terminal_printed_pc_equal=a['terminal_printed_pc'] == b['terminal_printed_pc'], database_read=False,
+                scope='The terminal_printed_pc is the limit message PC, not a verified last-retired instruction. Matching printed endpoints do not prove an identical dynamic instruction prefix; no ROI denominator is silently adjusted.')
 
 
 def main():
