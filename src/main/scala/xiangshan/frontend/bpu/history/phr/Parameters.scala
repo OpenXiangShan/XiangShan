@@ -29,7 +29,15 @@ case class PhrParameters(
 trait HasPhrParameters extends HasBpuParameters {
   def phrParameters: PhrParameters = bpuParameters.phrParameters
 
-  def Shamt:             Int     = phrParameters.Shamt
+  def Shamt: Int = phrParameters.Shamt
+
+  // the most a single cycle may shift into the path history: one block's shift bits per block of a group
+  def MaxUpdateNum: Int = MaxPredictionNum * Shamt
+
+  // A group's whole contribution to the path history, as bits to XOR over the shifted window. A taken block's shift
+  // bits and its hash-high overlay are the two halves of one path hash, so one block contributes a whole hash and
+  // each further block's hash sits Shamt above the last.
+  def TokenWidth:        Int     = PathHashWidth + (MaxPredictionNum - 1) * Shamt
   def EnableTwoTaken:    Boolean = phrParameters.EnableTwoTaken
   def PathHashWidth:     Int     = phrParameters.PathHashWidth
   def PathHashHighWidth: Int     = PathHashWidth - Shamt
