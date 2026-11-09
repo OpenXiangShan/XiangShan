@@ -39,6 +39,7 @@ import xiangshan.mem.LoadStage._
 import xiangshan.mem.prefetch._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
+import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
 
 class LoadUnitS0(param: ExeUnitParams)(
   implicit p: Parameters,
@@ -179,8 +180,9 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   // 6. loads issued from IQ
   val ldin = io.ldin.bits
-  val ldinVAddr = ldin.src(0) + SignExt(ldin.imm(11, 0), VAddrBits)
-  val ldinFullva = ldin.src(0) + SignExt(ldin.imm(11, 0), XLEN)
+  def ldinTraceVAddr = ldin.toDynInst().traceInfo.get.memoryAddrVA
+  val ldinVAddr = TraceRTLChoose(ldin.src(0) + SignExt(ldin.imm(11, 0), VAddrBits), ldinTraceVAddr(VAddrBits - 1, 0))
+  val ldinFullva = TraceRTLChoose(ldin.src(0) + SignExt(ldin.imm(11, 0), XLEN), SignExt(ldinTraceVAddr, XLEN))
   val ldinSize = LSUOpType.size(ldin.fuOpType) // B, H, W, D, excluding of Q
   scalarIssue.valid := io.ldin.valid
   scalarIssue.bits.entrance := LoadEntrance.scalarIssue.U
@@ -609,9 +611,10 @@ class LoadUnitS1(param: ExeUnitParams)(
   val paddrEffective = tlbHit || noQuery // hit or noQuery
   val pbmt = Mux(tlbHit, tlbResp.bits.pbmt.head, Pbmt.pma)
   val noQueryPAddr = Mux(io.uncacheBypassResp.valid, io.uncacheBypassResp.bits.paddr, in.paddr.get)
-  val paddr = Mux(noQuery, noQueryPAddr, tlbResp.bits.paddr(0))
-  val paddrDCache = Mux(noQuery, noQueryPAddr, tlbResp.bits.paddr(1))
-  val gpaddr = tlbResp.bits.gpaddr(0)
+  def tracePAddr = SignExt(uop.traceInfo.get.memoryAddrPA, PAddrBits)
+  val paddr = Mux(noQuery, noQueryPAddr, TraceRTLChoose(tlbResp.bits.paddr(0), tracePAddr))
+  val paddrDCache = Mux(noQuery, noQueryPAddr, TraceRTLChoose(tlbResp.bits.paddr(1), tracePAddr))
+  val gpaddr = TraceRTLChoose(tlbResp.bits.gpaddr(0), tracePAddr)
   val fullva = tlbResp.bits.fullva
 
   val pf = tlbHit && tlbResp.bits.excp.head.pf.ld
@@ -700,10 +703,10 @@ class LoadUnitS1(param: ExeUnitParams)(
   connectSamePort(stageInfo, in)
   stageInfo.specialModeRequest := specialRequest
   stageInfo.uop.trigger := triggerAction
-  stageInfo.uop.exceptionVec(breakPoint) := bp
-  stageInfo.uop.exceptionVec(loadPageFault) := pf
-  stageInfo.uop.exceptionVec(loadAccessFault) := af
-  stageInfo.uop.exceptionVec(loadGuestPageFault) := gpf
+  stageInfo.uop.exceptionVec(breakPoint) := TraceRTLDontCareValue(bp)
+  stageInfo.uop.exceptionVec(loadPageFault) := TraceRTLDontCareValue(pf)
+  stageInfo.uop.exceptionVec(loadAccessFault) := TraceRTLDontCareValue(af)
+  stageInfo.uop.exceptionVec(loadGuestPageFault) := TraceRTLDontCareValue(gpf)
   stageInfo.uop.perfDebugInfo.tlbRespTime := Mux(
     pipeIn.valid && paddrEffective,
     GTimer(),
@@ -948,9 +951,9 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   val exceptionVec = uop.exceptionVec.selectByFu(LduCfg)
   val exception = TriggerAction.isDmode(uop.trigger) || exceptionVec.orR
-  exceptionVec(loadAddrMisaligned) := am
-  exceptionVec(loadAccessFault) := af
-  exceptionVec(hardwareError) := hwe
+  exceptionVec(loadAddrMisaligned) := TraceRTLDontCareValue(am)
+  exceptionVec(loadAccessFault) := TraceRTLDontCareValue(af)
+  exceptionVec(hardwareError) := TraceRTLDontCareValue(hwe)
 
   /**
     * Data forward response
@@ -1103,6 +1106,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   nukeQueryReq.ftqOffset := uop.ftqOffset
   nukeQueryReq.pc := uop.pc
   nukeQueryReq.debugInfo := uop.perfDebugInfo
+  nukeQueryReq.traceInfo.foreach(_ := uop.traceInfo.get)
 
   val rarNack = io.rarNukeQueryReq.valid && !io.rarNukeQueryReq.ready
   val rawNack = io.rawNukeQueryReq.valid && !io.rawNukeQueryReq.ready
@@ -1429,6 +1433,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
   val s3ExceptionVec = uop.exceptionVec.selectByFu(LduCfg)
+  if (env.TraceRTLMode) s3ExceptionVec := 0.U.asTypeOf(s3ExceptionVec)
   val s3Exception = s3ExceptionVec.orR || TriggerAction.isDmode(uop.trigger)
   val exceptionVec = ExceptSparseVec.mux2(
     s4HeadValid && s4HeadHasException,
@@ -1458,7 +1463,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     s3ShouldWriteback
   )
 
-  s3ExceptionVec(hardwareError) := uop.exceptionVec(hardwareError) || dcacheError
+  s3ExceptionVec(hardwareError) := TraceRTLDontCareValue(uop.exceptionVec(hardwareError) || dcacheError)
 
   /**
     * Fast replay
@@ -1757,6 +1762,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits.ftqIdx := uop.ftqPtr
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel
+  io.rollback.bits.traceInfo.foreach(_ := uop.traceInfo.get)
   io.rollback.bits.debug_runahead_checkpoint_id := uop.perfDebugInfo.runahead_checkpoint_id
 
   io.exceptionInfo.valid := exceptionInfoValid

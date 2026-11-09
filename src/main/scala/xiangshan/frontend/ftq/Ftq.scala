@@ -382,6 +382,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toIfu.redirect.valid := backendRedirect.valid
   // TODO: only valid should be needed
   io.toIfu.redirect.bits := DontCare
+  // TraceRTL rewinds the trace to the redirecting instruction.
+  if (env.TraceRTLMode) io.toIfu.redirect.bits := backendRedirect.bits
 
   io.toBpu.redirect.valid          := redirect.valid
   io.toBpu.redirect.bits.cfiPc     := getCfiPcFromOffset(GuardedPcInit(redirect.bits.pc), redirect.bits.ftqOffset)

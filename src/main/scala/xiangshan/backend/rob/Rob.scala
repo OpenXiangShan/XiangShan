@@ -812,6 +812,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   out.flushOut.bits.interrupt := !isFlushPipe
   out.flushOut.bits.satpFlush := isFlushPipe && exceptionDataRead.bits.satpFlush
+  out.flushOut.bits.traceInfo.foreach(_ := deqExceptionUop.traceInfo.get)
   XSPerfAccumulate("flush_num", out.flushOut.valid)
   XSPerfAccumulate("interrupt_num", out.flushOut.valid && intrEnable)
   XSPerfAccumulate("exception_num", out.flushOut.valid && deqHasException)
@@ -847,6 +848,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   out.exception.bits.isHls := RegEnable(exceptionUop.isHls, exceptionHappen)
   out.exception.bits.vls := RegEnable(exceptionUop.isVectorMemory, exceptionHappen)
   out.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
+  out.exception.bits.traceInfo.foreach(_ := RegEnable(exceptionUop.traceInfo.get, exceptionHappen))
 
   // A latter exception flushes itself but preserves its older former slot.
   // Hold only the difftest observation until that slot really retires after walk.
@@ -1985,6 +1987,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           reset = reset
         )
       }
+    }
+  }
+
+  if (env.TraceRTLMode) {
+    // The TraceRTL runtime checks committed instructions against the trace.
+    val traceCollector = Module(new xiangshan.frontend.tracertl.TraceCollectorHelper(CommitWidth))
+    traceCollector.clock := clock
+    traceCollector.reset := reset
+    for (i <- 0 until CommitWidth) {
+      val uop = commitDebugUop(2 * i)
+      traceCollector.enable(i)  := out.commits.isCommit && out.commits.commitValid(0) && out.commits.commitValid(i)
+      traceCollector.pc(i)      := SignExt(debugMeta(uop).pc, XLEN)
+      traceCollector.inst(i)    := uop.traceInfo.get.inst
+      traceCollector.instNum(i) := instrSizeCommit(i)
     }
   }
 

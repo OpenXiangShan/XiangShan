@@ -30,6 +30,7 @@ import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 import difftest._
+import xiangshan.frontend.tracertl.{TraceFakeDynPageTable, TraceFakeSatpPpn}
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
   override def shouldBeInlined: Boolean = false
@@ -83,6 +84,16 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val csr_num: Int = if (HasBitmapCheck) 10 else if (HasMptCheck) (8+PtwWidth) else 8
   val sfence_dup = Seq.fill(sfence_num) (RegNext(sfence_tmp))
   val csr_dup = Seq.fill(csr_num) (RegNext(csr_tmp)) // TODO: add csr_modified?
+  // TraceRTL walks the trace-generated page table from a fixed Sv39 root.
+  if (env.TraceRTLMode) {
+    val traceSatp = Module(new TraceFakeSatpPpn)
+    csr_dup.foreach { csr =>
+      csr.satp.mode := 8.U
+      csr.satp.asid := 0.U
+      csr.satp.ppn := traceSatp.io.ppn
+      csr.satp.changed := false.B
+    }
+  }
   val satp   = csr_dup(0).satp
   val vsatp  = csr_dup(0).vsatp
   val hgatp  = csr_dup(0).hgatp
@@ -583,6 +594,27 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
   val refill_data_tmp = WireInit(refill_data)
   refill_data_tmp(refill_helper._4) := mem.d.bits.data
+
+  // TraceRTL keeps native PTW timing but sources PTE contents from the trace-generated page table.
+  // Bitmap and MPT traffic retains real memory data.
+  if (env.TraceRTLMode) {
+    val fakePageTable = Module(new TraceFakeDynPageTable)
+    val tracePageTableData = Reg(Vec(MemReqWidth, Vec(2, UInt(256.W))))
+    val memReqIsPtw = from_llptw(mem.a.bits.source) || from_ptw(mem.a.bits.source) || from_hptw(mem.a.bits.source)
+    fakePageTable.io.req.valid := mem.a.fire && memReqIsPtw
+    fakePageTable.io.req.bits.paddr := mem.a.bits.address
+    val tracePageTableSource = RegEnable(mem.a.bits.source, mem.a.fire && memReqIsPtw)
+    when (fakePageTable.io.resp.valid) {
+      tracePageTableData(tracePageTableSource) := fakePageTable.io.resp.bits.data
+    }
+    val traceBeat = tracePageTableData(mem.d.bits.source)(refill_helper._4)
+    when (mem_resp_from_llptw || mem_resp_from_ptw || mem_resp_from_hptw) {
+      when (mem.d.valid) {
+        refill_data(refill_helper._4) := traceBeat
+      }
+      refill_data_tmp(refill_helper._4) := traceBeat
+    }
+  }
 
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)

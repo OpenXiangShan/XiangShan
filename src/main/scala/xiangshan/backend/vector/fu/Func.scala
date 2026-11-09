@@ -12,6 +12,7 @@ import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecRegionModule
+import xiangshan.frontend.tracertl.TraceInfo
 import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import yunsuan.vector.Common.Fflags
 
@@ -111,6 +112,7 @@ object Func {
     val oldVType  = Option.when(cfg.writeVType)(VType())
     val vm        = Option.when(cfg.readVType)(Bool())
     val frm       = Option.when(cfg.needSrcFrm)(Frm())
+    val traceInfo = if (cfg.isFdiv) TraceInfo() else None
   }
 
   class InData(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {
