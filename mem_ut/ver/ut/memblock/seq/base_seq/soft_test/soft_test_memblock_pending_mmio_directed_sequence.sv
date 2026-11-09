@@ -739,8 +739,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::wait_for_dut_sample_wate
 endtask:wait_for_dut_sample_watermark
 
 // 抽象职责：仅为 Uncache redirect guard 的 software-only 长等待逐 sample 模拟
-// LSQ timing service；每个 monitor sample 发布完成后 drain raw sideband 并 reconcile，
-// 不推进完整 dispatch service cycle，也不调用其它生产 handler。
+// LSQ timing collector；每个 monitor sample 发布完成后只 drain raw sideband，
+// cancel reconcile 仍由场景完成 shadow restore 后显式推进。
 task soft_test_memblock_pending_mmio_directed_sequence::
     wait_for_uncache_guard_sample_watermark(
         input longint unsigned target_sample_seq,
@@ -751,13 +751,11 @@ task soft_test_memblock_pending_mmio_directed_sequence::
                    $sformatf("%s requested zero DUT sample watermark", scenario_name))
     end
     monitor_adapter.drain_lsq_timing_sidebands();
-    monitor_adapter.service_lsq_timing_reconcile();
     while (memblock_sync_pkg::peek_current_dut_global_sample() < target_sample_seq) begin
         @(memblock_sync_pkg::dut_sample_seq);
         uvm_wait_for_nba_region();
         #0;
         monitor_adapter.drain_lsq_timing_sidebands();
-        monitor_adapter.service_lsq_timing_reconcile();
     end
 endtask:wait_for_uncache_guard_sample_watermark
 
