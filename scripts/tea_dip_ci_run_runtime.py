@@ -1,0 +1,166 @@
+"""Observe a pinned CI run and record actual seeds without changing its scheduling."""
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
+import argparse
+import json
+import subprocess
+
+
+def check_guest(guest, identity):
+    argv = guest['args']
+    for option, expected in [('-W', '20000000'), ('-I', '40000000'),
+                             ('--diff', identity['report'] + '/riscv64-nemu-interpreter-so'),
+                             ('--cst-file', identity['cst_file'])]:
+        assert argv[argv.index(option) + 1] == expected, option
+    tables = {'Tea_0', 'TeaDelayedFinal_0', 'TeaCycleSummary_0', 'TeaNoCommit_0', 'Dip_0', 'DipDelayedFinal_0'}
+    assert set(argv[argv.index('--dump-select-db') + 1].split()) == tables
+    assert len(guest['affinity']) == 1
+    expected = {'tea_enabled': 1, 'dip_enabled': 1, 'tea_sample_period': 1000, 'dip_sample_period': 1000}
+    for key, value in expected.items():
+        assert guest[key] is None or guest[key] == value, key
+    return dict(actual_seed=int(argv[argv.index('-s') + 1]), requested_configuration_matches=True,
+                sampling_announcements_complete=all(guest[k] is not None for k in expected),
+                difftest_announced=True if guest['difftest_announced'] else None)
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--report-dir', type=Path, required=True)
+    parser.add_argument('--ci-evidence', required=True)
+    args = parser.parse_args()
+    R = args.report_dir.resolve()
+    O = R / 'evidence' / args.ci_evidence
+    identity = json.loads((O / 'archive-identity.json').read_text())
+    run = json.loads((O / 'run.json').read_text())
+    jobs = json.loads((O / 'jobs.json').read_text())
+    assert identity['run_id'] == run['id'] and identity['source'] == run['head_sha']
+    assert len(jobs['jobs']) == 1 and jobs['jobs'][0]['run_id'] == run['id']
+    runner_host = jobs['jobs'][0]['runner_name'].removeprefix('xs-perf-').rsplit('-', 1)[0]
+    head = identity['source']
+    code = r"""from pathlib import Path
+import hashlib,json,subprocess,socket
+root=Path(REPORT)
+log=root/RUNNER if RUNNER is not None else max(root.glob('runner_*.log'),key=lambda p:p.stat().st_mtime_ns,default=None)
+text=log.read_text() if log is not None else ''
+servers=[line for line in text.splitlines() if 'Server list:' in line]
+building=[]
+if not servers and WORKSPACE is not None:
+ workspace=Path(WORKSPACE)
+ source=subprocess.check_output(['git','-c','safe.directory='+str(workspace),'-C',str(workspace),'rev-parse','HEAD'],text=True).strip()
+ assert source==SOURCE,'CI workspace source changed'
+ for proc in Path('/proc').glob('[0-9]*'):
+  try:
+   args=[a for a in (proc/'cmdline').read_bytes().decode(errors='replace').split(chr(0)) if a]
+   if str(workspace/'scripts/xiangshan.py') not in args or '--build' not in args:continue
+   stat=(proc/'stat').read_text().rsplit(')',1)[1].split()
+   building.append(dict(pid=int(proc.name),start_ticks=stat[19],state=stat[0],cpu_ticks=int(stat[11])+int(stat[12]),role='build',args=args))
+  except (FileNotFoundError,PermissionError,ProcessLookupError):continue
+artifacts={}
+if servers:
+ for key,path in [('emu_sha256',root/'emu-gsim'),('reference_sha256',root/'riscv64-nemu-interpreter-so'),('cst_sha256',Path(CST_FILE))]:
+  with path.open('rb') as f:artifacts[key]=hashlib.file_digest(f,'sha256').hexdigest()
+print(json.dumps(dict(host=socket.gethostname(),runner_log=log.name if log is not None else None,tail=text[-8000:],server_lines=servers,build_processes=building,artifact_sha256=artifacts,retry_lines=[line for line in text.splitlines() if any(s in line for s in ['failed','retrying','resetting'])])))
+    """.replace('REPORT',repr(identity['report'])).replace('RUNNER',repr(identity['runner_log'])).replace('WORKSPACE',repr(identity.get('workspace'))).replace('SOURCE',repr(head)).replace('CST_FILE',repr(identity['cst_file']))
+
+    def remote(host, script):
+        result = subprocess.run(['proxychains', '-q', 'ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', host, 'python3', '-'],
+                                input=script, text=True, capture_output=True, timeout=50, check=True)
+        return json.loads(result.stdout)
+
+    runner = remote(runner_host, code)
+    if runner['artifact_sha256']:
+        for key, value in runner['artifact_sha256'].items():
+            if identity[key] is not None:
+                assert identity[key] == value, key + ' changed'
+            identity[key] = value
+        (O / 'archive-identity.json').write_text(json.dumps(identity, indent=2) + '\n')
+    if not runner['server_lines']:
+        stamp=datetime.now(timezone.utc).isoformat()
+        result=dict(utc=stamp,run_id=identity['run_id'],source=head,phase='before_spec',nodes=[],controller=dict(host=runner['host'],processes=runner['build_processes']),runner_log=runner['runner_log'],scope='Actual CI workspace source and original build PIDs only; SPEC workers not announced yet, no completed-window inference or live DB read.')
+        (O/'runtime-live.json').write_text(json.dumps(result,indent=2)+'\n')
+        with (O/'resource-events.jsonl').open('a') as output:output.write(json.dumps(result)+'\n')
+        print(json.dumps(dict(utc=stamp,pending_spec=True,original_build_processes=len(runner['build_processes']),workers=None,controller_processes=0)))
+        raise SystemExit(0)
+    if identity['runner_log'] is None:
+        identity['runner_log']=runner['runner_log']
+        (O/'archive-identity.json').write_text(json.dumps(identity,indent=2)+'\n')
+    workers = runner['server_lines'][-1].split('Server list: ', 1)[1].split(', ')
+    code = r'''"""Read the current CI's actual SPEC guest/controller processes on one node."""
+from pathlib import Path
+from datetime import datetime, timezone
+import json
+import os
+import re
+import socket
+
+run=dict(id=RUN_ID)
+report=Path(REPORT)
+binary = str(report / 'emu-gsim')
+processes = []
+def setting(text, name):
+    match = re.search(r'^' + name + r' = (\d+)$', text, re.M)
+    return int(match[1]) if match else None
+for proc in Path('/proc').glob('[0-9]*'):
+    try:
+        args = (proc / 'cmdline').read_bytes().decode(errors='replace').split('\0')[:-1]
+        guest = bool(args) and args[0] == binary
+        controller = '--result-path' in args and str(report) in args and '--run' in args
+        if not guest and not controller:
+            continue
+        stat = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
+        row = dict(pid=int(proc.name), start_ticks=stat[19], state=stat[0],
+                   cpu_ticks=int(stat[11]) + int(stat[12]), affinity=sorted(os.sched_getaffinity(int(proc.name))),
+                   role='guest' if guest else 'controller', args=args)
+        if guest:
+            point = Path(args[args.index('--db-path') + 1]).parent
+            output = point / 'simulator_out.txt'
+            text = output.read_text(errors='replace')
+            row.update(point=point.name, stdout_bytes=output.stat().st_size,
+                       difftest_requested='--diff' in args, difftest_announced='Difftest enabled' in text,
+                       tea_enabled=setting(text, 'enableTea0'),
+                       dip_enabled=setting(text, 'enableDip0'),
+                       tea_sample_period=setting(text, 'teaSamplePeriod0'),
+                       dip_sample_period=setting(text, 'dipSamplePeriod0'),
+                       warmup_announced='Warmup finished' in text,
+                       limit_announced='EXCEEDING CYCLE/INSTR LIMIT' in text, critical='HIT CRITICAL' in text)
+        processes.append(row)
+    except (FileNotFoundError, PermissionError, ProcessLookupError):
+        continue
+print(json.dumps(dict(utc=datetime.now(timezone.utc).isoformat(), run_id=run['id'],
+                      host=socket.gethostname(),
+                      processes=processes, scope='Live argv and process identity; no unfinished database reads'), indent=2))
+    '''.replace('REPORT', repr(identity['report'])).replace('RUN_ID', repr(identity['run_id']))
+    with ThreadPoolExecutor(max_workers=len(workers) + 1) as pool:
+        observations = list(pool.map(lambda host: remote(host, code), [*workers, runner_host]))
+    stamp = datetime.now(timezone.utc).isoformat()
+    result = dict(utc=stamp, run_id=identity['run_id'], source=head, nodes=observations[:-1], controller=observations[-1],
+                  scope='Worker list observed from the original auto-scheduled runner. Original process identities and stdout flags only; no host-load sampling, unfinished DB reads or inferred guest CPI.')
+    # Preserve kernel identities even when buffered sampler output is not ready.
+    (O / 'runtime-live.json').write_text(json.dumps(result, indent=2) + '\n')
+    with (O / 'resource-events.jsonl').open('a') as output:
+        output.write(json.dumps(result) + '\n')
+    controllers = result['controller']['processes']
+    controller_checked = None
+    if controllers:
+        assert len(controllers) == 1
+        controller = controllers[0]['args']
+        assert controller[controller.index('--threads') + 1] == '1' and controller[controller.index('--server-list') + 1] == 'node'
+        controller_checked = True
+    checks = []
+    for node in result['nodes']:
+        for guest in node['processes']:
+            if guest['role'] == 'guest':
+                checks.append(dict(host=node['host'], point=guest['point'], pid=guest['pid'],
+                                   start_ticks=guest['start_ticks'], **check_guest(guest, identity)))
+    (O / 'runtime-check.json').write_text(json.dumps(dict(utc=stamp, run_id=identity['run_id'], checks=checks,
+        controller_single_thread_and_default_node_pool=controller_checked, completed_spec_difftest_validated=None,
+        scope='Observed argv, affinity and sampler stdout only. Difftest is requested; a missing announcement in buffered live stdout is unknown, not a pass or failure. No SPEC DB read.'), indent=2) + '\n')
+    (O / 'runner-last-tail.txt').write_text(runner['tail'])
+    (O / 'runner-network-retries.json').write_text(json.dumps(dict(utc=stamp, run_id=identity['run_id'], lines=runner['retry_lines'],
+        scope='Original platform transport failures and automatic retries; preserved as infrastructure evidence, not new user dispatches or measured RTL failures.'), indent=2) + '\n')
+    print(json.dumps(dict(utc=stamp, workers=[dict(host=n['host'], guests=len([p for p in n['processes'] if p['role']=='guest'])) for n in result['nodes']],
+                         retry_lines=len(runner['retry_lines']), controller_processes=len(result['controller']['processes'])), indent=2))
+
+
+if __name__ == '__main__':
+    main()
