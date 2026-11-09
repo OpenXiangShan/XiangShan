@@ -10,7 +10,7 @@ from native_perf import read_blocks,unique_counters
 from tea_dip_query_endpoint_evidence import STATES,digest,verify
 
 
-def window(root,case,payload_pc,anchor_pc,kind):
+def window(root,case,payload_pc,kind):
     folder=root/case['variant'];result=json.loads((folder/'result.json').read_text())
     assert result['passed'] and result['original_process_closed'] and result['source']==case['source']
     calibration=json.loads((folder/'sampling-calibration.json').read_text())
@@ -62,7 +62,7 @@ def analyze(root,payload_pc,anchor_pc,kind):
     spec=json.loads((root/'experiment.json').read_text());assert digest(root/'experiment.json')==receipt['spec_sha256'] and spec['period']==1
     if kind=='padding':assert spec['image_identity']['original_payload_code_prefix_and_data_identical']
     cases={x['variant']:x for x in spec['cases']};assert set(cases)=={'stage_control','candidate'}
-    results=[window(root,cases[v],payload_pc,anchor_pc,kind)for v in ['stage_control','candidate']]
+    results=[window(root,cases[v],payload_pc,kind)for v in ['stage_control','candidate']]
     (a,x,px),(b,y,py)=results
     assert [r['pc']for r in x]==[r['pc']for r in y] and a['payload_retirement_members']==b['payload_retirement_members']
     count=a['payload_retirement_members'];frontiers=[]
