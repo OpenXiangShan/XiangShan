@@ -40,6 +40,7 @@ import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.ftq.FtqParameters
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.frontend.ibuffer.IBufferParameters
+import xiangshan.frontend.tracertl.{TraceRTLParamKey, TraceRTLParameters}
 import freechips.rocketchip.devices.debug._
 import xscache.openLLC.OpenLLCParam
 import zhujiang.ZJParameters
@@ -70,6 +71,7 @@ private[top] object CacheSizeParser {
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
+  case TraceRTLParamKey => TraceRTLParameters()
   case SoCParamsKey => SoCParameters()
   case CVMParamsKey => CVMParameters()
   case PMParameKey => PMParameters()

@@ -11,6 +11,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.{RedirectLevel, SelImm, XSModule}
 import xiangshan.frontend.PcInit
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
@@ -37,10 +38,14 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.func := io.in.bits.ctrl.fuOpType
   dataModule.io.predTaken := io.in.bits.ctrl.predictInfo.get.predTaken
 
+  // TraceRTL has no GPR values: resolve the branch with the traced outcome
+  val taken = TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.get.isTaken)
+  val mispredict = TraceRTLChoose(dataModule.io.mispredict, dataModule.io.predTaken =/= taken)
+
   val pcExtend = io.instrAddrTransType.get.extend(io.in.bits.data.pc.get, VAddrBits + 2)
   addModule.io.pcExtend := pcExtend
   addModule.io.imm := io.in.bits.data.imm // imm
-  addModule.io.taken := dataModule.io.taken
+  addModule.io.taken := taken
   addModule.io.isRVC := io.in.bits.ctrl.isRVC.get
   addModule.io.nextPcOffset := io.in.bits.data.nextPcOffset.get
 
@@ -49,8 +54,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val brhPredictTarget = io.in.bits.ctrl.predictInfo.get.target
   val brhRealTarget = addModule.io.target(VAddrData().dataWidth - 1, 0)
-  val targetWrong = dataModule.io.predTaken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
-  val isMisPred = dataModule.io.mispredict || targetWrong
+  val targetWrong = dataModule.io.predTaken && taken && (brhRealTarget =/= brhPredictTarget)
+  val isMisPred = mispredict || targetWrong
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
@@ -62,20 +67,21 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
       redirect.bits.fullTarget := addModule.io.target
       redirect.bits.isMisPred := isMisPred
-      redirect.bits.taken := dataModule.io.taken
+      redirect.bits.taken := taken
       redirect.bits.target := addModule.io.target
       redirect.bits.pc := pcExtend(VAddrBits, 0)
       redirect.bits.backendIAF := false.B
       redirect.bits.backendIPF := false.B
       redirect.bits.backendIGPF := false.B
       redirect.bits.attribute := io.toFrontendBJUResolve.get.bits.attribute
+      redirect.bits.traceInfo.foreach(_ := io.in.bits.ctrl.traceInfo.get)
   }
   io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
   io.toFrontendBJUResolve.get.bits.pc := PcInit(pcExtend(VAddrBits - 1, 0))
   io.toFrontendBJUResolve.get.bits.target := PcInit(addModule.io.target(VAddrBits - 1, 0))
-  io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
+  io.toFrontendBJUResolve.get.bits.taken := taken
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   io.toFrontendBJUResolve.get.bits.attribute.branchType := BranchAttribute.BranchType.Conditional
   io.toFrontendBJUResolve.get.bits.attribute.rasAction := 0.U

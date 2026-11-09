@@ -16,6 +16,7 @@ import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
 import xiangshan.backend.fu.fpu.Bundles._
 import yunsuan.fpu.fmul.utils.FMULToFADDCtrlBundle
+import xiangshan.frontend.tracertl.TraceInfo
 
 trait HasFuLatency {
   val latencyVal: Option[Int]
@@ -73,6 +74,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val lastUop     = OptionWrapper(cfg.needVecCtrl, Bool())
   val vtype       = OptionWrapper(cfg.needVecCtrl, VType())
   val oldVType    = Option.when(cfg.writeVType)(VType())
+  val traceInfo   = TraceInfo()
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {

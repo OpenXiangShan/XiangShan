@@ -315,6 +315,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     vstdEnq.bits.latency := staEnq.bits.latency
     vstdEnq.bits.robIdx := staEnq.bits.robIdx
     vstdEnq.bits.chanelIdx := staEnq.bits.chanelIdx
+    vstdEnq.bits.traceInfo.foreach(_ := staEnq.bits.traceInfo.get)
     vstdEnq.bits.uopIdx.foreach(_ := staEnq.bits.uopIdx.get)
     vstdEnq.bits.lastUop.foreach(_ := staEnq.bits.lastUop.get)
     vstdEnq.bits.sqIdx.get := staEnq.bits.sqIdx.get
