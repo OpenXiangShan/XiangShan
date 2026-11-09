@@ -6618,7 +6618,9 @@ class common_data_transaction extends uvm_object;
         memblock_uid_t     sq_uid;
         status_transaction resolved_status;
         memblock_lq_key_t  resolved_lq_key;
+        memblock_sq_key_t  resolved_sq_key;
         bit                use_dequeued_load_lq_identity;
+        bit                use_dequeued_store_sq_identity;
         bit                have_uid;
 
         uid = 0;
@@ -6667,14 +6669,43 @@ class common_data_transaction extends uvm_object;
             end
         end
         if (wb_event.has_sq) begin
-            if (!lookup_active_uid_by_sq(wb_event.sq_key, sq_uid)) begin
-                return 1'b0;
+            use_dequeued_store_sq_identity = 1'b0;
+            if (have_uid &&
+                (wb_event.target == MEMBLOCK_ISSUE_TARGET_STA ||
+                 wb_event.target == MEMBLOCK_ISSUE_TARGET_STD)) begin
+                resolved_status = get_status(uid);
+                resolved_sq_key.flag = resolved_status.sqIdx_flag;
+                resolved_sq_key.value = resolved_status.sqIdx_value;
+                // 中文注释：STORE WB 已由 UID/ROB 归属后，真实 sqDeq 可以让物理
+                // SQ slot 被后续 UID 复用。此时 event SQ key 只校验当前 UID 的历史
+                // identity；无 deq 时仍必须查询 active map并保持严格 owner 校验。
+                use_dequeued_store_sq_identity =
+                    !resolved_status.active_sq_mapped &&
+                    resolved_status.lsq_deq &&
+                    target_dispatched(resolved_status, wb_event.target) &&
+                    is_valid_sq_key(resolved_sq_key) &&
+                    is_valid_sq_key(wb_event.sq_key) &&
+                    wb_event.has_issue_epoch &&
+                    wb_event.issue_epoch ==
+                        resolved_status.get_target_issue_epoch(wb_event.target) &&
+                    wb_event.has_replay_seq &&
+                    target_replay_seq_match(resolved_status, wb_event.target,
+                                            wb_event.replay_seq) &&
+                    wb_event.has_dynamic_epoch &&
+                    wb_event.dynamic_epoch == resolved_status.dynamic_epoch &&
+                    resolved_sq_key.flag == wb_event.sq_key.flag &&
+                    resolved_sq_key.value == wb_event.sq_key.value;
             end
-            if (have_uid && uid != sq_uid) begin
-                `uvm_fatal("COMMON_DATA", $sformatf("WB_UID_MISMATCH uid=%0d sq_uid=%0d", uid, sq_uid))
+            if (!use_dequeued_store_sq_identity) begin
+                if (!lookup_active_uid_by_sq(wb_event.sq_key, sq_uid)) begin
+                    return 1'b0;
+                end
+                if (have_uid && uid != sq_uid) begin
+                    `uvm_fatal("COMMON_DATA", $sformatf("WB_UID_MISMATCH uid=%0d sq_uid=%0d", uid, sq_uid))
+                end
+                uid = sq_uid;
+                have_uid = 1'b1;
             end
-            uid = sq_uid;
-            have_uid = 1'b1;
         end
         return have_uid;
     endfunction:resolve_uid_for_event

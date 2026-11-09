@@ -420,13 +420,6 @@ class dispatch_monitor_event_adapter extends uvm_object;
             end
             MEMBLOCK_ISSUE_TARGET_STA,
             MEMBLOCK_ISSUE_TARGET_STD: begin
-                if (!status.active_sq_mapped) begin
-                    if (strict_candidate) begin
-                        `uvm_fatal("INT_WB_ATTACH",
-                                   $sformatf("STORE uid=%0d has no active SQ mapping", uid))
-                    end
-                    return 1'b0;
-                end
                 sq_key.flag = status.sqIdx_flag;
                 sq_key.value = status.sqIdx_value;
                 if (!data.is_valid_sq_key(sq_key)) begin
@@ -435,6 +428,17 @@ class dispatch_monitor_event_adapter extends uvm_object;
                 if (status.active_sq_mapped) begin
                     if (!data.lookup_active_uid_by_sq(sq_key, mapped_uid) || mapped_uid != uid) begin
                         `uvm_fatal("INT_WB_ATTACH", $sformatf("STORE SQ owner mismatch uid=%0d", uid))
+                    end
+                end else begin
+                    // 中文注释：真实 sqDeq 可以先释放并复用物理 SQ owner map。STA/STD
+                    // raw 已由完整 ROB、target issue epoch 和 flush provenance 归属当前 UID
+                    // 时，只复用 status 保留的历史 SQ identity；未观察到 deq 仍严格拒绝。
+                    if (!status.lsq_deq) begin
+                        if (strict_candidate) begin
+                            `uvm_fatal("INT_WB_ATTACH",
+                                       $sformatf("STORE uid=%0d lost active SQ mapping before sqDeq", uid))
+                        end
+                        return 1'b0;
                     end
                 end
                 wb_event.sq_key = sq_key;

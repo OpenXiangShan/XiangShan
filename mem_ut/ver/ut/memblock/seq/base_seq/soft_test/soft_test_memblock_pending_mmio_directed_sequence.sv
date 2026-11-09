@@ -55,6 +55,30 @@ class memblock_pending_mmio_rob_expected_fatal_catcher extends uvm_report_catche
     endfunction:catch
 endclass:memblock_pending_mmio_rob_expected_fatal_catcher
 
+class memblock_pending_mmio_int_wb_expected_fatal_catcher extends uvm_report_catcher;
+    int unsigned caught_count;
+    string expected_message_pattern;
+
+    function new(
+        string name = "memblock_pending_mmio_int_wb_expected_fatal_catcher",
+        string message_pattern = "*lost active SQ mapping before sqDeq*"
+    );
+        super.new(name);
+        caught_count = 0;
+        expected_message_pattern = message_pattern;
+    endfunction:new
+
+    virtual function action_e catch();
+        if (get_severity() == UVM_FATAL &&
+            get_id() == "INT_WB_ATTACH" &&
+            uvm_pkg::uvm_is_match(expected_message_pattern, get_message())) begin
+            caught_count++;
+            return CAUGHT;
+        end
+        return THROW;
+    endfunction:catch
+endclass:memblock_pending_mmio_int_wb_expected_fatal_catcher
+
 class soft_test_memblock_pending_mmio_directed_sequence extends
     soft_test_memblock_dispatch_smoke_sequence;
 
@@ -76,6 +100,7 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
     extern virtual task run_monitor_raw_scenario();
     extern virtual task run_cbo_store_mmio_consume_scenario();
     extern virtual task run_cbo_fault_late_sta_scenario();
+    extern virtual task run_store_post_sqdeq_wb_attach_scenario();
     extern virtual task run_incompatible_store_mmio_fatal_scenario();
     extern virtual task run_uncache_retry_boost_scenario();
     extern virtual task run_rollback_xmr_path_scenario();
@@ -164,6 +189,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::body();
     run_monitor_raw_scenario();
     run_cbo_store_mmio_consume_scenario();
     run_cbo_fault_late_sta_scenario();
+    run_store_post_sqdeq_wb_attach_scenario();
     run_incompatible_store_mmio_fatal_scenario();
     run_uncache_retry_boost_scenario();
     run_rollback_xmr_path_scenario();
@@ -1352,6 +1378,92 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
                    "different-key CBO fault contexts did not coexist independently")
     end
 endtask:run_cbo_fault_late_sta_scenario
+
+// 中文注释：CBO redirect 后的年轻 STORE 可先观察到真实 sqDeq，再收到同一
+// active ROB 动态实例的 STA/STD real-WB。正例验证历史 SQ key attach 和公共
+// event resolver；负例证明未观察到 deq 时不能绕过 active SQ owner map。
+task soft_test_memblock_pending_mmio_directed_sequence::
+    run_store_post_sqdeq_wb_attach_scenario();
+    memblock_pending_mmio_int_wb_expected_fatal_catcher catcher;
+    memblock_sync_pkg::dispatch_raw_int_wb_t raw;
+    memblock_wb_event_t wb_event;
+    memblock_wb_event_t normalized_event;
+    status_transaction status;
+    memblock_sq_key_t historical_sq_key;
+    bit attached;
+
+    reset_directed_owner_state();
+    build_store_table();
+    activate_directed_store_issue(0, 21);
+    status = data.get_status(0);
+    historical_sq_key.flag = status.sqIdx_flag;
+    historical_sq_key.value = status.sqIdx_value;
+    data.release_uid_sq_mapping(0);
+    if (!status.active || status.active_sq_mapped || !status.lsq_deq) begin
+        `uvm_fatal(get_type_name(),
+                   "post-sqDeq STORE did not retain an active ROB with historical SQ identity")
+    end
+
+    raw = make_sta0_raw(0, 24'b0);
+    if (!monitor_adapter.convert_raw_int_wb(raw, wb_event) ||
+        wb_event.target != MEMBLOCK_ISSUE_TARGET_STA ||
+        !wb_event.has_sq || wb_event.sq_key != historical_sq_key ||
+        wb_event.issue_epoch != status.sta_issue_epoch ||
+        wb_event.dynamic_epoch != status.dynamic_epoch ||
+        !data.normalize_feedback_event(wb_event, normalized_event) ||
+        normalized_event.uid != 0 || normalized_event.sq_key != historical_sq_key) begin
+        `uvm_fatal(get_type_name(),
+                   "post-sqDeq STA real-WB did not attach through historical SQ identity")
+    end
+
+    raw = memblock_sync_pkg::make_empty_raw_int_wb();
+    raw.valid = 1'b1;
+    raw.source_kind = memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STD;
+    raw.port_id = 0;
+    raw.sample_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+    raw.key_needs_state_lookup = 1'b1;
+    raw.rob_value_only_without_flag = 1'b1;
+    raw.rob_value = status.robIdx_value;
+    raw.trigger = 4'hf;
+    raw.cycle = $time + 1;
+    if (!monitor_adapter.convert_raw_int_wb(raw, wb_event) ||
+        wb_event.target != MEMBLOCK_ISSUE_TARGET_STD ||
+        !wb_event.has_sq || wb_event.sq_key != historical_sq_key ||
+        wb_event.issue_epoch != status.std_issue_epoch ||
+        wb_event.dynamic_epoch != status.dynamic_epoch ||
+        !data.normalize_feedback_event(wb_event, normalized_event) ||
+        normalized_event.uid != 0 || normalized_event.sq_key != historical_sq_key) begin
+        `uvm_fatal(get_type_name(),
+                   "post-sqDeq STD real-WB did not attach through historical SQ identity")
+    end
+
+    reset_directed_owner_state();
+    build_store_table();
+    activate_directed_store_issue(0, 22);
+    status = data.get_status(0);
+    data.release_uid_sq_mapping(0);
+    data.set_status_field(0, MEMBLOCK_STATUS_LSQ_DEQ, 1'b0);
+    wb_event = data.make_empty_wb_event();
+    wb_event.valid = 1'b1;
+    wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STORE_WB;
+    wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
+    wb_event.port_id = 0;
+    catcher = new("store_without_sqdeq_catcher");
+    uvm_report_cb::add(null, catcher);
+    attached = monitor_adapter.fill_current_issue_snapshot(
+        wb_event,
+        0,
+        status.get_rob_key(),
+        1'b1,
+        memblock_sync_pkg::dispatch_flush_epoch,
+        1'b1
+    );
+    uvm_report_cb::delete(null, catcher);
+    if (catcher.caught_count != 1 || attached) begin
+        `uvm_fatal(get_type_name(),
+                   "STORE without sqDeq did not retain strict active SQ mapping rejection")
+    end
+endtask:run_store_post_sqdeq_wb_attach_scenario
 
 // 中文注释：只放宽合法 CBO owner；load/prefetch等其它 behavior 收到 storeMmio
 // 仍必须由 resolver 拒绝，避免 value-only raw 被错误归属。
