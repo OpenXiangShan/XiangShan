@@ -1237,8 +1237,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       !io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself()
     )
   val resetsPendingSlot = flushesHeadEntry || clearsHeadLatter
+  // Entry validity is cleared by redirectValidReg one cycle after the redirect.
+  // Keep the former slot selected until that delayed clear has taken effect.
+  val resetsPendingSlotReg = RegNext(resetsPendingSlot, false.B)
   val pendingPtrIsFormer = RegInit(true.B)
-  when (resetsPendingSlot || io.commits.isCommit && io.commits.commitValid.asUInt.orR) {
+  when (
+    resetsPendingSlot || resetsPendingSlotReg ||
+      io.commits.isCommit && io.commits.commitValid.asUInt.orR
+  ) {
     pendingPtrIsFormer := true.B
   }.elsewhen(
     !pendingBackPtr.needFlush(io.redirect) &&
