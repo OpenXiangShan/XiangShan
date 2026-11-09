@@ -332,8 +332,8 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   XSPerfAccumulate("prefetchHitFetchReq", prefetchHitFetchReq)
 
   // Sent requests (Total - Duplicated - Cancelled)
-  XSPerfAccumulate("sentFetchReq", io.memAcquire.fire && io.memAcquire.bits.source < NumFetchMshr.U)
-  XSPerfAccumulate("sentPrefetchReq", io.memAcquire.fire && io.memAcquire.bits.source >= NumFetchMshr.U)
+  XSPerfAccumulate("sentFetchReq", io.txreq.fire && io.txreq.bits.TxnID < NumFetchMshr.U)
+  XSPerfAccumulate("sentPrefetchReq", io.txreq.fire && io.txreq.bits.TxnID >= NumFetchMshr.U)
 
   // Mshr occupancy
   XSPerfHistogram(
@@ -353,8 +353,8 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
 
   XSPerfHistogram(
     "responseLatency",
-    MuxCase(0.U, allMshr.map(mshr => (idNext === mshr.id.U) -> mshr.io.perf_latency)),
-    lastFireNext,
+    MuxCase(0.U, allMshr.map(mshr => (completeIdNext === mshr.id.U) -> mshr.io.perf_latency)),
+    completeNext,
     0,
     200,
     10

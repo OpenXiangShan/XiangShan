@@ -42,7 +42,7 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
   io.deq.bits := entries(0).data
   io.enq.ready := count < depth.U
   when(io.deq.valid && entries(0).speculative) {
-    assert(entries(0).committed || headCommittedNow, "uncommitted SpecMiss reached TileLink A")
+    assert(entries(0).committed || headCommittedNow, "uncommitted SpecMiss reached the downstream request channel")
   }
 
   for (w <- 0 until nOwners) {

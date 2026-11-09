@@ -1583,8 +1583,8 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
     query_fire(i) := query_valid(i) && io.queryMQ(i).ready
   }
 
-  // A fabric winner owns a tentative post-arbitration buffer slot. Only an
-  // accurately allocated S2 miss commits that slot as a real TL A request.
+  // A CCHI arbiter winner owns a tentative request-buffer slot. Only an
+  // accurately allocated S2 miss commits that slot as a real CCHI request.
   for (w <- 0 until LoadPipelineWidth) {
     val i = w + 1
     io.spec_fabric.resolve(w).valid := reserve_valid(w)
@@ -1608,11 +1608,11 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
         query_fire(i) && reserved_for_req(i) && (analysis.strategy(i) & 1.U) =/= 0.U &&
         analysis.compress_group(i) === i.U,
         "SpecMiss commit must own its reservation and a new MissQueue allocation")
-      assert(io.spec_fabric.committed(w), "committed SpecMiss has no post-xbar A slot")
+      assert(io.spec_fabric.committed(w), "committed SpecMiss has no CCHI request-buffer slot")
     }
     when(io.spec_fabric.committed(w)) {
       assert(io.spec_fabric.resolve(w).valid && io.spec_fabric.resolve(w).bits.commit,
-        "post-xbar SpecMiss commit has no matching MissQueue resolution")
+        "CCHI SpecMiss commit has no matching MissQueue resolution")
     }
     XSPerfAccumulate(s"spec_fabric_commit_$w", io.spec_fabric.committed(w))
   }
@@ -1651,7 +1651,7 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
     io.spec_fabric.candidate(w).bits.id := choice.id
     io.spec_fabric.candidate(w).bits.alias := get_alias(request.bits.vaddr)
     io.spec_fabric.candidate(w).bits.prefetch := !io.l2_pf_store_only
-    io.spec_fabric.candidate(w).bits.channel := selectChannel(request.bits.paddr, choice.id)
+    io.spec_fabric.candidate(w).bits.channel := selectCCHIChannel(request.bits.paddr, choice.id)
     spec_candidate_fire(w) := io.spec_fabric.candidate(w).fire
     spec_candidate_id(w) := choice.id
     when(request.valid && choice.addressBusy) {

@@ -20,14 +20,16 @@ object CCHICheckTypeEquality {
 object CCHIBuffer {
   // upper = requester / inner; down = completer / outer.
   // up* : upper -> Queue -> down;  dn* : down -> Queue -> upper.
-  def apply[T <: Data](upper: T, down: T, nStages: Int = 1): Unit = {
+  def apply[T <: Data](upper: T, down: T, nStages: Int = 1, bufferUpReq: Boolean = true): Unit = {
     require(CCHICheckTypeEquality(upper, down), "CCHI port types must match")
     require(nStages >= 1, "nStages must be >= 1")
     val upperChans = channels(upper)
     val downChans = channels(down)
     upperChans.foreach { case (name, u) =>
       val d = downChans(name)
-      if (name.startsWith("up")) {
+      if (name == "upREQ" && !bufferUpReq) {
+        // The caller supplies the speculative request buffer for this channel.
+      } else if (name.startsWith("up")) {
         d <> QueueBuffer(u, nStages)
       } else if (name.startsWith("dn")) {
         u <> QueueBuffer(d, nStages)

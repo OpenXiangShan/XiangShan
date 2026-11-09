@@ -281,6 +281,10 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   override def shouldBeInlined: Boolean = true
 
   val dcache = LazyModule(new DCacheWrapper())
+  val dcacheSpecSink = Option.when(coreParams.dcacheParametersOpt.exists(_.enMissTrack))(
+    BundleBridgeSink[SpecMissFabricIO](Some(() => new SpecMissFabricIO))
+  )
+  dcacheSpecSink.foreach(_ := dcache.dcache.specFabricSource.get)
   val uncache = LazyModule(new Uncache())
   val ptw = LazyModule(new L2TLBWrapper())
 
@@ -1292,8 +1296,19 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
 
-  for (ch <- 0 until nCCHIChannelsFromDcache) {
-    CCHIBuffer(dcache.io.cchi(ch), io.outer_dcache_cchi(ch))
+  outer.dcacheSpecSink match {
+    case Some(sink) =>
+      val requests = Module(new CCHISpecMissBuffer)
+      requests.io.spec <> sink.bundle
+      for (ch <- 0 until nCCHIChannelsFromDcache) {
+        CCHIBuffer(dcache.io.cchi(ch), io.outer_dcache_cchi(ch), bufferUpReq = false)
+        requests.io.normal(ch) <> dcache.io.cchi(ch).upREQ
+        io.outer_dcache_cchi(ch).upREQ <> requests.io.out(ch)
+      }
+    case None =>
+      for (ch <- 0 until nCCHIChannelsFromDcache) {
+        CCHIBuffer(dcache.io.cchi(ch), io.outer_dcache_cchi(ch))
+      }
   }
 
   CCHIBuffer(io.inner_icache_cchi, io.outer_icache_cchi, nStages = 2)
