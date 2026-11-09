@@ -34,6 +34,10 @@ def main():
     try:
         while True:
             assert digest(args.launch)==launch_sha and all(digest(p)==v for p,v in frozen.items())
+            if (args.output_dir/'closure-receipt.json').exists() and not (args.prior_observer_dir/'closure-receipt.json').exists():
+                save(phase='waiting_prior_observer')
+                time.sleep(60)
+                continue
             attempt = state['attempts']+1
             command = [sys.executable,str(tools/'tea_dip_bpu_commit_collect.py'),'--launch',str(args.launch),'--output-dir',str(args.output_dir)]
             reply = subprocess.run(command,capture_output=True,text=True)
