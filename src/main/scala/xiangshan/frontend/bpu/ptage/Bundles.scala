@@ -25,6 +25,25 @@ import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
 
+/** Where a lookup sits relative to the last correction of the prediction stream, for performance counters only.
+  *
+  * A lookup is keyed on the group before the one it answers for, so a correction disturbs the group that enters s0
+  * in the correction cycle and the one after it; everything else is steady state.
+  */
+object PtageLookupClass {
+  val Steady:          Int = 0
+  val AtRedirect:      Int = 1
+  val AtS2Override:    Int = 2
+  val AtS3Override:    Int = 3
+  val AfterRedirect:   Int = 4
+  val AfterS2Override: Int = 5
+  val AfterS3Override: Int = 6
+
+  val Names: Seq[String] =
+    Seq("steady", "atRedirect", "atS2Override", "atS3Override", "afterRedirect", "afterS2Override", "afterS3Override")
+  def width: Int = log2Ceil(Names.length)
+}
+
 object PtageCounter extends SaturateCounterFactory {
   def width(implicit p: Parameters): Int =
     p(XSCoreParamsKey).frontendParameters.bpuParameters.ptageParameters.CounterWidth
@@ -93,6 +112,9 @@ class PtageMeta(implicit p: Parameters) extends PtageBundle {
   val p2NextPcLow:   UInt            = UInt(NextPcLowWidth.W)
   // how many times in a row the stored second block has turned out right
   val p2Conf: UInt = UInt(PairConfWidth.W)
+
+  // performance counters only: see PtageLookupClass
+  val perf_lookupClass: UInt = UInt(PtageLookupClass.width.W)
 
   // the provider entry, which is the one behind a second block this lookup put out
   def pairTag: PtagePairTag = {

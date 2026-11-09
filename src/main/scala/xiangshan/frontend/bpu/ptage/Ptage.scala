@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
@@ -205,6 +206,30 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val s1_entry  = s1_read.entry
   private val s1_hitVec = RegEnable(s0_hitVec, s0_fire)
 
+  /* *** perf: where a lookup sits relative to a correction ***
+   * Judged in the cycle the group leaves s0, when the correction that brought it there is still visible.
+   */
+  private val perf_kindNow = MuxCase(
+    PtageLookupClass.Steady.U,
+    Seq(
+      io.redirect      -> PtageLookupClass.AtRedirect.U,
+      io.bpuS3Override -> PtageLookupClass.AtS3Override.U,
+      io.bpuS2Override -> PtageLookupClass.AtS2Override.U
+    )
+  )
+  private val perf_lastKind = RegEnable(perf_kindNow, PtageLookupClass.Steady.U, s0_fire)
+  private val perf_s0Class = Mux(
+    perf_kindNow =/= PtageLookupClass.Steady.U,
+    perf_kindNow,
+    Mux(
+      perf_lastKind =/= PtageLookupClass.Steady.U,
+      // widening: an "after" class lies past the range of the "at" class it comes from
+      perf_lastKind +& (PtageLookupClass.AfterRedirect - PtageLookupClass.AtRedirect).U,
+      PtageLookupClass.Steady.U
+    )
+  )
+  private val s1_perfClass = RegEnable(perf_s0Class, PtageLookupClass.Steady.U, s0_fire)
+
   // The longest history that hit provides the prediction, as in any TAGE: a longer history is a more specific
   // context, so where one matches it is the better answer. The select stays one-hot, since everything on the
   // prediction path picks with it and only the meta needs the table's index.
@@ -284,6 +309,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   io.meta.p2Attribute            := s1_providerEntry.p2.attribute
   io.meta.p2NextPcLow            := s1_providerEntry.p2.nextPcLow
   io.meta.p2Conf                 := s1_providerConf
+  io.meta.perf_lookupClass       := s1_perfClass
 
   /* *** t0: receive a verified group ***
    * Driven by s3's verified result, so pTAGE learns what the high-level predictor concluded rather than waiting for
@@ -512,4 +538,19 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("trainAllocate", t0_fire && t0_needAllocate)
   XSPerfAccumulate("trainNoTableFree", t0_fire && t0_allocRefused)
   XSPerfAccumulate("usefulReset", t0_needUsefulReset)
+
+  // Per lookup class: how often a lookup hits, then what training did with it. A class whose lookups go wrong but
+  // still train shows up as allocation churn here.
+  private def perf_byClass(classOf: UInt): Seq[(String, Bool)] =
+    PtageLookupClass.Names.zipWithIndex.map { case (name, c) => (name, classOf === c.U) }
+  private val perf_s1Classes = perf_byClass(s1_perfClass)
+  XSPerfSeqAccumulate("lookup", s1_fire, perf_s1Classes)
+  XSPerfSeqAccumulate("lookupHit", s1_fire && s1_p1Usable, perf_s1Classes)
+  // training writes the held group, so it is that group's lookup the counts belong to
+  private val perf_t0Classes = perf_byClass(heldMeta.perf_lookupClass)
+  XSPerfSeqAccumulate("train", t0_heldFire, perf_t0Classes)
+  XSPerfSeqAccumulate("trainStrengthen", t0_heldFire && t0_needStrengthen, perf_t0Classes)
+  XSPerfSeqAccumulate("trainCorrect", t0_heldFire && t0_needCorrect, perf_t0Classes)
+  XSPerfSeqAccumulate("trainAllocate", t0_heldFire && t0_needAllocate, perf_t0Classes)
+  XSPerfSeqAccumulate("trainNoTableFree", t0_heldFire && t0_allocRefused, perf_t0Classes)
 }

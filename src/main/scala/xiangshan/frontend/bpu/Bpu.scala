@@ -41,6 +41,7 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.ptage.Ptage
+import xiangshan.frontend.bpu.ptage.PtageLookupClass
 import xiangshan.frontend.bpu.ras.MicroRas
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
@@ -356,11 +357,19 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   // The first block comes from the ahead btb and the micro tage behind it, exactly as without pTAGE. pTAGE is keyed a
   // group ahead and answers with a whole pair, which is what buys a second block, but for the first block alone it is
   // the weaker predictor and would leave s2 correcting s1 more often.
+  private val s1_ubtbPathPrediction = Mux(s1_ubtbPrediction.taken, s1_ubtbPrediction, fallThrough.io.prediction)
   s1_prediction := Mux(
     s1_abtbValid,
     Mux(s1_abtbResult.taken, s1_abtbResult, fallThrough.io.prediction),
-    Mux(s1_ubtbPrediction.taken, s1_ubtbPrediction, fallThrough.io.prediction)
+    s1_ubtbPathPrediction
   )
+  // what s1 would say if pTAGE chose the first block instead, for the performance counters below
+  private val s1_ptagePathPrediction =
+    Mux(
+      s1_ptageBlock.valid,
+      Mux(s1_ptageResult.taken, s1_ptageResult, fallThrough.io.prediction),
+      s1_ubtbPathPrediction
+    )
 
   // The group s1 hands on. Everything that has to account for a whole group, the path history included, reads it from
   // here.
@@ -917,6 +926,77 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
       ("fallThrough", !s1_taken)
     )
   )
+  /* *** perf: how often each s1 source agrees with s3 ***
+   * s3 is what the s1 predictors are trained towards and what an override restores, so agreeing with it is what keeps
+   * s2 and s3 from correcting s1. pTAGE's answer is judged here as well, whether or not s1 used it.
+   */
+  private val perf_s1Correct = s3_s1Prediction.sameExit(s3_prediction)
+  private val perf_s2Correct = s3_s2Prediction.sameExit(s3_prediction)
+
+  // pTAGE's first block, rebuilt from the meta that travels with the group; only its target is carried separately,
+  // since a return takes it from the return stack
+  private val s3_perfPtagePath = RegEnable(RegEnable(s1_ptagePathPrediction, s1_fire), s2_fire)
+  private val s3_perfPtage     = Wire(new Prediction)
+  s3_perfPtage.taken       := s3_ptageMeta.p1Counter.isPositive
+  s3_perfPtage.cfiPosition := s3_ptageMeta.p1CfiPosition
+  s3_perfPtage.attribute   := s3_ptageMeta.p1Attribute
+  s3_perfPtage.target      := RegEnable(RegEnable(s1_ptageResult.target, s1_fire), s2_fire)
+  private val s3_perfPtageHit   = s3_ptageMeta.valid && s3_ptageMeta.provider.valid
+  private val s3_perfAbtbHit    = RegEnable(RegEnable(s1_abtbValid, s1_fire), s2_fire)
+  private val perf_ptageHit     = s3_fire && s3_perfPtageHit
+  private val perf_ptageCorrect = s3_perfPtage.sameExit(s3_prediction)
+  private val perf_bothTaken    = s3_perfPtage.taken && s3_prediction.taken
+  private val perf_samePosition = s3_perfPtage.cfiPosition === s3_prediction.cfiPosition
+
+  XSPerfAccumulate("perfS3_groups", s3_fire)
+  XSPerfAccumulate("perfS3_s1Correct", s3_fire && perf_s1Correct)
+  XSPerfAccumulate("perfS3_ptagePathCorrect", s3_fire && s3_perfPtagePath.sameExit(s3_prediction))
+  XSPerfAccumulate("perfS3_abtbHit", s3_fire && s3_perfAbtbHit)
+  XSPerfAccumulate("perfS3_abtbHitCorrect", s3_fire && s3_perfAbtbHit && perf_s1Correct)
+
+  // pTAGE's own answer where it had one, and why it was wrong where it was
+  XSPerfAccumulate("perfS3_ptageHit", perf_ptageHit)
+  XSPerfAccumulate("perfS3_ptageHitCorrect", perf_ptageHit && perf_ptageCorrect)
+  XSPerfAccumulate("perfS3_ptageHitWrongDirection", perf_ptageHit && s3_perfPtage.taken =/= s3_prediction.taken)
+  XSPerfAccumulate("perfS3_ptageHitWrongPosition", perf_ptageHit && perf_bothTaken && !perf_samePosition)
+  XSPerfAccumulate(
+    "perfS3_ptageHitWrongTarget",
+    perf_ptageHit && perf_bothTaken && perf_samePosition && s3_perfPtage.target =/= s3_prediction.target
+  )
+  XSPerfAccumulate(
+    "perfS3_ptageMissFallbackCorrect",
+    s3_fire && !s3_perfPtageHit && s3_perfPtagePath.sameExit(s3_prediction)
+  )
+  private val perf_ptageWeak = s3_ptageMeta.p1Counter.isWeak
+  XSPerfAccumulate("perfS3_ptageHitWeak", perf_ptageHit && perf_ptageWeak)
+  XSPerfAccumulate("perfS3_ptageHitWeakCorrect", perf_ptageHit && perf_ptageWeak && perf_ptageCorrect)
+  XSPerfAccumulate("perfS3_ptageHitPositive", perf_ptageHit && s3_perfPtage.taken)
+  XSPerfAccumulate("perfS3_ptageHitPositiveCorrect", perf_ptageHit && s3_perfPtage.taken && perf_ptageCorrect)
+  (0 until ptage.NumTables).foreach { t =>
+    val fromTable = perf_ptageHit && s3_ptageMeta.provider.bits === t.U
+    XSPerfAccumulate(s"perfS3_ptageHitTable$t", fromTable)
+    XSPerfAccumulate(s"perfS3_ptageHitCorrectTable$t", fromTable && perf_ptageCorrect)
+  }
+
+  // An s2 override pays off only where s1 was wrong. Where s1 already agreed with s3, s2 broke a right answer and s3
+  // has to put it back, which costs two corrections instead of none.
+  XSPerfAccumulate("perfS3_s2Correct", s3_fire && perf_s2Correct)
+  XSPerfAccumulate("perfS3_s2Overrode", s3_fire && s3_s2Override)
+  XSPerfAccumulate("perfS3_s2OverrodeRightS1", s3_fire && s3_s2Override && perf_s1Correct)
+  XSPerfAccumulate("perfS3_s2OverrodeRightS1PtageHit", s3_fire && s3_s2Override && perf_s1Correct && s3_perfPtageHit)
+  XSPerfAccumulate("perfS3_s2OverrodeAndWasRight", s3_fire && s3_s2Override && perf_s2Correct)
+  XSPerfAccumulate("perfS3_s3OverrodeRightS1", s3_fire && s3_override && perf_s1Correct)
+  XSPerfAccumulate("perfS3_s1RightS2Wrong", s3_fire && perf_s1Correct && !perf_s2Correct)
+  XSPerfAccumulate("perfS3_s1WrongS2Right", s3_fire && !perf_s1Correct && perf_s2Correct)
+
+  // the same agreement split by where pTAGE's lookup sat relative to the last correction
+  private val perf_s3Classes =
+    PtageLookupClass.Names.zipWithIndex.map { case (name, c) => (name, s3_ptageMeta.perf_lookupClass === c.U) }
+  XSPerfSeqAccumulate("perfS3_groups", s3_fire, perf_s3Classes)
+  XSPerfSeqAccumulate("perfS3_s1Correct", s3_fire && perf_s1Correct, perf_s3Classes)
+  XSPerfSeqAccumulate("perfS3_ptageHit", perf_ptageHit, perf_s3Classes)
+  XSPerfSeqAccumulate("perfS3_ptageHitCorrect", perf_ptageHit && perf_ptageCorrect, perf_s3Classes)
+
   XSPerfAccumulate("s3_use_ras", s3_fire && s3_taken && s3_useRas)
   XSPerfAccumulate("s3_use_ittage", s3_fire && s3_taken && !s3_useRas && s3_useIttage)
   XSPerfAccumulate("s3_use_mbtb_tage", s3_fire && s3_prediction.attribute.isConditional)
