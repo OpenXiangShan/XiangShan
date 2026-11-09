@@ -1381,9 +1381,9 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
     end
 endtask:run_cbo_fault_late_sta_scenario
 
-// 中文注释：DUT exception redirect可先于fault token的软件intent完成scan。
-// 本场景保留真实cancel record/owner window，随后提交同owner intent，验证它只被
-// 历史覆盖证明收口；年轻UID按新dynamic epoch重发，窗口仍经snapshot/apply清理。
+// 中文注释：fault CBO可先真实SQ deq并terminal retire，之后同ROB exception
+// redirect才完成scan。该顺序不会建立fault LSQ resource，因此必须用terminal
+// UID/epoch/ROB身份和owner-window固定record证明软件intent已被覆盖。
 task soft_test_memblock_pending_mmio_directed_sequence::
     run_cbo_fault_observed_redirect_coverage_scenario();
     memblock_issue_q_item_t fired_items[$];
@@ -1396,6 +1396,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     memblock_op_behavior_t behavior;
     status_transaction fault_status;
     status_transaction reissue_status;
+    memblock_rob_map_key_t fault_rob_map_key;
+    memblock_rob_key_t saved_reissue_rob_key;
     memblock_sq_key_t sq_deq_head;
     memblock_lsqenq_dispatch_base_sequence enq;
     longint unsigned anchor_sample;
@@ -1424,23 +1426,38 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     fault_status = data.get_status(0);
     reissue_status = data.get_status(1);
     reissue_old_epoch = reissue_status.dynamic_epoch;
+    saved_real_smoke_active = memblock_sync_pkg::dispatch_real_smoke_active;
+    memblock_sync_pkg::dispatch_real_smoke_active = 1'b1;
     raw = make_sta0_raw(0, 24'h000080);
     if (!monitor_adapter.convert_raw_int_wb(raw, wb_event) ||
         !writeback_handler.handle_real_writeback_event(wb_event) ||
         !data.mark_target_normal_pass(0, MEMBLOCK_ISSUE_TARGET_STD,
                                       fault_status.std_issue_epoch,
-                                      fault_status.replay_seq, $time) ||
-        !commit_handler.mark_fault_rob_commit_uid(0)) begin
+                                      fault_status.replay_seq, $time)) begin
         `uvm_fatal(get_type_name(),
                    "failed to establish committed fault CBO before observed redirect")
+    end
+    sq_deq_head = lsq_ctrl.sq_deq_ptr;
+    commit_handler.apply_dut_sq_deq(1, sq_deq_head, 1'b0);
+    if (!fault_status.lsq_deq || fault_status.active_sq_mapped ||
+        !commit_handler.mark_fault_rob_commit_uid(0) ||
+        !fault_status.terminal_done || fault_status.active ||
+        data.fault_redirect_resource.valid) begin
+        `uvm_fatal(get_type_name(),
+                   "fault CBO did not reach terminal post-SQ-deq state before redirect")
     end
     exception_handler.process_pending_events();
     if (data.exception_event_q.size() != 0) begin
         `uvm_fatal(get_type_name(),
                    "fault recovery event was not consumed before observed redirect")
     end
+    if (commit_handler.request_fault_head_redirect() ||
+        !commit_handler.fault_head_redirect_intent_pending ||
+        commit_handler.fault_head_redirect_intent_id == 0) begin
+        `uvm_fatal(get_type_name(),
+                   "terminal fault CBO redirect intent was not queued")
+    end
 
-    victim_uids.push_back(0);
     victim_uids.push_back(1);
     redirect = '{default:'0};
     redirect.valid = 1'b1;
@@ -1455,20 +1472,30 @@ task soft_test_memblock_pending_mmio_directed_sequence::
         reissue_status.active || !reissue_status.redirect_pending ||
         !reissue_status.flushed || reissue_status.terminal_done) begin
         `uvm_fatal(get_type_name(),
-                   "observed redirect did not preserve fault identity and reset UID+1 for reissue")
+                   "observed redirect did not cover terminal fault identity and reset UID+1 for reissue")
     end
 
-    saved_real_smoke_active = memblock_sync_pkg::dispatch_real_smoke_active;
-    memblock_sync_pkg::dispatch_real_smoke_active = 1'b1;
-    if (commit_handler.request_fault_head_redirect() ||
-        !commit_handler.fault_head_redirect_intent_pending ||
-        commit_handler.fault_head_redirect_intent_id == 0) begin
+    // A reused complete ROB key with a live owner must block historical coverage.
+    fault_rob_map_key = rob_order_util::rob_to_map_key(fault_status.get_rob_key());
+    saved_reissue_rob_key = reissue_status.get_rob_key();
+    reissue_status.robIdx_flag = fault_status.robIdx_flag;
+    reissue_status.robIdx_value = fault_status.robIdx_value;
+    reissue_status.active = 1'b1;
+    data.uid_by_active_rob[fault_rob_map_key] = 1;
+    if (data.fault_cbo_applied_redirect_covers_owner(
+            0, fault_status.dynamic_epoch, fault_status.get_rob_key())) begin
         `uvm_fatal(get_type_name(),
-                   "duplicate fault redirect intent was not queued for coverage test")
+                   "historical fault redirect coverage overrode a reused live ROB owner")
     end
+    data.uid_by_active_rob.delete(fault_rob_map_key);
+    reissue_status.active = 1'b0;
+    reissue_status.robIdx_flag = saved_reissue_rob_key.flag;
+    reissue_status.robIdx_value = saved_reissue_rob_key.value;
+
     void'(commit_handler.sync_modeled_head_after_fault_terminal());
-    if (!commit_handler.fault_head_redirect_covered ||
-        commit_handler.fault_head_redirect_intent_pending ||
+    if (commit_handler.fault_head_redirect_intent_pending ||
+        commit_handler.fault_head_waiting ||
+        commit_handler.commit_cursor_uid != 1 ||
         data.active_redirect.valid || data.has_pending_redirect_drive() ||
         data.exception_event_q.size() != 0) begin
         `uvm_fatal(get_type_name(),
@@ -1476,7 +1503,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     end
 
     record_idx = data.find_cancel_record_index_by_id(
-        data.fault_redirect_resource.cancel_record_id);
+        data.redirect_deleted_owner_record_id);
     if (record_idx < 0 ||
         data.cancel_record_q[record_idx].software_count_finalized ||
         data.cancel_record_q[record_idx].software_applied) begin
@@ -1513,10 +1540,9 @@ task soft_test_memblock_pending_mmio_directed_sequence::
         data.cancel_record_q[record_idx].dut_cancel_update_sample_seq + 1);
     data.service_cancel_reconcile();
     if (!data.cancel_record_q[record_idx].observed_valid ||
-        data.fault_redirect_resource.disposition !=
-            MEMBLOCK_FAULT_LSQ_DISPOSITION_WAIT_SQ_DEQ) begin
+        data.fault_redirect_resource.valid) begin
         `uvm_fatal(get_type_name(),
-                   "real cancel snapshot did not reconcile the fault CBO SQ path")
+                   "real cancel snapshot did not reconcile terminal CBO redirect")
     end
 
     enq = memblock_lsqenq_dispatch_base_sequence::type_id::create(
@@ -1530,14 +1556,11 @@ task soft_test_memblock_pending_mmio_directed_sequence::
                    "applied cancel did not converge the deleted-owner window")
     end
 
-    sq_deq_head = lsq_ctrl.sq_deq_ptr;
-    commit_handler.apply_dut_sq_deq(1, sq_deq_head, 1'b0);
-    if (commit_handler.fault_head_waiting ||
-        commit_handler.commit_cursor_uid != 1 ||
-        !fault_status.terminal_done || fault_status.active ||
+    if (!fault_status.terminal_done || fault_status.active ||
+        !fault_status.lsq_deq ||
         data.fault_redirect_resource.valid) begin
         `uvm_fatal(get_type_name(),
-                   "covered fault token did not close after its real SQ dequeue")
+                   "covered terminal fault CBO identity changed during window convergence")
     end
     data.service_cancel_reconcile();
 
