@@ -1679,7 +1679,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     memblock_redirect_payload_t redirect;
     memblock_lsqenq_dispatch_base_sequence enq;
     main_control_transaction cbo_tr;
-    status_transaction victim_status;
+    main_control_transaction main_tr;
+    memblock_op_behavior_t behavior;
     bit [15:0] outstanding_mask;
     longint unsigned last_a_sample;
     longint unsigned last_d_sample;
@@ -1705,8 +1706,13 @@ task soft_test_memblock_pending_mmio_directed_sequence::
                MEMBLOCK_OP_CLASS_STORE, 1,
                64'h0000_0000_8498_2000));
     import_manual_main_table();
-    admit_lsq_and_route_issue();
-    victim_status = data.get_status(1);
+    for (memblock_uid_t uid = 0; uid < data.main_trans_num; uid++) begin
+        main_tr = data.get_main_transaction(uid);
+        behavior = derive_op_behavior(main_tr);
+        lsq_ctrl.commit_allocate(uid, behavior, main_tr);
+    end
+    data.set_status_field(0, MEMBLOCK_STATUS_STA_WRITEBACK, 1'b1);
+    data.set_status_field(0, MEMBLOCK_STATUS_STA_PASS, 1'b1);
     wait_for_dut_sample_watermark(1, "uncache-window-a-accept");
     a_sample = memblock_sync_pkg::peek_current_dut_global_sample();
     memblock_sync_pkg::publish_sbuffer_uncache_a_accept(4'h3, a_sample);
