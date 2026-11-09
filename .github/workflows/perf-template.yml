@@ -265,10 +265,6 @@ jobs:
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_ENV
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_OUTPUT
 
-          if [[ "${{ inputs.benchmark_type }}" == "spec06-rva23-novec-gcc16-0.3c" ]]; then
-            echo "PERF_SEED_MAP=$GITHUB_WORKSPACE/scripts/ci/spec06-cov03-seeds.json" >> "$GITHUB_ENV"
-          fi
-
       - name: Prepare selected database runner
         if: (inputs.enable_tea || inputs.enable_dip) && !inputs.enable_db && !inputs.enable_rolling
         run: |
@@ -276,7 +272,6 @@ jobs:
           mkdir -p "$TEA_SCRIPTS_HOME"
           cp -r "$SCRIPTS_HOME/perf_trigger" "$TEA_SCRIPTS_HOME/perf_trigger"
           patch -d "$TEA_SCRIPTS_HOME" -p1 < "$GITHUB_WORKSPACE/scripts/ci/perf-select-db.patch"
-          patch -d "$TEA_SCRIPTS_HOME" -p1 < "$GITHUB_WORKSPACE/scripts/ci/perf-resource-control.patch"
           echo "SCRIPTS_HOME=$TEA_SCRIPTS_HOME" >> "$GITHUB_ENV"
 
       - name: Initialize submodules
@@ -289,41 +284,19 @@ jobs:
       - name: Build EMU with DRAMsim3
         env:
           WITH_TEA: ${{ (inputs.enable_tea || inputs.enable_dip) && '1' || '0' }}
-          JAVA_TOOL_OPTIONS: -XX:ActiveProcessorCount=16
         run: |
-          if [[ "$(hostname)" != node* ]]; then
-            echo "This experiment builds only on node servers"
-            exit 1
-          fi
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
-            DB_TABLES=()
-            if [[ "${{ inputs.enable_tea }}" == "true" ]]; then
-              DB_TABLES+=(Tea_0 TeaDelayedFinal_0 TeaCycleSummary_0 TeaNoCommit_0)
-            fi
-            if [[ "${{ inputs.enable_dip }}" == "true" ]]; then
-              DB_TABLES+=(Dip_0 DipDelayedFinal_0)
-            fi
-            PGO_EMU_ARGS="--no-diff $CST_RUN_OPT"
-            if (( ${#DB_TABLES[@]} )); then
-              PGO_EMU_ARGS+=" --dump-select-db '${DB_TABLES[*]}' --db-path $GITHUB_WORKSPACE/build/pgo-training.db"
-            fi
-            nice -n 10 proxychains -q python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-              --make-threads 16 \
+            proxychains -q python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
               --config "${{ inputs.xs_config }}" \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
               --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-              --pgo-emu-args="$PGO_EMU_ARGS" \
               --llvm-profdata llvm-profdata --trace-fst \
               --emulator ${{ inputs.emulator }} \
               ${{ (inputs.enable_db || inputs.enable_tea || inputs.enable_dip) && '--enable-db' || '' }} \
               ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
               $CST_COMPILE_OPT
             mkdir -p $SPEC_DIR
-            if (( ${#DB_TABLES[@]} )); then
-              python3 "$GITHUB_WORKSPACE/scripts/ci/check-pgo-sampling.py" \
-                "$GITHUB_WORKSPACE/build" "$SPEC_DIR" "${DB_TABLES[@]}"
-            fi
             cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
           fi
           if [ ! -e "$SPEC_DIR/riscv64-nemu-interpreter-so" ]; then
@@ -356,7 +329,7 @@ jobs:
           if [[ -n "${{ inputs.max_cycles }}" ]]; then
             EXTRA_OPTS+=(--max-cycles "${{ inputs.max_cycles }}")
           fi
-          python3 main.py \
+          proxychains -q python3 main.py \
             --gcpt-path "$CKPT_HOME" \
             --json-path "$CKPT_JSON_PATH" \
             --result-path "$SPEC_DIR" \
