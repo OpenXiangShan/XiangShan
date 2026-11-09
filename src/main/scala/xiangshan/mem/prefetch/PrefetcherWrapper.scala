@@ -105,7 +105,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   })
 
   val hartId = p(XSCoreParamsKey).HartId
-  val l1D_pf_enable = RegNextN(io.pfCtrlFromCSR.l1D_pf_enable, 2, Some(true.B))
+  // Isolated BOP experiments: disable Stream, Stride, Berti and SMS for all CSR settings.
+  val l1D_pf_enable = false.B
   val pf_train_on_hit = RegNextN(io.pfCtrlFromCSR.l1D_pf_train_on_hit, 2, Some(true.B))
   val s2_loadPcVec = (0 until LD_TRAIN_WIDTH).map{ i=>
     RegEnable(io.fromOOO.s1_loadPc(i), io.trainSource.s1_loadFireHint(i))
