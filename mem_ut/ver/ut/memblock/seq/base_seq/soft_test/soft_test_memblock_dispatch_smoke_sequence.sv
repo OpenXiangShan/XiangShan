@@ -77,10 +77,14 @@ task soft_test_memblock_dispatch_smoke_sequence::build_directed_main_table();
     import_manual_main_table();
 endtask:build_directed_main_table
 
+// 抽象职责：为 software-only admission 建立与生产 LSQ launch 一致的最小可见性。
+// 普通 load/store 保持直接 allocate；CBO 在 issue route 前必须持有已采样 token。
 task soft_test_memblock_dispatch_smoke_sequence::admit_lsq_and_route_issue();
     for (int unsigned uid = 0; uid < data.main_trans_num; uid++) begin
         main_control_transaction main_tr;
         memblock_op_behavior_t   behavior;
+        int unsigned             reservation_launch_epoch;
+        longint unsigned        reservation_sample_seq;
 
         main_tr  = data.get_main_transaction(uid);
         behavior = derive_op_behavior(main_tr);
@@ -88,6 +92,16 @@ task soft_test_memblock_dispatch_smoke_sequence::admit_lsq_and_route_issue();
             lsq_ctrl.commit_non_lsq_admission(uid, behavior, main_tr);
         end else begin
             lsq_ctrl.commit_allocate(uid, behavior, main_tr);
+            if (behavior.is_cbo) begin
+                reservation_launch_epoch = data.begin_lsq_reservation_launch(uid);
+                while (memblock_sync_pkg::peek_current_dut_global_sample() == 0) begin
+                    @(memblock_sync_pkg::dut_sample_seq);
+                end
+                reservation_sample_seq =
+                    memblock_sync_pkg::peek_current_dut_global_sample();
+                data.mark_lsq_reservation_sampled(
+                    uid, reservation_launch_epoch, reservation_sample_seq);
+            end
         end
         prepare_issue_route_for_uid(uid);
     end
