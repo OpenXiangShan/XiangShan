@@ -95,6 +95,10 @@ class soft_test_memblock_pending_mmio_directed_sequence extends
         input longint unsigned target_sample_seq,
         input string scenario_name
     );
+    extern virtual task wait_for_uncache_guard_sample_watermark(
+        input longint unsigned target_sample_seq,
+        input string scenario_name
+    );
     extern virtual task run_inactive_head_pointer_scenario();
     extern virtual task run_directed_tag_scenario();
     extern virtual task run_monitor_raw_scenario();
@@ -733,6 +737,29 @@ task soft_test_memblock_pending_mmio_directed_sequence::wait_for_dut_sample_wate
         @(memblock_sync_pkg::dut_sample_seq);
     end
 endtask:wait_for_dut_sample_watermark
+
+// 抽象职责：仅为 Uncache redirect guard 的 software-only 长等待逐 sample 模拟
+// LSQ timing service；每个 monitor sample 发布完成后 drain raw sideband 并 reconcile，
+// 不推进完整 dispatch service cycle，也不调用其它生产 handler。
+task soft_test_memblock_pending_mmio_directed_sequence::
+    wait_for_uncache_guard_sample_watermark(
+        input longint unsigned target_sample_seq,
+        input string scenario_name
+    );
+    if (target_sample_seq == 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s requested zero DUT sample watermark", scenario_name))
+    end
+    monitor_adapter.drain_lsq_timing_sidebands();
+    monitor_adapter.service_lsq_timing_reconcile();
+    while (memblock_sync_pkg::peek_current_dut_global_sample() < target_sample_seq) begin
+        @(memblock_sync_pkg::dut_sample_seq);
+        uvm_wait_for_nba_region();
+        #0;
+        monitor_adapter.drain_lsq_timing_sidebands();
+        monitor_adapter.service_lsq_timing_reconcile();
+    end
+endtask:wait_for_uncache_guard_sample_watermark
 
 task soft_test_memblock_pending_mmio_directed_sequence::build_load_store_table();
     clear_manual_main_table();
@@ -1789,7 +1816,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     end
 
     // 跨越基础 hold sample 后 outstanding 仍无超时；窗口和 admission 必须继续冻结。
-    wait_for_dut_sample_watermark(
+    wait_for_uncache_guard_sample_watermark(
         data.redirect_deleted_owner_expire_sample + 8,
         "uncache-window-outstanding");
     data.service_redirect_deleted_owner_window(
@@ -1818,7 +1845,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
                    "Uncache D drain sample prematurely released redirect window")
     end
 
-    wait_for_dut_sample_watermark(
+    wait_for_uncache_guard_sample_watermark(
         d_sample + post_drain_hold_samples,
         "uncache-window-post-drain-hold");
     data.service_redirect_deleted_owner_window(
@@ -1830,7 +1857,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
                    "Uncache post-drain hold boundary prematurely released redirect window")
     end
 
-    wait_for_dut_sample_watermark(
+    wait_for_uncache_guard_sample_watermark(
         d_sample + post_drain_hold_samples + 1,
         "uncache-window-post-drain-release");
     data.service_redirect_deleted_owner_window(
