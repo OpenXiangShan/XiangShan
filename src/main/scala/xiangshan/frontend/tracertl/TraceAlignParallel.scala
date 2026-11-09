@@ -5,12 +5,19 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSError
 
+class TraceAlignParallelIO(implicit p: Parameters) extends TraceBundle {
+  val debug_valid   = Input(Bool())
+  val traceInsts    = Input(Valid(Vec(trtl.TracePredictWidth, new TraceInstrBundle())))
+  val predictInfo   = Input(new TracePredictInfo)
+  val lastHalfValid = Input(Bool())
+  val result        = Output(new TraceAlignResult)
+}
+
 class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
-  val io = IO(new TraceAlignToIFUCutIO())
+  val io = IO(new TraceAlignParallelIO())
 
   private val width       = trtl.TracePredictWidth
   private val offsetWidth = log2Ceil(width)
-  private def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
 
   require(FetchPorts == 2, "TraceRTL two-fetch alignment requires two IFU fetch ports")
   require(width == io.predictInfo.block.head.instRange.getWidth && width <= IBufferEnqueueWidth)
@@ -28,30 +35,27 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
   )
   XSError(io.debug_valid && block1.valid && !block0.valid, "TraceAlignParallel received block 1 without block 0")
 
-  private val expectedPc        = Wire(Vec(width, UInt(VAddrBits.W)))
+  // Only the first trace instruction can be the RVI whose first halfword ended the previous fetch block.
+  private def inheritedHalfRvi(i: Int): Bool = if (i == 0) io.lastHalfValid else false.B
+
+  // Per trace instruction; each entry depends on the previous one.
   private val blockState        = Wire(Vec(width, Bool()))
   private val stillConsecutive  = Wire(Vec(width, Bool()))
-  private val localStartOffset  = Wire(Vec(width, UInt(offsetWidth.W)))
   private val logicalStartWide  = Wire(Vec(width, UInt(VAddrBits.W)))
-  private val logicalStart      = Wire(Vec(width, UInt(offsetWidth.W)))
   private val localEndOffset    = Wire(Vec(width, UInt(offsetWidth.W)))
   private val effectiveBlockSel = Wire(Vec(width, Bool()))
-  private val inheritedHalfRvi  = Wire(Vec(width, Bool()))
   private val internalCrossRvi  = Wire(Vec(width, Bool()))
   private val incompleteRvi     = Wire(Vec(width, Bool()))
-  private val addrInRange       = Wire(Vec(width, Bool()))
   private val positionHotVec    = Wire(Vec(width, UInt(width.W)))
   private val traceRangeVec     = Wire(Vec(width, UInt(width.W)))
-  private val taken2BVec        = Wire(Vec(width, Bool()))
 
   for (i <- 0 until width) {
-    val rawIsRvc = isRVC(rawInsts(i).inst)
+    val rawIsRvc = rawInsts(i).isRVC
     if (i == 0) {
-      expectedPc(i)       := Mux(io.lastHalfValid, block0.startAddr - 2.U, block0.startAddr)
+      val expectedPc = Mux(io.lastHalfValid, block0.startAddr - 2.U, block0.startAddr)
       blockState(i)       := false.B
-      stillConsecutive(i) := io.traceInsts.valid && rawInsts(i).pcVA === expectedPc(i)
+      stillConsecutive(i) := io.traceInsts.valid && rawInsts(i).pcVA === expectedPc
     } else {
-      val previousSequentialPc = rawInsts(i - 1).pcVA + Mux(isRVC(rawInsts(i - 1).inst), 2.U, 4.U)
       val previousPredictedEnd = !effectiveBlockSel(i - 1) &&
         block0.ftqOffset.valid && localEndOffset(i - 1) === block0.ftqOffset.bits
       // An RVI inherited from the previous fetch block contributes only its
@@ -59,7 +63,7 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
       // instruction here would transition to block 1 one slot too early and
       // drop the instruction immediately following the inherited RVI.
       val previousOccupiedHalfwords = Mux(
-        inheritedHalfRvi(i - 1) || isRVC(rawInsts(i - 1).inst),
+        inheritedHalfRvi(i - 1) || rawInsts(i - 1).isRVC,
         1.U,
         2.U
       )
@@ -68,16 +72,14 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
       val transitionToBlock1 = block1.valid && !blockState(i - 1) &&
         (internalCrossRvi(i - 1) || previousPredictedEnd || previousReachesEnd)
 
-      blockState(i) := blockState(i - 1) || transitionToBlock1
-      expectedPc(i) := Mux(
+      val expectedPc = Mux(
         transitionToBlock1 && !internalCrossRvi(i - 1),
         block1.startAddr,
-        previousSequentialPc
+        rawInsts(i - 1).nextPc
       )
-      stillConsecutive(i) := stillConsecutive(i - 1) && rawInsts(i).pcVA === expectedPc(i)
+      blockState(i)       := blockState(i - 1) || transitionToBlock1
+      stillConsecutive(i) := stillConsecutive(i - 1) && rawInsts(i).pcVA === expectedPc
     }
-
-    inheritedHalfRvi(i) := (if (i == 0) io.lastHalfValid else false.B)
 
     // Keep the address-derived offsets wide until range checks are complete. Truncating
     // them to log2(width) here would make instructions beyond the window wrap around
@@ -92,12 +94,12 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
 
     internalCrossRvi(i)  := crossesIntoBlock1
     effectiveBlockSel(i) := blockState(i) || crossesIntoBlock1
-    localStartOffset(i) := Mux(
+    val localStartOffset = Mux(
       effectiveBlockSel(i),
       Mux(crossesIntoBlock1, ~0.U(offsetWidth.W), block1Offset),
       block0Offset
     )
-    localEndOffset(i) := Mux(crossesIntoBlock1 || inheritedHalfRvi(i), 0.U, localStartOffset(i) + !rawIsRvc)
+    localEndOffset(i) := Mux(crossesIntoBlock1 || inheritedHalfRvi(i), 0.U, localStartOffset + !rawIsRvc)
     logicalStartWide(i) := Mux(
       inheritedHalfRvi(i),
       0.U,
@@ -107,14 +109,13 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
         Mux(effectiveBlockSel(i), block0.size + block1OffsetWide, block0OffsetWide)
       )
     )
-    logicalStart(i) := logicalStartWide(i)(offsetWidth - 1, 0)
 
     val startsInSelectedBlock = Mux(
       effectiveBlockSel(i),
       block1.valid && (crossesIntoBlock1 || block1OffsetWide < block1.size),
       block0.valid && block0OffsetWide < block0.size
     )
-    addrInRange(i) := inheritedHalfRvi(i) ||
+    val addrInRange = inheritedHalfRvi(i) ||
       (startsInSelectedBlock && logicalStartWide(i) < totalSize)
 
     incompleteRvi(i) := !rawIsRvc && !inheritedHalfRvi(i) && !crossesIntoBlock1 && Mux(
@@ -124,8 +125,8 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
     )
 
     positionHotVec(i) := Mux(
-      stillConsecutive(i) && addrInRange(i),
-      UIntToOH(logicalStart(i), width),
+      stillConsecutive(i) && addrInRange,
+      UIntToOH(logicalStartWide(i)(offsetWidth - 1, 0), width),
       0.U(width.W)
     )
     traceRangeVec(i) := Mux(
@@ -143,6 +144,7 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
   private val slotBlockSel     = Wire(Vec(width, Bool()))
   private val slotInheritedRvi = Wire(Vec(width, Bool()))
   private val slotCrossBlock   = Wire(Vec(width, Bool()))
+  private val taken2BVec       = Wire(Vec(width, Bool()))
 
   for (slot <- 0 until width) {
     val hitVec = positionHotVec.map(_(slot))
@@ -158,7 +160,7 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
     // the subsequent slot-to-compact selection.
     slotEndOffset(slot)    := Mux1H(hitVec, localEndOffset)
     slotBlockSel(slot)     := Mux1H(hitVec, effectiveBlockSel)
-    slotInheritedRvi(slot) := Mux1H(hitVec, inheritedHalfRvi)
+    slotInheritedRvi(slot) := hitVec.head && inheritedHalfRvi(0)
     slotCrossBlock(slot)   := Mux1H(hitVec, internalCrossRvi)
     when(!cutInsts(slot).valid) {
       cutInsts(slot).bits := zeroTraceInst
@@ -180,8 +182,7 @@ class TraceAlignParallel(implicit p: Parameters) extends TraceModule {
     if (i == 0) 0.U(log2Ceil(width + 1).W) else PopCount(compactSourceValid.take(i))
   )
 
-  io.result.position.insts      := cutInsts
-  io.result.position.traceRange := traceRangeMerge & combinedRange
+  io.result.traceRange          := traceRangeMerge & combinedRange
   io.result.candidateCount      := PopCount(compactSourceValid)
   io.result.concede2Bytes       := taken2BVec.asUInt.orR
   io.result.traceForceJump      := traceForceJump

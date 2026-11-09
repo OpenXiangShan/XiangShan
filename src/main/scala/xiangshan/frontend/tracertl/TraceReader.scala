@@ -18,96 +18,50 @@ class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
 
 class TraceBufferPtr(size: Int) extends CircularQueuePtr[TraceBufferPtr](size)
 
-class TraceReaderHelperWrapper(implicit p: Parameters) extends TraceModule {
-  val io = IO(new Bundle {
-    val enable         = Input(Bool())
-    val instsReady     = Output(Bool())
-    val insts          = Output(Vec(trtl.TraceFetchWidth, new TraceInstrInnerBundle()))
-    val redirectValid  = Input(Bool())
-    val redirectInstID = Input(UInt(trtl.TraceInstIDWidth.W))
-    val workingState   = Input(Bool())
-  })
+class TraceReader(implicit p: Parameters) extends TraceModule with HasCircularQueuePtrHelper {
+  val io = IO(new TraceReaderIO())
+
+  val traceBuffer = RegInit(0.U.asTypeOf(Vec(trtl.TraceBufferSize, new TraceInstrBundle())))
+  val enqPtr      = RegInit(0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize)))
+  val deqPtr      = RegInit(0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize)))
+
+  val workingState = RegNext(TraceWarmUp(), false.B)
+
+  val redirectValid = io.redirect.valid
+
+  val readTraceEnable = hasFreeEntries(enqPtr, deqPtr) >= trtl.TraceFetchWidth.U &&
+    workingState &&
+    !redirectValid
 
   val traceReaderHelper = Module(new TraceReaderHelper(trtl.TraceFetchWidth))
   traceReaderHelper.clock  := clock
   traceReaderHelper.reset  := reset
-  traceReaderHelper.enable := io.enable && io.workingState
+  traceReaderHelper.enable := readTraceEnable
+
+  // Exceptions and synthetic force-jumps transfer control after the current
+  // trace instruction even when the backend redirect flushes the ROB entry.
+  val redirectTrace = io.redirect.bits.traceInfo.get
+  val redirectFlushItself = RedirectLevel.flushItself(io.redirect.bits.level) &&
+    !redirectTrace.isForceJump &&
+    !redirectTrace.hasException
 
   val traceRedirectHelper = Module(new TraceRedirectHelper)
   traceRedirectHelper.clock               := clock
   traceRedirectHelper.reset               := reset
-  traceRedirectHelper.enable              := io.redirectValid && io.workingState
-  traceRedirectHelper.InstID              := io.redirectInstID
+  traceRedirectHelper.enable              := redirectValid && workingState
+  traceRedirectHelper.InstID := Mux(
+    redirectFlushItself,
+    redirectTrace.InstID,
+    redirectTrace.InstID + 1.U
+  )(trtl.TraceInstIDWidth - 1, 0)
   traceRedirectHelper.preserveDriveBefore := false.B
 
-  private def narrow(raw: UInt, width: Int): UInt = raw(width - 1, 0)
-
-  io.insts.zipWithIndex.foreach { case (inst, i) =>
-    inst.pcVA           := narrow(traceReaderHelper.insts_pcVA(i), inst.pcVA.getWidth)
-    inst.pcPA           := narrow(traceReaderHelper.insts_pcPA(i), inst.pcPA.getWidth)
-    inst.memoryAddrVA   := narrow(traceReaderHelper.insts_memoryAddrVA(i), inst.memoryAddrVA.getWidth)
-    inst.memoryAddrPA   := narrow(traceReaderHelper.insts_memoryAddrPA(i), inst.memoryAddrPA.getWidth)
-    inst.target         := narrow(traceReaderHelper.insts_target(i), inst.target.getWidth)
-    inst.inst           := narrow(traceReaderHelper.insts_inst(i), inst.inst.getWidth)
-    inst.memoryType     := narrow(traceReaderHelper.insts_memoryType(i), inst.memoryType.getWidth)
-    inst.memorySize     := narrow(traceReaderHelper.insts_memorySize(i), inst.memorySize.getWidth)
-    inst.branchType     := narrow(traceReaderHelper.insts_branchType(i), inst.branchType.getWidth)
-    inst.branchTaken    := narrow(traceReaderHelper.insts_branchTaken(i), inst.branchTaken.getWidth)
-    inst.exception      := narrow(traceReaderHelper.insts_exception(i), inst.exception.getWidth)
-    inst.fastSimulation := narrow(traceReaderHelper.insts_fastSimulation(i), inst.fastSimulation.getWidth)
-    inst.InstID         := narrow(traceReaderHelper.insts_InstID(i), inst.InstID.getWidth)
-  }
-  io.instsReady := true.B
-}
-
-class TraceReader(implicit p: Parameters) extends TraceModule with HasCircularQueuePtrHelper {
-  val io = IO(new TraceReaderIO())
-
-  val traceBuffer       = RegInit(0.U.asTypeOf(Vec(trtl.TraceBufferSize, new TraceInstrBundle())))
-  val traceReaderHelper = Module(new TraceReaderHelperWrapper())
-  val enqPtr            = RegInit(0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize)))
-  val deqPtr            = RegInit(0.U.asTypeOf(new TraceBufferPtr(trtl.TraceBufferSize)))
-
-  val workingState = RegInit(false.B)
-  val startCount   = RegInit(0.U(4.W))
-  when(startCount < 10.U) {
-    startCount := startCount + 1.U
-  }
-  when(startCount === 5.U) {
-    workingState := true.B
-  }
-
-  val redirectValid = io.redirect.valid
-
-  val readTraceEnable = !isFull(enqPtr, deqPtr) &&
-    hasFreeEntries(enqPtr, deqPtr) >= trtl.TraceFetchWidth.U &&
-    workingState &&
-    !redirectValid
-  val readTraceReady = traceReaderHelper.io.instsReady
-
-  traceReaderHelper.io.enable        := readTraceEnable
-  traceReaderHelper.io.redirectValid := redirectValid && workingState
-  // Exceptions and synthetic force-jumps transfer control after the current
-  // trace instruction even when the backend redirect flushes the ROB entry.
-  val redirectFlushItself = RedirectLevel.flushItself(io.redirect.bits.level) &&
-    !io.redirect.bits.traceInfo.get.isForceJump &&
-    !io.redirect.bits.traceInfo.get.hasException
-  val redirectInstID = Mux(
-    redirectFlushItself,
-    io.redirect.bits.traceInfo.get.InstID,
-    io.redirect.bits.traceInfo.get.InstID + 1.U
-  )(trtl.TraceInstIDWidth - 1, 0)
-  traceReaderHelper.io.redirectInstID := redirectInstID
-  traceReaderHelper.io.workingState   := workingState
-
-  val enqPtrVec = Wire(Vec(trtl.TraceFetchWidth, new TraceBufferPtr(trtl.TraceBufferSize)))
-  enqPtrVec.zipWithIndex.foreach { case (ptr, i) =>
-    ptr := enqPtr + i.U
-  }
-
-  when(readTraceEnable && readTraceReady) {
+  when(readTraceEnable) {
     (0 until trtl.TraceFetchWidth).foreach { i =>
-      traceBuffer(enqPtrVec(i).value) := TraceInstrBundle(traceReaderHelper.io.insts(i))
+      traceBuffer((enqPtr + i.U).value).elements.foreach { case (name, field) =>
+        val raw = traceReaderHelper.insts(name)(i)
+        field := raw(field.getWidth - 1, 0)
+      }
     }
     enqPtr := enqPtr + trtl.TraceFetchWidth.U
   }

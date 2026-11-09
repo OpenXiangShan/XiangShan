@@ -21,16 +21,23 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.FrontendBundle
 import xiangshan.frontend.FrontendModule
 import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.PcInit
 import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
 
 class TraceBundle(implicit p: Parameters) extends FrontendBundle {
   def trtl = p(TraceRTLParamKey)
 }
 class TraceModule(implicit p: Parameters) extends FrontendModule {
   def trtl = p(TraceRTLParamKey)
+
+  // Trace addresses are TraceVAddrWidth wide; the frontend keeps VAddrBits.
+  def traceGuardedPc(addr: UInt): GuardedPc = PcInit(addr(VAddrBits - 1, 0)).signGuard
+  def tracePrunedAddr(addr: UInt): PrunedAddr = PrunedAddrInit(addr(VAddrBits - 1, 0))
 }
 
-class TraceInstrInnerBundle(implicit p: Parameters) extends Bundle {
+class TraceInstrBundle(implicit p: Parameters) extends Bundle {
   def trtl = p(TraceRTLParamKey)
 
   val pcVA = UInt(trtl.TraceVAddrWidth.W)
@@ -49,35 +56,28 @@ class TraceInstrInnerBundle(implicit p: Parameters) extends Bundle {
   val fastSimulation = UInt(8.W)
   val InstID         = UInt(trtl.TraceInstIDWidth.W)
 
-  def isFastSim = fastSimulation(0) === 1.U
-  def arthiSrc0 = memoryAddrVA
-  def arthiSrc1 = memoryAddrPA
-  def isTaken   = branchTaken(0) === 1.U
+  def arthiSrc0    = memoryAddrVA
+  def arthiSrc1    = memoryAddrPA
+  def isTaken      = branchTaken(0) === 1.U
+  def hasException = exception =/= 0.U
+  def isForceJump  = exception(7)
+  def isRVC        = inst(1, 0) =/= 3.U
+  def nextPc       = pcVA + Mux(isRVC, 2.U, 4.U)
+}
+
+/** High from the fifth cycle after reset, once the trace DPI side has initialised. */
+object TraceWarmUp {
+  def apply(): Bool = {
+    val count = RegInit(0.U(3.W))
+    when(count =/= 5.U) {
+      count := count + 1.U
+    }
+    count === 5.U
+  }
 }
 
 class TraceRecvInfo(implicit p: Parameters) extends TraceBundle {
   val instNum = UInt(log2Ceil(IBufferEnqueueWidth + 1).W)
-}
-
-class TraceInstrBundle(implicit p: Parameters) extends TraceInstrInnerBundle {
-  def hasException = exception =/= 0.U
-  def isForceJump  = exception(7)
-}
-
-object TraceInstrBundle {
-  def apply(rawInst: TraceInstrInnerBundle)(implicit p: Parameters): TraceInstrBundle = {
-    val bundle = Wire(new TraceInstrBundle)
-    rawInst.elements.foreach { case (name, elt) =>
-      bundle.elements(name) := elt
-    }
-    bundle
-  }
-}
-
-/** Trace instructions indexed by their halfword position in the prediction window. */
-class TracePositionView(implicit p: Parameters) extends TraceBundle {
-  val insts      = Vec(trtl.TracePredictWidth, Valid(new TraceInstrBundle))
-  val traceRange = UInt(trtl.TracePredictWidth.W)
 }
 
 /** One instruction after removing holes from the position-indexed representation. */
@@ -92,14 +92,16 @@ class TraceCompactEntry(implicit p: Parameters) extends TraceBundle {
 
 /** A compact instruction enriched by TracePreDecoder. */
 class TraceDecodedEntry(implicit p: Parameters) extends TraceBundle {
-  val compact    = new TraceCompactEntry
-  val pd         = new PreDecodeInfo
-  val jumpOffset = GuardedPc()
+  val compact     = new TraceCompactEntry
+  val pd          = new PreDecodeInfo
+  val jumpOffset  = GuardedPc()
+  val isPredTaken = Bool()
 }
 
 /** Complete combinational result of TraceAlignParallel for one S2 packet. */
 class TraceAlignResult(implicit p: Parameters) extends TraceBundle {
-  val position       = new TracePositionView
+  // halfword slots of the prediction window covered by the trace instructions
+  val traceRange     = UInt(trtl.TracePredictWidth.W)
   val compact        = Vec(IBufferEnqueueWidth, new TraceCompactEntry)
   val candidateCount = UInt(log2Ceil(IBufferEnqueueWidth + 1).W)
   val concede2Bytes  = Bool()
@@ -116,24 +118,4 @@ class TraceFetchBlockPredictInfo(implicit p: Parameters) extends TraceBundle {
 
 class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
   val block = Vec(FetchPorts, new TraceFetchBlockPredictInfo)
-}
-
-class TraceDriverOutput(implicit p: Parameters) extends TraceBundle {
-  val block      = Output(Bool())
-  val recv       = ValidIO(new TraceRecvInfo())
-  val endWithCFI = Output(Bool())
-}
-
-class TraceATSBundle(implicit p: Parameters) extends TraceBundle {
-  val valid = Input(Bool())
-  val vaddr = Input(UInt(64.W))
-  val paddr = Output(UInt(64.W))
-}
-
-class TraceAlignToIFUCutIO(implicit p: Parameters) extends TraceBundle {
-  val debug_valid   = Input(Bool())
-  val traceInsts    = Input(Valid(Vec(trtl.TracePredictWidth, new TraceInstrBundle())))
-  val predictInfo   = Input(new TracePredictInfo)
-  val lastHalfValid = Input(Bool())
-  val result        = Output(new TraceAlignResult)
 }

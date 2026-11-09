@@ -6,7 +6,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XORFold
 import xiangshan.Redirect
 import xiangshan.frontend.GuardedPc
-import xiangshan.frontend.PcInit
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ifu.Instruction
 
@@ -51,25 +50,22 @@ class TraceRTLIO(implicit p: Parameters) extends TraceBundle {
 class TraceRTL(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceRTLIO)
 
-  private def shiftToIBuffer[T <: Data](data: Vec[T], shiftNum: UInt, default: T): Vec[T] = {
-    require(shiftNum.getWidth == 2)
-    val padded = VecInit.tabulate(IBufferEnqueueWidth)(i => if (i < data.length) data(i) else 0.U.asTypeOf(default))
+  // Move the packet to the IBuffer slots the IFU aligned the fetch block to.
+  private def shiftToIBuffer[T <: Data](data: Vec[T], shiftNum: UInt): Vec[T] = {
+    require(data.length == IBufferEnqueueWidth && shiftNum.getWidth == 2)
+    val zero = 0.U.asTypeOf(data.head)
     VecInit.tabulate(IBufferEnqueueWidth) { i =>
-      MuxLookup(shiftNum, 0.U.asTypeOf(default))(Seq(
-        0.U -> padded(i),
-        1.U -> (if (i < 1) 0.U.asTypeOf(default) else padded(i - 1)),
-        2.U -> (if (i < 2) 0.U.asTypeOf(default) else padded(i - 2)),
-        3.U -> (if (i < 3) 0.U.asTypeOf(default) else padded(i - 3))
-      ))
+      MuxLookup(shiftNum, zero)((0 until 4).map(k => k.U -> (if (i < k) zero else data(i - k))))
     }
   }
+  private def shiftToIBuffer(mask: UInt, shiftNum: UInt): UInt =
+    (mask << shiftNum)(IBufferEnqueueWidth - 1, 0)
 
   val traceReader  = Module(new TraceReader)
   val traceDriver  = Module(new TraceDriver)
   val traceAligner = Module(new TraceAlignParallel)
   val preDecoder   = Module(new TracePreDecoder)
   val predChecker  = Module(new TracePredictChecker)
-  val traceChecker = Module(new TraceChecker)
 
   traceReader.io.recv     := traceDriver.io.out.recv
   traceReader.io.redirect := io.redirect.fromBackend
@@ -85,14 +81,15 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
   val effectiveConcede2Bytes = visibleConcede2Bytes &&
     traceReader.io.traceInsts.valid &&
     traceReader.io.traceInsts.bits.head.pcVA === io.fromIFU.ifuS1PredInfo.block(0).startAddr - 2.U &&
-    traceReader.io.traceInsts.bits.head.inst(1, 0) === 3.U
+    !traceReader.io.traceInsts.bits.head.isRVC
 
   traceAligner.io.debug_valid   := io.fromIFU.ifuS1Valid
   traceAligner.io.traceInsts    := traceReader.io.traceInsts
   traceAligner.io.predictInfo   := io.fromIFU.ifuS1PredInfo
   traceAligner.io.lastHalfValid := effectiveConcede2Bytes
 
-  preDecoder.io.compact := traceAligner.io.result.compact
+  preDecoder.io.compact     := traceAligner.io.result.compact
+  preDecoder.io.predictInfo := io.fromIFU.ifuS1PredInfo
 
   val s2Block = !traceReader.io.traceInsts.valid ||
     (traceAligner.io.result.candidateCount === 0.U && !traceAligner.io.result.concede2Bytes)
@@ -103,7 +100,7 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
   val s3Decoded                = RegEnable(preDecoder.io.out, s2ToS3)
   val s3ShiftNum               = RegEnable(io.fromIFU.ifuS1AlignShift, 0.U(2.W), s2ToS3)
   val s3PredInfo               = RegEnable(io.fromIFU.ifuS1PredInfo, s2ToS3)
-  val s3TraceRange             = RegEnable(traceAligner.io.result.position.traceRange, s2ToS3)
+  val s3TraceRange             = RegEnable(traceAligner.io.result.traceRange, s2ToS3)
   val s3TraceForceJump         = RegEnable(traceAligner.io.result.traceForceJump, s2ToS3)
   val s3DetectedConcede2Bytes  = RegEnable(traceAligner.io.result.concede2Bytes, s2ToS3)
   val s3InheritedConcede2Bytes = RegEnable(effectiveConcede2Bytes, s2ToS3)
@@ -115,14 +112,11 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
   predChecker.io.traceRange    := s3TraceRange
   predChecker.io.concede2Bytes := s3InheritedConcede2Bytes
 
-  traceChecker.io.decoded        := s3Decoded
-  traceChecker.io.fixedValid     := predChecker.io.out.stage1Out.fixedTwoFetchRange
-  traceChecker.io.traceForceJump := s3TraceForceJump
-
-  traceDriver.io.fire          := io.fromIFU.ifuS2Fire
-  traceDriver.io.decoded       := s3Decoded
-  traceDriver.io.consumeValid  := traceChecker.io.consumeValid
-  traceDriver.io.concede2Bytes := s3DetectedConcede2Bytes
+  traceDriver.io.fire           := io.fromIFU.ifuS2Fire
+  traceDriver.io.decoded        := s3Decoded
+  traceDriver.io.fixedValid     := predChecker.io.out.stage1Out.fixedTwoFetchRange
+  traceDriver.io.traceForceJump := s3TraceForceJump
+  traceDriver.io.concede2Bytes  := s3DetectedConcede2Bytes
 
   // In a two-fetch transaction, block 0 may end with a taken CFI while block 1
   // contains only the first halfword of the target RVI.  That incomplete RVI
@@ -147,38 +141,23 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
     pendingConcede2Bytes := nextConcede2Bytes
   }
 
-  val s3DecodedForIFU = shiftToIBuffer(
-    s3Decoded,
-    s3ShiftNum,
-    0.U.asTypeOf(new TraceDecodedEntry)
-  )
-  val fixedTwoFetchRangeForIFU = shiftToIBuffer(
-    VecInit(predChecker.io.out.stage1Out.fixedTwoFetchRange.asBools),
-    s3ShiftNum,
-    false.B
-  )
-  val fixedTwoFetchTakenForIFU = shiftToIBuffer(
-    VecInit(predChecker.io.out.stage1Out.fixedTwoFetchTaken.asBools),
-    s3ShiftNum,
-    false.B
-  )
+  val s3DecodedForIFU = shiftToIBuffer(s3Decoded, s3ShiftNum)
 
   io.checker                              := predChecker.io.out
-  io.checker.stage1Out.fixedTwoFetchRange := fixedTwoFetchRangeForIFU.asUInt
-  io.checker.stage1Out.fixedTwoFetchTaken := fixedTwoFetchTakenForIFU.asUInt
+  io.checker.stage1Out.fixedTwoFetchRange := shiftToIBuffer(predChecker.io.out.stage1Out.fixedTwoFetchRange, s3ShiftNum)
+  io.checker.stage1Out.fixedTwoFetchTaken := shiftToIBuffer(predChecker.io.out.stage1Out.fixedTwoFetchTaken, s3ShiftNum)
   io.s2Block                              := s2Block
   io.block                                := traceDriver.io.out.block
   io.s2CandidateCount                     := traceAligner.io.result.candidateCount
 
   private val aligned = io.aligned
   aligned.instrVec.zip(s3DecodedForIFU).foreach { case (instr, decoded) =>
-    val entry    = decoded.compact
-    val isRvc    = entry.traceInfo.inst(1, 0) =/= 3.U
-    val takenCfi = Mux(entry.selectBlock, s3PredInfo.block(1).ftqOffset, s3PredInfo.block(0).ftqOffset)
+    val entry = decoded.compact
+    val isRvc = entry.traceInfo.isRVC
     instr.valid             := entry.valid
     instr.data              := entry.traceInfo.inst
     instr.isRvc             := isRvc
-    instr.isPredTaken       := entry.valid && takenCfi.valid && takenCfi.bits === entry.instrEndOffset
+    instr.isPredTaken       := decoded.isPredTaken
     instr.invalidTaken      := false.B
     instr.blockSel          := entry.selectBlock
     instr.startOffset       := entry.instrEndOffset - Mux(isRvc, 0.U, 1.U)
@@ -187,7 +166,7 @@ class TraceRTL(implicit p: Parameters) extends TraceModule {
     instr.isPrevEndHalfRvi  := entry.isPrevEndHalfRvi
     instr.isCrossBlockInstr := entry.isCrossBlockInstr
   }
-  aligned.instrPcVec := VecInit(s3DecodedForIFU.map(d => PcInit(d.compact.traceInfo.pcVA(VAddrBits - 1, 0)).signGuard))
+  aligned.instrPcVec := VecInit(s3DecodedForIFU.map(d => traceGuardedPc(d.compact.traceInfo.pcVA)))
   aligned.instrValid := VecInit(s3DecodedForIFU.map(_.compact.valid)).asUInt
   aligned.instrCount := PopCount(s3DecodedForIFU.map(_.compact.valid))
   aligned.foldPc     := VecInit(aligned.instrPcVec.map(pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth)))
