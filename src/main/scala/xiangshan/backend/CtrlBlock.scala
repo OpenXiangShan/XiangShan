@@ -803,7 +803,9 @@ class CtrlBlockImp(
   }
   if (backendParams.teaEn) {
     val hartId = p(XSCoreParamsKey).HartId
-    val dip = Module(new DipSampler)
+    val dip = withReset(reset.asBool || !difftest.common.LogPerfControl().inRoi) {
+      Module(new DipSampler)
+    }
     dip.io.enable := Constantin.createRecord(s"enableDip$hartId", false).asBool
     dip.io.period := Constantin.createRecord(s"dipSamplePeriod$hartId", 256)
     dip.io.rob := rob.io.dip.get

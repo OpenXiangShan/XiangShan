@@ -35,7 +35,7 @@ HEAD_REASONS = re.findall(r'^\s*val \w+ = Value\("([^"\n]+)"\)', _reason_enum, r
 SPEC_PERF = re.compile(r"\[PERF\s*\]\[time=\s*(\d+)\]\s+[^:]+\.rob:\s*(clock_cycle|commitInstr),\s*(\d+)")
 
 
-def read_spec_roi(directory):
+def read_spec_roi(directory, database):
     output = (directory / "simulator_out.txt").read_text()
     if not any(marker in output for marker in ("EXCEEDING CYCLE/INSTR LIMIT", "HIT GOOD TRAP")):
         raise ValueError(f"{directory}: checkpoint did not finish successfully")
@@ -57,21 +57,38 @@ def read_spec_roi(directory):
     if not (20_000_000 <= warm_instructions < 20_100_000
             and 19_900_000 <= instructions < 20_100_000):
         raise ValueError(f"{directory}: counters do not match the default SPEC 20M warmup / 40M total window")
+    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as con:
+        if con.execute("SELECT 1 FROM sqlite_master WHERE name='TeaCycleSummary_0'").fetchone():
+            first = con.execute("SELECT min(CYCLE) FROM TeaCycleSummary_0").fetchone()[0]
+            if first is not None and first > 1:
+                # TEA starts after warmup in the ROB reset domain; PERF uses the top-level timer.
+                start, end = first - 1, first - 1 + final[1]
+                last = con.execute("SELECT CYCLE, STATES_0, STATES_1, STATES_2, STATES_3 "
+                                   "FROM TeaCycleSummary_0 ORDER BY CYCLE DESC LIMIT 1").fetchone()
+                if last[0] != end or sum(last[1:]) != final[1]:
+                    raise ValueError(f"{database}: TEA summary does not match the SPEC measured window")
     return (start, end), instructions, final[1]
 
 
 def sampling_coverage(path, cycle_range, sample_period):
     start, end = cycle_range
-    first = ((start + sample_period - 1) // sample_period) * sample_period
-    expected = max(0, (end - 1 - first) // sample_period + 1)
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as con:
+        # The first summary includes the first measured cycle; preserve that sampling phase.
+        phase = 0
+        if con.execute("SELECT 1 FROM sqlite_master WHERE name='TeaCycleSummary_0'").fetchone():
+            first_summary = con.execute("SELECT min(CYCLE) FROM TeaCycleSummary_0").fetchone()[0]
+            if first_summary is not None:
+                phase = (first_summary - 1) % sample_period
+        first = start + (phase - start) % sample_period
+        expected = max(0, (end - 1 - first) // sample_period + 1)
         rows, unique, off_grid, grid_unique, low, high = con.execute(
-            "SELECT count(*), count(DISTINCT CYCLE), coalesce(sum(CYCLE % ? != 0), 0), "
-            "count(DISTINCT CASE WHEN CYCLE % ? = 0 THEN CYCLE END), "
-            "min(CASE WHEN CYCLE % ? = 0 THEN CYCLE END), "
-            "max(CASE WHEN CYCLE % ? = 0 THEN CYCLE END) "
+            "SELECT count(*), count(DISTINCT CYCLE), coalesce(sum(CYCLE % ? != ?), 0), "
+            "count(DISTINCT CASE WHEN CYCLE % ? = ? THEN CYCLE END), "
+            "min(CASE WHEN CYCLE % ? = ? THEN CYCLE END), "
+            "max(CASE WHEN CYCLE % ? = ? THEN CYCLE END) "
             "FROM Tea_0 WHERE CYCLE >= ? AND CYCLE < ?",
-            (sample_period, sample_period, sample_period, sample_period, start, end)).fetchone()
+            (sample_period, phase, sample_period, phase, sample_period, phase, sample_period, phase,
+             start, end)).fetchone()
     span = (high - low) // sample_period + 1 if low is not None else 0
     return dict(sample_period=sample_period, expected_sample_boundaries=expected,
                 observed_sample_rows=rows, duplicate_sample_rows=rows - unique,
@@ -135,11 +152,18 @@ def load_data(path, label, args):
         def resolve(row):
             mask = sum(row[f"VALIDMASK_{i}"] << (i * rank_width) for i in range(chunks))
             state = row["STATE"]
-            if state not in range(4) or not 0 <= mask < (1 << width) or (state == 0 and not mask):
+            if state not in range(4) or not 0 <= mask < (1 << width):
                 raise ValueError(f"{path}: invalid state/valid mask in row {row['ID']}")
             if state in (0, 2):
-                return ([(normalize_pc(row[f"PCVEC_{i}"]), row[f"PSVVEC_{i}"])
-                         for i in range(width) if mask & (1 << i)] or [(None, -3)])
+                lanes = [(normalize_pc(row[f"PCVEC_{i}"]), row[f"PSVVEC_{i}"])
+                         for i in range(width) if mask & (1 << i)]
+                if state == 0:
+                    retired = row["CONTEXT_RETIRED"] if "CONTEXT_RETIRED" in columns else len(lanes)
+                    if retired <= 0 or retired < len(lanes):
+                        raise ValueError(f"{path}: invalid retired count in row {row['ID']}")
+                    # Pre-window allocations have no history; preserve their share of this cycle.
+                    lanes += [(None, -3)] * (retired - len(lanes))
+                return lanes or [(None, -3)]
             if state == 1:
                 if not row["TARGETVALID"]:
                     return [(None, -3)]
@@ -614,7 +638,7 @@ def main():
         if args.spec_log_dir:
             directory = args.spec_log_dir[index].expanduser().resolve()
             try:
-                selection.cycle_range, instructions, cycles = read_spec_roi(directory)
+                selection.cycle_range, instructions, cycles = read_spec_roi(directory, path)
             except (OSError, ValueError) as error:
                 parser.error(str(error))
             metadata = dict(spec_log_dir=str(directory), measured_instructions=instructions,

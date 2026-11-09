@@ -207,21 +207,24 @@ class TeaNativeMemberTracker {
 
 public:
   void evaluate(bool reset, bool phase, const uint64_t *words, uint64_t *out) {
+    if (reset) {
+      if (previousValid) {
+        for (auto &e : entries) {
+          for (auto &m : e.members) m.live = m.sampled = false;
+        }
+        sampledEntry = {};
+        previousValid = false;
+      }
+      std::memset(out, 0, (16 + CommitWidth * RenameWidth * 6 + RenameWidth * 9) * sizeof(uint64_t));
+      return;
+    }
     Frame in;
     std::memcpy(&in, words, sizeof(in));
-    if (reset) {
-      for (auto &e : entries) {
-        for (auto &m : e.members) m.live = m.sampled = false;
-      }
-      sampledEntry = {};
-      previousValid = false;
-    } else {
-      // Combinational reevaluations replace the pending frame, never apply it twice.
-      if (previousValid && phase != previousPhase) advance(previous);
-      previous = in;
-      previousPhase = phase;
-      previousValid = true;
-    }
+    // Combinational reevaluations replace the pending frame, never apply it twice.
+    if (previousValid && phase != previousPhase) advance(previous);
+    previous = in;
+    previousPhase = phase;
+    previousValid = true;
     for (const auto &p : in.read) {
       int rank = RenameWidth - 1;
       const auto &e = entries[p.index];
@@ -231,6 +234,7 @@ public:
           break;
         }
       }
+      *out++ = e.members[rank].live && e.flag == p.flag && e.members[rank].former == p.former;
       result(in, p.index, rank, out);
     }
     const int stalled = unfinished(in);
