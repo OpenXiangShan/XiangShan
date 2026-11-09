@@ -1385,8 +1385,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
     end
 endtask:run_cbo_fault_late_sta_scenario
 
-// 抽象职责：先显式完成 fault CBO 双 real-WB 屏障和 terminal retire，再验证
-// 已观察的同 ROB exception redirect 能覆盖软件 intent 并收敛 owner window。
+// 抽象职责：先显式完成 fault CBO 双 real-WB 屏障和 terminal retire，确认 fault
+// event 已消费且未来可用 redirect intent 保留，再验证 observed redirect 覆盖与窗口收敛。
 task soft_test_memblock_pending_mmio_directed_sequence::
     run_cbo_fault_observed_redirect_coverage_scenario();
     memblock_issue_q_item_t fired_items[$];
@@ -1395,6 +1395,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     memblock_sync_pkg::dispatch_raw_int_wb_t raw;
     memblock_sync_pkg::dispatch_raw_cancel_snapshot_t snapshot;
     memblock_wb_event_t wb_event;
+    memblock_wb_event_t pending_redirect_intent;
     main_control_transaction main_tr;
     memblock_op_behavior_t behavior;
     status_transaction fault_status;
@@ -1451,9 +1452,32 @@ task soft_test_memblock_pending_mmio_directed_sequence::
                    "fault CBO did not reach terminal post-SQ-deq state before redirect")
     end
     exception_handler.process_pending_events();
-    if (data.exception_event_q.size() != 0) begin
+    if (data.exception_event_q.size() != 1 ||
+        !exception_handler.queue_has_redirect()) begin
         `uvm_fatal(get_type_name(),
-                   "fault recovery event was not consumed before observed redirect")
+                   "fault event was not consumed while preserving one future redirect intent")
+    end
+    pending_redirect_intent = data.exception_event_q[0];
+    if (!data.feedback_event_is_redirect(pending_redirect_intent) ||
+        data.feedback_event_has_fault(pending_redirect_intent) ||
+        pending_redirect_intent.source != MEMBLOCK_WB_EVENT_SOURCE_REDIRECT ||
+        !pending_redirect_intent.has_uid || pending_redirect_intent.uid != 0 ||
+        !pending_redirect_intent.has_dynamic_epoch ||
+        pending_redirect_intent.dynamic_epoch != fault_status.dynamic_epoch ||
+        !pending_redirect_intent.has_rob ||
+        pending_redirect_intent.rob_key != fault_status.get_rob_key() ||
+        pending_redirect_intent.redirect.rob_key != fault_status.get_rob_key() ||
+        !pending_redirect_intent.redirect.flush_itself ||
+        !pending_redirect_intent.redirect.level ||
+        !pending_redirect_intent.has_control_seq ||
+        pending_redirect_intent.control_reset_epoch !=
+            memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
+        pending_redirect_intent.control_eligible_seq <=
+            memblock_sync_pkg::get_dispatch_service_cycle() ||
+        pending_redirect_intent.redirect_intent_id !=
+            commit_handler.fault_head_redirect_intent_id) begin
+        `uvm_fatal(get_type_name(),
+                   "preserved CBO redirect intent identity or future eligibility mismatch")
     end
     if (commit_handler.request_fault_head_redirect() ||
         !commit_handler.fault_head_redirect_intent_pending ||
