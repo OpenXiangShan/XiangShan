@@ -1495,6 +1495,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     void'(commit_handler.sync_modeled_head_after_fault_terminal());
     if (commit_handler.fault_head_redirect_intent_pending ||
         commit_handler.fault_head_waiting ||
+        commit_handler.latched_is_store_exception ||
         commit_handler.commit_cursor_uid != 1 ||
         data.active_redirect.valid || data.has_pending_redirect_drive() ||
         data.exception_event_q.size() != 0) begin

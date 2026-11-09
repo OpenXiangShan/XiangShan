@@ -405,11 +405,10 @@ task soft_test_memblock_dispatch_fault_smoke_sequence::build_fault_case_main_tab
     memblock_op_class_e younger_op_class;
 
     case (fault_op_class)
-        // The younger UID only proves that a normal commit preserves the fault
-        // sideband. Keep it a load so this focused fault smoke does not also
-        // need to exercise the separate strict STA real-writeback contract.
-        MEMBLOCK_OP_CLASS_INT_LOAD,
-        MEMBLOCK_OP_CLASS_STORE:    younger_op_class = MEMBLOCK_OP_CLASS_INT_LOAD;
+        MEMBLOCK_OP_CLASS_INT_LOAD: younger_op_class = MEMBLOCK_OP_CLASS_INT_LOAD;
+        // A younger ordinary store proves that the completed fault token no
+        // longer selects the store exception-address path as a stale level.
+        MEMBLOCK_OP_CLASS_STORE:    younger_op_class = MEMBLOCK_OP_CLASS_STORE;
         default: begin
             `uvm_fatal(get_type_name(),
                        $sformatf("unsupported fault smoke op_class=%0d", fault_op_class))
@@ -546,12 +545,14 @@ task soft_test_memblock_dispatch_fault_smoke_sequence::commit_and_deq_fault_lsq(
     if (!has_commit || has_fault_head || commit_uids.size() != 1) begin
         `uvm_fatal(get_type_name(), "expected second commit batch after fault uid terminal_done")
     end
+    younger_behavior = derive_op_behavior(data.get_main_transaction(1));
     if (commit_uids[0] != 1 ||
-        commit_tr.io_ooo_to_mem_isStoreException != expected_is_store_exception) begin
-        `uvm_fatal(get_type_name(), "second commit batch did not preserve the expected uid or isStoreException value")
+        commit_tr.io_ooo_to_mem_isStoreException != 1'b0 ||
+        commit_tr.io_ooo_to_mem_lsqio_pendingst != younger_behavior.commit_is_store) begin
+        `uvm_fatal(get_type_name(),
+                   "second commit batch did not clear fault isStoreException or preserve younger store pendingst")
     end
     commit_handler.mark_rob_commit_batch(commit_uids);
-    younger_behavior = derive_op_behavior(data.get_main_transaction(1));
     if (younger_behavior.uses_lq) begin
         lq_deq_head = lsq_ctrl.lq_deq_ptr;
         commit_handler.apply_dut_lq_deq(1, lq_deq_head, 1'b0);
@@ -564,10 +565,9 @@ task soft_test_memblock_dispatch_fault_smoke_sequence::commit_and_deq_fault_lsq(
     commit_handler.build_lsqcommit_xaction(terminal_tr, commit_uids, has_commit,
                                            has_fault_head, fault_uid);
     if (has_commit || has_fault_head || commit_uids.size() != 0 ||
-        terminal_tr.io_ooo_to_mem_isStoreException != expected_is_store_exception) begin
+        terminal_tr.io_ooo_to_mem_isStoreException != 1'b0) begin
         `uvm_fatal(get_type_name(),
-                   $sformatf("terminal idle did not hold isStoreException=%0d: commit=%0d fault=%0d size=%0d value=%0d",
-                             expected_is_store_exception,
+                   $sformatf("terminal idle did not clear isStoreException: commit=%0d fault=%0d size=%0d value=%0d",
                              has_commit,
                              has_fault_head,
                              commit_uids.size(),

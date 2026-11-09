@@ -106,7 +106,8 @@ class lsq_commit_handler extends uvm_object;
         latched_is_store_exception = 1'b0;
     endfunction:reset_lsqcommit_runtime_state
 
-    // 只清 fault token 私有生命周期，不改 status、cursor、LQ/SQ 或 exception sideband latch。
+    // 只清 fault token 私有生命周期，不改 status、cursor 或LQ/SQ状态。
+    // isStoreException是该token拥有的level sideband，必须在token真正清除时同步撤销。
     function void clear_fault_head_token();
         if (fault_head_redirect_intent_pending) begin
             if (data == null) begin
@@ -121,6 +122,7 @@ class lsq_commit_handler extends uvm_object;
         fault_head_redirect_covered = 1'b0;
         fault_head_redirect_intent_pending = 1'b0;
         fault_head_redirect_intent_id = 0;
+        latched_is_store_exception = 1'b0;
     endfunction:clear_fault_head_token
 
     // 抽象职责：commit cursor 的唯一推进入口，同时发布公共 ROB admission frontier。
@@ -959,9 +961,9 @@ class lsq_commit_handler extends uvm_object;
         fault_head_dynamic_epoch = status.dynamic_epoch;
         fault_head_rob_key = status.get_rob_key();
         fault_head_redirect_covered = 1'b0;
+        latched_is_store_exception = fault_is_store_exception;
         data.try_retire_committed_uid(uid);
         sync_modeled_head_after_fault_terminal();
-        latched_is_store_exception = fault_is_store_exception;
         return 1'b1;
     endfunction:mark_fault_rob_commit_uid
 
