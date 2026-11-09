@@ -1769,6 +1769,22 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     XSPerfAccumulate(s"hint_without_grant$chSuffix", hint_without_grant)
     XSPerfAccumulate(s"grant_without_hint$chSuffix", grant_without_hint)
     XSPerfAccumulate(s"hint_grant_unmatch$chSuffix", hint_grant_unmatch)
+
+    // The denominator is the number of hints due at this L1D input.
+    XSPerfAccumulate(s"hint_sent$chSuffix", io.l2_hint(ch).valid)
+    XSPerfAccumulate(s"hint_due$chSuffix", hintPipe2.io.out.valid)
+    XSPerfAccumulate(s"hint_exact3$chSuffix", accurateHint)
+    when(hintPipe2.io.out.valid) {
+      assert(accurateHint, "L2 hit hint must precede first beat by exactly three cycles")
+    }
+    val previousHintedFirst = RegNext(accurateHint, false.B)
+    val previousTxn = RegEnable(io.cchi(ch).dnDAT.bits.TxnID, accurateHint)
+    val secondOnTime = io.cchi(ch).dnDAT.fire &&
+      io.cchi(ch).dnDAT.bits.DataID === 1.U && io.cchi(ch).dnDAT.bits.TxnID === previousTxn
+    XSPerfAccumulate(s"hint_two_beat_gap$chSuffix", previousHintedFirst && !secondOnTime)
+    when(previousHintedFirst) {
+      assert(secondOnTime, "hinted refill must deliver two consecutive beats")
+    }
   }
 
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
