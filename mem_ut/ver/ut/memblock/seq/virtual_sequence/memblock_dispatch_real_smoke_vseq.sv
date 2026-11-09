@@ -19,6 +19,7 @@ class memblock_dispatch_real_smoke_vseq extends virtual_base_sequence;
     extern virtual function void initialize_shared_memory_store();
     extern virtual task start_background_responders();
     extern virtual task start_core_dispatch_flow();
+    extern virtual task start_main_dispatch_sequence();
     extern virtual task wait_for_explicit_l2tlb_start_barrier();
     extern virtual function bit uses_explicit_control_workers();
     extern virtual function bit uses_static_mmu_sv39_csr();
@@ -125,12 +126,19 @@ task memblock_dispatch_real_smoke_vseq::start_background_responders();
     join
 endtask:start_background_responders
 
+// 抽象职责：启动 real-smoke topology 中唯一的主表与持续 monitor service owner。
+// 派生场景只覆盖该 hook 选择主表 builder，不复制其它 worker/responder fork。
+task memblock_dispatch_real_smoke_vseq::start_main_dispatch_sequence();
+    memblock_main_dispatch_auto_build_main_table_base_sequence main_seq;
+
+    `uvm_do_on(main_seq, p_sequencer)
+endtask:start_main_dispatch_sequence
+
 task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
     memblock_lsqenq_dispatch_base_sequence                  lsqenq_seq;
     memblock_issue_dispatch_base_sequence                   issue_seq;
     memblock_lsqcommit_dispatch_base_sequence               lsqcommit_seq;
     memblock_l2tlb_base_sequence                            l2tlb_seq;
-    memblock_main_dispatch_auto_build_main_table_base_sequence main_seq;
     memblock_csr_control_base_sequence                      csr_control_seq;
     memblock_sfence_control_base_sequence                   sfence_control_seq;
     memblock_mmu_sv39_csr_sequence                          mmu_sv39_csr_seq;
@@ -158,7 +166,7 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
             `uvm_do_on(l2tlb_seq, p_sequencer.L2tlb_sqr)
         end
         begin : start_main_sequence
-            `uvm_do_on(main_seq, p_sequencer)
+            start_main_dispatch_sequence();
         end
         begin : start_static_mmu_sv39_csr_sequence
             if (uses_static_mmu_sv39_csr()) begin

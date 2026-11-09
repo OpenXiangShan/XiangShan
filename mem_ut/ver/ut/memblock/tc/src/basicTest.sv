@@ -21,6 +21,7 @@ class basicTest extends tcnt_test_base ;
       function bit vseq_starts_l2tlb(input string vseq_name);
           return vseq_name == "memblock_l2tlb_routed_ppn_vseq" ||
                  vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cbo_directed_vseq" ||
                  vseq_name == "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq" ||
                  vseq_name == "memblock_dispatch_manual_control_vseq" ||
                  vseq_name == "memblock_csr_random_config_vseq" ||
@@ -50,6 +51,7 @@ class basicTest extends tcnt_test_base ;
       function bit vseq_owns_static_mmu_csr(input string vseq_name);
           return (vseq_name == "memblock_l2tlb_routed_ppn_vseq" ||
                   vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+                  vseq_name == "memblock_dispatch_real_cbo_directed_vseq" ||
                   vseq_name == "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq" ||
                   vseq_name == "memblock_l2tlb_pbmt_response_fault_vseq") &&
                  !memblock_sync_pkg::uses_control_barrier_topology();

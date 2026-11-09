@@ -56,6 +56,7 @@ seq_pkg.sv
 // ./base_seq/memblock_l2tlb_base_sequence.sv
 // ./base_seq/soft_test/soft_test_l2tlb_ppn_reuse_sequence.sv
 // ./base_seq/memblock_main_dispatch_auto_build_main_table_base_sequence.sv
+// ./base_seq/memblock_main_dispatch_cbo_directed_sequence.sv
 // ./base_seq/memblock_main_dispatch_manual_main_table_sequence.sv
 // ./base_seq/memblock_main_dispatch_manual_control_main_table_sequence.sv
 // ./base_seq/memblock_main_dispatch_cancel_reconcile_sequence.sv
@@ -67,6 +68,7 @@ seq_pkg.sv
 // ./virtual_sequence/memblock_l2tlb_pbmt_toggle_csr_sequence.sv
 // ./virtual_sequence/memblock_pending_mmio_directed_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_smoke_vseq.sv
+// ./virtual_sequence/memblock_dispatch_real_cbo_directed_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq.sv
 // ./virtual_sequence/memblock_csr_random_config_vseq.sv
 // ./virtual_sequence/memblock_dispatch_manual_control_vseq.sv
