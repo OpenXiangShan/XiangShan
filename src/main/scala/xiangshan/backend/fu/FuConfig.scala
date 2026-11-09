@@ -335,6 +335,19 @@ object FuConfig {
     immType = Set(Imm_I(), Imm_J(), Imm_U(), Imm_LUI32()),
   )
 
+  val SscheckCfg: FuConfig = FuConfig (
+    name = "sscheck",
+    fuType = FuType.sscheck,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new SscheckUnit(cfg)(p).suggestName("Sscheck")),
+    srcData = Seq(
+      Seq(IntData(), IntData()),
+    ),
+    piped = true,
+    writeIntRf = true,
+    latency = CertainLatency(0),
+    exceptionOut = Seq(zicfissSoftwareCheck),
+  )
+
   val MulCfg: FuConfig = FuConfig (
     name = "mul",
     fuType = FuType.mul,
@@ -467,12 +480,6 @@ object FuConfig {
     readVl = true,
     readV0 = true,
     readVType = true,
-  )
-  // new ldu for cfi
-  val LduCfgWithShadowStack: FuConfig = LduCfg.copy(
-    srcData = Seq(Seq(IntData(), IntData())),
-    exceptionOut = LduCfg.exceptionOut :+ zicfissSoftwareCheck,
-    //add new source and new exception type for ssp compare
   )
 
   val StaCfg: FuConfig = FuConfig (
@@ -845,7 +852,7 @@ object FuConfig {
   )
 
   def allConfigs = Seq(
-    NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
+    NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, SscheckCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,
     FaluCfg, FmulCfg, FcvtCfg, FdivCfg,
     VialuCfg, VimacCfg, VidivCfg, VmoveCfg,

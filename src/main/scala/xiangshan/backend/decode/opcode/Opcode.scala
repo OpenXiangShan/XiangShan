@@ -17,6 +17,7 @@ object Opcode {
   def main(args: Array[String]): Unit = {
     val opcodes = Seq(
       AluOpcodes,
+      SscheckOpcodes,
       BruOpcodes,
       LinkOpcodes,
       JmpOpcodes,
@@ -274,6 +275,11 @@ object Opcode {
     def isZicond(func: UInt): Bool  = func(6, 4).andR && !func(3)
   }
 
+  object SscheckOpcodes extends Opcodes {
+    // Internal shadow-stack compare: equal returns the RV64 stack step, otherwise zero.
+    val sscheck = IntRType(bb"000_0000")
+  }
+
   object BruOpcodes extends Opcodes {
     // branch
     val beq        = IntBSType(bb"000_000")
@@ -443,7 +449,8 @@ object Opcode {
 
   trait LduOpcodes extends Opcodes with LsuTrait with DataType {
     protected val uopPrefetch = bb"1"
-    val sspopchk = IntRType(SCALAR1, nonH, nonX, sign, D, bb"0")
+    // Internal POP load; the ALU0 sscheck FU compares the returned data.
+    val sspopchk = IntIType(SCALAR1, nonH, nonX, sign, D, bb"0")
     // Internal SSPUSH check: executes in LDU with shadow-stack store permissions.
     val sspushchk = IntIType(SCALAR3, nonH, nonX, sign, D, bb"0")
     def isSspushCheck(op: UInt): Bool = op === sspushchk.encode

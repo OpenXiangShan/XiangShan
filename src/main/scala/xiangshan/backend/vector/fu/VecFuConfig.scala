@@ -287,7 +287,6 @@ object VecFuConfig {
   val VSetRiWvfCfg = VecFuConfig.fromFuConfig(FuConfig.VSetRiWvfCfg)
   val VSetRiWiCfg = VecFuConfig.fromFuConfig(FuConfig.VSetRiWiCfg)
   val LduCfg = VecFuConfig.fromFuConfig(FuConfig.LduCfg)
-  val LduCfgWithShadowStack = VecFuConfig.fromFuConfig(FuConfig.LduCfgWithShadowStack)
   val StaCfg = VecFuConfig.fromFuConfig(FuConfig.StaCfg)
   val StdCfg = VecFuConfig.fromFuConfig(FuConfig.StdCfg)
   val HyldaCfg = VecFuConfig.fromFuConfig(FuConfig.HyldaCfg)
@@ -329,7 +328,6 @@ object VecFuConfig {
     VSetRiWvfCfg,
     VSetRiWiCfg,
     LduCfg,
-    LduCfgWithShadowStack,
     StaCfg,
     StdCfg,
     HyldaCfg,

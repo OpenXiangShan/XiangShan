@@ -263,6 +263,7 @@ object PseudoDecodeChannel {
     (op: InstPattern) => {
       val fuType = uopTable(op).factory match {
         case _: Opcode.AluOpcodes.type => FuType.alu.U
+        case _: Opcode.SscheckOpcodes.type => FuType.sscheck.U
         case _: Opcode.BruOpcodes.type => ???
         case _: Opcode.LinkOpcodes.type => ???
         case _: Opcode.JmpOpcodes.type => FuType.jmp.U

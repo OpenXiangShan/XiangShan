@@ -691,11 +691,18 @@ object BackendV2SchdParams {
   def numPregsVec = 128
   def rfDataWidthVec = 128
 
-  def intSchdParams = {
+  def intSchdParams(hasShadowStack: Boolean) = {
     implicit val schdType: SchedulerType = IntScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(4, 0))), true, 2),
+        ExeUnitParams(
+          "ALU0",
+          Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg) ++ (if (hasShadowStack) Seq(SscheckCfg) else Seq.empty),
+          Seq(IntWB(port = 0, 0)),
+          Seq(Seq(IntRD(0, 0)), Seq(IntRD(4, 0))),
+          true,
+          2,
+        ),
         ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(0, 1)), Seq(IntRD(4, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
@@ -718,7 +725,14 @@ object BackendV2SchdParams {
         ExeUnitParams("ALU3", Seq(AluCfg, BkuCfg, MulCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(3, 0)), Seq(IntRD(7, 0))), true, 2)
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(4, 0), FpWB(3, 0)), Seq(Seq(IntRD(8, 0))), true, 2),
+        ExeUnitParams(
+          "LDU0",
+          Seq(LduCfg),
+          Seq(IntWB(4, 0), FpWB(3, 0)),
+          Seq(Seq(IntRD(8, 0))),
+          true,
+          2,
+        ),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(5, 0), FpWB(4, 0)), Seq(Seq(IntRD(9, 0))), true, 2),

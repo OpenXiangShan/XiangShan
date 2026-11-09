@@ -173,9 +173,6 @@ class LoadUnitS0(param: ExeUnitParams)(
   prefetch.hasROBEntry := false.B
   prefetch.missDbUpdated := false.B
   prefetch.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
-  prefetch.sspCheckValue.foreach(_ := DontCare)
-  prefetch.sspValue.foreach(_ := DontCare)
-  prefetch.sspNextValue.foreach(_ := DontCare)
   prefetchHiConf.valid := io.prefetchReq.valid && prefetchIsHiConf
   prefetchHiConf.bits := prefetch
   prefetchHiConf.bits.entrance := LoadEntrance.prefetchHiConf.U
@@ -215,9 +212,6 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
   scalarIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
-  scalarIssue.bits.sspCheckValue.foreach(_ := ldin.src(1))
-  scalarIssue.bits.sspValue.foreach(_ := ldin.src(0))
-  scalarIssue.bits.sspNextValue.foreach(_ := DontCare)
   // 7. low-confidence prefetch
   prefetchLoConf.valid := io.prefetchReq.valid
   prefetchLoConf.bits := prefetch
@@ -1269,13 +1263,6 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.sqSbufferForwarded.get := sqSbufferForwarded
   stageInfo.sqSbufferFullForwarded.get := sqSbufferFullForwarded
   stageInfo.specialModeRequest := specialRequest
-  stageInfo.sspNextValue.foreach { nextValue =>
-    nextValue := Mux(
-      LSUOpType.isSspushCheck(uop.fuOpType),
-      in.sspValue.get - (XLEN / 8).U,
-      in.sspValue.get + (XLEN / 8).U
-    )
-  }
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
 
@@ -1396,8 +1383,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     val rrBankConflictFastReplayFire = Output(Bool())
     val rrBankConflictFastReplayDenied = Output(Bool())
 
-    val sspopchkData = Option.when(HasShadowStack)(Input(UInt(XLEN.W)))
-    // PUSH and POP return the checked pointer to their dependent CSR uop.
+    // The internal PUSH check returns the SSP pointer step to the dependent ALU uop.
     val shadowStackWb = Option.when(HasShadowStack)(Output(ValidIO(UInt(XLEN.W))))
     // RAR / RAW revoke and RAR response
     val rarNukeQueryResp = Flipped(ValidIO(new LoadNukeQueryResp))
@@ -1536,18 +1522,6 @@ class LoadUnitS3(param: ExeUnitParams)(
     s4HeadAlwaysWriteback || s4HeadWritebackDependOnTail && s3ShouldWriteback,
     s3ShouldWriteback
   )
-  val sspMismatch = Option.when(HasShadowStack)(WireDefault(false.B))
-  if (HasShadowStack) {
-    val priorFault =
-      s3ExceptionVec.unselect(ExceptionNO.zicfissSoftwareCheck).orR ||
-        TriggerAction.isDmode(uop.trigger)
-
-    sspMismatch.get := pipeIn.valid && !priorFault && !kill && endPipe && s3ShouldWakeup &&
-      !in.matchInvalid.get && LSUOpType.isSspopchk(uop.fuOpType) &&
-      (io.sspopchkData.get =/= in.sspCheckValue.get)
-
-    s3ExceptionVec(ExceptionNO.zicfissSoftwareCheck) := sspMismatch.get
-  }
   s3ExceptionVec(hardwareError) := uop.exceptionVec(hardwareError) || dcacheError
 
   /**
@@ -1595,23 +1569,22 @@ class LoadUnitS3(param: ExeUnitParams)(
   val rollbackValid = pipeIn.valid && (rarViolation || matchInvalid) && endPipe
   val rollbackLevel = Mux(matchInvalid, RedirectLevel.flush, RedirectLevel.flushAfter)
 
-  // Both split SS instructions have a dependent CSR uop. Only a successful
-  // check returns the adjusted pointer. A terminal fault returns the old SSP;
-  // a replay or killed request must not wake the CSR writer.
-  val isShadowStack = if (HasShadowStack) LSUOpType.isShadowStackLoad(uop.fuOpType) else false.B
-  val shadowStackSuccess = isShadowStack && pipeIn.valid && !kill && endPipe &&
+  // PUSH checks return -XLEN/8 on success, or zero on a terminal fault.
+  // POP loads return memory data only on success; faults/replays must not wake
+  // the dependent ALU check or CSR writer.
+  val isSspushCheck = if (HasShadowStack) LSUOpType.isSspushCheck(uop.fuOpType) else false.B
+  val isSspopchk = if (HasShadowStack) LSUOpType.isSspopchk(uop.fuOpType) else false.B
+  val shadowStackLoadSuccess = pipeIn.valid && !kill && endPipe &&
     !exception && shouldWakeup && !matchInvalid && !shouldReplay
-  val shadowStackTerminalFault = isShadowStack && pipeIn.valid && !kill && endPipe && exception
+  val shadowStackSuccess = isSspushCheck && shadowStackLoadSuccess
+  val shadowStackTerminalFault = isSspushCheck && pipeIn.valid && !kill && endPipe && exception
   val shadowStackWbValid = shadowStackSuccess || shadowStackTerminalFault
   if (HasShadowStack) {
     io.shadowStackWb.get.valid := shadowStackWbValid
-    io.shadowStackWb.get.bits := Mux(
-      shadowStackSuccess,
-      in.sspNextValue.get,
-      in.sspValue.get
-    )
+    io.shadowStackWb.get.bits := Mux(shadowStackSuccess, 0.U(XLEN.W) - (XLEN / 8).U, 0.U(XLEN.W))
   }
-  val effectiveWakeup = Mux(isShadowStack, shadowStackWbValid, shouldWakeup)
+  val effectiveWakeup = Mux(isSspushCheck, shadowStackWbValid,
+    Mux(isSspopchk, shadowStackLoadSuccess, shouldWakeup))
 
   /**
     * Load cancel
@@ -1678,12 +1651,6 @@ class LoadUnitS3(param: ExeUnitParams)(
   val lqWriteMshrId = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadMshrId, in.mshrId.get)
   val lqWriteHandledByMSHR = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadHandledByMSHR, in.handledByMSHR.get)
   // TODO: remove useless fields after old LoadUnit is removed
-  lqWrite.sspCheckValue.foreach { value =>
-    value := in.sspCheckValue.get
-  }
-  lqWrite.sspValue.foreach { value =>
-    value := in.sspValue.get
-  }
   lqWrite.uop := uop
   lqWrite.uop.exceptionVec extendFrom exceptionVec
   lqWrite.vaddr := vaddr
@@ -2302,9 +2269,6 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s3.io.csrCtrl := io.csrCtrl
   io.vldS3WakeUp := s3.io.vldS3WakeUp
 
-  s3.io.sspopchkData.foreach { data =>
-    data := dataPath.io.s3ShiftAndExtData(XLEN - 1, 0)
-  }
   // Data path
   dataPath.io.s2SqForwardResp := io.sqForward.s2Resp
   dataPath.io.s2SbufferForwardResp := io.sbufferForward.s2Resp
@@ -2387,7 +2351,7 @@ abstract class LoadUnitStage(val param: ExeUnitParams)(
     Some(IO(DecoupledIO(new LoadStageIO)))
   } else None
 
-  val lduExceptionCfg = if (HasShadowStack) LduCfgWithShadowStack else LduCfg
+  val lduExceptionCfg = LduCfg
   def <>(that: LoadUnitStage): Unit = {
     this.io_pipeIn.foreach(_ <> that.io_pipeOut.get)
   }

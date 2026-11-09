@@ -19,6 +19,7 @@ import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.MulOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.JmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.SscheckOpcodes._
 import xiangshan.backend.decode.opcode.Opcode._
 import xiangshan.backend.decode.opcode.OpcodeTraits._
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
@@ -753,6 +754,7 @@ object ScalaUopTable {
         /** Describe one split uop; omitted operands use the instruction's rs1/rs2/rs3/rd fields. */
 
     val sspTmp = Const(32)
+    val sspRaTmp = Const(33)
     val readImm = UopImmSpec(DecodeSelImm.Z, _ => BigInt((1 << 17) | CSRs.ssp))
     val writeImm = UopImmSpec(DecodeSelImm.Z, _ => BigInt((1 << 12) | CSRs.ssp))
     val stepImm = UopImmSpec(DecodeSelImm.I, xlen => BigInt(-xlen / 8) & 0xfff)
@@ -777,17 +779,24 @@ object ScalaUopTable {
         imm = Some(readImm), commitType = Some(CommitType.STORE)),
       split(sspush, src1 = sspTmp, src2 = Rs2(), src3 = Zero, dest = Zero,
         imm = Some(stepImm.copy(sel = DecodeSelImm.S)), commitType = Some(CommitType.STORE)),
-      // LDU returns ssp-XLEN/8 only after SSPUSH's permission checks succeed;
-      // a terminal fault returns the old ssp to the dependent CSR write.
-      split(sspushchk, src1 = sspTmp, src2 = Zero, src3 = Zero, dest = sspTmp,
+      // The check returns the signed SSP step: -XLEN/8 on success or zero on a terminal fault.
+      split(sspushchk, src1 = sspTmp, src2 = Zero, src3 = Zero, dest = sspRaTmp,
         imm = Some(stepImm), commitType = Some(CommitType.LOAD)),
+      split(add, src1 = sspTmp, src2 = sspRaTmp, src3 = Zero, dest = sspTmp,
+        commitType = Some(CommitType.NORMAL)),
       writeSsp,
     )
     val pop = Seq(
       split(readSsp, src1 = Zero, src2 = Zero, src3 = Zero, dest = sspTmp,
         imm = Some(readImm), commitType = Some(CommitType.LOAD)),
-      split(sspopchkOp, src1 = sspTmp, src2 = Rs1, src3 = Zero, dest = sspTmp,
+      split(sspopchkOp, src1 = sspTmp, src2 = Zero, src3 = Zero, dest = sspRaTmp,
         imm = Some(zeroImm), commitType = Some(CommitType.LOAD)),
+      // The check returns 8 on success, or 0 and a software-check exception on mismatch.
+      // Both ADD and the CSR write depend on the check, preserving SSP on failure.
+      split(sscheck, src1 = sspRaTmp, src2 = Rs1, src3 = Zero, dest = sspRaTmp,
+        commitType = Some(CommitType.NORMAL)),
+      split(add, src1 = sspTmp, src2 = sspRaTmp, src3 = Zero, dest = sspTmp,
+        commitType = Some(CommitType.NORMAL)),
       writeSsp,
     )
     ZICFISSType.mapUopcodes(

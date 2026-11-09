@@ -304,8 +304,8 @@ case class XSCoreParameters
   hartIDDmodeWidth: Int = -1, // only for Customization
   enableResetMtvec: Boolean = false, // only for Customization
 ){
-  // Zicfiss split uops carry the checked SSP through one hidden logical register.
-  val IntLogicRegs: Int = IntLogicRegsBase + (if (HasShadowStack) 1 else 0)
+  // Zicfiss split uops use two hidden logical registers for SSP and return-address/step values.
+  val IntLogicRegs: Int = IntLogicRegsBase + (if (HasShadowStack) 2 else 0)
 
   def ISABase = "rv64i"
   def ISAExtensions = {
@@ -355,7 +355,14 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = IntScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 2),
+        ExeUnitParams(
+          "ALU0",
+          Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg) ++ (if (HasShadowStack) Seq(SscheckCfg) else Seq.empty),
+          Seq(IntWB(port = 0, 0)),
+          Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))),
+          true,
+          2,
+        ),
         ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(
@@ -394,9 +401,9 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "LDU0",
-          Seq(if (HasShadowStack) LduCfgWithShadowStack else LduCfg),
+          Seq(LduCfg),
           Seq(IntWB(6, 0), FpWB(4, 0), VfWB(0, 0)),
-          Seq(Seq(IntRD(7, 0))) ++ (if (HasShadowStack) Seq(Seq(IntRD(12, 0))) else Seq.empty),
+          Seq(Seq(IntRD(7, 0))),
           true,
           2,
           vlRD = VlRD(4, 0),
@@ -407,9 +414,9 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "LDU1",
-          Seq(if (HasShadowStack) LduCfgWithShadowStack else LduCfg),
+          Seq(LduCfg),
           Seq(IntWB(7, 0), FpWB(5, 0), VfWB(1, 0)),
-          Seq(Seq(IntRD(9, 0))) ++ (if (HasShadowStack) Seq(Seq(IntRD(13, 0))) else Seq.empty),
+          Seq(Seq(IntRD(9, 0))),
           true,
           2,
           vlRD = VlRD(5, 0),
@@ -420,9 +427,9 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "LDU2",
-          Seq(if (HasShadowStack) LduCfgWithShadowStack else LduCfg),
+          Seq(LduCfg),
           Seq(IntWB(8, 0), FpWB(6, 0), VfWB(2, 0)),
-          Seq(Seq(IntRD(11, 0))) ++ (if (HasShadowStack) Seq(Seq(IntRD(14, 0))) else Seq.empty),
+          Seq(Seq(IntRD(11, 0))),
           true,
           2,
           vlRD = VlRD(6, 0),
@@ -593,7 +600,7 @@ case class XSCoreParameters
 
   val backendParams: BackendParams = backend.BackendParams(
     Map(
-      IntScheduler() -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.intSchdParams else intSchdParams),
+      IntScheduler() -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.intSchdParams(HasShadowStack) else intSchdParams),
       FpScheduler()  -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.fpSchdParams else fpSchdParams),
       VecScheduler() -> (if (EnableBackendV2Config) backend.BackendV2SchdParams.vecSchdParams else vecSchdParams),
     ),
