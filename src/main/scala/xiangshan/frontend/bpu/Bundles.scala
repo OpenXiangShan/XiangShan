@@ -30,6 +30,7 @@ import xiangshan.frontend.bpu.history.commonhr.CommonHRResolveMeta
 import xiangshan.frontend.bpu.history.phr.PhrMeta
 import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
+import xiangshan.frontend.bpu.ptage.PtageMeta
 import xiangshan.frontend.bpu.ras.RasCommitMeta
 import xiangshan.frontend.bpu.ras.RasRedirectMeta
 import xiangshan.frontend.bpu.sc.ScMeta
@@ -317,6 +318,10 @@ class FastTrain(implicit p: Parameters) extends BpuBundle {
   val branch:    BranchInfo    = new BranchInfo
   val abtbMeta:  AheadBtbMeta  = new AheadBtbMeta
   val utageMeta: MicroTageMeta = new MicroTageMeta
+  val ptageMeta: PtageMeta     = new PtageMeta
+  // the group kept a second block of its own, so its successor was consumed inside the group rather than arriving as
+  // the next training event
+  val hasSecondBlock: Bool = Bool()
 }
 
 // metadata for commit training (e.g. ras)

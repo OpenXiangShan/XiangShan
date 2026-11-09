@@ -1,0 +1,148 @@
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+
+package xiangshan.frontend.bpu.ptage
+
+import chisel3._
+import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.SaturateCounterFactory
+import xiangshan.frontend.bpu.WriteReqBundle
+
+object PtageCounter extends SaturateCounterFactory {
+  def width(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.ptageParameters.CounterWidth
+}
+
+/** One block of a prediction group: where it leaves, and where it goes next. */
+class PtageBlock(implicit p: Parameters) extends PtageBundle {
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val attribute:   BranchAttribute = new BranchAttribute
+  val counter:     SaturateCounter = PtageCounter()
+  // low bits of this block's next pc, read out and used directly as an index with no adder in the way
+  val nextPcLow: UInt = UInt(NextPcLowWidth.W)
+
+  def taken: Bool = counter.isPositive
+}
+
+/** One pTAGE entry holds a whole prediction group.
+  *
+  * Keyed by the previous group's start pc together with the folded path history, an entry answers "what comes after
+  * that", which is what lets a single read produce both blocks. The second block's start is not stored, because it is
+  * by construction the first block's next pc; training is what keeps that true. An entry reached through a tag alias
+  * is caught by the high-level predictor when it misleads the first block, and loses its pair's confidence when it
+  * misleads the second.
+  */
+class PtageEntry(implicit p: Parameters) extends PtageBundle {
+  val valid: Bool = Bool()
+  val tag:   UInt = UInt(TagWidth.W)
+
+  val p1:      PtageBlock = new PtageBlock
+  val p2:      PtageBlock = new PtageBlock
+  val p2Valid: Bool       = Bool()
+}
+
+/** What training needs to know about the lookup that produced a prediction.
+  *
+  * Carried down the predictor pipeline rather than recomputed, because pTAGE indexes on the *previous* group's start
+  * pc and history: re-deriving an index at training time would have to reproduce a context that has since moved on,
+  * and any drift would train a different entry than the one that predicted.
+  */
+class PtageMeta(implicit p: Parameters) extends PtageBundle {
+  // Invalid for the group a redirect puts in s0: its read was made for the path the redirect abandoned, so it neither
+  // predicts nor trains. This is the warm-up that indexing a group ahead costs.
+  val valid:   Bool      = Bool()
+  val setIdx:  Vec[UInt] = Vec(NumTables, UInt(SetIdxWidth.W))
+  val tag:     Vec[UInt] = Vec(NumTables, UInt(TagWidth.W))
+  val bankIdx: UInt      = UInt(BankIdxWidth.W)
+  // the indexed entries' useful marks, used to pick an allocation victim; may be stale, which costs allocation
+  // quality but never correctness
+  val usefulVec: Vec[Bool] = Vec(NumTables, Bool())
+  // whether the provider said something the next-longest hit did not; a mark is only earned in that case
+  val providerDiffersFromAlt: Bool        = Bool()
+  val provider:               Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
+  // the provider entry as it was read, so training need not read the table again to know what it is correcting
+  val p1Counter:     SaturateCounter = PtageCounter()
+  val p2Counter:     SaturateCounter = PtageCounter()
+  val p1CfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  // where the entry said the first block goes. Without it training cannot tell an entry that named the right exit
+  // from one that named the right exit and rebuilt the wrong target, and would reinforce both alike.
+  val p1NextPcLow: UInt            = UInt(NextPcLowWidth.W)
+  val p1Attribute: BranchAttribute = new BranchAttribute
+  val p2Valid:     Bool            = Bool()
+  // the stored second block, carried so a write that learns nothing new about it can put it back unchanged instead of
+  // dropping it
+  val p2CfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val p2Attribute:   BranchAttribute = new BranchAttribute
+  val p2NextPcLow:   UInt            = UInt(NextPcLowWidth.W)
+  // how many times in a row the stored second block has turned out right
+  val p2Conf: UInt = UInt(PairConfWidth.W)
+
+  // the provider entry, which is the one behind a second block this lookup put out
+  def pairTag: PtagePairTag = {
+    val tag = Wire(new PtagePairTag)
+    tag.table   := provider.bits
+    tag.bankIdx := bankIdx
+    tag.setIdx  := Mux1H(UIntToOH(provider.bits, NumTables), setIdx)
+    tag
+  }
+}
+
+/** Which entry put out a group's second block, carried with the block until it resolves.
+  *
+  * Nothing checks a second block before fetch, so the backend is the only place that learns whether it was right.
+  * This is what lets that verdict reach the entry's confidence.
+  */
+class PtagePairTag(implicit p: Parameters) extends PtageBundle {
+  val table:   UInt = UInt(log2Ceil(NumTables).W)
+  val bankIdx: UInt = UInt(BankIdxWidth.W)
+  val setIdx:  UInt = UInt(SetIdxWidth.W)
+}
+
+/** A read keyed on the group before the one it answers for, not yet matched against that group's own pc.
+  *
+  * It is kept for two stages after it is matched, because an override gives the group it was keyed on a new
+  * successor, and that successor's lookup is this same read matched again with the new pc.
+  */
+class PipelineState(implicit p: Parameters) extends PtageBundle {
+  val entry:   Vec[PtageEntry] = Vec(NumTables, new PtageEntry)
+  val setIdx:  Vec[UInt]       = Vec(NumTables, UInt(SetIdxWidth.W))
+  val bankIdx: UInt            = UInt(BankIdxWidth.W)
+  // the history half of each table's tag; the pc half belongs to the group the read is matched against
+  val tagFold: Vec[UInt] = Vec(NumTables, UInt(TagWidth.W))
+  // whether the read was keyed on the group that the one it is matched against follows
+  val valid: Bool = Bool()
+  // the pc the read was keyed on, to check a replayed read against the group an override corrected
+  val debug_keyPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(GuardedPc())
+}
+
+class BankReadReq(implicit p: Parameters) extends PtageBundle {
+  val setIdx: UInt = UInt(SetIdxWidth.W)
+}
+
+class BankReadResp(implicit p: Parameters) extends PtageBundle {
+  val entry: PtageEntry = new PtageEntry
+}
+
+class BankWriteReq(implicit p: Parameters) extends WriteReqBundle with HasPtageParameters {
+  val setIdx: UInt       = UInt(SetIdxWidth.W)
+  val entry:  PtageEntry = new PtageEntry
+
+  override def tag: Option[UInt] = Some(entry.tag)
+}

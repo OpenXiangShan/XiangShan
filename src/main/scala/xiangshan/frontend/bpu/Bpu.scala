@@ -175,6 +175,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   fastTrain.bits.branch.fromPrediction(s3_prediction, s3_override)
   fastTrain.bits.abtbMeta  := s3_abtbMeta
   fastTrain.bits.utageMeta := s3_utageMeta
+  // pTAGE is not on the prediction path yet, so there is no pTAGE lookup and no second block to train from
+  fastTrain.bits.ptageMeta      := 0.U.asTypeOf(fastTrain.bits.ptageMeta)
+  fastTrain.bits.hasSecondBlock := false.B
 
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
