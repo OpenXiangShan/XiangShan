@@ -1386,7 +1386,8 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_cbo_fault_late_sta_s
 endtask:run_cbo_fault_late_sta_scenario
 
 // 抽象职责：先显式完成 fault CBO 双 real-WB 屏障和 terminal retire，确认 fault
-// event 已消费且未来可用 redirect intent 保留，再验证 observed redirect 覆盖与窗口收敛。
+// event 已消费且未来可用 redirect intent 保留，再按 record ID 验证 observed
+// redirect 覆盖、owner window 收敛及已完成 cancel record 清理。
 task soft_test_memblock_pending_mmio_directed_sequence::
     run_cbo_fault_observed_redirect_coverage_scenario();
     memblock_issue_q_item_t fired_items[$];
@@ -1406,6 +1407,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     memblock_lsqenq_dispatch_base_sequence enq;
     longint unsigned anchor_sample;
     int record_idx;
+    int unsigned cancel_record_id;
     int unsigned reissue_old_epoch;
     bit saved_real_smoke_active;
 
@@ -1539,6 +1541,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::
         `uvm_fatal(get_type_name(),
                    "fault redirect record was not held open by the owner window")
     end
+    cancel_record_id = data.cancel_record_q[record_idx].cancel_record_id;
     wait_for_dut_sample_watermark(
         data.redirect_deleted_owner_expire_sample + 1,
         "cbo-fault-observed-redirect-expire");
@@ -1580,9 +1583,11 @@ task soft_test_memblock_pending_mmio_directed_sequence::
     data.service_redirect_deleted_owner_window(
         memblock_sync_pkg::peek_current_dut_global_sample(), 1'b0);
     if (data.redirect_deleted_owner_window_pending() ||
-        !data.cancel_record_q[record_idx].software_applied) begin
+        data.redirect_deleted_owner_record_id != 0 ||
+        data.find_cancel_record_index_by_id(cancel_record_id) >= 0 ||
+        data.has_pending_lsq_cancel_apply()) begin
         `uvm_fatal(get_type_name(),
-                   "applied cancel did not converge the deleted-owner window")
+                   "applied cancel did not close the owner window and clean its record")
     end
 
     if (!fault_status.terminal_done || fault_status.active ||
