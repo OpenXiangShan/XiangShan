@@ -5175,6 +5175,16 @@ class common_data_transaction extends uvm_object;
                 return 1'b1;
             end
         end
+        // 中文注释：timing sideband drain 会先把 raw anchor 从 history queue
+        // 绑定到 cancel record。LSQ shadow 随后推进同一 sample 时仍必须看到
+        // redirect，不能让 adapter 的绑定顺序截断 t1/t2/t3 pointer restore。
+        foreach (cancel_record_q[idx]) begin
+            if (cancel_record_q[idx].valid &&
+                cancel_record_q[idx].redirect_anchor_valid &&
+                cancel_record_q[idx].redirect_sample_seq == sample_seq) begin
+                return 1'b1;
+            end
+        end
         return 1'b0;
     endfunction:redirect_sampled_at
 
