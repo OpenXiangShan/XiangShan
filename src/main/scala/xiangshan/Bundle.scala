@@ -199,7 +199,13 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   def hasBackendFault: Bool = backendIGPF || backendIPF || backendIAF
 
   // for backend and memory
+
+  // Last retained logical slot, Set by central preprocessing; needFlush flushes slots strictly after it.
+  val robIdxForFlush = new RobPtr
+  // Downstream consumer for robidx:
+  // Snapshot flush/selection, ROB deqHitRedirectReg/redirectAll, CSR TrapTvalMod and debug PC lookup/assertions.
   val robIdx = new RobPtr
+
   val interrupt: Bool = Bool()
   val isMisPred: Bool = Bool()
   val isFromLoad: Bool = Bool()
