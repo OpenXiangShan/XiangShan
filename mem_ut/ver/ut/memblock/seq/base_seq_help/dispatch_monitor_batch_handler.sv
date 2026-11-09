@@ -56,18 +56,19 @@ class dispatch_monitor_batch_handler extends uvm_object;
     function bit store_fault_redirect_must_wait(input memblock_wb_event_t wb_event);
         status_transaction status;
 
-        // 中文注释：普通 scalar store 的 fault redirect 不能沿用 DUT sideband 的
-        // 同拍到达顺序。fault 必须先完成 STA/STD 双 real-WB、ROB commit 和
-        // terminal，再由 fault token 统一申请 redirect；否则 commit cursor 会被
-        // redirect flush/reissue 反复打回同一 UID。
+        // 中文注释：普通 scalar store 的 sideband redirect 必须等待 ROB commit
+        // 和 terminal。只有已标记 completion-before-redirect 的 non-zero CBO
+        // flushAfter 可先固化 STA0 completion；其合法性由 owner completion 检查。
         if (!event_is_redirect(wb_event) ||
             !data.is_valid_uid(wb_event.uid) ||
             !data.is_scalar_store_uid(wb_event.uid)) begin
             return 1'b0;
         end
+        if (wb_event.completion_before_redirect) begin
+            return 1'b0;
+        end
         status = data.get_status(wb_event.uid);
-        return status.active && !status.rob_commit && !status.terminal_done &&
-               (status.fault || status.exception_pending);
+        return status.active && !status.rob_commit && !status.terminal_done;
     endfunction:store_fault_redirect_must_wait
 
     function bit batch_has_fault_for_uid(input memblock_wb_event_t events[$],
