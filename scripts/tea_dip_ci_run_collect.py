@@ -32,7 +32,13 @@ else:
   with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
  argv=old['args'];assert argv[0]==str(root/'emu-gsim')
  assert argv[argv.index('--db-path')+1]==str(root/point/'simulator.db')
- files={name:dict(bytes=(root/point/name).stat().st_size,sha256=digest(root/point/name)) for name in ['simulator_out.txt','simulator_err.txt','simulator.db']}
+ def fingerprint(p):
+  size=0;hashed=hashlib.sha256()
+  with p.open('rb')as stream:
+   for chunk in iter(lambda:stream.read(1024*1024),b''):
+    size+=len(chunk);hashed.update(chunk)
+  return dict(bytes=size,sha256=hashed.hexdigest())
+ files={name:fingerprint(root/point/name) for name in ['simulator_out.txt','simulator_err.txt','simulator.db']}
  artifacts=dict(emu=root/'emu-gsim',reference=root/'riscv64-nemu-interpreter-so',cst=Path(argv[argv.index('--cst-file')+1]))
  print(json.dumps(dict(ready=True,utc=datetime.now(timezone.utc).isoformat(),point=point,host=old['host'],run_id=identity['run_id'],source=identity['source'],original_pid=old['pid'],original_start_ticks=old['start_ticks'],original_process_live=False,last_live_process_observation=old,runner_success_lines=lines,files=files,artifact_sha256={k:digest(p) for k,p in artifacts.items()})))
 '''.replace('IDENTITY', repr(identity)).replace('POINT', repr(point)).replace('OBSERVATION', repr(old))
