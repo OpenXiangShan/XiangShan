@@ -7,6 +7,7 @@ import json
 import re
 
 from native_perf import read_blocks
+from tea_dip_latency_validity import analyze as latency_validity
 from tea_dip_query_endpoint_evidence import TABLES, old_execution, verify
 
 
@@ -50,6 +51,7 @@ def point(folder, receipt_path):
     result = dict(run_id=receipt['run_id'], source=receipt['source'], actual_seed=seed,
                   checkpoint=argv[argv.index('-i') + 1], artifact_sha256=receipt['artifact_sha256'],
                   phases=dict(zip(['warmup', 'ROI'], phases)),
+                  native_stage_latency_validity=latency_validity(folder / 'simulator_err.txt'),
                   terminal_counts=[int(value.replace(',', '')) for value in terminal.groups()],
                   printed_host_milliseconds=int(host[1].replace(',', '')) if host else None,
                   closed_receipt_sha256=digest(receipt_path))
@@ -86,7 +88,8 @@ def main():
                   source_equivalence_sha256=digest(args.source_equivalence), consumer_sha256=digest(__file__),
                   scope='Closed default20M+20M CI repetitions only. Source equivalence checks the supplied Git tree hashes; '
                         'it does not rebuild models. Equal observations at these seeds do not establish general seed '
-                        'independence or identical dynamic uop prefixes. Host elapsed is whole-run host time, not RTL '
+                        'independence or identical dynamic uop prefixes. Equal traces do not validate native stage timestamps. '
+                        'Host elapsed is whole-run host time, not RTL '
                         'CPI, paired tool overhead or a suite score.')
     args.output.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
