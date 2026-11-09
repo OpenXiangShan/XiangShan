@@ -27,6 +27,7 @@ class TeaNoCommit extends Bundle {
 class TeaCycleStats extends Module {
   val io = IO(new Bundle {
     val enable = Input(Bool())
+    val dump = Input(Bool())
     val cycle = Input(UInt(64.W))
     val state = Input(UInt(4.W))
     val retired = Input(UInt(16.W))
@@ -78,7 +79,7 @@ class TeaCycleStats extends Module {
     leftCensored := !wasEnabled
   }
 
-  io.summary.valid := stopped || io.enable && (!wasEnabled || tick.andR)
+  io.summary.valid := stopped || io.enable && (!wasEnabled || tick.andR || io.dump)
   io.summary.bits.cycle := io.cycle + io.enable
   io.summary.bits.states := nextStates
   io.summary.bits.retired := nextRetired

@@ -60,6 +60,6 @@ python3 scripts/dip_analyze.py build/dip.db --output build/dip-profile
 
 RTL 为每个 ROB Former/Latter slot 保存是否被引用、环绕 flag、首次被引用的周期 generation 和是否作为恢复原因。未被采样引用的分派/提交不产生记录。前端等待共享一个 generation；遇到下一条 Dispatch 指令时，仅输出一次绑定。同一目标可被任意多个周期样本引用，不占用逐样本硬件队列。flush 只在影响已采工作时输出；离线将其重归到原因目标，保留后续更老 flush 再次重归的能力。generation 避免 ROB 索引复用与旧样本串联。
 
-`--warmup-instr N` 使用每个样本之前的累计架构退休数，精确排除预热边界及之前的采样点。`--end-cycle C` 设定排他的采样终点；更晚的终结事件仍参与归因。输出 `pics.csv` 按 PC、最终状态和多热原因组合聚合；`summary.json` 给出采样数、重归因数、各状态周期和未定案槽位。
+EMU 的实际 `inRoi` 信号控制采集：预热期间原生采集器保持复位，不累计退休数、不维护目标或恢复历史，也不写表。正式窗口开始后才从空状态采集，`CYCLE` 保留原始周期，`TOTALRETIRED` 从正式窗口起点的 0 开始。分析本版本的正式窗口数据使用默认 `--warmup-instr 0`；该参数仅用于进一步按窗口内退休前缀截取。`--end-cycle C` 设定排他的采样终点；更晚的终结事件仍参与归因。输出 `pics.csv` 按 PC、最终状态和多热原因组合聚合；`summary.json` 给出采样数、重归因数、各状态周期和未定案槽位。
 
 稀疏日志不再提供任意非采样周期的退休前缀。`sampled_span_*` 只描述首尾入选采样点之间（含首尾周期）的真实退休数、周期数和 IPC，不将其冒充整个测量 ROI。整段性能数据使用模拟器原生统计；原生最终摘要存在流水延迟，分析时仍以其 `cycleCnt` 设置排他采样终点。

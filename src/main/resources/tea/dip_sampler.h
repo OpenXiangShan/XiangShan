@@ -258,20 +258,24 @@ class DipNativeSampler {
 
 public:
   void evaluate(bool reset, bool phase, const uint64_t *words, uint64_t *out) {
+    if (reset) {
+      if (previousValid) {
+        for (auto &t : tracked) t.live = false;
+        countdown = totalRetired = 0;
+        waiting = recovering = flushSettled = false;
+        lastFlush = {};
+        previousValid = false;
+      }
+      std::memset(out, 0, sizeof(Output));
+      return;
+    }
     Frame in;
     std::memcpy(&in, words, sizeof(in));
-    if (reset) {
-      for (auto &t : tracked) t.live = false;
-      countdown = totalRetired = 0;
-      waiting = recovering = flushSettled = false;
-      previousValid = false;
-    } else {
-      // Apply the pending frame once per clock edge, even after repeated evaluations.
-      if (previousValid && phase != previousPhase) process(previous, nullptr);
-      previous = in;
-      previousValid = true;
-      previousPhase = phase;
-    }
+    // Apply the pending frame once per clock edge, even after repeated evaluations.
+    if (previousValid && phase != previousPhase) process(previous, nullptr);
+    previous = in;
+    previousValid = true;
+    previousPhase = phase;
     Output result;
     process(in, &result);
     std::memcpy(out, &result, sizeof(result));

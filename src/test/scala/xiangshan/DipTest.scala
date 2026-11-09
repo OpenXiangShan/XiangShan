@@ -63,6 +63,31 @@ class DipTest extends XSTester {
     dut.io.rob.flush.bits.cause.poke(1.U)
   }
 
+  it should "leave collection idle during warmup and start with fresh retirement and recovery history" in {
+    simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
+      init(dut)
+      dut.reset.poke(true.B)
+      dut.io.rob.retired.poke(4.U)
+      dut.io.rob.flush.valid.poke(true.B)
+      for (cycle <- 0 until 10) {
+        dut.io.rob.cycle.poke(cycle.U)
+        dut.io.trace.valid.expect(false.B)
+        dut.io.finals.foreach(_.valid.expect(false.B))
+        dut.clock.step()
+      }
+      dut.reset.poke(false.B)
+      dut.io.rob.flush.valid.poke(false.B)
+      dut.io.rob.cycle.poke(10.U)
+      dut.io.trace.valid.expect(true.B)
+      dut.io.trace.bits.cycle.expect(10.U)
+      dut.io.trace.bits.totalRetired.expect(0.U)
+      dut.io.trace.bits.slots.foreach(_.state.expect(DipState.frontend.U))
+      dut.clock.step()
+      dut.io.rob.cycle.poke(11.U)
+      dut.io.trace.bits.totalRetired.expect(4.U)
+    }
+  }
+
   it should "compact fired lanes and attribute all remaining capacity to the oldest blocked uop" in {
     simulate(new DipSampler()(dipConfig), settings = nativeSettings) { dut =>
       init(dut)

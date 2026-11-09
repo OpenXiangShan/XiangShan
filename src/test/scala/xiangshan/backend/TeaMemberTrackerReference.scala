@@ -143,7 +143,8 @@ class TeaMemberTrackerReference(writebackPorts: Int, eventPorts: Int)(implicit p
     val mask = VecInit((0 until RenameWidth).map(rank =>
       live(ptr.value)(rank) && flags(ptr.value) === ptr.flag &&
         members(ptr.value)(rank).isFormer === ptr.isFormer))
-    io.read(port) := result(ptr.value, PriorityEncoder(mask))
+    io.read(port).valid := mask.asUInt.orR
+    io.read(port).bits := result(ptr.value, PriorityEncoder(mask))
   }
 
   for (entryLane <- 0 until CommitWidth; rank <- 0 until RenameWidth) {
