@@ -11,7 +11,7 @@
 `include "memblock_compile_params.svh"
 
 `define MEMBLOCK_V2_LSQ_LOAD_OR_PREFETCH_FUOPTYPE_VALUES [9'd0:9'd6], 9'd8, 9'd9, 9'd10
-`define MEMBLOCK_V2_LSQ_STORE_FUOPTYPE_VALUES [9'd0:9'd3]
+`define MEMBLOCK_V2_LSQ_STORE_FUOPTYPE_VALUES [9'd0:9'd3], 9'd7, 9'd12, 9'd13, 9'd14
 
 class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     // Base legality follows backend dispatch->LSQ handshake:
@@ -270,7 +270,8 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_enqLsq_req_5_bits_lastUop;
     rand bit [3:0] io_ooo_to_mem_enqLsq_req_5_bits_trigger;
 
-    // V2 scalar LQ accepts ordinary load plus software-prefetch opcodes; SQ accepts ordinary stores only.
+    // V2 scalar LQ accepts ordinary load plus software-prefetch opcodes; SQ accepts
+    // ordinary stores and the four scalar CBO opcodes, which share needAlloc=2'b10.
     static function bit is_supported_v2_load_or_prefetch_fuoptype(input bit [8:0] fu_op_type);
         return fu_op_type inside {`MEMBLOCK_V2_LSQ_LOAD_OR_PREFETCH_FUOPTYPE_VALUES};
     endfunction:is_supported_v2_load_or_prefetch_fuoptype
