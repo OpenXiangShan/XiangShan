@@ -606,6 +606,8 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event.has_issue_epoch = 1'b1;
         wb_event.replay_seq = status.replay_seq;
         wb_event.has_replay_seq = 1'b1;
+        wb_event.dynamic_epoch = status.dynamic_epoch;
+        wb_event.has_dynamic_epoch = 1'b1;
         return 1'b1;
     endfunction:try_attach_existing_sta_fault_snapshot
 
@@ -640,6 +642,8 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event.has_issue_epoch = 1'b1;
         wb_event.replay_seq = tombstone.replay_seq;
         wb_event.has_replay_seq = 1'b1;
+        wb_event.dynamic_epoch = tombstone.dynamic_epoch;
+        wb_event.has_dynamic_epoch = 1'b1;
         `uvm_info("STA_LATE_TOMBSTONE",
                   $sformatf("attach late fault uid=%0d issue_epoch=%0d replay_seq=%0d flush_epoch=%0d",
                             uid, tombstone.issue_epoch, tombstone.replay_seq,
