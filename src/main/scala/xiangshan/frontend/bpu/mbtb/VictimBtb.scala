@@ -95,13 +95,15 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
     rawHit && e.entry.position >= s1_readAlignedOffset && !read.req.crossPage
   })
 
-  // A fully-associative VBTB exposes only the earliest matching entry. The
-  // non-strict order makes a lower physical way win when positions are equal.
-  private val s1_readPositionMatrix = CompareMatrix(
-    VecInit(entries.map(_.entry.position)),
+  // Writes keep unconditional-jump counters positive, so the counter sign
+  // alone encodes taken priority. Prefer taken entries, then the earliest
+  // position; if all are not-taken, expose the earliest one for TAGE/SC.
+  // The non-strict order makes a lower physical way win when keys are equal.
+  private val s1_readPriorityMatrix = CompareMatrix(
+    VecInit(entries.map(e => Cat(!e.counter.isPositive, e.entry.position))),
     order = (a: UInt, b: UInt) => a <= b
   )
-  private val s1_selectOH    = s1_readPositionMatrix.getLeastElementOH(s1_hitMask).asUInt
+  private val s1_selectOH    = s1_readPriorityMatrix.getLeastElementOH(s1_hitMask).asUInt
   private val s1_selectEntry = Mux1H(s1_selectOH, entries)
   private val s1_prediction  = Wire(Valid(new Prediction))
 
@@ -199,7 +201,8 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
 
   // Training can update entry and counters independently:
   // - entryWayMask rewrites the victim BTB entry payload.
-  // - counterWayMask updates the taken counter for conditional branches.
+  // - counterWayMask trains resident conditional branches or resets counters on payload repairs.
+  // MainBtbAlignBank supplies a positive counter whenever an unconditional jump is written.
   // This allows a VBTB hit to be repaired in place without allocating MainBtb.
   for (w <- 0 until NumVictimBtbWays) {
     when(trainEntry.req.valid) {
@@ -225,7 +228,11 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
       entries(w).entry           := snapshot.req.bits.evicted
       entries(w).setIdx          := snapshot.req.bits.setIdx
       entries(w).internalBankIdx := snapshot.req.bits.internalBankIdx
-      entries(w).counter         := TakenCounter.WeakPositive
+      entries(w).counter := Mux(
+        snapshot.req.bits.evicted.attribute.isConditional,
+        TakenCounter.WeakNegative,
+        TakenCounter.WeakPositive
+      )
     }
   }
 
