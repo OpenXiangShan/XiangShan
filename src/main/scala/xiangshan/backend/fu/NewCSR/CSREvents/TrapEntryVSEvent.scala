@@ -79,9 +79,10 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isBpExcp       = isException && EX_BP.U === highPrioTrapNO
   private val isFetchBkpt    = isBpExcp && (TriggerAction.isFetch(in.trigger) || in.trigger === TriggerAction.Ebreak)
   private val isMemBkpt      = isBpExcp && TriggerAction.isMem(in.trigger)
+  private val isOtherBkpt    = isBpExcp && in.trigger === TriggerAction.OtherTrigger
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
-  private val isFetchMalAddrExcp = isFetchExcp && isFetchMalAddr
+  private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
   private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
 
@@ -123,9 +124,9 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
                                       Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject && isInterrupt, hvictlIID, highPrioTrapNO)
-  out.vstval.bits.ALL            := Mux(satpFlushFirstFetchFault,
-                                      tval,
-                                      Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
+  out.vstval.bits.ALL            := Mux(isOtherBkpt, 0.U,
+                                      Mux(satpFlushFirstFetchFault, tval,
+                                        Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)))
   dontTouch(tvalFillGVA)
 }
 

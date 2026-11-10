@@ -146,6 +146,8 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
 
   io.out.triggerFrontendChange  := frontendTriggerUpdate
   io.out.newTriggerChainIsLegal := newTriggerChainIsLegal
+  io.out.icountContextMatch := tdata3MatchVec.head
+  io.out.ebreakToDebug := ebreakEnterDebugMode
 
   io.out.hasDebugTrap                 := hasDebugTrap
   io.out.hasDebugIntr                 := hasDebugIntr
@@ -192,6 +194,8 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
     // trigger
     val triggerFrontendChange = Bool()
     val newTriggerChainIsLegal = Bool()
+    val icountContextMatch = Bool()
+    val ebreakToDebug = Bool()
     val memTrigger = new MemTdataDistributeIO()
     val frontendTrigger = new FrontendTdataDistributeIO()
 

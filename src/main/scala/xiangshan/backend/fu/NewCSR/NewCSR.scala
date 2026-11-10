@@ -15,7 +15,6 @@ import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, Ev
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
-import xiangshan.backend.rob.RobPtr
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.util.CSRConst
@@ -153,10 +152,10 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isFormer = Bool()
       })
       val commit = Input(new RobCommitCSR)
-      val robDeqPtr = Input(new RobPtr)
       val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Bool())
     })
     val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Valid(Bool())))
+    val icountEvent = Input(Valid(new IcountEvent))
 
     val fromRename = Input(new Bundle {
       val diffVl = Option.when(backendParams.basicDebugEn)(Vl())
@@ -198,6 +197,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       // trigger
       val frontendTrigger = new FrontendTdataDistributeIO()
       val memTrigger = new MemTdataDistributeIO()
+      val icount = new IcountResponse
       // Instruction fetch address translation type
       val instrAddrTransType = new AddrTransType
       // trace
@@ -290,8 +290,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val oldPrivState = io.oldPrivState
   val trapIsFormer = io.fromRob.trap.bits.isFormer
 
-  // Debug interrupt handling follows origin/kunminghu-v3's CSR path.
-  val debugIntrEnable = RegInit(true.B)
+  // Debug interrupt
+  val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
   val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // CSR Privilege State
@@ -1032,6 +1032,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val triggerFrontendChange = Wire(Bool())
   val triggerBpGateChange = Wire(Bool())
+  val icountConfigChange = Wire(Bool())
 
   val vstartChange = vstart.w.wen && (
     vstart.w.wdata === 0.U && vstart.regOut.vstart.asUInt =/= 0.U ||
@@ -1049,7 +1050,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val writeContext = Cat(Seq(mcontext, hcontext, scontext).map(_.addr.U === addr)).orR && wenLegalReg
 
   val flushPipe = resetSatp ||
-    triggerFrontendChange || triggerBpGateChange || floatStatusOnOff || vectorStatusOnOff ||
+    triggerFrontendChange || triggerBpGateChange || icountConfigChange || floatStatusOnOff || vectorStatusOnOff ||
     vstartChange || frmChange || writeContext
 
   /**
@@ -1325,6 +1326,28 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.tdata1Wdata               := wdata
   debugMod.io.in.triggerCanRaiseBpExp      := triggerCanRaiseBpExp
 
+  val icountMod = Module(new IcountController)
+  val modifyIcount = tdata1Update && tselect.rdata === 0.U &&
+    (tdata1Vec.head.TYPE === Tdata1Type.Icount || wdata(63, 60) === Tdata1Type.Icount.asUInt)
+  icountMod.in.tdata1 := tdata1Vec.head
+  icountMod.in.priv := privState
+  icountMod.in.contextMatch := debugMod.io.out.icountContextMatch
+  icountMod.in.debugMode := debugMode
+  icountMod.in.canRaiseBreakpoint := triggerCanRaiseBpExp
+  icountMod.in.modifyIcount := modifyIcount
+  icountMod.in.trap.valid := hasTrap
+  icountMod.in.trap.bits.isInterrupt := trapIsInterrupt
+  icountMod.in.trap.bits.breakpoint := trapVec(ExceptionNO.breakPoint)
+  icountMod.in.trap.bits.trigger := trigger
+  icountMod.in.trap.bits.toDebug := entryDebugMode
+  icountMod.in.event <> io.icountEvent
+  io.status.icount := icountMod.out.response
+  icountConfigChange := modifyIcount || tdata3Update && tselect.rdata === 0.U && tdata1Vec.head.TYPE === Tdata1Type.Icount
+  tdata1RegVec.zipWithIndex.foreach { case (mod: HasIcountUpdate, idx) =>
+    mod.icountUpdate.valid := (idx == 0).B && icountMod.out.update.valid
+    mod.icountUpdate.bits := icountMod.out.update.bits
+  }
+
   entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
 
   trapEntryDEvent.valid                           := entryDebugMode
@@ -1380,7 +1403,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val vsstatusWriteSDT = menvcfg.regOut.DTE && henvcfg.regOut.DTE && vsstatus.w.wdataFields.SDT
   val vsstatusWriteSIE = vsstatus.w.wdataFields.SIE && !vsstatusWriteSDT
   // Only the current mode's delegated breakpoint gate is affected by its interrupt enable.
-  triggerBpGateChange := debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR && (
+  triggerBpGateChange := (debugMod.io.out.frontendTrigger.tEnableVec.asUInt.orR || tdata1Vec.head.TYPE === Tdata1Type.Icount) && (
     privState.isModeM && mstatus.w.wen && mstatusWriteMIE =/= mstatus.regOut.MIE.asBool ||
     privState.isModeHS && medeleg.regOut.EX_BP &&
       mstatus.wAliasSstatus.wen && sstatusWriteSIE =/= mstatus.regOut.SIE.asBool ||
