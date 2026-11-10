@@ -201,10 +201,10 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   XSDebug(s2_fire, p"hit_taken_jalr:")
 
-  // With a correct provider target, confidence and useful stay unchanged in
-  // this prediction-time state.
+  // With a correct provider target, saturated confidence stays unchanged.
+  // Useful also stays unchanged when already 1 or when no alternate exists.
   private val s2_skipReadOnCorrect = provided && providerInfo.cnt.isSaturatePositive &&
-    providerInfo.usefulCnt.value === 1.U
+    (providerInfo.usefulCnt.value === 1.U || !altProvided)
   ittageMeta.skipReadOnCorrect := RegEnable(s2_skipReadOnCorrect, false.B, s2_fire)
   ittageMeta.provider.valid    := s3_provided
   ittageMeta.provider.bits     := s3_provider
