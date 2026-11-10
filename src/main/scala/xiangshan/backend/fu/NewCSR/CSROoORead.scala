@@ -6,8 +6,10 @@ object CSROoORead {
   /**
    * "Read only" CSRs that can be fully pipelined when read in CSRR instruction.
    * Only read by csr instructions.
+   *
+   * Note: SHOULD NOT CONTAIN VL and VLENB, since they have other decode results
    */
-  val waitForwardInOrderCsrReadList = List(
+  val waitForwardCsrReadList = List(
     CSRs.fflags,
     CSRs.fcsr,
     CSRs.vxsat,
@@ -36,7 +38,7 @@ object CSROoORead {
     CSRs.hvip,
     CSRs.mvip,
   )
-  val blockBackwardInOrderCsrReadList = List(
+  val blockBackwardCsrReadList = List(
     CSRs.mireg,
     CSRs.sireg,
     CSRs.vsireg,
@@ -53,4 +55,5 @@ object CSROoORead {
     CSRs.hvip,
     CSRs.mvip,
   )
+  def fullCSRList: List[Int] = (0 until 0x1000).toList
 }

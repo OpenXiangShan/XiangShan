@@ -84,7 +84,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
       ("(virtual) setIdx", idxBits),
       ("(virtual) tag (unused)", vtagBits)
     ),
-    maxWidth = Option(VAddrBits),
+    maxWidth = Option(VAddrBits max PAddrBits),
     extraFields = Seq(
       ("(physical) tag", pgUntagBits, tagBits),
       ("blockOffset", 0, blockOffBits),

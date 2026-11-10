@@ -118,15 +118,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // metaQueueRedirect stores speculation information needed by BPU when redirect happens.
   private val metaQueueRedirect = Reg(Vec(FtqSize, new BpuRedirectMeta))
 
-  // metaQueue stores information needed to train BPU.
+  // metaQueueCommit stores call/return information needed by RAS after the call/return is committed.
+  private val metaQueueCommit = Reg(Vec(FtqSize, new BpuCommitMeta))
+
+  // metaQueueResolve stores information needed to train BPU.
   private val metaQueueResolve = Reg(Vec(FtqSize, new BpuResolveMeta))
-  private val metaQueueCommit  = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
-
-  // commitQueue caches branch commit information from backend.
-  private val commitQueue = Module(new CommitQueue)
 
   // prefetchQueue stores non-FDIP prefetch requests (e.g. Zicbop prefetch.i instruction) and send to ICache.
   private val prefetchQueue = Module(new PrefetchQueue)
@@ -513,12 +512,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
     commitPtr := commitPtr + 1.U
   }
 
-  commitQueue.io.backendCommit := io.fromBackend.callRetCommit
+  when(redirect.valid) {
+    metaQueueCommit(redirect.bits.ftqIdx.value).attribute.rasAction := redirect.bits.attribute.rasAction
+  }
 
-  io.toBpu.commit.valid                     := commitQueue.io.bpuTrain.valid
-  io.toBpu.commit.bits.meta                 := metaQueueCommit(commitQueue.io.bpuTrain.bits.ftqPtr.value)
-  io.toBpu.commit.bits.attribute.branchType := DontCare
-  io.toBpu.commit.bits.attribute.rasAction  := commitQueue.io.bpuTrain.bits.rasAction
+  io.toBpu.commit.valid     := commit
+  io.toBpu.commit.bits.meta := metaQueueCommit(commitPtr(0).value)
 
   // --------------------------------------------------------------------------------
   // Performance monitoring
@@ -589,6 +588,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
 
   private val perf_mispredS1SourceVec = BpuPredictionSource.Stage1.getValidSeq(redirectPerfMeta.bpSource.s1Source)
+  private val perf_mispredS2SourceVec = BpuPredictionSource.Stage2.getValidSeq(redirectPerfMeta.bpSource.s2Source)
   private val perf_mispredS3SourceVec = BpuPredictionSource.Stage3.getValidSeq(redirectPerfMeta.bpSource.s3Source)
 
   XSPerfSeqAccumulate(
@@ -598,6 +598,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
     perf_mispredS1SourceVec
   )
 
+  XSPerfSeqAccumulate(
+    "resolve_branch_mispredicts_s2_source",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirectPerfMeta.bpSource.s2Override && !redirectPerfMeta.bpSource.s3Override,
+    perf_mispredS2SourceVec
+  )
   XSPerfSeqAccumulate(
     "resolve_branch_mispredicts_s3_source",
     backendRedirect.valid && backendRedirect.bits.isMisPred && redirectPerfMeta.bpSource.s3Override,
@@ -651,9 +657,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
   )
   XSPerfSeqAccumulate(
+    "commit_branch_mispredicts_s2_mispred_s2_source",
+    perf_commitHasMispredict &&
+      commitPerfMeta.bpuPerf.bpSource.s2Override && !commitPerfMeta.bpuPerf.bpSource.s3Override,
+    BpuPredictionSource.Stage2.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s2Source)
+  )
+  XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s1_source",
     perf_commitHasMispredict,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
+  )
+  XSPerfSeqAccumulate(
+    "commit_branch_mispredicts_s2_source",
+    perf_commitHasMispredict,
+    BpuPredictionSource.Stage2.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s2Source)
   )
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s3_source",

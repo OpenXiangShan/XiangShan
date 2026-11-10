@@ -4,19 +4,9 @@ XiangShan (香山) is an open-source high-performance RISC-V processor project.
 
 English | [中文](README.zh-cn.md)
 
-## Documentation
+## Architecture
 
-XiangShan's documentation is available at [docs.xiangshan.cc](https://docs.xiangshan.cc).
-
-XiangShan Design Document for Kunminghu V2R2 has been published separately. You can find it at [docs.xiangshan.cc/projects/design](https://docs.xiangshan.cc/projects/design/).
-
-XiangShan User Guide has been published separately. You can find it at [docs.xiangshan.cc/projects/user-guide](https://docs.xiangshan.cc/projects/user-guide/) or [XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
-
-Our performance tracker is at [XiangShan Dashboard](https://dashboard.xiangshan.cc), you can view all the results from by-commit EMU-Performance CI, nightly 0.3c SPEC regression, and weekly 1.0c SPEC regression there.
-
-We are using [Weblate](https://hosted.weblate.org/projects/openxiangshan/) to translate documentation into English and other languages. Your contributions are welcome—come and help us improve it!
-
-All XiangShan documents are licensed under the CC-BY-4.0.
+![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
 ## Publications
 
@@ -32,29 +22,7 @@ This paper is awarded all three available badges for artifact evaluation (Availa
 
 [Paper PDF](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan.pdf) | [IEEE Xplore](https://ieeexplore.ieee.org/abstract/document/9923860) | [BibTeX](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan.bib) | [Presentation Slides](https://talks-pubs.xiangshan.cc/publications/micro2022-xiangshan-slides.pdf) | [Presentation Video](https://www.bilibili.com/video/BV1FB4y1j7Jy)
 
-## Follow us
-
-Wechat/微信：香山开源处理器
-
-<div align=left><img width="340" height="117" src="images/wechat.png"/></div>
-
-Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangshan)
-
-Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
-
-You can contact us through [our mailing list](mailto:xiangshan-all@ict.ac.cn). All mails from this list will be archived [here](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/).
-
-## Architecture
-
-The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) and is [on the yanqihu branch](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu), which has been developed since June 2020.
-
-The second stable micro-architecture of XiangShan is called Nanhu (南湖) and is [on the nanhu branch](https://github.com/OpenXiangShan/XiangShan/tree/nanhu).
-
-The third-generation XiangShan microarchitecture, Kunminghu (昆明湖), is under active development on the `kunminghu-v2` and `kunminghu-v3` branches.
-
-The micro-architecture overview of Kunminghu-V2 is shown below.
-
-![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
+[More publications](https://docs.xiangshan.cc/zh-cn/latest/tutorials/publications/)
 
 ## Branch Maintenance Status
 
@@ -94,63 +62,84 @@ Some of the key directories are shown below.
 └── ready-to-run           # pre-built simulation images
 ```
 
-## IDE Support
+## Development
 
-### bsp
-```
-make bsp
-```
+### Pre-requisites
 
-### IDEA
-```
-make idea
-```
+Refer to [OpenXiangShan/xs-env](https://github.com/OpenXiangShan/xs-env) for bare-metal, Nix devshell, and Docker environment setup, including dependencies and environment variable settings. From an xs-env checkout, `source ./env.sh` configures the project paths; `nix develop` also loads this script automatically.
 
-## Generate Verilog
+TL;DR: install java, mill, clang, and a simulator (Verilator or GSIM), clone xs-env or directly clone this repo, then run `make init` to initialize submodules.
 
-* Run `make verilog` to generate verilog code. This generates multiple `.sv` files in the `build/rtl/` folder (e.g., `build/rtl/XSTop.sv`).
-* Refer to `Makefile` for more information.
+#### Computational resources
 
-## Run Programs by Simulation
+Building XiangShan needs significant computational resources. i.e. `kunminghu-v3` `DefaultConfig` requires **128 GB RAM**; **64 GB RAM + 64 GB swap with zswap** also works, slightly slower. `-j` controls parallel Clang compilation, but single-threaded Verilator/GSIM model generation still needs **~100 GB memory**, a hard minimum unaffected by `-j`.
+
+### IDE Support
+
+BSP: `make bsp`
+
+IntelliJ IDEA:
+
+- 2026.1 or newer: `make bsp`, then refer to [official doc](https://www.jetbrains.com/help/idea/bsp-support.html)
+- Older versions: `make idea`
 
 ### Prepare environment
 
-* Set environment variable `NEMU_HOME` to the **absolute path** of the [NEMU project](https://github.com/OpenXiangShan/NEMU).
-* Set environment variable `NOOP_HOME` to the **absolute path** of the XiangShan project.
-* Set environment variable `AM_HOME` to the **absolute path** of the [AM project](https://github.com/OpenXiangShan/nexus-am).
-* Install `mill`. Refer to [the Manual section in this guide](https://mill-build.org/mill/cli/installation-ide.html#_bootstrap_scripts).
-* Clone this project and run `make init` to initialize submodules.
+- Set environment variable `NOOP_HOME` to the **absolute path** of the XiangShan project, for example `export NOOP_HOME=/path/to/XiangShan`. This is the only project home variable required by XiangShan itself.
+- Optional: set `NEMU_HOME` to the **absolute path** of [OpenXiangShan/NEMU](https://github.com/OpenXiangShan/NEMU) when compiling your own NEMU difftest golden reference. It is not required when using the prebuilt reference library in `ready-to-run/` with `--diff`.
+- Optional: set `AM_HOME` to the **absolute path** of [OpenXiangShan/nexus-am](https://github.com/OpenXiangShan/nexus-am) when compiling your own test cases. It is not required when running prebuilt workloads.
 
-### Run with simulator
+### Generate Verilog
 
-* Install [Verilator](https://verilator.org/guide/latest/), the open-source Verilog simulator.
-* Run `make emu` to build the C++ simulator `./build/emu` with Verilator.
-* Refer to `./build/emu --help` for run-time arguments of the simulator.
-* Refer to `Makefile` and `verilator.mk` for more information.
+- Install java and mill.
+- Run `make verilog` to generate verilog code. This generates multiple `.sv` files in the `build/rtl/` folder (e.g., `build/rtl/XSTop.sv`).
+- Refer to `Makefile` for more information.
 
-Example:
+### Build & Run with simulator
+
+- Install either [Verilator](https://verilator.org/guide/latest/), or [OpenXiangShan/GSIM](https://github.com/OpenXiangShan/GSIM). Follow the respective repository's installation instructions and ensure the tool is on `PATH`.
+- With Verilator, run `make emu` to build the C++ simulator `./build/emu`.
+- With GSIM, run `make gsim GSIM=1 -j10` to build `./build/emu`. Keep `GSIM=1` to select the GSIM difftest configuration during elaboration. Note that GSIM requires `clang++` 19 or newer.
+- Prefer `numactl` to bind simulation to physical cores and memory on the same NUMA node; see [`scripts/xiangshan.py`](scripts/xiangshan.py) (`--numa`, `--threads`).
+- Refer to `./build/emu --help` for run-time arguments of the simulator.
+- Refer to `Makefile`, `difftest/verilator.mk`, and `difftest/gsim.mk` for more information.
+
+Choose one build command, then run a workload:
 
 ```bash
-make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
+make emu CONFIG=DefaultConfig EMU_THREADS=2 -j10  # Verilator
+# Alternatively: make gsim GSIM=1 CONFIG=DefaultConfig -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
+
+### Testing
+
+We encourage testing with workloads on a simulator: write focused regression cases using [nexus-am](https://github.com/OpenXiangShan/nexus-am), or run the CoreMark or Linux etc. binaries provided by `ready-to-run/`. To build your own workloads, set `AM_HOME` and follow the nexus-am instructions (for example, `make ARCH=riscv64-xs` in a test or application directory).
+
+After building `emu` with either simulator, a Linux smoke test uses the same prebuilt difftest reference:
+
+```bash
+./build/emu -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
+```
+
+ScalaTest/Chisel unit tests in `src/test/scala/` are another option. Run them with `mill -i xiangshan.test.test`, or select a suite with `mill -i xiangshan.test.testOnly xiangshan.frontend.bpu.SaturateCounterTest`.
+
 ### Run with xspdb
 
 There are two ways to use xspdb:
 
 1. Quick Start with Prebuilt Binaries
-    * **Why choose this?** It is lightweight and requires no compilation. A standard Python environment is enough to run the full XiangShan experience with low memory usage.
-    * **Step 1: Download** Get the latest XSPdb from the run summary of the repository's [Actions](https://github.com/OpenXiangShan/XiangShan/actions/workflows/release.yml?query=is%3Asuccess+event%3Apush) workflow.
-    * **Step 2: Extract & Run**
+    1. Get the latest XSPdb from the run summary of the repository's [Actions](https://github.com/OpenXiangShan/XiangShan/actions/workflows/release.yml?query=is%3Asuccess+event%3Apush) workflow.
+    2. Extract & Run
 
 2. Build from source code
-    * Install [picker](https://github.com/XS-MLVP/picker), a verification tool that supports high-level languages.
-    * Run `make pdb` to build XiangShan Python binaries.
-    * Run `make pdb-run` to run XiangShan binaries.
+    1. Install [picker](https://github.com/XS-MLVP/picker), a verification tool that supports high-level languages.
+    2. Run `make pdb` to build XiangShan Python binaries.
+    3. Run `make pdb-run` to run XiangShan binaries.
 
 Example output and interaction:
 
-```bash 
+```bash
 $ make pdb-run
 [Info] Set PMEM_BASE to 0x80000000 (Current: 0x80000000)
 [Info] Set FIRST_INST_ADDRESS to 0x80000000 (Current: 0x80000000)
@@ -176,15 +165,27 @@ PC[7]: 0x0    Instr: 0x0
 HIT GOOD LOOP at pc = 0xf0001cb0
 ```
 
-## Troubleshooting Guide
+## Contributing
 
-[Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting issues/PRs, especially the [Known issues](CONTRIBUTING.md#known-issues), and use the correct issue template.
 
 ## Acknowledgement
 
 The implementation of XiangShan is inspired by several key papers. We list these papers in XiangShan document, see: [Acknowledgements](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/). We very much encourage and expect that more academic innovations can be realised based on XiangShan in the future.
 
-## Star History
+## Documentation
+
+- Main documentation site: [website](https://docs.xiangshan.cc) | [Github Repo](https://github.com/OpenXiangShan/XiangShan-doc)
+- Design doc (for hw developers): [website](https://docs.xiangshan.cc/projects/design/) | [Github Release](https://github.com/OpenXiangShan/XiangShan-Design-Doc/releases)
+- User guide (for sw developers): [website](https://docs.xiangshan.cc/projects/user-guide/) | [Github Release](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases)
+- Performance dashboard: [website](https://dashboard.xiangshan.cc) | [Github Repo](https://github.com/OpenXiangShan/XiangShan-Dashboard)
+- Publications: [website](https://docs.xiangshan.cc/zh-cn/latest/tutorials/publications/)
+- Acknowledgements: [website](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)
+- Talks & tutorials: [website](https://docs.xiangshan.cc/zh-cn/latest/tutorials/talks/)
+
+All XiangShan documents are licensed under the CC-BY-4.0.
+
+We are using [Weblate](https://hosted.weblate.org/projects/openxiangshan/) to translate documentation into English and other languages. Your contributions are welcome—come and help us improve it!
 
 <a href="https://www.star-history.com/?repos=openxiangshan%2Fxiangshan&type=date&legend=top-left">
  <picture>
@@ -194,12 +195,24 @@ The implementation of XiangShan is inspired by several key papers. We list these
  </picture>
 </a>
 
+## Follow us
+
+Wechat/微信：香山开源处理器
+
+<div align=left><img width="340" height="117" src="images/wechat.png"/></div>
+
+Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangshan)
+
+Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
+
+You can contact us through [our mailing list](mailto:xiangshan-all@ict.ac.cn). All mails from this list will be archived [here](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/).
+
 ## LICENSE
 
 Copyright © 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences.
 
-Copyright © 2021-2026 Beijing Institute of Open Source Chip
+Copyright © 2021-2026 Beijing Institute of Open Source Chip.
 
-Copyright © 2020-2022 by Peng Cheng Laboratory.
+Copyright © 2020-2022 Peng Cheng Laboratory.
 
 XiangShan is licensed under [Mulan PSL v2](LICENSE).
