@@ -242,7 +242,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     }
   }
 
-  io.specOut.isCanUse  := isCanUse
+  io.specOut.isCanUse  := false.B
   io.specOut.retTarget := topRetAddr
 
   private val s3_overrideHasRasAction     = s3_override && (s3_realPush || s3_realPop)
