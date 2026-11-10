@@ -2134,7 +2134,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 256)
     val enableTeaStats = Constantin.createRecord(s"enableTeaStats$hartId", false)
     val teaGapThreshold = Constantin.createRecord(s"teaGapThreshold$hartId", 128)
-    val teaPerf = difftest.common.LogPerfControl()
     val teaRedirectPtr = io.redirect.bits.robIdx
     val teaFlushPtr = deqExceptionRobIdx
     val teaRedirectCtrlMispred = io.redirect.valid &&
@@ -2282,18 +2281,26 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     sample.context.headReasonValid := !isEmpty && !hasTeaCommit && io.debugRobHeadStall.get.valid
     sample.context.headReason := Mux(sample.context.headReasonValid, io.debugRobHeadStall.get.bits, 0.U)
 
-    val stats = Module(new TeaCycleStats)
-    stats.io.enable := enableTeaStats.asBool || enableTea.asBool
-    stats.io.clean := teaPerf.clean
-    stats.io.dump := teaPerf.dump
-    stats.io.cycle := teaSelector.io.cycle
-    stats.io.state := teaSelector.io.sample.state
-    stats.io.retired := sample.context.retired
-    stats.io.gapThreshold := teaGapThreshold
-    val summaryTable = ChiselDB.createTable(s"TeaCycleSummary_$hartId", new TeaCycleSummary, basicDB = true)
-    summaryTable.log(stats.io.summary, "summary", clock, reset)
-    val intervalTable = ChiselDB.createTable(s"TeaNoCommit_$hartId", new TeaNoCommit, basicDB = true)
-    intervalTable.log(stats.io.interval, "interval", clock, reset)
+    val teaStatsEnable = enableTeaStats.asBool || enableTea.asBool
+    XSLog.registerCaller { control =>
+      import chisel3.util.experimental.BoringUtils.bore
+      val teaClock = bore(clock)
+      val teaReset = bore(reset)
+      withClockAndReset(teaClock, teaReset) {
+        val stats = Module(new TeaCycleStats)
+        stats.io.enable := bore(teaStatsEnable)
+        stats.io.clean := control.clean
+        stats.io.dump := control.dump
+        stats.io.cycle := bore(teaSelector.io.cycle)
+        stats.io.state := bore(teaSelector.io.sample.state)
+        stats.io.retired := bore(sample.context.retired)
+        stats.io.gapThreshold := bore(teaGapThreshold)
+        val summaryTable = ChiselDB.createTable(s"TeaCycleSummary_$hartId", new TeaCycleSummary, basicDB = true)
+        summaryTable.log(stats.io.summary, "summary", teaClock, teaReset)
+        val intervalTable = ChiselDB.createTable(s"TeaNoCommit_$hartId", new TeaNoCommit, basicDB = true)
+        intervalTable.log(stats.io.interval, "interval", teaClock, teaReset)
+      }
+    }
 
     val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
     teaTable.log(sample, teaSelector.io.sampleValid, "", clock, reset)

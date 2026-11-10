@@ -4,34 +4,28 @@ package xiangshan
 
 import chisel3._
 import chisel3.simulator.scalatest.ChiselSim
-import difftest.common.LogPerfControl
+import chisel3.util.experimental.BoringUtils.bore
+import org.chipsalliance.cde.config.Parameters
+import utility.{LogPerfIO, XSLog}
 import org.scalatest.flatspec.AnyFlatSpec
 
 class TeaCycleStatsTest extends AnyFlatSpec with ChiselSim {
   behavior of "TEA cycle statistics"
 
-  class PerfSink extends Module {
-    val io = IO(Output(new LogPerfControl))
-    io := LogPerfControl()
-  }
-
   class PerfHarness extends Module {
+    implicit val p: Parameters = Parameters.empty
     val io = IO(new Bundle {
       val clean = Input(Bool())
       val dump = Input(Bool())
-      val observed = Output(new LogPerfControl)
+      val observed = Output(new LogPerfIO)
     })
-    val control = WireInit(0.U.asTypeOf(new LogPerfControl))
-    control.timer := 123.U
-    control.logEnable := true.B
-    control.clean := io.clean
-    control.dump := io.dump
-    LogPerfControl.setSource(control)
-    val sink = Module(new PerfSink)
-    io.observed := sink.io
+    var control: LogPerfIO = null
+    XSLog.registerCaller { source => control = source }
+    XSLog.collect(123.U(64.W), true.B, io.clean, io.dump)
+    io.observed := bore(control)
   }
 
-  it should "wire the existing performance controls across modules" in {
+  it should "receive the existing performance controls through the counter callback" in {
     simulate(new PerfHarness) { dut =>
       for (clean <- Seq(false, true); dump <- Seq(false, true)) {
         dut.io.clean.poke(clean.B)
