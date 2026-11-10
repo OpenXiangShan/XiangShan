@@ -922,4 +922,32 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       reset = reset
     )
   }
+
+  // Observe the complete matched cohort without reading or logging training SRAM weights.
+  private val scMatchedTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScMatchedConditionalTrace)))
+  scMatchedTraceVec.zip(scTraceVec).zipWithIndex.foreach { case ((matched, selected), i) =>
+    matched.valid := t1_fire && t1_branches(i).valid && t1_branches(i).bits.attribute.isConditional &&
+      t1_branchesScIdxHitVec(i) && t1_meta.tagePredValid(t1_branchesScIdxVec(i))
+    matched.bits.startPc          := selected.bits.startPc
+    matched.bits.cfiPc            := selected.bits.cfiPc
+    matched.bits.providerValid    := selected.bits.providerValid
+    matched.bits.providerTaken    := selected.bits.providerTaken
+    matched.bits.providerCtr      := selected.bits.providerCtr
+    matched.bits.tageUseProvider  := selected.bits.tageUseProvider
+    matched.bits.tageFinalValid   := selected.bits.tageFinalValid
+    matched.bits.tageFinalTaken   := selected.bits.tageFinalTaken
+    matched.bits.sumAboveThres    := selected.bits.sumAboveThres
+    matched.bits.scPred           := selected.bits.scPred
+    matched.bits.useSc            := selected.bits.useSc
+    matched.bits.actualTaken      := selected.bits.actualTaken
+    matched.bits.mispredict       := selected.bits.mispredict
+    matched.bits.trainingEligible := selected.valid
+  }
+  XSPerfAccumulate("diag_sc_matched_cond_events", PopCount(scMatchedTraceVec.map(_.valid)))
+  private val scMatchedDBTables = (0 until ResolveEntryBranchNumber).map { i =>
+    ChiselDB.createTable(s"scMatchedConditional_${i}", new ScMatchedConditionalTrace, basicDB = true)
+  }
+  scMatchedDBTables.zip(scMatchedTraceVec).foreach { case (dbTable, trace) =>
+    dbTable.log(data = trace.bits, en = trace.valid, clock = clock, reset = reset)
+  }
 }

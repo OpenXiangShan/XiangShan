@@ -126,3 +126,21 @@ class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with Has
   val scWrong:              Bool = Bool()
   val scCorrect:            Bool = Bool()
 }
+
+// Complete accepted MBTB/provider-hit conditional cohort, including branches not trained by SC.
+class ScMatchedConditionalTrace(implicit p: Parameters) extends ScBundle with HasScParameters {
+  val startPc:          Pc   = Pc()
+  val cfiPc:            UInt = UInt(VAddrBits.W)
+  val providerValid:    Bool = Bool()
+  val providerTaken:    Bool = Bool()
+  val providerCtr:      UInt = UInt(TageTakenCtrWidth.W)
+  val tageUseProvider:  Bool = Bool()
+  val tageFinalValid:   Bool = Bool()
+  val tageFinalTaken:   Bool = Bool()
+  val sumAboveThres:    Bool = Bool()
+  val scPred:           Bool = Bool()
+  val useSc:            Bool = Bool()
+  val actualTaken:      Bool = Bool()
+  val mispredict:       Bool = Bool()
+  val trainingEligible: Bool = Bool()
+}
