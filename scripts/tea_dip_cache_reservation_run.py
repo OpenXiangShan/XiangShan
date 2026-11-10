@@ -15,6 +15,7 @@ import dip_analyze as dip
 from native_perf import read_blocks
 from tea_dip_fdiv_ready_run import completed_guest
 from tea_dip_memory_native import analyze as memory_evidence
+from tea_dip_l2_traffic_native import analyze as traffic_evidence
 from tea_dip_query_endpoint_evidence import TABLES, endpoint
 from tea_dip_wb_protocol_micro import digest, write
 
@@ -76,6 +77,7 @@ def closed_budget(folder, result):
                 sampled_TEA_CPI=tea, DIP_CPI=dip_budget,
                 exact_TEA=endpoint(folder) if len(blocks) == 2 else None,
                 memory=memory_evidence(folder, receipt) if len(blocks) == 2 else None,
+                prefetch_traffic=traffic_evidence(folder, receipt) if len(blocks) == 2 else None,
                 scope='Each native denominator retained. Sampled budgets are rescaled to native CPI; closure does not prove representative sampling, dynamic-prefix identity or unique causal attribution.')
 
 
