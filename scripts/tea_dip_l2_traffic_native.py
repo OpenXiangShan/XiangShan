@@ -62,8 +62,8 @@ def analyze(folder, receipt_path):
     assert len(blocks) == 2
     counters = blocks[max(blocks)]
 
-    def scalar(suffix):
-        matches = {key: values for key, values in counters.items() if key.endswith(suffix)}
+    def scalar(suffix, block=counters):
+        matches = {key: values for key, values in block.items() if key.endswith(suffix)}
         assert len(matches) == 1, suffix
         name, values = next(iter(matches.items()))
         assert len(values) == 1 and values[0] >= 0, (name, values)
@@ -91,8 +91,24 @@ def analyze(folder, receipt_path):
     assert sources
     for row in sources.values():
         assert row['Miss'] <= row['Total']
+    learning = {}
+    for phase, stamp in zip(['warmup', 'ROI'], sorted(blocks)):
+        generators = {}
+        for role in ['VBOP', 'PBOP']:
+            prefix = '.l2cache.prefetcher.' + role.lower() + '.'
+            names = ['bop_req', 'bop_train', 'bop_drop_for_external_disable',
+                     'bop_drop_for_auto_disable', 'bop_phase_auto_disable', 'bop_student_takeover',
+                     'bop_l2_feedback_control_drop', 'scoreTable.total_learn_phase',
+                     'scoreTable.total_bop_disable', 'scoreTable.total_bop_high_confidence']
+            row = {name: scalar(prefix + name, blocks[stamp])[1] for name in names}
+            controller = '.l2cache.prefetcher.prefetchController.'
+            row['controller_active_epochs'] = scalar(controller + 'epoch_activeEpochCount' + role, blocks[stamp])[1]
+            row['controller_inactive_epochs'] = scalar(controller + 'epoch_inactiveEpochCount' + role, blocks[stamp])[1]
+            generators[role] = row
+        learning[phase] = dict(native_print_stamp=stamp, generators=generators)
     return dict(point=receipt['point'], source=receipt['source'], native_cycles=cycles,
                 native_retired=retired, traffic=traffic, directory_request_sources=sources,
+                prefetch_learning=learning,
                 completed_MSHR_residence=residence(counters),
                 receipt_sha256=digest(receipt_path), native_log_sha256=digest(folder/'simulator_err.txt'),
                 tool_sha256=digest(Path(__file__)),
@@ -102,6 +118,8 @@ def analyze(folder, receipt_path):
                       'Acquire address match to a prefetch MSHR, not a confirmed merge handshake. '
                       'LateInCache is an L2 prefetch hitting cache; LateInMSHR is a duplicate L2 '
                       'prefetch matching an MSHR OR request-buffer entry. Neither measures CPU waiting. '
+                      'Controller-active epochs do not prove local issueEnable. Local auto-disable includes teacher, '
+                      'student and issue-gate decisions; student takeover is a training event, not a sent request. '
                       'Window events are not matched prefetch lifetimes or disjoint saved-cycle budgets.')
 
 
